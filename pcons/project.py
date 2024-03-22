@@ -4,9 +4,8 @@
 # and tools used to traverse the nodes
 
 import inspect
-import os
 import pathlib
-from typing import List, Dict, Optional, Union
+from typing import Union
 from pathlib import Path
 from pcons.node import Node, FSNode
 from pcons.generator import Generator

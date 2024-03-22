@@ -3,7 +3,7 @@
 # Node base class for all nodes: filesystem (source and/or target), value, or custom
 
 import pathlib
-from typing import List, Dict, Optional, Union
+from typing import Union
 from enum import Enum
 
 
