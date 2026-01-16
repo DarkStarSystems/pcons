@@ -1,71 +1,81 @@
 # SPDX-License-Identifier: MIT
 """Variable substitution engine for pcons.
 
-This module provides recursive variable expansion for building
-command lines and other templated strings. It supports:
+Key design principles:
+1. Lists stay as lists until final shell command generation
+2. Function-style syntax for list operations: ${prefix(p, list)}
+3. Shell quoting happens only at the end, appropriate for target shell
+4. MultiCmd wrapper for multiple commands in a single build step
 
+Supported syntax:
 - Simple variables: $VAR or ${VAR}
 - Namespaced variables: $tool.var or ${tool.var}
-- Recursive expansion (expand until no $ remain)
-- Circular reference detection
-- List values (space-joined when interpolated into strings)
 - Escaped dollars: $$ becomes literal $
+- Functions: ${prefix(var, list)}, ${suffix(list, var)}, ${wrap(p, list, s)}
+
+Command template forms:
+- String: "$cc.cmd $cc.flags -c -o $$out $$in" (auto-tokenized on whitespace)
+- List: ["$cc.cmd", "$cc.flags", "-c", "-o", "$$out", "$$in"] (explicit tokens)
+- MultiCmd: MultiCmd(["cmd1 args", "cmd2 args"]) (multiple commands)
 """
 
 from __future__ import annotations
 
+import platform
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import Any
 
-from pcons.core.errors import CircularReferenceError, MissingVariableError
+from pcons.core.errors import (
+    CircularReferenceError,
+    MissingVariableError,
+    SubstitutionError,
+)
 from pcons.util.source_location import SourceLocation
 
-# Pattern to match variable references:
-# - $$ -> escaped dollar (group 1)
-# - ${name} -> braced variable (group 2)
-# - $name -> simple variable (group 3)
-# Name can include dots for namespaced access (e.g., cc.flags)
-_VAR_PATTERN = re.compile(
-    r"(\$\$)"  # Escaped dollar
-    r"|"
-    r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}"  # Braced: ${var} or ${tool.var}
-    r"|"
-    r"\$([a-zA-Z_][a-zA-Z0-9_.]*)"  # Simple: $var or $tool.var
-)
+
+# =============================================================================
+# MultiCmd wrapper for multiple commands
+# =============================================================================
+
+
+@dataclass
+class MultiCmd:
+    """Wrapper for multiple commands in a single build step.
+
+    Args:
+        commands: List of commands (strings or token lists)
+        join: How to join commands ("&&", ";", or "\\n")
+
+    Example:
+        MultiCmd([
+            "mkdir -p $(dirname $$out)",
+            "$cc.cmd $cc.flags -c -o $$out $$in"
+        ])
+    """
+
+    commands: list[str | list[str]]
+    join: str = "&&"
+
+
+# =============================================================================
+# Namespace for variable lookup
+# =============================================================================
 
 
 class Namespace:
-    """A hierarchical namespace for variable lookup.
-
-    Supports both flat access (ns['key']) and dotted access (ns['tool.key']).
-    Can be nested for tool-specific namespaces.
-    """
+    """Hierarchical namespace for variable lookup with dotted notation."""
 
     def __init__(
         self,
         data: dict[str, Any] | None = None,
         parent: Namespace | None = None,
     ) -> None:
-        """Create a namespace.
-
-        Args:
-            data: Initial data dictionary.
-            parent: Parent namespace for fallback lookups.
-        """
         self._data: dict[str, Any] = data.copy() if data else {}
         self._parent = parent
 
     def get(self, key: str, default: Any = None) -> Any:
-        """Get a value, supporting dotted notation.
-
-        Args:
-            key: Variable name, possibly with dots (e.g., 'cc.flags').
-            default: Value to return if not found.
-
-        Returns:
-            The value, or default if not found.
-        """
         try:
             return self._resolve(key)
         except KeyError:
@@ -74,7 +84,6 @@ class Namespace:
             return default
 
     def _resolve(self, key: str) -> Any:
-        """Resolve a key, handling dotted notation."""
         if "." in key:
             parts = key.split(".", 1)
             sub = self._data.get(parts[0])
@@ -83,7 +92,6 @@ class Namespace:
             if isinstance(sub, Namespace):
                 return sub._resolve(parts[1])
             if isinstance(sub, dict):
-                # Convert dict to namespace on the fly
                 return Namespace(sub)._resolve(parts[1])
             raise KeyError(key)
         if key in self._data:
@@ -91,11 +99,9 @@ class Namespace:
         raise KeyError(key)
 
     def __contains__(self, key: str) -> bool:
-        """Check if a key exists."""
         return self.get(key, _MISSING) is not _MISSING
 
     def __setitem__(self, key: str, value: Any) -> None:
-        """Set a value, supporting dotted notation for nested access."""
         if "." in key:
             parts = key.split(".", 1)
             if parts[0] not in self._data:
@@ -111,161 +117,346 @@ class Namespace:
             self._data[key] = value
 
     def __getitem__(self, key: str) -> Any:
-        """Get a value, raising KeyError if not found."""
         value = self.get(key, _MISSING)
         if value is _MISSING:
             raise KeyError(key)
         return value
 
     def update(self, other: Mapping[str, Any]) -> None:
-        """Update with values from another mapping."""
         for key, value in other.items():
             self[key] = value
 
 
-# Sentinel for missing values
 _MISSING = object()
 
-# Marker for escaped dollars during expansion (replaced with $ at the end)
-_ESCAPED_DOLLAR_MARKER = "\x00DOLLAR\x00"
+# Sentinel character to represent literal $ during expansion (replaced at the end)
+_DOLLAR_SENTINEL = "\x00"
+
+
+# =============================================================================
+# Pattern matching
+# =============================================================================
+
+# Match: $$, ${func(args)}, ${var}, $var
+_TOKEN_PATTERN = re.compile(
+    r"(\$\$)"  # Group 1: Escaped dollar
+    r"|"
+    r"\$\{(\w+)\(([^)]*)\)\}"  # Group 2,3: Function ${func(args)}
+    r"|"
+    r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}"  # Group 4: Braced ${var}
+    r"|"
+    r"\$([a-zA-Z_][a-zA-Z0-9_.]*)"  # Group 5: Simple $var
+)
+
+_ARG_SPLIT = re.compile(r",\s*")
+
+
+# =============================================================================
+# Core substitution
+# =============================================================================
 
 
 def subst(
-    template: str,
+    template: str | list | MultiCmd,
     namespace: Namespace | dict[str, Any],
     *,
     location: SourceLocation | None = None,
-) -> str:
-    """Expand variables in a template string.
-
-    Performs recursive expansion until no $ references remain
-    (except escaped $$).
+) -> list[str] | list[list[str]]:
+    """Expand variables in a template, returning structured token list.
 
     Args:
-        template: String containing $VAR or ${VAR} references.
-        namespace: Variables to substitute. Can be a Namespace or dict.
-        location: Source location for error messages.
+        template: String, list of tokens, or MultiCmd
+        namespace: Variables to substitute
+        location: Source location for error messages
 
     Returns:
-        The expanded string.
-
-    Raises:
-        MissingVariableError: If a referenced variable doesn't exist.
-        CircularReferenceError: If variables reference each other cyclically.
+        Single command: list[str] - flat list of tokens
+        MultiCmd: list[list[str]] - list of commands, each a list of tokens
     """
     if isinstance(namespace, dict):
         namespace = Namespace(namespace)
 
-    result = _expand(template, namespace, set(), location)
-    # Restore escaped dollars (marker -> $) only at the top level
-    result = result.replace(_ESCAPED_DOLLAR_MARKER, "$")
+    if isinstance(template, MultiCmd):
+        return [_subst_command(cmd, namespace, location) for cmd in template.commands]
+    else:
+        return _subst_command(template, namespace, location)
+
+
+def _subst_command(
+    template: str | list,
+    namespace: Namespace,
+    location: SourceLocation | None,
+) -> list[str]:
+    """Substitute a single command template, returning token list."""
+    tokens = template.split() if isinstance(template, str) else list(template)
+
+    result: list[str] = []
+    for token in tokens:
+        expanded = _expand_token(token, namespace, set(), location)
+        if isinstance(expanded, list):
+            result.extend(expanded)
+        else:
+            result.append(expanded)
+
     return result
 
 
-def subst_list(
-    template: str,
-    namespace: Namespace | dict[str, Any],
-    *,
-    location: SourceLocation | None = None,
-) -> list[str]:
-    """Expand variables and return as a list of strings.
-
-    Like subst(), but splits the result on whitespace and
-    handles list values by expanding them into multiple items.
-
-    Args:
-        template: String containing $VAR or ${VAR} references.
-        namespace: Variables to substitute.
-        location: Source location for error messages.
-
-    Returns:
-        A list of strings (template tokens with variables expanded).
-    """
-    if isinstance(namespace, dict):
-        namespace = Namespace(namespace)
-
-    result = _expand(template, namespace, set(), location)
-    return result.split()
-
-
-def _expand(
-    template: str,
+def _expand_token(
+    token: str,
     namespace: Namespace,
     expanding: set[str],
     location: SourceLocation | None,
-) -> str:
-    """Recursively expand variables in template.
+) -> str | list[str]:
+    """Expand a single token. Returns string or list if token expands to multiple."""
+    stripped = token.strip()
 
-    Args:
-        template: Template string.
-        namespace: Variable namespace.
-        expanding: Set of variables currently being expanded (for cycle detection).
-        location: Source location for error messages.
+    # Check for function call: ${func(args)}
+    func_match = re.fullmatch(r"\$\{(\w+)\(([^)]*)\)\}", stripped)
+    if func_match:
+        return _call_function(
+            func_match.group(1), func_match.group(2), namespace, expanding, location
+        )
 
-    Returns:
-        Expanded string.
-    """
+    # Check for single variable reference (entire token)
+    var_match = re.fullmatch(
+        r"\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}|\$([a-zA-Z_][a-zA-Z0-9_.]*)", stripped
+    )
+    if var_match:
+        var_name = var_match.group(1) or var_match.group(2)
+        value = _lookup_var(var_name, namespace, expanding, location)
 
-    def replace_var(match: re.Match[str]) -> str:
-        # Group 1: escaped $$ -> marker (converted to $ at the end)
-        if match.group(1):
-            return _ESCAPED_DOLLAR_MARKER
+        if isinstance(value, list):
+            # List variable as entire token -> multiple tokens
+            result = []
+            for v in value:
+                sv = str(v)
+                if "$" in sv:
+                    exp = _expand_token(sv, namespace, expanding, location)
+                    if isinstance(exp, list):
+                        result.extend(exp)
+                    else:
+                        result.append(exp)
+                else:
+                    result.append(sv)
+            return result
 
-        # Group 2 or 3: variable name
-        var_name = match.group(2) or match.group(3)
-
-        # Check for circular reference
-        if var_name in expanding:
-            chain = list(expanding) + [var_name]
-            raise CircularReferenceError(chain, location)
-
-        # Look up the value
-        value = namespace.get(var_name, _MISSING)
-        if value is _MISSING:
-            raise MissingVariableError(var_name, location)
-
-        # Convert to string
-        str_value = _value_to_str(value)
-
-        # Recursively expand if there are more $ references
-        if "$" in str_value and str_value != "$":
-            new_expanding = expanding | {var_name}
-            return _expand(str_value, namespace, new_expanding, location)
-
+        str_value = str(value)
+        if "$" in str_value:
+            return _expand_token(str_value, namespace, expanding | {var_name}, location)
         return str_value
 
-    # Keep expanding until no more substitutions happen
-    result = _VAR_PATTERN.sub(replace_var, template)
+    # Token contains mixed content - expand inline
+    def replace_match(match: re.Match[str]) -> str:
+        if match.group(1):  # $$
+            # Use sentinel to protect literal $ from further expansion
+            return _DOLLAR_SENTINEL
 
-    # Check if we need another pass (in case expansion introduced new variables)
-    # But skip if the only $ is from $$ escaping (which is now a marker)
-    if "$" in result:
-        # Make sure we're not in an infinite loop
-        if result != template:
-            return _expand(result, namespace, expanding, location)
+        if match.group(2):  # Function call
+            result = _call_function(
+                match.group(2), match.group(3), namespace, expanding, location
+            )
+            return " ".join(str(x) for x in result) if isinstance(result, list) else str(result)
+
+        var_name = match.group(4) or match.group(5)
+        value = _lookup_var(var_name, namespace, expanding, location)
+
+        if isinstance(value, list):
+            raise SubstitutionError(
+                f"List variable ${var_name} cannot be embedded in '{token}'. "
+                f"Use ${{prefix(...)}} or make it the entire token.",
+                location,
+            )
+        return str(value)
+
+    result = _TOKEN_PATTERN.sub(replace_match, token)
+
+    if "$" in result and result != token:
+        result = _expand_token(result, namespace, expanding, location)
+
+    # Replace sentinel with actual $ at the end
+    if isinstance(result, str):
+        result = result.replace(_DOLLAR_SENTINEL, "$")
+    elif isinstance(result, list):
+        result = [s.replace(_DOLLAR_SENTINEL, "$") for s in result]
 
     return result
 
 
-def _value_to_str(value: Any) -> str:
-    """Convert a value to a string suitable for substitution.
+def _lookup_var(
+    var_name: str,
+    namespace: Namespace,
+    expanding: set[str],
+    location: SourceLocation | None,
+) -> Any:
+    """Look up variable, checking for cycles."""
+    if var_name in expanding:
+        raise CircularReferenceError(list(expanding) + [var_name], location)
 
-    Lists are space-joined. Other types are converted via str().
+    value = namespace.get(var_name, _MISSING)
+    if value is _MISSING:
+        raise MissingVariableError(var_name, location)
+
+    return value
+
+
+def _call_function(
+    func_name: str,
+    args_str: str,
+    namespace: Namespace,
+    expanding: set[str],
+    location: SourceLocation | None,
+) -> list[str]:
+    """Call a substitution function. Always returns a list."""
+    args = [a.strip() for a in _ARG_SPLIT.split(args_str) if a.strip()]
+
+    if func_name == "prefix":
+        if len(args) != 2:
+            raise SubstitutionError(f"prefix() requires 2 args, got {len(args)}", location)
+        prefix = str(_resolve_arg(args[0], namespace, expanding, location))
+        items = _resolve_arg(args[1], namespace, expanding, location)
+        items = items if isinstance(items, list) else [items]
+        return [prefix + str(item) for item in items]
+
+    elif func_name == "suffix":
+        if len(args) != 2:
+            raise SubstitutionError(f"suffix() requires 2 args, got {len(args)}", location)
+        items = _resolve_arg(args[0], namespace, expanding, location)
+        suffix = str(_resolve_arg(args[1], namespace, expanding, location))
+        items = items if isinstance(items, list) else [items]
+        return [str(item) + suffix for item in items]
+
+    elif func_name == "wrap":
+        if len(args) != 3:
+            raise SubstitutionError(f"wrap() requires 3 args, got {len(args)}", location)
+        prefix = str(_resolve_arg(args[0], namespace, expanding, location))
+        items = _resolve_arg(args[1], namespace, expanding, location)
+        suffix = str(_resolve_arg(args[2], namespace, expanding, location))
+        items = items if isinstance(items, list) else [items]
+        return [prefix + str(item) + suffix for item in items]
+
+    elif func_name == "join":
+        if len(args) != 2:
+            raise SubstitutionError(f"join() requires 2 args, got {len(args)}", location)
+        sep = str(_resolve_arg(args[0], namespace, expanding, location))
+        items = _resolve_arg(args[1], namespace, expanding, location)
+        items = items if isinstance(items, list) else [items]
+        return [sep.join(str(item) for item in items)]
+
+    else:
+        raise SubstitutionError(f"Unknown function: {func_name}", location)
+
+
+def _resolve_arg(
+    arg: str,
+    namespace: Namespace,
+    expanding: set[str],
+    location: SourceLocation | None,
+) -> Any:
+    """Resolve function argument - variable reference or literal."""
+    if arg.startswith("${") and arg.endswith("}"):
+        return _lookup_var(arg[2:-1], namespace, expanding, location)
+    if arg.startswith("$"):
+        return _lookup_var(arg[1:], namespace, expanding, location)
+
+    # Dotted name = implicit variable reference
+    if re.match(r"^[a-zA-Z_][a-zA-Z0-9_.]*$", arg) and "." in arg:
+        return _lookup_var(arg, namespace, expanding, location)
+
+    # Simple name - check if it's a variable
+    if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", arg):
+        value = namespace.get(arg, _MISSING)
+        if value is not _MISSING:
+            return value
+
+    return arg  # Literal
+
+
+# =============================================================================
+# Shell command formatting
+# =============================================================================
+
+
+def to_shell_command(
+    tokens: list[str] | list[list[str]],
+    shell: str = "auto",
+    multi_join: str = " && ",
+) -> str:
+    """Convert token list to shell command string with proper quoting.
+
+    Args:
+        tokens: From subst() - single command or list of commands
+        shell: "auto", "bash", "cmd", or "powershell"
+        multi_join: Separator for multiple commands
     """
-    if isinstance(value, list):
-        return " ".join(str(item) for item in value)
-    if isinstance(value, bool):
-        return "1" if value else "0"
-    return str(value)
+    if shell == "auto":
+        shell = "cmd" if platform.system() == "Windows" else "bash"
+
+    # Multiple commands?
+    if tokens and isinstance(tokens[0], list):
+        commands = []
+        for cmd_tokens in tokens:
+            quoted = [_quote_for_shell(t, shell) for t in _flatten(cmd_tokens)]
+            commands.append(" ".join(quoted))
+        return multi_join.join(commands)
+    else:
+        quoted = [_quote_for_shell(t, shell) for t in _flatten(tokens)]
+        return " ".join(quoted)
+
+
+def _flatten(items: list) -> list[str]:
+    """Flatten nested lists to flat list of strings."""
+    result: list[str] = []
+    for item in items:
+        if isinstance(item, list):
+            result.extend(_flatten(item))
+        else:
+            result.append(str(item))
+    return result
+
+
+def _quote_for_shell(s: str, shell: str) -> str:
+    """Quote string for target shell if needed.
+
+    Args:
+        s: String to quote
+        shell: Target shell ("bash", "cmd", "powershell", or "ninja")
+
+    For "ninja" shell, ninja variables like $in, $out are not quoted.
+    """
+    if not s:
+        return "''" if shell not in ("cmd", "ninja") else '""' if shell == "cmd" else ""
+
+    if shell == "ninja":
+        # Ninja handles its own quoting, and $in/$out/$out.d etc. are ninja variables
+        # that should not be quoted. For ninja, we don't quote at all.
+        return s
+
+    if shell == "bash":
+        needs_quote = any(c in s for c in ' \t\n"\'\\$`!*?[](){}|&;<>')
+        if not needs_quote:
+            return s
+        if "'" not in s:
+            return f"'{s}'"
+        escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+        return f'"{escaped}"'
+
+    elif shell == "cmd":
+        needs_quote = any(c in s for c in ' \t"^&|<>()%!')
+        if not needs_quote:
+            return s
+        return f'"{s.replace(chr(34), chr(34)+chr(34))}"'
+
+    elif shell == "powershell":
+        needs_quote = any(c in s for c in ' \t"\'$`(){}[]|&;<>')
+        if not needs_quote:
+            return s
+        if "'" not in s:
+            return f"'{s}'"
+        return f"'{s.replace(chr(39), chr(39)+chr(39))}'"
+
+    return f'"{s}"' if " " in s else s
 
 
 def escape(s: str) -> str:
-    """Escape dollar signs in a string.
-
-    Args:
-        s: String to escape.
-
-    Returns:
-        String with $ replaced by $$.
-    """
+    """Escape dollar signs: $ -> $$"""
     return s.replace("$", "$$")

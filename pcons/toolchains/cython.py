@@ -73,7 +73,11 @@ class CythonTranspiler(BaseTool):
         return {
             "cmd": "cython",
             "flags": [],
-            "pyx_to_c_cmd": "$cython.cmd $cython.flags -o $$out $$in",
+            "pyx_to_c_cmd": [
+                "$cython.cmd",
+                "$cython.flags",
+                "-o", "$$out", "$$in",
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -144,10 +148,10 @@ class CythonCCompiler(BaseTool):
         # Use clang on macOS, gcc elsewhere
         cmd = "clang" if platform.is_macos else "gcc"
 
-        # Build include flags
+        # Include directories (without -I prefix)
         includes = []
         if python_info["include_dir"]:
-            includes.append(f"-I{python_info['include_dir']}")
+            includes.append(python_info["include_dir"])
 
         # Flags for position-independent code (needed for shared libs)
         flags = ["-fPIC"]
@@ -158,10 +162,19 @@ class CythonCCompiler(BaseTool):
         return {
             "cmd": cmd,
             "flags": flags,
+            "iprefix": "-I",
             "includes": includes,
+            "dprefix": "-D",
             "defines": [],
-            "depflags": "-MD -MF $$out.d",
-            "objcmd": "$cycc.cmd $cycc.flags $cycc.includes $cycc.defines $cycc.depflags -c -o $$out $$in",
+            "depflags": ["-MD", "-MF", "$$out.d"],
+            "objcmd": [
+                "$cycc.cmd",
+                "$cycc.flags",
+                "${prefix(cycc.iprefix, cycc.includes)}",
+                "${prefix(cycc.dprefix, cycc.defines)}",
+                "$cycc.depflags",
+                "-c", "-o", "$$out", "$$in",
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -246,21 +259,29 @@ class CythonLinker(BaseTool):
         else:
             flags = ["-shared"]
 
-        # Library directories and libraries
+        # Library directories (without -L prefix) and libraries (without -l prefix)
         libdirs = []
         libs = []
         if python_info["lib_dir"]:
-            libdirs.append(f"-L{python_info['lib_dir']}")
+            libdirs.append(python_info["lib_dir"])
         if python_info["libs"]:
-            libs.append(f"-l{python_info['libs']}")
+            libs.append(python_info["libs"])
 
         return {
             "cmd": cmd,
             "flags": flags,
+            "lprefix": "-l",
             "libs": libs,
+            "Lprefix": "-L",
             "libdirs": libdirs,
             "ext_suffix": python_info["ext_suffix"],
-            "extcmd": "$cylink.cmd $cylink.flags -o $$out $$in $cylink.libdirs $cylink.libs",
+            "extcmd": [
+                "$cylink.cmd",
+                "$cylink.flags",
+                "-o", "$$out", "$$in",
+                "${prefix(cylink.Lprefix, cylink.libdirs)}",
+                "${prefix(cylink.lprefix, cylink.libs)}",
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:

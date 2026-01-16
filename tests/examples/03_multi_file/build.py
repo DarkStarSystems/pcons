@@ -33,7 +33,8 @@ env = project.Environment(toolchain=toolchain)
 
 # Configure compiler flags and include directories
 env.cc.flags = ["-Wall", "-Wextra"]
-env.cc.includes = [f"-I{include_dir}"]
+# Include paths without -I prefix (the prefix is in env.cc.iprefix)
+env.cc.includes = [str(include_dir)]
 
 # Compile source files
 objs = []

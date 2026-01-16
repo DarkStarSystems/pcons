@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.subst import Namespace, subst
+from pcons.core.subst import Namespace, subst, to_shell_command
 from pcons.core.toolconfig import ToolConfig
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -165,35 +165,48 @@ class Environment:
         except AttributeError:
             return default
 
-    def subst(self, template: str, **extra: Any) -> str:
-        """Expand variables in a template string.
+    def subst(
+        self,
+        template: str | list[str],
+        *,
+        shell: str = "auto",
+        **extra: Any,
+    ) -> str:
+        """Expand variables in a template and return as shell command string.
 
-        Uses both tool namespaces and cross-tool variables.
+        Uses both tool namespaces and cross-tool variables. The template
+        is expanded to a list of tokens, then converted to a properly
+        quoted shell command string.
 
         Args:
-            template: String with $var or ${tool.var} references.
+            template: String or list with $var or ${tool.var} references.
+            shell: Target shell for quoting ("auto", "bash", "cmd", "powershell", "ninja").
+                   Use "ninja" when generating ninja build files.
             **extra: Additional variables for this expansion only.
 
         Returns:
-            Expanded string.
+            Expanded shell command string.
         """
         namespace = self._build_namespace()
         if extra:
             namespace.update(extra)
-        return subst(template, namespace)
+        tokens = subst(template, namespace)
+        return to_shell_command(tokens, shell=shell)
 
-    def subst_list(self, template: str, **extra: Any) -> list[str]:
-        """Expand variables and split into a list.
+    def subst_list(self, template: str | list[str], **extra: Any) -> list[str]:
+        """Expand variables and return as list of tokens.
 
         Args:
-            template: String with variable references.
+            template: String or list with variable references.
             **extra: Additional variables for this expansion only.
 
         Returns:
             List of expanded tokens.
         """
-        result = self.subst(template, **extra)
-        return result.split()
+        namespace = self._build_namespace()
+        if extra:
+            namespace.update(extra)
+        return subst(template, namespace)
 
     def _build_namespace(self) -> Namespace:
         """Build a Namespace for variable substitution."""

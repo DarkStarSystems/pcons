@@ -4,6 +4,9 @@
 Each toolchain implements its own apply_variant() method to handle
 build variants like "debug" and "release". The core only knows
 the variant name - toolchains define what it means.
+
+Note: Defines are stored without the -D prefix (e.g., "DEBUG" not "-DDEBUG").
+The prefix is applied during expansion via ${prefix(dprefix, defines)}.
 """
 
 from __future__ import annotations
@@ -44,8 +47,9 @@ class TestGccVariants:
         # Check flags were applied
         assert "-O0" in cc.flags
         assert "-g" in cc.flags
-        assert "-DDEBUG" in cc.defines
-        assert "-D_DEBUG" in cc.defines
+        # Defines stored without -D prefix
+        assert "DEBUG" in cc.defines
+        assert "_DEBUG" in cc.defines
 
         assert "-O0" in cxx.flags
         assert "-g" in cxx.flags
@@ -67,7 +71,8 @@ class TestGccVariants:
 
         assert "-O2" in cc.flags
         assert "-g" not in cc.flags
-        assert "-DNDEBUG" in cc.defines
+        # Define stored without -D prefix
+        assert "NDEBUG" in cc.defines
         assert env.variant == "release"
 
     def test_relwithdebinfo_variant(self) -> None:
@@ -84,7 +89,7 @@ class TestGccVariants:
 
         assert "-O2" in cc.flags
         assert "-g" in cc.flags
-        assert "-DNDEBUG" in cc.defines
+        assert "NDEBUG" in cc.defines
 
     def test_minsizerel_variant(self) -> None:
         """Test GCC minsizerel variant."""
@@ -99,7 +104,7 @@ class TestGccVariants:
         toolchain.apply_variant(env, "minsizerel")
 
         assert "-Os" in cc.flags
-        assert "-DNDEBUG" in cc.defines
+        assert "NDEBUG" in cc.defines
 
     def test_extra_flags(self) -> None:
         """Test extra flags are added."""
@@ -117,7 +122,7 @@ class TestGccVariants:
         assert "-Wextra" in cc.flags
 
     def test_extra_defines(self) -> None:
-        """Test extra defines are added."""
+        """Test extra defines are added (without -D prefix)."""
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -126,9 +131,10 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
+        # Extra defines stored without prefix
         toolchain.apply_variant(env, "release", extra_defines=["MY_FEATURE"])
 
-        assert "-DMY_FEATURE" in cc.defines
+        assert "MY_FEATURE" in cc.defines
 
     def test_unknown_variant(self) -> None:
         """Test unknown variant sets name but no flags."""
@@ -181,7 +187,8 @@ class TestLlvmVariants:
 
         assert "-O0" in cc.flags
         assert "-g" in cc.flags
-        assert "-DDEBUG" in cc.defines
+        # Defines stored without -D prefix
+        assert "DEBUG" in cc.defines
         assert env.variant == "debug"
 
     def test_release_variant(self) -> None:
@@ -197,7 +204,7 @@ class TestLlvmVariants:
         toolchain.apply_variant(env, "release")
 
         assert "-O2" in cc.flags
-        assert "-DNDEBUG" in cc.defines
+        assert "NDEBUG" in cc.defines
 
 
 class TestEnvironmentSetVariant:
@@ -239,7 +246,8 @@ class TestEnvironmentSetVariant:
         cc = env.add_tool("cc")
         cc.set("cmd", "gcc")
         cc.set("flags", ["-Wall", "-Wextra"])
-        cc.set("defines", ["-DFOO"])
+        # Existing defines without prefix
+        cc.set("defines", ["FOO"])
 
         toolchain = GccToolchain()
         env._toolchain = toolchain
@@ -249,7 +257,7 @@ class TestEnvironmentSetVariant:
         # Original flags should still be there
         assert "-Wall" in cc.flags
         assert "-Wextra" in cc.flags
-        assert "-DFOO" in cc.defines
+        assert "FOO" in cc.defines
         # New flags should be added
         assert "-O0" in cc.flags
         assert "-g" in cc.flags
