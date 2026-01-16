@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
@@ -23,6 +23,7 @@ from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
+    from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
 
 
@@ -316,3 +317,96 @@ class MsvcToolchain(BaseToolchain):
         }
 
         return True
+
+    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
+        """Apply a build variant to the environment.
+
+        Implements MSVC-specific handling for standard build variants.
+
+        Args:
+            env: Environment to configure.
+            variant: Variant name. Recognized values:
+                - "debug": No optimization, debug symbols, DEBUG defined
+                - "release": Full optimization, NDEBUG defined
+                - "relwithdebinfo": Optimization with debug symbols
+                - "minsizerel": Size optimization
+            **kwargs: Additional options:
+                - extra_flags: Additional compiler flags
+                - extra_defines: Additional preprocessor definitions
+        """
+        # Call base to set env.variant
+        super().apply_variant(env, variant, **kwargs)
+
+        extra_flags = kwargs.get("extra_flags", [])
+        extra_defines = kwargs.get("extra_defines", [])
+
+        # Collect flags based on variant
+        compile_flags: list[str] = []
+        defines: list[str] = []
+        link_flags: list[str] = []
+
+        variant_lower = variant.lower()
+        if variant_lower == "debug":
+            compile_flags = ["/Od", "/Zi"]
+            defines = ["/DDEBUG", "/D_DEBUG"]
+            link_flags = ["/DEBUG"]
+        elif variant_lower == "release":
+            compile_flags = ["/O2"]
+            defines = ["/DNDEBUG"]
+        elif variant_lower == "relwithdebinfo":
+            compile_flags = ["/O2", "/Zi"]
+            defines = ["/DNDEBUG"]
+            link_flags = ["/DEBUG"]
+        elif variant_lower == "minsizerel":
+            compile_flags = ["/O1"]  # MSVC /O1 optimizes for size
+            defines = ["/DNDEBUG"]
+        # else: unknown variant, leave flags empty (user manages)
+
+        # Add extra flags
+        for flag in extra_flags:
+            compile_flags.append(flag)
+        for define in extra_defines:
+            defines.append(f"/D{define}")
+
+        # Apply to C compiler
+        if env.has_tool("cc"):
+            cc = env.cc
+            current_flags = getattr(cc, "flags", [])
+            if isinstance(current_flags, list):
+                current_flags.extend(compile_flags)
+            current_defines = getattr(cc, "defines", [])
+            if isinstance(current_defines, list):
+                current_defines.extend(defines)
+
+        # Apply to C++ compiler
+        if env.has_tool("cxx"):
+            cxx = env.cxx
+            current_flags = getattr(cxx, "flags", [])
+            if isinstance(current_flags, list):
+                current_flags.extend(compile_flags)
+            current_defines = getattr(cxx, "defines", [])
+            if isinstance(current_defines, list):
+                current_defines.extend(defines)
+
+        # Apply to linker
+        if env.has_tool("link"):
+            link = env.link
+            current_flags = getattr(link, "flags", [])
+            if isinstance(current_flags, list):
+                current_flags.extend(link_flags)
+
+
+# =============================================================================
+# Registration
+# =============================================================================
+
+# Register MSVC toolchain for auto-discovery
+from pcons.tools.toolchain import toolchain_registry
+
+toolchain_registry.register(
+    MsvcToolchain,
+    aliases=["msvc", "vc", "visualstudio"],
+    check_command="cl.exe",
+    tool_classes=[MsvcCompiler, MsvcLibrarian, MsvcLinker],
+    category="c",
+)

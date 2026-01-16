@@ -1,0 +1,22 @@
+# Test configuration for the hello_c example
+
+[test]
+description = "Demonstrates compiling a simple C program with GCC"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/hello.o",
+    "build/hello",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/hello", expect_stdout = "Hello from pcons!" },
+]
+
+[skip]
+# Skip on Windows (needs different executable name and possibly MSVC)
+platforms = ["windows"]
+# Requires gcc to be installed
+requires = ["gcc"]

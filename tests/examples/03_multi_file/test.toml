@@ -1,0 +1,23 @@
+# Test configuration for the multi-file C example
+
+[test]
+description = "Demonstrates building a multi-file C project with include directories"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/math_ops.o",
+    "build/main.o",
+    "build/calculator",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/calculator", expect_stdout = "a = 5, b = 3" },
+    { run = "./build/calculator", expect_stdout = "add(5, 3) = 8" },
+    { run = "./build/calculator", expect_stdout = "multiply(5, 3) = 15" },
+]
+
+[skip]
+platforms = ["windows"]
+requires = ["gcc"]

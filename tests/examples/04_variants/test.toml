@@ -1,0 +1,21 @@
+# Test configuration for the build variants example
+
+[test]
+description = "Demonstrates debug/release build variants with different compiler flags"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/main.o",
+    "build/variant_demo",
+]
+
+[verify]
+# The release variant should define NDEBUG, so output should reflect that
+commands = [
+    { run = "./build/variant_demo", expect_stdout = "Running in RELEASE mode" },
+    { run = "./build/variant_demo", expect_stdout = "Assertions disabled" },
+]
+
+[skip]
+platforms = ["windows"]
+requires = ["gcc"]

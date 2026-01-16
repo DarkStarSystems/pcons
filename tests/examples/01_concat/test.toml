@@ -1,0 +1,21 @@
+# Test configuration for the concat example
+
+[test]
+description = "Demonstrates creating a custom tool that concatenates files"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/combined.txt",
+]
+
+[verify]
+# Verify the output contains expected content
+commands = [
+    { run = "cat build/combined.txt", expect_stdout = "Welcome to the Concat Example" },
+    { run = "cat build/combined.txt", expect_stdout = "Key concepts:" },
+    { run = "cat build/combined.txt", expect_stdout = "End of Concat Example" },
+]
+
+[skip]
+# Skip on Windows (no 'cat' command by default)
+platforms = ["windows"]

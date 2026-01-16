@@ -523,6 +523,43 @@ class Project:
 
 ## Key Design Decisions
 
+### Tool-Agnostic Core
+
+The core (`pcons/core/`) must remain completely tool-agnostic. It knows nothing about:
+- Compiler flags (`-O2`, `/Od`, `-g`, etc.)
+- Preprocessor defines (`-D`, `/D`)
+- Language-specific concepts (C flags, C++ flags, linker flags)
+- Specific tool names (gcc, clang, msvc)
+
+**Why this matters:** Pcons should support any build tool - C/C++ compilers, Rust, Go, LaTeX, game engines, Python bundlers, protobuf compilers, and tools we haven't imagined yet. The core provides:
+- Dependency graph management
+- Variable substitution
+- Environment and tool namespaces
+- Node and target abstractions
+
+**Toolchains own their semantics:** Each toolchain (GCC, LLVM, MSVC, etc.) implements its own `apply_variant()` method to handle build variants like "debug" or "release". The core only knows the variant *name* - toolchains define what it means.
+
+```python
+# Core only provides:
+env.set_variant("debug")  # Just a name, delegates to toolchain
+
+# GCC toolchain implements:
+def apply_variant(self, env, variant, **kwargs):
+    if variant == "debug":
+        env.cc.flags.extend(["-O0", "-g"])
+        env.cc.defines.extend(["-DDEBUG"])
+
+# A hypothetical LaTeX toolchain might implement:
+def apply_variant(self, env, variant, **kwargs):
+    if variant == "draft":
+        env.latex.options.append("draft")
+```
+
+**Guidelines for new code:**
+- Never add compiler flags, tool names, or language-specific logic to `pcons/core/`
+- Tool-specific code belongs in `pcons/toolchains/` or `pcons/tools/`
+- If you need build configuration, implement it in the toolchain
+
 ### Rebuild Detection: Timestamps vs Signatures
 
 **Decision: Rely on Ninja's timestamp + command comparison.**
@@ -756,7 +793,7 @@ project.generate()
 
 1. **Configuration caching**: What format? JSON for readability, or pickle for speed? When to invalidate? (Probably: hash of configure.py + tool versions)
 
-2. **Variant builds**: Current approach uses separate environments with different `build_dir`. Is this sufficient, or do we need explicit variant support?
+2. **Variant builds**: Handled via `env.set_variant("debug")` which delegates to the toolchain's `apply_variant()` method. Each toolchain defines what variants mean for its tools. Environment cloning allows multiple variant builds in the same project.
 
 3. **Distributed builds**: distcc/icecream/sccache should "just work" by wrapping compiler commands. Do we need explicit support?
 

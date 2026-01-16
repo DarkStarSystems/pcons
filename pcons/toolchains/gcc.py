@@ -10,7 +10,7 @@ Provides GCC-based C and C++ compilation toolchain including:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
@@ -331,3 +331,94 @@ class GccToolchain(BaseToolchain):
         # Set up convenience builders at environment level
         # These delegate to the appropriate tool based on source suffix
         pass  # Tool setup handles this via BaseTool.setup()
+
+    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
+        """Apply a build variant to the environment.
+
+        Implements GCC-specific handling for standard build variants.
+
+        Args:
+            env: Environment to configure.
+            variant: Variant name. Recognized values:
+                - "debug": No optimization, debug symbols, DEBUG defined
+                - "release": Full optimization, NDEBUG defined
+                - "relwithdebinfo": Optimization with debug symbols
+                - "minsizerel": Size optimization
+            **kwargs: Additional options:
+                - extra_flags: Additional compiler flags
+                - extra_defines: Additional preprocessor definitions
+        """
+        # Call base to set env.variant
+        super().apply_variant(env, variant, **kwargs)
+
+        extra_flags = kwargs.get("extra_flags", [])
+        extra_defines = kwargs.get("extra_defines", [])
+
+        # Collect flags based on variant
+        compile_flags: list[str] = []
+        defines: list[str] = []
+        link_flags: list[str] = []
+
+        variant_lower = variant.lower()
+        if variant_lower == "debug":
+            compile_flags = ["-O0", "-g"]
+            defines = ["-DDEBUG", "-D_DEBUG"]
+        elif variant_lower == "release":
+            compile_flags = ["-O2"]
+            defines = ["-DNDEBUG"]
+        elif variant_lower == "relwithdebinfo":
+            compile_flags = ["-O2", "-g"]
+            defines = ["-DNDEBUG"]
+        elif variant_lower == "minsizerel":
+            compile_flags = ["-Os"]
+            defines = ["-DNDEBUG"]
+        # else: unknown variant, leave flags empty (user manages)
+
+        # Add extra flags
+        for flag in extra_flags:
+            compile_flags.append(flag)
+        for define in extra_defines:
+            defines.append(f"-D{define}")
+
+        # Apply to C compiler
+        if env.has_tool("cc"):
+            cc = env.cc
+            current_flags = getattr(cc, "flags", [])
+            if isinstance(current_flags, list):
+                current_flags.extend(compile_flags)
+            current_defines = getattr(cc, "defines", [])
+            if isinstance(current_defines, list):
+                current_defines.extend(defines)
+
+        # Apply to C++ compiler
+        if env.has_tool("cxx"):
+            cxx = env.cxx
+            current_flags = getattr(cxx, "flags", [])
+            if isinstance(current_flags, list):
+                current_flags.extend(compile_flags)
+            current_defines = getattr(cxx, "defines", [])
+            if isinstance(current_defines, list):
+                current_defines.extend(defines)
+
+        # Apply to linker
+        if env.has_tool("link"):
+            link = env.link
+            current_flags = getattr(link, "flags", [])
+            if isinstance(current_flags, list):
+                current_flags.extend(link_flags)
+
+
+# =============================================================================
+# Registration
+# =============================================================================
+
+# Register GCC toolchain for auto-discovery
+from pcons.tools.toolchain import toolchain_registry
+
+toolchain_registry.register(
+    GccToolchain,
+    aliases=["gcc", "gnu"],
+    check_command="gcc",
+    tool_classes=[GccCCompiler, GccCxxCompiler, GccArchiver, GccLinker],
+    category="c",
+)

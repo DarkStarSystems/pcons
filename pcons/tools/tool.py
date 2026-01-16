@@ -147,6 +147,7 @@ class BuilderMethod:
 
     This allows calling builders as methods on tool configs:
         env.cc.Object('foo.o', 'foo.c')
+        env.cc.Object(build_dir / 'foo.o', src_dir / 'foo.c')  # Paths work too
     """
 
     def __init__(self, env: Environment, builder: Builder) -> None:
@@ -155,28 +156,28 @@ class BuilderMethod:
 
     def __call__(
         self,
-        target: str | None = None,
-        sources: list[str] | str | None = None,
+        target: str | Path | None = None,
+        sources: list[str | Path] | str | Path | None = None,
         **kwargs: object,
     ) -> list:
         """Invoke the builder.
 
         Args:
-            target: Target file path.
-            sources: Source file(s).
+            target: Target file path (str or Path).
+            sources: Source file(s) (str, Path, or list of either).
             **kwargs: Additional builder options.
 
         Returns:
             List of created nodes.
         """
-        from pathlib import Path
+        from pathlib import Path as PathlibPath
 
         from pcons.core.node import Node
 
-        # Normalize sources
+        # Normalize sources to a list
         if sources is None:
-            source_list: list[str | Path | Node] = []
-        elif isinstance(sources, str):
+            source_list: list[str | PathlibPath | Node] = []
+        elif isinstance(sources, (str, PathlibPath)):
             source_list = [sources]
         else:
             source_list = list(sources)

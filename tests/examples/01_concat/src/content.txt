@@ -1,0 +1,10 @@
+This example demonstrates how to create a custom tool
+in pcons. The "concat" tool combines multiple text files
+into a single output file.
+
+Key concepts:
+- Creating a custom Tool subclass
+- Defining default variables
+- Creating builders with CommandBuilder
+- Using the tool in a build script
+

@@ -324,6 +324,331 @@ class Configure:
         # Placeholder - needs compiler/linker
         return False
 
+    # Feature check methods that track results for config header generation
+
+    def define(self, name: str, value: str | int | bool = 1) -> None:
+        """Define a preprocessor macro for the config header.
+
+        This adds a #define to the config header. Use this when you
+        know a feature is present without needing to check.
+
+        Args:
+            name: Macro name (e.g., "HAVE_FEATURE_X").
+            value: Macro value (1 for feature flags, or an integer/string).
+
+        Example:
+            config.define("VERSION_MAJOR", 1)
+            config.define("VERSION_MINOR", 2)
+            config.define("HAVE_CUSTOM_FEATURE")
+        """
+        defines = self._cache.setdefault("_defines", {})
+        if isinstance(value, bool):
+            defines[name] = 1 if value else None  # None means #undef
+        else:
+            defines[name] = value
+
+    def undefine(self, name: str) -> None:
+        """Mark a macro as undefined for the config header.
+
+        This adds a /* #undef NAME */ comment to the config header.
+
+        Args:
+            name: Macro name.
+        """
+        defines = self._cache.setdefault("_defines", {})
+        defines[name] = None
+
+    def check_header(
+        self,
+        header: str,
+        *,
+        define_name: str | None = None,
+        lang: str = "c",
+    ) -> bool:
+        """Check if a header file exists and can be included.
+
+        If found, defines HAVE_<HEADER>_H (with dots and slashes replaced).
+
+        Args:
+            header: Header file name (e.g., "stdint.h", "sys/types.h").
+            define_name: Override for the define name.
+            lang: Language ('c' or 'cxx').
+
+        Returns:
+            True if header is available.
+
+        Example:
+            if config.check_header("stdint.h"):
+                # HAVE_STDINT_H is defined
+                pass
+        """
+        # Cache key for this check
+        cache_key = f"header:{header}"
+        if cache_key in self._cache:
+            result = bool(self._cache[cache_key])
+        else:
+            # Try to compile a simple include
+            source = f'#include <{header}>\nint main(void) {{ return 0; }}\n'
+            result = self.check_compile(source, lang=lang)
+            self._cache[cache_key] = result
+
+        # Generate define name
+        if define_name is None:
+            # HAVE_STDINT_H, HAVE_SYS_TYPES_H, etc.
+            safe_name = header.upper().replace(".", "_").replace("/", "_")
+            define_name = f"HAVE_{safe_name}"
+
+        # Record the result
+        if result:
+            self.define(define_name)
+        else:
+            self.undefine(define_name)
+
+        return result
+
+    def check_sizeof(
+        self,
+        type_name: str,
+        *,
+        define_name: str | None = None,
+        headers: list[str] | None = None,
+        default: int | None = None,
+    ) -> int | None:
+        """Check the size of a type.
+
+        Defines SIZEOF_<TYPE> with the size in bytes.
+
+        Args:
+            type_name: C type name (e.g., "int", "void*", "long long").
+            define_name: Override for the define name.
+            headers: Headers to include before checking.
+            default: Default value if check fails.
+
+        Returns:
+            Size in bytes, or default if check fails.
+
+        Example:
+            int_size = config.check_sizeof("int")  # Defines SIZEOF_INT
+            ptr_size = config.check_sizeof("void*")  # Defines SIZEOF_VOIDP
+        """
+        cache_key = f"sizeof:{type_name}"
+        if cache_key in self._cache:
+            cached = self._cache[cache_key]
+            size: int | None = int(cached) if cached is not None else None
+        else:
+            # For now, use ctypes to get sizes for common types
+            # Real implementation would compile and run a test program
+            size = self._get_sizeof_ctypes(type_name)
+            if size is None:
+                size = default
+            self._cache[cache_key] = size
+
+        # Generate define name
+        if define_name is None:
+            safe_name = type_name.upper().replace(" ", "_").replace("*", "P")
+            define_name = f"SIZEOF_{safe_name}"
+
+        if size is not None:
+            self.define(define_name, size)
+
+        return size
+
+    def _get_sizeof_ctypes(self, type_name: str) -> int | None:
+        """Get size of a type using ctypes (fallback method)."""
+        import ctypes
+
+        # Map of type names to their sizes
+        # We use sizeof directly with the type object
+        size_map: dict[str, int] = {
+            "char": ctypes.sizeof(ctypes.c_char),
+            "short": ctypes.sizeof(ctypes.c_short),
+            "int": ctypes.sizeof(ctypes.c_int),
+            "long": ctypes.sizeof(ctypes.c_long),
+            "long long": ctypes.sizeof(ctypes.c_longlong),
+            "float": ctypes.sizeof(ctypes.c_float),
+            "double": ctypes.sizeof(ctypes.c_double),
+            "void*": ctypes.sizeof(ctypes.c_void_p),
+            "size_t": ctypes.sizeof(ctypes.c_size_t),
+            "ssize_t": ctypes.sizeof(ctypes.c_ssize_t),
+        }
+
+        return size_map.get(type_name.lower())
+
+    def check_symbol(
+        self,
+        symbol: str,
+        *,
+        header: str | None = None,
+        define_name: str | None = None,
+        lang: str = "c",
+    ) -> bool:
+        """Check if a symbol (function, variable, macro) exists.
+
+        Defines HAVE_<SYMBOL> if the symbol exists.
+
+        Args:
+            symbol: Symbol name (e.g., "pthread_create", "M_PI").
+            header: Header file that declares the symbol.
+            define_name: Override for the define name.
+            lang: Language ('c' or 'cxx').
+
+        Returns:
+            True if symbol exists.
+
+        Example:
+            if config.check_symbol("pthread_create", header="pthread.h"):
+                # HAVE_PTHREAD_CREATE is defined
+                pass
+        """
+        cache_key = f"symbol:{symbol}"
+        if cache_key in self._cache:
+            result = bool(self._cache[cache_key])
+        else:
+            # Build test source
+            include = f'#include <{header}>\n' if header else ""
+            # Try different approaches to detect the symbol
+            # First try using it as a function pointer (works for functions)
+            source = f'''{include}
+int main(void) {{
+    void (*fp)(void) = (void (*)(void)){symbol};
+    (void)fp;
+    return 0;
+}}
+'''
+            result = self.check_compile(source, lang=lang)
+            self._cache[cache_key] = result
+
+        # Generate define name
+        if define_name is None:
+            safe_name = symbol.upper()
+            define_name = f"HAVE_{safe_name}"
+
+        if result:
+            self.define(define_name)
+        else:
+            self.undefine(define_name)
+
+        return result
+
+    def write_config_header(
+        self,
+        path: Path | str,
+        *,
+        guard: str | None = None,
+        include_platform: bool = True,
+    ) -> None:
+        """Write a C/C++ configuration header file.
+
+        Generates a header with #define statements for all detected
+        features, sizes, and custom definitions.
+
+        Args:
+            path: Path to write the header file.
+            guard: Include guard name (default: derived from filename).
+            include_platform: Include platform detection macros.
+
+        Example:
+            config.check_header("stdint.h")
+            config.check_sizeof("int")
+            config.define("VERSION", "1.0.0")
+            config.write_config_header("config.h")
+
+        Generated header:
+            #ifndef CONFIG_H
+            #define CONFIG_H
+
+            /* Platform detection */
+            #define PCONS_OS_DARWIN 1
+            #define PCONS_ARCH_ARM64 1
+
+            /* Header checks */
+            #define HAVE_STDINT_H 1
+
+            /* Type sizes */
+            #define SIZEOF_INT 4
+
+            /* Custom definitions */
+            #define VERSION "1.0.0"
+
+            #endif /* CONFIG_H */
+        """
+        path = Path(path)
+
+        # Generate include guard
+        if guard is None:
+            guard = path.name.upper().replace(".", "_").replace("-", "_")
+
+        lines: list[str] = []
+        lines.append(f"#ifndef {guard}")
+        lines.append(f"#define {guard}")
+        lines.append("")
+        lines.append("/* Generated by pcons configure */")
+        lines.append("")
+
+        # Platform detection
+        if include_platform:
+            lines.append("/* Platform detection */")
+            os_name = self.platform.os.upper()
+            arch_name = self.platform.arch.upper().replace("-", "_")
+            lines.append(f"#define PCONS_OS_{os_name} 1")
+            lines.append(f"#define PCONS_ARCH_{arch_name} 1")
+            if self.platform.is_64bit:
+                lines.append("#define PCONS_64BIT 1")
+            lines.append("")
+
+        # Collect defines by category
+        defines = self._cache.get("_defines", {})
+
+        # Separate into categories
+        have_defs = {k: v for k, v in defines.items() if k.startswith("HAVE_")}
+        sizeof_defs = {k: v for k, v in defines.items() if k.startswith("SIZEOF_")}
+        other_defs = {
+            k: v
+            for k, v in defines.items()
+            if not k.startswith("HAVE_") and not k.startswith("SIZEOF_")
+        }
+
+        # Write header checks
+        if have_defs:
+            lines.append("/* Feature and header checks */")
+            for name in sorted(have_defs.keys()):
+                value = have_defs[name]
+                if value is None:
+                    lines.append(f"/* #undef {name} */")
+                else:
+                    lines.append(f"#define {name} {value}")
+            lines.append("")
+
+        # Write sizeof checks
+        if sizeof_defs:
+            lines.append("/* Type sizes */")
+            for name in sorted(sizeof_defs.keys()):
+                value = sizeof_defs[name]
+                if value is not None:
+                    lines.append(f"#define {name} {value}")
+            lines.append("")
+
+        # Write other definitions
+        if other_defs:
+            lines.append("/* Custom definitions */")
+            for name in sorted(other_defs.keys()):
+                value = other_defs[name]
+                if value is None:
+                    lines.append(f"/* #undef {name} */")
+                elif isinstance(value, str):
+                    # Quote string values
+                    lines.append(f'#define {name} "{value}"')
+                else:
+                    lines.append(f"#define {name} {value}")
+            lines.append("")
+
+        lines.append(f"#endif /* {guard} */")
+        lines.append("")
+
+        # Write the file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("\n".join(lines))
+
     def __repr__(self) -> str:
         return (
             f"Configure(platform={self.platform.os}/{self.platform.arch}, "

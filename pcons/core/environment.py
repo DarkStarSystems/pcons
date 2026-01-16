@@ -64,6 +64,7 @@ class Environment:
         self._tools: dict[str, ToolConfig] = {}
         self._vars: dict[str, Any] = {
             "build_dir": Path("build"),
+            "variant": "default",
         }
         self._project: Any = None  # Set by Project when env is created
         self._toolchain = toolchain
@@ -245,6 +246,32 @@ class Environment:
         return new_env
 
     # Convenience methods for common patterns
+
+    def set_variant(self, name: str, **kwargs: Any) -> None:
+        """Set the build variant.
+
+        Delegates to the toolchain's apply_variant() method if a toolchain
+        is configured. The toolchain is responsible for translating the
+        variant name into appropriate tool-specific settings.
+
+        The core knows nothing about what variants mean - it's just a name.
+        Each toolchain defines its own semantics (e.g., GCC defines "debug"
+        as -O0 -g, while a LaTeX toolchain might use "draft" mode).
+
+        Args:
+            name: Variant name (e.g., "debug", "release").
+            **kwargs: Toolchain-specific options passed to apply_variant().
+
+        Example:
+            env.set_variant("debug")
+            env.set_variant("release", extra_flags=["-march=native"])
+        """
+        toolchain = object.__getattribute__(self, "_toolchain")
+        if toolchain is not None:
+            toolchain.apply_variant(self, name, **kwargs)
+        else:
+            # No toolchain - just set the variant name
+            self.variant = name
 
     def Glob(self, pattern: str) -> list[FileNode]:
         """Find files matching a glob pattern.

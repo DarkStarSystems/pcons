@@ -7,12 +7,174 @@ A Toolchain is a coordinated set of Tools that work together
 
 from __future__ import annotations
 
+import shutil
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
-    from pcons.tools.tool import Tool
+    from pcons.tools.tool import BaseTool, Tool
+
+
+# =============================================================================
+# Toolchain Registry
+# =============================================================================
+
+
+class ToolchainRegistry:
+    """Registry for toolchains that support auto-discovery.
+
+    Toolchains register themselves with metadata needed for automatic
+    detection and instantiation. This allows find_toolchain() to work
+    without hardcoding toolchain-specific information.
+
+    Example:
+        # In gcc.py, after class definition:
+        toolchain_registry.register(
+            GccToolchain,
+            aliases=["gcc", "gnu"],
+            check_command="gcc",
+            tool_classes=[GccCCompiler, GccCxxCompiler, GccArchiver, GccLinker],
+            category="c",
+        )
+    """
+
+    def __init__(self) -> None:
+        self._toolchains: dict[str, ToolchainEntry] = {}
+
+    def register(
+        self,
+        toolchain_class: type[BaseToolchain],
+        *,
+        aliases: list[str],
+        check_command: str,
+        tool_classes: list[type[BaseTool]],
+        category: str = "general",
+    ) -> None:
+        """Register a toolchain for auto-discovery.
+
+        Args:
+            toolchain_class: The toolchain class to register.
+            aliases: Names this toolchain responds to (e.g., ["llvm", "clang"]).
+            check_command: Command to check for availability (e.g., "clang").
+            tool_classes: Tool classes to instantiate when using this toolchain.
+            category: Category for grouping (e.g., "c", "python", "rust").
+        """
+        entry = ToolchainEntry(
+            toolchain_class=toolchain_class,
+            aliases=aliases,
+            check_command=check_command,
+            tool_classes=tool_classes,
+            category=category,
+        )
+        # Register under all aliases
+        for alias in aliases:
+            self._toolchains[alias.lower()] = entry
+
+    def get(self, name: str) -> ToolchainEntry | None:
+        """Get toolchain entry by name."""
+        return self._toolchains.get(name.lower())
+
+    def find_available(
+        self,
+        category: str,
+        prefer: list[str] | None = None,
+    ) -> BaseToolchain | None:
+        """Find the first available toolchain in a category.
+
+        Args:
+            category: Category to search (e.g., "c").
+            prefer: Ordered list of toolchain names to try first.
+
+        Returns:
+            A configured toolchain, or None if none available.
+        """
+        # Collect unique entries in preference order
+        tried: list[str] = []
+        entries_to_try: list[ToolchainEntry] = []
+        seen_classes: set[type] = set()
+
+        # First, try preferred toolchains in order
+        if prefer:
+            for name in prefer:
+                entry = self.get(name)
+                if entry and entry.category == category:
+                    if entry.toolchain_class not in seen_classes:
+                        entries_to_try.append(entry)
+                        seen_classes.add(entry.toolchain_class)
+
+        # Then try any remaining toolchains in the category
+        for entry in self._toolchains.values():
+            if entry.category == category:
+                if entry.toolchain_class not in seen_classes:
+                    entries_to_try.append(entry)
+                    seen_classes.add(entry.toolchain_class)
+
+        # Try each entry
+        for entry in entries_to_try:
+            tried.append(entry.aliases[0] if entry.aliases else "unknown")
+            if shutil.which(entry.check_command) is not None:
+                return entry.create_toolchain()
+
+        return None
+
+    def get_tried_names(
+        self,
+        category: str,
+        prefer: list[str] | None = None,
+    ) -> list[str]:
+        """Get the list of toolchain names that would be tried."""
+        tried: list[str] = []
+        seen_classes: set[type] = set()
+
+        if prefer:
+            for name in prefer:
+                entry = self.get(name)
+                if entry and entry.category == category:
+                    if entry.toolchain_class not in seen_classes:
+                        tried.append(entry.aliases[0] if entry.aliases else name)
+                        seen_classes.add(entry.toolchain_class)
+
+        for entry in self._toolchains.values():
+            if entry.category == category:
+                if entry.toolchain_class not in seen_classes:
+                    tried.append(entry.aliases[0] if entry.aliases else "unknown")
+                    seen_classes.add(entry.toolchain_class)
+
+        return tried
+
+
+class ToolchainEntry:
+    """Metadata for a registered toolchain."""
+
+    def __init__(
+        self,
+        toolchain_class: type[BaseToolchain],
+        aliases: list[str],
+        check_command: str,
+        tool_classes: list[type[BaseTool]],
+        category: str,
+    ) -> None:
+        self.toolchain_class = toolchain_class
+        self.aliases = aliases
+        self.check_command = check_command
+        self.tool_classes = tool_classes
+        self.category = category
+
+    def create_toolchain(self) -> BaseToolchain:
+        """Create and configure a toolchain instance."""
+        toolchain = self.toolchain_class()
+        # Set up tools without requiring full configure()
+        toolchain._tools = {}
+        for tool_class in self.tool_classes:
+            tool = tool_class()
+            toolchain._tools[tool.name] = tool
+        toolchain._configured = True
+        return toolchain
+
+
+# Global registry instance
+toolchain_registry = ToolchainRegistry()
 
 
 @runtime_checkable
@@ -59,6 +221,21 @@ class Toolchain(Protocol):
 
         Args:
             env: Environment to set up.
+        """
+        ...
+
+    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
+        """Apply a build variant to the environment.
+
+        Toolchains implement this to configure their tools for different
+        build variants (e.g., "debug", "release"). The core knows nothing
+        about what these variants mean - each toolchain defines its own
+        semantics.
+
+        Args:
+            env: Environment to configure.
+            variant: Variant name (e.g., "debug", "release").
+            **kwargs: Toolchain-specific options.
         """
         ...
 
@@ -134,6 +311,20 @@ class BaseToolchain(ABC):
         """Set up all tools in the environment."""
         for tool in self._tools.values():
             tool.setup(env)
+
+    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
+        """Apply a build variant to the environment.
+
+        Default implementation does nothing. Subclasses override this
+        to implement toolchain-specific variant handling.
+
+        Args:
+            env: Environment to configure.
+            variant: Variant name (e.g., "debug", "release").
+            **kwargs: Toolchain-specific options.
+        """
+        # Store variant name on environment
+        env.variant = variant
 
     def get_linker_for_languages(self, languages: set[str]) -> str:
         """Determine which tool should link based on languages used.
