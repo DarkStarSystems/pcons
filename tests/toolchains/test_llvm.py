@@ -70,7 +70,8 @@ class TestLlvmArchiver:
         ar = LlvmArchiver()
         vars = ar.default_vars()
         assert vars["cmd"] == "llvm-ar"
-        assert vars["flags"] == "rcs"
+        # flags is now a list (for consistency with subst)
+        assert vars["flags"] == ["rcs"]
         assert "libcmd" in vars
 
     def test_builders(self):

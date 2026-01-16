@@ -1,19 +1,12 @@
 # SPDX-License-Identifier: MIT
-"""LLVM/Clang toolchain implementation.
-
-Provides LLVM-based C and C++ compilation toolchain including:
-- Clang C compiler (clang)
-- Clang C++ compiler (clang++)
-- LLVM archiver (llvm-ar or ar)
-- Linker (using clang/clang++ or lld)
-"""
+"""LLVM/Clang toolchain implementation."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
-from pcons.core.builder import CommandBuilder
+from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain
 
@@ -24,18 +17,7 @@ if TYPE_CHECKING:
 
 
 class ClangCCompiler(BaseTool):
-    """Clang C compiler tool.
-
-    Provides the 'cc' tool for compiling C source files to object files.
-
-    Variables:
-        cmd: Compiler command (default: 'clang')
-        flags: Compiler flags
-        includes: Include directories (-I flags)
-        defines: Preprocessor definitions (-D flags)
-        depflags: Dependency generation flags
-        objcmd: Command template for compiling to object
-    """
+    """Clang C compiler tool."""
 
     def __init__(self) -> None:
         super().__init__("cc", language="c")
@@ -44,19 +26,26 @@ class ClangCCompiler(BaseTool):
         return {
             "cmd": "clang",
             "flags": [],
+            "iprefix": "-I",
             "includes": [],
+            "dprefix": "-D",
             "defines": [],
-            "depflags": "-MD -MF $$out.d",
-            "objcmd": "$cc.cmd $cc.flags $cc.includes $cc.defines $cc.depflags -c -o $$out $$in",
+            "depflags": ["-MD", "-MF", "$$out.d"],
+            "objcmd": [
+                "$cc.cmd",
+                "$cc.flags",
+                "${prefix(cc.iprefix, cc.includes)}",
+                "${prefix(cc.dprefix, cc.defines)}",
+                "$cc.depflags",
+                "-c", "-o", "$$out", "$$in",
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()
         return {
             "Object": CommandBuilder(
-                "Object",
-                "cc",
-                "objcmd",
+                "Object", "cc", "objcmd",
                 src_suffixes=[".c"],
                 target_suffixes=[platform.object_suffix],
                 language="c",
@@ -65,36 +54,21 @@ class ClangCCompiler(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        """Detect Clang C compiler."""
         from pcons.configure.config import Configure
         if not isinstance(config, Configure):
             return None
-
         clang = config.find_program("clang")
         if clang is None:
             return None
-
         from pcons.core.toolconfig import ToolConfig
         tool_config = ToolConfig("cc", cmd=str(clang.path))
         if clang.version:
             tool_config.version = clang.version
-
         return tool_config
 
 
 class ClangCxxCompiler(BaseTool):
-    """Clang C++ compiler tool.
-
-    Provides the 'cxx' tool for compiling C++ source files to object files.
-
-    Variables:
-        cmd: Compiler command (default: 'clang++')
-        flags: Compiler flags
-        includes: Include directories (-I flags)
-        defines: Preprocessor definitions (-D flags)
-        depflags: Dependency generation flags
-        objcmd: Command template for compiling to object
-    """
+    """Clang C++ compiler tool."""
 
     def __init__(self) -> None:
         super().__init__("cxx", language="cxx")
@@ -103,19 +77,26 @@ class ClangCxxCompiler(BaseTool):
         return {
             "cmd": "clang++",
             "flags": [],
+            "iprefix": "-I",
             "includes": [],
+            "dprefix": "-D",
             "defines": [],
-            "depflags": "-MD -MF $$out.d",
-            "objcmd": "$cxx.cmd $cxx.flags $cxx.includes $cxx.defines $cxx.depflags -c -o $$out $$in",
+            "depflags": ["-MD", "-MF", "$$out.d"],
+            "objcmd": [
+                "$cxx.cmd",
+                "$cxx.flags",
+                "${prefix(cxx.iprefix, cxx.includes)}",
+                "${prefix(cxx.dprefix, cxx.defines)}",
+                "$cxx.depflags",
+                "-c", "-o", "$$out", "$$in",
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()
         return {
             "Object": CommandBuilder(
-                "Object",
-                "cxx",
-                "objcmd",
+                "Object", "cxx", "objcmd",
                 src_suffixes=[".cpp", ".cxx", ".cc", ".C"],
                 target_suffixes=[platform.object_suffix],
                 language="cxx",
@@ -124,34 +105,21 @@ class ClangCxxCompiler(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        """Detect Clang C++ compiler."""
         from pcons.configure.config import Configure
         if not isinstance(config, Configure):
             return None
-
         clangxx = config.find_program("clang++")
         if clangxx is None:
             return None
-
         from pcons.core.toolconfig import ToolConfig
         tool_config = ToolConfig("cxx", cmd=str(clangxx.path))
         if clangxx.version:
             tool_config.version = clangxx.version
-
         return tool_config
 
 
 class LlvmArchiver(BaseTool):
-    """LLVM archiver tool.
-
-    Provides the 'ar' tool for creating static libraries.
-    Uses llvm-ar if available, falls back to system ar.
-
-    Variables:
-        cmd: Archiver command (default: 'llvm-ar' or 'ar')
-        flags: Archiver flags (default: 'rcs')
-        libcmd: Command template for creating static library
-    """
+    """LLVM archiver tool."""
 
     def __init__(self) -> None:
         super().__init__("ar")
@@ -159,17 +127,15 @@ class LlvmArchiver(BaseTool):
     def default_vars(self) -> dict[str, object]:
         return {
             "cmd": "llvm-ar",
-            "flags": "rcs",
-            "libcmd": "$ar.cmd $ar.flags $$out $$in",
+            "flags": ["rcs"],
+            "libcmd": ["$ar.cmd", "$ar.flags", "$$out", "$$in"],
         }
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()
         return {
             "StaticLibrary": CommandBuilder(
-                "StaticLibrary",
-                "ar",
-                "libcmd",
+                "StaticLibrary", "ar", "libcmd",
                 src_suffixes=[platform.object_suffix],
                 target_suffixes=[platform.static_lib_suffix],
                 single_source=False,
@@ -177,226 +143,140 @@ class LlvmArchiver(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        """Detect LLVM archiver."""
         from pcons.configure.config import Configure
         if not isinstance(config, Configure):
             return None
-
-        # Prefer llvm-ar, fall back to ar
         ar = config.find_program("llvm-ar")
         if ar is None:
             ar = config.find_program("ar")
-
         if ar is None:
             return None
-
         from pcons.core.toolconfig import ToolConfig
-        tool_config = ToolConfig("ar", cmd=str(ar.path))
-        return tool_config
+        return ToolConfig("ar", cmd=str(ar.path))
 
 
 class LlvmLinker(BaseTool):
-    """LLVM linker tool.
-
-    Provides the 'link' tool for linking object files into executables
-    or shared libraries. Uses clang/clang++ as the linker driver.
-
-    Variables:
-        cmd: Linker command (default: 'clang')
-        flags: Linker flags
-        libs: Libraries to link (-l flags)
-        libdirs: Library directories (-L flags)
-        progcmd: Command template for linking program
-        sharedcmd: Command template for linking shared library
-    """
+    """LLVM linker tool."""
 
     def __init__(self) -> None:
         super().__init__("link")
 
     def default_vars(self) -> dict[str, object]:
         platform = get_platform()
-        shared_flag = "-shared" if not platform.is_macos else "-dynamiclib"
+        shared_flag = "-dynamiclib" if platform.is_macos else "-shared"
         return {
             "cmd": "clang",
             "flags": [],
+            "lprefix": "-l",
             "libs": [],
+            "Lprefix": "-L",
             "libdirs": [],
-            "progcmd": "$link.cmd $link.flags -o $$out $$in $link.libdirs $link.libs",
-            "sharedcmd": f"$link.cmd {shared_flag} $link.flags -o $$out $$in $link.libdirs $link.libs",
+            "progcmd": [
+                "$link.cmd", "$link.flags",
+                "-o", "$$out", "$$in",
+                "${prefix(link.Lprefix, link.libdirs)}",
+                "${prefix(link.lprefix, link.libs)}",
+            ],
+            "sharedcmd": [
+                "$link.cmd", shared_flag, "$link.flags",
+                "-o", "$$out", "$$in",
+                "${prefix(link.Lprefix, link.libdirs)}",
+                "${prefix(link.lprefix, link.libs)}",
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()
         return {
             "Program": CommandBuilder(
-                "Program",
-                "link",
-                "progcmd",
+                "Program", "link", "progcmd",
                 src_suffixes=[platform.object_suffix],
                 target_suffixes=[platform.exe_suffix],
                 single_source=False,
             ),
-            "SharedLibrary": CommandBuilder(
-                "SharedLibrary",
-                "link",
-                "sharedcmd",
+            "SharedLibrary": MultiOutputBuilder(
+                "SharedLibrary", "link", "sharedcmd",
+                outputs=[
+                    OutputSpec("primary", platform.shared_lib_suffix),
+                ],
                 src_suffixes=[platform.object_suffix],
-                target_suffixes=[platform.shared_lib_suffix],
                 single_source=False,
             ),
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        """Detect linker (same as C compiler)."""
         from pcons.configure.config import Configure
         if not isinstance(config, Configure):
             return None
-
         clang = config.find_program("clang")
         if clang is None:
             return None
-
         from pcons.core.toolconfig import ToolConfig
-        tool_config = ToolConfig("link", cmd=str(clang.path))
-        return tool_config
+        return ToolConfig("link", cmd=str(clang.path))
 
 
 class LlvmToolchain(BaseToolchain):
-    """LLVM/Clang toolchain.
-
-    A complete LLVM-based toolchain for C and C++ development.
-    Includes:
-    - C compiler (clang)
-    - C++ compiler (clang++)
-    - Archiver (llvm-ar or ar)
-    - Linker (clang/clang++)
-
-    Example:
-        config = Configure()
-        llvm = LlvmToolchain()
-        if llvm.configure(config):
-            env = project.Environment(toolchain=llvm)
-            env.cc.Object("main.o", "main.c")
-    """
+    """LLVM/Clang toolchain for C and C++ development."""
 
     def __init__(self) -> None:
         super().__init__("llvm")
 
     def _configure_tools(self, config: object) -> bool:
-        """Configure all LLVM tools."""
         from pcons.configure.config import Configure
         if not isinstance(config, Configure):
             return False
 
-        # Try to configure each tool
         cc = ClangCCompiler()
-        cc_config = cc.configure(config)
-        if cc_config is None:
+        if cc.configure(config) is None:
             return False
 
         cxx = ClangCxxCompiler()
-        cxx.configure(config)  # C++ is optional
+        cxx.configure(config)
 
         ar = LlvmArchiver()
-        ar.configure(config)  # Archiver is optional
+        ar.configure(config)
 
         link = LlvmLinker()
-        link_config = link.configure(config)
-        if link_config is None:
+        if link.configure(config) is None:
             return False
 
-        # Store configured tools
-        self._tools = {
-            "cc": cc,
-            "cxx": cxx,
-            "ar": ar,
-            "link": link,
-        }
-
+        self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
         return True
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant to the environment.
-
-        Implements Clang/LLVM-specific handling for standard build variants.
-        Uses the same flag format as GCC.
-
-        Args:
-            env: Environment to configure.
-            variant: Variant name. Recognized values:
-                - "debug": No optimization, debug symbols, DEBUG defined
-                - "release": Full optimization, NDEBUG defined
-                - "relwithdebinfo": Optimization with debug symbols
-                - "minsizerel": Size optimization
-            **kwargs: Additional options:
-                - extra_flags: Additional compiler flags
-                - extra_defines: Additional preprocessor definitions
-        """
-        # Call base to set env.variant
+        """Apply build variant (debug, release, etc.)."""
         super().apply_variant(env, variant, **kwargs)
 
-        extra_flags = kwargs.get("extra_flags", [])
-        extra_defines = kwargs.get("extra_defines", [])
-
-        # Collect flags based on variant
         compile_flags: list[str] = []
         defines: list[str] = []
-        link_flags: list[str] = []
 
         variant_lower = variant.lower()
         if variant_lower == "debug":
             compile_flags = ["-O0", "-g"]
-            defines = ["-DDEBUG", "-D_DEBUG"]
+            defines = ["DEBUG", "_DEBUG"]
         elif variant_lower == "release":
             compile_flags = ["-O2"]
-            defines = ["-DNDEBUG"]
+            defines = ["NDEBUG"]
         elif variant_lower == "relwithdebinfo":
             compile_flags = ["-O2", "-g"]
-            defines = ["-DNDEBUG"]
+            defines = ["NDEBUG"]
         elif variant_lower == "minsizerel":
             compile_flags = ["-Os"]
-            defines = ["-DNDEBUG"]
-        # else: unknown variant, leave flags empty (user manages)
+            defines = ["NDEBUG"]
 
-        # Add extra flags
-        for flag in extra_flags:
-            compile_flags.append(flag)
-        for define in extra_defines:
-            defines.append(f"-D{define}")
-
-        # Apply to C compiler
-        if env.has_tool("cc"):
-            cc = env.cc
-            current_flags = getattr(cc, "flags", [])
-            if isinstance(current_flags, list):
-                current_flags.extend(compile_flags)
-            current_defines = getattr(cc, "defines", [])
-            if isinstance(current_defines, list):
-                current_defines.extend(defines)
-
-        # Apply to C++ compiler
-        if env.has_tool("cxx"):
-            cxx = env.cxx
-            current_flags = getattr(cxx, "flags", [])
-            if isinstance(current_flags, list):
-                current_flags.extend(compile_flags)
-            current_defines = getattr(cxx, "defines", [])
-            if isinstance(current_defines, list):
-                current_defines.extend(defines)
-
-        # Apply to linker
-        if env.has_tool("link"):
-            link = env.link
-            current_flags = getattr(link, "flags", [])
-            if isinstance(current_flags, list):
-                current_flags.extend(link_flags)
+        for tool_name in ("cc", "cxx"):
+            if env.has_tool(tool_name):
+                tool = getattr(env, tool_name)
+                if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                    tool.flags.extend(compile_flags)
+                if hasattr(tool, "defines") and isinstance(tool.defines, list):
+                    tool.defines.extend(defines)
 
 
 # =============================================================================
 # Registration
 # =============================================================================
 
-# Register LLVM toolchain for auto-discovery
 from pcons.tools.toolchain import toolchain_registry
 
 toolchain_registry.register(

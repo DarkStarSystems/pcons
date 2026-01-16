@@ -138,10 +138,12 @@ class NinjaGenerator(BaseGenerator):
                 if tool_config is not None:
                     cmd_template = getattr(tool_config, command_var, None)
                     if cmd_template:
-                        # Expand tool variables
+                        # Expand tool variables using subst() with ninja shell
+                        # Template can be a string or list of tokens
+                        # Using shell="ninja" ensures $in, $out aren't quoted
                         # Ninja variables like $in, $out are escaped as $$in, $$out
                         # in the toolchain defaults, and become $in, $out after subst
-                        command = env.subst(str(cmd_template))
+                        command = env.subst(cmd_template, shell="ninja")
 
             # Write the rule
             f.write(f"rule {rule_name}\n")
@@ -149,7 +151,7 @@ class NinjaGenerator(BaseGenerator):
             f.write(f"  description = {description}\n")
 
             # Add depfile support if this looks like a compiler
-            if tool_name in ("cc", "cxx", "cpp"):
+            if tool_name in ("cc", "cxx", "cycc"):
                 f.write("  depfile = $out.d\n")
                 f.write("  deps = gcc\n")
 
@@ -190,9 +192,17 @@ class NinjaGenerator(BaseGenerator):
     def _write_build_statement(
         self, f: TextIO, node: FileNode, target: Target | None, project: Project | None = None
     ) -> None:
-        """Write a single build statement."""
+        """Write a single build statement.
+
+        Handles both single-output and multi-output builds. Multi-output builds
+        use Ninja's implicit output syntax: build out1 out2 | implicit_out: rule deps
+        """
         build_info = getattr(node, "_build_info", None)
         if build_info is None:
+            return
+
+        # Skip secondary nodes from multi-output builds (they reference primary_node)
+        if "primary_node" in build_info:
             return
 
         tool_name = build_info.get("tool", "unknown")
@@ -200,7 +210,27 @@ class NinjaGenerator(BaseGenerator):
         sources: list[Node] = build_info.get("sources", [])
 
         rule_name = f"{tool_name}_{command_var}"
-        output = self._escape_path(node.path)
+
+        # Handle multi-output builds
+        outputs_info = build_info.get("outputs")
+        if outputs_info:
+            # Multi-output build
+            explicit_outputs: list[str] = []
+            implicit_outputs: list[str] = []
+
+            for name, info in outputs_info.items():
+                path = self._escape_path(info["path"])
+                if info.get("implicit", False):
+                    implicit_outputs.append(path)
+                else:
+                    explicit_outputs.append(path)
+
+            output = " ".join(explicit_outputs)
+            if implicit_outputs:
+                output += " | " + " ".join(implicit_outputs)
+        else:
+            # Single-output build
+            output = self._escape_path(node.path)
 
         # Explicit dependencies (sources) - use paths relative to build dir
         # For source files, we need to reference them from the build directory
@@ -249,7 +279,10 @@ class NinjaGenerator(BaseGenerator):
         build_info: dict[str, object],
         project: Project | None = None,
     ) -> None:
-        """Write variables for a build statement."""
+        """Write variables for a build statement.
+
+        For multi-output builds, also writes out_<name> variables for each output.
+        """
         sources: list[Node] = build_info.get("sources", [])  # type: ignore[assignment]
 
         # Standard variables - use absolute paths for sources
@@ -266,6 +299,13 @@ class NinjaGenerator(BaseGenerator):
         if source_paths:
             f.write(f"  in = {source_paths}\n")
         f.write(f"  out = {node.path}\n")
+
+        # For multi-output builds, write out_<name> for each output
+        outputs_info = build_info.get("outputs")
+        if outputs_info:
+            for name, info in outputs_info.items():  # type: ignore[union-attr]
+                # Write out_<name> variable for each output
+                f.write(f"  out_{name} = {info['path']}\n")
 
     def _write_aliases(self, f: TextIO, project: Project) -> None:
         """Write phony rules for aliases."""
@@ -336,6 +376,8 @@ class NinjaGenerator(BaseGenerator):
         if command_template is None:
             return f"echo 'No command template: {tool_name}.{command_var}'"
 
-        # Expand variables
-        # Note: $in and $out are left unexpanded for Ninja
-        return env.subst(str(command_template))
+        # Expand variables using subst() with ninja shell
+        # Template can be a string or list of tokens
+        # Using shell="ninja" ensures $in, $out aren't quoted
+        # Note: $in and $out are left unexpanded for Ninja (they're $$in, $$out in templates)
+        return env.subst(command_template, shell="ninja")

@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.msvc."""
 
+from pathlib import Path
+
 import pytest
 
 from pcons.configure.platform import get_platform
+from pcons.core.builder import MultiOutputBuilder, OutputGroup
+from pcons.core.environment import Environment
 from pcons.toolchains.msvc import (
     MsvcCompiler,
     MsvcLibrarian,
@@ -31,9 +35,13 @@ class TestMsvcCompiler:
         assert vars["includes"] == []
         assert vars["defines"] == []
         assert "objcmd" in vars
-        assert "$cc.cmd" in vars["objcmd"]
-        assert "/c" in vars["objcmd"]
-        assert "/Fo$out" in vars["objcmd"]
+        # objcmd is now a list template
+        objcmd = vars["objcmd"]
+        assert isinstance(objcmd, list)
+        assert "$cc.cmd" in objcmd
+        assert "/c" in objcmd
+        # Output uses $$out which becomes $out for ninja
+        assert "/Fo$$out" in objcmd
 
     def test_builders(self):
         cc = MsvcCompiler()
@@ -57,7 +65,11 @@ class TestMsvcLibrarian:
         assert vars["cmd"] == "lib.exe"
         assert vars["flags"] == ["/nologo"]
         assert "libcmd" in vars
-        assert "/OUT:$out" in vars["libcmd"]
+        # libcmd is now a list template
+        libcmd = vars["libcmd"]
+        assert isinstance(libcmd, list)
+        # Output uses $$out which becomes $out for ninja
+        assert "/OUT:$$out" in libcmd
 
     def test_builders(self):
         lib = MsvcLibrarian()
@@ -83,8 +95,14 @@ class TestMsvcLinker:
         assert vars["libdirs"] == []
         assert "progcmd" in vars
         assert "sharedcmd" in vars
-        assert "/OUT:$out" in vars["progcmd"]
-        assert "/DLL" in vars["sharedcmd"]
+        # progcmd and sharedcmd are now list templates
+        progcmd = vars["progcmd"]
+        sharedcmd = vars["sharedcmd"]
+        assert isinstance(progcmd, list)
+        assert isinstance(sharedcmd, list)
+        # Output uses $$out which becomes $out for ninja
+        assert "/OUT:$$out" in progcmd
+        assert "/DLL" in sharedcmd
 
     def test_builders(self):
         link = MsvcLinker()
@@ -95,6 +113,61 @@ class TestMsvcLinker:
         assert ".exe" in prog_builder.target_suffixes
         shared_builder = builders["SharedLibrary"]
         assert ".dll" in shared_builder.target_suffixes
+
+    def test_shared_library_is_multi_output_builder(self):
+        link = MsvcLinker()
+        builders = link.builders()
+        shared_builder = builders["SharedLibrary"]
+        assert isinstance(shared_builder, MultiOutputBuilder)
+
+    def test_shared_library_outputs(self):
+        link = MsvcLinker()
+        builders = link.builders()
+        shared_builder = builders["SharedLibrary"]
+
+        # Check output specs
+        outputs = shared_builder.outputs
+        assert len(outputs) == 3
+
+        # Primary should be .dll
+        assert outputs[0].name == "primary"
+        assert outputs[0].suffix == ".dll"
+        assert outputs[0].implicit is False
+
+        # Import lib should be .lib
+        assert outputs[1].name == "import_lib"
+        assert outputs[1].suffix == ".lib"
+        assert outputs[1].implicit is False
+
+        # Export file should be .exp and implicit
+        assert outputs[2].name == "export_file"
+        assert outputs[2].suffix == ".exp"
+        assert outputs[2].implicit is True
+
+    def test_shared_library_returns_output_group(self):
+        link = MsvcLinker()
+        builders = link.builders()
+        shared_builder = builders["SharedLibrary"]
+
+        env = Environment()
+        env.add_tool("link")
+        env.link.cmd = "link.exe"
+        env.link.flags = ["/nologo"]
+        env.link.sharedcmd = ["$link.cmd", "/DLL", "/OUT:$$out", "$$in"]
+
+        result = shared_builder(env, "build/mylib.dll", ["a.obj", "b.obj"])
+
+        assert isinstance(result, OutputGroup)
+        assert result.primary.path == Path("build/mylib.dll")
+        assert result.import_lib.path == Path("build/mylib.lib")
+        assert result.export_file.path == Path("build/mylib.exp")
+
+    def test_sharedcmd_includes_implib(self):
+        link = MsvcLinker()
+        vars = link.default_vars()
+        sharedcmd = vars["sharedcmd"]
+        # Check that IMPLIB flag is in the command
+        assert any("/IMPLIB:" in str(item) for item in sharedcmd)
 
 
 class TestMsvcToolchain:

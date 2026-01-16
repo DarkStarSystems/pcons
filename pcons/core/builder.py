@@ -9,8 +9,9 @@ an Object builder that turns .c files into .o files).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Iterator, Protocol, runtime_checkable
 
 from pcons.core.node import FileNode, Node
 from pcons.util.source_location import SourceLocation, get_caller_location
@@ -18,6 +19,83 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
+
+
+@dataclass
+class OutputSpec:
+    """Specification for a builder output.
+
+    Args:
+        name: Output name for variable reference (e.g., "import_lib")
+        suffix: File suffix (e.g., ".lib")
+        implicit: If True, this is a Ninja implicit output (|)
+        required: If True, must always be produced
+    """
+
+    name: str
+    suffix: str
+    implicit: bool = False  # Ninja implicit output
+    required: bool = True
+
+
+class OutputGroup:
+    """Container for multiple output nodes with named access.
+
+    Allows: outputs.primary, outputs.import_lib, outputs["import_lib"]
+    Also supports list() for iteration and len().
+
+    This class provides backward compatibility by behaving like a list
+    when used in contexts that expect iterables (e.g., objs += env.link.SharedLibrary(...))
+    """
+
+    def __init__(self, nodes: dict[str, FileNode], primary_name: str) -> None:
+        """Initialize an OutputGroup.
+
+        Args:
+            nodes: Dictionary mapping output names to FileNode instances
+            primary_name: The name of the primary output in the nodes dict
+        """
+        self._nodes = nodes
+        self._primary_name = primary_name
+
+    @property
+    def primary(self) -> FileNode:
+        """Get the primary output node."""
+        return self._nodes[self._primary_name]
+
+    def __getattr__(self, name: str) -> FileNode:
+        if name.startswith("_"):
+            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+        if name in self._nodes:
+            return self._nodes[name]
+        raise AttributeError(f"No output named '{name}'")
+
+    def __getitem__(self, name: str) -> FileNode:
+        return self._nodes[name]
+
+    def __iter__(self) -> Iterator[FileNode]:
+        return iter(self._nodes.values())
+
+    def __len__(self) -> int:
+        return len(self._nodes)
+
+    def __list__(self) -> list[FileNode]:
+        return list(self._nodes.values())
+
+    def keys(self) -> list[str]:
+        """Return the names of all outputs."""
+        return list(self._nodes.keys())
+
+    def values(self) -> list[FileNode]:
+        """Return all output nodes."""
+        return list(self._nodes.values())
+
+    def items(self) -> list[tuple[str, FileNode]]:
+        """Return all (name, node) pairs."""
+        return list(self._nodes.items())
+
+    def __repr__(self) -> str:
+        return f"OutputGroup({list(self._nodes.keys())}, primary={self._primary_name!r})"
 
 
 @runtime_checkable
@@ -315,3 +393,162 @@ class CommandBuilder(BaseBuilder):
         }
 
         return node
+
+
+class MultiOutputBuilder(CommandBuilder):
+    """Builder that produces multiple output files.
+
+    Use for things like MSVC SharedLibrary which produces:
+    - .dll (primary)
+    - .lib (import library)
+    - .exp (export file, implicit)
+
+    Example:
+        builder = MultiOutputBuilder(
+            "SharedLibrary", "link", "sharedcmd",
+            outputs=[
+                OutputSpec("primary", ".dll"),
+                OutputSpec("import_lib", ".lib"),
+                OutputSpec("export_file", ".exp", implicit=True),
+            ],
+            src_suffixes=[".obj"],
+        )
+    """
+
+    def __init__(
+        self,
+        name: str,
+        tool_name: str,
+        command_var: str,
+        outputs: list[OutputSpec],
+        *,
+        src_suffixes: list[str] | None = None,
+        language: str | None = None,
+        single_source: bool = False,
+    ) -> None:
+        """Initialize a multi-output builder.
+
+        Args:
+            name: Builder name.
+            tool_name: Tool name.
+            command_var: Variable name containing command template.
+            outputs: List of OutputSpec defining the outputs. First is primary.
+            src_suffixes: Accepted input suffixes.
+            language: Language for linker selection.
+            single_source: If True, create one target per source.
+        """
+        # Primary output determines target_suffixes
+        primary = outputs[0]
+        super().__init__(
+            name,
+            tool_name,
+            command_var,
+            src_suffixes=src_suffixes,
+            target_suffixes=[primary.suffix],
+            language=language,
+            single_source=single_source,
+        )
+        self._outputs = outputs
+
+    @property
+    def outputs(self) -> list[OutputSpec]:
+        """Get the output specifications."""
+        return self._outputs
+
+    def _build(
+        self,
+        env: Environment,
+        targets: list[Path],
+        sources: list[Node],
+        **kwargs: Any,
+    ) -> list[Node] | OutputGroup:
+        """Create target nodes for command execution.
+
+        For multi-output builders, returns an OutputGroup instead of a list
+        when there are multiple outputs. The OutputGroup is iterable for
+        backward compatibility.
+        """
+        tool_config = self._get_tool_config(env)
+        defined_at = kwargs.get("defined_at") or get_caller_location()
+
+        if self._single_source:
+            # One OutputGroup per source - skip if no sources
+            if not sources:
+                return []
+            result: list[Node] = []
+            for target, source in zip(targets, sources, strict=True):
+                output_group = self._create_multi_output_nodes(
+                    env, tool_config, target, [source], defined_at
+                )
+                result.extend(output_group)
+            return result
+        else:
+            # All sources to one OutputGroup
+            if targets:
+                return self._create_multi_output_nodes(
+                    env, tool_config, targets[0], sources, defined_at
+                )
+            return []
+
+    def _create_multi_output_nodes(
+        self,
+        env: Environment,
+        tool_config: ToolConfig,
+        primary_target: Path,
+        sources: list[Node],
+        defined_at: SourceLocation,
+    ) -> OutputGroup:
+        """Create multiple output nodes for a single build.
+
+        Returns an OutputGroup containing all output nodes.
+        """
+        nodes: dict[str, FileNode] = {}
+        primary_name = self._outputs[0].name
+
+        # Create a node for each output
+        for spec in self._outputs:
+            if spec.name == primary_name:
+                # Primary output uses the provided target path
+                target_path = primary_target
+            else:
+                # Other outputs derive path from primary
+                target_path = primary_target.with_suffix(spec.suffix)
+
+            node = FileNode(target_path, defined_at=defined_at)
+            node.builder = self
+            nodes[spec.name] = node
+
+        # Primary node has dependencies on sources
+        primary_node = nodes[primary_name]
+        primary_node.depends(sources)
+
+        # Store build info on the primary node
+        # Include information about all outputs for the generator
+        output_info = {
+            spec.name: {
+                "path": nodes[spec.name].path,
+                "suffix": spec.suffix,
+                "implicit": spec.implicit,
+                "required": spec.required,
+            }
+            for spec in self._outputs
+        }
+
+        primary_node._build_info = {
+            "tool": self._tool_name,
+            "command_var": self._command_var,
+            "language": self._language,
+            "sources": sources,
+            "outputs": output_info,
+            "all_output_nodes": nodes,
+        }
+
+        # Secondary nodes reference the primary for build info
+        for name, node in nodes.items():
+            if name != primary_name:
+                node._build_info = {
+                    "primary_node": primary_node,
+                    "output_name": name,
+                }
+
+        return OutputGroup(nodes, primary_name)
