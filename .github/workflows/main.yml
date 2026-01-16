@@ -1,92 +1,50 @@
-# This is a basic workflow to help you get started with Actions
-
 name: CI
 
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the main branch
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
-
-  # Allows you to run this workflow manually from the Actions tab
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  linter:
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: [3.11]
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+  lint:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v4
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install project
-        run: make install
-      - name: Run linter
-        run: make lint
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync
+      - name: Run ruff
+        run: uv run ruff check pcons/ tests/
+      - name: Run ruff format check
+        run: uv run ruff format --check pcons/ tests/
+      - name: Run mypy
+        run: uv run mypy pcons/
 
-  tests_linux:
-    needs: linter
+  test:
+    needs: lint
     strategy:
       fail-fast: false
       matrix:
-        python-version: [3.11]
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v4
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install project
-        run: make install
+          version: "latest"
+      - name: Set Python version
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: uv sync
       - name: Run tests
-        run: make test
-      - name: "Upload coverage to Codecov"
+        run: uv run pytest --cov=pcons --cov-report=xml
+      - name: Upload coverage to Codecov
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         uses: codecov/codecov-action@v4
-        # with:
-        #   fail_ci_if_error: true
-
-  tests_mac:
-    needs: linter
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: [3.11]
-        os: [macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install project
-        run: make install
-      - name: Run tests
-        run: make test
-
-  tests_win:
-    needs: linter
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: [3.11]
-        os: [windows-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - name: Install Pip
-        run: pip install --user --upgrade pip
-      - name: Install project
-        run: pip install -e .[test]
-      - name: run tests
-        run: pytest -s -vvvv -l --tb=long tests
+          file: coverage.xml

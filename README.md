@@ -1,38 +1,105 @@
+# Pcons
 
-# Pcons: a python-based software build system
+A modern Python-based build system that generates Ninja (or Makefile) build files.
 
-PCons is currently very much a work in progress; my goal is for it to be a software build tool inspired by [SCons](https://scons.org) and [CMake](https://cmake.org). The basic idea is to use modern python as the language to describe the build dependency tree and tools, and emit project definitions for Ninja or Makefiles to actually run the build. 
-
----
-# pcons
-
-[![codecov](https://codecov.io/gh/garyo/pcons/branch/main/graph/badge.svg?token=pcons_token_here)](https://codecov.io/gh/garyo/pcons)
 [![CI](https://github.com/garyo/pcons/actions/workflows/main.yml/badge.svg)](https://github.com/garyo/pcons/actions/workflows/main.yml)
 
-pcons -- created by garyo
+## Overview
 
-## Install it from PyPI
+Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), taking the best ideas from each:
 
-```bash
-pip install pcons
+- **From SCons**: Environments, Tools, powerful dependency tracking, Python as the configuration language
+- **From CMake**: Generator architecture (configure once, build fast), usage requirements that propagate through dependencies
+
+**Key design principles:**
+
+- **Configuration, not execution**: Pcons generates Ninja files; Ninja executes the build
+- **Python is the language**: No custom DSL—build scripts are real Python with full IDE support
+- **Language-agnostic**: Build C++, Rust, LaTeX, protobuf, or anything else
+- **Explicit over implicit**: Dependencies are discoverable and traceable
+
+## Status
+
+🚧 **Under active development** - not yet usable for real projects.
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the roadmap.
+
+## Quick Example (Target API)
+
+```python
+# configure.py
+from pcons import Configure
+
+config = Configure()
+config.find_toolchain('cxx')
+config.save()
 ```
 
-## Usage
+```python
+# build.py
+from pcons import Project, load_config
 
-```py
-from pcons import BaseClass
-from pcons import base_function
+config = load_config()
+project = Project('myapp', config)
 
-BaseClass().base_method()
-base_function()
+env = project.Environment(toolchain=config.cxx_toolchain)
+env.cxx.flags = ['-std=c++20', '-Wall']
+
+lib = env.StaticLibrary('core', sources=env.Glob('src/*.cpp'),
+    public_include_dirs=['include'])
+
+app = env.Program('myapp', sources=['main.cpp'], link_libs=[lib])
+
+project.Default(app)
+project.generate()
 ```
 
 ```bash
-$ python -m pcons
-#or
-$ pcons
+pcons configure
+pcons generate
+ninja
+```
+
+## Installation
+
+```bash
+# Using uv (recommended)
+uv add pcons  # Not yet published
+
+# Or via uvx for one-off usage
+uvx pcons configure
+```
+
+For development:
+
+```bash
+git clone https://github.com/garyo/pcons.git
+cd pcons
+uv sync
 ```
 
 ## Development
 
-Read the [CONTRIBUTING.md](CONTRIBUTING.md) file.
+```bash
+# Run tests
+uv run pytest
+
+# Run linter
+make lint
+
+# Format code
+make fmt
+
+# Or use uv directly
+uv run ruff check pcons/
+uv run mypy pcons/
+```
+
+## Documentation
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Design document
+- [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) - Development roadmap
+
+## License
+
+MIT License - see [LICENSE](LICENSE)

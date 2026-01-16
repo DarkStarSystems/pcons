@@ -1,28 +1,80 @@
-"""CLI interface for pcons project.
+# SPDX-License-Identifier: MIT
+"""Command-line interface for pcons."""
 
-Be creative! do whatever you want!
-
-- Install click or typer and create a CLI app
-- Use builtin argparse
-- Start a web application
-- Import things from your .base module
-"""
+import argparse
+import sys
 
 
-def main():  # pragma: no cover
-    """
-    The main function executes on commands:
-    `python -m pcons` and `$ pcons `.
+def cmd_configure(args):
+    """Run the configure phase."""
+    print("pcons configure: not yet implemented")
+    return 1
 
-    This is your program's entry point.
 
-    You can change this function to do whatever you want.
-    Examples:
-        * Run a test suite
-        * Run a server
-        * Do some other stuff
-        * Run a command line application (Click, Typer, ArgParse)
-        * List all available tasks
-        * Run an application (Flask, FastAPI, Django, etc.)
-    """
-    print("This will do something")
+def cmd_generate(args):
+    """Run the generate phase."""
+    print("pcons generate: not yet implemented")
+    return 1
+
+
+def cmd_build(args):
+    """Run ninja to build targets."""
+    print("pcons build: not yet implemented")
+    return 1
+
+
+def cmd_clean(args):
+    """Clean build artifacts."""
+    print("pcons clean: not yet implemented")
+    return 1
+
+
+def main():
+    """Main entry point for the pcons CLI."""
+    parser = argparse.ArgumentParser(
+        prog="pcons",
+        description="A Python-based build system that generates Ninja files.",
+    )
+    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0-dev")
+
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # pcons configure
+    cfg_parser = subparsers.add_parser(
+        "configure", help="Run configure phase (tool detection)"
+    )
+    cfg_parser.add_argument(
+        "--build-dir", default="build", help="Build directory (default: build)"
+    )
+    cfg_parser.set_defaults(func=cmd_configure)
+
+    # pcons generate
+    gen_parser = subparsers.add_parser(
+        "generate", help="Generate build files from build.py"
+    )
+    gen_parser.add_argument(
+        "--build-dir", default="build", help="Build directory (default: build)"
+    )
+    gen_parser.set_defaults(func=cmd_generate)
+
+    # pcons build
+    build_parser = subparsers.add_parser("build", help="Build targets using ninja")
+    build_parser.add_argument("targets", nargs="*", help="Targets to build")
+    build_parser.add_argument("-j", "--jobs", type=int, help="Number of parallel jobs")
+    build_parser.set_defaults(func=cmd_build)
+
+    # pcons clean
+    clean_parser = subparsers.add_parser("clean", help="Clean build artifacts")
+    clean_parser.set_defaults(func=cmd_clean)
+
+    args = parser.parse_args()
+
+    if args.command is None:
+        parser.print_help()
+        return 0
+
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
