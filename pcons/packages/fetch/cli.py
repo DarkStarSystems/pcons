@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Command-line interface for pcons-fetch."""
 
+from __future__ import annotations
+
 import argparse
 import sys
 
 
-def main():
+def main() -> int:
     """Main entry point for the pcons-fetch CLI."""
     parser = argparse.ArgumentParser(
         prog="pcons-fetch",

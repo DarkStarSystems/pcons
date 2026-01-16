@@ -1,35 +1,37 @@
 # SPDX-License-Identifier: MIT
 """Command-line interface for pcons."""
 
+from __future__ import annotations
+
 import argparse
 import sys
 
 
-def cmd_configure(args):
+def cmd_configure(args: argparse.Namespace) -> int:
     """Run the configure phase."""
     print("pcons configure: not yet implemented")
     return 1
 
 
-def cmd_generate(args):
+def cmd_generate(args: argparse.Namespace) -> int:
     """Run the generate phase."""
     print("pcons generate: not yet implemented")
     return 1
 
 
-def cmd_build(args):
+def cmd_build(args: argparse.Namespace) -> int:
     """Run ninja to build targets."""
     print("pcons build: not yet implemented")
     return 1
 
 
-def cmd_clean(args):
+def cmd_clean(args: argparse.Namespace) -> int:
     """Clean build artifacts."""
     print("pcons clean: not yet implemented")
     return 1
 
 
-def main():
+def main() -> int:
     """Main entry point for the pcons CLI."""
     parser = argparse.ArgumentParser(
         prog="pcons",
@@ -73,7 +75,8 @@ def main():
         parser.print_help()
         return 0
 
-    return args.func(args)
+    result: int = args.func(args)
+    return result
 
 
 if __name__ == "__main__":
