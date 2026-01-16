@@ -16,9 +16,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pcons.util.source_location import SourceLocation, get_caller_location
+
+if TYPE_CHECKING:
+    from pcons.core.builder import Builder
 
 
 class Node(ABC):
@@ -46,8 +49,7 @@ class Node(ABC):
         """
         self.explicit_deps: list[Node] = []
         self.implicit_deps: list[Node] = []
-        # Builder type will be properly typed when builder.py is implemented
-        self.builder: Any = None
+        self.builder: Builder | None = None
         self.defined_at = defined_at or get_caller_location()
         self._hash: int | None = None
 
@@ -97,9 +99,10 @@ class FileNode(Node):
 
     Attributes:
         path: The path to the file.
+        _build_info: Builder-specific information for code generation.
     """
 
-    __slots__ = ("path",)
+    __slots__ = ("path", "_build_info")
 
     def __init__(
         self,
@@ -115,6 +118,7 @@ class FileNode(Node):
         """
         super().__init__(defined_at=defined_at)
         self.path = Path(path) if isinstance(path, str) else path
+        self._build_info: dict[str, object] | None = None
 
     @property
     def name(self) -> str:
