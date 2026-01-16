@@ -126,6 +126,9 @@ class Namespace:
 # Sentinel for missing values
 _MISSING = object()
 
+# Marker for escaped dollars during expansion (replaced with $ at the end)
+_ESCAPED_DOLLAR_MARKER = "\x00DOLLAR\x00"
+
 
 def subst(
     template: str,
@@ -153,7 +156,10 @@ def subst(
     if isinstance(namespace, dict):
         namespace = Namespace(namespace)
 
-    return _expand(template, namespace, set(), location)
+    result = _expand(template, namespace, set(), location)
+    # Restore escaped dollars (marker -> $) only at the top level
+    result = result.replace(_ESCAPED_DOLLAR_MARKER, "$")
+    return result
 
 
 def subst_list(
@@ -201,9 +207,9 @@ def _expand(
     """
 
     def replace_var(match: re.Match[str]) -> str:
-        # Group 1: escaped $$ -> literal $
+        # Group 1: escaped $$ -> marker (converted to $ at the end)
         if match.group(1):
-            return "$"
+            return _ESCAPED_DOLLAR_MARKER
 
         # Group 2 or 3: variable name
         var_name = match.group(2) or match.group(3)
@@ -232,8 +238,8 @@ def _expand(
     result = _VAR_PATTERN.sub(replace_var, template)
 
     # Check if we need another pass (in case expansion introduced new variables)
-    # But skip if the only $ is from $$ escaping
-    if "$" in result and not all(c == "$" for c in result.replace("$$", "")):
+    # But skip if the only $ is from $$ escaping (which is now a marker)
+    if "$" in result:
         # Make sure we're not in an infinite loop
         if result != template:
             return _expand(result, namespace, expanding, location)

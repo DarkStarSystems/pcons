@@ -93,11 +93,28 @@ class NinjaGenerator(BaseGenerator):
         for target in project.targets:
             for node in target.nodes:
                 if isinstance(node, FileNode) and node.builder is not None:
-                    self._ensure_rule(f, node, target)
+                    # Find environment for this target
+                    env = self._find_env_for_node(node, project)
+                    self._ensure_rule(f, node, target, env)
+
+        # Also check nodes tracked in environments
+        for env in project.environments:
+            for node in getattr(env, "_created_nodes", []):
+                if isinstance(node, FileNode) and node.builder is not None:
+                    self._ensure_rule(f, node, None, env)
 
         f.write("\n")
 
-    def _ensure_rule(self, f: TextIO, node: FileNode, target: Target) -> str:
+    def _find_env_for_node(self, node: FileNode, project: Project) -> Environment | None:
+        """Find the environment that created a node."""
+        for env in project.environments:
+            if node in getattr(env, "_created_nodes", []):
+                return env
+        return None
+
+    def _ensure_rule(
+        self, f: TextIO, node: FileNode, target: Target | None, env: Environment | None = None
+    ) -> str:
         """Ensure a rule exists for this node's builder, return rule name."""
         build_info = getattr(node, "_build_info", None)
         if build_info is None:
@@ -111,14 +128,24 @@ class NinjaGenerator(BaseGenerator):
         rule_key = f"{tool_name}_{command_var}"
 
         if rule_key not in self._rules:
-            # Get the command template from the environment
-            # For now, use a placeholder - real implementation will expand from env
             rule_name = rule_key
             description = f"{tool_name.upper()} $out"
 
+            # Get the actual command from the environment
+            command = f"echo 'No command for {rule_key}'"
+            if env is not None:
+                tool_config = getattr(env, tool_name, None)
+                if tool_config is not None:
+                    cmd_template = getattr(tool_config, command_var, None)
+                    if cmd_template:
+                        # Expand tool variables
+                        # Ninja variables like $in, $out are escaped as $$in, $$out
+                        # in the toolchain defaults, and become $in, $out after subst
+                        command = env.subst(str(cmd_template))
+
             # Write the rule
             f.write(f"rule {rule_name}\n")
-            f.write(f"  command = ${tool_name}_{command_var}\n")
+            f.write(f"  command = {command}\n")
             f.write(f"  description = {description}\n")
 
             # Add depfile support if this looks like a compiler
@@ -135,20 +162,34 @@ class NinjaGenerator(BaseGenerator):
         """Write build statements for all targets."""
         f.write("# Build statements\n")
 
+        written_nodes: set[Path] = set()
+
         for target in project.targets:
-            self._write_target_builds(f, target, project)
+            self._write_target_builds(f, target, project, written_nodes)
+
+        # Also write builds for nodes tracked in environments
+        for env in project.environments:
+            for node in getattr(env, "_created_nodes", []):
+                if isinstance(node, FileNode) and node.builder is not None:
+                    if node.path not in written_nodes:
+                        self._write_build_statement(f, node, None, project)
+                        written_nodes.add(node.path)
 
         f.write("\n")
 
     def _write_target_builds(
-        self, f: TextIO, target: Target, project: Project
+        self, f: TextIO, target: Target, project: Project, written_nodes: set[Path]
     ) -> None:
         """Write build statements for a single target."""
         for node in target.nodes:
             if isinstance(node, FileNode) and node.builder is not None:
-                self._write_build_statement(f, node, target)
+                if node.path not in written_nodes:
+                    self._write_build_statement(f, node, target, project)
+                    written_nodes.add(node.path)
 
-    def _write_build_statement(self, f: TextIO, node: FileNode, target: Target) -> None:
+    def _write_build_statement(
+        self, f: TextIO, node: FileNode, target: Target | None, project: Project | None = None
+    ) -> None:
         """Write a single build statement."""
         build_info = getattr(node, "_build_info", None)
         if build_info is None:
@@ -161,9 +202,20 @@ class NinjaGenerator(BaseGenerator):
         rule_name = f"{tool_name}_{command_var}"
         output = self._escape_path(node.path)
 
-        # Explicit dependencies (sources)
+        # Explicit dependencies (sources) - use paths relative to build dir
+        # For source files, we need to reference them from the build directory
+        def get_source_path(s: FileNode) -> str:
+            # If source is in build dir, use relative path
+            # Otherwise, make it relative to build dir or absolute
+            if project and not s.path.is_absolute():
+                # Make path relative from build dir to source dir
+                src_path = project.root_dir / s.path
+                if src_path.exists():
+                    return self._escape_path(src_path)
+            return self._escape_path(s.path)
+
         explicit_deps = " ".join(
-            self._escape_path(s.path) for s in sources if isinstance(s, FileNode)
+            get_source_path(s) for s in sources if isinstance(s, FileNode)
         )
 
         # Implicit dependencies (from node.implicit_deps)
@@ -187,21 +239,29 @@ class NinjaGenerator(BaseGenerator):
 
         # Write per-build variables
         # These override the rule's command with actual values
-        self._write_build_variables(f, node, target, build_info)
+        self._write_build_variables(f, node, target, build_info, project)
 
     def _write_build_variables(
         self,
         f: TextIO,
         node: FileNode,
-        target: Target,
+        target: Target | None,
         build_info: dict[str, object],
+        project: Project | None = None,
     ) -> None:
         """Write variables for a build statement."""
         sources: list[Node] = build_info.get("sources", [])  # type: ignore[assignment]
 
-        # Standard variables
+        # Standard variables - use absolute paths for sources
+        def get_source_path(s: FileNode) -> str:
+            if project and not s.path.is_absolute():
+                src_path = project.root_dir / s.path
+                if src_path.exists():
+                    return str(src_path)
+            return str(s.path)
+
         source_paths = " ".join(
-            str(s.path) for s in sources if isinstance(s, FileNode)
+            get_source_path(s) for s in sources if isinstance(s, FileNode)
         )
         if source_paths:
             f.write(f"  in = {source_paths}\n")
@@ -225,15 +285,25 @@ class NinjaGenerator(BaseGenerator):
 
     def _write_defaults(self, f: TextIO, project: Project) -> None:
         """Write default targets."""
-        if not project.default_targets:
-            return
-
         f.write("# Default targets\n")
         defaults: list[str] = []
+
+        # Add nodes from default targets
         for target in project.default_targets:
             for node in target.nodes:
                 if isinstance(node, FileNode):
                     defaults.append(self._escape_path(node.path))
+
+        # If no default targets, use all program/library outputs from environments
+        if not defaults:
+            for env in project.environments:
+                for node in getattr(env, "_created_nodes", []):
+                    if isinstance(node, FileNode) and node.builder is not None:
+                        # Check if this is a "final" output (Program, SharedLibrary)
+                        build_info = getattr(node, "_build_info", {})
+                        tool = build_info.get("tool", "")
+                        if tool == "link":
+                            defaults.append(self._escape_path(node.path))
 
         if defaults:
             f.write(f"default {' '.join(defaults)}\n")

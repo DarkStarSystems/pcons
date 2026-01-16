@@ -181,7 +181,13 @@ class BuilderMethod:
         else:
             source_list = list(sources)
 
-        return self._builder(self._env, target, source_list, **kwargs)
+        nodes = self._builder(self._env, target, source_list, **kwargs)
+
+        # Register created nodes with the environment
+        for node in nodes:
+            self._env.register_node(node)
+
+        return nodes
 
     def __repr__(self) -> str:
         return f"BuilderMethod({self._builder.name})"

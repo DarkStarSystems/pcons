@@ -46,8 +46,8 @@ class GccCCompiler(BaseTool):
             "flags": [],
             "includes": [],
             "defines": [],
-            "depflags": "-MD -MF $out.d",
-            "objcmd": "$cc.cmd $cc.flags $cc.includes $cc.defines $cc.depflags -c -o $out $in",
+            "depflags": "-MD -MF $$out.d",
+            "objcmd": "$cc.cmd $cc.flags $cc.includes $cc.defines $cc.depflags -c -o $$out $$in",
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -110,8 +110,8 @@ class GccCxxCompiler(BaseTool):
             "flags": [],
             "includes": [],
             "defines": [],
-            "depflags": "-MD -MF $out.d",
-            "objcmd": "$cxx.cmd $cxx.flags $cxx.includes $cxx.defines $cxx.depflags -c -o $out $in",
+            "depflags": "-MD -MF $$out.d",
+            "objcmd": "$cxx.cmd $cxx.flags $cxx.includes $cxx.defines $cxx.depflags -c -o $$out $$in",
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -169,7 +169,7 @@ class GccArchiver(BaseTool):
         return {
             "cmd": "ar",
             "flags": "rcs",
-            "libcmd": "$ar.cmd $ar.flags $out $in",
+            "libcmd": "$ar.cmd $ar.flags $$out $$in",
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -226,8 +226,8 @@ class GccLinker(BaseTool):
             "flags": [],
             "libs": [],
             "libdirs": [],
-            "progcmd": "$link.cmd $link.flags -o $out $in $link.libdirs $link.libs",
-            "sharedcmd": f"$link.cmd {shared_flag} $link.flags -o $out $in $link.libdirs $link.libs",
+            "progcmd": "$link.cmd $link.flags -o $$out $$in $link.libdirs $link.libs",
+            "sharedcmd": f"$link.cmd {shared_flag} $link.flags -o $$out $$in $link.libdirs $link.libs",
         }
 
     def builders(self) -> dict[str, Builder]:

@@ -45,6 +45,7 @@ class Environment:
         "_vars",
         "_project",
         "_toolchain",
+        "_created_nodes",
         "defined_at",
     )
 
@@ -66,6 +67,7 @@ class Environment:
         }
         self._project: Any = None  # Set by Project when env is created
         self._toolchain = toolchain
+        self._created_nodes: list[Any] = []  # Nodes created by builders
         self.defined_at = defined_at or get_caller_location()
 
         # Initialize tools from toolchain if provided
@@ -137,6 +139,23 @@ class Environment:
         """Return list of configured tool names."""
         tools = object.__getattribute__(self, "_tools")
         return list(tools.keys())
+
+    def register_node(self, node: Any) -> None:
+        """Register a node created by a builder.
+
+        This tracks nodes so the generator can find all build targets.
+
+        Args:
+            node: The node to register.
+        """
+        created_nodes = object.__getattribute__(self, "_created_nodes")
+        created_nodes.append(node)
+
+    @property
+    def created_nodes(self) -> list[Any]:
+        """Return list of nodes created by builders in this environment."""
+        nodes: list[Any] = object.__getattribute__(self, "_created_nodes")
+        return nodes
 
     def get(self, name: str, default: Any = None) -> Any:
         """Get a variable or tool with a default."""
@@ -220,6 +239,8 @@ class Environment:
 
         # Copy toolchain reference (not cloned - it's shared)
         new_env._toolchain = self._toolchain
+
+        # Don't copy created_nodes - new environment starts fresh
 
         return new_env
 
