@@ -20,54 +20,53 @@ Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), 
 
 ## Status
 
-🚧 **Under active development** - not yet usable for real projects.
+🚧 **Under active development** - ready for experimentation and feedback.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the design and [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for the roadmap.
+Core functionality is working: C/C++ compilation, static and shared libraries, programs, and install targets. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 
-## Quick Example (Target API)
-
-```python
-# configure.py
-from pcons import Configure
-
-config = Configure()
-config.find_toolchain('cxx')
-config.save()
-```
+## Quick Example
 
 ```python
 # build.py
-from pcons import Project, load_config
+from pathlib import Path
+from pcons.core.project import Project
+from pcons.toolchains import find_c_toolchain
 
-config = load_config()
-project = Project('myapp', config)
+project = Project("myapp", build_dir=Path("build"))
 
-env = project.Environment(toolchain=config.cxx_toolchain)
-env.cxx.flags = ['-std=c++20', '-Wall']
+# Find and configure a C/C++ toolchain
+toolchain = find_c_toolchain()
+env = project.Environment(toolchain=toolchain)
+env.cc.flags.extend(["-O2", "-Wall"])
 
-lib = env.StaticLibrary('core', sources=env.Glob('src/*.cpp'),
-    public_include_dirs=['include'])
+# Build a static library
+lib = project.StaticLibrary("core", env)
+lib.sources.append(project.node("src/core.c"))
+lib.public.include_dirs.append(Path("include"))
 
-app = env.Program('myapp', sources=['main.cpp'], link_libs=[lib])
+# Build a program
+app = project.Program("myapp", env)
+app.sources.append(project.node("src/main.c"))
+app.link(lib)
 
 project.Default(app)
+project.resolve()
 project.generate()
 ```
 
 ```bash
-pcons configure
-pcons generate
-ninja
+python build.py
+ninja -C build
 ```
 
 ## Installation
 
 ```bash
 # Using uv (recommended)
-uv add pcons  # Not yet published
+uv add pcons
 
-# Or via uvx for one-off usage
-uvx pcons configure
+# Or pip
+pip install pcons
 ```
 
 For development:
@@ -97,8 +96,8 @@ uv run mypy pcons/
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Design document
-- [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) - Development roadmap
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Design document and implementation status
+- [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
 
 ## License
 

@@ -1,113 +1,93 @@
-# How to develop on this project
+# How to Contribute to Pcons
 
-pcons welcomes contributions from the community.
+Pcons welcomes contributions from the community.
 
-**You need PYTHON3!**
+**Requirements:** Python 3.11+ and [uv](https://docs.astral.sh/uv/)
 
-This instructions are for linux base systems. (Linux, MacOS, BSD, etc.)
-## Setting up your own fork of this repo.
+## Setting Up Your Fork
 
-- On github interface click on `Fork` button.
-- Clone your fork of this repo. `git clone git@github.com:YOUR_GIT_USERNAME/pcons.git`
-- Enter the directory `cd pcons`
-- Add upstream repo `git remote add upstream https://github.com/garyo/pcons`
+1. On GitHub, click the `Fork` button to create your own fork
+2. Clone your fork: `git clone git@github.com:YOUR_USERNAME/pcons.git`
+3. Enter the directory: `cd pcons`
+4. Add upstream remote: `git remote add upstream https://github.com/garyo/pcons`
 
-## Setting up your own virtual environment
+## Setting Up the Development Environment
 
-Run `make virtualenv` to create a virtual environment.
-then activate it with `source .venv/bin/activate`.
+```bash
+# Install dependencies and create virtual environment
+uv sync
 
-## Install the project in develop mode
-
-Run `make install` to install the project in develop mode.
-
-## Run the tests to ensure everything is working
-
-Run `make test` to run the tests.
-
-## Create a new branch to work on your contribution
-
-Run `git checkout -b my_contribution`
-
-## Make your changes
-
-Edit the files using your preferred editor. (we recommend VIM or VSCode)
-
-## Format the code
-
-Run `make fmt` to format the code.
-
-## Run the linter
-
-Run `make lint` to run the linter.
-
-## Test your changes
-
-Run `make test` to run the tests.
-
-Ensure code coverage report shows `100%` coverage, add tests to your PR.
-
-## Build the docs locally
-
-Run `make docs` to build the docs.
-
-Ensure your new changes are documented.
-
-## Commit your changes
-
-This project uses [conventional git commit messages](https://www.conventionalcommits.org/en/v1.0.0/).
-
-Example: `fix(package): update setup.py arguments 🎉` (emojis are fine too)
-
-## Push your changes to your fork
-
-Run `git push origin my_contribution`
-
-## Submit a pull request
-
-On github interface, click on `Pull Request` button.
-
-Wait CI to run and one of the developers will review your PR.
-## Makefile utilities
-
-This project comes with a `Makefile` that contains a number of useful utility.
-
-```bash 
-❯ make
-Usage: make <target>
-
-Targets:
-help:             ## Show the help.
-install:          ## Install the project in dev mode.
-fmt:              ## Format code using black & isort.
-lint:             ## Run pep8, black, mypy linters.
-test: lint        ## Run tests and generate coverage report.
-watch:            ## Run tests on every change.
-clean:            ## Clean unused files.
-virtualenv:       ## Create a virtual environment.
-release:          ## Create a new tag for release.
-docs:             ## Build the documentation.
-switch-to-poetry: ## Switch to poetry package manager.
-init:             ## Initialize the project based on an application template.
+# Verify the setup
+uv run pcons --help
+uv run pytest
 ```
 
-## Making a new release
+## Development Workflow
 
-This project uses [semantic versioning](https://semver.org/) and tags releases with `X.Y.Z`
-Every time a new tag is created and pushed to the remote repo, github actions will
-automatically create a new release on github and trigger a release on PyPI.
+### Create a Branch
 
-For this to work you need to setup a secret called `PIPY_API_TOKEN` on the project settings>secrets, 
-this token can be generated on [pypi.org](https://pypi.org/account/).
+```bash
+git checkout -b my_contribution
+```
 
-To trigger a new release all you need to do is.
+### Run Tests
 
-1. If you have changes to add to the repo
-    * Make your changes following the steps described above.
-    * Commit your changes following the [conventional git commit messages](https://www.conventionalcommits.org/en/v1.0.0/).
-2. Run the tests to ensure everything is working.
-4. Run `make release` to create a new tag and push it to the remote repo.
+```bash
+uv run pytest
+```
 
-the `make release` will ask you the version number to create the tag, ex: type `0.1.1` when you are asked.
+### Run Linter and Type Checker
 
-> **CAUTION**:  The make release will change local changelog files and commit all the unstaged changes you have.
+```bash
+# Run all checks
+make lint
+
+# Or run individually
+uv run ruff check pcons/ tests/
+uv run mypy pcons/
+```
+
+### Format Code
+
+```bash
+# Auto-format
+make fmt
+
+# Or run directly
+uv run ruff format pcons/ tests/
+```
+
+### Run Tests with Coverage
+
+```bash
+uv run pytest --cov=pcons --cov-report=html
+```
+
+## Commit Guidelines
+
+This project uses [conventional commit messages](https://www.conventionalcommits.org/en/v1.0.0/).
+
+Examples:
+- `fix(resolver): handle empty source lists`
+- `feat(toolchain): add LLVM/Clang support`
+- `docs: update README examples`
+- `test: add coverage for Windows paths`
+
+## Submitting a Pull Request
+
+1. Push your branch: `git push origin my_contribution`
+2. On GitHub, open a Pull Request against `main`
+3. Wait for CI to pass and a maintainer to review
+
+## Makefile Targets
+
+```bash
+make help    # Show available targets
+make lint    # Run linters (ruff, mypy)
+make fmt     # Format code with ruff
+make test    # Run tests with pytest
+```
+
+## License
+
+By contributing to pcons, you agree that your contributions will be licensed under the MIT License.
