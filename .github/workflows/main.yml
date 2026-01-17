@@ -29,8 +29,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ["3.11", "3.12"]
+        include:
+          # Ubuntu latest (24.04) - primary Linux
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          # Ubuntu 22.04 LTS - older but widely used
+          - os: ubuntu-22.04
+            python-version: "3.11"
+          # macOS latest (ARM/Apple Silicon)
+          - os: macos-latest
+            python-version: "3.11"
+          - os: macos-latest
+            python-version: "3.12"
+          # macOS 13 (Intel) - still common
+          - os: macos-13
+            python-version: "3.11"
+          # Windows latest
+          - os: windows-latest
+            python-version: "3.11"
+          - os: windows-latest
+            python-version: "3.12"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

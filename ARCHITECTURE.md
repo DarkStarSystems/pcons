@@ -2,6 +2,55 @@
 
 A modern Python-based build system that generates Ninja (or other) build files.
 
+---
+
+## Implementation Status Summary
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| **Core System** | | |
+| Node hierarchy (FileNode, DirNode, etc.) | Implemented | Full support |
+| Environment with namespaced tools | Implemented | Full support |
+| Variable substitution | Implemented | Recursive, with functions |
+| Target with usage requirements | Implemented | Public/private requirements |
+| Project container | Implemented | Full support |
+| Resolver (lazy node creation) | Implemented | Full support |
+| **Configure Phase** | | |
+| Configure class | Partial | Basic program/toolchain finding |
+| Feature checks (compile tests) | Partial | Methods exist, need toolchain integration |
+| Configuration caching | Implemented | JSON-based |
+| Config header generation | Implemented | write_config_header() |
+| load_config() function | Implemented | Loads saved config |
+| **Toolchains** | | |
+| Toolchain base class | Implemented | Plugin registry |
+| GCC toolchain | Implemented | Auto-detection, C/C++ |
+| LLVM/Clang toolchain | Planned | Not yet implemented |
+| MSVC toolchain | Planned | Not yet implemented |
+| **Generators** | | |
+| Ninja generator | Implemented | Primary, full support |
+| compile_commands.json | Implemented | For IDE integration |
+| Mermaid diagram generator | Implemented | For visualization |
+| Makefile generator | Planned | Not yet implemented |
+| IDE generators (VSCode, Xcode) | Planned | Not yet implemented |
+| **Package Management** | | |
+| PackageDescription | Implemented | TOML format |
+| ImportedTarget | Implemented | Wraps external deps |
+| pkg-config finder | Implemented | Reads .pc files |
+| System finder | Implemented | Manual search |
+| Conan/vcpkg finders | Planned | Not yet implemented |
+| pcons-fetch tool | Implemented | CMake/autotools support |
+| **Scanners** | | |
+| Scanner interface | Implemented | Protocol defined |
+| C/C++ header scanner | Planned | Relies on depfiles |
+| Build-time depfiles | Implemented | Via Ninja |
+
+**Legend:**
+- **Implemented** - Feature is complete and working
+- **Partial** - Feature exists but has limitations or missing integration
+- **Planned** - Documented but not yet implemented
+
+---
+
 ## Design Philosophy
 
 **Configuration, not execution.** Unlike SCons which both configures and executes builds, Pcons is purely a build file generator. Python scripts describe what to build; Ninja (or Make) executes it. This separation provides:
@@ -23,6 +72,7 @@ A modern Python-based build system that generates Ninja (or other) build files.
 ## Execution Model: Three Distinct Phases
 
 ### Phase 1: Configure
+> **Status: Partial** - Configure class exists with program finding, caching, and config header generation. Feature checks (compile tests) require toolchain integration.
 
 **Separate from build description.** Tool detection is complex and must complete before builds are defined.
 
@@ -63,6 +113,7 @@ config.save()
 ```
 
 ### Phase 2: Build Description
+> **Status: Implemented** - Project, Environment, Target, and Resolver all fully functional.
 
 **Uses cached configuration.** Fast, runs every time build files might need updating.
 
@@ -90,6 +141,7 @@ env = project.Environment(toolchain=config.cxx)
 ```
 
 ### Phase 3: Generate
+> **Status: Partial** - Ninja generator fully implemented. compile_commands.json and Mermaid diagram generators available. Makefile and IDE generators planned.
 
 1. Generator traverses the dependency graph
 2. Build rules are emitted (e.g., `build.ninja`)
@@ -106,6 +158,7 @@ User runs `ninja` (or `make`). Pcons is not involved.
 ## Core Abstractions
 
 ### Node
+> **Status: Implemented**
 
 The fundamental unit in the dependency graph. A Node represents something that can be a dependency or a target.
 
@@ -124,6 +177,7 @@ Node (abstract)
 - `defined_at`: Source location where this node was created (for debugging)
 
 ### Directory Node Semantics
+> **Status: Implemented**
 
 Directories require special handling. Their semantics differ based on usage:
 
@@ -163,6 +217,7 @@ obj = env.cc.Object('build/obj/foo.o', 'foo.c')
 ```
 
 ### Environment with Namespaced Tools
+> **Status: Implemented**
 
 Environments provide **namespaced configuration** for each tool, avoiding the SCons problem of flat variable collisions.
 
@@ -213,6 +268,7 @@ env.variant = 'release'
 ```
 
 ### Variable Substitution (Always Recursive)
+> **Status: Implemented**
 
 Variable expansion is **always recursive**. This is essential for building complex command lines.
 
@@ -248,6 +304,7 @@ env.cc.cmdline = '$cc.cmd $cc.flags $cc.include_flags $cc.define_flags -c -o $ou
 - `$first_out` - first output file
 
 ### Tool
+> **Status: Implemented** - Base Tool class and protocol defined. GCC toolchain implemented with C/C++ tools.
 
 A Tool knows how to perform a specific type of transformation. Tools are **namespaced within environments** and provide Builders.
 
@@ -299,6 +356,7 @@ obj = env.Object('foo.o', 'foo.cpp')  # Dispatches to env.cxx.Object
 ```
 
 ### Toolchain
+> **Status: Partial** - Base Toolchain class implemented. GCC toolchain working. LLVM and MSVC toolchains planned.
 
 A Toolchain is a coordinated set of Tools that work together.
 
@@ -338,6 +396,7 @@ env_llvm = project.Environment(toolchain=llvm)
 ```
 
 ### Builder
+> **Status: Implemented**
 
 A Builder creates target nodes from source nodes, using a specific Tool.
 
@@ -360,6 +419,7 @@ class Builder:
 ```
 
 ### Transitive Tool Requirements (Language Propagation)
+> **Status: Implemented**
 
 When linking, the linker must match the "strongest" language used in the objects.
 
@@ -391,6 +451,7 @@ language_strength = {
 **Implementation:** Target tracks `required_languages: set[str]`. Linker builder inspects this to choose the right link command.
 
 ### Target (Build Specification with Usage Requirements)
+> **Status: Implemented**
 
 A Target represents a high-level build artifact with usage requirements that propagate to dependents.
 
@@ -437,6 +498,7 @@ app = env.Program('app', ['main.cpp'],
 ```
 
 ### Target Resolution and Lazy Node Creation
+> **Status: Implemented**
 
 **Targets represent builds without containing output nodes initially.**
 
@@ -488,6 +550,7 @@ project.resolve()
 This makes build scripts declarative - the order of declarations doesn't matter.
 
 ### Scanner
+> **Status: Partial** - Scanner protocol defined. Build-time depfiles work via Ninja. Configure-time scanning not yet implemented.
 
 A Scanner discovers implicit dependencies.
 
@@ -518,6 +581,7 @@ class Scanner(Protocol):
    - Results embedded in build graph
 
 ### Generator
+> **Status: Partial** - Ninja generator fully implemented and tested. CompileCommandsGenerator and MermaidGenerator available. MakefileGenerator and IDE generators planned.
 
 A Generator transforms the dependency graph into build files.
 
@@ -531,10 +595,11 @@ class Generator(Protocol):
 ```
 
 **Generators:**
-- `NinjaGenerator`: Primary output format
-- `MakefileGenerator`: For environments without Ninja
-- `CompileCommandsGenerator`: For IDE/tooling integration (can run alongside others)
-- `VSCodeGenerator`, `XcodeGenerator`: IDE project files
+- `NinjaGenerator`: Primary output format - **Implemented**
+- `CompileCommandsGenerator`: For IDE/tooling integration - **Implemented**
+- `MermaidGenerator`: For dependency graph visualization - **Implemented**
+- `MakefileGenerator`: For environments without Ninja - **Planned**
+- `VSCodeGenerator`, `XcodeGenerator`: IDE project files - **Planned**
 
 **Generator responsibilities:**
 - Translate Nodes and Builders into build rules
@@ -543,6 +608,7 @@ class Generator(Protocol):
 - Properly handle directory semantics (order-only vs real deps)
 
 ### Project
+> **Status: Implemented**
 
 The top-level container for the entire build specification.
 
@@ -575,6 +641,7 @@ class Project:
 ## Key Design Decisions
 
 ### Tool-Agnostic Core
+> **Status: Implemented** - Core modules (`pcons/core/`) are language-agnostic. All tool-specific code is in `pcons/tools/` and `pcons/toolchains/`.
 
 The core (`pcons/core/`) must remain completely tool-agnostic. It knows nothing about:
 - Compiler flags (`-O2`, `/Od`, `-g`, etc.)
@@ -612,6 +679,7 @@ def apply_variant(self, env, variant, **kwargs):
 - If you need build configuration, implement it in the toolchain
 
 ### Rebuild Detection: Timestamps vs Signatures
+> **Status: Implemented** - Pcons generates Ninja files which handle rebuild detection.
 
 **Decision: Rely on Ninja's timestamp + command comparison.**
 
@@ -630,6 +698,7 @@ This is sufficient for most cases and much simpler. The tradeoff:
 - Ninja handles this well and is battle-tested
 
 ### Error Handling
+> **Status: Implemented** - Custom error hierarchy with source location tracking.
 
 **Fail fast, fail clearly.**
 
@@ -645,6 +714,7 @@ This is sufficient for most cases and much simpler. The tradeoff:
 - Debug mode shows full dependency chains
 
 ### Extensibility Points
+> **Status: Partial** - Plugin registration mechanism exists for toolchains. Scanner and generator registries planned.
 
 **Tools are plugins:**
 ```python
@@ -678,79 +748,78 @@ class BazelGenerator(Generator):
 ---
 
 ## File Organization
+> **Note:** This shows the planned file organization. Files marked with status indicators show current implementation state.
 
 ```
 pcons/
 ├── __init__.py
-├── __main__.py              # CLI entry point
-├── cli.py                   # Command-line interface
+├── __main__.py              # CLI entry point .................... [Implemented]
+├── cli.py                   # Command-line interface ............. [Implemented]
 ├── core/
 │   ├── __init__.py
-│   ├── node.py              # Node hierarchy
-│   ├── environment.py       # Environment with namespaced tools
-│   ├── builder.py           # Builder base class
-│   ├── scanner.py           # Scanner interface
-│   ├── target.py            # Target with usage requirements
-│   ├── project.py           # Project container
-│   └── subst.py             # Variable substitution engine
+│   ├── node.py              # Node hierarchy ..................... [Implemented]
+│   ├── environment.py       # Environment with namespaced tools .. [Implemented]
+│   ├── builder.py           # Builder base class ................. [Implemented]
+│   ├── scanner.py           # Scanner interface .................. [Partial]
+│   ├── target.py            # Target with usage requirements ..... [Implemented]
+│   ├── project.py           # Project container .................. [Implemented]
+│   └── subst.py             # Variable substitution engine ....... [Implemented]
 ├── configure/
 │   ├── __init__.py
-│   ├── config.py            # Configure context and caching
-│   ├── checks.py            # Feature checks (compile tests, etc.)
-│   └── platform.py          # Platform detection
+│   ├── config.py            # Configure context and caching ...... [Implemented]
+│   ├── checks.py            # Feature checks (compile tests) ..... [Partial - needs toolchain]
+│   └── platform.py          # Platform detection ................. [Implemented]
 ├── tools/
-│   ├── __init__.py          # Tool registry
-│   ├── tool.py              # Tool base class
-│   ├── toolchain.py         # Toolchain base class
-│   ├── cc.py                # C compiler tool
-│   ├── cxx.py               # C++ compiler tool
-│   ├── fortran.py           # Fortran compiler tool
-│   ├── link.py              # Linker tools (static, shared, exe)
+│   ├── __init__.py          # Tool registry ...................... [Implemented]
+│   ├── tool.py              # Tool base class .................... [Implemented]
+│   ├── toolchain.py         # Toolchain base class ............... [Implemented]
+│   ├── cc.py                # C compiler tool .................... [Implemented]
+│   ├── cxx.py               # C++ compiler tool .................. [Implemented]
+│   ├── fortran.py           # Fortran compiler tool .............. [Planned]
+│   ├── link.py              # Linker tools ....................... [Implemented]
 │   └── ...                  # Other tools
 ├── toolchains/
 │   ├── __init__.py
-│   ├── gcc.py               # GCC toolchain
-│   ├── llvm.py              # LLVM/Clang toolchain
-│   ├── msvc.py              # MSVC toolchain
+│   ├── gcc.py               # GCC toolchain ...................... [Implemented]
+│   ├── llvm.py              # LLVM/Clang toolchain ............... [Planned]
+│   ├── msvc.py              # MSVC toolchain ..................... [Planned]
 │   └── ...
 ├── generators/
-│   ├── __init__.py          # Generator registry
-│   ├── generator.py         # Generator base class
-│   ├── ninja.py             # Ninja generator
-│   ├── makefile.py          # Makefile generator
-│   └── compile_commands.py  # compile_commands.json
+│   ├── __init__.py          # Generator registry ................. [Implemented]
+│   ├── generator.py         # Generator base class ............... [Implemented]
+│   ├── ninja.py             # Ninja generator .................... [Implemented]
+│   ├── mermaid.py           # Mermaid diagram generator .......... [Implemented]
+│   ├── compile_commands.py  # compile_commands.json .............. [Implemented]
+│   └── makefile.py          # Makefile generator ................. [Planned]
 ├── scanners/
-│   ├── __init__.py          # Scanner registry
-│   ├── c.py                 # C/C++ header scanner
+│   ├── __init__.py          # Scanner registry ................... [Planned]
+│   ├── c.py                 # C/C++ header scanner ............... [Planned - uses depfiles]
 │   └── ...
 ├── packages/
-│   ├── __init__.py          # Package loading utilities
-│   ├── description.py       # PackageDescription class
-│   ├── imported.py          # ImportedTarget class
+│   ├── __init__.py          # Package loading utilities .......... [Implemented]
+│   ├── description.py       # PackageDescription class ........... [Implemented]
+│   ├── imported.py          # ImportedTarget class ............... [Implemented]
 │   ├── finders/
 │   │   ├── __init__.py
-│   │   ├── pkgconfig.py     # pkg-config finder
-│   │   ├── conan.py         # Conan finder
-│   │   ├── vcpkg.py         # vcpkg finder
-│   │   └── system.py        # Manual system search
+│   │   ├── base.py          # Base finder class .................. [Implemented]
+│   │   ├── pkgconfig.py     # pkg-config finder .................. [Implemented]
+│   │   ├── system.py        # Manual system search ............... [Implemented]
+│   │   ├── conan.py         # Conan finder ....................... [Planned]
+│   │   └── vcpkg.py         # vcpkg finder ....................... [Planned]
 │   └── fetch/
 │       ├── __init__.py
-│       ├── cli.py           # pcons-fetch CLI
-│       ├── download.py      # Source downloading
-│       └── builders/        # Build system adapters
-│           ├── cmake.py
-│           ├── autotools.py
-│           ├── meson.py
-│           └── custom.py
+│       ├── cli.py           # pcons-fetch CLI .................... [Implemented]
+│       └── ...              # (CMake/autotools builders inline)
 └── util/
     ├── __init__.py
-    ├── path.py              # Path utilities
+    ├── path.py              # Path utilities ..................... [Implemented]
     └── ...
 ```
 
 ---
 
 ## Example: Complete Build
+> **Note:** This example shows the intended API. Some features (like `find_toolchain('cxx')` auto-detection and `config.packages` dict) are partially implemented or planned.
 
 ### configure.py
 ```python
@@ -853,6 +922,7 @@ project.generate()
 ---
 
 ## Package Management Integration
+> **Status: Partial** - PackageDescription, ImportedTarget, pkg-config finder, system finder, and pcons-fetch tool are implemented. Conan/vcpkg finders planned. Integration with Project.ImportedTarget() needs work.
 
 **Core principle: Pcons handles consumption, not acquisition.**
 
@@ -881,6 +951,7 @@ Pcons is not a package manager. External tools (Conan, vcpkg, pcons-fetch, manua
 ```
 
 ### Package Description Format
+> **Status: Implemented** - PackageDescription class with TOML serialization.
 
 A simple TOML format that any tool can generate:
 
@@ -930,6 +1001,7 @@ libraries = ["boost_system"]
 ```
 
 ### ImportedTarget
+> **Status: Implemented** - Class exists with full API. Integration with Project needs completion.
 
 An ImportedTarget represents an external dependency. It has usage requirements but no build rules.
 
@@ -950,6 +1022,7 @@ class ImportedTarget(Target):
 ```
 
 ### Package Finders
+> **Status: Partial** - PkgConfigFinder and SystemFinder implemented. ConanFinder and VcpkgFinder planned.
 
 Finders locate packages and generate `.pcons-pkg.toml` files (or create ImportedTargets directly).
 
@@ -995,6 +1068,7 @@ config.save()
 ```
 
 ### Using Packages in Builds
+> **Status: Planned** - This API pattern is the goal; current implementation requires manual flag handling.
 
 ```python
 # In build.py
@@ -1022,6 +1096,7 @@ app = env.Program('myapp', ['main.cpp'],
 ```
 
 ### pcons-fetch: Source Dependency Tool
+> **Status: Implemented** - CLI tool with CMake and autotools support. Generates .pcons-pkg.toml files.
 
 For building dependencies from source, pcons provides `pcons-fetch`, a companion tool that:
 1. Downloads/clones source code
@@ -1132,6 +1207,7 @@ cxxflags = "-O2 -std=c++17"
 ```
 
 ### Integration with External Package Managers
+> **Status: Planned** - Conan and vcpkg integration planned but not yet implemented.
 
 #### Conan Integration
 
@@ -1173,6 +1249,7 @@ fmt = VcpkgFinder.find('fmt', vcpkg_root=os.environ.get('VCPKG_ROOT'))
 ```
 
 ### Package Search Order
+> **Status: Partial** - Individual finders work; chained search order pattern not yet implemented.
 
 When finding a package, finders can search multiple sources:
 

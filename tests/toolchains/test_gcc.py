@@ -113,3 +113,107 @@ class TestGccToolchain:
         tc = GccToolchain()
         # Tools should be empty before configure
         assert tc.tools == {}
+
+
+class TestGccCompileFlagsForTargetType:
+    """Tests for get_compile_flags_for_target_type method."""
+
+    def test_shared_library_linux(self, monkeypatch):
+        """On Linux, shared libraries should get -fPIC."""
+        # Mock the platform to be Linux
+        linux_platform = Platform(
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+
+        tc = GccToolchain()
+        flags = tc.get_compile_flags_for_target_type("shared_library")
+        assert "-fPIC" in flags
+
+    def test_shared_library_macos(self, monkeypatch):
+        """On macOS, shared libraries don't need -fPIC (it's the default)."""
+        # Mock the platform to be macOS
+        macos_platform = Platform(
+            os="darwin",
+            arch="arm64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".dylib",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: macos_platform)
+
+        tc = GccToolchain()
+        flags = tc.get_compile_flags_for_target_type("shared_library")
+        assert "-fPIC" not in flags
+        assert flags == []
+
+    def test_static_library_linux(self, monkeypatch):
+        """Static libraries don't need -fPIC."""
+        linux_platform = Platform(
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+
+        tc = GccToolchain()
+        flags = tc.get_compile_flags_for_target_type("static_library")
+        assert "-fPIC" not in flags
+        assert flags == []
+
+    def test_program_linux(self, monkeypatch):
+        """Programs don't need -fPIC."""
+        linux_platform = Platform(
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+
+        tc = GccToolchain()
+        flags = tc.get_compile_flags_for_target_type("program")
+        assert "-fPIC" not in flags
+        assert flags == []
+
+    def test_interface_target(self, monkeypatch):
+        """Interface targets don't need special flags."""
+        linux_platform = Platform(
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+
+        tc = GccToolchain()
+        flags = tc.get_compile_flags_for_target_type("interface")
+        assert flags == []

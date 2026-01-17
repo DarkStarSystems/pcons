@@ -336,3 +336,61 @@ class TestFluentAPI:
         assert result is app
         assert len(app.sources) == 1
         assert lib in app.dependencies
+
+
+class TestPostBuild:
+    """Tests for post_build() functionality."""
+
+    def test_post_build_adds_command(self):
+        """post_build() adds a command to the list."""
+        target = Target("app")
+
+        target.post_build("install_name_tool -add_rpath @loader_path $out")
+
+        assert len(target._post_build_commands) == 1
+        assert target._post_build_commands[0] == "install_name_tool -add_rpath @loader_path $out"
+
+    def test_post_build_fluent_returns_self(self):
+        """post_build() returns self for chaining."""
+        target = Target("app")
+
+        result = target.post_build("echo done")
+
+        assert result is target
+
+    def test_post_build_multiple_commands(self):
+        """Multiple post_build() calls accumulate commands in order."""
+        target = Target("plugin")
+
+        target.post_build("install_name_tool -add_rpath @loader_path $out")
+        target.post_build("install_name_tool -change /old/path @rpath/lib.dylib $out")
+        target.post_build("codesign --sign - $out")
+
+        assert len(target._post_build_commands) == 3
+        assert target._post_build_commands[0] == "install_name_tool -add_rpath @loader_path $out"
+        assert target._post_build_commands[1] == "install_name_tool -change /old/path @rpath/lib.dylib $out"
+        assert target._post_build_commands[2] == "codesign --sign - $out"
+
+    def test_post_build_chain_with_other_methods(self, tmp_path):
+        """post_build() can be chained with other fluent methods."""
+        target = Target("app")
+        src = tmp_path / "main.c"
+        src.touch()
+
+        result = (
+            target
+            .add_source(src)
+            .post_build("chmod +x $out")
+            .private_defines(["DEBUG"])
+        )
+
+        assert result is target
+        assert len(target.sources) == 1
+        assert len(target._post_build_commands) == 1
+        assert "DEBUG" in target.private.defines
+
+    def test_post_build_empty_by_default(self):
+        """Target has no post_build commands by default."""
+        target = Target("app")
+
+        assert target._post_build_commands == []

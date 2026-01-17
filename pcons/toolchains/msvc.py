@@ -245,6 +245,26 @@ class MsvcToolchain(BaseToolchain):
         """Return filename for a program (with .exe suffix)."""
         return f"{name}.exe"
 
+    def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
+        """Return additional compile flags needed for the target type.
+
+        MSVC does not need special compile flags for shared libraries.
+        DLL exports are typically handled via __declspec(dllexport) in code
+        or via module definition files (.def), not compiler flags.
+
+        Args:
+            target_type: The target type (e.g., "shared_library", "static_library").
+
+        Returns:
+            List of additional compile flags (empty for MSVC).
+        """
+        # MSVC doesn't need special compile flags like -fPIC.
+        # DLL export/import is handled via:
+        # - __declspec(dllexport) / __declspec(dllimport) in source code
+        # - Module definition files (.def)
+        # - /EXPORT linker flag (not a compile flag)
+        return []
+
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
         if not isinstance(config, Configure):

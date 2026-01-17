@@ -470,6 +470,22 @@ class BaseToolchain(ABC):
         """
         return name
 
+    def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
+        """Return additional compile flags needed for the target type.
+
+        Override in subclasses for platform/toolchain-specific flags.
+        For example, GCC/LLVM on Linux need -fPIC for shared libraries.
+
+        Args:
+            target_type: The target type (e.g., "shared_library", "static_library",
+                        "program", "interface", "object").
+
+        Returns:
+            List of additional compile flags needed for this target type.
+            Default implementation returns an empty list.
+        """
+        return []
+
     def __repr__(self) -> str:
         tools = ", ".join(self._tools.keys())
         return f"{self.__class__.__name__}({self.name!r}, tools=[{tools}])"

@@ -7,25 +7,42 @@ and carries "usage requirements" that propagate to consumers (CMake-style).
 
 from __future__ import annotations
 
+import logging
+import warnings
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any
 
 from pcons.util.source_location import SourceLocation, get_caller_location
+
+# Import SourceSpec from centralized types module
+from pcons.core.types import SourceSpec
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode, Node
 
-# Valid target types
-TargetType = Literal[
-    "static_library",
-    "shared_library",
-    "program",
-    "interface",  # Header-only library
-    "object",  # Object files only (no linking)
-]
+
+class TargetType(StrEnum):
+    """Valid target types.
+
+    Using StrEnum allows these values to be used directly in string comparisons
+    while providing type safety and preventing typos.
+    """
+
+    STATIC_LIBRARY = "static_library"
+    SHARED_LIBRARY = "shared_library"
+    PROGRAM = "program"
+    INTERFACE = "interface"  # Header-only library
+    OBJECT = "object"  # Object files only (no linking)
+
+
+# Re-export SourceSpec for backwards compatibility
+__all__ = ["SourceSpec", "TargetType", "UsageRequirements", "Target", "ImportedTarget"]
 
 
 @dataclass
@@ -115,7 +132,7 @@ class Target:
         "name",
         "nodes",
         "builder",
-        "sources",
+        "_sources",
         "dependencies",
         "public",
         "private",
@@ -137,13 +154,15 @@ class Target:
         "_pending_sources",
         "_install_dest_dir",
         "_install_as_dest",
+        # Post-build commands:
+        "_post_build_commands",
     )
 
     def __init__(
         self,
         name: str,
         *,
-        target_type: TargetType | None = None,
+        target_type: TargetType | str | None = None,
         builder: Builder | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
@@ -151,14 +170,15 @@ class Target:
 
         Args:
             name: Target name (e.g., "mylib", "myapp").
-            target_type: Type of target (static_library, shared_library, program, interface).
+            target_type: Type of target (TargetType enum or string like "static_library").
+                        Using TargetType enum constants is preferred for type safety.
             builder: Builder to use for this target.
             defined_at: Source location where target was created.
         """
         self.name = name
         self.nodes: list[Node] = []
         self.builder = builder
-        self.sources: list[Node] = []
+        self._sources: list[Node] = []
         self.dependencies: list[Target] = []
         self.public = UsageRequirements()
         self.private = UsageRequirements()
@@ -183,6 +203,27 @@ class Target:
         self._install_dest_dir: Path | None = None
         # Destination path for InstallAs targets (full path including filename)
         self._install_as_dest: Path | None = None
+        # Post-build commands (shell commands run after target is built)
+        self._post_build_commands: list[str] = []
+
+    @property
+    def sources(self) -> list[Node]:
+        """Get the list of source nodes for this target."""
+        return self._sources
+
+    @sources.setter
+    def sources(self, value: list[Node]) -> None:
+        """Set the sources list with a warning about direct assignment.
+
+        Direct assignment replaces all sources. Use add_source() or add_sources()
+        for the fluent API.
+        """
+        warnings.warn(
+            f"Direct assignment to {self.name}.sources replaces all sources. "
+            "Consider using add_source() or add_sources() instead.",
+            stacklevel=2,
+        )
+        self._sources = value
 
     def link(self, *targets: Target) -> Target:
         """Add targets as dependencies (fluent API).
@@ -213,7 +254,7 @@ class Target:
             self for method chaining.
         """
         node = self._to_node(source)
-        self.sources.append(node)
+        self._sources.append(node)
         return self
 
     def add_sources(
@@ -241,7 +282,7 @@ class Target:
                 if not path.is_absolute():
                     source = base_path / path
             node = self._to_node(source)
-            self.sources.append(node)
+            self._sources.append(node)
         return self
 
     def _to_node(self, source: Node | Path | str) -> Node:
@@ -342,6 +383,30 @@ class Target:
             self for method chaining.
         """
         self.private.flags.extend(flags)
+        return self
+
+    def post_build(self, command: str) -> Target:
+        """Add a post-build command (fluent API).
+
+        Post-build commands are shell commands that run after the target
+        is built. Commands support variable substitution:
+        - $out: The primary output file path
+        - $in: The input files (space-separated)
+
+        Commands run in the order they are added.
+
+        Args:
+            command: Shell command to run after building.
+
+        Returns:
+            self for method chaining.
+
+        Example:
+            plugin = project.SharedLibrary("myplugin", env)
+            plugin.post_build("install_name_tool -add_rpath @loader_path $out")
+            plugin.post_build("codesign --sign - $out")
+        """
+        self._post_build_commands.append(command)
         return self
 
     def collect_usage_requirements(self) -> UsageRequirements:

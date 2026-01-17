@@ -7,8 +7,9 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Iterator
 
 from pcons.core.subst import Namespace, subst, to_shell_command
 from pcons.core.toolconfig import ToolConfig
@@ -75,6 +76,19 @@ class Environment:
         if toolchain is not None:
             toolchain.setup(self)
 
+    # Private helper methods to reduce object.__getattribute__ verbosity
+    def _get_tools(self) -> dict[str, ToolConfig]:
+        """Get the internal tools dictionary."""
+        return object.__getattribute__(self, "_tools")
+
+    def _get_vars(self) -> dict[str, Any]:
+        """Get the internal variables dictionary."""
+        return object.__getattribute__(self, "_vars")
+
+    def _get_created_nodes(self) -> list[Any]:
+        """Get the internal created nodes list."""
+        return object.__getattribute__(self, "_created_nodes")
+
     def __getattr__(self, name: str) -> Any:
         """Get a tool namespace or cross-tool variable.
 
@@ -84,12 +98,12 @@ class Environment:
             raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 
         # Check for tool namespace first
-        tools = object.__getattribute__(self, "_tools")
+        tools = self._get_tools()
         if name in tools:
             return tools[name]
 
         # Check for cross-tool variable
-        vars_dict = object.__getattribute__(self, "_vars")
+        vars_dict = self._get_vars()
         if name in vars_dict:
             return vars_dict[name]
 
@@ -104,10 +118,10 @@ class Environment:
         if name.startswith("_") or name == "defined_at":
             object.__setattr__(self, name, value)
         elif isinstance(value, ToolConfig):
-            tools = object.__getattribute__(self, "_tools")
+            tools = self._get_tools()
             tools[name] = value
         else:
-            vars_dict = object.__getattribute__(self, "_vars")
+            vars_dict = self._get_vars()
             vars_dict[name] = value
 
     def add_tool(self, name: str, config: ToolConfig | None = None) -> ToolConfig:
@@ -123,7 +137,7 @@ class Environment:
         Returns:
             The ToolConfig for this tool.
         """
-        tools: dict[str, ToolConfig] = object.__getattribute__(self, "_tools")
+        tools = self._get_tools()
         if name in tools:
             return tools[name]
         if config is None:
@@ -133,13 +147,11 @@ class Environment:
 
     def has_tool(self, name: str) -> bool:
         """Check if a tool namespace exists."""
-        tools = object.__getattribute__(self, "_tools")
-        return name in tools
+        return name in self._get_tools()
 
     def tool_names(self) -> list[str]:
         """Return list of configured tool names."""
-        tools = object.__getattribute__(self, "_tools")
-        return list(tools.keys())
+        return list(self._get_tools().keys())
 
     def register_node(self, node: Any) -> None:
         """Register a node created by a builder.
@@ -149,14 +161,12 @@ class Environment:
         Args:
             node: The node to register.
         """
-        created_nodes = object.__getattribute__(self, "_created_nodes")
-        created_nodes.append(node)
+        self._get_created_nodes().append(node)
 
     @property
     def created_nodes(self) -> list[Any]:
         """Return list of nodes created by builders in this environment."""
-        nodes: list[Any] = object.__getattribute__(self, "_created_nodes")
-        return nodes
+        return self._get_created_nodes()
 
     def get(self, name: str, default: Any = None) -> Any:
         """Get a variable or tool with a default."""
@@ -210,8 +220,8 @@ class Environment:
 
     def _build_namespace(self) -> Namespace:
         """Build a Namespace for variable substitution."""
-        tools = object.__getattribute__(self, "_tools")
-        vars_dict = object.__getattribute__(self, "_vars")
+        tools = self._get_tools()
+        vars_dict = self._get_vars()
 
         # Start with cross-tool variables
         data: dict[str, Any] = dict(vars_dict)
@@ -231,13 +241,13 @@ class Environment:
         Returns:
             A new Environment with copied configuration.
         """
-        tools = object.__getattribute__(self, "_tools")
-        vars_dict = object.__getattribute__(self, "_vars")
+        tools = self._get_tools()
+        vars_dict = self._get_vars()
 
         new_env = Environment(defined_at=get_caller_location())
 
         # Copy cross-tool variables (deep copy lists/dicts)
-        new_vars = object.__getattribute__(new_env, "_vars")
+        new_vars = new_env._get_vars()
         for key, value in vars_dict.items():
             if isinstance(value, list):
                 new_vars[key] = list(value)
@@ -247,7 +257,7 @@ class Environment:
                 new_vars[key] = value
 
         # Clone tool configurations
-        new_tools = object.__getattribute__(new_env, "_tools")
+        new_tools = new_env._get_tools()
         for name, config in tools.items():
             new_tools[name] = config.clone()
 
@@ -260,6 +270,58 @@ class Environment:
         # Don't copy created_nodes - new environment starts fresh
 
         return new_env
+
+    @contextmanager
+    def override(self, **kwargs: Any) -> Iterator[Environment]:
+        """Create a temporary environment with overrides.
+
+        Returns a context manager that yields a cloned environment with
+        the specified overrides applied. Useful for building targets with
+        temporarily modified settings.
+
+        Args:
+            **kwargs: Variables or tool settings to override.
+                     For tool settings, use tool__attr notation (e.g., cc__flags)
+                     since Python kwargs can't contain dots.
+
+        Yields:
+            A cloned Environment with overrides applied. The cloned environment
+            is fully independent, so you can also modify it directly within
+            the context block.
+
+        Example:
+            # Override cross-tool variables
+            with env.override(variant="profile") as profile_env:
+                project.Program("app_profile", profile_env, sources=["main.cpp"])
+
+            # Override tool settings using double-underscore notation
+            with env.override(cxx__flags=["-fno-exceptions"]) as no_except_env:
+                project.Library("mylib", no_except_env, sources=["lib.cpp"])
+
+            # The yielded env is a full clone - you can modify it directly too
+            with env.override(variant="debug") as debug_env:
+                debug_env.cxx.defines.append("EXTRA_DEBUG")
+                debug_env.cxx.flags.extend(["-g3", "-fno-omit-frame-pointer"])
+                project.Library("mylib_debug", debug_env, sources=["lib.cpp"])
+        """
+        temp_env = self.clone()
+
+        for key, value in kwargs.items():
+            if "__" in key:
+                # Tool attribute override: cc__flags -> env.cc.flags
+                tool_name, attr_name = key.split("__", 1)
+                if temp_env.has_tool(tool_name):
+                    tool = getattr(temp_env, tool_name)
+                    setattr(tool, attr_name, value)
+                else:
+                    # Create tool if it doesn't exist
+                    tool = temp_env.add_tool(tool_name)
+                    setattr(tool, attr_name, value)
+            else:
+                # Cross-tool variable override
+                setattr(temp_env, key, value)
+
+        yield temp_env
 
     # Convenience methods for common patterns
 
@@ -282,9 +344,8 @@ class Environment:
             env.set_variant("debug")
             env.set_variant("release", extra_flags=["-march=native"])
         """
-        toolchain = object.__getattribute__(self, "_toolchain")
-        if toolchain is not None:
-            toolchain.apply_variant(self, name, **kwargs)
+        if self._toolchain is not None:
+            self._toolchain.apply_variant(self, name, **kwargs)
         else:
             # No toolchain - just set the variant name
             self.variant = name
@@ -311,8 +372,8 @@ class Environment:
         return [FileNode(p, defined_at=get_caller_location()) for p in matches]
 
     def __repr__(self) -> str:
-        tools = object.__getattribute__(self, "_tools")
-        vars_dict = object.__getattribute__(self, "_vars")
+        tools = self._get_tools()
+        vars_dict = self._get_vars()
         return (
             f"Environment(tools=[{', '.join(tools.keys())}], "
             f"vars=[{', '.join(vars_dict.keys())}])"

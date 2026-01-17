@@ -408,6 +408,175 @@ class TestResolverOutputName:
             assert target.output_nodes[0].path.name == "libmylib.so"
 
 
+class TestResolverSharedLibraryCompileFlags:
+    """Test that shared library objects get correct target-type compile flags."""
+
+    def test_shared_library_gets_fpic_on_linux(self, tmp_path, monkeypatch):
+        """Test that shared library objects get -fPIC on Linux."""
+        from pcons.configure.platform import Platform
+        from pcons.toolchains.gcc import GccToolchain
+
+        # Mock platform to be Linux
+        linux_platform = Platform(
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        # Need to patch in multiple places
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        # Create environment with GCC toolchain
+        gcc_toolchain = GccToolchain()
+        gcc_toolchain._configured = True
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $in -o $out"
+
+        target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
+        project.resolve()
+
+        assert target._resolved
+        assert len(target.object_nodes) == 1
+
+        # Check that -fPIC is in the effective flags
+        obj_node = target.object_nodes[0]
+        assert "-fPIC" in obj_node._build_info["effective_flags"]
+
+    def test_shared_library_no_fpic_on_macos(self, tmp_path, monkeypatch):
+        """Test that shared library objects don't get -fPIC on macOS (it's default)."""
+        from pcons.configure.platform import Platform
+        from pcons.toolchains.gcc import GccToolchain
+
+        # Mock platform to be macOS
+        macos_platform = Platform(
+            os="darwin",
+            arch="arm64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".dylib",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: macos_platform)
+
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        # Create environment with GCC toolchain
+        gcc_toolchain = GccToolchain()
+        gcc_toolchain._configured = True
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $in -o $out"
+
+        target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
+        project.resolve()
+
+        assert target._resolved
+        assert len(target.object_nodes) == 1
+
+        # Check that -fPIC is NOT in the effective flags
+        obj_node = target.object_nodes[0]
+        assert "-fPIC" not in obj_node._build_info["effective_flags"]
+
+    def test_static_library_no_fpic(self, tmp_path, monkeypatch):
+        """Test that static library objects don't get -fPIC."""
+        from pcons.configure.platform import Platform
+        from pcons.toolchains.gcc import GccToolchain
+
+        # Mock platform to be Linux
+        linux_platform = Platform(
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        # Create environment with GCC toolchain
+        gcc_toolchain = GccToolchain()
+        gcc_toolchain._configured = True
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $in -o $out"
+
+        target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
+        project.resolve()
+
+        assert target._resolved
+        assert len(target.object_nodes) == 1
+
+        # Check that -fPIC is NOT in the effective flags
+        obj_node = target.object_nodes[0]
+        assert "-fPIC" not in obj_node._build_info["effective_flags"]
+
+    def test_program_no_fpic(self, tmp_path, monkeypatch):
+        """Test that program objects don't get -fPIC."""
+        from pcons.configure.platform import Platform
+        from pcons.toolchains.gcc import GccToolchain
+
+        # Mock platform to be Linux
+        linux_platform = Platform(
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+
+        src_file = tmp_path / "main.c"
+        src_file.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        # Create environment with GCC toolchain
+        gcc_toolchain = GccToolchain()
+        gcc_toolchain._configured = True
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $in -o $out"
+
+        target = project.Program("myapp", env, sources=[str(src_file)])
+        project.resolve()
+
+        assert target._resolved
+        assert len(target.object_nodes) == 1
+
+        # Check that -fPIC is NOT in the effective flags
+        obj_node = target.object_nodes[0]
+        assert "-fPIC" not in obj_node._build_info["effective_flags"]
+
+
 class TestResolverToolAgnostic:
     """Test that resolver works with non-C toolchains (tool-agnostic design)."""
 

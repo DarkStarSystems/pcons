@@ -97,29 +97,9 @@ class NinjaGenerator(BaseGenerator):
 
         # Collect all unique rules from targets
         for target in project.targets:
-            # For resolved targets, use object_nodes and output_nodes
-            if getattr(target, "_resolved", False):
-                env = target._env
-                for node in target.object_nodes:
-                    self._ensure_rule(f, node, target, env)
-                for node in target.output_nodes:
-                    self._ensure_rule(f, node, target, env)
-                # For interface targets (like Install), also check target.nodes
-                if target.target_type == "interface":
-                    for node in target.nodes:
-                        if isinstance(node, FileNode):
-                            has_build = getattr(node, "_build_info", None) is not None
-                            if has_build:
-                                self._ensure_rule(f, node, target, env)
-            else:
-                # Legacy path
-                for node in target.nodes:
-                    # Check for builder or build_info (install nodes use build_info)
-                    has_build = node.builder is not None or getattr(node, "_build_info", None) is not None
-                    if isinstance(node, FileNode) and has_build:
-                        # Find environment for this target
-                        env = self._find_env_for_node(node, project)
-                        self._ensure_rule(f, node, target, env)
+            env = target._env
+            for node in self._get_target_build_nodes(target, project):
+                self._ensure_rule(f, node, target, env)
 
         # Also check nodes tracked in environments
         for env in project.environments:
@@ -128,6 +108,49 @@ class NinjaGenerator(BaseGenerator):
                     self._ensure_rule(f, node, None, env)
 
         f.write("\n")
+
+    def _get_target_build_nodes(
+        self, target: Target, project: Project
+    ) -> list[FileNode]:
+        """Get all buildable file nodes from a target.
+
+        This is a helper method that handles both resolved (target-centric)
+        and legacy targets, extracting nodes that have build information.
+
+        Args:
+            target: The target to get nodes from.
+            project: The project (used for legacy path to find environment).
+
+        Returns:
+            List of FileNodes that have build information.
+        """
+        nodes: list[FileNode] = []
+
+        if getattr(target, "_resolved", False):
+            # Resolved target (target-centric model)
+            # Add object nodes and output nodes
+            for node in target.object_nodes:
+                if isinstance(node, FileNode):
+                    nodes.append(node)
+            for node in target.output_nodes:
+                if isinstance(node, FileNode):
+                    nodes.append(node)
+            # For interface targets (like Install), also check target.nodes
+            if target.target_type == "interface":
+                for node in target.nodes:
+                    if isinstance(node, FileNode):
+                        has_build = getattr(node, "_build_info", None) is not None
+                        if has_build:
+                            nodes.append(node)
+        else:
+            # Legacy path: use target.nodes directly
+            for node in target.nodes:
+                # Check for builder or build_info (install nodes use build_info)
+                has_build = node.builder is not None or getattr(node, "_build_info", None) is not None
+                if isinstance(node, FileNode) and has_build:
+                    nodes.append(node)
+
+        return nodes
 
     def _find_env_for_node(self, node: FileNode, project: Project) -> Environment | None:
         """Find the environment that created a node."""
@@ -173,7 +196,7 @@ class NinjaGenerator(BaseGenerator):
             # Special case for copy command (from Install)
             if tool_name == "copy":
                 copy_cmd = build_info.get("copy_cmd", "cp $in $out")
-                command = copy_cmd
+                command = copy_cmd + "$post_build"
                 description = "INSTALL $out"
             elif env is not None:
                 tool_config = getattr(env, tool_name, None)
@@ -193,6 +216,9 @@ class NinjaGenerator(BaseGenerator):
                             command = self._augment_command_with_effective_vars(
                                 command, command_var
                             )
+                        else:
+                            # For non-effective builds, still add $post_build
+                            command = command.rstrip() + "$post_build"
 
             # Write the rule
             f.write(f"rule {rule_name}\n")
@@ -250,6 +276,10 @@ class NinjaGenerator(BaseGenerator):
                     command += " $ldflags $libdirs $libs"
         # For archive commands (archivecmd), no changes needed
 
+        # For all commands, append $post_build placeholder for post-build commands
+        # This will be empty unless a target has post_build commands
+        command = command.rstrip() + "$post_build"
+
         return command
 
     def _write_builds(self, f: TextIO, project: Project) -> None:
@@ -281,32 +311,12 @@ class NinjaGenerator(BaseGenerator):
         """Collect all output directories and write mkdir build statements."""
         directories: set[Path] = set()
 
-        # Collect directories from resolved targets
+        # Collect directories from all targets using the helper
         for target in project.targets:
-            if getattr(target, "_resolved", False):
-                for node in target.object_nodes:
-                    if isinstance(node, FileNode):
-                        parent = node.path.parent
-                        if parent != Path(".") and parent != Path(""):
-                            directories.add(parent)
-                for node in target.output_nodes:
-                    if isinstance(node, FileNode):
-                        parent = node.path.parent
-                        if parent != Path(".") and parent != Path(""):
-                            directories.add(parent)
-                # For interface targets (like Install), also check target.nodes
-                if target.target_type == "interface":
-                    for node in target.nodes:
-                        if isinstance(node, FileNode):
-                            parent = node.path.parent
-                            if parent != Path(".") and parent != Path(""):
-                                directories.add(parent)
-            else:
-                for node in target.nodes:
-                    if isinstance(node, FileNode):
-                        parent = node.path.parent
-                        if parent != Path(".") and parent != Path(""):
-                            directories.add(parent)
+            for node in self._get_target_build_nodes(target, project):
+                parent = node.path.parent
+                if parent != Path(".") and parent != Path(""):
+                    directories.add(parent)
 
         # Collect directories from environment-tracked nodes
         for env in project.environments:
@@ -327,40 +337,13 @@ class NinjaGenerator(BaseGenerator):
     ) -> None:
         """Write build statements for a single target.
 
-        For resolved targets (target._resolved is True), writes builds for
-        object_nodes and output_nodes. For legacy targets, uses target.nodes.
-        Interface targets (like Install) may have nodes in target.nodes directly.
+        Uses _get_target_build_nodes() to handle both resolved (target-centric)
+        and legacy targets uniformly.
         """
-        # Check if this is a resolved target (target-centric model)
-        if getattr(target, "_resolved", False):
-            # Write object file builds
-            for node in target.object_nodes:
-                if node.path not in written_nodes:
-                    self._write_build_statement(f, node, target, project)
-                    written_nodes.add(node.path)
-            # Write output file builds (library/program)
-            for node in target.output_nodes:
-                if node.path not in written_nodes:
-                    self._write_build_statement(f, node, target, project)
-                    written_nodes.add(node.path)
-            # For interface targets (like Install), also check target.nodes
-            # These may contain copy/install nodes with _build_info
-            if target.target_type == "interface":
-                for node in target.nodes:
-                    if isinstance(node, FileNode) and node.path not in written_nodes:
-                        has_build = getattr(node, "_build_info", None) is not None
-                        if has_build:
-                            self._write_build_statement(f, node, target, project)
-                            written_nodes.add(node.path)
-        else:
-            # Legacy path: use target.nodes directly
-            for node in target.nodes:
-                # Check for builder or build_info (install nodes use build_info)
-                has_build = node.builder is not None or getattr(node, "_build_info", None) is not None
-                if isinstance(node, FileNode) and has_build:
-                    if node.path not in written_nodes:
-                        self._write_build_statement(f, node, target, project)
-                        written_nodes.add(node.path)
+        for node in self._get_target_build_nodes(target, project):
+            if node.path not in written_nodes:
+                self._write_build_statement(f, node, target, project)
+                written_nodes.add(node.path)
 
     def _write_build_statement(
         self, f: TextIO, node: FileNode, target: Target | None, project: Project | None = None
@@ -530,6 +513,34 @@ class NinjaGenerator(BaseGenerator):
         if effective_link_dirs:
             link_dirs_str = " ".join(f"-L{d}" for d in effective_link_dirs)
             f.write(f"  libdirs = {link_dirs_str}\n")
+
+        # Write post-build commands if target has them
+        # Check if this is an output node (not an intermediate object file)
+        is_output_node = (
+            target is not None
+            and hasattr(target, "output_nodes")
+            and node in target.output_nodes
+        )
+        # Also check for legacy path where output nodes are in target.nodes
+        if not is_output_node and target is not None:
+            is_output_node = node in target.nodes
+
+        if is_output_node and target is not None:
+            post_build_cmds = getattr(target, "_post_build_commands", [])
+            if post_build_cmds:
+                # Substitute $out and $in in each command
+                out_path = str(node.path)
+                in_paths = " ".join(
+                    str(s.path) for s in sources if isinstance(s, FileNode)
+                )
+                substituted_cmds = []
+                for cmd in post_build_cmds:
+                    cmd = cmd.replace("$out", out_path)
+                    cmd = cmd.replace("$in", in_paths)
+                    substituted_cmds.append(cmd)
+                # Chain commands with && and prepend with &&
+                post_build_str = " && " + " && ".join(substituted_cmds)
+                f.write(f"  post_build = {post_build_str}\n")
 
     def _write_aliases(self, f: TextIO, project: Project) -> None:
         """Write phony rules for aliases."""

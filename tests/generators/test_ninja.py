@@ -158,6 +158,130 @@ class TestNinjaEscaping:
         assert escaped == "C$:/path/file.c"
 
 
+class TestNinjaPostBuild:
+    def test_post_build_commands_in_ninja_output(self, tmp_path):
+        """Post-build commands are chained with && in ninja output."""
+        project = Project("test", root_dir=tmp_path)
+
+        target = Target("app")
+        output_node = FileNode("build/app")
+        source_node = FileNode("build/main.o")
+        output_node._build_info = {
+            "tool": "link",
+            "command_var": "progcmd",
+            "language": None,
+            "sources": [source_node],
+        }
+        output_node.builder = CommandBuilder(
+            "Program", "link", "progcmd",
+            src_suffixes=[".o"], target_suffixes=[""]
+        )
+
+        target.nodes.append(output_node)
+        target.post_build("install_name_tool -add_rpath @loader_path $out")
+        project.add_target(target)
+
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+        # Should have post_build variable with the command
+        assert "post_build =" in content
+        assert "&& install_name_tool -add_rpath @loader_path build/app" in content
+
+    def test_post_build_multiple_commands_chained(self, tmp_path):
+        """Multiple post-build commands are chained with &&."""
+        project = Project("test", root_dir=tmp_path)
+
+        target = Target("plugin")
+        output_node = FileNode("build/plugin.so")
+        source_node = FileNode("build/plugin.o")
+        output_node._build_info = {
+            "tool": "link",
+            "command_var": "sharedcmd",
+            "language": None,
+            "sources": [source_node],
+        }
+        output_node.builder = CommandBuilder(
+            "SharedLibrary", "link", "sharedcmd",
+            src_suffixes=[".o"], target_suffixes=[".so"]
+        )
+
+        target.nodes.append(output_node)
+        target.post_build("install_name_tool -add_rpath @loader_path $out")
+        target.post_build("codesign --sign - $out")
+        project.add_target(target)
+
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+        # Should have both commands chained
+        assert "post_build =" in content
+        assert "&& install_name_tool -add_rpath @loader_path build/plugin.so" in content
+        assert "&& codesign --sign - build/plugin.so" in content
+
+    def test_post_build_variable_substitution(self, tmp_path):
+        """$out and $in are substituted in post-build commands."""
+        project = Project("test", root_dir=tmp_path)
+
+        target = Target("app")
+        output_node = FileNode("build/myapp")
+        source_node = FileNode("build/main.o")
+        output_node._build_info = {
+            "tool": "link",
+            "command_var": "progcmd",
+            "language": None,
+            "sources": [source_node],
+        }
+        output_node.builder = CommandBuilder(
+            "Program", "link", "progcmd",
+            src_suffixes=[".o"], target_suffixes=[""]
+        )
+
+        target.nodes.append(output_node)
+        target.post_build("echo Built $out from $in")
+        project.add_target(target)
+
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+        # $out should be substituted with the actual output path
+        # $in should be substituted with the input files
+        assert "post_build =" in content
+        assert "&& echo Built build/myapp from build/main.o" in content
+
+    def test_no_post_build_when_empty(self, tmp_path):
+        """No post_build variable when target has no post-build commands."""
+        project = Project("test", root_dir=tmp_path)
+
+        target = Target("app")
+        output_node = FileNode("build/app")
+        source_node = FileNode("build/main.o")
+        output_node._build_info = {
+            "tool": "link",
+            "command_var": "progcmd",
+            "language": None,
+            "sources": [source_node],
+        }
+        output_node.builder = CommandBuilder(
+            "Program", "link", "progcmd",
+            src_suffixes=[".o"], target_suffixes=[""]
+        )
+
+        target.nodes.append(output_node)
+        # No post_build() calls
+        project.add_target(target)
+
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+        # Should not have post_build variable
+        assert "post_build =" not in content
+
+
 class TestNinjaDepsDirectives:
     def test_gcc_deps_style_emits_depfile_and_deps(self, tmp_path):
         project = Project("test", root_dir=tmp_path)

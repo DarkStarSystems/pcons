@@ -21,7 +21,7 @@ from pcons.core.graph import (
     topological_sort_targets,
 )
 from pcons.core.node import AliasNode, DirNode, FileNode, Node
-from pcons.core.target import Target
+from pcons.core.target import Target, TargetType
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
@@ -454,7 +454,7 @@ class Project:
         Returns:
             A new Target configured as a static library.
         """
-        target = Target(name, target_type="static_library", defined_at=get_caller_location())
+        target = Target(name, target_type=TargetType.STATIC_LIBRARY, defined_at=get_caller_location())
         target._env = env
         target._project = self
         if sources:
@@ -479,7 +479,7 @@ class Project:
         Returns:
             A new Target configured as a shared library.
         """
-        target = Target(name, target_type="shared_library", defined_at=get_caller_location())
+        target = Target(name, target_type=TargetType.SHARED_LIBRARY, defined_at=get_caller_location())
         target._env = env
         target._project = self
         if sources:
@@ -504,7 +504,7 @@ class Project:
         Returns:
             A new Target configured as a program.
         """
-        target = Target(name, target_type="program", defined_at=get_caller_location())
+        target = Target(name, target_type=TargetType.PROGRAM, defined_at=get_caller_location())
         target._env = env
         target._project = self
         if sources:
@@ -531,7 +531,7 @@ class Project:
         Returns:
             A new Target configured as an interface library.
         """
-        target = Target(name, target_type="interface", defined_at=get_caller_location())
+        target = Target(name, target_type=TargetType.INTERFACE, defined_at=get_caller_location())
         if include_dirs:
             for inc_dir in include_dirs:
                 target.public.include_dirs.append(Path(inc_dir))
@@ -558,7 +558,7 @@ class Project:
         Returns:
             A new Target configured as an object library.
         """
-        target = Target(name, target_type="object", defined_at=get_caller_location())
+        target = Target(name, target_type=TargetType.OBJECT, defined_at=get_caller_location())
         target._env = env
         target._project = self
         if sources:
@@ -639,12 +639,18 @@ class Project:
         while target_name in self._targets:
             target_name = f"{base_name}_{counter}"
             counter += 1
+        if target_name != base_name:
+            logger.warning(
+                "Install target renamed from '%s' to '%s' to avoid conflict",
+                base_name,
+                target_name,
+            )
 
         # Create the install target with pending sources
         # Sources will be resolved during project.resolve()
         install_target = Target(
             target_name,
-            target_type="interface",
+            target_type=TargetType.INTERFACE,
             defined_at=get_caller_location(),
         )
 
@@ -693,12 +699,18 @@ class Project:
         while target_name in self._targets:
             target_name = f"{base_name}_{counter}"
             counter += 1
+        if target_name != base_name:
+            logger.warning(
+                "Install target renamed from '%s' to '%s' to avoid conflict",
+                base_name,
+                target_name,
+            )
 
         # Create the install target with pending source
         # Source will be resolved during project.resolve()
         install_target = Target(
             target_name,
-            target_type="interface",
+            target_type=TargetType.INTERFACE,
             defined_at=get_caller_location(),
         )
 

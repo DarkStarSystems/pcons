@@ -218,3 +218,32 @@ class TestMsvcToolchain:
             # Should return False on non-Windows
             result = tc._configure_tools(MockConfig())
             assert result is False
+
+
+class TestMsvcCompileFlagsForTargetType:
+    """Tests for get_compile_flags_for_target_type method."""
+
+    def test_shared_library_no_flags(self):
+        """MSVC doesn't need special compile flags for shared libraries."""
+        tc = MsvcToolchain()
+        flags = tc.get_compile_flags_for_target_type("shared_library")
+        # MSVC uses __declspec(dllexport) in code, not compiler flags
+        assert flags == []
+
+    def test_static_library_no_flags(self):
+        """Static libraries don't need special flags."""
+        tc = MsvcToolchain()
+        flags = tc.get_compile_flags_for_target_type("static_library")
+        assert flags == []
+
+    def test_program_no_flags(self):
+        """Programs don't need special flags."""
+        tc = MsvcToolchain()
+        flags = tc.get_compile_flags_for_target_type("program")
+        assert flags == []
+
+    def test_interface_no_flags(self):
+        """Interface targets don't need special flags."""
+        tc = MsvcToolchain()
+        flags = tc.get_compile_flags_for_target_type("interface")
+        assert flags == []

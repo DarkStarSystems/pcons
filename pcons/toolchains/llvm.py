@@ -271,6 +271,30 @@ class LlvmToolchain(BaseToolchain):
         """Return filename for a program (no suffix on Unix)."""
         return name
 
+    def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
+        """Return additional compile flags needed for the target type.
+
+        For LLVM/Clang on Linux, shared libraries need -fPIC.
+        On macOS, PIC is the default for 64-bit, so no flag is needed.
+
+        Args:
+            target_type: The target type (e.g., "shared_library", "static_library").
+
+        Returns:
+            List of additional compile flags.
+        """
+        platform = get_platform()
+
+        if target_type == "shared_library":
+            # On Linux (and other non-macOS POSIX systems), we need -fPIC
+            # for position-independent code in shared libraries.
+            # On macOS 64-bit, PIC is the default, so no flag needed.
+            if platform.is_linux or (platform.is_posix and not platform.is_macos):
+                return ["-fPIC"]
+
+        # Static libraries, programs, and other types don't need special flags
+        return []
+
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
         if not isinstance(config, Configure):

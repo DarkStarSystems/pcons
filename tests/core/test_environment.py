@@ -200,6 +200,60 @@ class TestEnvironmentSubst:
         assert result == ["gcc", "-Isrc", "-Iinclude"]
 
 
+class TestEnvironmentOverride:
+    """Tests for env.override() context manager."""
+
+    def test_override_simple_var(self):
+        """Override a simple variable."""
+        env = Environment()
+        env.variant = "release"
+
+        with env.override(variant="debug") as temp_env:
+            assert temp_env.variant == "debug"
+            assert env.variant == "release"  # Original unchanged
+
+        assert env.variant == "release"
+
+    def test_override_tool_setting(self):
+        """Override tool settings using double-underscore notation."""
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.flags = ["-Wall"]
+
+        with env.override(cc__flags=["-Wall", "-Werror"]) as temp_env:
+            assert temp_env.cc.flags == ["-Wall", "-Werror"]
+            assert env.cc.flags == ["-Wall"]  # Original unchanged
+
+    def test_override_add_define(self):
+        """Common use case: add a specific define for some files."""
+        env = Environment()
+        env.add_tool("cxx")
+        env.cxx.defines = ["RELEASE"]
+
+        with env.override(cxx__defines=["RELEASE", "SPECIAL_BUILD"]) as temp_env:
+            assert "SPECIAL_BUILD" in temp_env.cxx.defines
+            assert "SPECIAL_BUILD" not in env.cxx.defines
+
+    def test_override_multiple_settings(self):
+        """Override multiple settings at once."""
+        env = Environment()
+        env.variant = "release"
+        env.add_tool("cc")
+        env.cc.cmd = "gcc"
+
+        with env.override(variant="debug", cc__cmd="clang") as temp_env:
+            assert temp_env.variant == "debug"
+            assert temp_env.cc.cmd == "clang"
+
+    def test_override_returns_clone(self):
+        """Override returns a cloned environment, not the original."""
+        env = Environment()
+        env.variant = "release"
+
+        with env.override(variant="debug") as temp_env:
+            assert temp_env is not env
+
+
 class TestEnvironmentRepr:
     def test_repr(self):
         env = Environment()
