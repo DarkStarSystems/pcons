@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
+    from pcons.tools.toolchain import SourceHandler
 
 
 class GccCCompiler(BaseTool):
@@ -70,6 +71,8 @@ class GccCCompiler(BaseTool):
                 target_suffixes=[platform.object_suffix],
                 language="c",
                 single_source=True,
+                depfile="$out.d",
+                deps_style="gcc",
             ),
         }
 
@@ -138,6 +141,8 @@ class GccCxxCompiler(BaseTool):
                 target_suffixes=[platform.object_suffix],
                 language="cxx",
                 single_source=True,
+                depfile="$out.d",
+                deps_style="gcc",
             ),
         }
 
@@ -296,6 +301,48 @@ class GccToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("gcc")
+
+    # =========================================================================
+    # Source Handler Methods
+    # =========================================================================
+
+    def get_source_handler(self, suffix: str) -> "SourceHandler | None":
+        """Return handler for source file suffix, or None if not handled."""
+        from pcons.tools.toolchain import SourceHandler
+
+        suffix_lower = suffix.lower()
+        if suffix_lower == ".c":
+            return SourceHandler("cc", "c", ".o", "$out.d", "gcc")
+        if suffix_lower in (".cpp", ".cxx", ".cc", ".c++"):
+            return SourceHandler("cxx", "cxx", ".o", "$out.d", "gcc")
+        # Handle case-sensitive .C (C++ on Unix)
+        if suffix == ".C":
+            return SourceHandler("cxx", "cxx", ".o", "$out.d", "gcc")
+        # Objective-C
+        if suffix_lower == ".m":
+            return SourceHandler("cc", "objc", ".o", "$out.d", "gcc")
+        if suffix_lower == ".mm":
+            return SourceHandler("cxx", "objcxx", ".o", "$out.d", "gcc")
+        return None
+
+    def get_object_suffix(self) -> str:
+        """Return the object file suffix for GCC toolchain."""
+        return ".o"
+
+    def get_static_library_name(self, name: str) -> str:
+        """Return filename for a static library (Unix-style)."""
+        return f"lib{name}.a"
+
+    def get_shared_library_name(self, name: str) -> str:
+        """Return filename for a shared library (platform-aware)."""
+        platform = get_platform()
+        if platform.is_macos:
+            return f"lib{name}.dylib"
+        return f"lib{name}.so"
+
+    def get_program_name(self, name: str) -> str:
+        """Return filename for a program (no suffix on Unix)."""
+        return name
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

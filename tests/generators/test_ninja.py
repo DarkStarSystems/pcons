@@ -156,3 +156,97 @@ class TestNinjaEscaping:
         gen = NinjaGenerator()
         escaped = gen._escape_path(Path("C:/path/file.c"))
         assert escaped == "C$:/path/file.c"
+
+
+class TestNinjaDepsDirectives:
+    def test_gcc_deps_style_emits_depfile_and_deps(self, tmp_path):
+        project = Project("test", root_dir=tmp_path)
+
+        target = Target("app")
+        output_node = FileNode("build/app.o")
+        source_node = FileNode("src/main.c")
+        output_node._build_info = {
+            "tool": "cc",
+            "command_var": "objcmd",
+            "language": "c",
+            "sources": [source_node],
+            "depfile": "$out.d",
+            "deps_style": "gcc",
+        }
+        output_node.builder = CommandBuilder(
+            "Object", "cc", "objcmd",
+            src_suffixes=[".c"], target_suffixes=[".o"],
+            depfile="$out.d", deps_style="gcc"
+        )
+
+        target.nodes.append(output_node)
+        project.add_target(target)
+
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+        assert "depfile = $out.d" in content
+        assert "deps = gcc" in content
+
+    def test_msvc_deps_style_emits_deps_msvc(self, tmp_path):
+        project = Project("test", root_dir=tmp_path)
+
+        target = Target("app")
+        output_node = FileNode("build/app.obj")
+        source_node = FileNode("src/main.c")
+        output_node._build_info = {
+            "tool": "cc",
+            "command_var": "objcmd",
+            "language": "c",
+            "sources": [source_node],
+            "depfile": None,
+            "deps_style": "msvc",
+        }
+        output_node.builder = CommandBuilder(
+            "Object", "cc", "objcmd",
+            src_suffixes=[".c"], target_suffixes=[".obj"],
+            deps_style="msvc"
+        )
+
+        target.nodes.append(output_node)
+        project.add_target(target)
+
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+        assert "deps = msvc" in content
+        # MSVC doesn't use depfile
+        assert "depfile" not in content
+
+    def test_no_deps_style_emits_no_deps_directive(self, tmp_path):
+        project = Project("test", root_dir=tmp_path)
+
+        target = Target("app")
+        output_node = FileNode("build/app")
+        source_node = FileNode("build/main.o")
+        output_node._build_info = {
+            "tool": "link",
+            "command_var": "progcmd",
+            "language": None,
+            "sources": [source_node],
+            "depfile": None,
+            "deps_style": None,
+        }
+        output_node.builder = CommandBuilder(
+            "Program", "link", "progcmd",
+            src_suffixes=[".o"], target_suffixes=[""]
+        )
+
+        target.nodes.append(output_node)
+        project.add_target(target)
+
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+        # Should not have any deps directives for linker
+        assert "deps = gcc" not in content
+        assert "deps = msvc" not in content
+        assert "depfile" not in content

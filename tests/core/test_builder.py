@@ -216,3 +216,73 @@ class TestCommandBuilder:
         assert info["tool"] == "cc"
         assert info["command_var"] == "cmdline"
         assert info["language"] == "c"
+
+
+class TestCommandBuilderDepfile:
+    def test_depfile_and_deps_style_stored(self):
+        builder = CommandBuilder(
+            "Object",
+            "cc",
+            "cmdline",
+            src_suffixes=[".c"],
+            target_suffixes=[".o"],
+            language="c",
+            single_source=True,
+            depfile="$out.d",
+            deps_style="gcc",
+        )
+
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.cmd = "gcc"
+
+        result = builder(env, "foo.o", ["foo.c"])
+        target = result[0]
+
+        info = target._build_info
+        assert info["depfile"] == "$out.d"
+        assert info["deps_style"] == "gcc"
+
+    def test_msvc_deps_style_no_depfile(self):
+        builder = CommandBuilder(
+            "Object",
+            "cc",
+            "cmdline",
+            src_suffixes=[".c"],
+            target_suffixes=[".obj"],
+            language="c",
+            single_source=True,
+            deps_style="msvc",
+        )
+
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.cmd = "cl.exe"
+
+        result = builder(env, "foo.obj", ["foo.c"])
+        target = result[0]
+
+        info = target._build_info
+        assert info["depfile"] is None
+        assert info["deps_style"] == "msvc"
+
+    def test_no_deps_by_default(self):
+        builder = CommandBuilder(
+            "Program",
+            "link",
+            "cmdline",
+            src_suffixes=[".o"],
+            target_suffixes=[""],
+            single_source=False,
+        )
+
+        env = Environment()
+        env.add_tool("link")
+        env.link.cmd = "gcc"
+
+        result = builder(env, "app", ["a.o", "b.o"])
+        target = result[0]
+
+        info = target._build_info
+        assert info["depfile"] is None
+        assert info["deps_style"] is None

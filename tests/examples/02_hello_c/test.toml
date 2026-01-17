@@ -4,8 +4,9 @@
 description = "Demonstrates compiling a simple C program with GCC"
 
 # Files that should exist after the build
+# Object files are in obj.<target>/ subdirectories
 expected_outputs = [
-    "build/hello.o",
+    "build/obj.hello/hello.o",
     "build/hello",
 ]
 

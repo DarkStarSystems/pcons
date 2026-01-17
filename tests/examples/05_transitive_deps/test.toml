@@ -1,0 +1,25 @@
+# Test configuration for the transitive dependencies example
+
+[test]
+description = "Demonstrates transitive include directory propagation"
+
+# Files that should exist after the build
+# Object files are in obj.<target>/ subdirectories
+expected_outputs = [
+    "build/obj.simulator/math_lib.o",
+    "build/obj.simulator/physics_lib.o",
+    "build/obj.simulator/main.o",
+    "build/simulator",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/simulator", expect_stdout = "Mass: 10 kg" },
+    { run = "./build/simulator", expect_stdout = "Kinetic Energy:" },
+    { run = "./build/simulator", expect_stdout = "Momentum:" },
+]
+
+[skip]
+platforms = ["windows"]
+requires = ["gcc"]

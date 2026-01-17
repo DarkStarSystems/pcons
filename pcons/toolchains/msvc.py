@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
+    from pcons.tools.toolchain import SourceHandler
 
 
 def _find_vswhere() -> Path | None:
@@ -57,11 +58,13 @@ class MsvcCompiler(BaseTool):
             "includes": [],
             "dprefix": "/D",
             "defines": [],
+            "depflags": ["/showIncludes"],
             "objcmd": [
                 "$cc.cmd",
                 "$cc.flags",
                 "${prefix(cc.iprefix, cc.includes)}",
                 "${prefix(cc.dprefix, cc.defines)}",
+                "$cc.depflags",
                 "/c", "/Fo$$out", "$$in",
             ],
         }
@@ -74,6 +77,7 @@ class MsvcCompiler(BaseTool):
                 target_suffixes=[".obj"],
                 language=self._language,
                 single_source=True,
+                deps_style="msvc",
             ),
         }
 
@@ -209,6 +213,37 @@ class MsvcToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("msvc")
+
+    # =========================================================================
+    # Source Handler Methods
+    # =========================================================================
+
+    def get_source_handler(self, suffix: str) -> "SourceHandler | None":
+        """Return handler for source file suffix, or None if not handled."""
+        from pcons.tools.toolchain import SourceHandler
+
+        suffix_lower = suffix.lower()
+        if suffix_lower == ".c":
+            return SourceHandler("cc", "c", ".obj", None, "msvc")
+        if suffix_lower in (".cpp", ".cxx", ".cc"):
+            return SourceHandler("cxx", "cxx", ".obj", None, "msvc")
+        return None
+
+    def get_object_suffix(self) -> str:
+        """Return the object file suffix for MSVC toolchain."""
+        return ".obj"
+
+    def get_static_library_name(self, name: str) -> str:
+        """Return filename for a static library (Windows-style)."""
+        return f"{name}.lib"
+
+    def get_shared_library_name(self, name: str) -> str:
+        """Return filename for a shared library (DLL)."""
+        return f"{name}.dll"
+
+    def get_program_name(self, name: str) -> str:
+        """Return filename for a program (with .exe suffix)."""
+        return f"{name}.exe"
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

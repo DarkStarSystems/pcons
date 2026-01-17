@@ -188,6 +188,8 @@ class CythonCCompiler(BaseTool):
                 target_suffixes=[platform.object_suffix],
                 language="c",
                 single_source=True,
+                depfile="$out.d",
+                deps_style="gcc",
             ),
         }
 

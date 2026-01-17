@@ -9,11 +9,39 @@ from __future__ import annotations
 
 import shutil
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.tools.tool import BaseTool, Tool
+
+
+# =============================================================================
+# Source Handler - describes how a toolchain handles a source file type
+# =============================================================================
+
+
+@dataclass
+class SourceHandler:
+    """Describes how a toolchain handles a source file type.
+
+    This allows toolchains to define what source file types they can process
+    without hardcoding this information in the resolver.
+
+    Attributes:
+        tool_name: Name of the tool to use (e.g., "cc", "cxx", "latex").
+        language: Language of the source (e.g., "c", "cxx", "latex").
+        object_suffix: Suffix for compiled objects (e.g., ".o", ".obj", ".aux").
+        depfile: Dependency file template (e.g., "$out.d") or None.
+        deps_style: Dependency file style (e.g., "gcc", "msvc") or None.
+    """
+
+    tool_name: str
+    language: str
+    object_suffix: str
+    depfile: str | None = None
+    deps_style: str | None = None
 
 
 # =============================================================================
@@ -370,6 +398,77 @@ class BaseToolchain(ABC):
             return "cuda"
         else:
             return "link"
+
+    # =========================================================================
+    # Source Handler Methods - Override in subclasses for tool-agnosticism
+    # =========================================================================
+
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
+        """Return handler for source file suffix, or None if not handled.
+
+        Override in subclasses to define what sources this toolchain handles.
+        This allows the resolver to be tool-agnostic - it queries the toolchain
+        instead of having hardcoded knowledge about file types.
+
+        Args:
+            suffix: File suffix including dot (e.g., ".c", ".cpp", ".tex").
+
+        Returns:
+            SourceHandler describing how to compile, or None if not handled.
+        """
+        return None
+
+    def get_object_suffix(self) -> str:
+        """Return the object file suffix for this toolchain.
+
+        Override in subclasses. Defaults to ".o" for Unix-like systems.
+
+        Returns:
+            Object file suffix (e.g., ".o", ".obj").
+        """
+        return ".o"
+
+    def get_static_library_name(self, name: str) -> str:
+        """Return filename for a static library.
+
+        Override in subclasses for platform-specific naming.
+        Default is Unix-style "lib{name}.a".
+
+        Args:
+            name: Library base name.
+
+        Returns:
+            Full library filename (e.g., "libfoo.a").
+        """
+        return f"lib{name}.a"
+
+    def get_shared_library_name(self, name: str) -> str:
+        """Return filename for a shared library.
+
+        Override in subclasses for platform-specific naming.
+        Default is Unix-style "lib{name}.so".
+
+        Args:
+            name: Library base name.
+
+        Returns:
+            Full library filename (e.g., "libfoo.so", "libfoo.dylib").
+        """
+        return f"lib{name}.so"
+
+    def get_program_name(self, name: str) -> str:
+        """Return filename for a program.
+
+        Override in subclasses for platform-specific naming.
+        Default has no suffix (Unix-style).
+
+        Args:
+            name: Program base name.
+
+        Returns:
+            Full program filename (e.g., "myapp", "myapp.exe").
+        """
+        return name
 
     def __repr__(self) -> str:
         tools = ", ".join(self._tools.keys())

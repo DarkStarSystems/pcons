@@ -193,10 +193,13 @@ class TestNinjaMultiOutput:
 
         content = (tmp_path / "build.ninja").read_text()
 
-        # Count build statements - should only have one for the primary
+        # Count build statements - should only have one for the actual build
+        # (plus mkdir statements for directories)
         build_lines = [line for line in content.split("\n") if line.startswith("build ")]
+        # Filter out mkdir statements
+        non_mkdir_builds = [line for line in build_lines if ": mkdir" not in line]
         # Should have just one build statement (for the multi-output)
-        assert len(build_lines) == 1
+        assert len(non_mkdir_builds) == 1
 
 
 class TestNinjaSingleOutput:

@@ -9,13 +9,23 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
-    from pcons.core.node import Node
+    from pcons.core.environment import Environment
+    from pcons.core.node import FileNode, Node
+
+# Valid target types
+TargetType = Literal[
+    "static_library",
+    "shared_library",
+    "program",
+    "interface",  # Header-only library
+    "object",  # Object files only (no linking)
+]
 
 
 @dataclass
@@ -94,6 +104,11 @@ class Target:
         private: Usage requirements for this target only.
         required_languages: Languages needed to build/link this target.
         defined_at: Where this target was created in user code.
+        target_type: Type of target (static_library, shared_library, program, interface).
+        _env: Reference to the Environment used for building.
+        object_nodes: Compiled object nodes (populated by resolver).
+        output_nodes: Final output nodes (library/program, populated by resolver).
+        _resolved: Whether resolve() has been called on this target.
     """
 
     __slots__ = (
@@ -107,12 +122,19 @@ class Target:
         "required_languages",
         "defined_at",
         "_collected_requirements",
+        # NEW for target-centric build model:
+        "target_type",
+        "_env",
+        "object_nodes",
+        "output_nodes",
+        "_resolved",
     )
 
     def __init__(
         self,
         name: str,
         *,
+        target_type: TargetType | None = None,
         builder: Builder | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
@@ -120,6 +142,7 @@ class Target:
 
         Args:
             name: Target name (e.g., "mylib", "myapp").
+            target_type: Type of target (static_library, shared_library, program, interface).
             builder: Builder to use for this target.
             defined_at: Source location where target was created.
         """
@@ -133,6 +156,12 @@ class Target:
         self.required_languages: set[str] = set()
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
+        # NEW for target-centric build model:
+        self.target_type: TargetType | None = target_type
+        self._env: Environment | None = None
+        self.object_nodes: list[FileNode] = []
+        self.output_nodes: list[FileNode] = []
+        self._resolved: bool = False
 
     def link(self, *targets: Target) -> None:
         """Add targets as dependencies.
@@ -212,6 +241,28 @@ class Target:
                 languages.update(dep.get_all_languages())
 
         return languages
+
+    def transitive_dependencies(self) -> list[Target]:
+        """Return all dependencies transitively (DFS, no duplicates).
+
+        Returns dependencies in the order they are discovered via DFS,
+        which means dependencies are listed before their dependents.
+
+        Returns:
+            List of all transitive dependencies (not including self).
+        """
+        result: list[Target] = []
+        visited: set[str] = set()
+
+        def _collect(target: Target) -> None:
+            for dep in target.dependencies:
+                if dep.name not in visited:
+                    visited.add(dep.name)
+                    _collect(dep)
+                    result.append(dep)
+
+        _collect(self)
+        return result
 
     def __repr__(self) -> str:
         deps = ", ".join(d.name for d in self.dependencies)

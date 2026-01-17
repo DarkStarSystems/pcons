@@ -89,13 +89,28 @@ class NinjaGenerator(BaseGenerator):
         """
         f.write("# Rules\n")
 
+        # Add a rule to create directories (needed for order-only deps)
+        f.write("rule mkdir\n")
+        f.write("  command = mkdir -p $out\n")
+        f.write("  description = MKDIR $out\n")
+        f.write("\n")
+
         # Collect all unique rules from targets
         for target in project.targets:
-            for node in target.nodes:
-                if isinstance(node, FileNode) and node.builder is not None:
-                    # Find environment for this target
-                    env = self._find_env_for_node(node, project)
+            # For resolved targets, use object_nodes and output_nodes
+            if getattr(target, "_resolved", False):
+                env = target._env
+                for node in target.object_nodes:
                     self._ensure_rule(f, node, target, env)
+                for node in target.output_nodes:
+                    self._ensure_rule(f, node, target, env)
+            else:
+                # Legacy path
+                for node in target.nodes:
+                    if isinstance(node, FileNode) and node.builder is not None:
+                        # Find environment for this target
+                        env = self._find_env_for_node(node, project)
+                        self._ensure_rule(f, node, target, env)
 
         # Also check nodes tracked in environments
         for env in project.environments:
@@ -115,7 +130,12 @@ class NinjaGenerator(BaseGenerator):
     def _ensure_rule(
         self, f: TextIO, node: FileNode, target: Target | None, env: Environment | None = None
     ) -> str:
-        """Ensure a rule exists for this node's builder, return rule name."""
+        """Ensure a rule exists for this node's builder, return rule name.
+
+        For target-centric builds, the rule command may include placeholders
+        for effective requirements ($includes, $defines, $extra_flags, etc.)
+        that are filled in via per-build variables.
+        """
         build_info = getattr(node, "_build_info", None)
         if build_info is None:
             return "phony"
@@ -124,8 +144,15 @@ class NinjaGenerator(BaseGenerator):
         tool_name = build_info.get("tool", "unknown")
         command_var = build_info.get("command_var", "cmdline")
 
-        # Create a unique key for this rule based on tool and command var
+        # Check if this is a target-centric build (has effective requirements)
+        has_effective_reqs = any(
+            k.startswith("effective_") for k in build_info.keys()
+        )
+
+        # Create a unique key for this rule based on tool, command var, and mode
         rule_key = f"{tool_name}_{command_var}"
+        if has_effective_reqs:
+            rule_key += "_effective"
 
         if rule_key not in self._rules:
             rule_name = rule_key
@@ -145,14 +172,27 @@ class NinjaGenerator(BaseGenerator):
                         # in the toolchain defaults, and become $in, $out after subst
                         command = env.subst(cmd_template, shell="ninja")
 
+                        # For target-centric builds, append effective requirement
+                        # placeholders that will be filled per-build
+                        if has_effective_reqs:
+                            command = self._augment_command_with_effective_vars(
+                                command, command_var
+                            )
+
             # Write the rule
             f.write(f"rule {rule_name}\n")
             f.write(f"  command = {command}\n")
             f.write(f"  description = {description}\n")
 
-            # Add depfile support if this looks like a compiler
-            if tool_name in ("cc", "cxx", "cycc"):
-                f.write("  depfile = $out.d\n")
+            # Add depfile support based on builder configuration
+            depfile = build_info.get("depfile")
+            deps_style = build_info.get("deps_style")
+
+            if deps_style == "msvc":
+                f.write("  deps = msvc\n")
+            elif deps_style == "gcc":
+                if depfile:
+                    f.write(f"  depfile = {depfile}\n")
                 f.write("  deps = gcc\n")
 
             f.write("\n")
@@ -160,11 +200,52 @@ class NinjaGenerator(BaseGenerator):
 
         return self._rules[rule_key]
 
+    def _augment_command_with_effective_vars(
+        self, command: str, command_var: str
+    ) -> str:
+        """Augment a command with effective requirement variables.
+
+        Adds placeholders like $includes, $defines, $extra_flags that will
+        be filled in per-build based on the target's effective requirements.
+
+        Args:
+            command: The base command template.
+            command_var: The command variable name (objcmd, linkcmd, etc.)
+
+        Returns:
+            Command with effective requirement placeholders added.
+        """
+        # For compilation commands (objcmd), add includes, defines, extra_flags
+        if command_var == "objcmd":
+            # Insert before the output flag (usually -o or -c)
+            # We'll append them before the source file
+            # Format: cmd $flags $includes $defines $extra_flags -c $in -o $out
+            if "$in" in command:
+                command = command.replace(
+                    "$in",
+                    "$includes $defines $extra_flags $in"
+                )
+        # For link commands (linkcmd, sharedcmd), add ldflags, libdirs, libs
+        elif command_var in ("linkcmd", "sharedcmd"):
+            # Append link flags at the end
+            if "$out" in command:
+                # Add after the sources/objects
+                command = command.rstrip()
+                if not command.endswith("$libs"):
+                    command += " $ldflags $libdirs $libs"
+        # For archive commands (archivecmd), no changes needed
+
+        return command
+
     def _write_builds(self, f: TextIO, project: Project) -> None:
         """Write build statements for all targets."""
         f.write("# Build statements\n")
 
         written_nodes: set[Path] = set()
+        written_dirs: set[Path] = set()
+
+        # Collect and write directory build statements first
+        self._collect_and_write_directories(f, project, written_dirs)
 
         for target in project.targets:
             self._write_target_builds(f, target, project, written_nodes)
@@ -179,15 +260,73 @@ class NinjaGenerator(BaseGenerator):
 
         f.write("\n")
 
+    def _collect_and_write_directories(
+        self, f: TextIO, project: Project, written_dirs: set[Path]
+    ) -> None:
+        """Collect all output directories and write mkdir build statements."""
+        directories: set[Path] = set()
+
+        # Collect directories from resolved targets
+        for target in project.targets:
+            if getattr(target, "_resolved", False):
+                for node in target.object_nodes:
+                    if isinstance(node, FileNode):
+                        parent = node.path.parent
+                        if parent != Path(".") and parent != Path(""):
+                            directories.add(parent)
+                for node in target.output_nodes:
+                    if isinstance(node, FileNode):
+                        parent = node.path.parent
+                        if parent != Path(".") and parent != Path(""):
+                            directories.add(parent)
+            else:
+                for node in target.nodes:
+                    if isinstance(node, FileNode):
+                        parent = node.path.parent
+                        if parent != Path(".") and parent != Path(""):
+                            directories.add(parent)
+
+        # Collect directories from environment-tracked nodes
+        for env in project.environments:
+            for node in getattr(env, "_created_nodes", []):
+                if isinstance(node, FileNode):
+                    parent = node.path.parent
+                    if parent != Path(".") and parent != Path(""):
+                        directories.add(parent)
+
+        # Write mkdir statements for each directory
+        for directory in sorted(directories):
+            if directory not in written_dirs:
+                f.write(f"build {self._escape_path(directory)}: mkdir\n")
+                written_dirs.add(directory)
+
     def _write_target_builds(
         self, f: TextIO, target: Target, project: Project, written_nodes: set[Path]
     ) -> None:
-        """Write build statements for a single target."""
-        for node in target.nodes:
-            if isinstance(node, FileNode) and node.builder is not None:
+        """Write build statements for a single target.
+
+        For resolved targets (target._resolved is True), writes builds for
+        object_nodes and output_nodes. For legacy targets, uses target.nodes.
+        """
+        # Check if this is a resolved target (target-centric model)
+        if getattr(target, "_resolved", False):
+            # Write object file builds
+            for node in target.object_nodes:
                 if node.path not in written_nodes:
                     self._write_build_statement(f, node, target, project)
                     written_nodes.add(node.path)
+            # Write output file builds (library/program)
+            for node in target.output_nodes:
+                if node.path not in written_nodes:
+                    self._write_build_statement(f, node, target, project)
+                    written_nodes.add(node.path)
+        else:
+            # Legacy path: use target.nodes directly
+            for node in target.nodes:
+                if isinstance(node, FileNode) and node.builder is not None:
+                    if node.path not in written_nodes:
+                        self._write_build_statement(f, node, target, project)
+                        written_nodes.add(node.path)
 
     def _write_build_statement(
         self, f: TextIO, node: FileNode, target: Target | None, project: Project | None = None
@@ -209,7 +348,14 @@ class NinjaGenerator(BaseGenerator):
         command_var = build_info.get("command_var", "cmdline")
         sources: list[Node] = build_info.get("sources", [])
 
+        # Check if this is a target-centric build (has effective requirements)
+        has_effective_reqs = any(
+            k.startswith("effective_") for k in build_info.keys()
+        )
+
         rule_name = f"{tool_name}_{command_var}"
+        if has_effective_reqs:
+            rule_name += "_effective"
 
         # Handle multi-output builds
         outputs_info = build_info.get("outputs")
@@ -218,7 +364,7 @@ class NinjaGenerator(BaseGenerator):
             explicit_outputs: list[str] = []
             implicit_outputs: list[str] = []
 
-            for name, info in outputs_info.items():
+            for _name, info in outputs_info.items():
                 path = self._escape_path(info["path"])
                 if info.get("implicit", False):
                     implicit_outputs.append(path)
@@ -282,6 +428,7 @@ class NinjaGenerator(BaseGenerator):
         """Write variables for a build statement.
 
         For multi-output builds, also writes out_<name> variables for each output.
+        For target-centric builds, writes effective_* variables from build_info.
         """
         sources: list[Node] = build_info.get("sources", [])  # type: ignore[assignment]
 
@@ -307,6 +454,39 @@ class NinjaGenerator(BaseGenerator):
                 # Write out_<name> variable for each output
                 f.write(f"  out_{name} = {info['path']}\n")
 
+        # Write effective requirements from target-centric build model
+        # These are used to generate the actual compilation/link flags
+        effective_includes = build_info.get("effective_includes")
+        if effective_includes:
+            include_flags = " ".join(f"-I{inc}" for inc in effective_includes)
+            f.write(f"  includes = {include_flags}\n")
+
+        effective_defines = build_info.get("effective_defines")
+        if effective_defines:
+            define_flags = " ".join(f"-D{d}" for d in effective_defines)
+            f.write(f"  defines = {define_flags}\n")
+
+        effective_flags = build_info.get("effective_flags")
+        if effective_flags:
+            flags_str = " ".join(effective_flags)
+            f.write(f"  extra_flags = {flags_str}\n")
+
+        # Link-time effective requirements
+        effective_link_flags = build_info.get("effective_link_flags")
+        if effective_link_flags:
+            link_flags_str = " ".join(effective_link_flags)
+            f.write(f"  ldflags = {link_flags_str}\n")
+
+        effective_link_libs = build_info.get("effective_link_libs")
+        if effective_link_libs:
+            libs_str = " ".join(f"-l{lib}" for lib in effective_link_libs)
+            f.write(f"  libs = {libs_str}\n")
+
+        effective_link_dirs = build_info.get("effective_link_dirs")
+        if effective_link_dirs:
+            link_dirs_str = " ".join(f"-L{d}" for d in effective_link_dirs)
+            f.write(f"  libdirs = {link_dirs_str}\n")
+
     def _write_aliases(self, f: TextIO, project: Project) -> None:
         """Write phony rules for aliases."""
         if not project.aliases:
@@ -330,20 +510,37 @@ class NinjaGenerator(BaseGenerator):
 
         # Add nodes from default targets
         for target in project.default_targets:
-            for node in target.nodes:
-                if isinstance(node, FileNode):
-                    defaults.append(self._escape_path(node.path))
+            # For resolved targets, use output_nodes
+            if getattr(target, "_resolved", False):
+                for node in target.output_nodes:
+                    if isinstance(node, FileNode):
+                        defaults.append(self._escape_path(node.path))
+            else:
+                for node in target.nodes:
+                    if isinstance(node, FileNode):
+                        defaults.append(self._escape_path(node.path))
 
-        # If no default targets, use all program/library outputs from environments
+        # If no default targets, auto-detect "final" outputs
         if not defaults:
-            for env in project.environments:
-                for node in getattr(env, "_created_nodes", []):
-                    if isinstance(node, FileNode) and node.builder is not None:
-                        # Check if this is a "final" output (Program, SharedLibrary)
-                        build_info = getattr(node, "_build_info", {})
-                        tool = build_info.get("tool", "")
-                        if tool == "link":
-                            defaults.append(self._escape_path(node.path))
+            # First, try resolved targets with output nodes
+            for target in project.targets:
+                if getattr(target, "_resolved", False):
+                    # Check if this is a "final" target (program or library)
+                    if target.target_type in ("program", "shared_library", "static_library"):
+                        for node in target.output_nodes:
+                            if isinstance(node, FileNode):
+                                defaults.append(self._escape_path(node.path))
+
+            # If still no defaults, use legacy path
+            if not defaults:
+                for env in project.environments:
+                    for node in getattr(env, "_created_nodes", []):
+                        if isinstance(node, FileNode) and node.builder is not None:
+                            # Check if this is a "final" output (Program, SharedLibrary)
+                            build_info = getattr(node, "_build_info", {})
+                            tool = build_info.get("tool", "")
+                            if tool == "link":
+                                defaults.append(self._escape_path(node.path))
 
         if defaults:
             f.write(f"default {' '.join(defaults)}\n")

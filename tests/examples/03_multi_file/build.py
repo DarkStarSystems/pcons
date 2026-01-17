@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Build script for a multi-file C project.
 
-This example demonstrates:
-- Compiling multiple source files
-- Using include directories
-- Linking multiple object files into an executable
+This example demonstrates the target-centric build API:
+- Compiling multiple source files into a single program
+- Using include directories via private requirements
+- Automatic resolution of sources to objects
 """
 
 from pathlib import Path
@@ -31,18 +31,17 @@ toolchain = find_c_toolchain()
 project = Project("multi_file", build_dir=build_dir)
 env = project.Environment(toolchain=toolchain)
 
-# Configure compiler flags and include directories
-env.cc.flags = ["-Wall", "-Wextra"]
-# Include paths without -I prefix (the prefix is in env.cc.iprefix)
-env.cc.includes = [str(include_dir)]
+# Create calculator program target using target-centric API
+calculator = project.Program("calculator", env)
+calculator.sources = [
+    project.node(src_dir / "math_ops.c"),
+    project.node(src_dir / "main.c"),
+]
+calculator.private.include_dirs.append(include_dir)
+calculator.private.compile_flags.extend(["-Wall", "-Wextra"])
 
-# Compile source files
-objs = []
-objs += env.cc.Object(build_dir / "math_ops.o", src_dir / "math_ops.c")
-objs += env.cc.Object(build_dir / "main.o", src_dir / "main.c")
-
-# Link into executable
-env.link.Program(build_dir / "calculator", objs)
+# Resolve targets (computes effective requirements, creates nodes)
+project.resolve()
 
 # Generate ninja build file
 generator = NinjaGenerator()

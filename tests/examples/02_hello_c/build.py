@@ -2,10 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Build script for a simple C program.
 
-This example demonstrates:
+This example demonstrates the target-centric build API:
 - Using find_c_toolchain() to automatically select a compiler
-- Compiling a C source file to an object file
-- Linking to create an executable
+- Creating a Program target with sources
+- Using private requirements for compile flags
+- Automatic resolution and generation
 """
 
 from pathlib import Path
@@ -30,14 +31,13 @@ toolchain = find_c_toolchain()
 project = Project("hello_c", build_dir=build_dir)
 env = project.Environment(toolchain=toolchain)
 
-# Add warning flags
-env.cc.flags = ["-Wall", "-Wextra"]
+# Create program target using the target-centric API
+hello = project.Program("hello", env)
+hello.sources = [project.node(src_dir / "hello.c")]
+hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
-# Compile: hello.c -> hello.o
-obj = env.cc.Object(build_dir / "hello.o", src_dir / "hello.c")
-
-# Link: hello.o -> hello (executable)
-env.link.Program(build_dir / "hello", obj)
+# Resolve targets (computes effective requirements, creates nodes)
+project.resolve()
 
 # Generate ninja build file
 generator = NinjaGenerator()

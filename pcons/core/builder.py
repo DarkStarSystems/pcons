@@ -314,6 +314,8 @@ class CommandBuilder(BaseBuilder):
         target_suffixes: list[str] | None = None,
         language: str | None = None,
         single_source: bool = False,
+        depfile: str | None = None,
+        deps_style: str | None = None,
     ) -> None:
         """Initialize a command builder.
 
@@ -327,6 +329,8 @@ class CommandBuilder(BaseBuilder):
             language: Language for linker selection.
             single_source: If True, create one target per source.
                           If False, all sources go to one target.
+            depfile: Depfile path pattern for Ninja (e.g., "$out.d").
+            deps_style: Dependency style for Ninja ("gcc" or "msvc").
         """
         super().__init__(
             name,
@@ -337,6 +341,8 @@ class CommandBuilder(BaseBuilder):
         )
         self._command_var = command_var
         self._single_source = single_source
+        self._depfile = depfile
+        self._deps_style = deps_style
 
     def _build(
         self,
@@ -390,6 +396,8 @@ class CommandBuilder(BaseBuilder):
             "command_var": self._command_var,
             "language": self._language,
             "sources": sources,
+            "depfile": self._depfile,
+            "deps_style": self._deps_style,
         }
 
         return node
@@ -425,6 +433,8 @@ class MultiOutputBuilder(CommandBuilder):
         src_suffixes: list[str] | None = None,
         language: str | None = None,
         single_source: bool = False,
+        depfile: str | None = None,
+        deps_style: str | None = None,
     ) -> None:
         """Initialize a multi-output builder.
 
@@ -436,6 +446,8 @@ class MultiOutputBuilder(CommandBuilder):
             src_suffixes: Accepted input suffixes.
             language: Language for linker selection.
             single_source: If True, create one target per source.
+            depfile: Depfile path pattern for Ninja (e.g., "$out.d").
+            deps_style: Dependency style for Ninja ("gcc" or "msvc").
         """
         # Primary output determines target_suffixes
         primary = outputs[0]
@@ -447,6 +459,8 @@ class MultiOutputBuilder(CommandBuilder):
             target_suffixes=[primary.suffix],
             language=language,
             single_source=single_source,
+            depfile=depfile,
+            deps_style=deps_style,
         )
         self._outputs = outputs
 
@@ -541,6 +555,8 @@ class MultiOutputBuilder(CommandBuilder):
             "sources": sources,
             "outputs": output_info,
             "all_output_nodes": nodes,
+            "depfile": self._depfile,
+            "deps_style": self._deps_style,
         }
 
         # Secondary nodes reference the primary for build info

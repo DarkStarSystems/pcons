@@ -307,6 +307,168 @@ class Project:
         """
         return topological_sort_targets(list(self._targets.values()))
 
+    def resolve(self) -> None:
+        """Resolve all targets.
+
+        This processes all targets in dependency order, computing effective
+        requirements and creating the necessary nodes for compilation and linking.
+
+        After resolution, each target's object_nodes and output_nodes are populated.
+        """
+        from pcons.core.resolver import Resolver
+
+        resolver = Resolver(self)
+        resolver.resolve()
+
+    # Target factory methods for the target-centric build model
+
+    def StaticLibrary(
+        self,
+        name: str,
+        env: Env,
+        sources: list[str | Path | Node] | None = None,
+    ) -> Target:
+        """Create a static library target.
+
+        Args:
+            name: Target name (e.g., "mylib").
+            env: Environment to use for building.
+            sources: Source files for the library.
+
+        Returns:
+            A new Target configured as a static library.
+        """
+        target = Target(name, target_type="static_library", defined_at=get_caller_location())
+        target._env = env
+        if sources:
+            source_nodes = self._normalize_sources(sources)
+            target.add_sources(source_nodes)
+        self.add_target(target)
+        return target
+
+    def SharedLibrary(
+        self,
+        name: str,
+        env: Env,
+        sources: list[str | Path | Node] | None = None,
+    ) -> Target:
+        """Create a shared library target.
+
+        Args:
+            name: Target name (e.g., "mylib").
+            env: Environment to use for building.
+            sources: Source files for the library.
+
+        Returns:
+            A new Target configured as a shared library.
+        """
+        target = Target(name, target_type="shared_library", defined_at=get_caller_location())
+        target._env = env
+        if sources:
+            source_nodes = self._normalize_sources(sources)
+            target.add_sources(source_nodes)
+        self.add_target(target)
+        return target
+
+    def Program(
+        self,
+        name: str,
+        env: Env,
+        sources: list[str | Path | Node] | None = None,
+    ) -> Target:
+        """Create a program (executable) target.
+
+        Args:
+            name: Target name (e.g., "myapp").
+            env: Environment to use for building.
+            sources: Source files for the program.
+
+        Returns:
+            A new Target configured as a program.
+        """
+        target = Target(name, target_type="program", defined_at=get_caller_location())
+        target._env = env
+        if sources:
+            source_nodes = self._normalize_sources(sources)
+            target.add_sources(source_nodes)
+        self.add_target(target)
+        return target
+
+    def HeaderOnlyLibrary(
+        self,
+        name: str,
+        include_dirs: list[str | Path] | None = None,
+    ) -> Target:
+        """Create a header-only (interface) library target.
+
+        Header-only libraries have no sources to compile but can provide
+        usage requirements (include directories, defines, etc.) to
+        targets that link against them.
+
+        Args:
+            name: Target name (e.g., "my_headers").
+            include_dirs: Include directories to propagate to dependents.
+
+        Returns:
+            A new Target configured as an interface library.
+        """
+        target = Target(name, target_type="interface", defined_at=get_caller_location())
+        if include_dirs:
+            for inc_dir in include_dirs:
+                target.public.include_dirs.append(Path(inc_dir))
+        self.add_target(target)
+        return target
+
+    def ObjectLibrary(
+        self,
+        name: str,
+        env: Env,
+        sources: list[str | Path | Node] | None = None,
+    ) -> Target:
+        """Create an object library target (compiles but doesn't link).
+
+        Object libraries compile their sources to object files but don't
+        produce a final library or executable. Useful for compiling sources
+        that will be used by multiple targets.
+
+        Args:
+            name: Target name.
+            env: Environment to use for building.
+            sources: Source files to compile.
+
+        Returns:
+            A new Target configured as an object library.
+        """
+        target = Target(name, target_type="object", defined_at=get_caller_location())
+        target._env = env
+        if sources:
+            source_nodes = self._normalize_sources(sources)
+            target.add_sources(source_nodes)
+        self.add_target(target)
+        return target
+
+    def _normalize_sources(
+        self,
+        sources: list[str | Path | Node],
+    ) -> list[Node]:
+        """Convert source paths/strings to nodes.
+
+        Uses project's node() for deduplication.
+
+        Args:
+            sources: List of source files (strings, Paths, or Nodes).
+
+        Returns:
+            List of Node objects.
+        """
+        result: list[Node] = []
+        for src in sources:
+            if isinstance(src, Node):
+                result.append(src)
+            else:
+                result.append(self.node(src))
+        return result
+
     def __repr__(self) -> str:
         return (
             f"Project({self.name!r}, "

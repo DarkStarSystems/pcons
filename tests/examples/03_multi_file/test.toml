@@ -4,9 +4,10 @@
 description = "Demonstrates building a multi-file C project with include directories"
 
 # Files that should exist after the build
+# Object files are in obj.<target>/ subdirectories
 expected_outputs = [
-    "build/math_ops.o",
-    "build/main.o",
+    "build/obj.calculator/math_ops.o",
+    "build/obj.calculator/main.o",
     "build/calculator",
 ]
 

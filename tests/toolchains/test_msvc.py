@@ -43,6 +43,32 @@ class TestMsvcCompiler:
         # Output uses $$out which becomes $out for ninja
         assert "/Fo$$out" in objcmd
 
+    def test_depflags(self):
+        cc = MsvcCompiler()
+        vars = cc.default_vars()
+        assert "depflags" in vars
+        assert vars["depflags"] == ["/showIncludes"]
+        # Verify depflags is in objcmd
+        objcmd = vars["objcmd"]
+        assert "$cc.depflags" in objcmd
+
+    def test_builder_has_msvc_deps_style(self):
+        cc = MsvcCompiler()
+        builders = cc.builders()
+        obj_builder = builders["Object"]
+        # Create a mock environment and build a target to check build_info
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.cmd = "cl.exe"
+        env.cc.objcmd = ["cl.exe", "/c", "/Fo$$out", "$$in"]
+        result = obj_builder(env, "test.obj", ["test.c"])
+        assert len(result) == 1
+        target = result[0]
+        assert hasattr(target, "_build_info")
+        assert target._build_info.get("deps_style") == "msvc"
+        # MSVC doesn't use a depfile (uses stdout)
+        assert target._build_info.get("depfile") is None
+
     def test_builders(self):
         cc = MsvcCompiler()
         builders = cc.builders()
