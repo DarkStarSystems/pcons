@@ -1,0 +1,44 @@
+# Test configuration for the multi_library example
+# Tests multi-library builds with dependency graph and compile_commands.json
+
+[test]
+description = "Demonstrates multi-library builds with transitive dependencies"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/build.ninja",
+    "build/compile_commands.json",
+    "build/deps.mmd",
+    "build/build/libmath.a",
+    "build/build/libphysics.a",
+    "build/build/simulator",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    # Run the simulator and verify it produces expected physics output
+    { run = "./build/build/simulator", expect_stdout = "Kinetic energy:" },
+    { run = "./build/build/simulator", expect_stdout = "Final position:" },
+
+    # Verify compile_commands.json has entries for all source files
+    { run = "cat build/compile_commands.json", expect_stdout = "math_utils.c" },
+    { run = "cat build/compile_commands.json", expect_stdout = "physics.c" },
+    { run = "cat build/compile_commands.json", expect_stdout = "main.c" },
+    # Verify includes are present
+    { run = "cat build/compile_commands.json", expect_stdout = "-I" },
+
+    # Verify deps.mmd has the dependency graph
+    { run = "cat build/deps.mmd", expect_stdout = "flowchart" },
+    { run = "cat build/deps.mmd", expect_stdout = "libmath" },
+    { run = "cat build/deps.mmd", expect_stdout = "libphysics" },
+    { run = "cat build/deps.mmd", expect_stdout = "simulator" },
+    # Verify edges exist
+    { run = "cat build/deps.mmd", expect_stdout = "-->" },
+]
+
+[skip]
+# Skip on Windows (needs different paths and possibly MSVC)
+platforms = ["windows"]
+# Requires a C compiler
+requires = ["cc"]
