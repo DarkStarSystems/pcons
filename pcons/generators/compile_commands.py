@@ -73,7 +73,10 @@ class CompileCommandsGenerator(BaseGenerator):
         """Collect compile commands from a target."""
         commands: list[dict[str, Any]] = []
 
-        for node in target.nodes:
+        # Check object_nodes (new target-centric model) and nodes (legacy)
+        nodes_to_check = list(target.object_nodes) + list(target.nodes)
+
+        for node in nodes_to_check:
             if not isinstance(node, FileNode):
                 continue
 
@@ -84,6 +87,11 @@ class CompileCommandsGenerator(BaseGenerator):
             # Only include compilation commands (not linking)
             language = build_info.get("language")
             if language not in self.COMPILE_LANGUAGES:
+                continue
+
+            # Skip link commands (progcmd, sharedcmd, libcmd)
+            command_var = build_info.get("command_var", "")
+            if command_var in ("progcmd", "sharedcmd", "libcmd"):
                 continue
 
             sources: list[Any] = build_info.get("sources", [])
@@ -106,10 +114,9 @@ class CompileCommandsGenerator(BaseGenerator):
         tool_name = build_info.get("tool", "")
         command_var = build_info.get("command_var", "")
 
-        # Get the command - for now use a placeholder
-        # Real implementation will expand from environment
+        # Format the command with effective flags
         command = self._format_command(
-            tool_name, command_var, source, output, project  # type: ignore[arg-type]
+            tool_name, command_var, source, output, project, build_info  # type: ignore[arg-type]
         )
 
         return {
@@ -126,18 +133,35 @@ class CompileCommandsGenerator(BaseGenerator):
         source: FileNode,
         output: FileNode,
         project: Project,
+        build_info: dict[str, object] | None = None,
     ) -> str:
         """Format the command for a source file.
 
-        This is a simplified version - real implementation will
-        expand the full command template from the environment.
+        Includes effective flags from build_info if available.
         """
         # Basic command format
-        # In a real implementation, we'd get this from the environment
         tool_cmd = tool_name
         if tool_name == "cc":
             tool_cmd = "cc"
         elif tool_name == "cxx":
             tool_cmd = "c++"
 
-        return f"{tool_cmd} -c -o {output.path} {source.path}"
+        parts = [tool_cmd, "-c"]
+
+        # Add effective requirements from build_info
+        if build_info:
+            includes = build_info.get("effective_includes", [])
+            for inc in includes:
+                parts.append(f"-I{inc}")
+
+            defines = build_info.get("effective_defines", [])
+            for define in defines:
+                parts.append(f"-D{define}")
+
+            flags = build_info.get("effective_flags", [])
+            for flag in flags:
+                parts.append(str(flag))
+
+        parts.extend(["-o", str(output.path), str(source.path)])
+
+        return " ".join(parts)

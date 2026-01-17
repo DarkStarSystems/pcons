@@ -17,6 +17,7 @@ import os
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator
 from pcons.generators.mermaid import MermaidGenerator
+from pcons.generators.compile_commands import CompileCommandsGenerator
 from pcons.toolchains import find_c_toolchain
 
 # =============================================================================
@@ -66,7 +67,12 @@ ninja_gen.generate(project, build_dir)
 mermaid_gen = MermaidGenerator(direction="LR")
 mermaid_gen.generate(project, build_dir)
 
+# Generate compile_commands.json for IDE integration
+cc_gen = CompileCommandsGenerator()
+cc_gen.generate(project, build_dir)
+
 print(f"Generated {build_dir / 'build.ninja'}")
+print(f"Generated {build_dir / 'compile_commands.json'}")
 print(f"Generated {build_dir / 'deps.mmd'}")
 print()
 print("Dependency graph:")
