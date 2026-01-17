@@ -637,10 +637,18 @@ class Resolver:
         if not sources:
             return
 
+        if len(sources) > 1:
+            from pcons.core.errors import BuilderError
+
+            raise BuilderError(
+                f"InstallAs expects exactly one source, got {len(sources)}. "
+                f"Use Install() for multiple files.",
+                location=target.defined_at,
+            )
+
         platform = get_platform()
         copy_cmd = "copy" if platform.is_windows else "cp"
 
-        # Use the first source
         source_node = sources[0]
 
         # Create destination node

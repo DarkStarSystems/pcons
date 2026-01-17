@@ -563,7 +563,6 @@ wheels = [
 
 [[package]]
 name = "pcons"
-version = "0.1.0.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "tomli-w" },

@@ -8,8 +8,11 @@ serves as the context for build descriptions.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+logger = logging.getLogger(__name__)
 
 from pcons.core.environment import Environment as Env
 from pcons.core.graph import (
@@ -307,7 +310,93 @@ class Project:
         """
         return topological_sort_targets(list(self._targets.values()))
 
-    def resolve(self) -> None:
+    def dump_graph(self, path: Path | str | None = None) -> str:
+        """Dump the dependency graph in Graphviz DOT format.
+
+        Useful for debugging and visualizing the build structure.
+        Call this after resolve() for complete information.
+
+        Args:
+            path: Optional file path to write the DOT file.
+                  If None, just returns the DOT string.
+
+        Returns:
+            The DOT format string.
+
+        Example:
+            project.resolve()
+            project.dump_graph("build/graph.dot")
+            # Then: dot -Tpng build/graph.dot -o build/graph.png
+        """
+        lines = ["digraph pcons {", "  rankdir=LR;", "  node [shape=box];", ""]
+
+        # Add target nodes
+        lines.append("  // Targets")
+        for name, target in self._targets.items():
+            label = f"{name}\\n({target.target_type})"
+            if target.output_nodes:
+                outputs = [n.path.name for n in target.output_nodes[:2]]
+                if len(target.output_nodes) > 2:
+                    outputs.append("...")
+                label += f"\\n→ {', '.join(outputs)}"
+
+            # Color by target type
+            colors = {
+                "static_library": "lightblue",
+                "shared_library": "lightgreen",
+                "program": "lightyellow",
+                "interface": "lightgray",
+                "object": "white",
+            }
+            color = colors.get(target.target_type, "white")
+            lines.append(f'  "{name}" [label="{label}", fillcolor={color}, style=filled];')
+
+        lines.append("")
+
+        # Add dependency edges
+        lines.append("  // Dependencies")
+        for name, target in self._targets.items():
+            for dep in target.link_deps:
+                if isinstance(dep, Target):
+                    lines.append(f'  "{dep.name}" -> "{name}";')
+                elif hasattr(dep, "name"):
+                    lines.append(f'  "{dep.name}" -> "{name}";')
+
+        lines.append("}")
+
+        dot_str = "\n".join(lines)
+
+        if path:
+            path = Path(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(dot_str)
+            logger.info("Wrote dependency graph to %s", path)
+
+        return dot_str
+
+    def print_targets(self) -> None:
+        """Print a human-readable summary of all targets.
+
+        Useful for debugging. Shows target names, types, and dependencies.
+        """
+        print(f"Project: {self.name}")
+        print(f"Build dir: {self.build_dir}")
+        print(f"Targets ({len(self._targets)}):")
+
+        for name, target in sorted(self._targets.items()):
+            print(f"  {name} ({target.target_type})")
+            if target.sources:
+                print(f"    sources: {len(target.sources)} files")
+            if target.output_nodes:
+                for node in target.output_nodes[:3]:
+                    print(f"    output: {node.path}")
+                if len(target.output_nodes) > 3:
+                    print(f"    ... and {len(target.output_nodes) - 3} more")
+            if target.link_deps:
+                deps = [d.name if hasattr(d, "name") else str(d) for d in target.link_deps]
+                print(f"    links: {', '.join(deps)}")
+
+    def resolve(self, strict: bool = False) -> None:
         """Resolve all targets in two phases.
 
         Phase 1: Resolve build targets (compiles, links)
@@ -318,7 +407,11 @@ class Project:
             Because Phase 1 has run, output_nodes are now populated.
 
         After resolution, each target's nodes are fully populated and ready
-        for generation.
+        for generation. Validation is run automatically and warnings logged.
+
+        Args:
+            strict: If True, raise an exception on validation errors.
+                   If False (default), log warnings but continue.
         """
         from pcons.core.resolver import Resolver
 
@@ -329,6 +422,19 @@ class Project:
 
         # Phase 2: Resolve pending sources (Install, etc.)
         resolver.resolve_pending_sources()
+
+        # Validate and report issues
+        errors = self.validate()
+        if errors:
+            for error in errors:
+                logger.warning("Validation: %s", error)
+            if strict:
+                from pcons.core.errors import PconsError
+
+                raise PconsError(
+                    f"Validation failed with {len(errors)} error(s). "
+                    f"First error: {errors[0]}"
+                )
 
     # Target factory methods for the target-centric build model
 

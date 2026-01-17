@@ -254,6 +254,9 @@ class Environment:
         # Copy toolchain reference (not cloned - it's shared)
         new_env._toolchain = self._toolchain
 
+        # Copy project reference
+        new_env._project = object.__getattribute__(self, "_project")
+
         # Don't copy created_nodes - new environment starts fresh
 
         return new_env

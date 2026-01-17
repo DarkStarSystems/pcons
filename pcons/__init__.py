@@ -82,9 +82,24 @@ def get_variant(default: str = "release") -> str:
     return os.environ.get("PCONS_VARIANT") or os.environ.get("VARIANT") or default
 
 
+# Re-export commonly used classes for convenient imports
+from pcons.configure.config import Configure
+from pcons.core.project import Project
+from pcons.generators.ninja import NinjaGenerator
+from pcons.toolchains import find_c_toolchain
+
 # Public API exports
 __all__ = [
+    # Version
     "__version__",
+    # CLI variable access
     "get_var",
     "get_variant",
+    # Core classes
+    "Configure",
+    "Project",
+    # Generators
+    "NinjaGenerator",
+    # Toolchain discovery
+    "find_c_toolchain",
 ]
