@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Mermaid diagram generator for dependency visualization.
 
-Generates Mermaid flowchart syntax showing the dependency graph.
+Generates Mermaid flowchart syntax showing the complete dependency graph.
 Output can be rendered in GitHub markdown, documentation tools,
 or the Mermaid live editor (https://mermaid.live).
 """
@@ -22,17 +22,24 @@ if TYPE_CHECKING:
 class MermaidGenerator(BaseGenerator):
     """Generator that produces Mermaid flowchart diagrams.
 
-    Generates a dependency graph visualization in Mermaid syntax.
-    Can show target-level dependencies, file-level dependencies, or both.
+    Generates the complete dependency graph showing all files:
+    sources, objects, libraries, and programs with their relationships.
 
     Example output:
         ```mermaid
         flowchart LR
-          libmath[libmath.a]
-          libphysics[libphysics.a]
-          app[app]
-          libmath --> libphysics
-          libphysics --> app
+          math_c>math.c]
+          math_o(math.o)
+          libmath_a[libmath.a]
+          main_c>main.c]
+          main_o(main.o)
+          app[[app]]
+
+          math_c --> math_o
+          math_o --> libmath_a
+          main_c --> main_o
+          main_o --> app
+          libmath_a --> app
         ```
 
     Usage:
@@ -44,7 +51,6 @@ class MermaidGenerator(BaseGenerator):
     def __init__(
         self,
         *,
-        show_files: bool = False,
         include_headers: bool = False,
         direction: str = "LR",
         output_filename: str = "deps.mmd",
@@ -52,16 +58,13 @@ class MermaidGenerator(BaseGenerator):
         """Initialize the Mermaid generator.
 
         Args:
-            show_files: If True, show file-level dependencies (more detailed).
-                       If False, show only target-level dependencies.
-            include_headers: If True and show_files=True, parse .d files to
-                           include header dependencies. Requires a prior build.
+            include_headers: If True, parse .d files to include header
+                           dependencies. Requires a prior build.
             direction: Graph direction - "LR" (left-right), "TB" (top-bottom),
                       "RL" (right-left), or "BT" (bottom-top).
             output_filename: Name of the output file.
         """
         super().__init__("mermaid")
-        self._show_files = show_files
         self._include_headers = include_headers
         self._direction = direction
         self._output_filename = output_filename
@@ -78,48 +81,19 @@ class MermaidGenerator(BaseGenerator):
 
         with open(output_file, "w") as f:
             self._write_header(f, project)
-
-            if self._show_files:
-                self._write_file_graph(f, project)
-            else:
-                self._write_target_graph(f, project)
+            self._write_graph(f, project)
 
     def _write_header(self, f: TextIO, project: Project) -> None:
         """Write Mermaid header."""
-        f.write(f"---\n")
+        f.write("---\n")
         f.write(f"title: {project.name} Dependencies\n")
-        f.write(f"---\n")
+        f.write("---\n")
         f.write(f"flowchart {self._direction}\n")
 
-    def _write_target_graph(self, f: TextIO, project: Project) -> None:
-        """Write target-level dependency graph."""
-        targets = list(project.targets)
-        if not targets:
-            f.write("  empty[No targets]\n")
-            return
+    def _write_graph(self, f: TextIO, project: Project) -> None:
+        """Write the complete dependency graph.
 
-        # Define nodes with shapes based on target type
-        for target in targets:
-            node_id = self._sanitize_id(target.name)
-            label = self._get_target_label(target)
-            shape = self._get_target_shape(target)
-            f.write(f"  {node_id}{shape[0]}{label}{shape[1]}\n")
-
-        f.write("\n")
-
-        # Define edges
-        for target in targets:
-            target_id = self._sanitize_id(target.name)
-            for dep in target.dependencies:
-                dep_id = self._sanitize_id(dep.name)
-                f.write(f"  {dep_id} --> {target_id}\n")
-
-    def _write_file_graph(self, f: TextIO, project: Project) -> None:
-        """Write file-level dependency graph.
-
-        Shows all files in the build: sources, objects, libraries, programs.
-        Includes library-to-library dependencies and optionally header
-        dependencies from .d files.
+        Shows all files: sources, objects, libraries, programs.
         """
         written_nodes: set[str] = set()
         edges: list[tuple[str, str]] = []
@@ -130,7 +104,6 @@ class MermaidGenerator(BaseGenerator):
         def get_short_id(path: Path) -> str:
             """Get a short but unique ID for a file path."""
             name = path.name
-            # Check if this name is unique or if we need to disambiguate
             if name not in name_to_paths:
                 name_to_paths[name] = []
             if path not in name_to_paths[name]:
@@ -169,7 +142,7 @@ class MermaidGenerator(BaseGenerator):
 
         # Second pass: write nodes and collect edges
         for target in project.targets:
-            # Add target output nodes (libraries, programs)
+            # Output nodes (libraries, programs)
             for node in target.output_nodes:
                 if isinstance(node, FileNode):
                     node_id = get_short_id(node.path)
@@ -179,7 +152,7 @@ class MermaidGenerator(BaseGenerator):
                         f.write(f"  {node_id}{shape[0]}{label}{shape[1]}\n")
                         written_nodes.add(node_id)
 
-            # Add object nodes
+            # Object nodes
             for node in target.object_nodes:
                 if isinstance(node, FileNode):
                     node_id = get_short_id(node.path)
@@ -188,45 +161,42 @@ class MermaidGenerator(BaseGenerator):
                         f.write(f"  {node_id}({label})\n")  # Rounded for objects
                         written_nodes.add(node_id)
 
-                    # Add source dependencies (explicit_deps on object nodes)
+                    # Source dependencies
                     for dep in node.explicit_deps:
                         if isinstance(dep, FileNode):
                             dep_id = get_short_id(dep.path)
                             if dep_id not in written_nodes:
                                 dep_label = dep.path.name
-                                f.write(f"  {dep_id}>{dep_label}]\n")  # Flag shape for sources
+                                f.write(f"  {dep_id}>{dep_label}]\n")  # Flag for sources
                                 written_nodes.add(dep_id)
                             edges.append((dep_id, node_id))
 
-                    # Try to find header dependencies from .d file
+                    # Header dependencies from .d files (if enabled)
                     if self._include_headers:
                         header_deps = self._parse_depfile(node.path)
                         for header in header_deps:
                             header_id = get_short_id(header)
                             if header_id not in written_nodes:
-                                header_label = header.name
-                                f.write(f"  {header_id}>{header_label}]\n")
+                                f.write(f"  {header_id}>{header.name}]\n")
                                 written_nodes.add(header_id)
                             edges.append((header_id, node_id))
 
-            # Add edges from objects to outputs
+            # Edges: objects → outputs
             for output in target.output_nodes:
                 if isinstance(output, FileNode):
                     output_id = get_short_id(output.path)
                     for obj in target.object_nodes:
                         if isinstance(obj, FileNode):
-                            obj_id = get_short_id(obj.path)
-                            edges.append((obj_id, output_id))
+                            edges.append((get_short_id(obj.path), output_id))
 
-            # Add edges from dependency libraries to this target's output
+            # Edges: dependency libraries → this target's output
             for output in target.output_nodes:
                 if isinstance(output, FileNode):
                     output_id = get_short_id(output.path)
                     for dep_target in target.dependencies:
                         for dep_output in dep_target.output_nodes:
                             if isinstance(dep_output, FileNode):
-                                dep_id = get_short_id(dep_output.path)
-                                edges.append((dep_id, output_id))
+                                edges.append((get_short_id(dep_output.path), output_id))
 
         f.write("\n")
 
@@ -237,7 +207,7 @@ class MermaidGenerator(BaseGenerator):
                 f.write(f"  {src} --> {dst}\n")
                 seen_edges.add((src, dst))
 
-    def _get_output_shape(self, target: "Target") -> tuple[str, str]:
+    def _get_output_shape(self, target: Target) -> tuple[str, str]:
         """Get Mermaid shape for output node based on target type."""
         target_type = getattr(target, "target_type", None)
         if target_type == "program":
@@ -246,6 +216,8 @@ class MermaidGenerator(BaseGenerator):
             return ("([", "])")  # Stadium
         elif target_type == "static_library":
             return ("[", "]")  # Rectangle
+        elif target_type == "interface":
+            return ("{{", "}}")  # Hexagon for header-only
         else:
             return ("[", "]")
 
@@ -266,16 +238,12 @@ class MermaidGenerator(BaseGenerator):
         try:
             content = depfile.read_text()
             # GCC/Clang .d format: "target: dep1 dep2 dep3 ..."
-            # Dependencies may span multiple lines with backslash continuation
             content = content.replace("\\\n", " ")
-            # Skip the target part (before the colon)
             if ":" in content:
                 deps_part = content.split(":", 1)[1]
                 for dep in deps_part.split():
                     dep_path = Path(dep)
-                    # Skip the source file itself and system headers
                     if dep_path.suffix in (".h", ".hpp", ".hxx", ".H"):
-                        # Skip system headers (in /usr, /Library, etc.)
                         dep_str = str(dep_path)
                         if not dep_str.startswith(("/usr", "/Library", "/System")):
                             headers.append(dep_path)
@@ -284,41 +252,11 @@ class MermaidGenerator(BaseGenerator):
 
         return headers
 
-    def _get_target_label(self, target: Target) -> str:
-        """Get display label for a target."""
-        if target.output_nodes:
-            # Use the output filename
-            for node in target.output_nodes:
-                if isinstance(node, FileNode):
-                    return node.path.name
-        return target.name
-
-    def _get_target_shape(self, target: Target) -> tuple[str, str]:
-        """Get Mermaid shape brackets for a target type.
-
-        Returns:
-            Tuple of (opening, closing) brackets.
-        """
-        target_type = getattr(target, "target_type", None)
-
-        if target_type == "program":
-            return ("[[", "]]")  # Stadium shape for executables
-        elif target_type == "shared_library":
-            return ("([", "])")  # Stadium shape
-        elif target_type == "static_library":
-            return ("[", "]")  # Rectangle
-        elif target_type == "interface":
-            return ("{{", "}}")  # Hexagon for header-only
-        else:
-            return ("[", "]")  # Default rectangle
-
     def _sanitize_id(self, name: str) -> str:
         """Sanitize a name for use as a Mermaid node ID."""
-        # Replace problematic characters
         result = name.replace("/", "_").replace("\\", "_")
         result = result.replace(".", "_").replace("-", "_")
         result = result.replace(" ", "_").replace(":", "_")
-        # Ensure it starts with a letter
         if result and result[0].isdigit():
             result = "n" + result
         return result

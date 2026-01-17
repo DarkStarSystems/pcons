@@ -23,17 +23,17 @@ class TestMermaidGeneratorBasic:
     def test_generator_with_options(self):
         """Test generator accepts options."""
         gen = MermaidGenerator(
-            show_files=True,
+            include_headers=True,
             direction="TB",
             output_filename="graph.mmd",
         )
-        assert gen._show_files is True
+        assert gen._include_headers is True
         assert gen._direction == "TB"
         assert gen._output_filename == "graph.mmd"
 
 
-class TestMermaidGeneratorTargetGraph:
-    """Tests for target-level graph generation."""
+class TestMermaidGeneratorGraph:
+    """Tests for graph generation."""
 
     def test_empty_project(self, tmp_path):
         """Test generation with no targets."""
@@ -50,73 +50,8 @@ class TestMermaidGeneratorTargetGraph:
         """Test generation with single target."""
         project = Project("single", build_dir=tmp_path)
         target = Target("myapp", target_type="program")
-        project.add_target(target)
 
-        gen = MermaidGenerator()
-        gen.generate(project, tmp_path)
-
-        output = (tmp_path / "deps.mmd").read_text()
-        assert "myapp" in output
-
-    def test_target_dependencies(self, tmp_path):
-        """Test generation shows target dependencies."""
-        project = Project("deps", build_dir=tmp_path)
-
-        libmath = Target("libmath", target_type="static_library")
-        libphysics = Target("libphysics", target_type="static_library")
-        app = Target("app", target_type="program")
-
-        libphysics.link(libmath)
-        app.link(libphysics)
-
-        project.add_target(libmath)
-        project.add_target(libphysics)
-        project.add_target(app)
-
-        gen = MermaidGenerator()
-        gen.generate(project, tmp_path)
-
-        output = (tmp_path / "deps.mmd").read_text()
-        assert "libmath" in output
-        assert "libphysics" in output
-        assert "app" in output
-        # Check edges exist
-        assert "libmath --> libphysics" in output
-        assert "libphysics --> app" in output
-
-    def test_target_shapes(self, tmp_path):
-        """Test different target types get different shapes."""
-        project = Project("shapes", build_dir=tmp_path)
-
-        project.add_target(Target("mylib", target_type="static_library"))
-        project.add_target(Target("myshared", target_type="shared_library"))
-        project.add_target(Target("myapp", target_type="program"))
-        project.add_target(Target("headers", target_type="interface"))
-
-        gen = MermaidGenerator()
-        gen.generate(project, tmp_path)
-
-        output = (tmp_path / "deps.mmd").read_text()
-        # Static library: rectangle [name]
-        assert "mylib[" in output
-        # Shared library: stadium ([name])
-        assert "myshared([" in output
-        # Program: stadium [[name]]
-        assert "myapp[[" in output
-        # Interface: hexagon {{name}}
-        assert "headers{{" in output
-
-
-class TestMermaidGeneratorFileGraph:
-    """Tests for file-level graph generation."""
-
-    def test_file_graph_mode(self, tmp_path):
-        """Test file-level graph generation."""
-        project = Project("files", build_dir=tmp_path)
-
-        target = Target("myapp", target_type="program")
-
-        # Add some mock nodes
+        # Add mock nodes
         src = FileNode(Path("src/main.c"))
         obj = FileNode(Path("build/main.o"))
         exe = FileNode(Path("build/myapp"))
@@ -127,18 +62,17 @@ class TestMermaidGeneratorFileGraph:
 
         project.add_target(target)
 
-        gen = MermaidGenerator(show_files=True)
+        gen = MermaidGenerator()
         gen.generate(project, tmp_path)
 
         output = (tmp_path / "deps.mmd").read_text()
-        assert "main_c" in output  # sanitized source name
-        assert "main_o" in output  # sanitized object name
         assert "myapp" in output
+        assert "main_c" in output
+        assert "main_o" in output
 
-
-    def test_file_graph_library_dependencies(self, tmp_path):
-        """Test file-level graph shows library dependencies."""
-        project = Project("libdeps", build_dir=tmp_path)
+    def test_target_dependencies(self, tmp_path):
+        """Test generation shows target dependencies."""
+        project = Project("deps", build_dir=tmp_path)
 
         # Create libmath
         libmath = Target("libmath", target_type="static_library")
@@ -149,7 +83,17 @@ class TestMermaidGeneratorFileGraph:
         libmath.object_nodes.append(math_obj)
         libmath.output_nodes.append(math_lib)
 
-        # Create app that depends on libmath
+        # Create libphysics depending on libmath
+        libphysics = Target("libphysics", target_type="static_library")
+        physics_src = FileNode(Path("src/physics.c"))
+        physics_obj = FileNode(Path("build/physics.o"))
+        physics_lib = FileNode(Path("build/libphysics.a"))
+        physics_obj.depends([physics_src])
+        libphysics.object_nodes.append(physics_obj)
+        libphysics.output_nodes.append(physics_lib)
+        libphysics.link(libmath)
+
+        # Create app depending on libphysics
         app = Target("app", target_type="program")
         app_src = FileNode(Path("src/main.c"))
         app_obj = FileNode(Path("build/main.o"))
@@ -157,20 +101,60 @@ class TestMermaidGeneratorFileGraph:
         app_obj.depends([app_src])
         app.object_nodes.append(app_obj)
         app.output_nodes.append(app_exe)
-        app.link(libmath)
+        app.link(libphysics)
 
         project.add_target(libmath)
+        project.add_target(libphysics)
         project.add_target(app)
 
-        gen = MermaidGenerator(show_files=True)
+        gen = MermaidGenerator()
         gen.generate(project, tmp_path)
 
         output = (tmp_path / "deps.mmd").read_text()
-        # Check library dependency edge exists
         assert "libmath_a" in output
-        assert "app[[app]]" in output  # Program with stadium shape
-        # Check the library links to the app
-        assert "libmath_a --> app" in output
+        assert "libphysics_a" in output
+        assert "app[[app]]" in output
+        # Check library dependency edges
+        assert "libmath_a --> libphysics_a" in output
+        assert "libphysics_a --> app" in output
+
+    def test_target_shapes(self, tmp_path):
+        """Test different target types get different shapes."""
+        project = Project("shapes", build_dir=tmp_path)
+
+        # Static library
+        lib = Target("mylib", target_type="static_library")
+        lib.output_nodes.append(FileNode(Path("build/libmylib.a")))
+
+        # Shared library
+        shared = Target("myshared", target_type="shared_library")
+        shared.output_nodes.append(FileNode(Path("build/libmyshared.so")))
+
+        # Program
+        prog = Target("myapp", target_type="program")
+        prog.output_nodes.append(FileNode(Path("build/myapp")))
+
+        # Interface
+        iface = Target("headers", target_type="interface")
+        iface.output_nodes.append(FileNode(Path("include/headers")))
+
+        project.add_target(lib)
+        project.add_target(shared)
+        project.add_target(prog)
+        project.add_target(iface)
+
+        gen = MermaidGenerator()
+        gen.generate(project, tmp_path)
+
+        output = (tmp_path / "deps.mmd").read_text()
+        # Static library: rectangle [name]
+        assert "libmylib_a[" in output
+        # Shared library: stadium ([name])
+        assert "libmyshared_so([" in output
+        # Program: stadium [[name]]
+        assert "myapp[[" in output
+        # Interface: hexagon {{name}}
+        assert "headers{{" in output
 
 
 class TestMermaidGeneratorDirection:
@@ -221,57 +205,50 @@ class TestMermaidGeneratorSanitization:
 
 
 class TestMermaidGeneratorIntegration:
-    """Integration tests with resolved projects."""
+    """Integration tests."""
 
-    def test_resolved_project(self, tmp_path):
-        """Test with a fully resolved project."""
-        from pcons.tools.toolchain import BaseToolchain, SourceHandler
+    def test_complete_project(self, tmp_path):
+        """Test with a complete multi-target project."""
+        project = Project("complete", build_dir=tmp_path)
 
-        # Create a minimal mock toolchain
-        class MockToolchain(BaseToolchain):
-            def __init__(self):
-                super().__init__("mock")
+        # libmath: math.c -> math.o -> libmath.a
+        libmath = Target("libmath", target_type="static_library")
+        math_src = FileNode(Path("src/math.c"))
+        math_obj = FileNode(Path("build/obj.libmath/math.o"))
+        math_lib = FileNode(Path("build/libmath.a"))
+        math_obj.depends([math_src])
+        libmath.object_nodes.append(math_obj)
+        libmath.output_nodes.append(math_lib)
 
-            def _configure_tools(self, config):
-                return True
+        # app: main.c -> main.o -> app (links libmath)
+        app = Target("app", target_type="program")
+        app_src = FileNode(Path("src/main.c"))
+        app_obj = FileNode(Path("build/obj.app/main.o"))
+        app_exe = FileNode(Path("build/app"))
+        app_obj.depends([app_src])
+        app.object_nodes.append(app_obj)
+        app.output_nodes.append(app_exe)
+        app.link(libmath)
 
-            def get_source_handler(self, suffix):
-                if suffix == ".c":
-                    return SourceHandler("cc", "c", ".o", None, None)
-                return None
+        project.add_target(libmath)
+        project.add_target(app)
 
-            def get_object_suffix(self):
-                return ".o"
-
-            def get_static_library_name(self, name):
-                return f"lib{name}.a"
-
-            def get_program_name(self, name):
-                return name
-
-        # Create project
-        project = Project("integrated", build_dir=tmp_path)
-        toolchain = MockToolchain()
-
-        env = Environment(toolchain=toolchain)
-        env._project = project
-        project._environments.append(env)
-
-        # Create a source file
-        src_file = tmp_path / "main.c"
-        src_file.write_text("int main() { return 0; }")
-
-        # Create target
-        app = project.Program("myapp", env)
-        app.sources = [project.node(src_file)]
-
-        # Resolve
-        project.resolve()
-
-        # Generate mermaid
         gen = MermaidGenerator()
         gen.generate(project, tmp_path)
 
         output = (tmp_path / "deps.mmd").read_text()
-        assert "myapp" in output
-        assert "flowchart" in output
+
+        # Check all nodes present
+        assert "math_c" in output
+        assert "math_o" in output
+        assert "libmath_a" in output
+        assert "main_c" in output
+        assert "main_o" in output
+        assert "app[[app]]" in output
+
+        # Check edges
+        assert "math_c --> math_o" in output
+        assert "math_o --> libmath_a" in output
+        assert "main_c --> main_o" in output
+        assert "main_o --> app" in output
+        assert "libmath_a --> app" in output
