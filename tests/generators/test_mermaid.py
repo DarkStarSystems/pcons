@@ -136,6 +136,43 @@ class TestMermaidGeneratorFileGraph:
         assert "myapp" in output
 
 
+    def test_file_graph_library_dependencies(self, tmp_path):
+        """Test file-level graph shows library dependencies."""
+        project = Project("libdeps", build_dir=tmp_path)
+
+        # Create libmath
+        libmath = Target("libmath", target_type="static_library")
+        math_src = FileNode(Path("src/math.c"))
+        math_obj = FileNode(Path("build/math.o"))
+        math_lib = FileNode(Path("build/libmath.a"))
+        math_obj.depends([math_src])
+        libmath.object_nodes.append(math_obj)
+        libmath.output_nodes.append(math_lib)
+
+        # Create app that depends on libmath
+        app = Target("app", target_type="program")
+        app_src = FileNode(Path("src/main.c"))
+        app_obj = FileNode(Path("build/main.o"))
+        app_exe = FileNode(Path("build/app"))
+        app_obj.depends([app_src])
+        app.object_nodes.append(app_obj)
+        app.output_nodes.append(app_exe)
+        app.link(libmath)
+
+        project.add_target(libmath)
+        project.add_target(app)
+
+        gen = MermaidGenerator(show_files=True)
+        gen.generate(project, tmp_path)
+
+        output = (tmp_path / "deps.mmd").read_text()
+        # Check library dependency edge exists
+        assert "libmath_a" in output
+        assert "app[[app]]" in output  # Program with stadium shape
+        # Check the library links to the app
+        assert "libmath_a --> app" in output
+
+
 class TestMermaidGeneratorDirection:
     """Tests for graph direction options."""
 

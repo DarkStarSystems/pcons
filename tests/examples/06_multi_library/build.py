@@ -62,13 +62,23 @@ project.resolve()
 ninja_gen = NinjaGenerator()
 ninja_gen.generate(project, build_dir)
 
-# Generate Mermaid dependency diagram
-mermaid_gen = MermaidGenerator(direction="LR")
+# Generate Mermaid dependency diagrams
+# Target-level view (compact)
+mermaid_gen = MermaidGenerator(direction="LR", output_filename="deps_targets.mmd")
 mermaid_gen.generate(project, build_dir)
 
+# File-level view (detailed, shows sources, objects, and library deps)
+mermaid_gen_files = MermaidGenerator(show_files=True, direction="LR", output_filename="deps_files.mmd")
+mermaid_gen_files.generate(project, build_dir)
+
 print(f"Generated {build_dir / 'build.ninja'}")
-print(f"Generated {build_dir / 'deps.mmd'}")
+print(f"Generated {build_dir / 'deps_targets.mmd'} (target-level view)")
+print(f"Generated {build_dir / 'deps_files.mmd'} (file-level view)")
 print()
-print("Dependency graph (Mermaid):")
+print("Target-level dependency graph:")
 print("-" * 40)
-print((build_dir / "deps.mmd").read_text())
+print((build_dir / "deps_targets.mmd").read_text())
+print()
+print("File-level dependency graph:")
+print("-" * 40)
+print((build_dir / "deps_files.mmd").read_text())

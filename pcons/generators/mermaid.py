@@ -45,6 +45,7 @@ class MermaidGenerator(BaseGenerator):
         self,
         *,
         show_files: bool = False,
+        include_headers: bool = False,
         direction: str = "LR",
         output_filename: str = "deps.mmd",
     ) -> None:
@@ -53,12 +54,15 @@ class MermaidGenerator(BaseGenerator):
         Args:
             show_files: If True, show file-level dependencies (more detailed).
                        If False, show only target-level dependencies.
+            include_headers: If True and show_files=True, parse .d files to
+                           include header dependencies. Requires a prior build.
             direction: Graph direction - "LR" (left-right), "TB" (top-bottom),
                       "RL" (right-left), or "BT" (bottom-top).
             output_filename: Name of the output file.
         """
         super().__init__("mermaid")
         self._show_files = show_files
+        self._include_headers = include_headers
         self._direction = direction
         self._output_filename = output_filename
 
@@ -111,55 +115,174 @@ class MermaidGenerator(BaseGenerator):
                 f.write(f"  {dep_id} --> {target_id}\n")
 
     def _write_file_graph(self, f: TextIO, project: Project) -> None:
-        """Write file-level dependency graph."""
-        # Collect all nodes
+        """Write file-level dependency graph.
+
+        Shows all files in the build: sources, objects, libraries, programs.
+        Includes library-to-library dependencies and optionally header
+        dependencies from .d files.
+        """
         written_nodes: set[str] = set()
         edges: list[tuple[str, str]] = []
 
-        # First pass: collect all nodes and edges from targets
+        # Track file names to detect conflicts (same name, different path)
+        name_to_paths: dict[str, list[Path]] = {}
+
+        def get_short_id(path: Path) -> str:
+            """Get a short but unique ID for a file path."""
+            name = path.name
+            # Check if this name is unique or if we need to disambiguate
+            if name not in name_to_paths:
+                name_to_paths[name] = []
+            if path not in name_to_paths[name]:
+                name_to_paths[name].append(path)
+
+            # If multiple files have the same name, include parent dir
+            if len(name_to_paths[name]) > 1:
+                return self._sanitize_id(f"{path.parent.name}_{name}")
+            return self._sanitize_id(name)
+
+        # First pass: collect all file paths to detect name conflicts
         for target in project.targets:
-            # Add target output nodes
             for node in target.output_nodes:
                 if isinstance(node, FileNode):
-                    node_id = self._sanitize_id(str(node.path))
+                    name = node.path.name
+                    if name not in name_to_paths:
+                        name_to_paths[name] = []
+                    if node.path not in name_to_paths[name]:
+                        name_to_paths[name].append(node.path)
+
+            for node in target.object_nodes:
+                if isinstance(node, FileNode):
+                    name = node.path.name
+                    if name not in name_to_paths:
+                        name_to_paths[name] = []
+                    if node.path not in name_to_paths[name]:
+                        name_to_paths[name].append(node.path)
+
+                    for dep in node.explicit_deps:
+                        if isinstance(dep, FileNode):
+                            name = dep.path.name
+                            if name not in name_to_paths:
+                                name_to_paths[name] = []
+                            if dep.path not in name_to_paths[name]:
+                                name_to_paths[name].append(dep.path)
+
+        # Second pass: write nodes and collect edges
+        for target in project.targets:
+            # Add target output nodes (libraries, programs)
+            for node in target.output_nodes:
+                if isinstance(node, FileNode):
+                    node_id = get_short_id(node.path)
                     if node_id not in written_nodes:
                         label = node.path.name
-                        f.write(f"  {node_id}[{label}]\n")
+                        shape = self._get_output_shape(target)
+                        f.write(f"  {node_id}{shape[0]}{label}{shape[1]}\n")
                         written_nodes.add(node_id)
 
             # Add object nodes
             for node in target.object_nodes:
                 if isinstance(node, FileNode):
-                    node_id = self._sanitize_id(str(node.path))
+                    node_id = get_short_id(node.path)
                     if node_id not in written_nodes:
                         label = node.path.name
                         f.write(f"  {node_id}({label})\n")  # Rounded for objects
                         written_nodes.add(node_id)
 
-                    # Add source dependencies
+                    # Add source dependencies (explicit_deps on object nodes)
                     for dep in node.explicit_deps:
                         if isinstance(dep, FileNode):
-                            dep_id = self._sanitize_id(str(dep.path))
+                            dep_id = get_short_id(dep.path)
                             if dep_id not in written_nodes:
                                 dep_label = dep.path.name
                                 f.write(f"  {dep_id}>{dep_label}]\n")  # Flag shape for sources
                                 written_nodes.add(dep_id)
                             edges.append((dep_id, node_id))
 
+                    # Try to find header dependencies from .d file
+                    if self._include_headers:
+                        header_deps = self._parse_depfile(node.path)
+                        for header in header_deps:
+                            header_id = get_short_id(header)
+                            if header_id not in written_nodes:
+                                header_label = header.name
+                                f.write(f"  {header_id}>{header_label}]\n")
+                                written_nodes.add(header_id)
+                            edges.append((header_id, node_id))
+
             # Add edges from objects to outputs
             for output in target.output_nodes:
                 if isinstance(output, FileNode):
-                    output_id = self._sanitize_id(str(output.path))
+                    output_id = get_short_id(output.path)
                     for obj in target.object_nodes:
                         if isinstance(obj, FileNode):
-                            obj_id = self._sanitize_id(str(obj.path))
+                            obj_id = get_short_id(obj.path)
                             edges.append((obj_id, output_id))
+
+            # Add edges from dependency libraries to this target's output
+            for output in target.output_nodes:
+                if isinstance(output, FileNode):
+                    output_id = get_short_id(output.path)
+                    for dep_target in target.dependencies:
+                        for dep_output in dep_target.output_nodes:
+                            if isinstance(dep_output, FileNode):
+                                dep_id = get_short_id(dep_output.path)
+                                edges.append((dep_id, output_id))
 
         f.write("\n")
 
-        # Write edges
+        # Write edges (deduplicated)
+        seen_edges: set[tuple[str, str]] = set()
         for src, dst in edges:
-            f.write(f"  {src} --> {dst}\n")
+            if (src, dst) not in seen_edges:
+                f.write(f"  {src} --> {dst}\n")
+                seen_edges.add((src, dst))
+
+    def _get_output_shape(self, target: "Target") -> tuple[str, str]:
+        """Get Mermaid shape for output node based on target type."""
+        target_type = getattr(target, "target_type", None)
+        if target_type == "program":
+            return ("[[", "]]")  # Stadium for executables
+        elif target_type == "shared_library":
+            return ("([", "])")  # Stadium
+        elif target_type == "static_library":
+            return ("[", "]")  # Rectangle
+        else:
+            return ("[", "]")
+
+    def _parse_depfile(self, obj_path: Path) -> list[Path]:
+        """Parse a .d dependency file to extract header dependencies.
+
+        Args:
+            obj_path: Path to the object file (depfile is obj_path + ".d")
+
+        Returns:
+            List of header file paths found in the depfile.
+        """
+        depfile = Path(str(obj_path) + ".d")
+        if not depfile.exists():
+            return []
+
+        headers: list[Path] = []
+        try:
+            content = depfile.read_text()
+            # GCC/Clang .d format: "target: dep1 dep2 dep3 ..."
+            # Dependencies may span multiple lines with backslash continuation
+            content = content.replace("\\\n", " ")
+            # Skip the target part (before the colon)
+            if ":" in content:
+                deps_part = content.split(":", 1)[1]
+                for dep in deps_part.split():
+                    dep_path = Path(dep)
+                    # Skip the source file itself and system headers
+                    if dep_path.suffix in (".h", ".hpp", ".hxx", ".H"):
+                        # Skip system headers (in /usr, /Library, etc.)
+                        dep_str = str(dep_path)
+                        if not dep_str.startswith(("/usr", "/Library", "/System")):
+                            headers.append(dep_path)
+        except (OSError, UnicodeDecodeError):
+            pass
+
+        return headers
 
     def _get_target_label(self, target: Target) -> str:
         """Get display label for a target."""
