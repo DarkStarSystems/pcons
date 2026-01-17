@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pcons.cli import find_script, setup_logging
+from pcons.cli import find_script, parse_variables, setup_logging
 
 if TYPE_CHECKING:
     pass
@@ -57,6 +57,52 @@ class TestSetupLogging:
         setup_logging(verbose=False, debug=True)
 
 
+class TestParseVariables:
+    """Tests for parse_variables function."""
+
+    def test_parse_simple_variable(self) -> None:
+        """Test parsing a simple KEY=value variable."""
+        variables, remaining = parse_variables(["PORT=ofx"])
+        assert variables == {"PORT": "ofx"}
+        assert remaining == []
+
+    def test_parse_multiple_variables(self) -> None:
+        """Test parsing multiple KEY=value variables."""
+        variables, remaining = parse_variables(["PORT=ofx", "CC=clang", "USE_CUDA=1"])
+        assert variables == {"PORT": "ofx", "CC": "clang", "USE_CUDA": "1"}
+        assert remaining == []
+
+    def test_parse_empty_value(self) -> None:
+        """Test parsing KEY= (empty value)."""
+        variables, remaining = parse_variables(["EMPTY="])
+        assert variables == {"EMPTY": ""}
+        assert remaining == []
+
+    def test_parse_value_with_equals(self) -> None:
+        """Test parsing KEY=value=with=equals."""
+        variables, remaining = parse_variables(["FLAGS=-O2 -DFOO=1"])
+        assert variables == {"FLAGS": "-O2 -DFOO=1"}
+        assert remaining == []
+
+    def test_parse_mixed_args(self) -> None:
+        """Test parsing a mix of variables and targets."""
+        variables, remaining = parse_variables(["PORT=ofx", "all", "test", "CC=gcc"])
+        assert variables == {"PORT": "ofx", "CC": "gcc"}
+        assert remaining == ["all", "test"]
+
+    def test_parse_flags_not_variables(self) -> None:
+        """Test that flags starting with - are not treated as variables."""
+        variables, remaining = parse_variables(["-v", "--debug", "PORT=ofx"])
+        assert variables == {"PORT": "ofx"}
+        assert remaining == ["-v", "--debug"]
+
+    def test_parse_empty_key(self) -> None:
+        """Test that =value (empty key) is not parsed as a variable."""
+        variables, remaining = parse_variables(["=value"])
+        assert variables == {}
+        assert remaining == ["=value"]
+
+
 class TestCLICommands:
     """Tests for CLI commands."""
 
@@ -69,10 +115,10 @@ class TestCLICommands:
         )
         assert result.returncode == 0
         assert "pcons" in result.stdout
-        assert "configure" in result.stdout
         assert "generate" in result.stdout
         assert "build" in result.stdout
         assert "clean" in result.stdout
+        assert "init" in result.stdout
 
     def test_pcons_version(self) -> None:
         """Test pcons --version."""
@@ -85,7 +131,7 @@ class TestCLICommands:
         assert "0.1.0" in result.stdout
 
     def test_pcons_init(self, tmp_path: Path) -> None:
-        """Test pcons init creates template files."""
+        """Test pcons init creates template build.py."""
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "init"],
             capture_output=True,
@@ -93,22 +139,83 @@ class TestCLICommands:
             cwd=tmp_path,
         )
         assert result.returncode == 0
-        assert (tmp_path / "configure.py").exists()
         assert (tmp_path / "build.py").exists()
 
-        # Check content
-        configure_content = (tmp_path / "configure.py").read_text()
-        assert "Configure" in configure_content
-        assert "toolchain" in configure_content
-
+        # Check content - should have configure and build together
         build_content = (tmp_path / "build.py").read_text()
         assert "Project" in build_content
         assert "NinjaGenerator" in build_content
+        assert "Configure" in build_content
+        assert "get_variant" in build_content
+        assert "get_var" in build_content
+        assert "PCONS_BUILD_DIR" in build_content
+        assert "PCONS_RECONFIGURE" in build_content
+
+    def test_pcons_init_creates_valid_python(self, tmp_path: Path) -> None:
+        """Test that init creates syntactically valid Python."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "init"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+
+        # Verify it's valid Python by compiling it
+        build_py = tmp_path / "build.py"
+        result = subprocess.run(
+            [sys.executable, "-m", "py_compile", str(build_py)],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, f"Invalid Python: {result.stderr}"
+
+    def test_pcons_init_creates_executable(self, tmp_path: Path) -> None:
+        """Test that init creates an executable file."""
+        import os
+        import stat
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "init"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+
+        build_py = tmp_path / "build.py"
+        mode = build_py.stat().st_mode
+        assert mode & stat.S_IXUSR, "build.py should be executable"
+
+    def test_pcons_init_template_runs(self, tmp_path: Path) -> None:
+        """Test that the init template can actually run and generate ninja."""
+        import shutil
+
+        # Skip if no C compiler available
+        if shutil.which("clang") is None and shutil.which("gcc") is None:
+            pytest.skip("no C compiler found")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "init"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+
+        # Run the generated build.py via pcons generate
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "generate"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, f"generate failed: {result.stderr}"
+        assert (tmp_path / "build" / "build.ninja").exists()
 
     def test_pcons_init_force(self, tmp_path: Path) -> None:
         """Test pcons init --force overwrites files."""
-        # Create existing files
-        (tmp_path / "configure.py").write_text("# old content")
+        # Create existing file
         (tmp_path / "build.py").write_text("# old content")
 
         # Without --force should fail
@@ -130,19 +237,9 @@ class TestCLICommands:
         assert result.returncode == 0
 
         # Check content was replaced
-        configure_content = (tmp_path / "configure.py").read_text()
-        assert "Configure" in configure_content
-
-    def test_pcons_configure_no_script(self, tmp_path: Path) -> None:
-        """Test pcons configure without configure.py."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "configure"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode != 0
-        assert "No configure.py found" in result.stderr
+        build_content = (tmp_path / "build.py").read_text()
+        assert "Project" in build_content
+        assert "Configure" in build_content
 
     def test_pcons_generate_no_script(self, tmp_path: Path) -> None:
         """Test pcons generate without build.py."""
@@ -205,8 +302,8 @@ class TestIntegration:
             pytest.skip("ninja not found")
 
         # Skip if clang not available
-        if shutil.which("clang") is None:
-            pytest.skip("clang not found")
+        if shutil.which("clang") is None and shutil.which("gcc") is None:
+            pytest.skip("no C compiler found")
 
         # Create a simple C source file
         hello_c = tmp_path / "hello.c"
@@ -221,31 +318,7 @@ int main(void) {
 """
         )
 
-        # Create configure.py
-        configure_py = tmp_path / "configure.py"
-        configure_py.write_text(
-            """\
-import os
-from pathlib import Path
-from pcons.configure.config import Configure
-from pcons.toolchains import LlvmToolchain, GccToolchain
-
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
-config = Configure(build_dir=build_dir)
-
-llvm = LlvmToolchain()
-gcc = GccToolchain()
-
-if llvm.configure(config):
-    config.set("toolchain", "llvm")
-elif gcc.configure(config):
-    config.set("toolchain", "gcc")
-
-config.save()
-"""
-        )
-
-        # Create build.py
+        # Create build.py (configuration is done inline)
         build_py = tmp_path / "build.py"
         build_py.write_text(
             """\
@@ -254,22 +327,22 @@ from pathlib import Path
 from pcons.configure.config import Configure
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import GccToolchain, LlvmToolchain
+from pcons.toolchains import find_c_toolchain
 
 build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 source_dir = Path(os.environ.get("PCONS_SOURCE_DIR", "."))
 
+# Configuration (auto-cached)
 config = Configure(build_dir=build_dir)
-toolchain_name = config.get("toolchain", "gcc")
+if not config.get("configured") or os.environ.get("PCONS_RECONFIGURE"):
+    toolchain = find_c_toolchain()
+    toolchain.configure(config)
+    config.set("configured", True)
+    config.save()
 
-if toolchain_name == "llvm":
-    toolchain = LlvmToolchain()
-else:
-    toolchain = GccToolchain()
-
-toolchain.configure(config)
-
+# Create project
 project = Project("hello", root_dir=source_dir, build_dir=build_dir)
+toolchain = find_c_toolchain()
 env = project.Environment(toolchain=toolchain)
 
 obj = env.cc.Object("hello.o", "hello.c")
@@ -280,17 +353,7 @@ generator.generate(project, build_dir)
 """
         )
 
-        # Run configure
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "configure"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0, f"configure failed: {result.stderr}"
-        assert (tmp_path / "build" / "pcons_config.json").exists()
-
-        # Run generate
+        # Run generate (which includes configuration)
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "generate"],
             capture_output=True,

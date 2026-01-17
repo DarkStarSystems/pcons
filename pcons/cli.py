@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import shutil
@@ -34,7 +35,7 @@ def find_script(name: str, search_dir: Path | None = None) -> Path | None:
     """Find a build script by name.
 
     Args:
-        name: Script name (e.g., 'configure.py', 'build.py')
+        name: Script name (e.g., 'build.py')
         search_dir: Directory to search in (default: current dir)
 
     Returns:
@@ -50,12 +51,46 @@ def find_script(name: str, search_dir: Path | None = None) -> Path | None:
     return None
 
 
-def run_script(script_path: Path, build_dir: Path) -> int:
+def parse_variables(args: list[str]) -> tuple[dict[str, str], list[str]]:
+    """Parse KEY=value arguments from a list.
+
+    Args:
+        args: List of arguments.
+
+    Returns:
+        Tuple of (variables dict, remaining args).
+    """
+    variables: dict[str, str] = {}
+    remaining: list[str] = []
+
+    for arg in args:
+        if "=" in arg and not arg.startswith("-"):
+            key, _, value = arg.partition("=")
+            if key:  # Valid KEY=value
+                variables[key] = value
+            else:
+                remaining.append(arg)
+        else:
+            remaining.append(arg)
+
+    return variables, remaining
+
+
+def run_script(
+    script_path: Path,
+    build_dir: Path,
+    variables: dict[str, str] | None = None,
+    variant: str | None = None,
+    reconfigure: bool = False,
+) -> int:
     """Execute a Python build script.
 
     Args:
         script_path: Path to the script to run.
         build_dir: Build directory to pass to the script.
+        variables: Build variables to pass via PCONS_VARS.
+        variant: Build variant to pass via PCONS_VARIANT.
+        reconfigure: If True, set PCONS_RECONFIGURE=1.
 
     Returns:
         Exit code from script execution.
@@ -65,9 +100,22 @@ def run_script(script_path: Path, build_dir: Path) -> int:
     env["PCONS_BUILD_DIR"] = str(build_dir.absolute())
     env["PCONS_SOURCE_DIR"] = str(script_path.parent.absolute())
 
+    if variables:
+        env["PCONS_VARS"] = json.dumps(variables)
+
+    if variant:
+        env["PCONS_VARIANT"] = variant
+
+    if reconfigure:
+        env["PCONS_RECONFIGURE"] = "1"
+
     logger.info("Running %s", script_path)
     logger.debug("  PCONS_BUILD_DIR=%s", env["PCONS_BUILD_DIR"])
     logger.debug("  PCONS_SOURCE_DIR=%s", env["PCONS_SOURCE_DIR"])
+    if variables:
+        logger.debug("  PCONS_VARS=%s", env["PCONS_VARS"])
+    if variant:
+        logger.debug("  PCONS_VARIANT=%s", variant)
 
     try:
         result = subprocess.run(
@@ -81,87 +129,23 @@ def run_script(script_path: Path, build_dir: Path) -> int:
         return 1
 
 
-def cmd_configure(args: argparse.Namespace) -> int:
-    """Run the configure phase.
+def run_ninja(
+    build_dir: Path,
+    targets: list[str] | None = None,
+    jobs: int | None = None,
+    verbose: bool = False,
+) -> int:
+    """Run ninja in the build directory.
 
-    This command:
-    1. Finds configure.py in the current directory
-    2. Creates the build directory
-    3. Runs configure.py to detect tools and save configuration
+    Args:
+        build_dir: Build directory containing build.ninja.
+        targets: Specific targets to build.
+        jobs: Number of parallel jobs.
+        verbose: Enable verbose output.
+
+    Returns:
+        Exit code from ninja.
     """
-    setup_logging(args.verbose, args.debug)
-
-    build_dir = Path(args.build_dir)
-    script_path = args.configure_script
-
-    # Find configure script
-    script: Path
-    if script_path:
-        script = Path(script_path)
-        if not script.exists():
-            logger.error("Configure script not found: %s", script_path)
-            return 1
-    else:
-        found_script = find_script("configure.py")
-        if found_script is None:
-            logger.error("No configure.py found in current directory")
-            logger.info("Create a configure.py file to define your configuration")
-            return 1
-        script = found_script
-
-    # Create build directory
-    build_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Build directory: %s", build_dir.absolute())
-
-    # Run configure script
-    return run_script(script, build_dir)
-
-
-def cmd_generate(args: argparse.Namespace) -> int:
-    """Run the generate phase.
-
-    This command:
-    1. Finds build.py in the current directory
-    2. Runs build.py to define the build
-    3. Generates build.ninja in the build directory
-    """
-    setup_logging(args.verbose, args.debug)
-
-    build_dir = Path(args.build_dir)
-    script_path = args.build_script
-
-    # Find build script
-    script: Path
-    if script_path:
-        script = Path(script_path)
-        if not script.exists():
-            logger.error("Build script not found: %s", script_path)
-            return 1
-    else:
-        found_script = find_script("build.py")
-        if found_script is None:
-            logger.error("No build.py found in current directory")
-            logger.info("Create a build.py file to define your build")
-            return 1
-        script = found_script
-
-    # Create build directory if it doesn't exist
-    build_dir.mkdir(parents=True, exist_ok=True)
-
-    # Run build script
-    return run_script(script, build_dir)
-
-
-def cmd_build(args: argparse.Namespace) -> int:
-    """Build targets using ninja.
-
-    This command:
-    1. Changes to the build directory
-    2. Runs ninja with the specified targets
-    """
-    setup_logging(args.verbose, args.debug)
-
-    build_dir = Path(args.build_dir)
     ninja_file = build_dir / "build.ninja"
 
     if not ninja_file.exists():
@@ -179,14 +163,14 @@ def cmd_build(args: argparse.Namespace) -> int:
     # Build ninja command
     cmd = [ninja, "-C", str(build_dir)]
 
-    if args.jobs:
-        cmd.extend(["-j", str(args.jobs)])
+    if jobs:
+        cmd.extend(["-j", str(jobs)])
 
-    if args.verbose:
+    if verbose:
         cmd.append("-v")
 
-    if args.targets:
-        cmd.extend(args.targets)
+    if targets:
+        cmd.extend(targets)
 
     logger.info("Running: %s", " ".join(cmd))
 
@@ -196,6 +180,94 @@ def cmd_build(args: argparse.Namespace) -> int:
     except OSError as e:
         logger.error("Failed to run ninja: %s", e)
         return 1
+
+
+def cmd_default(args: argparse.Namespace) -> int:
+    """Default command: generate and build.
+
+    This is what runs when you just type 'pcons' with no subcommand.
+    Equivalent to: pcons generate && pcons build
+    """
+    # First, generate
+    result = cmd_generate(args)
+    if result != 0:
+        return result
+
+    # Then, build
+    return cmd_build(args)
+
+
+def cmd_generate(args: argparse.Namespace) -> int:
+    """Run the generate phase.
+
+    This command:
+    1. Finds build.py in the current directory
+    2. Runs build.py to define the build (includes configure if needed)
+    3. Generates build.ninja in the build directory
+    """
+    setup_logging(args.verbose, args.debug)
+
+    build_dir = Path(args.build_dir)
+    script_path = getattr(args, "build_script", None)
+
+    # Parse variables from extra args
+    variables, remaining = parse_variables(getattr(args, "extra", []))
+
+    # Find build script
+    script: Path
+    if script_path:
+        script = Path(script_path)
+        if not script.exists():
+            logger.error("Build script not found: %s", script_path)
+            return 1
+    else:
+        found_script = find_script("build.py")
+        if found_script is None:
+            logger.error("No build.py found in current directory")
+            logger.info("Create a build.py file or run 'pcons init'")
+            return 1
+        script = found_script
+
+    # Create build directory if it doesn't exist
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    # Get variant and reconfigure flags
+    variant = getattr(args, "variant", None)
+    reconfigure = getattr(args, "reconfigure", False)
+
+    # Run build script
+    return run_script(
+        script,
+        build_dir,
+        variables=variables,
+        variant=variant,
+        reconfigure=reconfigure,
+    )
+
+
+def cmd_build(args: argparse.Namespace) -> int:
+    """Build targets using ninja.
+
+    This command runs ninja in the build directory.
+    """
+    setup_logging(args.verbose, args.debug)
+
+    build_dir = Path(args.build_dir)
+
+    # Get targets from args
+    targets = getattr(args, "targets", None)
+    if not targets:
+        # Check for remaining args that might be targets
+        extra = getattr(args, "extra", [])
+        _, remaining = parse_variables(extra)
+        targets = remaining if remaining else None
+
+    return run_ninja(
+        build_dir,
+        targets=targets,
+        jobs=getattr(args, "jobs", None),
+        verbose=args.verbose,
+    )
 
 
 def cmd_clean(args: argparse.Namespace) -> int:
@@ -244,60 +316,15 @@ def cmd_clean(args: argparse.Namespace) -> int:
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize a new pcons project.
 
-    Creates template configure.py and build.py files.
+    Creates a template build.py file.
     """
     setup_logging(args.verbose, args.debug)
 
-    configure_py = Path("configure.py")
     build_py = Path("build.py")
-
-    if configure_py.exists() and not args.force:
-        logger.error("configure.py already exists (use --force to overwrite)")
-        return 1
 
     if build_py.exists() and not args.force:
         logger.error("build.py already exists (use --force to overwrite)")
         return 1
-
-    # Write configure.py template
-    configure_template = '''\
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons"]
-# ///
-"""Configure phase: detect tools and set up the build environment."""
-
-import os
-from pathlib import Path
-
-from pcons.configure.config import Configure
-from pcons.toolchains import GccToolchain, LlvmToolchain
-
-# Get build directory from environment or use default
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
-
-# Create configure context
-config = Configure(build_dir=build_dir)
-
-# Try to find a C/C++ toolchain
-# Prefer LLVM/Clang, fall back to GCC
-llvm = LlvmToolchain()
-gcc = GccToolchain()
-
-if llvm.configure(config):
-    config.set("toolchain", "llvm")
-    print(f"Found LLVM/Clang toolchain")
-elif gcc.configure(config):
-    config.set("toolchain", "gcc")
-    print(f"Found GCC toolchain")
-else:
-    print("Warning: No C/C++ toolchain found")
-
-# Save configuration
-config.save()
-print(f"Configuration saved to {build_dir / 'pcons_config.json'}")
-'''
 
     # Write build.py template
     build_template = '''\
@@ -306,52 +333,54 @@ print(f"Configuration saved to {build_dir / 'pcons_config.json'}")
 # requires-python = ">=3.11"
 # dependencies = ["pcons"]
 # ///
-"""Build phase: define targets and generate ninja files."""
+"""Build script for the project."""
 
 import os
 from pathlib import Path
 
-from pcons.configure.config import Configure, load_config
+from pcons import get_var, get_variant
+from pcons.configure.config import Configure
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import GccToolchain, LlvmToolchain
+from pcons.toolchains import find_c_toolchain
 
 # Get directories from environment or use defaults
 build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 source_dir = Path(os.environ.get("PCONS_SOURCE_DIR", "."))
 
-# Load configuration
+# Configuration (auto-cached)
 config = Configure(build_dir=build_dir)
-toolchain_name = config.get("toolchain", "gcc")
+if not config.get("configured") or os.environ.get("PCONS_RECONFIGURE"):
+    # Run configuration checks
+    toolchain = find_c_toolchain()
+    toolchain.configure(config)
+    config.set("configured", True)
+    config.save()
 
-# Select toolchain
-if toolchain_name == "llvm":
-    toolchain = LlvmToolchain()
-else:
-    toolchain = GccToolchain()
-
-toolchain.configure(config)
+# Get build variables
+variant = get_variant("release")
 
 # Create project
 project = Project("myproject", root_dir=source_dir, build_dir=build_dir)
 
 # Create environment with toolchain
+toolchain = find_c_toolchain()
 env = project.Environment(toolchain=toolchain)
+env.set_variant(variant)
 
 # Define your build here
 # Example:
-# obj = env.cc.Object("hello.o", "hello.c")
-# env.link.Program("hello", obj)
+# app = project.Program("hello", env, sources=["hello.c"])
+# project.Default(app)
+
+# Resolve targets
+project.resolve()
 
 # Generate ninja file
 generator = NinjaGenerator()
 generator.generate(project, build_dir)
 print(f"Generated {build_dir / 'build.ninja'}")
 '''
-
-    configure_py.write_text(configure_template)
-    configure_py.chmod(0o755)
-    logger.info("Created %s", configure_py)
 
     build_py.write_text(build_template)
     build_py.chmod(0o755)
@@ -360,11 +389,41 @@ print(f"Generated {build_dir / 'build.ninja'}")
     print("Project initialized!")
     print("Next steps:")
     print("  1. Edit build.py to define your build targets")
-    print("  2. Run 'pcons configure' to detect tools")
-    print("  3. Run 'pcons generate' to create build.ninja")
-    print("  4. Run 'pcons build' to build your project")
+    print("  2. Run 'pcons' to build")
+    print()
+    print("Build variables:")
+    print("  pcons VARIANT=debug        # Set build variant")
+    print("  pcons -v debug             # Same as above")
+    print("  pcons CC=clang PORT=ofx    # Set custom variables")
 
     return 0
+
+
+def add_common_args(parser: argparse.ArgumentParser) -> None:
+    """Add common arguments to a parser."""
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    parser.add_argument("--debug", action="store_true", help="Debug output")
+    parser.add_argument(
+        "-B", "--build-dir", default="build", help="Build directory (default: build)"
+    )
+
+
+def add_generate_args(parser: argparse.ArgumentParser) -> None:
+    """Add arguments for generate-related commands."""
+    parser.add_argument(
+        "--variant",
+        metavar="NAME",
+        help="Build variant (debug, release, etc.)",
+    )
+    parser.add_argument(
+        "-C",
+        "--reconfigure",
+        action="store_true",
+        help="Force re-run configuration checks",
+    )
+    parser.add_argument(
+        "-b", "--build-script", help="Path to build.py script"
+    )
 
 
 def main() -> int:
@@ -372,87 +431,83 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         prog="pcons",
         description="A Python-based build system that generates Ninja files.",
+        epilog="Run 'pcons <command> --help' for command-specific help.",
     )
     parser.add_argument("--version", action="version", version="%(prog)s 0.1.0-dev")
+
+    # Default command args (for 'pcons' with no subcommand)
+    add_common_args(parser)
+    add_generate_args(parser)
     parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Enable verbose output"
+        "-j", "--jobs", type=int, help="Number of parallel jobs for build"
     )
     parser.add_argument(
-        "--debug", action="store_true", help="Enable debug output"
+        "extra",
+        nargs="*",
+        help="Build variables (KEY=value) or targets",
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # pcons init
-    init_parser = subparsers.add_parser(
-        "init", help="Initialize a new pcons project"
-    )
+    init_parser = subparsers.add_parser("init", help="Initialize a new pcons project")
     init_parser.add_argument(
         "-f", "--force", action="store_true", help="Overwrite existing files"
     )
-    init_parser.add_argument("-v", "--verbose", action="store_true")
-    init_parser.add_argument("--debug", action="store_true")
+    add_common_args(init_parser)
     init_parser.set_defaults(func=cmd_init)
-
-    # pcons configure
-    cfg_parser = subparsers.add_parser(
-        "configure", help="Run configure phase (tool detection)"
-    )
-    cfg_parser.add_argument(
-        "--build-dir", "-B", default="build", help="Build directory (default: build)"
-    )
-    cfg_parser.add_argument(
-        "--configure-script", "-c", help="Path to configure.py script"
-    )
-    cfg_parser.add_argument("-v", "--verbose", action="store_true")
-    cfg_parser.add_argument("--debug", action="store_true")
-    cfg_parser.set_defaults(func=cmd_configure)
 
     # pcons generate
     gen_parser = subparsers.add_parser(
         "generate", help="Generate build files from build.py"
     )
+    add_common_args(gen_parser)
+    add_generate_args(gen_parser)
     gen_parser.add_argument(
-        "--build-dir", "-B", default="build", help="Build directory (default: build)"
+        "extra",
+        nargs="*",
+        help="Build variables (KEY=value)",
     )
-    gen_parser.add_argument(
-        "--build-script", "-b", help="Path to build.py script"
-    )
-    gen_parser.add_argument("-v", "--verbose", action="store_true")
-    gen_parser.add_argument("--debug", action="store_true")
     gen_parser.set_defaults(func=cmd_generate)
 
     # pcons build
     build_parser = subparsers.add_parser("build", help="Build targets using ninja")
-    build_parser.add_argument("targets", nargs="*", help="Targets to build")
-    build_parser.add_argument(
-        "--build-dir", "-B", default="build", help="Build directory (default: build)"
-    )
+    add_common_args(build_parser)
     build_parser.add_argument(
         "-j", "--jobs", type=int, help="Number of parallel jobs"
     )
-    build_parser.add_argument("-v", "--verbose", action="store_true")
-    build_parser.add_argument("--debug", action="store_true")
+    build_parser.add_argument(
+        "targets", nargs="*", help="Targets to build"
+    )
     build_parser.set_defaults(func=cmd_build)
 
     # pcons clean
     clean_parser = subparsers.add_parser("clean", help="Clean build artifacts")
+    add_common_args(clean_parser)
     clean_parser.add_argument(
-        "--build-dir", "-B", default="build", help="Build directory (default: build)"
+        "-a", "--all", action="store_true", help="Remove entire build directory"
     )
-    clean_parser.add_argument(
-        "--all", "-a", action="store_true", help="Remove entire build directory"
-    )
-    clean_parser.add_argument("-v", "--verbose", action="store_true")
-    clean_parser.add_argument("--debug", action="store_true")
     clean_parser.set_defaults(func=cmd_clean)
 
     args = parser.parse_args()
 
+    # Handle default command (no subcommand specified)
     if args.command is None:
-        parser.print_help()
-        return 0
+        # Check if any extra args look like targets (don't contain =)
+        extra = getattr(args, "extra", [])
+        variables, remaining = parse_variables(extra)
 
+        # If we have remaining args and no build.py, they might be targets
+        # for an existing build.ninja
+        if remaining and not find_script("build.py"):
+            # Just run build with the targets
+            args.targets = remaining
+            return cmd_build(args)
+
+        # Default: generate and build
+        return cmd_default(args)
+
+    # Run the specified command
     result: int = args.func(args)
     return result
 
