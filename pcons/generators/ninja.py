@@ -104,10 +104,19 @@ class NinjaGenerator(BaseGenerator):
                     self._ensure_rule(f, node, target, env)
                 for node in target.output_nodes:
                     self._ensure_rule(f, node, target, env)
+                # For interface targets (like Install), also check target.nodes
+                if target.target_type == "interface":
+                    for node in target.nodes:
+                        if isinstance(node, FileNode):
+                            has_build = getattr(node, "_build_info", None) is not None
+                            if has_build:
+                                self._ensure_rule(f, node, target, env)
             else:
                 # Legacy path
                 for node in target.nodes:
-                    if isinstance(node, FileNode) and node.builder is not None:
+                    # Check for builder or build_info (install nodes use build_info)
+                    has_build = node.builder is not None or getattr(node, "_build_info", None) is not None
+                    if isinstance(node, FileNode) and has_build:
                         # Find environment for this target
                         env = self._find_env_for_node(node, project)
                         self._ensure_rule(f, node, target, env)
@@ -158,9 +167,15 @@ class NinjaGenerator(BaseGenerator):
             rule_name = rule_key
             description = f"{tool_name.upper()} $out"
 
-            # Get the actual command from the environment
+            # Get the actual command from the environment or build_info
             command = f"echo 'No command for {rule_key}'"
-            if env is not None:
+
+            # Special case for copy command (from Install)
+            if tool_name == "copy":
+                copy_cmd = build_info.get("copy_cmd", "cp $in $out")
+                command = copy_cmd
+                description = "INSTALL $out"
+            elif env is not None:
                 tool_config = getattr(env, tool_name, None)
                 if tool_config is not None:
                     cmd_template = getattr(tool_config, command_var, None)
@@ -279,6 +294,13 @@ class NinjaGenerator(BaseGenerator):
                         parent = node.path.parent
                         if parent != Path(".") and parent != Path(""):
                             directories.add(parent)
+                # For interface targets (like Install), also check target.nodes
+                if target.target_type == "interface":
+                    for node in target.nodes:
+                        if isinstance(node, FileNode):
+                            parent = node.path.parent
+                            if parent != Path(".") and parent != Path(""):
+                                directories.add(parent)
             else:
                 for node in target.nodes:
                     if isinstance(node, FileNode):
@@ -307,6 +329,7 @@ class NinjaGenerator(BaseGenerator):
 
         For resolved targets (target._resolved is True), writes builds for
         object_nodes and output_nodes. For legacy targets, uses target.nodes.
+        Interface targets (like Install) may have nodes in target.nodes directly.
         """
         # Check if this is a resolved target (target-centric model)
         if getattr(target, "_resolved", False):
@@ -320,10 +343,21 @@ class NinjaGenerator(BaseGenerator):
                 if node.path not in written_nodes:
                     self._write_build_statement(f, node, target, project)
                     written_nodes.add(node.path)
+            # For interface targets (like Install), also check target.nodes
+            # These may contain copy/install nodes with _build_info
+            if target.target_type == "interface":
+                for node in target.nodes:
+                    if isinstance(node, FileNode) and node.path not in written_nodes:
+                        has_build = getattr(node, "_build_info", None) is not None
+                        if has_build:
+                            self._write_build_statement(f, node, target, project)
+                            written_nodes.add(node.path)
         else:
             # Legacy path: use target.nodes directly
             for node in target.nodes:
-                if isinstance(node, FileNode) and node.builder is not None:
+                # Check for builder or build_info (install nodes use build_info)
+                has_build = node.builder is not None or getattr(node, "_build_info", None) is not None
+                if isinstance(node, FileNode) and has_build:
                     if node.path not in written_nodes:
                         self._write_build_statement(f, node, target, project)
                         written_nodes.add(node.path)
@@ -521,10 +555,11 @@ class NinjaGenerator(BaseGenerator):
         # Add nodes from default targets
         for target in project.default_targets:
             # For resolved targets, use output_nodes
-            if getattr(target, "_resolved", False):
+            if target.output_nodes:
                 for node in target.output_nodes:
                     if isinstance(node, FileNode):
                         defaults.append(self._escape_path(node.path))
+            # Fall back to nodes for legacy/unresolved targets
             else:
                 for node in target.nodes:
                     if isinstance(node, FileNode):

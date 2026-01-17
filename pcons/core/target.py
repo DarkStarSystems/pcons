@@ -128,6 +128,14 @@ class Target:
         "object_nodes",
         "output_nodes",
         "_resolved",
+        # For install targets:
+        "_install_nodes",
+        # Custom output filename:
+        "output_name",
+        # Lazy source resolution (for Install, etc.):
+        "_pending_sources",
+        "_install_dest_dir",
+        "_install_as_dest",
     )
 
     def __init__(
@@ -162,6 +170,17 @@ class Target:
         self.object_nodes: list[FileNode] = []
         self.output_nodes: list[FileNode] = []
         self._resolved: bool = False
+        # For install targets:
+        self._install_nodes: list[FileNode] = []
+        # Custom output filename (overrides toolchain default naming):
+        self.output_name: str | None = None
+        # Lazy source resolution (for Install, etc.):
+        # Sources that need resolution after main resolve phase
+        self._pending_sources: list[Target | Node | Path | str] | None = None
+        # Destination directory for Install targets
+        self._install_dest_dir: Path | None = None
+        # Destination path for InstallAs targets (full path including filename)
+        self._install_as_dest: Path | None = None
 
     def link(self, *targets: Target) -> None:
         """Add targets as dependencies.

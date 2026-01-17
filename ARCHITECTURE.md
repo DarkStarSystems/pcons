@@ -436,6 +436,57 @@ app = env.Program('app', ['main.cpp'],
     link_libs=[libbar])
 ```
 
+### Target Resolution and Lazy Node Creation
+
+**Targets represent builds without containing output nodes initially.**
+
+When you call `project.SharedLibrary("mylib", env)`, it returns a Target object that *describes* what to build, but doesn't yet contain the actual output nodes. The Target is a configuration object:
+
+```python
+lib = project.SharedLibrary("mylib", env, sources=["lib.cpp"])
+lib.output_name = "mylib.ofx"  # Customize output filename
+
+# At this point:
+# - lib.sources contains the source FileNodes
+# - lib.output_nodes is EMPTY []
+# - lib.object_nodes is EMPTY []
+```
+
+**Resolution populates the nodes.** The Resolver, called via `project.resolve()`, processes all targets in dependency order and:
+
+1. Computes effective requirements (flags from transitive dependencies)
+2. Creates object nodes for each source file
+3. Creates output nodes (library/program files) with proper naming
+4. Sets up build_info with commands and flags
+
+```python
+project.resolve()
+
+# Now:
+# - lib.object_nodes contains [FileNode("build/obj.mylib/lib.o")]
+# - lib.output_nodes contains [FileNode("build/mylib.ofx")]
+```
+
+**Why this design?** The output filename and build flags depend on:
+- The `output_name` attribute (may be set after target creation)
+- Toolchain defaults (platform-specific naming like `.dylib` vs `.so`)
+- Effective requirements from dependencies (must be computed in dependency order)
+
+**Pending sources for lazy resolution.** Some operations, like `Install()`, need to reference a target's outputs. Rather than requiring users to carefully order their build script, targets can have `_pending_sources` - references that are resolved after the main resolution phase:
+
+```python
+# These can appear in any order:
+lib = project.SharedLibrary("mylib", env, sources=["lib.cpp"])
+install = project.Install("dist/lib", [lib])  # lib.output_nodes is empty here!
+
+# resolve() handles it:
+# 1. Phase 1: Resolve build targets (populates lib.output_nodes)
+# 2. Phase 2: Resolve pending sources (install now sees lib.output_nodes)
+project.resolve()
+```
+
+This makes build scripts declarative - the order of declarations doesn't matter.
+
 ### Scanner
 
 A Scanner discovers implicit dependencies.

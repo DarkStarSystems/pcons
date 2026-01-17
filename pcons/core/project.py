@@ -308,17 +308,27 @@ class Project:
         return topological_sort_targets(list(self._targets.values()))
 
     def resolve(self) -> None:
-        """Resolve all targets.
+        """Resolve all targets in two phases.
 
-        This processes all targets in dependency order, computing effective
-        requirements and creating the necessary nodes for compilation and linking.
+        Phase 1: Resolve build targets (compiles, links)
+            This populates object_nodes and output_nodes for libraries/programs.
 
-        After resolution, each target's object_nodes and output_nodes are populated.
+        Phase 2: Resolve pending sources (Install, InstallAs, etc.)
+            This handles targets that reference outputs from other targets.
+            Because Phase 1 has run, output_nodes are now populated.
+
+        After resolution, each target's nodes are fully populated and ready
+        for generation.
         """
         from pcons.core.resolver import Resolver
 
         resolver = Resolver(self)
+
+        # Phase 1: Resolve build targets
         resolver.resolve()
+
+        # Phase 2: Resolve pending sources (Install, etc.)
+        resolver.resolve_pending_sources()
 
     # Target factory methods for the target-centric build model
 
@@ -468,6 +478,126 @@ class Project:
             else:
                 result.append(self.node(src))
         return result
+
+    def Install(
+        self,
+        dest_dir: Path | str,
+        sources: list[Target | Node | Path | str],
+        *,
+        name: str | None = None,
+    ) -> Target:
+        """Install files to a destination directory.
+
+        Creates copy operations for each source file to the destination
+        directory. The returned target depends on all the installed files.
+
+        Note: Sources are resolved lazily during project.resolve(), so this
+        can be called before or after defining the source targets.
+
+        Args:
+            dest_dir: Destination directory path.
+            sources: Files to install. Can be:
+                - Target: Installs the target's output files
+                - Node: Installs the node
+                - Path/str: Installs the file at that path
+            name: Optional name for the install target (default: "install_<dirname>")
+
+        Returns:
+            A Target representing the install operation.
+
+        Example:
+            # Install a library and headers
+            project.Install(
+                "dist/lib",
+                [mylib],  # Installs libmylib.a (or .so)
+            )
+            project.Install(
+                "dist/include",
+                project.Glob("include/*.h"),
+            )
+
+            # Bundle creation
+            bundle_dir = Path("build/MyPlugin.bundle/Contents/MacOS")
+            project.Install(bundle_dir, [plugin_lib])
+        """
+        dest_dir = Path(dest_dir)
+        target_name = name or f"install_{dest_dir.name}"
+
+        # Handle duplicate target names by appending a suffix
+        base_name = target_name
+        counter = 1
+        while target_name in self._targets:
+            target_name = f"{base_name}_{counter}"
+            counter += 1
+
+        # Create the install target with pending sources
+        # Sources will be resolved during project.resolve()
+        install_target = Target(
+            target_name,
+            target_type="interface",
+            defined_at=get_caller_location(),
+        )
+
+        # Store for lazy resolution
+        install_target._pending_sources = list(sources)
+        install_target._install_dest_dir = dest_dir
+
+        self.add_target(install_target)
+        return install_target
+
+    def InstallAs(
+        self,
+        dest: Path | str,
+        source: Target | Node | Path | str,
+        *,
+        name: str | None = None,
+    ) -> Target:
+        """Install a file to a specific destination path.
+
+        Unlike Install(), this copies a single file to an exact path,
+        allowing rename during installation.
+
+        Note: Source is resolved lazily during project.resolve(), so this
+        can be called before or after defining the source target.
+
+        Args:
+            dest: Full destination path (including filename).
+            source: Source file (Target, Node, Path, or string).
+            name: Optional name for the install target.
+
+        Returns:
+            A Target representing the install operation.
+
+        Example:
+            project.InstallAs(
+                bundle_dir / "markymark.ofx",
+                ofx_plugin,
+            )
+        """
+        dest = Path(dest)
+        target_name = name or f"install_{dest.name}"
+
+        # Handle duplicate target names by appending a suffix
+        base_name = target_name
+        counter = 1
+        while target_name in self._targets:
+            target_name = f"{base_name}_{counter}"
+            counter += 1
+
+        # Create the install target with pending source
+        # Source will be resolved during project.resolve()
+        install_target = Target(
+            target_name,
+            target_type="interface",
+            defined_at=get_caller_location(),
+        )
+
+        # Store for lazy resolution
+        install_target._pending_sources = [source]
+        install_target._install_as_dest = dest
+
+        self.add_target(install_target)
+        return install_target
 
     def __repr__(self) -> str:
         return (

@@ -323,6 +323,91 @@ class TestResolverLanguageDetection:
         assert "cxx" in target.required_languages
 
 
+class TestResolverOutputName:
+    """Tests for target.output_name custom output naming."""
+
+    def test_shared_library_output_name(self, tmp_path):
+        """Test that output_name overrides shared library naming."""
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $in -o $out"
+
+        target = project.SharedLibrary("plugin", env, sources=[str(src_file)])
+        target.output_name = "plugin.ofx"  # Custom name with .ofx suffix
+
+        project.resolve()
+
+        assert target._resolved
+        assert len(target.output_nodes) == 1
+        # Should use custom name, not platform default
+        assert target.output_nodes[0].path.name == "plugin.ofx"
+
+    def test_static_library_output_name(self, tmp_path):
+        """Test that output_name overrides static library naming."""
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $in -o $out"
+
+        target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
+        target.output_name = "custom_mylib.lib"  # Windows-style naming
+
+        project.resolve()
+
+        assert target._resolved
+        assert target.output_nodes[0].path.name == "custom_mylib.lib"
+
+    def test_program_output_name(self, tmp_path):
+        """Test that output_name overrides program naming."""
+        src_file = tmp_path / "main.c"
+        src_file.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $in -o $out"
+
+        target = project.Program("myapp", env, sources=[str(src_file)])
+        target.output_name = "custom_app.bin"
+
+        project.resolve()
+
+        assert target._resolved
+        assert target.output_nodes[0].path.name == "custom_app.bin"
+
+    def test_output_name_none_uses_default(self, tmp_path):
+        """Test that None output_name uses default naming."""
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $in -o $out"
+
+        target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
+        # output_name is None by default
+
+        project.resolve()
+
+        assert target._resolved
+        # Should use platform default
+        import sys
+        if sys.platform == "darwin":
+            assert target.output_nodes[0].path.name == "libmylib.dylib"
+        elif sys.platform == "win32":
+            assert target.output_nodes[0].path.name == "mylib.dll"
+        else:
+            assert target.output_nodes[0].path.name == "libmylib.so"
+
+
 class TestResolverToolAgnostic:
     """Test that resolver works with non-C toolchains (tool-agnostic design)."""
 

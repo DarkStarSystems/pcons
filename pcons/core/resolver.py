@@ -358,9 +358,10 @@ class Resolver:
 
         build_dir = self.project.build_dir
 
-        # Get library name from toolchain (tool-agnostic)
-        toolchain = env._toolchain
-        if toolchain:
+        # Check for custom output name first
+        if target.output_name:
+            lib_name = target.output_name
+        elif toolchain := env._toolchain:
             lib_name = toolchain.get_static_library_name(target.name)
         else:
             lib_name = f"lib{target.name}.a"  # Fallback
@@ -398,9 +399,10 @@ class Resolver:
 
         build_dir = self.project.build_dir
 
-        # Get library name from toolchain (tool-agnostic)
-        toolchain = env._toolchain
-        if toolchain:
+        # Check for custom output name first
+        if target.output_name:
+            lib_name = target.output_name
+        elif toolchain := env._toolchain:
             lib_name = toolchain.get_shared_library_name(target.name)
         else:
             # Fallback to platform-specific naming
@@ -457,9 +459,10 @@ class Resolver:
 
         build_dir = self.project.build_dir
 
-        # Get program name from toolchain (tool-agnostic)
-        toolchain = env._toolchain
-        if toolchain:
+        # Check for custom output name first
+        if target.output_name:
+            prog_name = target.output_name
+        elif toolchain := env._toolchain:
             prog_name = toolchain.get_program_name(target.name)
         else:
             # Fallback to platform-specific naming
@@ -513,3 +516,148 @@ class Resolver:
         for dep in target.transitive_dependencies():
             result.extend(dep.output_nodes)
         return result
+
+    def resolve_pending_sources(self) -> None:
+        """Resolve _pending_sources for all targets that have them.
+
+        Called after main resolution so output_nodes are populated.
+        This handles Install, InstallAs, and similar targets that need
+        to reference outputs from other targets.
+        """
+        for target in self._targets_in_build_order():
+            if target._pending_sources is not None:
+                self._resolve_target_pending_sources(target)
+
+    def _resolve_target_pending_sources(self, target: "Target") -> None:
+        """Resolve pending sources for a single target.
+
+        Recursively ensures any source targets have their pending sources
+        resolved first, then creates the appropriate nodes.
+        """
+        from pathlib import Path
+
+        from pcons.core.node import FileNode, Node
+        from pcons.core.target import Target
+
+        if target._pending_sources is None:
+            return
+
+        # Recursively resolve any source targets that also have pending sources
+        for source in target._pending_sources:
+            if isinstance(source, Target) and source._pending_sources is not None:
+                self._resolve_target_pending_sources(source)
+
+        # Now collect resolved source files
+        resolved_sources: list[FileNode] = []
+        for source in target._pending_sources:
+            if isinstance(source, Target):
+                # Get output files from the now-resolved target
+                resolved_sources.extend(source.output_nodes)
+                # Also check nodes directly (for interface targets)
+                for node in source.nodes:
+                    if isinstance(node, FileNode) and node not in resolved_sources:
+                        resolved_sources.append(node)
+            elif isinstance(source, FileNode):
+                resolved_sources.append(source)
+            elif isinstance(source, Node):
+                # Skip non-file nodes
+                pass
+            elif isinstance(source, (Path, str)):
+                resolved_sources.append(self.project.node(source))
+
+        # Create nodes based on target type
+        if target._install_dest_dir is not None:
+            # This is an Install target
+            self._create_install_nodes(target, resolved_sources, target._install_dest_dir)
+        elif target._install_as_dest is not None:
+            # This is an InstallAs target
+            self._create_install_as_node(target, resolved_sources, target._install_as_dest)
+
+        # Mark as processed
+        target._pending_sources = None
+
+    def _create_install_nodes(
+        self, target: "Target", sources: list[FileNode], dest_dir: Path
+    ) -> None:
+        """Create copy nodes for Install target.
+
+        Args:
+            target: The Install target.
+            sources: Resolved source file nodes.
+            dest_dir: Destination directory.
+        """
+        from pcons.configure.platform import get_platform
+
+        platform = get_platform()
+        copy_cmd = "copy" if platform.is_windows else "cp"
+
+        installed_nodes: list[FileNode] = []
+        for file_node in sources:
+            if not isinstance(file_node, FileNode):
+                continue
+
+            # Destination path
+            dest_path = dest_dir / file_node.path.name
+
+            # Create destination node
+            dest_node = FileNode(dest_path, defined_at=get_caller_location())
+            dest_node.depends([file_node])
+
+            # Store build info for the copy command
+            dest_node._build_info = {
+                "tool": "copy",
+                "command": copy_cmd,
+                "command_var": "copycmd",
+                "sources": [file_node],
+                "copy_cmd": f"{copy_cmd} $in $out",
+            }
+
+            installed_nodes.append(dest_node)
+
+            # Register the node with the project
+            if dest_path not in self.project._nodes:
+                self.project._nodes[dest_path] = dest_node
+
+        # Add installed files as output nodes (consistent with other builders)
+        target._install_nodes = installed_nodes
+        target.output_nodes.extend(installed_nodes)
+
+    def _create_install_as_node(
+        self, target: "Target", sources: list[FileNode], dest: Path
+    ) -> None:
+        """Create copy node for InstallAs target.
+
+        Args:
+            target: The InstallAs target.
+            sources: Resolved source file nodes (should have exactly one).
+            dest: Destination path (full path including filename).
+        """
+        from pcons.configure.platform import get_platform
+
+        if not sources:
+            return
+
+        platform = get_platform()
+        copy_cmd = "copy" if platform.is_windows else "cp"
+
+        # Use the first source
+        source_node = sources[0]
+
+        # Create destination node
+        dest_node = FileNode(dest, defined_at=get_caller_location())
+        dest_node.depends([source_node])
+
+        dest_node._build_info = {
+            "tool": "copy",
+            "command": copy_cmd,
+            "command_var": "copycmd",
+            "sources": [source_node],
+            "copy_cmd": f"{copy_cmd} $in $out",
+        }
+
+        # Add installed file as output node (consistent with other builders)
+        target._install_nodes = [dest_node]
+        target.output_nodes.append(dest_node)
+
+        if dest not in self.project._nodes:
+            self.project._nodes[dest] = dest_node
