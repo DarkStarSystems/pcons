@@ -59,16 +59,5 @@ clean:            ## Clean unused files.
 .PHONY: docs
 docs:             ## Build the documentation.
 	@echo "building documentation ..."
-	uv run mkdocs build
-	@open site/index.html || xdg-open site/index.html
-
-.PHONY: release
-release:          ## Create a new tag for release.
-	@echo "WARNING: This operation will create a version tag and push to github"
-	@read -p "Version? (provide the next x.y.z semver) : " TAG && \
-	echo "Creating release for version $${TAG}" && \
-	git add -A && \
-	git commit -m "release: version $${TAG}" && \
-	git tag "v$${TAG}" && \
-	git push -u origin HEAD --tags
-	@echo "Github Actions will detect the new tag and release the new version."
+	cd docs && uv run python build.py
+	@open docs/build/index.html || xdg-open docs/build/index.html
