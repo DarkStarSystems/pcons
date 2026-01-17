@@ -54,7 +54,7 @@ project.generate()
 ```
 
 ```bash
-python build.py
+uv run build.py
 ninja -C build
 ```
 

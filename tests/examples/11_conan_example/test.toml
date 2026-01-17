@@ -1,9 +1,11 @@
 # Test configuration for Conan example
-# This test requires Conan to be installed, so it's skipped in CI
+# Uses uvx to run conan if conan is not installed
 
 [test]
-skip = true  # Requires Conan installation
 description = "Example showing how to use Conan packages with pcons"
+
+[skip]
+requires = ["uvx"]  # Falls back to uvx conan if conan not installed
 
 [test.commands]
 generate = "uvx pcons generate"
