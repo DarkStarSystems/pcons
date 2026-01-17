@@ -64,7 +64,14 @@ def get_variant(default: str = "release") -> str:
 
     The variant can be set with:
         pcons --variant=debug
-        pcons -v debug
+
+    Or when running directly:
+        VARIANT=debug python build.py
+
+    Precedence (highest to lowest):
+        1. PCONS_VARIANT (set by pcons CLI)
+        2. VARIANT environment variable
+        3. default parameter
 
     Args:
         default: Default variant if not set.
@@ -72,7 +79,7 @@ def get_variant(default: str = "release") -> str:
     Returns:
         The variant name.
     """
-    return os.environ.get("PCONS_VARIANT", default)
+    return os.environ.get("PCONS_VARIANT") or os.environ.get("VARIANT") or default
 
 
 # Public API exports
