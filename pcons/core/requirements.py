@@ -200,8 +200,9 @@ def _get_primary_tool(target: Target, env: Environment) -> str | None:
         for source in target.sources:
             if isinstance(source, FileNode):
                 handler = toolchain.get_source_handler(source.path.suffix)
-                if handler:
-                    return handler.tool_name
+                if handler is not None:
+                    tool_name: str = handler.tool_name
+                    return tool_name
 
     # Fallback to hardcoded suffixes for backwards compatibility
     for source in target.sources:

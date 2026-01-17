@@ -8,13 +8,13 @@ compiling C files). Tools attach to Environments and provide Builders.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
-
 
 
 @runtime_checkable
@@ -74,11 +74,11 @@ class BaseTool(ABC):
     the abstract methods.
     """
 
-    def __init__(self, name: str, *, language: str | None = None) -> None:
+    def __init__(self, name: str = "", *, language: str | None = None) -> None:
         """Initialize a tool.
 
         Args:
-            name: Tool name.
+            name: Tool name. Subclasses should always provide this.
             language: Language this tool handles (for linker selection).
         """
         self._name = name
@@ -113,9 +113,7 @@ class BaseTool(ABC):
             # Make builder callable from tool config (e.g., env.cc.Object())
             setattr(tool_config, builder_name, self._make_builder_method(env, builder))
 
-    def _make_builder_method(
-        self, env: Environment, builder: Builder
-    ) -> BuilderMethod:
+    def _make_builder_method(self, env: Environment, builder: Builder) -> BuilderMethod:
         """Create a bound method for calling a builder from the tool config."""
         return BuilderMethod(env, builder)
 

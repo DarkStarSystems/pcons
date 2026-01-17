@@ -53,7 +53,7 @@ class NodeLike(Protocol):
         ...
 
     @property
-    def builder(self) -> "Builder | None":
+    def builder(self) -> Builder | None:
         """The builder that produces this node (None for sources)."""
         ...
 
@@ -129,7 +129,7 @@ class TargetLike(Protocol):
         ...
 
     @property
-    def defined_at(self) -> "SourceLocation | None":
+    def defined_at(self) -> SourceLocation | None:
         """Where this target was created in user code."""
         ...
 

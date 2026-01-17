@@ -23,14 +23,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.graph import topological_sort_targets
-
-logger = logging.getLogger(__name__)
 from pcons.core.node import FileNode
 from pcons.core.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
 )
 from pcons.util.source_location import get_caller_location
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -74,9 +74,7 @@ class ObjectNodeFactory:
         self.project = project
         self._object_cache: dict[tuple[Path, tuple], FileNode] = {}
 
-    def get_object_path(
-        self, target: Target, source: Path, env: Environment
-    ) -> Path:
+    def get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
         """Generate target-specific output path for an object file.
 
         Format: build/obj.<target_name>/<source_stem>.<suffix>
@@ -109,7 +107,7 @@ class ObjectNodeFactory:
 
     def get_source_handler(
         self, source: Path, env: Environment
-    ) -> "SourceHandler | None":
+    ) -> SourceHandler | None:
         """Get source handler from the environment's toolchain.
 
         This is the tool-agnostic way to determine how to compile a source.
@@ -127,7 +125,8 @@ class ObjectNodeFactory:
             handler = toolchain.get_source_handler(source.suffix)
             if handler is not None:
                 if env.has_tool(handler.tool_name):
-                    return handler
+                    result: SourceHandler = handler
+                    return result
                 else:
                     logger.warning(
                         "Tool '%s' required for '%s' files is not available in the "
@@ -196,8 +195,8 @@ class ObjectNodeFactory:
             if tool_info is None:
                 return None
             tool_name, language = tool_info
-            depfile = "$out.d"
-            deps_style = "gcc"
+            depfile: str | None = "$out.d"
+            deps_style: str | None = "gcc"
         else:
             tool_name = handler.tool_name
             language = handler.language
@@ -260,9 +259,7 @@ class OutputNodeFactory:
         """
         self.project = project
 
-    def create_static_library_output(
-        self, target: Target, env: Environment
-    ) -> None:
+    def create_static_library_output(self, target: Target, env: Environment) -> None:
         """Create static library output node.
 
         Args:
@@ -292,7 +289,9 @@ class OutputNodeFactory:
         lib_node.depends(target.object_nodes)
 
         # Compute effective link requirements
-        effective_link = compute_effective_requirements(target, env, for_compilation=False)
+        effective_link = compute_effective_requirements(
+            target, env, for_compilation=False
+        )
 
         lib_node._build_info = {
             "tool": "ar",
@@ -305,9 +304,7 @@ class OutputNodeFactory:
         target.nodes.append(lib_node)
         env.register_node(lib_node)
 
-    def create_shared_library_output(
-        self, target: Target, env: Environment
-    ) -> None:
+    def create_shared_library_output(self, target: Target, env: Environment) -> None:
         """Create shared library output node.
 
         Args:
@@ -331,6 +328,7 @@ class OutputNodeFactory:
         else:
             # Fallback to platform-specific naming
             import sys
+
             if sys.platform == "darwin":
                 lib_name = f"lib{target.name}.dylib"
             elif sys.platform == "win32":
@@ -349,7 +347,9 @@ class OutputNodeFactory:
             lib_node.depends(dep_libs)
 
         # Compute effective link requirements
-        effective_link = compute_effective_requirements(target, env, for_compilation=False)
+        effective_link = compute_effective_requirements(
+            target, env, for_compilation=False
+        )
 
         # Determine linker language - we use 'link' tool for linking
         # but track the language for description purposes
@@ -369,9 +369,7 @@ class OutputNodeFactory:
         target.nodes.append(lib_node)
         env.register_node(lib_node)
 
-    def create_program_output(
-        self, target: Target, env: Environment
-    ) -> None:
+    def create_program_output(self, target: Target, env: Environment) -> None:
         """Create program output node.
 
         Args:
@@ -395,6 +393,7 @@ class OutputNodeFactory:
         else:
             # Fallback to platform-specific naming
             import sys
+
             if sys.platform == "win32":
                 prog_name = f"{target.name}.exe"
             else:
@@ -411,7 +410,9 @@ class OutputNodeFactory:
             prog_node.depends(dep_libs)
 
         # Compute effective link requirements
-        effective_link = compute_effective_requirements(target, env, for_compilation=False)
+        effective_link = compute_effective_requirements(
+            target, env, for_compilation=False
+        )
 
         # Determine linker tool based on language - we use 'link' tool
         # but track the language for description purposes
@@ -465,7 +466,7 @@ class InstallNodeFactory:
         self.project = project
 
     def create_install_nodes(
-        self, target: "Target", sources: list[FileNode], dest_dir: Path
+        self, target: Target, sources: list[FileNode], dest_dir: Path
     ) -> None:
         """Create copy nodes for Install target.
 
@@ -511,7 +512,7 @@ class InstallNodeFactory:
         target.output_nodes.extend(installed_nodes)
 
     def create_install_as_node(
-        self, target: "Target", sources: list[FileNode], dest: Path
+        self, target: Target, sources: list[FileNode], dest: Path
     ) -> None:
         """Create copy node for InstallAs target.
 
@@ -729,9 +730,7 @@ class Resolver:
         return None
 
     # Delegate methods to factories for backwards compatibility
-    def _get_object_path(
-        self, target: Target, source: Path, env: Environment
-    ) -> Path:
+    def _get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
         """Generate target-specific output path for an object file.
 
         Delegated to ObjectNodeFactory.
@@ -740,7 +739,7 @@ class Resolver:
 
     def _get_source_handler(
         self, source: Path, env: Environment
-    ) -> "SourceHandler | None":
+    ) -> SourceHandler | None:
         """Get source handler from the environment's toolchain.
 
         Delegated to ObjectNodeFactory.
@@ -769,27 +768,21 @@ class Resolver:
         """
         return self._object_factory.create_object_node(target, source, effective, env)
 
-    def _create_static_library_output(
-        self, target: Target, env: Environment
-    ) -> None:
+    def _create_static_library_output(self, target: Target, env: Environment) -> None:
         """Create static library output node.
 
         Delegated to OutputNodeFactory.
         """
         self._output_factory.create_static_library_output(target, env)
 
-    def _create_shared_library_output(
-        self, target: Target, env: Environment
-    ) -> None:
+    def _create_shared_library_output(self, target: Target, env: Environment) -> None:
         """Create shared library output node.
 
         Delegated to OutputNodeFactory.
         """
         self._output_factory.create_shared_library_output(target, env)
 
-    def _create_program_output(
-        self, target: Target, env: Environment
-    ) -> None:
+    def _create_program_output(self, target: Target, env: Environment) -> None:
         """Create program output node.
 
         Delegated to OutputNodeFactory.
@@ -814,7 +807,7 @@ class Resolver:
             if target._pending_sources is not None:
                 self._resolve_target_pending_sources(target)
 
-    def _resolve_target_pending_sources(self, target: "Target") -> None:
+    def _resolve_target_pending_sources(self, target: Target) -> None:
         """Resolve pending sources for a single target.
 
         Recursively ensures any source targets have their pending sources
@@ -868,7 +861,7 @@ class Resolver:
 
     # Delegate methods to InstallNodeFactory for backwards compatibility
     def _create_install_nodes(
-        self, target: "Target", sources: list[FileNode], dest_dir: Path
+        self, target: Target, sources: list[FileNode], dest_dir: Path
     ) -> None:
         """Create copy nodes for Install target.
 
@@ -877,7 +870,7 @@ class Resolver:
         self._install_factory.create_install_nodes(target, sources, dest_dir)
 
     def _create_install_as_node(
-        self, target: "Target", sources: list[FileNode], dest: Path
+        self, target: Target, sources: list[FileNode], dest: Path
     ) -> None:
         """Create copy node for InstallAs target.
 

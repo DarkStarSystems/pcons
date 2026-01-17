@@ -1,16 +1,15 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.util.macos."""
 
-import subprocess
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 # Only import on macOS to avoid issues on other platforms
 if sys.platform == "darwin":
-    from pcons.util.macos import get_dylib_install_name, fix_dylib_references
+    from pcons.util.macos import fix_dylib_references, get_dylib_install_name
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")

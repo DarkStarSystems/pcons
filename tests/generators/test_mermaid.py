@@ -3,9 +3,6 @@
 
 from pathlib import Path
 
-import pytest
-
-from pcons.core.environment import Environment
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target

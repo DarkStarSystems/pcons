@@ -173,7 +173,11 @@ class TestEnvironmentSubst:
         env.cc.flags = ["-Wall", "-O2"]
 
         # List template properly expands list variables
-        result = env.subst_list(["$cc.cmd", "$cc.flags", "-c", "-o", "$out", "$src"], out="foo.o", src="foo.c")
+        result = env.subst_list(
+            ["$cc.cmd", "$cc.flags", "-c", "-o", "$out", "$src"],
+            out="foo.o",
+            src="foo.c",
+        )
         assert "gcc" in result
         assert "-Wall" in result
         assert "-O2" in result

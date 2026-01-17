@@ -111,12 +111,17 @@ class CompileCommandsGenerator(BaseGenerator):
         project: Project,
     ) -> dict[str, Any] | None:
         """Create a compile_commands.json entry for a source file."""
-        tool_name = build_info.get("tool", "")
-        command_var = build_info.get("command_var", "")
+        tool_name = str(build_info.get("tool", ""))
+        command_var = str(build_info.get("command_var", ""))
 
         # Format the command with effective flags
         command = self._format_command(
-            tool_name, command_var, source, output, project, build_info  # type: ignore[arg-type]
+            tool_name,
+            command_var,
+            source,
+            output,
+            project,
+            build_info,
         )
 
         return {
@@ -151,16 +156,19 @@ class CompileCommandsGenerator(BaseGenerator):
         # Add effective requirements from build_info
         if build_info:
             includes = build_info.get("effective_includes", [])
-            for inc in includes:
-                parts.append(f"-I{inc}")
+            if isinstance(includes, list):
+                for inc in includes:
+                    parts.append(f"-I{inc}")
 
             defines = build_info.get("effective_defines", [])
-            for define in defines:
-                parts.append(f"-D{define}")
+            if isinstance(defines, list):
+                for define in defines:
+                    parts.append(f"-D{define}")
 
             flags = build_info.get("effective_flags", [])
-            for flag in flags:
-                parts.append(str(flag))
+            if isinstance(flags, list):
+                for flag in flags:
+                    parts.append(str(flag))
 
         parts.extend(["-o", str(output.path), str(source.path)])
 

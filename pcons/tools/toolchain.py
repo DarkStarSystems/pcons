@@ -267,6 +267,30 @@ class Toolchain(Protocol):
         """
         ...
 
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
+        """Return handler for source file suffix, or None if not handled."""
+        ...
+
+    def get_object_suffix(self) -> str:
+        """Return the object file suffix for this toolchain."""
+        ...
+
+    def get_static_library_name(self, name: str) -> str:
+        """Return filename for a static library."""
+        ...
+
+    def get_shared_library_name(self, name: str) -> str:
+        """Return filename for a shared library."""
+        ...
+
+    def get_program_name(self, name: str) -> str:
+        """Return filename for a program."""
+        ...
+
+    def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
+        """Return additional compile flags needed for the target type."""
+        ...
+
 
 class BaseToolchain(ABC):
     """Abstract base class for toolchains.
@@ -285,11 +309,11 @@ class BaseToolchain(ABC):
         "cuda": 4,
     }
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str = "") -> None:
         """Initialize a toolchain.
 
         Args:
-            name: Toolchain name.
+            name: Toolchain name. Subclasses should always provide this.
         """
         self._name = name
         self._tools: dict[str, Tool] = {}

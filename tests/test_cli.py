@@ -65,6 +65,7 @@ class TestGetVar:
         """Test get_var returns default when not set."""
         # Clear any cached vars
         import pcons
+
         pcons._cli_vars = None
         monkeypatch.delenv("PCONS_VARS", raising=False)
         monkeypatch.delenv("TEST_VAR", raising=False)
@@ -74,6 +75,7 @@ class TestGetVar:
     def test_get_var_from_env(self, monkeypatch) -> None:
         """Test get_var reads from environment variable."""
         import pcons
+
         pcons._cli_vars = None
         monkeypatch.delenv("PCONS_VARS", raising=False)
         monkeypatch.setenv("TEST_VAR", "env_value")
@@ -83,6 +85,7 @@ class TestGetVar:
     def test_get_var_from_pcons_vars(self, monkeypatch) -> None:
         """Test get_var reads from PCONS_VARS JSON."""
         import pcons
+
         pcons._cli_vars = None
         monkeypatch.setenv("PCONS_VARS", '{"TEST_VAR": "cli_value"}')
         monkeypatch.setenv("TEST_VAR", "env_value")  # Should be overridden
@@ -231,9 +234,12 @@ class TestCLICommands:
         )
         assert result.returncode == 0, f"Invalid Python: {result.stderr}"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows doesn't have Unix-style executable permissions",
+    )
     def test_pcons_init_creates_executable(self, tmp_path: Path) -> None:
         """Test that init creates an executable file."""
-        import os
         import stat
 
         result = subprocess.run(

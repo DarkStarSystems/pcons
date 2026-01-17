@@ -25,9 +25,15 @@ class TestPlatform:
 
     def test_is_properties(self):
         linux = Platform(
-            os="linux", arch="x86_64", is_64bit=True,
-            exe_suffix="", shared_lib_suffix=".so", shared_lib_prefix="lib",
-            static_lib_suffix=".a", static_lib_prefix="lib", object_suffix=".o",
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
         )
         assert linux.is_linux is True
         assert linux.is_windows is False
@@ -35,70 +41,119 @@ class TestPlatform:
         assert linux.is_posix is True
 
         windows = Platform(
-            os="windows", arch="x86_64", is_64bit=True,
-            exe_suffix=".exe", shared_lib_suffix=".dll", shared_lib_prefix="",
-            static_lib_suffix=".lib", static_lib_prefix="", object_suffix=".obj",
+            os="windows",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix=".exe",
+            shared_lib_suffix=".dll",
+            shared_lib_prefix="",
+            static_lib_suffix=".lib",
+            static_lib_prefix="",
+            object_suffix=".obj",
         )
         assert windows.is_windows is True
         assert windows.is_linux is False
         assert windows.is_posix is False
 
         macos = Platform(
-            os="darwin", arch="arm64", is_64bit=True,
-            exe_suffix="", shared_lib_suffix=".dylib", shared_lib_prefix="lib",
-            static_lib_suffix=".a", static_lib_prefix="lib", object_suffix=".o",
+            os="darwin",
+            arch="arm64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".dylib",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
         )
         assert macos.is_macos is True
         assert macos.is_posix is True
 
     def test_shared_lib_name(self):
         linux = Platform(
-            os="linux", arch="x86_64", is_64bit=True,
-            exe_suffix="", shared_lib_suffix=".so", shared_lib_prefix="lib",
-            static_lib_suffix=".a", static_lib_prefix="lib", object_suffix=".o",
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
         )
         assert linux.shared_lib_name("foo") == "libfoo.so"
 
         windows = Platform(
-            os="windows", arch="x86_64", is_64bit=True,
-            exe_suffix=".exe", shared_lib_suffix=".dll", shared_lib_prefix="",
-            static_lib_suffix=".lib", static_lib_prefix="", object_suffix=".obj",
+            os="windows",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix=".exe",
+            shared_lib_suffix=".dll",
+            shared_lib_prefix="",
+            static_lib_suffix=".lib",
+            static_lib_prefix="",
+            object_suffix=".obj",
         )
         assert windows.shared_lib_name("foo") == "foo.dll"
 
     def test_static_lib_name(self):
         linux = Platform(
-            os="linux", arch="x86_64", is_64bit=True,
-            exe_suffix="", shared_lib_suffix=".so", shared_lib_prefix="lib",
-            static_lib_suffix=".a", static_lib_prefix="lib", object_suffix=".o",
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
         )
         assert linux.static_lib_name("foo") == "libfoo.a"
 
     def test_exe_name(self):
         linux = Platform(
-            os="linux", arch="x86_64", is_64bit=True,
-            exe_suffix="", shared_lib_suffix=".so", shared_lib_prefix="lib",
-            static_lib_suffix=".a", static_lib_prefix="lib", object_suffix=".o",
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
         )
         assert linux.exe_name("app") == "app"
 
         windows = Platform(
-            os="windows", arch="x86_64", is_64bit=True,
-            exe_suffix=".exe", shared_lib_suffix=".dll", shared_lib_prefix="",
-            static_lib_suffix=".lib", static_lib_prefix="", object_suffix=".obj",
+            os="windows",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix=".exe",
+            shared_lib_suffix=".dll",
+            shared_lib_prefix="",
+            static_lib_suffix=".lib",
+            static_lib_prefix="",
+            object_suffix=".obj",
         )
         assert windows.exe_name("app") == "app.exe"
 
     def test_frozen(self):
         p = Platform(
-            os="linux", arch="x86_64", is_64bit=True,
-            exe_suffix="", shared_lib_suffix=".so", shared_lib_prefix="lib",
-            static_lib_suffix=".a", static_lib_prefix="lib", object_suffix=".o",
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
         )
         # Platform is frozen (dataclass)
         import dataclasses
 
         import pytest
+
         with pytest.raises(dataclasses.FrozenInstanceError):
             p.os = "windows"  # type: ignore
 

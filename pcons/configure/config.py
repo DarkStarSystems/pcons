@@ -388,7 +388,7 @@ class Configure:
             result = bool(self._cache[cache_key])
         else:
             # Try to compile a simple include
-            source = f'#include <{header}>\nint main(void) {{ return 0; }}\n'
+            source = f"#include <{header}>\nint main(void) {{ return 0; }}\n"
             result = self.check_compile(source, lang=lang)
             self._cache[cache_key] = result
 
@@ -505,16 +505,16 @@ class Configure:
             result = bool(self._cache[cache_key])
         else:
             # Build test source
-            include = f'#include <{header}>\n' if header else ""
+            include = f"#include <{header}>\n" if header else ""
             # Try different approaches to detect the symbol
             # First try using it as a function pointer (works for functions)
-            source = f'''{include}
+            source = f"""{include}
 int main(void) {{
     void (*fp)(void) = (void (*)(void)){symbol};
     (void)fp;
     return 0;
 }}
-'''
+"""
             result = self.check_compile(source, lang=lang)
             self._cache[cache_key] = result
 

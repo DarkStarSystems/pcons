@@ -11,13 +11,13 @@ Build graph:
     libmath <-- libphysics <-- simulator
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
-from pcons.generators.mermaid import MermaidGenerator
 from pcons.generators.compile_commands import CompileCommandsGenerator
+from pcons.generators.mermaid import MermaidGenerator
+from pcons.generators.ninja import NinjaGenerator
 from pcons.toolchains import find_c_toolchain
 
 # =============================================================================
@@ -39,6 +39,8 @@ libmath = project.StaticLibrary("math", env)
 libmath.sources = [project.node(src_dir / "math_utils.c")]
 # Public includes propagate to consumers
 libmath.public.include_dirs.append(include_dir)
+# Link against libm for math functions (required on Linux)
+libmath.public.link_libs.append("m")
 
 # -----------------------------------------------------------------------------
 # Library: libphysics - physics simulation, depends on libmath

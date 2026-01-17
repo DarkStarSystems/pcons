@@ -9,9 +9,10 @@ an Object builder that turns .c files into .o files).
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pcons.core.node import FileNode, Node
 from pcons.util.source_location import SourceLocation, get_caller_location
@@ -65,7 +66,9 @@ class OutputGroup:
 
     def __getattr__(self, name: str) -> FileNode:
         if name.startswith("_"):
-            raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
         if name in self._nodes:
             return self._nodes[name]
         raise AttributeError(f"No output named '{name}'")
@@ -95,7 +98,9 @@ class OutputGroup:
         return list(self._nodes.items())
 
     def __repr__(self) -> str:
-        return f"OutputGroup({list(self._nodes.keys())}, primary={self._primary_name!r})"
+        return (
+            f"OutputGroup({list(self._nodes.keys())}, primary={self._primary_name!r})"
+        )
 
 
 @runtime_checkable
@@ -469,7 +474,7 @@ class MultiOutputBuilder(CommandBuilder):
         """Get the output specifications."""
         return self._outputs
 
-    def _build(
+    def _build(  # type: ignore[override]
         self,
         env: Environment,
         targets: list[Path],

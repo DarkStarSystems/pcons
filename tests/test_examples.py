@@ -38,7 +38,11 @@ def discover_examples() -> list[Path]:
         return examples
 
     for item in sorted(EXAMPLES_DIR.iterdir()):
-        if item.is_dir() and (item / "build.py").exists() and (item / "test.toml").exists():
+        if (
+            item.is_dir()
+            and (item / "build.py").exists()
+            and (item / "test.toml").exists()
+        ):
             examples.append(item)
 
     return examples

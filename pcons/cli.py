@@ -473,9 +473,7 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Force re-run configuration checks",
     )
-    parser.add_argument(
-        "-b", "--build-script", help="Path to build.py script"
-    )
+    parser.add_argument("-b", "--build-script", help="Path to build.py script")
 
 
 def main() -> int:
@@ -487,7 +485,9 @@ def main() -> int:
     )
     from pcons import __version__
 
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
 
     # Default command args (for 'pcons' with no subcommand)
     add_common_args(parser)
@@ -508,9 +508,7 @@ def main() -> int:
         "info", help="Show build script info and available variables"
     )
     add_common_args(info_parser)
-    info_parser.add_argument(
-        "-b", "--build-script", help="Path to build.py script"
-    )
+    info_parser.add_argument("-b", "--build-script", help="Path to build.py script")
     info_parser.set_defaults(func=cmd_info)
 
     # pcons init
@@ -537,12 +535,8 @@ def main() -> int:
     # pcons build
     build_parser = subparsers.add_parser("build", help="Build targets using ninja")
     add_common_args(build_parser)
-    build_parser.add_argument(
-        "-j", "--jobs", type=int, help="Number of parallel jobs"
-    )
-    build_parser.add_argument(
-        "targets", nargs="*", help="Targets to build"
-    )
+    build_parser.add_argument("-j", "--jobs", type=int, help="Number of parallel jobs")
+    build_parser.add_argument("targets", nargs="*", help="Targets to build")
     build_parser.set_defaults(func=cmd_build)
 
     # pcons clean

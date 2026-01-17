@@ -11,8 +11,6 @@ The prefix is applied during expansion via ${prefix(dprefix, defines)}.
 
 from __future__ import annotations
 
-import pytest
-
 from pcons.core.environment import Environment
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
@@ -268,7 +266,6 @@ class TestBaseToolchainVariant:
 
     def test_base_sets_variant_name(self) -> None:
         """Test base implementation sets variant name."""
-        from pcons.tools.toolchain import BaseToolchain
 
         # Can't instantiate abstract class directly, use a concrete one
         # and verify the base behavior

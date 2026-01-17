@@ -129,30 +129,37 @@ class NinjaGenerator(BaseGenerator):
         if getattr(target, "_resolved", False):
             # Resolved target (target-centric model)
             # Add object nodes and output nodes
-            for node in target.object_nodes:
-                if isinstance(node, FileNode):
-                    nodes.append(node)
-            for node in target.output_nodes:
-                if isinstance(node, FileNode):
-                    nodes.append(node)
+            for obj_node in target.object_nodes:
+                if isinstance(obj_node, FileNode):
+                    nodes.append(obj_node)
+            for out_node in target.output_nodes:
+                if isinstance(out_node, FileNode):
+                    nodes.append(out_node)
             # For interface targets (like Install), also check target.nodes
             if target.target_type == "interface":
-                for node in target.nodes:
-                    if isinstance(node, FileNode):
-                        has_build = getattr(node, "_build_info", None) is not None
+                for target_node in target.nodes:
+                    if isinstance(target_node, FileNode):
+                        has_build = (
+                            getattr(target_node, "_build_info", None) is not None
+                        )
                         if has_build:
-                            nodes.append(node)
+                            nodes.append(target_node)
         else:
             # Legacy path: use target.nodes directly
-            for node in target.nodes:
+            for target_node in target.nodes:
                 # Check for builder or build_info (install nodes use build_info)
-                has_build = node.builder is not None or getattr(node, "_build_info", None) is not None
-                if isinstance(node, FileNode) and has_build:
-                    nodes.append(node)
+                has_build = (
+                    target_node.builder is not None
+                    or getattr(target_node, "_build_info", None) is not None
+                )
+                if isinstance(target_node, FileNode) and has_build:
+                    nodes.append(target_node)
 
         return nodes
 
-    def _find_env_for_node(self, node: FileNode, project: Project) -> Environment | None:
+    def _find_env_for_node(
+        self, node: FileNode, project: Project
+    ) -> Environment | None:
         """Find the environment that created a node."""
         for env in project.environments:
             if node in getattr(env, "_created_nodes", []):
@@ -160,7 +167,11 @@ class NinjaGenerator(BaseGenerator):
         return None
 
     def _ensure_rule(
-        self, f: TextIO, node: FileNode, target: Target | None, env: Environment | None = None
+        self,
+        f: TextIO,
+        node: FileNode,
+        target: Target | None,
+        env: Environment | None = None,
     ) -> str:
         """Ensure a rule exists for this node's builder, return rule name.
 
@@ -177,9 +188,7 @@ class NinjaGenerator(BaseGenerator):
         command_var = build_info.get("command_var", "cmdline")
 
         # Check if this is a target-centric build (has effective requirements)
-        has_effective_reqs = any(
-            k.startswith("effective_") for k in build_info.keys()
-        )
+        has_effective_reqs = any(k.startswith("effective_") for k in build_info.keys())
 
         # Create a unique key for this rule based on tool, command var, and mode
         rule_key = f"{tool_name}_{command_var}"
@@ -262,12 +271,9 @@ class NinjaGenerator(BaseGenerator):
             # We'll append them before the source file
             # Format: cmd $flags $includes $defines $extra_flags -c $in -o $out
             if "$in" in command:
-                command = command.replace(
-                    "$in",
-                    "$includes $defines $extra_flags $in"
-                )
-        # For link commands (linkcmd, sharedcmd), add ldflags, libdirs, libs
-        elif command_var in ("linkcmd", "sharedcmd"):
+                command = command.replace("$in", "$includes $defines $extra_flags $in")
+        # For link commands (linkcmd, sharedcmd, progcmd), add ldflags, libdirs, libs
+        elif command_var in ("linkcmd", "sharedcmd", "progcmd"):
             # Append link flags at the end
             if "$out" in command:
                 # Add after the sources/objects
@@ -346,7 +352,11 @@ class NinjaGenerator(BaseGenerator):
                 written_nodes.add(node.path)
 
     def _write_build_statement(
-        self, f: TextIO, node: FileNode, target: Target | None, project: Project | None = None
+        self,
+        f: TextIO,
+        node: FileNode,
+        target: Target | None,
+        project: Project | None = None,
     ) -> None:
         """Write a single build statement.
 
@@ -366,9 +376,7 @@ class NinjaGenerator(BaseGenerator):
         sources: list[Node] = build_info.get("sources", [])
 
         # Check if this is a target-centric build (has effective requirements)
-        has_effective_reqs = any(
-            k.startswith("effective_") for k in build_info.keys()
-        )
+        has_effective_reqs = any(k.startswith("effective_") for k in build_info.keys())
 
         rule_name = f"{tool_name}_{command_var}"
         if has_effective_reqs:
@@ -438,7 +446,9 @@ class NinjaGenerator(BaseGenerator):
         if output_dir != Path(".") and output_dir != Path(""):
             order_only = f" || {self._escape_path(output_dir)}"
 
-        f.write(f"build {output}: {rule_name} {explicit_deps}{implicit_deps}{order_only}\n")
+        f.write(
+            f"build {output}: {rule_name} {explicit_deps}{implicit_deps}{order_only}\n"
+        )
 
         # Write per-build variables
         # These override the rule's command with actual values
@@ -476,41 +486,42 @@ class NinjaGenerator(BaseGenerator):
 
         # For multi-output builds, write out_<name> for each output
         outputs_info = build_info.get("outputs")
-        if outputs_info:
-            for name, info in outputs_info.items():  # type: ignore[union-attr]
+        if outputs_info and isinstance(outputs_info, dict):
+            for name, info in outputs_info.items():
                 # Write out_<name> variable for each output
-                f.write(f"  out_{name} = {info['path']}\n")
+                if isinstance(info, dict):
+                    f.write(f"  out_{name} = {info['path']}\n")
 
         # Write effective requirements from target-centric build model
         # These are used to generate the actual compilation/link flags
         effective_includes = build_info.get("effective_includes")
-        if effective_includes:
+        if effective_includes and isinstance(effective_includes, list):
             include_flags = " ".join(f"-I{inc}" for inc in effective_includes)
             f.write(f"  includes = {include_flags}\n")
 
         effective_defines = build_info.get("effective_defines")
-        if effective_defines:
+        if effective_defines and isinstance(effective_defines, list):
             define_flags = " ".join(f"-D{d}" for d in effective_defines)
             f.write(f"  defines = {define_flags}\n")
 
         effective_flags = build_info.get("effective_flags")
-        if effective_flags:
-            flags_str = " ".join(effective_flags)
+        if effective_flags and isinstance(effective_flags, list):
+            flags_str = " ".join(str(f) for f in effective_flags)
             f.write(f"  extra_flags = {flags_str}\n")
 
         # Link-time effective requirements
         effective_link_flags = build_info.get("effective_link_flags")
-        if effective_link_flags:
-            link_flags_str = " ".join(effective_link_flags)
+        if effective_link_flags and isinstance(effective_link_flags, list):
+            link_flags_str = " ".join(str(f) for f in effective_link_flags)
             f.write(f"  ldflags = {link_flags_str}\n")
 
         effective_link_libs = build_info.get("effective_link_libs")
-        if effective_link_libs:
+        if effective_link_libs and isinstance(effective_link_libs, list):
             libs_str = " ".join(f"-l{lib}" for lib in effective_link_libs)
             f.write(f"  libs = {libs_str}\n")
 
         effective_link_dirs = build_info.get("effective_link_dirs")
-        if effective_link_dirs:
+        if effective_link_dirs and isinstance(effective_link_dirs, list):
             link_dirs_str = " ".join(f"-L{d}" for d in effective_link_dirs)
             f.write(f"  libdirs = {link_dirs_str}\n")
 
@@ -567,14 +578,14 @@ class NinjaGenerator(BaseGenerator):
         for target in project.default_targets:
             # For resolved targets, use output_nodes
             if target.output_nodes:
-                for node in target.output_nodes:
-                    if isinstance(node, FileNode):
-                        defaults.append(self._escape_path(node.path))
+                for out_node in target.output_nodes:
+                    if isinstance(out_node, FileNode):
+                        defaults.append(self._escape_path(out_node.path))
             # Fall back to nodes for legacy/unresolved targets
             else:
-                for node in target.nodes:
-                    if isinstance(node, FileNode):
-                        defaults.append(self._escape_path(node.path))
+                for target_node in target.nodes:
+                    if isinstance(target_node, FileNode):
+                        defaults.append(self._escape_path(target_node.path))
 
         # If no default targets, auto-detect "final" outputs
         if not defaults:
@@ -582,7 +593,11 @@ class NinjaGenerator(BaseGenerator):
             for target in project.targets:
                 if getattr(target, "_resolved", False):
                     # Check if this is a "final" target (program or library)
-                    if target.target_type in ("program", "shared_library", "static_library"):
+                    if target.target_type in (
+                        "program",
+                        "shared_library",
+                        "static_library",
+                    ):
                         for node in target.output_nodes:
                             if isinstance(node, FileNode):
                                 defaults.append(self._escape_path(node.path))

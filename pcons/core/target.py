@@ -9,15 +9,15 @@ from __future__ import annotations
 
 import logging
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pcons.util.source_location import SourceLocation, get_caller_location
-
 # Import SourceSpec from centralized types module
 from pcons.core.types import SourceSpec
+from pcons.util.source_location import SourceLocation, get_caller_location
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +186,11 @@ class Target:
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
         # NEW for target-centric build model:
-        self.target_type: TargetType | None = target_type
+        # Convert string target_type to TargetType enum if provided as string
+        if isinstance(target_type, str):
+            self.target_type: TargetType | None = TargetType(target_type)
+        else:
+            self.target_type = target_type
         self._env: Environment | None = None
         self._project: Any = None  # Set by Project when target is created
         self.object_nodes: list[FileNode] = []
@@ -259,7 +263,7 @@ class Target:
 
     def add_sources(
         self,
-        sources: list[Node | Path | str],
+        sources: Sequence[Node | Path | str],
         *,
         base: Path | str | None = None,
     ) -> Target:
@@ -287,14 +291,16 @@ class Target:
 
     def _to_node(self, source: Node | Path | str) -> Node:
         """Convert a source specification to a Node."""
-        from pcons.core.node import FileNode, Node as NodeClass
+        from pcons.core.node import FileNode
+        from pcons.core.node import Node as NodeClass
 
         if isinstance(source, NodeClass):
             return source
         path = Path(source)
         # Use project's node() if available for deduplication
         if self._project is not None:
-            return self._project.node(path)
+            node: Node = self._project.node(path)
+            return node
         return FileNode(path)
 
     # Fluent API for usage requirements
@@ -339,7 +345,7 @@ class Target:
         Returns:
             self for method chaining.
         """
-        self.public.flags.extend(flags)
+        self.public.compile_flags.extend(flags)
         return self
 
     def private_includes(self, dirs: list[Path | str]) -> Target:
@@ -382,7 +388,7 @@ class Target:
         Returns:
             self for method chaining.
         """
-        self.private.flags.extend(flags)
+        self.private.compile_flags.extend(flags)
         return self
 
     def post_build(self, command: str) -> Target:
@@ -432,9 +438,7 @@ class Target:
         self._collected_requirements = result
         return result
 
-    def _collect_from_deps(
-        self, result: UsageRequirements, visited: set[str]
-    ) -> None:
+    def _collect_from_deps(self, result: UsageRequirements, visited: set[str]) -> None:
         """Recursively collect public requirements from dependencies."""
         for dep in self.dependencies:
             if dep.name in visited:

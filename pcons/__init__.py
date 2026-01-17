@@ -11,6 +11,13 @@ from __future__ import annotations
 import json
 import os
 
+# Re-export commonly used classes for convenient imports
+# These imports must be after __version__ is defined but we use noqa to allow it
+from pcons.configure.config import Configure  # noqa: E402
+from pcons.core.project import Project  # noqa: E402
+from pcons.generators.ninja import NinjaGenerator  # noqa: E402
+from pcons.toolchains import find_c_toolchain  # noqa: E402
+
 __version__ = "0.1.0-dev"
 
 # Internal storage for CLI variables
@@ -81,12 +88,6 @@ def get_variant(default: str = "release") -> str:
     """
     return os.environ.get("PCONS_VARIANT") or os.environ.get("VARIANT") or default
 
-
-# Re-export commonly used classes for convenient imports
-from pcons.configure.config import Configure
-from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import find_c_toolchain
 
 # Public API exports
 __all__ = [

@@ -38,7 +38,10 @@ class ClangCCompiler(BaseTool):
                 "${prefix(cc.iprefix, cc.includes)}",
                 "${prefix(cc.dprefix, cc.defines)}",
                 "$cc.depflags",
-                "-c", "-o", "$$out", "$$in",
+                "-c",
+                "-o",
+                "$$out",
+                "$$in",
             ],
         }
 
@@ -46,7 +49,9 @@ class ClangCCompiler(BaseTool):
         platform = get_platform()
         return {
             "Object": CommandBuilder(
-                "Object", "cc", "objcmd",
+                "Object",
+                "cc",
+                "objcmd",
                 src_suffixes=[".c"],
                 target_suffixes=[platform.object_suffix],
                 language="c",
@@ -58,12 +63,14 @@ class ClangCCompiler(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
         clang = config.find_program("clang")
         if clang is None:
             return None
         from pcons.core.toolconfig import ToolConfig
+
         tool_config = ToolConfig("cc", cmd=str(clang.path))
         if clang.version:
             tool_config.version = clang.version
@@ -91,7 +98,10 @@ class ClangCxxCompiler(BaseTool):
                 "${prefix(cxx.iprefix, cxx.includes)}",
                 "${prefix(cxx.dprefix, cxx.defines)}",
                 "$cxx.depflags",
-                "-c", "-o", "$$out", "$$in",
+                "-c",
+                "-o",
+                "$$out",
+                "$$in",
             ],
         }
 
@@ -99,7 +109,9 @@ class ClangCxxCompiler(BaseTool):
         platform = get_platform()
         return {
             "Object": CommandBuilder(
-                "Object", "cxx", "objcmd",
+                "Object",
+                "cxx",
+                "objcmd",
                 src_suffixes=[".cpp", ".cxx", ".cc", ".C"],
                 target_suffixes=[platform.object_suffix],
                 language="cxx",
@@ -111,12 +123,14 @@ class ClangCxxCompiler(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
         clangxx = config.find_program("clang++")
         if clangxx is None:
             return None
         from pcons.core.toolconfig import ToolConfig
+
         tool_config = ToolConfig("cxx", cmd=str(clangxx.path))
         if clangxx.version:
             tool_config.version = clangxx.version
@@ -131,6 +145,7 @@ class LlvmArchiver(BaseTool):
 
     def default_vars(self) -> dict[str, object]:
         import shutil
+
         # Prefer llvm-ar if available, otherwise fall back to ar
         ar_cmd = "llvm-ar" if shutil.which("llvm-ar") else "ar"
         return {
@@ -143,7 +158,9 @@ class LlvmArchiver(BaseTool):
         platform = get_platform()
         return {
             "StaticLibrary": CommandBuilder(
-                "StaticLibrary", "ar", "libcmd",
+                "StaticLibrary",
+                "ar",
+                "libcmd",
                 src_suffixes=[platform.object_suffix],
                 target_suffixes=[platform.static_lib_suffix],
                 single_source=False,
@@ -152,6 +169,7 @@ class LlvmArchiver(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
         ar = config.find_program("llvm-ar")
@@ -160,6 +178,7 @@ class LlvmArchiver(BaseTool):
         if ar is None:
             return None
         from pcons.core.toolconfig import ToolConfig
+
         return ToolConfig("ar", cmd=str(ar.path))
 
 
@@ -180,14 +199,21 @@ class LlvmLinker(BaseTool):
             "Lprefix": "-L",
             "libdirs": [],
             "progcmd": [
-                "$link.cmd", "$link.flags",
-                "-o", "$$out", "$$in",
+                "$link.cmd",
+                "$link.flags",
+                "-o",
+                "$$out",
+                "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
             ],
             "sharedcmd": [
-                "$link.cmd", shared_flag, "$link.flags",
-                "-o", "$$out", "$$in",
+                "$link.cmd",
+                shared_flag,
+                "$link.flags",
+                "-o",
+                "$$out",
+                "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
             ],
@@ -197,13 +223,17 @@ class LlvmLinker(BaseTool):
         platform = get_platform()
         return {
             "Program": CommandBuilder(
-                "Program", "link", "progcmd",
+                "Program",
+                "link",
+                "progcmd",
                 src_suffixes=[platform.object_suffix],
                 target_suffixes=[platform.exe_suffix],
                 single_source=False,
             ),
             "SharedLibrary": MultiOutputBuilder(
-                "SharedLibrary", "link", "sharedcmd",
+                "SharedLibrary",
+                "link",
+                "sharedcmd",
                 outputs=[
                     OutputSpec("primary", platform.shared_lib_suffix),
                 ],
@@ -214,12 +244,14 @@ class LlvmLinker(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
         clang = config.find_program("clang")
         if clang is None:
             return None
         from pcons.core.toolconfig import ToolConfig
+
         return ToolConfig("link", cmd=str(clang.path))
 
 
@@ -233,7 +265,7 @@ class LlvmToolchain(BaseToolchain):
     # Source Handler Methods
     # =========================================================================
 
-    def get_source_handler(self, suffix: str) -> "SourceHandler | None":
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
         from pcons.tools.toolchain import SourceHandler
 
@@ -297,6 +329,7 @@ class LlvmToolchain(BaseToolchain):
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return False
 
@@ -351,7 +384,7 @@ class LlvmToolchain(BaseToolchain):
 # Registration
 # =============================================================================
 
-from pcons.tools.toolchain import toolchain_registry
+from pcons.tools.toolchain import toolchain_registry  # noqa: E402
 
 toolchain_registry.register(
     LlvmToolchain,

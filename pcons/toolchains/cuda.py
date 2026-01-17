@@ -28,7 +28,6 @@ from __future__ import annotations
 import shutil
 from typing import TYPE_CHECKING, Any
 
-from pcons.configure.platform import get_platform
 from pcons.tools.cuda import CudaCompiler
 from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_registry
 
@@ -75,6 +74,7 @@ class CudaToolchain(BaseToolchain):
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return False
 
@@ -132,7 +132,7 @@ class CudaToolchain(BaseToolchain):
 
         # Apply to CUDA compiler
         if env.has_tool("cuda"):
-            tool = getattr(env, "cuda")
+            tool = env.cuda
             if hasattr(tool, "flags") and isinstance(tool.flags, list):
                 tool.flags.extend(compile_flags)
             if hasattr(tool, "defines") and isinstance(tool.defines, list):

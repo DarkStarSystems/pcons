@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -154,6 +155,9 @@ class TestSystemFinder:
         result = finder.find("zlib")
         assert result is None
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="System paths differ on Windows"
+    )
     def test_find_with_header_and_lib(self, tmp_path: Path) -> None:
         """Test finding a package with header and library present."""
         include_dir = tmp_path / "include"
@@ -162,7 +166,7 @@ class TestSystemFinder:
         lib_dir.mkdir()
 
         # Create fake zlib.h and libz.a
-        (include_dir / "zlib.h").write_text("#define ZLIB_VERSION \"1.2.13\"\n")
+        (include_dir / "zlib.h").write_text('#define ZLIB_VERSION "1.2.13"\n')
         (lib_dir / "libz.a").write_text("")
 
         finder = SystemFinder(
@@ -178,9 +182,11 @@ class TestSystemFinder:
         assert "z" in result.libraries
         assert result.found_by == "system"
 
+    @pytest.mark.skipif(
+        sys.platform == "win32", reason="System paths differ on Windows"
+    )
     def test_extract_version_from_header(self, tmp_path: Path) -> None:
         """Test extracting version from header."""
-        import sys
 
         include_dir = tmp_path / "include"
         lib_dir = tmp_path / "lib"

@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Tests for Project.Install() method."""
 
-from pathlib import Path
-
 import pytest
 
 from pcons.core.node import FileNode

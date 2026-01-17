@@ -6,14 +6,13 @@ This example demonstrates how to create and use a custom tool
 that concatenates multiple text files into one.
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 from pcons.core.builder import CommandBuilder
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator
 from pcons.tools.tool import BaseTool
-
 
 # =============================================================================
 # Custom Tool Definition

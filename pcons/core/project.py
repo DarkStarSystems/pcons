@@ -12,8 +12,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-logger = logging.getLogger(__name__)
-
 from pcons.core.environment import Environment as Env
 from pcons.core.graph import (
     collect_all_nodes,
@@ -23,6 +21,8 @@ from pcons.core.graph import (
 from pcons.core.node import AliasNode, DirNode, FileNode, Node
 from pcons.core.target import Target, TargetType
 from pcons.util.source_location import SourceLocation, get_caller_location
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.tools.toolchain import Toolchain
@@ -158,7 +158,9 @@ class Project:
             self._nodes[path] = FileNode(path, defined_at=get_caller_location())
         node = self._nodes[path]
         if not isinstance(node, FileNode):
-            raise TypeError(f"Path {path} is registered as {type(node).__name__}, not FileNode")
+            raise TypeError(
+                f"Path {path} is registered as {type(node).__name__}, not FileNode"
+            )
         return node
 
     def dir_node(self, path: Path | str) -> DirNode:
@@ -175,7 +177,9 @@ class Project:
             self._nodes[path] = DirNode(path, defined_at=get_caller_location())
         node = self._nodes[path]
         if not isinstance(node, DirNode):
-            raise TypeError(f"Path {path} is registered as {type(node).__name__}, not DirNode")
+            raise TypeError(
+                f"Path {path} is registered as {type(node).__name__}, not DirNode"
+            )
         return node
 
     def add_target(self, target: Target) -> None:
@@ -289,10 +293,12 @@ class Project:
         cycles = detect_cycles_in_targets(list(self._targets.values()))
         for cycle in cycles:
             from pcons.core.errors import DependencyCycleError
+
             errors.append(DependencyCycleError(cycle))
 
         # Check for missing sources
         from pcons.core.errors import MissingSourceError
+
         for target in self._targets.values():
             for source in target.sources:
                 if isinstance(source, FileNode):
@@ -348,15 +354,20 @@ class Project:
                 "interface": "lightgray",
                 "object": "white",
             }
-            color = colors.get(target.target_type, "white")
-            lines.append(f'  "{name}" [label="{label}", fillcolor={color}, style=filled];')
+            target_type_str = (
+                str(target.target_type) if target.target_type else "unknown"
+            )
+            color = colors.get(target_type_str, "white")
+            lines.append(
+                f'  "{name}" [label="{label}", fillcolor={color}, style=filled];'
+            )
 
         lines.append("")
 
         # Add dependency edges
         lines.append("  // Dependencies")
         for name, target in self._targets.items():
-            for dep in target.link_deps:
+            for dep in target.dependencies:
                 if isinstance(dep, Target):
                     lines.append(f'  "{dep.name}" -> "{name}";')
                 elif hasattr(dep, "name"):
@@ -392,8 +403,11 @@ class Project:
                     print(f"    output: {node.path}")
                 if len(target.output_nodes) > 3:
                     print(f"    ... and {len(target.output_nodes) - 3} more")
-            if target.link_deps:
-                deps = [d.name if hasattr(d, "name") else str(d) for d in target.link_deps]
+            if target.dependencies:
+                deps = [
+                    d.name if hasattr(d, "name") else str(d)
+                    for d in target.dependencies
+                ]
                 print(f"    links: {', '.join(deps)}")
 
     def resolve(self, strict: bool = False) -> None:
@@ -454,7 +468,11 @@ class Project:
         Returns:
             A new Target configured as a static library.
         """
-        target = Target(name, target_type=TargetType.STATIC_LIBRARY, defined_at=get_caller_location())
+        target = Target(
+            name,
+            target_type=TargetType.STATIC_LIBRARY,
+            defined_at=get_caller_location(),
+        )
         target._env = env
         target._project = self
         if sources:
@@ -479,7 +497,11 @@ class Project:
         Returns:
             A new Target configured as a shared library.
         """
-        target = Target(name, target_type=TargetType.SHARED_LIBRARY, defined_at=get_caller_location())
+        target = Target(
+            name,
+            target_type=TargetType.SHARED_LIBRARY,
+            defined_at=get_caller_location(),
+        )
         target._env = env
         target._project = self
         if sources:
@@ -504,7 +526,9 @@ class Project:
         Returns:
             A new Target configured as a program.
         """
-        target = Target(name, target_type=TargetType.PROGRAM, defined_at=get_caller_location())
+        target = Target(
+            name, target_type=TargetType.PROGRAM, defined_at=get_caller_location()
+        )
         target._env = env
         target._project = self
         if sources:
@@ -531,7 +555,9 @@ class Project:
         Returns:
             A new Target configured as an interface library.
         """
-        target = Target(name, target_type=TargetType.INTERFACE, defined_at=get_caller_location())
+        target = Target(
+            name, target_type=TargetType.INTERFACE, defined_at=get_caller_location()
+        )
         if include_dirs:
             for inc_dir in include_dirs:
                 target.public.include_dirs.append(Path(inc_dir))
@@ -558,7 +584,9 @@ class Project:
         Returns:
             A new Target configured as an object library.
         """
-        target = Target(name, target_type=TargetType.OBJECT, defined_at=get_caller_location())
+        target = Target(
+            name, target_type=TargetType.OBJECT, defined_at=get_caller_location()
+        )
         target._env = env
         target._project = self
         if sources:

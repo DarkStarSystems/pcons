@@ -64,7 +64,9 @@ def get_source_location(depth: int = 1) -> SourceLocation:
         return SourceLocation(
             filename=frame.f_code.co_filename,
             lineno=frame.f_lineno,
-            function=frame.f_code.co_name if frame.f_code.co_name != "<module>" else None,
+            function=frame.f_code.co_name
+            if frame.f_code.co_name != "<module>"
+            else None,
         )
     finally:
         del frame  # Avoid reference cycles

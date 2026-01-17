@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from pcons.core.builder import (
-    CommandBuilder,
     MultiOutputBuilder,
     OutputGroup,
     OutputSpec,

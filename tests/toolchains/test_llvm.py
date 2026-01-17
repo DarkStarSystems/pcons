@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.llvm."""
 
-import pytest
-
 from pcons.configure.platform import Platform, get_platform
 from pcons.toolchains.llvm import (
     ClangCCompiler,
@@ -142,7 +140,9 @@ class TestLlvmCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.llvm.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.get_platform", lambda: linux_platform
+        )
 
         tc = LlvmToolchain()
         flags = tc.get_compile_flags_for_target_type("shared_library")
@@ -162,7 +162,9 @@ class TestLlvmCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.llvm.get_platform", lambda: macos_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.get_platform", lambda: macos_platform
+        )
 
         tc = LlvmToolchain()
         flags = tc.get_compile_flags_for_target_type("shared_library")
@@ -182,7 +184,9 @@ class TestLlvmCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.llvm.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.get_platform", lambda: linux_platform
+        )
 
         tc = LlvmToolchain()
         flags = tc.get_compile_flags_for_target_type("static_library")
@@ -202,7 +206,9 @@ class TestLlvmCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.llvm.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.get_platform", lambda: linux_platform
+        )
 
         tc = LlvmToolchain()
         flags = tc.get_compile_flags_for_target_type("program")

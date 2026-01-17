@@ -126,13 +126,15 @@ class ToolChecks:
         if compiler is None:
             return CheckResult(success=False, output="No compiler configured")
 
-        source = f'#include <{header}>\nint main(void) {{ return 0; }}\n'
+        source = f"#include <{header}>\nint main(void) {{ return 0; }}\n"
 
         result = self._try_compile(compiler, source)
         self._config.set(cache_key, result.success)
         return result
 
-    def check_type(self, type_name: str, *, headers: list[str] | None = None) -> CheckResult:
+    def check_type(
+        self, type_name: str, *, headers: list[str] | None = None
+    ) -> CheckResult:
         """Check if a type is defined.
 
         Args:
@@ -153,9 +155,9 @@ class ToolChecks:
 
         includes = ""
         if headers:
-            includes = "\n".join(f'#include <{h}>' for h in headers)
+            includes = "\n".join(f"#include <{h}>" for h in headers)
 
-        source = f'{includes}\nint main(void) {{ {type_name} x; (void)x; return 0; }}\n'
+        source = f"{includes}\nint main(void) {{ {type_name} x; (void)x; return 0; }}\n"
 
         result = self._try_compile(compiler, source)
         self._config.set(cache_key, result.success)
@@ -184,16 +186,16 @@ class ToolChecks:
 
         includes = ""
         if headers:
-            includes = "\n".join(f'#include <{h}>' for h in headers)
+            includes = "\n".join(f"#include <{h}>" for h in headers)
 
         # Use compile-time assertion to encode the size
         # This avoids needing to run the compiled program
         for size in [1, 2, 4, 8, 16]:
-            source = f'''
+            source = f"""
 {includes}
 int check[sizeof({type_name}) == {size} ? 1 : -1];
 int main(void) {{ return 0; }}
-'''
+"""
             result = self._try_compile(compiler, source)
             if result.success:
                 self._config.set(cache_key, size)
@@ -220,13 +222,13 @@ int main(void) {{ return 0; }}
             return None
 
         # Use preprocessor to output the macro value
-        source = f'''
+        source = f"""
 #ifdef {define}
 PCONS_VALUE={define}
 #else
 PCONS_UNDEFINED
 #endif
-'''
+"""
         result = self._try_preprocess(compiler, source)
         if not result.success:
             self._config.set(cache_key, "__UNDEFINED__")
@@ -235,7 +237,7 @@ PCONS_UNDEFINED
         # Parse the output to find the value
         for line in result.output.split("\n"):
             if line.startswith("PCONS_VALUE="):
-                value = line[len("PCONS_VALUE="):].strip()
+                value = line[len("PCONS_VALUE=") :].strip()
                 self._config.set(cache_key, value)
                 return value
             if "PCONS_UNDEFINED" in line:
@@ -273,17 +275,17 @@ PCONS_UNDEFINED
 
         includes = ""
         if headers:
-            includes = "\n".join(f'#include <{h}>' for h in headers)
+            includes = "\n".join(f"#include <{h}>" for h in headers)
 
         # Try to get address of function to check if it exists
-        source = f'''
+        source = f"""
 {includes}
 int main(void) {{
     void *p = (void*){function};
     (void)p;
     return 0;
 }}
-'''
+"""
         extra_flags: list[str] = []
         if libs:
             extra_flags.extend(f"-l{lib}" for lib in libs)

@@ -82,12 +82,16 @@ class MissingVariableError(SubstitutionError):
             var_prefix = variable.split(".")[0] if "." in variable else variable
             similar = [k for k in available_keys if var_prefix in k][:3]
             if similar:
-                msg += f"\n  Available in '{var_prefix}' namespace: {', '.join(similar)}"
+                msg += (
+                    f"\n  Available in '{var_prefix}' namespace: {', '.join(similar)}"
+                )
             elif len(available_keys) <= 10:
                 msg += f"\n  Available variables: {', '.join(sorted(available_keys))}"
 
         if template:
-            msg += f"\n  In template: {template[:80]}{'...' if len(template) > 80 else ''}"
+            msg += (
+                f"\n  In template: {template[:80]}{'...' if len(template) > 80 else ''}"
+            )
 
         super().__init__(msg, location)
 

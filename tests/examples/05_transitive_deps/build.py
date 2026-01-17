@@ -12,8 +12,8 @@ to demonstrate include propagation. Full transitive library linking
 is a more advanced feature.
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator

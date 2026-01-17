@@ -24,7 +24,7 @@ from __future__ import annotations
 import platform
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 from pcons.core.errors import (
@@ -33,7 +33,6 @@ from pcons.core.errors import (
     SubstitutionError,
 )
 from pcons.util.source_location import SourceLocation
-
 
 # =============================================================================
 # MultiCmd wrapper for multiple commands
@@ -255,7 +254,11 @@ def _expand_token(
             result = _call_function(
                 match.group(2), match.group(3), namespace, expanding, location
             )
-            return " ".join(str(x) for x in result) if isinstance(result, list) else str(result)
+            return (
+                " ".join(str(x) for x in result)
+                if isinstance(result, list)
+                else str(result)
+            )
 
         var_name = match.group(4) or match.group(5)
         value = _lookup_var(var_name, namespace, expanding, location)
@@ -268,18 +271,19 @@ def _expand_token(
             )
         return str(value)
 
-    result = _TOKEN_PATTERN.sub(replace_match, token)
+    subst_result: str = _TOKEN_PATTERN.sub(replace_match, token)
+    final_result: str | list[str] = subst_result
 
-    if "$" in result and result != token:
-        result = _expand_token(result, namespace, expanding, location)
+    if "$" in subst_result and subst_result != token:
+        final_result = _expand_token(subst_result, namespace, expanding, location)
 
     # Replace sentinel with actual $ at the end
-    if isinstance(result, str):
-        result = result.replace(_DOLLAR_SENTINEL, "$")
-    elif isinstance(result, list):
-        result = [s.replace(_DOLLAR_SENTINEL, "$") for s in result]
+    if isinstance(final_result, str):
+        final_result = final_result.replace(_DOLLAR_SENTINEL, "$")
+    elif isinstance(final_result, list):
+        final_result = [s.replace(_DOLLAR_SENTINEL, "$") for s in final_result]
 
-    return result
+    return final_result
 
 
 def _lookup_var(
@@ -311,7 +315,9 @@ def _call_function(
 
     if func_name == "prefix":
         if len(args) != 2:
-            raise SubstitutionError(f"prefix() requires 2 args, got {len(args)}", location)
+            raise SubstitutionError(
+                f"prefix() requires 2 args, got {len(args)}", location
+            )
         prefix = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
@@ -319,7 +325,9 @@ def _call_function(
 
     elif func_name == "suffix":
         if len(args) != 2:
-            raise SubstitutionError(f"suffix() requires 2 args, got {len(args)}", location)
+            raise SubstitutionError(
+                f"suffix() requires 2 args, got {len(args)}", location
+            )
         items = _resolve_arg(args[0], namespace, expanding, location)
         suffix = str(_resolve_arg(args[1], namespace, expanding, location))
         items = items if isinstance(items, list) else [items]
@@ -327,7 +335,9 @@ def _call_function(
 
     elif func_name == "wrap":
         if len(args) != 3:
-            raise SubstitutionError(f"wrap() requires 3 args, got {len(args)}", location)
+            raise SubstitutionError(
+                f"wrap() requires 3 args, got {len(args)}", location
+            )
         prefix = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         suffix = str(_resolve_arg(args[2], namespace, expanding, location))
@@ -336,7 +346,9 @@ def _call_function(
 
     elif func_name == "join":
         if len(args) != 2:
-            raise SubstitutionError(f"join() requires 2 args, got {len(args)}", location)
+            raise SubstitutionError(
+                f"join() requires 2 args, got {len(args)}", location
+            )
         sep = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
@@ -395,11 +407,13 @@ def to_shell_command(
     if tokens and isinstance(tokens[0], list):
         commands = []
         for cmd_tokens in tokens:
-            quoted = [_quote_for_shell(t, shell) for t in _flatten(cmd_tokens)]
+            # cmd_tokens is a list[str] here, convert to list[Any] for _flatten
+            quoted = [_quote_for_shell(t, shell) for t in _flatten(list(cmd_tokens))]
             commands.append(" ".join(quoted))
         return multi_join.join(commands)
     else:
-        quoted = [_quote_for_shell(t, shell) for t in _flatten(tokens)]
+        # tokens is list[str] here, convert to list[Any] for _flatten
+        quoted = [_quote_for_shell(t, shell) for t in _flatten(list(tokens))]
         return " ".join(quoted)
 
 
@@ -432,27 +446,32 @@ def _quote_for_shell(s: str, shell: str) -> str:
         return s
 
     if shell == "bash":
-        needs_quote = any(c in s for c in ' \t\n"\'\\$`!*?[](){}|&;<>')
+        needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>")
         if not needs_quote:
             return s
         if "'" not in s:
             return f"'{s}'"
-        escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$").replace("`", "\\`")
+        escaped = (
+            s.replace("\\", "\\\\")
+            .replace('"', '\\"')
+            .replace("$", "\\$")
+            .replace("`", "\\`")
+        )
         return f'"{escaped}"'
 
     elif shell == "cmd":
         needs_quote = any(c in s for c in ' \t"^&|<>()%!')
         if not needs_quote:
             return s
-        return f'"{s.replace(chr(34), chr(34)+chr(34))}"'
+        return f'"{s.replace(chr(34), chr(34) + chr(34))}"'
 
     elif shell == "powershell":
-        needs_quote = any(c in s for c in ' \t"\'$`(){}[]|&;<>')
+        needs_quote = any(c in s for c in " \t\"'$`(){}[]|&;<>")
         if not needs_quote:
             return s
         if "'" not in s:
             return f"'{s}'"
-        return f"'{s.replace(chr(39), chr(39)+chr(39))}'"
+        return f"'{s.replace(chr(39), chr(39) + chr(39))}'"
 
     return f'"{s}"' if " " in s else s
 

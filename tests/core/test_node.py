@@ -7,11 +7,27 @@ from pcons.core.node import AliasNode, DirNode, FileNode, ValueNode
 from pcons.util.source_location import SourceLocation
 
 
+def normalize_path(p: str) -> str:
+    """Normalize path separators for cross-platform comparison.
+
+    On Windows, Path('/path/to/file') may convert forward slashes to backslashes.
+    This function normalizes the string representation back to forward slashes.
+    """
+    # Replace backslashes with forward slashes
+    result = p.replace("\\", "/")
+    # Clean up any doubled slashes that might result
+    while "//" in result:
+        result = result.replace("//", "/")
+    return result
+
+
 class TestFileNode:
     def test_creation_with_string(self):
         node = FileNode("/path/to/file.cpp")
         assert node.path == Path("/path/to/file.cpp")
-        assert node.name == "/path/to/file.cpp"
+        # On Windows, Path converts forward slashes to backslashes
+        # So we compare normalized paths
+        assert normalize_path(node.name) == "/path/to/file.cpp"
         assert node.suffix == ".cpp"
 
     def test_creation_with_path(self):
@@ -51,7 +67,8 @@ class TestFileNode:
 
     def test_repr(self):
         node = FileNode("/path/to/file.cpp")
-        assert repr(node) == "FileNode('/path/to/file.cpp')"
+        # On Windows, the path will use backslashes, so normalize for comparison
+        assert normalize_path(repr(node)) == "FileNode('/path/to/file.cpp')"
 
     def test_tracks_source_location(self):
         node = FileNode("file.cpp")
@@ -70,7 +87,8 @@ class TestDirNode:
     def test_creation(self):
         node = DirNode("/path/to/dir")
         assert node.path == Path("/path/to/dir")
-        assert node.name == "/path/to/dir"
+        # On Windows, Path converts forward slashes to backslashes
+        assert normalize_path(node.name) == "/path/to/dir"
         assert node.members == []
 
     def test_exists(self, tmp_path):

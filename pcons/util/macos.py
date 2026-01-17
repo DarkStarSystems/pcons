@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 
 def get_dylib_install_name(path: Path | str) -> str:
@@ -44,7 +45,7 @@ def get_dylib_install_name(path: Path | str) -> str:
     # Output format is:
     # /path/to/lib.dylib:
     # /install/path/lib.dylib
-    lines = output.split('\n')
+    lines = output.split("\n")
     if len(lines) < 2:
         raise ValueError(f"No install name found for {path}")
 
@@ -53,7 +54,7 @@ def get_dylib_install_name(path: Path | str) -> str:
 
 
 def fix_dylib_references(
-    target,
+    target: Any,
     dylibs: list[Path | str],
     lib_dir: Path | str,
     *,

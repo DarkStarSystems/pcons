@@ -7,8 +7,8 @@ This example demonstrates:
 - How variants affect compiler flags and defines
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator

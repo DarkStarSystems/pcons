@@ -57,7 +57,9 @@ class CudaCompiler(BaseTool):
                 "${prefix(cuda.iprefix, cuda.includes)}",
                 "${prefix(cuda.dprefix, cuda.defines)}",
                 "$cuda.depflags",
-                "-o", "$$out", "$$in",
+                "-o",
+                "$$out",
+                "$$in",
             ],
         }
 
@@ -79,6 +81,7 @@ class CudaCompiler(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
 
@@ -87,6 +90,7 @@ class CudaCompiler(BaseTool):
             return None
 
         from pcons.core.toolconfig import ToolConfig
+
         tool_config = ToolConfig("cuda", cmd=str(nvcc.path))
         if nvcc.version:
             tool_config.version = nvcc.version

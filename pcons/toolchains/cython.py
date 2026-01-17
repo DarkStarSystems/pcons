@@ -76,7 +76,9 @@ class CythonTranspiler(BaseTool):
             "pyx_to_c_cmd": [
                 "$cython.cmd",
                 "$cython.flags",
-                "-o", "$$out", "$$in",
+                "-o",
+                "$$out",
+                "$$in",
             ],
         }
 
@@ -173,7 +175,10 @@ class CythonCCompiler(BaseTool):
                 "${prefix(cycc.iprefix, cycc.includes)}",
                 "${prefix(cycc.dprefix, cycc.defines)}",
                 "$cycc.depflags",
-                "-c", "-o", "$$out", "$$in",
+                "-c",
+                "-o",
+                "$$out",
+                "$$in",
             ],
         }
 
@@ -280,7 +285,9 @@ class CythonLinker(BaseTool):
             "extcmd": [
                 "$cylink.cmd",
                 "$cylink.flags",
-                "-o", "$$out", "$$in",
+                "-o",
+                "$$out",
+                "$$in",
                 "${prefix(cylink.Lprefix, cylink.libdirs)}",
                 "${prefix(cylink.lprefix, cylink.libs)}",
             ],
@@ -390,7 +397,7 @@ class CythonToolchain(BaseToolchain):
 # =============================================================================
 
 # Register Cython toolchain for auto-discovery
-from pcons.tools.toolchain import toolchain_registry
+from pcons.tools.toolchain import toolchain_registry  # noqa: E402
 
 toolchain_registry.register(
     CythonToolchain,

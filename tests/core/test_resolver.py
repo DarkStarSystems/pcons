@@ -3,12 +3,8 @@
 
 from pathlib import Path
 
-import pytest
-
-from pcons.core.node import FileNode
 from pcons.core.project import Project
-from pcons.core.resolver import Resolver, SOURCE_SUFFIX_MAP
-from pcons.core.target import Target
+from pcons.core.resolver import SOURCE_SUFFIX_MAP, Resolver
 
 
 class TestSourceSuffixMap:
@@ -58,7 +54,9 @@ class TestResolverSingleTarget:
         assert target._resolved
         assert len(target.object_nodes) == 1
         # Objects are placed in obj.<target>/ subdirectory to avoid naming conflicts
-        assert target.object_nodes[0].path == tmp_path / "build" / "obj.mylib" / "main.o"
+        assert (
+            target.object_nodes[0].path == tmp_path / "build" / "obj.mylib" / "main.o"
+        )
 
     def test_resolve_sets_object_build_info(self, tmp_path):
         """Test that resolved objects have proper build_info."""
@@ -156,7 +154,9 @@ class TestResolverTransitiveRequirements:
 
         # App's objects should have lib's public requirements
         app_obj = app.object_nodes[0]
-        assert Path("include") in [Path(p) for p in app_obj._build_info["effective_includes"]]
+        assert Path("include") in [
+            Path(p) for p in app_obj._build_info["effective_includes"]
+        ]
         assert "LIB_API" in app_obj._build_info["effective_defines"]
 
 
@@ -191,7 +191,11 @@ class TestResolverHeaderOnlyLibrary:
 
         # App should have header lib's requirements
         app_obj = app.object_nodes[0]
-        assert "headers/include" in " ".join(app_obj._build_info["effective_includes"])
+        # Normalize path separators for cross-platform comparison
+        includes_normalized = " ".join(
+            inc.replace("\\", "/") for inc in app_obj._build_info["effective_includes"]
+        )
+        assert "headers/include" in includes_normalized
         assert "HEADER_LIB_API" in app_obj._build_info["effective_defines"]
 
 
@@ -230,6 +234,8 @@ class TestResolverObjectCaching:
 class TestResolverTargetTypes:
     def test_program_target(self, tmp_path):
         """Test resolving a program target."""
+        import sys
+
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
 
@@ -245,7 +251,9 @@ class TestResolverTargetTypes:
         assert target._resolved
         assert len(target.object_nodes) == 1
         assert len(target.output_nodes) == 1
-        assert target.output_nodes[0].path.name == "myapp"
+        # On Windows, programs have .exe suffix
+        expected_name = "myapp.exe" if sys.platform == "win32" else "myapp"
+        assert target.output_nodes[0].path.name == expected_name
 
     def test_shared_library_target(self, tmp_path):
         """Test resolving a shared library target."""
@@ -265,6 +273,7 @@ class TestResolverTargetTypes:
         assert len(target.output_nodes) == 1
         # Platform-specific library naming
         import sys
+
         if sys.platform == "darwin":
             assert target.output_nodes[0].path.name == "libmylib.dylib"
         elif sys.platform == "win32":
@@ -400,6 +409,7 @@ class TestResolverOutputName:
         assert target._resolved
         # Should use platform default
         import sys
+
         if sys.platform == "darwin":
             assert target.output_nodes[0].path.name == "libmylib.dylib"
         elif sys.platform == "win32":
@@ -611,7 +621,9 @@ class TestResolverToolAgnostic:
 
         # Create a .tex file
         tex_file = tmp_path / "document.tex"
-        tex_file.write_text(r"\documentclass{article}\begin{document}Hello\end{document}")
+        tex_file.write_text(
+            r"\documentclass{article}\begin{document}Hello\end{document}"
+        )
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
 

@@ -56,7 +56,10 @@ class GccCCompiler(BaseTool):
                 "${prefix(cc.iprefix, cc.includes)}",
                 "${prefix(cc.dprefix, cc.defines)}",
                 "$cc.depflags",
-                "-c", "-o", "$$out", "$$in",
+                "-c",
+                "-o",
+                "$$out",
+                "$$in",
             ],
         }
 
@@ -78,6 +81,7 @@ class GccCCompiler(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
 
@@ -88,6 +92,7 @@ class GccCCompiler(BaseTool):
             return None
 
         from pcons.core.toolconfig import ToolConfig
+
         tool_config = ToolConfig("cc", cmd=str(gcc.path))
         if gcc.version:
             tool_config.version = gcc.version
@@ -126,7 +131,10 @@ class GccCxxCompiler(BaseTool):
                 "${prefix(cxx.iprefix, cxx.includes)}",
                 "${prefix(cxx.dprefix, cxx.defines)}",
                 "$cxx.depflags",
-                "-c", "-o", "$$out", "$$in",
+                "-c",
+                "-o",
+                "$$out",
+                "$$in",
             ],
         }
 
@@ -148,6 +156,7 @@ class GccCxxCompiler(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
 
@@ -158,6 +167,7 @@ class GccCxxCompiler(BaseTool):
             return None
 
         from pcons.core.toolconfig import ToolConfig
+
         tool_config = ToolConfig("cxx", cmd=str(gxx.path))
         if gxx.version:
             tool_config.version = gxx.version
@@ -198,6 +208,7 @@ class GccArchiver(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
 
@@ -206,6 +217,7 @@ class GccArchiver(BaseTool):
             return None
 
         from pcons.core.toolconfig import ToolConfig
+
         return ToolConfig("ar", cmd=str(ar.path))
 
 
@@ -239,7 +251,8 @@ class GccLinker(BaseTool):
             "progcmd": [
                 "$link.cmd",
                 "$link.flags",
-                "-o", "$$out",
+                "-o",
+                "$$out",
                 "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
@@ -248,7 +261,8 @@ class GccLinker(BaseTool):
                 "$link.cmd",
                 shared_flag,
                 "$link.flags",
-                "-o", "$$out",
+                "-o",
+                "$$out",
                 "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
@@ -280,6 +294,7 @@ class GccLinker(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
 
@@ -290,6 +305,7 @@ class GccLinker(BaseTool):
             return None
 
         from pcons.core.toolconfig import ToolConfig
+
         return ToolConfig("link", cmd=str(gcc.path))
 
 
@@ -306,7 +322,7 @@ class GccToolchain(BaseToolchain):
     # Source Handler Methods
     # =========================================================================
 
-    def get_source_handler(self, suffix: str) -> "SourceHandler | None":
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
         from pcons.tools.toolchain import SourceHandler
 
@@ -370,6 +386,7 @@ class GccToolchain(BaseToolchain):
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return False
 
@@ -443,7 +460,7 @@ class GccToolchain(BaseToolchain):
 # Registration
 # =============================================================================
 
-from pcons.tools.toolchain import toolchain_registry
+from pcons.tools.toolchain import toolchain_registry  # noqa: E402
 
 toolchain_registry.register(
     GccToolchain,

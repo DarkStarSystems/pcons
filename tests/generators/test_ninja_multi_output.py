@@ -10,6 +10,11 @@ from pcons.core.target import Target
 from pcons.generators.ninja import NinjaGenerator
 
 
+def normalize_path(p: str) -> str:
+    """Normalize path separators for cross-platform comparison."""
+    return p.replace("\\", "/")
+
+
 class TestNinjaMultiOutput:
     def test_multi_output_build_statement(self, tmp_path):
         """Test that multi-output builds generate correct ninja syntax."""
@@ -79,7 +84,7 @@ class TestNinjaMultiOutput:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
 
         # Should have explicit outputs followed by implicit outputs after |
         # Format: build explicit1 explicit2 | implicit1: rule deps
@@ -135,7 +140,7 @@ class TestNinjaMultiOutput:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
 
         # Check for output variables
         assert "out_primary = build/mylib.dll" in content
@@ -191,11 +196,13 @@ class TestNinjaMultiOutput:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
 
         # Count build statements - should only have one for the actual build
         # (plus mkdir statements for directories)
-        build_lines = [line for line in content.split("\n") if line.startswith("build ")]
+        build_lines = [
+            line for line in content.split("\n") if line.startswith("build ")
+        ]
         # Filter out mkdir statements
         non_mkdir_builds = [line for line in build_lines if ": mkdir" not in line]
         # Should have just one build statement (for the multi-output)
@@ -233,7 +240,7 @@ class TestNinjaSingleOutput:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
 
         # Should have normal single output
         assert "build build/app.exe:" in content

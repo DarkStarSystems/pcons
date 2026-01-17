@@ -3,8 +3,6 @@
 
 from pathlib import Path
 
-import pytest
-
 from pcons.configure.platform import get_platform
 from pcons.core.builder import MultiOutputBuilder, OutputGroup
 from pcons.core.environment import Environment

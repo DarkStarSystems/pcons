@@ -9,8 +9,8 @@ This example demonstrates the target-centric build API:
 - Automatic resolution and generation
 """
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator

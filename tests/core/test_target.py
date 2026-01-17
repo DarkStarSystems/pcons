@@ -348,7 +348,10 @@ class TestPostBuild:
         target.post_build("install_name_tool -add_rpath @loader_path $out")
 
         assert len(target._post_build_commands) == 1
-        assert target._post_build_commands[0] == "install_name_tool -add_rpath @loader_path $out"
+        assert (
+            target._post_build_commands[0]
+            == "install_name_tool -add_rpath @loader_path $out"
+        )
 
     def test_post_build_fluent_returns_self(self):
         """post_build() returns self for chaining."""
@@ -367,8 +370,14 @@ class TestPostBuild:
         target.post_build("codesign --sign - $out")
 
         assert len(target._post_build_commands) == 3
-        assert target._post_build_commands[0] == "install_name_tool -add_rpath @loader_path $out"
-        assert target._post_build_commands[1] == "install_name_tool -change /old/path @rpath/lib.dylib $out"
+        assert (
+            target._post_build_commands[0]
+            == "install_name_tool -add_rpath @loader_path $out"
+        )
+        assert (
+            target._post_build_commands[1]
+            == "install_name_tool -change /old/path @rpath/lib.dylib $out"
+        )
         assert target._post_build_commands[2] == "codesign --sign - $out"
 
     def test_post_build_chain_with_other_methods(self, tmp_path):
@@ -378,8 +387,7 @@ class TestPostBuild:
         src.touch()
 
         result = (
-            target
-            .add_source(src)
+            target.add_source(src)
             .post_build("chmod +x $out")
             .private_defines(["DEBUG"])
         )

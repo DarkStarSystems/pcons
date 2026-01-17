@@ -9,6 +9,7 @@ tool that combines multiple text files into one.
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -71,7 +72,7 @@ class ConcatTool(BaseTool):
 
         # Simple check - try to run cat --version
         try:
-            result = subprocess.run(
+            subprocess.run(
                 ["cat", "--version"],
                 capture_output=True,
                 timeout=5,
@@ -271,7 +272,7 @@ class TestNinjaGeneration:
         src2.write_text("World\n")
 
         # Create a bundle target
-        target = env.concat.Bundle(
+        env.concat.Bundle(
             str(tmp_path / "output.txt"),
             [str(src1), str(src2)],
         )
@@ -292,6 +293,10 @@ class TestNinjaGeneration:
         # Should have a build statement for output.txt
         assert "output.txt" in content
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Uses cat command with shell redirection which doesn't work on Windows",
+    )
     def test_end_to_end_build(self, tmp_path: Path) -> None:
         """Full end-to-end test: create files, generate ninja, run ninja, verify output."""
         # Check if ninja is available
@@ -380,7 +385,9 @@ class TestNinjaGeneration:
         body_pos = content.find("This is the body.")
         footer_pos = content.find("=== FOOTER ===")
 
-        assert header_pos < body_pos < footer_pos, "Files should be concatenated in order"
+        assert header_pos < body_pos < footer_pos, (
+            "Files should be concatenated in order"
+        )
 
 
 class TestToolIntegration:

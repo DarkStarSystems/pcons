@@ -167,7 +167,9 @@ class MermaidGenerator(BaseGenerator):
                             dep_id = get_short_id(dep.path)
                             if dep_id not in written_nodes:
                                 dep_label = dep.path.name
-                                f.write(f"  {dep_id}>{dep_label}]\n")  # Flag for sources
+                                f.write(
+                                    f"  {dep_id}>{dep_label}]\n"
+                                )  # Flag for sources
                                 written_nodes.add(dep_id)
                             edges.append((dep_id, node_id))
 

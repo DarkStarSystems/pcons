@@ -9,17 +9,17 @@ expected_outputs = [
     "build/build.ninja",
     "build/compile_commands.json",
     "build/deps.mmd",
-    "build/build/libmath.a",
-    "build/build/libphysics.a",
-    "build/build/simulator",
+    "build/libmath.a",
+    "build/libphysics.a",
+    "build/simulator",
 ]
 
 [verify]
 # Run the built program and check output
 commands = [
     # Run the simulator and verify it produces expected physics output
-    { run = "./build/build/simulator", expect_stdout = "Kinetic energy:" },
-    { run = "./build/build/simulator", expect_stdout = "Final position:" },
+    { run = "./build/simulator", expect_stdout = "Kinetic energy:" },
+    { run = "./build/simulator", expect_stdout = "Final position:" },
 
     # Verify compile_commands.json has entries for all source files
     { run = "cat build/compile_commands.json", expect_stdout = "math_utils.c" },

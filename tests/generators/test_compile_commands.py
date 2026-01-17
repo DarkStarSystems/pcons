@@ -10,6 +10,11 @@ from pcons.core.target import Target
 from pcons.generators.compile_commands import CompileCommandsGenerator
 
 
+def normalize_path(p: str) -> str:
+    """Normalize path separators for cross-platform comparison."""
+    return p.replace("\\", "/")
+
+
 class TestCompileCommandsGenerator:
     def test_is_generator(self):
         gen = CompileCommandsGenerator()
@@ -48,8 +53,12 @@ class TestCompileCommandsEntries:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Object", "cc", "cmdline",
-            src_suffixes=[".c"], target_suffixes=[".o"], language="c"
+            "Object",
+            "cc",
+            "cmdline",
+            src_suffixes=[".c"],
+            target_suffixes=[".o"],
+            language="c",
         )
 
         target.nodes.append(output_node)
@@ -61,8 +70,9 @@ class TestCompileCommandsEntries:
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 1
-        assert content[0]["file"] == "src/main.c"
-        assert content[0]["output"] == "build/main.o"
+        # Normalize path separators for cross-platform comparison
+        assert normalize_path(content[0]["file"]) == "src/main.c"
+        assert normalize_path(content[0]["output"]) == "build/main.o"
 
     def test_includes_cpp_files(self, tmp_path):
         project = Project("test", root_dir=tmp_path)
@@ -77,8 +87,12 @@ class TestCompileCommandsEntries:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Object", "cxx", "cmdline",
-            src_suffixes=[".cpp"], target_suffixes=[".o"], language="cxx"
+            "Object",
+            "cxx",
+            "cmdline",
+            src_suffixes=[".cpp"],
+            target_suffixes=[".o"],
+            language="cxx",
         )
 
         target.nodes.append(output_node)
@@ -89,7 +103,8 @@ class TestCompileCommandsEntries:
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 1
-        assert content[0]["file"] == "src/main.cpp"
+        # Normalize path separators for cross-platform comparison
+        assert normalize_path(content[0]["file"]) == "src/main.cpp"
 
     def test_excludes_link_commands(self, tmp_path):
         project = Project("test", root_dir=tmp_path)
@@ -126,8 +141,12 @@ class TestCompileCommandsEntries:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Object", "cc", "cmdline",
-            src_suffixes=[".c"], target_suffixes=[".o"], language="c"
+            "Object",
+            "cc",
+            "cmdline",
+            src_suffixes=[".c"],
+            target_suffixes=[".o"],
+            language="c",
         )
 
         target.nodes.append(output_node)
@@ -152,8 +171,12 @@ class TestCompileCommandsEntries:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Object", "cc", "cmdline",
-            src_suffixes=[".c"], target_suffixes=[".o"], language="c"
+            "Object",
+            "cc",
+            "cmdline",
+            src_suffixes=[".c"],
+            target_suffixes=[".o"],
+            language="c",
         )
 
         target.nodes.append(output_node)
@@ -164,4 +187,5 @@ class TestCompileCommandsEntries:
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert "command" in content[0]
-        assert "src/main.c" in content[0]["command"]
+        # Normalize path separators for cross-platform comparison
+        assert "src/main.c" in normalize_path(content[0]["command"])

@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 # Import toolchain modules to trigger registration
 # These imports cause each toolchain to register itself
 from pcons.toolchains.cuda import CudaToolchain, find_cuda_toolchain
-from pcons.tools.cuda import CudaCompiler
 from pcons.toolchains.cython import (
     CythonCCompiler,
     CythonLinker,
@@ -40,6 +39,7 @@ from pcons.toolchains.msvc import (
     MsvcLinker,
     MsvcToolchain,
 )
+from pcons.tools.cuda import CudaCompiler
 
 # Re-export the registry for users who want to register custom toolchains
 from pcons.tools.toolchain import toolchain_registry

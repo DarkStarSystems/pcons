@@ -98,10 +98,17 @@ class TestConfigureFindProgram:
             )
 
     def test_find_program_with_hints(self, tmp_path):
+        import sys
+
         # Create a fake executable
-        fake_exe = tmp_path / "fake_program"
-        fake_exe.write_text("#!/bin/sh\necho fake")
-        fake_exe.chmod(0o755)
+        # On Windows, executables need .exe suffix
+        if sys.platform == "win32":
+            fake_exe = tmp_path / "fake_program.exe"
+            fake_exe.write_text("@echo fake")
+        else:
+            fake_exe = tmp_path / "fake_program"
+            fake_exe.write_text("#!/bin/sh\necho fake")
+            fake_exe.chmod(0o755)
 
         config = Configure(build_dir=tmp_path)
         result = config.find_program("fake_program", hints=[tmp_path])
@@ -116,7 +123,9 @@ class TestConfigureFindProgram:
         result1 = config.find_program("python3") or config.find_program("python")
         if result1:
             # The path should be cached
-            cache_key = "program:python3" if config.get("program:python3") else "program:python"
+            cache_key = (
+                "program:python3" if config.get("program:python3") else "program:python"
+            )
             cached = config.get(cache_key)
             assert cached is not None
 

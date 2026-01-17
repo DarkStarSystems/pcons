@@ -10,6 +10,11 @@ from pcons.core.target import Target
 from pcons.generators.ninja import NinjaGenerator
 
 
+def normalize_path(p: str) -> str:
+    """Normalize path separators for cross-platform comparison."""
+    return p.replace("\\", "/")
+
+
 class TestNinjaGenerator:
     def test_is_generator(self):
         gen = NinjaGenerator()
@@ -60,8 +65,7 @@ class TestNinjaBuildStatements:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Object", "cc", "cmdline",
-            src_suffixes=[".c"], target_suffixes=[".o"]
+            "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
         target.nodes.append(output_node)
@@ -71,7 +75,7 @@ class TestNinjaBuildStatements:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
         assert "build build/app.o:" in content
         assert "cc_cmdline" in content
         assert "src/main.c" in content
@@ -89,8 +93,7 @@ class TestNinjaBuildStatements:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Object", "cc", "cmdline",
-            src_suffixes=[".c"], target_suffixes=[".o"]
+            "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
         target.nodes.append(output_node)
@@ -118,7 +121,7 @@ class TestNinjaAliases:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
         assert "build libs: phony" in content
         assert "build/libmy.a" in content
 
@@ -137,7 +140,7 @@ class TestNinjaDefaults:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
         assert "default build/app" in content
 
 
@@ -145,17 +148,20 @@ class TestNinjaEscaping:
     def test_escapes_spaces_in_paths(self, tmp_path):
         gen = NinjaGenerator()
         escaped = gen._escape_path(Path("path with spaces/file.c"))
-        assert escaped == "path$ with$ spaces/file.c"
+        # Normalize for cross-platform comparison
+        assert normalize_path(escaped) == "path$ with$ spaces/file.c"
 
     def test_escapes_dollar_signs(self, tmp_path):
         gen = NinjaGenerator()
         escaped = gen._escape_path(Path("$HOME/file.c"))
-        assert escaped == "$$HOME/file.c"
+        # Normalize for cross-platform comparison
+        assert normalize_path(escaped) == "$$HOME/file.c"
 
     def test_escapes_colons(self, tmp_path):
         gen = NinjaGenerator()
         escaped = gen._escape_path(Path("C:/path/file.c"))
-        assert escaped == "C$:/path/file.c"
+        # Normalize for cross-platform comparison
+        assert normalize_path(escaped) == "C$:/path/file.c"
 
 
 class TestNinjaPostBuild:
@@ -173,8 +179,7 @@ class TestNinjaPostBuild:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Program", "link", "progcmd",
-            src_suffixes=[".o"], target_suffixes=[""]
+            "Program", "link", "progcmd", src_suffixes=[".o"], target_suffixes=[""]
         )
 
         target.nodes.append(output_node)
@@ -184,7 +189,7 @@ class TestNinjaPostBuild:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
         # Should have post_build variable with the command
         assert "post_build =" in content
         assert "&& install_name_tool -add_rpath @loader_path build/app" in content
@@ -203,8 +208,11 @@ class TestNinjaPostBuild:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "SharedLibrary", "link", "sharedcmd",
-            src_suffixes=[".o"], target_suffixes=[".so"]
+            "SharedLibrary",
+            "link",
+            "sharedcmd",
+            src_suffixes=[".o"],
+            target_suffixes=[".so"],
         )
 
         target.nodes.append(output_node)
@@ -215,7 +223,7 @@ class TestNinjaPostBuild:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
         # Should have both commands chained
         assert "post_build =" in content
         assert "&& install_name_tool -add_rpath @loader_path build/plugin.so" in content
@@ -235,8 +243,7 @@ class TestNinjaPostBuild:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Program", "link", "progcmd",
-            src_suffixes=[".o"], target_suffixes=[""]
+            "Program", "link", "progcmd", src_suffixes=[".o"], target_suffixes=[""]
         )
 
         target.nodes.append(output_node)
@@ -246,7 +253,7 @@ class TestNinjaPostBuild:
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = normalize_path((tmp_path / "build.ninja").read_text())
         # $out should be substituted with the actual output path
         # $in should be substituted with the input files
         assert "post_build =" in content
@@ -266,8 +273,7 @@ class TestNinjaPostBuild:
             "sources": [source_node],
         }
         output_node.builder = CommandBuilder(
-            "Program", "link", "progcmd",
-            src_suffixes=[".o"], target_suffixes=[""]
+            "Program", "link", "progcmd", src_suffixes=[".o"], target_suffixes=[""]
         )
 
         target.nodes.append(output_node)
@@ -298,9 +304,13 @@ class TestNinjaDepsDirectives:
             "deps_style": "gcc",
         }
         output_node.builder = CommandBuilder(
-            "Object", "cc", "objcmd",
-            src_suffixes=[".c"], target_suffixes=[".o"],
-            depfile="$out.d", deps_style="gcc"
+            "Object",
+            "cc",
+            "objcmd",
+            src_suffixes=[".c"],
+            target_suffixes=[".o"],
+            depfile="$out.d",
+            deps_style="gcc",
         )
 
         target.nodes.append(output_node)
@@ -328,9 +338,12 @@ class TestNinjaDepsDirectives:
             "deps_style": "msvc",
         }
         output_node.builder = CommandBuilder(
-            "Object", "cc", "objcmd",
-            src_suffixes=[".c"], target_suffixes=[".obj"],
-            deps_style="msvc"
+            "Object",
+            "cc",
+            "objcmd",
+            src_suffixes=[".c"],
+            target_suffixes=[".obj"],
+            deps_style="msvc",
         )
 
         target.nodes.append(output_node)
@@ -359,8 +372,7 @@ class TestNinjaDepsDirectives:
             "deps_style": None,
         }
         output_node.builder = CommandBuilder(
-            "Program", "link", "progcmd",
-            src_suffixes=[".o"], target_suffixes=[""]
+            "Program", "link", "progcmd", src_suffixes=[".o"], target_suffixes=[""]
         )
 
         target.nodes.append(output_node)

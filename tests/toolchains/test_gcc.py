@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.gcc."""
 
-import pytest
-
-from pcons.configure.platform import Platform, get_platform
+from pcons.configure.platform import Platform
 from pcons.toolchains.gcc import (
     GccArchiver,
     GccCCompiler,

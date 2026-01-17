@@ -7,9 +7,10 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any
 
 from pcons.core.subst import Namespace, subst, to_shell_command
 from pcons.core.toolconfig import ToolConfig
@@ -79,15 +80,18 @@ class Environment:
     # Private helper methods to reduce object.__getattribute__ verbosity
     def _get_tools(self) -> dict[str, ToolConfig]:
         """Get the internal tools dictionary."""
-        return object.__getattribute__(self, "_tools")
+        tools: dict[str, ToolConfig] = object.__getattribute__(self, "_tools")
+        return tools
 
     def _get_vars(self) -> dict[str, Any]:
         """Get the internal variables dictionary."""
-        return object.__getattribute__(self, "_vars")
+        vars_dict: dict[str, Any] = object.__getattribute__(self, "_vars")
+        return vars_dict
 
     def _get_created_nodes(self) -> list[Any]:
         """Get the internal created nodes list."""
-        return object.__getattribute__(self, "_created_nodes")
+        nodes: list[Any] = object.__getattribute__(self, "_created_nodes")
+        return nodes
 
     def __getattr__(self, name: str) -> Any:
         """Get a tool namespace or cross-tool variable.
@@ -213,10 +217,14 @@ class Environment:
         Returns:
             List of expanded tokens.
         """
+        from typing import cast
+
         namespace = self._build_namespace()
         if extra:
             namespace.update(extra)
-        return subst(template, namespace)
+        # subst() returns list[str] for string/list templates (not MultiCmd)
+        # Cast is safe because template is str | list[str], not MultiCmd
+        return cast(list[str], subst(template, namespace))
 
     def _build_namespace(self) -> Namespace:
         """Build a Namespace for variable substitution."""

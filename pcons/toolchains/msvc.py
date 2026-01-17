@@ -22,7 +22,9 @@ if TYPE_CHECKING:
 
 def _find_vswhere() -> Path | None:
     program_files = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
-    vswhere = Path(program_files) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    vswhere = (
+        Path(program_files) / "Microsoft Visual Studio" / "Installer" / "vswhere.exe"
+    )
     return vswhere if vswhere.exists() else None
 
 
@@ -32,10 +34,17 @@ def _find_msvc_install() -> Path | None:
         return None
     try:
         result = subprocess.run(
-            [str(vswhere), "-latest", "-requires",
-             "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-             "-property", "installationPath"],
-            capture_output=True, text=True, timeout=30,
+            [
+                str(vswhere),
+                "-latest",
+                "-requires",
+                "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+                "-property",
+                "installationPath",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         if result.returncode == 0 and result.stdout.strip():
             return Path(result.stdout.strip())
@@ -65,14 +74,18 @@ class MsvcCompiler(BaseTool):
                 "${prefix(cc.iprefix, cc.includes)}",
                 "${prefix(cc.dprefix, cc.defines)}",
                 "$cc.depflags",
-                "/c", "/Fo$$out", "$$in",
+                "/c",
+                "/Fo$$out",
+                "$$in",
             ],
         }
 
     def builders(self) -> dict[str, Builder]:
         return {
             "Object": CommandBuilder(
-                "Object", self._name, "objcmd",
+                "Object",
+                self._name,
+                "objcmd",
                 src_suffixes=[".c", ".cpp", ".cxx", ".cc"],
                 target_suffixes=[".obj"],
                 language=self._language,
@@ -83,6 +96,7 @@ class MsvcCompiler(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
         platform = get_platform()
@@ -99,6 +113,7 @@ class MsvcCompiler(BaseTool):
                         cl_path = version_dir / "bin" / "Hostx64" / "x64" / "cl.exe"
                         if cl_path.exists():
                             from pcons.configure.config import ProgramInfo
+
                             cl = ProgramInfo(path=cl_path)
                             break
 
@@ -106,6 +121,7 @@ class MsvcCompiler(BaseTool):
             return None
 
         from pcons.core.toolconfig import ToolConfig
+
         return ToolConfig(self._name, cmd=str(cl.path))
 
 
@@ -125,7 +141,9 @@ class MsvcLibrarian(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return {
             "StaticLibrary": CommandBuilder(
-                "StaticLibrary", "lib", "libcmd",
+                "StaticLibrary",
+                "lib",
+                "libcmd",
                 src_suffixes=[".obj"],
                 target_suffixes=[".lib"],
                 single_source=False,
@@ -134,6 +152,7 @@ class MsvcLibrarian(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
         platform = get_platform()
@@ -143,6 +162,7 @@ class MsvcLibrarian(BaseTool):
         if lib is None:
             return None
         from pcons.core.toolconfig import ToolConfig
+
         return ToolConfig("lib", cmd=str(lib.path))
 
 
@@ -160,14 +180,19 @@ class MsvcLinker(BaseTool):
             "Lprefix": "/LIBPATH:",
             "libdirs": [],
             "progcmd": [
-                "$link.cmd", "$link.flags",
-                "/OUT:$$out", "$$in",
+                "$link.cmd",
+                "$link.flags",
+                "/OUT:$$out",
+                "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
             "sharedcmd": [
-                "$link.cmd", "/DLL", "$link.flags",
-                "/OUT:$$out", "/IMPLIB:$$out_import_lib",
+                "$link.cmd",
+                "/DLL",
+                "$link.flags",
+                "/OUT:$$out",
+                "/IMPLIB:$$out_import_lib",
                 "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
@@ -177,13 +202,17 @@ class MsvcLinker(BaseTool):
     def builders(self) -> dict[str, Builder]:
         return {
             "Program": CommandBuilder(
-                "Program", "link", "progcmd",
+                "Program",
+                "link",
+                "progcmd",
                 src_suffixes=[".obj"],
                 target_suffixes=[".exe"],
                 single_source=False,
             ),
             "SharedLibrary": MultiOutputBuilder(
-                "SharedLibrary", "link", "sharedcmd",
+                "SharedLibrary",
+                "link",
+                "sharedcmd",
                 outputs=[
                     OutputSpec("primary", ".dll"),
                     OutputSpec("import_lib", ".lib"),
@@ -196,6 +225,7 @@ class MsvcLinker(BaseTool):
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return None
         platform = get_platform()
@@ -205,6 +235,7 @@ class MsvcLinker(BaseTool):
         if link is None:
             return None
         from pcons.core.toolconfig import ToolConfig
+
         return ToolConfig("link", cmd=str(link.path))
 
 
@@ -218,7 +249,7 @@ class MsvcToolchain(BaseToolchain):
     # Source Handler Methods
     # =========================================================================
 
-    def get_source_handler(self, suffix: str) -> "SourceHandler | None":
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
         from pcons.tools.toolchain import SourceHandler
 
@@ -267,6 +298,7 @@ class MsvcToolchain(BaseToolchain):
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
+
         if not isinstance(config, Configure):
             return False
         platform = get_platform()
@@ -331,7 +363,7 @@ class MsvcToolchain(BaseToolchain):
 # Registration
 # =============================================================================
 
-from pcons.tools.toolchain import toolchain_registry
+from pcons.tools.toolchain import toolchain_registry  # noqa: E402
 
 toolchain_registry.register(
     MsvcToolchain,

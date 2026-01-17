@@ -109,7 +109,9 @@ class TestSubstListTemplate:
         assert result == ["gcc", "-c", "file.c"]
 
     def test_list_template_with_vars(self):
-        result = subst(["$cc.cmd", "-c", "$src"], {"cc": {"cmd": "gcc"}, "src": "main.c"})
+        result = subst(
+            ["$cc.cmd", "-c", "$src"], {"cc": {"cmd": "gcc"}, "src": "main.c"}
+        )
         assert result == ["gcc", "-c", "main.c"]
 
     def test_list_template_preserves_spaces(self):
@@ -264,7 +266,13 @@ class TestSubstFunctions:
             }
         }
         result = subst(
-            ["$cc.cmd", "${prefix(cc.iprefix, cc.includes)}", "$cc.flags", "-c", "file.c"],
+            [
+                "$cc.cmd",
+                "${prefix(cc.iprefix, cc.includes)}",
+                "$cc.flags",
+                "-c",
+                "file.c",
+            ],
             ns,
         )
         assert result == ["gcc", "-I/usr/include", "-Wall", "-c", "file.c"]
