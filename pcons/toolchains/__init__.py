@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 
 # Import toolchain modules to trigger registration
 # These imports cause each toolchain to register itself
+from pcons.toolchains.cuda import CudaToolchain, find_cuda_toolchain
+from pcons.tools.cuda import CudaCompiler
 from pcons.toolchains.cython import (
     CythonCCompiler,
     CythonLinker,
@@ -104,7 +106,11 @@ def find_c_toolchain(
 __all__ = [
     # Toolchain finder and registry
     "find_c_toolchain",
+    "find_cuda_toolchain",
     "toolchain_registry",
+    # CUDA toolchain
+    "CudaCompiler",
+    "CudaToolchain",
     # Cython toolchain
     "CythonCCompiler",
     "CythonLinker",
