@@ -15,6 +15,12 @@ show:             ## Show the current environment.
 install:          ## Install the project in dev mode.
 	uv sync
 
+.PHONY: install-hooks
+install-hooks:    ## Install git pre-commit hooks.
+	cp scripts/pre-commit .git/hooks/pre-commit
+	chmod +x .git/hooks/pre-commit
+	@echo "Pre-commit hook installed."
+
 .PHONY: fmt
 fmt:              ## Format code using ruff.
 	uv run ruff format pcons/ tests/

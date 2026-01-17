@@ -20,7 +20,7 @@ Usage:
 import os
 from pathlib import Path
 
-from pcons import Project, NinjaGenerator, find_c_toolchain, get_variant
+from pcons import NinjaGenerator, Project, find_c_toolchain, get_variant
 from pcons.configure.config import Configure
 from pcons.generators.compile_commands import CompileCommandsGenerator
 from pcons.packages.finders import ConanFinder

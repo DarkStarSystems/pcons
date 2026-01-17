@@ -1,0 +1,23 @@
+#!/bin/sh
+# Pre-commit hook to run linting checks
+# Install with: make install-hooks
+#
+# This prevents committing code that fails CI lint checks
+
+echo "Running ruff check..."
+uv run ruff check pcons/ tests/
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "Lint check failed. Run 'uv run ruff check --fix pcons/ tests/' to fix."
+    exit 1
+fi
+
+echo "Running ruff format check..."
+uv run ruff format --check pcons/ tests/
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "Format check failed. Run 'uv run ruff format pcons/ tests/' to fix."
+    exit 1
+fi
+
+echo "Lint checks passed."
