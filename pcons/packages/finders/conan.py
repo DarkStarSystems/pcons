@@ -227,7 +227,56 @@ class ConanFinder(BaseFinder):
                 settings["compiler"] = "gcc"
                 settings["compiler.libcxx"] = "libstdc++11"
 
+        # Auto-detect compiler version if not set
+        if "compiler.version" not in settings and "compiler" in settings:
+            version = self._detect_compiler_version(settings.get("compiler", ""))
+            if version:
+                settings["compiler.version"] = version
+
         return settings
+
+    def _detect_compiler_version(self, compiler: str) -> str | None:
+        """Auto-detect compiler version by running the compiler.
+
+        Args:
+            compiler: Compiler name (gcc, clang, apple-clang, msvc).
+
+        Returns:
+            Major version string, or None if detection fails.
+        """
+        try:
+            if compiler in ("apple-clang", "clang"):
+                result = subprocess.run(
+                    ["clang", "--version"],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    # Parse "Apple clang version X.Y.Z" or "clang version X.Y.Z"
+                    for line in result.stdout.split("\n"):
+                        if "version" in line.lower():
+                            parts = line.split()
+                            for i, part in enumerate(parts):
+                                if part == "version" and i + 1 < len(parts):
+                                    return parts[i + 1].split(".")[0]
+            elif compiler == "gcc":
+                result = subprocess.run(
+                    ["gcc", "--version"],
+                    capture_output=True,
+                    text=True,
+                )
+                if result.returncode == 0:
+                    # Parse "gcc (Ubuntu X.Y.Z-...) X.Y.Z" or similar
+                    line = result.stdout.split("\n")[0]
+                    # Find version number pattern
+                    import re
+
+                    match = re.search(r"(\d+)\.\d+\.\d+", line)
+                    if match:
+                        return match.group(1)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        return None
 
     def set_profile_setting(self, key: str, value: str) -> None:
         """Set a custom profile setting.
@@ -411,17 +460,36 @@ class ConanFinder(BaseFinder):
     def _parse_pkgconfig_files(self) -> dict[str, PackageDescription]:
         """Parse all .pc files in the output folder.
 
+        Automatically searches cmake_layout subfolders if no .pc files found
+        in the main output folder.
+
         Returns:
             Dict mapping package names to PackageDescription objects.
         """
         packages: dict[str, PackageDescription] = {}
 
-        # Create a PkgConfigFinder that searches in the output folder
+        # Find the directory containing .pc files
+        # Conan with cmake_layout puts them in build/{build_type}/generators/
+        pc_dir = self.output_folder
+        if not list(pc_dir.glob("*.pc")):
+            # Check cmake_layout subfolders
+            for build_type in ["Release", "Debug", "RelWithDebInfo", "MinSizeRel"]:
+                candidate = self.output_folder / "build" / build_type / "generators"
+                if candidate.exists() and list(candidate.glob("*.pc")):
+                    pc_dir = candidate
+                    break
+
+        if not list(pc_dir.glob("*.pc")):
+            # No .pc files found anywhere
+            self._packages = packages
+            return packages
+
+        # Create a PkgConfigFinder that searches in the pc_dir
         # Set PKG_CONFIG_PATH environment for pkg-config
         old_pkg_config_path = os.environ.get("PKG_CONFIG_PATH", "")
         try:
-            # Prepend our output folder to PKG_CONFIG_PATH
-            new_path = str(self.output_folder)
+            # Prepend our pc_dir to PKG_CONFIG_PATH
+            new_path = str(pc_dir)
             if old_pkg_config_path:
                 new_path = f"{new_path}{os.pathsep}{old_pkg_config_path}"
             os.environ["PKG_CONFIG_PATH"] = new_path
@@ -432,13 +500,13 @@ class ConanFinder(BaseFinder):
                 return self._parse_pc_files_manually()
 
             # Find all .pc files
-            for pc_file in self.output_folder.glob("*.pc"):
+            for pc_file in pc_dir.glob("*.pc"):
                 pkg_name = pc_file.stem
                 # Skip private files (those with - in name that are components)
                 # but only if the base package also exists
                 if "-" in pkg_name:
                     base_name = pkg_name.rsplit("-", 1)[0]
-                    base_pc = self.output_folder / f"{base_name}.pc"
+                    base_pc = pc_dir / f"{base_name}.pc"
                     if base_pc.exists():
                         continue  # Skip, this is a component
 

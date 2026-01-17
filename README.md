@@ -8,7 +8,7 @@ A modern Python-based build system that generates Ninja (or Makefile) build file
 
 Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), taking the best ideas from each:
 
-- **From SCons**: Environments, Tools, powerful dependency tracking, Python as the configuration language
+- **From SCons**: Environments, Tools, dependency tracking, Python as the configuration language
 - **From CMake**: Generator architecture (configure once, build fast), usage requirements that propagate through dependencies
 
 **Key design principles:**
@@ -28,16 +28,15 @@ Core functionality is working: C/C++ compilation, static and shared libraries, p
 
 ```python
 # build.py
-from pathlib import Path
 from pcons.core.project import Project
 from pcons.toolchains import find_c_toolchain
 
-project = Project("myapp", build_dir=Path("build"))
+project = Project("myapp", build_dir="build")
 
 # Find and configure a C/C++ toolchain
 toolchain = find_c_toolchain()
 env = project.Environment(toolchain=toolchain)
-env.cc.flags.extend(["-O2", "-Wall"])
+env.cc.flags.extend(["-Wall"])
 
 # Build a static library
 lib = project.StaticLibrary("core", env)

@@ -451,6 +451,14 @@ class Project:
         lines.append("")
         lines.append("  // Output files (libraries, programs)")
         for target in self._targets.values():
+            # Skip interface targets (Install, etc.) - they're just copy operations
+            # and don't represent build dependencies
+            target_type_str = (
+                str(target.target_type) if target.target_type else "unknown"
+            )
+            if target_type_str == "interface":
+                continue
+
             shape, color = get_node_style(target)
             for node in target.output_nodes:
                 if isinstance(node, FileNode):
@@ -476,6 +484,14 @@ class Project:
                 if isinstance(output, FileNode):
                     output_id = get_short_id(output.path)
                     for dep_target in target.dependencies:
+                        # Skip interface dependencies too
+                        dep_type_str = (
+                            str(dep_target.target_type)
+                            if dep_target.target_type
+                            else "unknown"
+                        )
+                        if dep_type_str == "interface":
+                            continue
                         for dep_output in dep_target.output_nodes:
                             if isinstance(dep_output, FileNode):
                                 edges.append((get_short_id(dep_output.path), output_id))

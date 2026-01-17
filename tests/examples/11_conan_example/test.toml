@@ -1,0 +1,11 @@
+# Test configuration for Conan example
+# This test requires Conan to be installed, so it's skipped in CI
+
+[test]
+skip = true  # Requires Conan installation
+description = "Example showing how to use Conan packages with pcons"
+
+[test.commands]
+generate = "uvx pcons generate"
+build = "ninja -C build"
+run = "./build/hello_fmt"

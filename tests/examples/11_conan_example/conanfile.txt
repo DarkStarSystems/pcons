@@ -1,0 +1,8 @@
+[requires]
+fmt/10.2.1
+
+[generators]
+PkgConfigDeps
+
+[layout]
+cmake_layout

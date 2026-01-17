@@ -379,6 +379,75 @@ class Environment:
         matches = list(PathlibPath(".").glob(pattern))
         return [FileNode(p, defined_at=get_caller_location()) for p in matches]
 
+    def use(self, package: Any) -> None:
+        """Apply a package's settings to this environment.
+
+        This is the preferred way to use external packages. It applies all
+        compile and link settings from a PackageDescription or ImportedTarget.
+
+        The package's settings are applied to the appropriate tools:
+        - include_dirs → cxx.includes (and cc.includes if present)
+        - defines → cxx.defines (and cc.defines if present)
+        - compile_flags → cxx.flags
+        - library_dirs → link.libdirs
+        - libraries → link.libs
+        - link_flags → link.flags
+
+        Args:
+            package: A PackageDescription, ImportedTarget, or any object with
+                    include_dirs, defines, libraries, etc. attributes.
+
+        Example:
+            # Find and use a package
+            pkg = finder.find("fmt")
+            env.use(pkg)
+
+            # Or with ImportedTarget
+            target = ImportedTarget.from_package(pkg)
+            env.use(target)
+
+            # Multiple packages
+            for pkg in [fmt_pkg, spdlog_pkg]:
+                env.use(pkg)
+        """
+        # Compile settings - apply to cxx (and cc if present)
+        if hasattr(package, "include_dirs"):
+            for inc_dir in package.include_dirs:
+                if self.has_tool("cxx"):
+                    self.cxx.includes.append(str(inc_dir))
+                if self.has_tool("cc"):
+                    self.cc.includes.append(str(inc_dir))
+
+        if hasattr(package, "defines"):
+            for define in package.defines:
+                if self.has_tool("cxx"):
+                    self.cxx.defines.append(define)
+                if self.has_tool("cc"):
+                    self.cc.defines.append(define)
+
+        if hasattr(package, "compile_flags"):
+            for flag in package.compile_flags:
+                if self.has_tool("cxx"):
+                    self.cxx.flags.append(flag)
+                if self.has_tool("cc"):
+                    self.cc.flags.append(flag)
+
+        # Link settings
+        if hasattr(package, "library_dirs"):
+            if self.has_tool("link"):
+                for lib_dir in package.library_dirs:
+                    self.link.libdirs.append(str(lib_dir))
+
+        if hasattr(package, "libraries"):
+            if self.has_tool("link"):
+                for lib in package.libraries:
+                    self.link.libs.append(lib)
+
+        if hasattr(package, "link_flags"):
+            if self.has_tool("link"):
+                for flag in package.link_flags:
+                    self.link.flags.append(flag)
+
     def __repr__(self) -> str:
         tools = self._get_tools()
         vars_dict = self._get_vars()
