@@ -44,7 +44,8 @@ class TestConanFinderBasic:
         repr_str = repr(finder)
         assert "ConanFinder" in repr_str
         assert "test.txt" in repr_str
-        assert "build/deps" in repr_str
+        # Check for path components (Windows uses backslash)
+        assert "build" in repr_str and "deps" in repr_str
 
 
 class TestConanFinderProfile:
@@ -159,7 +160,8 @@ Cflags: -I${includedir}
             finder.install()
 
             # Find the conan install call (not pkg-config calls)
-            conan_calls = [c for c in captured_calls if "conan" in str(c[0])]
+            # Note: conan may be invoked via "uvx conan" so check entire command
+            conan_calls = [c for c in captured_calls if "conan" in str(c)]
             assert len(conan_calls) > 0, f"Expected conan call, got: {captured_calls}"
             call_args = conan_calls[0]
             assert "install" in call_args
