@@ -103,7 +103,6 @@ env.use(fmt_pkg)
 # =============================================================================
 # Build target
 # =============================================================================
-
 hello = project.Program("hello_fmt", env)
 hello.add_sources([project_dir / "src" / "main.cpp"])
 
@@ -118,8 +117,9 @@ project.resolve()
 NinjaGenerator().generate(project, build_dir)
 CompileCommandsGenerator().generate(project, build_dir)
 
+rel_build_dir = build_dir.relative_to(Path.cwd())
 print()
-print(f"Generated {build_dir / 'build.ninja'}")
+print(f"Generated {rel_build_dir / 'build.ninja'}")
 print()
-print(f"Build: ninja -C {build_dir}")
-print(f"Run:   {build_dir / 'hello_fmt'}")
+print(f"Build: ninja -C {rel_build_dir}")
+print(f"Run:   {rel_build_dir / 'hello_fmt'}")

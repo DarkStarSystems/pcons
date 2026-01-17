@@ -88,12 +88,8 @@ class NinjaGenerator(BaseGenerator):
         Rules are deduplicated - identical commands share a rule.
         """
         f.write("# Rules\n")
-
-        # Add a rule to create directories (needed for order-only deps)
-        f.write("rule mkdir\n")
-        f.write("  command = mkdir -p $out\n")
-        f.write("  description = MKDIR $out\n")
-        f.write("\n")
+        # Note: Ninja automatically creates output directories before running
+        # commands, so we don't need explicit mkdir rules.
 
         # Collect all unique rules from targets
         for target in project.targets:
@@ -293,10 +289,9 @@ class NinjaGenerator(BaseGenerator):
         f.write("# Build statements\n")
 
         written_nodes: set[Path] = set()
-        written_dirs: set[Path] = set()
 
-        # Collect and write directory build statements first
-        self._collect_and_write_directories(f, project, written_dirs)
+        # Note: No explicit mkdir statements needed - Ninja automatically
+        # creates output directories before running commands.
 
         for target in project.targets:
             self._write_target_builds(f, target, project, written_nodes)
@@ -310,33 +305,6 @@ class NinjaGenerator(BaseGenerator):
                         written_nodes.add(node.path)
 
         f.write("\n")
-
-    def _collect_and_write_directories(
-        self, f: TextIO, project: Project, written_dirs: set[Path]
-    ) -> None:
-        """Collect all output directories and write mkdir build statements."""
-        directories: set[Path] = set()
-
-        # Collect directories from all targets using the helper
-        for target in project.targets:
-            for node in self._get_target_build_nodes(target, project):
-                parent = node.path.parent
-                if parent != Path(".") and parent != Path(""):
-                    directories.add(parent)
-
-        # Collect directories from environment-tracked nodes
-        for env in project.environments:
-            for node in getattr(env, "_created_nodes", []):
-                if isinstance(node, FileNode):
-                    parent = node.path.parent
-                    if parent != Path(".") and parent != Path(""):
-                        directories.add(parent)
-
-        # Write mkdir statements for each directory
-        for directory in sorted(directories):
-            if directory not in written_dirs:
-                f.write(f"build {self._escape_path(directory)}: mkdir\n")
-                written_dirs.add(directory)
 
     def _write_target_builds(
         self, f: TextIO, target: Target, project: Project, written_nodes: set[Path]
@@ -440,11 +408,9 @@ class NinjaGenerator(BaseGenerator):
             if implicit:
                 implicit_deps = f" | {implicit}"
 
-        # Order-only dependencies (directories that must exist)
+        # Note: No order-only dependencies for directories needed.
+        # Ninja automatically creates output directories before running commands.
         order_only = ""
-        output_dir = node.path.parent
-        if output_dir != Path(".") and output_dir != Path(""):
-            order_only = f" || {self._escape_path(output_dir)}"
 
         f.write(
             f"build {output}: {rule_name} {explicit_deps}{implicit_deps}{order_only}\n"
