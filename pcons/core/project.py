@@ -456,6 +456,7 @@ class Project:
         """
         target = Target(name, target_type="static_library", defined_at=get_caller_location())
         target._env = env
+        target._project = self
         if sources:
             source_nodes = self._normalize_sources(sources)
             target.add_sources(source_nodes)
@@ -480,6 +481,7 @@ class Project:
         """
         target = Target(name, target_type="shared_library", defined_at=get_caller_location())
         target._env = env
+        target._project = self
         if sources:
             source_nodes = self._normalize_sources(sources)
             target.add_sources(source_nodes)
@@ -504,6 +506,7 @@ class Project:
         """
         target = Target(name, target_type="program", defined_at=get_caller_location())
         target._env = env
+        target._project = self
         if sources:
             source_nodes = self._normalize_sources(sources)
             target.add_sources(source_nodes)
@@ -557,6 +560,7 @@ class Project:
         """
         target = Target(name, target_type="object", defined_at=get_caller_location())
         target._env = env
+        target._project = self
         if sources:
             source_nodes = self._normalize_sources(sources)
             target.add_sources(source_nodes)

@@ -213,3 +213,126 @@ class TestImportedTarget:
 
         requirements = app.collect_usage_requirements()
         assert "z" in requirements.link_libs
+
+
+class TestFluentAPI:
+    """Tests for fluent API methods."""
+
+    def test_link_returns_self(self):
+        """link() returns self for chaining."""
+        lib = Target("lib")
+        app = Target("app")
+
+        result = app.link(lib)
+
+        assert result is app
+        assert lib in app.dependencies
+
+    def test_add_source_returns_self(self, tmp_path):
+        """add_source() returns self for chaining."""
+        target = Target("app")
+        src = tmp_path / "main.c"
+        src.touch()
+
+        result = target.add_source(src)
+
+        assert result is target
+        assert len(target.sources) == 1
+
+    def test_add_sources_returns_self(self, tmp_path):
+        """add_sources() returns self for chaining."""
+        target = Target("app")
+        src1 = tmp_path / "main.c"
+        src2 = tmp_path / "util.c"
+        src1.touch()
+        src2.touch()
+
+        result = target.add_sources([src1, src2])
+
+        assert result is target
+        assert len(target.sources) == 2
+
+    def test_add_sources_with_base(self, tmp_path):
+        """add_sources() with base directory works."""
+        target = Target("app")
+        src_dir = tmp_path / "src"
+        src_dir.mkdir()
+        (src_dir / "main.c").touch()
+        (src_dir / "util.c").touch()
+
+        target.add_sources(["main.c", "util.c"], base=src_dir)
+
+        assert len(target.sources) == 2
+        # Verify paths are resolved correctly
+        paths = [n.path for n in target.sources]
+        assert src_dir / "main.c" in paths
+        assert src_dir / "util.c" in paths
+
+    def test_public_includes_returns_self(self):
+        """public_includes() returns self for chaining."""
+        target = Target("lib")
+
+        result = target.public_includes([Path("include")])
+
+        assert result is target
+        assert Path("include") in target.public.include_dirs
+
+    def test_public_defines_returns_self(self):
+        """public_defines() returns self for chaining."""
+        target = Target("lib")
+
+        result = target.public_defines(["FOO", "BAR=1"])
+
+        assert result is target
+        assert "FOO" in target.public.defines
+        assert "BAR=1" in target.public.defines
+
+    def test_private_includes_returns_self(self):
+        """private_includes() returns self for chaining."""
+        target = Target("lib")
+
+        result = target.private_includes([Path("src")])
+
+        assert result is target
+        assert Path("src") in target.private.include_dirs
+
+    def test_private_defines_returns_self(self):
+        """private_defines() returns self for chaining."""
+        target = Target("lib")
+
+        result = target.private_defines(["BUILDING_LIB"])
+
+        assert result is target
+        assert "BUILDING_LIB" in target.private.defines
+
+    def test_chained_calls(self, tmp_path):
+        """Multiple fluent calls can be chained."""
+        lib = Target("lib")
+        src = tmp_path / "lib.c"
+        src.touch()
+
+        result = (
+            lib.add_source(src)
+            .public_includes([Path("include")])
+            .public_defines(["LIB_API"])
+            .private_defines(["BUILDING_LIB"])
+        )
+
+        assert result is lib
+        assert len(lib.sources) == 1
+        assert Path("include") in lib.public.include_dirs
+        assert "LIB_API" in lib.public.defines
+        assert "BUILDING_LIB" in lib.private.defines
+
+    def test_link_chain(self, tmp_path):
+        """link() can be chained with other fluent methods."""
+        lib = Target("lib")
+        app = Target("app")
+        src = tmp_path / "main.c"
+        src.touch()
+
+        result = app.add_source(src).link(lib)
+
+        assert result is app
+        assert len(app.sources) == 1
+        assert lib in app.dependencies

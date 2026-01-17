@@ -125,6 +125,7 @@ class Target:
         # NEW for target-centric build model:
         "target_type",
         "_env",
+        "_project",
         "object_nodes",
         "output_nodes",
         "_resolved",
@@ -167,6 +168,7 @@ class Target:
         # NEW for target-centric build model:
         self.target_type: TargetType | None = target_type
         self._env: Environment | None = None
+        self._project: Any = None  # Set by Project when target is created
         self.object_nodes: list[FileNode] = []
         self.output_nodes: list[FileNode] = []
         self._resolved: bool = False
@@ -182,28 +184,165 @@ class Target:
         # Destination path for InstallAs targets (full path including filename)
         self._install_as_dest: Path | None = None
 
-    def link(self, *targets: Target) -> None:
-        """Add targets as dependencies.
+    def link(self, *targets: Target) -> Target:
+        """Add targets as dependencies (fluent API).
 
         The dependencies' public usage requirements will be applied
         when building this target.
 
         Args:
             *targets: Targets to depend on.
+
+        Returns:
+            self for method chaining.
         """
         for target in targets:
             if target not in self.dependencies:
                 self.dependencies.append(target)
         # Invalidate cached requirements
         self._collected_requirements = None
+        return self
 
-    def add_source(self, node: Node) -> None:
-        """Add a source node to this target."""
+    def add_source(self, source: Node | Path | str) -> Target:
+        """Add a source to this target (fluent API).
+
+        Args:
+            source: Source file (Node, Path, or string path).
+
+        Returns:
+            self for method chaining.
+        """
+        node = self._to_node(source)
         self.sources.append(node)
+        return self
 
-    def add_sources(self, nodes: list[Node]) -> None:
-        """Add multiple source nodes to this target."""
-        self.sources.extend(nodes)
+    def add_sources(
+        self,
+        sources: list[Node | Path | str],
+        *,
+        base: Path | str | None = None,
+    ) -> Target:
+        """Add multiple sources to this target (fluent API).
+
+        Args:
+            sources: Source files (Nodes, Paths, or string paths).
+            base: Optional base directory for relative paths.
+
+        Returns:
+            self for method chaining.
+
+        Example:
+            target.add_sources(["main.cpp", "util.cpp"], base=src_dir)
+        """
+        base_path = Path(base) if base else None
+        for source in sources:
+            if base_path and isinstance(source, (str, Path)):
+                path = Path(source)
+                if not path.is_absolute():
+                    source = base_path / path
+            node = self._to_node(source)
+            self.sources.append(node)
+        return self
+
+    def _to_node(self, source: Node | Path | str) -> Node:
+        """Convert a source specification to a Node."""
+        from pcons.core.node import FileNode, Node as NodeClass
+
+        if isinstance(source, NodeClass):
+            return source
+        path = Path(source)
+        # Use project's node() if available for deduplication
+        if self._project is not None:
+            return self._project.node(path)
+        return FileNode(path)
+
+    # Fluent API for usage requirements
+
+    def public_includes(self, dirs: list[Path | str]) -> Target:
+        """Add public include directories (fluent API).
+
+        These directories propagate to targets that depend on this one.
+
+        Args:
+            dirs: Include directories.
+
+        Returns:
+            self for method chaining.
+        """
+        for d in dirs:
+            self.public.include_dirs.append(Path(d))
+        return self
+
+    def public_defines(self, defines: list[str]) -> Target:
+        """Add public preprocessor defines (fluent API).
+
+        These defines propagate to targets that depend on this one.
+
+        Args:
+            defines: Preprocessor defines (e.g., ["FOO", "BAR=1"]).
+
+        Returns:
+            self for method chaining.
+        """
+        self.public.defines.extend(defines)
+        return self
+
+    def public_flags(self, flags: list[str]) -> Target:
+        """Add public compiler flags (fluent API).
+
+        These flags propagate to targets that depend on this one.
+
+        Args:
+            flags: Compiler flags.
+
+        Returns:
+            self for method chaining.
+        """
+        self.public.flags.extend(flags)
+        return self
+
+    def private_includes(self, dirs: list[Path | str]) -> Target:
+        """Add private include directories (fluent API).
+
+        These directories are only used when building this target.
+
+        Args:
+            dirs: Include directories.
+
+        Returns:
+            self for method chaining.
+        """
+        for d in dirs:
+            self.private.include_dirs.append(Path(d))
+        return self
+
+    def private_defines(self, defines: list[str]) -> Target:
+        """Add private preprocessor defines (fluent API).
+
+        These defines are only used when building this target.
+
+        Args:
+            defines: Preprocessor defines (e.g., ["FOO", "BAR=1"]).
+
+        Returns:
+            self for method chaining.
+        """
+        self.private.defines.extend(defines)
+        return self
+
+    def private_flags(self, flags: list[str]) -> Target:
+        """Add private compiler flags (fluent API).
+
+        These flags are only used when building this target.
+
+        Args:
+            flags: Compiler flags.
+
+        Returns:
+            self for method chaining.
+        """
+        self.private.flags.extend(flags)
+        return self
 
     def collect_usage_requirements(self) -> UsageRequirements:
         """Collect transitive public requirements from all dependencies.
