@@ -69,7 +69,8 @@ class TestLlvmArchiver:
     def test_default_vars(self):
         ar = LlvmArchiver()
         vars = ar.default_vars()
-        assert vars["cmd"] == "llvm-ar"
+        # cmd is llvm-ar if available, otherwise falls back to ar
+        assert vars["cmd"] in ("llvm-ar", "ar")
         # flags is now a list (for consistency with subst)
         assert vars["flags"] == ["rcs"]
         assert "libcmd" in vars

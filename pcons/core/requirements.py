@@ -154,8 +154,11 @@ def compute_effective_requirements(
                 if flag not in result.compile_flags:
                     result.compile_flags.append(flag)
 
-    # Layer 2: Target's private requirements
+    # Layer 2: Target's own requirements
+    # Private: only for this target
     result.merge(target.private)
+    # Public: also available to this target's own sources (not just consumers)
+    result.merge(target.public)
 
     # Layer 3: All dependencies' public requirements (transitive)
     for dep in target.transitive_dependencies():

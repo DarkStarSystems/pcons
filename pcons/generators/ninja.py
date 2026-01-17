@@ -378,7 +378,7 @@ class NinjaGenerator(BaseGenerator):
             # Single-output build
             output = self._escape_path(node.path)
 
-        # Explicit dependencies (sources) - use paths relative to build dir
+        # Explicit dependencies (sources + library dependencies)
         # For source files, we need to reference them from the build directory
         def get_source_path(s: FileNode) -> str:
             # If source is in build dir, use relative path
@@ -390,9 +390,19 @@ class NinjaGenerator(BaseGenerator):
                     return self._escape_path(src_path)
             return self._escape_path(s.path)
 
-        explicit_deps = " ".join(
+        # Start with sources from build_info
+        explicit_deps_list = [
             get_source_path(s) for s in sources if isinstance(s, FileNode)
-        )
+        ]
+
+        # Add any additional explicit deps (e.g., libraries for linking)
+        # that aren't already in sources
+        source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
+        for dep in node.explicit_deps:
+            if isinstance(dep, FileNode) and dep.path not in source_paths_set:
+                explicit_deps_list.append(self._escape_path(dep.path))
+
+        explicit_deps = " ".join(explicit_deps_list)
 
         # Implicit dependencies (from node.implicit_deps)
         implicit_deps = ""

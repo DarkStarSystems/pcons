@@ -130,8 +130,11 @@ class LlvmArchiver(BaseTool):
         super().__init__("ar")
 
     def default_vars(self) -> dict[str, object]:
+        import shutil
+        # Prefer llvm-ar if available, otherwise fall back to ar
+        ar_cmd = "llvm-ar" if shutil.which("llvm-ar") else "ar"
         return {
-            "cmd": "llvm-ar",
+            "cmd": ar_cmd,
             "flags": ["rcs"],
             "libcmd": ["$ar.cmd", "$ar.flags", "$$out", "$$in"],
         }
