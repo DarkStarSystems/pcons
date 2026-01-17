@@ -30,7 +30,7 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | Ninja generator | Implemented | Primary, full support |
 | compile_commands.json | Implemented | For IDE integration |
 | Mermaid diagram generator | Implemented | For visualization |
-| Makefile generator | Planned | Not yet implemented |
+| Makefile generator | Implemented | For environments without Ninja |
 | IDE generators (VSCode, Xcode) | Planned | Not yet implemented |
 | **Package Management** | | |
 | PackageDescription | Implemented | TOML format |
@@ -581,7 +581,7 @@ class Scanner(Protocol):
    - Results embedded in build graph
 
 ### Generator
-> **Status: Partial** - Ninja generator fully implemented and tested. CompileCommandsGenerator and MermaidGenerator available. MakefileGenerator and IDE generators planned.
+> **Status: Implemented** - Ninja and Makefile generators fully implemented. CompileCommandsGenerator and MermaidGenerator available. IDE generators planned.
 
 A Generator transforms the dependency graph into build files.
 
@@ -598,7 +598,7 @@ class Generator(Protocol):
 - `NinjaGenerator`: Primary output format - **Implemented**
 - `CompileCommandsGenerator`: For IDE/tooling integration - **Implemented**
 - `MermaidGenerator`: For dependency graph visualization - **Implemented**
-- `MakefileGenerator`: For environments without Ninja - **Planned**
+- `MakefileGenerator`: For environments without Ninja - **Implemented**
 - `VSCodeGenerator`, `XcodeGenerator`: IDE project files - **Planned**
 
 **Generator responsibilities:**
@@ -790,7 +790,7 @@ pcons/
 │   ├── ninja.py             # Ninja generator .................... [Implemented]
 │   ├── mermaid.py           # Mermaid diagram generator .......... [Implemented]
 │   ├── compile_commands.py  # compile_commands.json .............. [Implemented]
-│   └── makefile.py          # Makefile generator ................. [Planned]
+│   └── makefile.py          # Makefile generator ................. [Implemented]
 ├── scanners/
 │   ├── __init__.py          # Scanner registry ................... [Planned]
 │   ├── c.py                 # C/C++ header scanner ............... [Planned - uses depfiles]

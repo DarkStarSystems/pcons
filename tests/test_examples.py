@@ -110,28 +110,51 @@ def run_example(example_dir: Path, tmp_path: Path) -> None:
         print(f"build.py stderr:\n{result.stderr}")
         pytest.fail(f"build.py failed with code {result.returncode}")
 
-    # Check that build.ninja was generated
-    ninja_file = build_dir / "build.ninja"
-    if not ninja_file.exists():
-        pytest.fail(f"build.ninja not generated in {build_dir}")
+    # Check for custom build command or use ninja default
+    build_command = test_config.get("build_command")
 
-    # Run ninja
-    if shutil.which("ninja") is None:
-        pytest.skip("ninja not available")
+    if build_command:
+        # Custom build command (e.g., "make -C build")
+        # Check for required tool (first word of command)
+        build_tool = build_command.split()[0]
+        if shutil.which(build_tool) is None:
+            pytest.skip(f"{build_tool} not available")
 
-    result = subprocess.run(
-        ["ninja", "-f", str(ninja_file)],
-        cwd=build_dir,
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+        result = subprocess.run(
+            build_command,
+            shell=True,
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
 
-    if result.returncode != 0:
-        print(f"Ninja stdout:\n{result.stdout}")
-        print(f"Ninja stderr:\n{result.stderr}")
-        print(f"build.ninja contents:\n{ninja_file.read_text()}")
-        pytest.fail(f"ninja failed with code {result.returncode}")
+        if result.returncode != 0:
+            print(f"Build stdout:\n{result.stdout}")
+            print(f"Build stderr:\n{result.stderr}")
+            pytest.fail(f"Build command failed with code {result.returncode}")
+    else:
+        # Default: use ninja
+        ninja_file = build_dir / "build.ninja"
+        if not ninja_file.exists():
+            pytest.fail(f"build.ninja not generated in {build_dir}")
+
+        if shutil.which("ninja") is None:
+            pytest.skip("ninja not available")
+
+        result = subprocess.run(
+            ["ninja", "-f", str(ninja_file)],
+            cwd=build_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            print(f"Ninja stdout:\n{result.stdout}")
+            print(f"Ninja stderr:\n{result.stderr}")
+            print(f"build.ninja contents:\n{ninja_file.read_text()}")
+            pytest.fail(f"ninja failed with code {result.returncode}")
 
     # Check expected outputs exist
     expected_outputs = test_config.get("expected_outputs", [])

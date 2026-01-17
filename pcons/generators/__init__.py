@@ -3,6 +3,7 @@
 
 from pcons.generators.compile_commands import CompileCommandsGenerator
 from pcons.generators.generator import BaseGenerator, Generator
+from pcons.generators.makefile import MakefileGenerator
 from pcons.generators.mermaid import MermaidGenerator
 from pcons.generators.ninja import NinjaGenerator
 
@@ -10,6 +11,7 @@ __all__ = [
     "BaseGenerator",
     "CompileCommandsGenerator",
     "Generator",
+    "MakefileGenerator",
     "MermaidGenerator",
     "NinjaGenerator",
 ]

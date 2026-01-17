@@ -1,0 +1,25 @@
+# Test configuration for the makefile example
+
+[test]
+description = "Demonstrates Makefile generation with pcons"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/obj.hello/hello.o",
+    "build/hello",
+]
+
+# Use make instead of ninja for building
+build_command = "make -C build"
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/hello", expect_stdout = "Hello from pcons Makefile!" },
+]
+
+[skip]
+# Skip on Windows (uses GNU Make features)
+platforms = ["windows"]
+# Requires gcc and make to be installed
+requires = ["gcc", "make"]
