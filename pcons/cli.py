@@ -82,6 +82,7 @@ def run_script(
     variables: dict[str, str] | None = None,
     variant: str | None = None,
     reconfigure: bool = False,
+    extra_env: dict[str, str] | None = None,
 ) -> int:
     """Execute a Python build script.
 
@@ -91,6 +92,7 @@ def run_script(
         variables: Build variables to pass via PCONS_VARS.
         variant: Build variant to pass via PCONS_VARIANT.
         reconfigure: If True, set PCONS_RECONFIGURE=1.
+        extra_env: Additional environment variables to set.
 
     Returns:
         Exit code from script execution.
@@ -108,6 +110,9 @@ def run_script(
 
     if reconfigure:
         env["PCONS_RECONFIGURE"] = "1"
+
+    if extra_env:
+        env.update(extra_env)
 
     logger.info("Running %s", script_path)
     logger.debug("  PCONS_BUILD_DIR=%s", env["PCONS_BUILD_DIR"])
@@ -234,6 +239,15 @@ def cmd_generate(args: argparse.Namespace) -> int:
     # Get variant and reconfigure flags
     variant = getattr(args, "variant", None)
     reconfigure = getattr(args, "reconfigure", False)
+    graph = getattr(args, "graph", None)
+    mermaid = getattr(args, "mermaid", None)
+
+    # Set up extra environment for graph output
+    extra_env: dict[str, str] = {}
+    if graph:
+        extra_env["PCONS_GRAPH"] = graph
+    if mermaid:
+        extra_env["PCONS_MERMAID"] = mermaid
 
     # Run build script
     return run_script(
@@ -242,6 +256,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         variables=variables,
         variant=variant,
         reconfigure=reconfigure,
+        extra_env=extra_env if extra_env else None,
     )
 
 
@@ -525,6 +540,20 @@ def main() -> int:
     )
     add_common_args(gen_parser)
     add_generate_args(gen_parser)
+    gen_parser.add_argument(
+        "--graph",
+        nargs="?",
+        const="-",
+        metavar="FILE",
+        help="Output dependency graph in DOT format (default: stdout)",
+    )
+    gen_parser.add_argument(
+        "--mermaid",
+        nargs="?",
+        const="-",
+        metavar="FILE",
+        help="Output dependency graph in Mermaid format (default: stdout)",
+    )
     gen_parser.add_argument(
         "extra",
         nargs="*",

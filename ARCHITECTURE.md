@@ -37,7 +37,8 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | ImportedTarget | Implemented | Wraps external deps |
 | pkg-config finder | Implemented | Reads .pc files |
 | System finder | Implemented | Manual search |
-| Conan/vcpkg finders | Planned | Not yet implemented |
+| Conan finder | Implemented | Conan 2.x with PkgConfigDeps |
+| vcpkg finder | Planned | Not yet implemented |
 | pcons-fetch tool | Implemented | CMake/autotools support |
 | **Scanners** | | |
 | Scanner interface | Implemented | Protocol defined |
@@ -804,7 +805,7 @@ pcons/
 │   │   ├── base.py          # Base finder class .................. [Implemented]
 │   │   ├── pkgconfig.py     # pkg-config finder .................. [Implemented]
 │   │   ├── system.py        # Manual system search ............... [Implemented]
-│   │   ├── conan.py         # Conan finder ....................... [Planned]
+│   │   ├── conan.py         # Conan finder ....................... [Implemented]
 │   │   └── vcpkg.py         # vcpkg finder ....................... [Planned]
 │   └── fetch/
 │       ├── __init__.py
@@ -1022,7 +1023,7 @@ class ImportedTarget(Target):
 ```
 
 ### Package Finders
-> **Status: Partial** - PkgConfigFinder and SystemFinder implemented. ConanFinder and VcpkgFinder planned.
+> **Status: Partial** - PkgConfigFinder, SystemFinder, and ConanFinder implemented. VcpkgFinder planned.
 
 Finders locate packages and generate `.pcons-pkg.toml` files (or create ImportedTargets directly).
 

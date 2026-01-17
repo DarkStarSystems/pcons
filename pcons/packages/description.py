@@ -16,8 +16,6 @@ try:
 except ImportError:
     import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
-import tomli_w
-
 
 @dataclass
 class ComponentDescription:
@@ -189,6 +187,8 @@ class PackageDescription:
         Args:
             path: Path to write the TOML file to.
         """
+        import tomli_w  # Lazy import - only needed when writing TOML
+
         data = self.to_dict()
         path.write_bytes(tomli_w.dumps(data).encode("utf-8"))
 
