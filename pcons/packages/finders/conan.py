@@ -423,11 +423,13 @@ class ConanFinder(BaseFinder):
         self.output_folder.mkdir(parents=True, exist_ok=True)
 
         # Build conan install command
+        # Use --profile:host and --profile:build to avoid requiring a default profile
         cmd: list[str] = [
             *self.conan_cmd,
             "install",
             str(self.conanfile.parent if self.conanfile.is_file() else self.conanfile),
-            f"--profile={self.profile_path}",
+            f"--profile:host={self.profile_path}",
+            f"--profile:build={self.profile_path}",
             "-g",
             "PkgConfigDeps",
             f"--output-folder={self.output_folder}",
