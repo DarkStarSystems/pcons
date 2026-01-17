@@ -313,6 +313,58 @@ def cmd_clean(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_info(args: argparse.Namespace) -> int:
+    """Show information about the build script.
+
+    Displays the docstring from build.py which should document
+    available build variables and usage.
+    """
+    setup_logging(args.verbose, args.debug)
+
+    script_path = getattr(args, "build_script", None)
+
+    # Find build script
+    if script_path:
+        script = Path(script_path)
+        if not script.exists():
+            logger.error("Build script not found: %s", script_path)
+            return 1
+    else:
+        found_script = find_script("build.py")
+        if found_script is None:
+            logger.error("No build.py found in current directory")
+            return 1
+        script = found_script
+
+    # Extract docstring using AST
+    import ast
+
+    try:
+        source = script.read_text()
+        tree = ast.parse(source)
+        docstring = ast.get_docstring(tree)
+    except SyntaxError as e:
+        logger.error("Failed to parse %s: %s", script, e)
+        return 1
+
+    print(f"Build script: {script}")
+    print()
+    if docstring:
+        print(docstring)
+    else:
+        print("(No docstring found in build.py)")
+        print()
+        print("Tip: Add a docstring to document available build variables:")
+        print('  """Build script for MyProject.')
+        print()
+        print("  Variables:")
+        print("      PORT     - Build target: ofx, ae (default: ofx)")
+        print("      USE_CUDA - Enable CUDA: 0, 1 (default: 0)")
+        print('  """')
+
+    return 0
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize a new pcons project.
 
@@ -448,6 +500,16 @@ def main() -> int:
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    # pcons info
+    info_parser = subparsers.add_parser(
+        "info", help="Show build script info and available variables"
+    )
+    add_common_args(info_parser)
+    info_parser.add_argument(
+        "-b", "--build-script", help="Path to build.py script"
+    )
+    info_parser.set_defaults(func=cmd_info)
 
     # pcons init
     init_parser = subparsers.add_parser("init", help="Initialize a new pcons project")

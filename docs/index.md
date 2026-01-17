@@ -60,6 +60,7 @@ pcons              # Configure (if needed) → Generate → Build
 pcons build        # Same as above
 pcons generate     # Configure (if needed) → Generate only
 pcons clean        # Clean build outputs (runs ninja -t clean)
+pcons info         # Show build.py documentation and available variables
 ```
 
 ### Configuration
@@ -144,6 +145,28 @@ Variables are stored internally by pcons and do not pollute the shell environmen
 - `CC`, `CXX` - Override C/C++ compiler
 - `PREFIX` - Installation prefix
 - Custom project-specific variables
+
+**Documenting variables**: Add a docstring to your `build.py` to document available variables. Users can view it with `pcons info`:
+
+```python
+"""Build script for MyProject.
+
+Variables:
+    PORT      - Build target: ofx, ae (default: ofx)
+    USE_CUDA  - Enable CUDA: 0, 1 (default: 0)
+"""
+```
+
+```bash
+$ pcons info
+Build script: build.py
+
+Build script for MyProject.
+
+Variables:
+    PORT      - Build target: ofx, ae (default: ofx)
+    USE_CUDA  - Enable CUDA: 0, 1 (default: 0)
+```
 
 ### How It Works
 

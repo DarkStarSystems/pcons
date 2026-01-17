@@ -241,6 +241,53 @@ class TestCLICommands:
         assert "Project" in build_content
         assert "Configure" in build_content
 
+    def test_pcons_info(self, tmp_path: Path) -> None:
+        """Test pcons info shows build.py docstring."""
+        # Create a build.py with a docstring
+        build_py = tmp_path / "build.py"
+        build_py.write_text('''"""My project build script.
+
+Variables:
+    FOO - Some variable (default: bar)
+"""
+print("hello")
+''')
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "info"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        assert "My project build script" in result.stdout
+        assert "FOO" in result.stdout
+
+    def test_pcons_info_no_docstring(self, tmp_path: Path) -> None:
+        """Test pcons info handles missing docstring gracefully."""
+        build_py = tmp_path / "build.py"
+        build_py.write_text('print("hello")\n')
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "info"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        assert "No docstring found" in result.stdout
+
+    def test_pcons_info_no_script(self, tmp_path: Path) -> None:
+        """Test pcons info without build.py."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "info"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode != 0
+        assert "No build.py found" in result.stderr
+
     def test_pcons_generate_no_script(self, tmp_path: Path) -> None:
         """Test pcons generate without build.py."""
         result = subprocess.run(
