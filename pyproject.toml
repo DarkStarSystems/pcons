@@ -1,6 +1,6 @@
 [project]
 name = "pcons"
-version = "0.1.0-dev"
+dynamic = ["version"]
 description = "A Python-based build system that generates Ninja files"
 readme = "README.md"
 license = { text = "MIT" }
@@ -50,6 +50,9 @@ Issues = "https://github.com/garyo/pcons/issues"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "pcons/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["pcons"]

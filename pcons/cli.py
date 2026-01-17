@@ -485,7 +485,9 @@ def main() -> int:
         description="A Python-based build system that generates Ninja files.",
         epilog="Run 'pcons <command> --help' for command-specific help.",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0-dev")
+    from pcons import __version__
+
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     # Default command args (for 'pcons' with no subcommand)
     add_common_args(parser)
