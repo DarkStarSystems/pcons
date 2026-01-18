@@ -294,6 +294,15 @@ class Toolchain(Protocol):
         """Return additional compile flags needed for the target type."""
         ...
 
+    def get_archiver_tool_name(self) -> str:
+        """Return the name of the archiver tool for this toolchain.
+
+        Different toolchains use different tool names:
+        - GCC uses "ar"
+        - MSVC uses "lib"
+        """
+        ...
+
 
 class BaseToolchain(ABC):
     """Abstract base class for toolchains.
@@ -454,6 +463,20 @@ class BaseToolchain(ABC):
             Object file suffix (e.g., ".o", ".obj").
         """
         return ".o"
+
+    def get_archiver_tool_name(self) -> str:
+        """Return the name of the archiver tool for this toolchain.
+
+        Different toolchains use different tool names:
+        - GCC uses "ar"
+        - MSVC uses "lib"
+
+        Override in subclasses. Default is "ar" for Unix-like systems.
+
+        Returns:
+            Archiver tool name (e.g., "ar", "lib").
+        """
+        return "ar"
 
     def get_static_library_name(self, name: str) -> str:
         """Return filename for a static library.

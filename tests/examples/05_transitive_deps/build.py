@@ -13,6 +13,7 @@ is a more advanced feature.
 """
 
 import os
+import sys
 from pathlib import Path
 
 from pcons.core.project import Project
@@ -27,7 +28,11 @@ build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
 
-toolchain = find_c_toolchain()
+# Find a C toolchain - prefer MSVC on Windows
+if sys.platform == "win32":
+    toolchain = find_c_toolchain(prefer=["msvc", "llvm", "gcc"])
+else:
+    toolchain = find_c_toolchain()
 project = Project("transitive_deps", build_dir=build_dir)
 env = project.Environment(toolchain=toolchain)
 

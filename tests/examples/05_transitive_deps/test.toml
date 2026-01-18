@@ -5,6 +5,7 @@ description = "Demonstrates transitive include directory propagation"
 
 # Files that should exist after the build
 # Object files are in obj.<target>/ subdirectories
+# Paths are Unix-style; automatically adapted for Windows
 expected_outputs = [
     "build/obj.simulator/math_lib.o",
     "build/obj.simulator/physics_lib.o",
@@ -14,6 +15,7 @@ expected_outputs = [
 
 [verify]
 # Run the built program and check output
+# Commands are Unix-style; automatically adapted for Windows
 commands = [
     { run = "./build/simulator", expect_stdout = "Mass: 10 kg" },
     { run = "./build/simulator", expect_stdout = "Kinetic Energy:" },
@@ -21,5 +23,4 @@ commands = [
 ]
 
 [skip]
-platforms = ["windows"]
-requires = ["gcc"]
+# Works on all platforms with a C compiler

@@ -344,6 +344,10 @@ class MsvcToolchain(BaseToolchain):
         """Return the object file suffix for MSVC toolchain."""
         return ".obj"
 
+    def get_archiver_tool_name(self) -> str:
+        """Return the name of the archiver tool for MSVC toolchain."""
+        return "lib"
+
     def get_static_library_name(self, name: str) -> str:
         """Return filename for a static library (Windows-style)."""
         return f"{name}.lib"

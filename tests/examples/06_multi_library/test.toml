@@ -5,6 +5,7 @@
 description = "Demonstrates multi-library builds with transitive dependencies"
 
 # Files that should exist after the build
+# Paths are Unix-style; automatically adapted for Windows (.a -> .lib, adds .exe)
 expected_outputs = [
     "build/build.ninja",
     "build/compile_commands.json",
@@ -16,8 +17,8 @@ expected_outputs = [
 
 [verify]
 # Run the built program and check output
+# Commands are Unix-style; automatically adapted for Windows
 commands = [
-    # Run the simulator and verify it produces expected physics output
     { run = "./build/simulator", expect_stdout = "Kinetic energy:" },
     { run = "./build/simulator", expect_stdout = "Final position:" },
 
@@ -25,7 +26,7 @@ commands = [
     { run = "cat build/compile_commands.json", expect_stdout = "math_utils.c" },
     { run = "cat build/compile_commands.json", expect_stdout = "physics.c" },
     { run = "cat build/compile_commands.json", expect_stdout = "main.c" },
-    # Verify includes are present
+    # Verify includes are present (uses -I for clang-compatible output)
     { run = "cat build/compile_commands.json", expect_stdout = "-I" },
 
     # Verify deps.mmd has the dependency graph
@@ -33,12 +34,27 @@ commands = [
     { run = "cat build/deps.mmd", expect_stdout = "libmath" },
     { run = "cat build/deps.mmd", expect_stdout = "libphysics" },
     { run = "cat build/deps.mmd", expect_stdout = "simulator" },
-    # Verify edges exist
     { run = "cat build/deps.mmd", expect_stdout = "-->" },
 ]
 
+# Windows needs different checks for deps.mmd since library names differ
+commands_windows = [
+    { run = "build\\simulator.exe", expect_stdout = "Kinetic energy:" },
+    { run = "build\\simulator.exe", expect_stdout = "Final position:" },
+
+    # Verify compile_commands.json has entries for all source files
+    { run = "type build\\compile_commands.json", expect_stdout = "math_utils.c" },
+    { run = "type build\\compile_commands.json", expect_stdout = "physics.c" },
+    { run = "type build\\compile_commands.json", expect_stdout = "main.c" },
+    { run = "type build\\compile_commands.json", expect_stdout = "-I" },
+
+    # Verify deps.mmd has the dependency graph (Windows uses different library names)
+    { run = "type build\\deps.mmd", expect_stdout = "flowchart" },
+    { run = "type build\\deps.mmd", expect_stdout = "math" },
+    { run = "type build\\deps.mmd", expect_stdout = "physics" },
+    { run = "type build\\deps.mmd", expect_stdout = "simulator" },
+    { run = "type build\\deps.mmd", expect_stdout = "-->" },
+]
+
 [skip]
-# Skip on Windows (needs different paths and possibly MSVC)
-platforms = ["windows"]
-# Requires a C compiler
-requires = ["cc"]
+# Works on all platforms with a C compiler

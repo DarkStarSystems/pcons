@@ -302,9 +302,14 @@ class OutputNodeFactory:
             target, env, for_compilation=False
         )
 
+        # Get archiver tool name from toolchain (e.g., "ar" for GCC, "lib" for MSVC)
+        archiver_tool = "ar"  # default
+        if toolchain := env._toolchain:
+            archiver_tool = toolchain.get_archiver_tool_name()
+
         lib_node._build_info = {
-            "tool": "ar",
-            "command_var": "libcmd",  # GCC archiver uses libcmd
+            "tool": archiver_tool,
+            "command_var": "libcmd",
             "sources": target.object_nodes,
             "effective_link_flags": list(effective_link.link_flags),
         }

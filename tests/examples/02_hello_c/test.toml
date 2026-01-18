@@ -1,10 +1,11 @@
 # Test configuration for the hello_c example
 
 [test]
-description = "Demonstrates compiling a simple C program with GCC"
+description = "Demonstrates compiling a simple C program (cross-platform)"
 
 # Files that should exist after the build
 # Object files are in obj.<target>/ subdirectories
+# Paths are Unix-style; automatically adapted for Windows (.o -> .obj, adds .exe)
 expected_outputs = [
     "build/obj.hello/hello.o",
     "build/hello",
@@ -12,12 +13,10 @@ expected_outputs = [
 
 [verify]
 # Run the built program and check output
+# Commands are Unix-style; automatically adapted for Windows
 commands = [
     { run = "./build/hello", expect_stdout = "Hello from pcons!" },
 ]
 
 [skip]
-# Skip on Windows (needs different executable name and possibly MSVC)
-platforms = ["windows"]
-# Requires gcc to be installed
-requires = ["gcc"]
+# Works on all platforms with a C compiler (gcc, clang, or cl.exe)

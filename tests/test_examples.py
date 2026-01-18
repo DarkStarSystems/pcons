@@ -29,6 +29,64 @@ except ImportError:
 
 
 EXAMPLES_DIR = Path(__file__).parent / "examples"
+IS_WINDOWS = platform.system().lower() == "windows"
+
+
+def adapt_path_for_windows(path: str) -> str:
+    """Adapt a Unix-style path for Windows.
+
+    Converts:
+        ./build/program -> build\\program.exe
+        build/file.o -> build\\file.obj
+        build/libfoo.a -> build\\foo.lib
+        build/program (no extension) -> build\\program.exe
+    """
+    # Convert forward slashes to backslashes
+    path = path.replace("/", "\\")
+
+    # Remove leading .\
+    if path.startswith(".\\"):
+        path = path[2:]
+
+    # Convert extensions
+    if path.endswith(".o"):
+        path = path[:-2] + ".obj"
+    elif path.endswith(".a"):
+        # Convert libfoo.a to foo.lib
+        import re
+
+        path = re.sub(r"\\lib([^\\]+)\.a$", r"\\\1.lib", path)
+        if path.endswith(".a"):  # Didn't match lib prefix
+            path = path[:-2] + ".lib"
+
+    # Add .exe to executables (paths in build/ without extension)
+    # Check if it's a build output without an extension
+    if "\\build\\" in path or path.startswith("build\\"):
+        parts = path.rsplit("\\", 1)
+        if len(parts) == 2 and "." not in parts[1]:
+            path = path + ".exe"
+
+    return path
+
+
+def adapt_command_for_windows(cmd: str) -> str:
+    """Adapt a Unix-style command for Windows.
+
+    Converts:
+        cat file -> type file
+        ./build/program -> build\\program.exe
+    """
+    # Convert cat to type
+    if cmd.startswith("cat "):
+        cmd = "type " + cmd[4:].replace("/", "\\")
+    else:
+        # Just adapt the path portion
+        parts = cmd.split(maxsplit=1)
+        if parts:
+            parts[0] = adapt_path_for_windows(parts[0])
+            cmd = " ".join(parts)
+
+    return cmd
 
 
 def discover_examples() -> list[Path]:
@@ -75,6 +133,49 @@ def should_skip(config: dict[str, Any]) -> str | None:
             return f"Required tool '{tool}' not found"
 
     return None
+
+
+def get_platform_value(
+    config: dict[str, Any],
+    key: str,
+    default: Any = None,
+    adapt_for_windows: bool = False,
+) -> Any:
+    """Get a platform-specific value from config.
+
+    Supports both simple values and platform-specific overrides:
+        key = "value"                    # Simple value for all platforms
+        key_windows = "windows_value"    # Windows-specific override
+        key_linux = "linux_value"        # Linux-specific override
+        key_darwin = "macos_value"       # macOS-specific override
+
+    Args:
+        config: Configuration dictionary
+        key: Key to look up
+        default: Default value if key not found
+        adapt_for_windows: If True and on Windows without a platform-specific
+            override, automatically adapt Unix paths/commands
+
+    Returns the platform-specific value if available, otherwise the base value.
+    """
+    current_platform = platform.system().lower()
+    platform_key = f"{key}_{current_platform}"
+
+    # Check for platform-specific override first
+    if platform_key in config:
+        return config[platform_key]
+
+    # Get base value
+    value = config.get(key, default)
+
+    # Optionally adapt for Windows when no override exists
+    if adapt_for_windows and IS_WINDOWS and value is not None:
+        if isinstance(value, list):
+            return [adapt_path_for_windows(str(v)) for v in value]
+        elif isinstance(value, str):
+            return adapt_path_for_windows(value)
+
+    return value
 
 
 def run_example(example_dir: Path, tmp_path: Path) -> None:
@@ -144,7 +245,7 @@ def run_example(example_dir: Path, tmp_path: Path) -> None:
 
         result = subprocess.run(
             ["ninja", "-f", str(ninja_file)],
-            cwd=build_dir,
+            cwd=work_dir,  # Run from project root, not build dir
             capture_output=True,
             text=True,
             timeout=120,
@@ -156,26 +257,35 @@ def run_example(example_dir: Path, tmp_path: Path) -> None:
             print(f"build.ninja contents:\n{ninja_file.read_text()}")
             pytest.fail(f"ninja failed with code {result.returncode}")
 
-    # Check expected outputs exist
-    expected_outputs = test_config.get("expected_outputs", [])
+    # Check expected outputs exist (auto-adapts for Windows if no override)
+    expected_outputs = get_platform_value(
+        test_config, "expected_outputs", [], adapt_for_windows=True
+    )
     for output in expected_outputs:
         output_path = work_dir / output
         if not output_path.exists():
             pytest.fail(f"Expected output not found: {output}")
 
-    # Run verification commands
+    # Run verification commands (auto-adapts for Windows if no override)
     verify_config = config.get("verify", {})
-    verify_commands = verify_config.get("commands", [])
+    # Check if there's a platform-specific commands override
+    current_platform = platform.system().lower()
+    has_platform_override = f"commands_{current_platform}" in verify_config
+    verify_commands = get_platform_value(verify_config, "commands", [])
 
     for cmd_config in verify_commands:
         run_cmd = cmd_config.get("run")
         if not run_cmd:
             continue
 
+        # Adapt command for Windows if no platform-specific override exists
+        if IS_WINDOWS and not has_platform_override:
+            run_cmd = adapt_command_for_windows(run_cmd)
+
         # Resolve command path relative to work_dir
-        cmd_path = work_dir / run_cmd
+        cmd_path = work_dir / run_cmd.split()[0]  # Check first word as path
         if cmd_path.exists():
-            run_cmd = str(cmd_path)
+            run_cmd = str(cmd_path) + run_cmd[len(run_cmd.split()[0]) :]
 
         result = subprocess.run(
             run_cmd,
