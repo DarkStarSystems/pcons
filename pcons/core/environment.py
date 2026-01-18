@@ -427,6 +427,48 @@ class Environment:
         matches = list(PathlibPath(".").glob(pattern))
         return [FileNode(p, defined_at=get_caller_location()) for p in matches]
 
+    def Framework(self, *names: str, dirs: list[str] | None = None) -> None:
+        """Add macOS frameworks to link against.
+
+        This is a convenience method for adding frameworks to the linker.
+        It modifies env.link.frameworks and optionally env.link.frameworkdirs.
+
+        On non-macOS platforms, this method still adds the frameworks to the
+        environment variables (for cross-compilation scenarios), but they
+        will have no effect when building on those platforms.
+
+        Args:
+            *names: Framework names (e.g., "Foundation", "CoreFoundation").
+            dirs: Optional list of framework search directories.
+
+        Example:
+            # Add single framework
+            env.Framework("Foundation")
+
+            # Add multiple frameworks
+            env.Framework("Foundation", "CoreFoundation", "Metal")
+
+            # Add framework with custom search path
+            env.Framework("MyFramework", dirs=["/path/to/frameworks"])
+        """
+        if not self.has_tool("link"):
+            return
+
+        link = self.link
+        if not hasattr(link, "frameworks"):
+            link.frameworks = []
+        if not hasattr(link, "frameworkdirs"):
+            link.frameworkdirs = []
+
+        for name in names:
+            if name not in link.frameworks:
+                link.frameworks.append(name)
+
+        if dirs:
+            for d in dirs:
+                if d not in link.frameworkdirs:
+                    link.frameworkdirs.append(d)
+
     def use(self, package: Any) -> None:
         """Apply a package's settings to this environment.
 
@@ -440,6 +482,8 @@ class Environment:
         - library_dirs → link.libdirs
         - libraries → link.libs
         - link_flags → link.flags
+        - frameworks → link.frameworks (macOS)
+        - framework_dirs → link.frameworkdirs (macOS)
 
         Args:
             package: A PackageDescription, ImportedTarget, or any object with
@@ -495,6 +539,107 @@ class Environment:
             if self.has_tool("link"):
                 for flag in package.link_flags:
                     self.link.flags.append(flag)
+
+        # Framework settings (macOS)
+        if hasattr(package, "frameworks"):
+            if self.has_tool("link"):
+                for fw in package.frameworks:
+                    if not hasattr(self.link, "frameworks"):
+                        self.link.frameworks = []
+                    if fw not in self.link.frameworks:
+                        self.link.frameworks.append(fw)
+
+        if hasattr(package, "framework_dirs"):
+            if self.has_tool("link"):
+                for fw_dir in package.framework_dirs:
+                    if not hasattr(self.link, "frameworkdirs"):
+                        self.link.frameworkdirs = []
+                    if str(fw_dir) not in self.link.frameworkdirs:
+                        self.link.frameworkdirs.append(str(fw_dir))
+
+    def Command(
+        self,
+        target: str | Path | list[str | Path],
+        source: str | Path | list[str | Path] | None = None,
+        command: str | list[str] = "",
+    ) -> list[FileNode]:
+        """Run an arbitrary shell command to build targets from sources.
+
+        This is a general-purpose builder for running shell commands that
+        don't fit into the standard compile/link model. It supports variable
+        substitution for common patterns.
+
+        Args:
+            target: Output file(s) that the command produces.
+            source: Input file(s) that the command depends on. Can be None
+                   if the command doesn't depend on any files.
+            command: The shell command to run. Supports variable substitution:
+                    - $SOURCE: First source file
+                    - $SOURCES: All source files (space-separated)
+                    - $TARGET: First target file
+                    - $TARGETS: All target files (space-separated)
+                    - ${SOURCES[n]}: Indexed source access (0-based)
+                    - ${TARGETS[n]}: Indexed target access (0-based)
+
+        Returns:
+            List of FileNode objects representing the target files.
+
+        Example:
+            # Generate a header from a template
+            env.Command(
+                "config.h",
+                ["config.h.in", "version.txt"],
+                "python generate_config.py $SOURCES > $TARGET"
+            )
+
+            # Run a code generator with multiple outputs
+            env.Command(
+                ["parser.c", "parser.h"],
+                "grammar.y",
+                "bison -d -o ${TARGETS[0]} $SOURCE"
+            )
+
+            # Command with no source dependencies
+            env.Command(
+                "timestamp.txt",
+                None,
+                "date > $TARGET"
+            )
+        """
+        from pcons.core.builder import GenericCommandBuilder
+        from pcons.core.node import FileNode
+
+        # Normalize target to list
+        if isinstance(target, (str, Path)):
+            targets = [Path(target)]
+        else:
+            targets = [Path(t) for t in target]
+
+        # Normalize source to list
+        if source is None:
+            sources: list[str | Path | FileNode] = []
+        elif isinstance(source, (str, Path)):
+            sources = [source]
+        else:
+            sources = list(source)
+
+        # Create the builder
+        builder = GenericCommandBuilder(command)
+
+        # Build the targets - always use _build directly with explicit targets
+        nodes = builder._build(
+            self,
+            targets,
+            builder._normalize_sources(sources),
+            defined_at=get_caller_location(),
+        )
+
+        # Register nodes with the environment
+        for node in nodes:
+            if isinstance(node, FileNode):
+                self.register_node(node)
+
+        return [n for n in nodes if isinstance(n, FileNode)]
 
     def __repr__(self) -> str:
         tools = self._get_tools()

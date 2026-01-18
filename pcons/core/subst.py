@@ -11,7 +11,8 @@ Supported syntax:
 - Simple variables: $VAR or ${VAR}
 - Namespaced variables: $tool.var or ${tool.var}
 - Escaped dollars: $$ becomes literal $
-- Functions: ${prefix(var, list)}, ${suffix(list, var)}, ${wrap(p, list, s)}
+- Functions: ${prefix(var, list)}, ${suffix(list, var)}, ${wrap(p, list, s)},
+             ${pairwise(var, list)} (produces interleaved pairs)
 
 Command template forms:
 - String: "$cc.cmd $cc.flags -c -o $$out $$in" (auto-tokenized on whitespace)
@@ -353,6 +354,22 @@ def _call_function(
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
         return [sep.join(str(item) for item in items)]
+
+    elif func_name == "pairwise":
+        # Produces pairs: pairwise("-framework", ["A", "B"]) -> ["-framework", "A", "-framework", "B"]
+        # Useful for linker flags like -framework Foundation -framework CoreFoundation
+        if len(args) != 2:
+            raise SubstitutionError(
+                f"pairwise() requires 2 args, got {len(args)}", location
+            )
+        prefix = str(_resolve_arg(args[0], namespace, expanding, location))
+        items = _resolve_arg(args[1], namespace, expanding, location)
+        items = items if isinstance(items, list) else [items]
+        result: list[str] = []
+        for item in items:
+            result.append(prefix)
+            result.append(str(item))
+        return result
 
     else:
         raise SubstitutionError(f"Unknown function: {func_name}", location)

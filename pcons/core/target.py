@@ -15,6 +15,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.flags import merge_flags
+
 # Import SourceSpec from centralized types module
 from pcons.core.types import SourceSpec
 from pcons.util.source_location import SourceLocation, get_caller_location
@@ -60,10 +62,21 @@ class UsageRequirements:
     compile_flags: list[str] = field(default_factory=list)
     link_flags: list[str] = field(default_factory=list)
 
-    def merge(self, other: UsageRequirements) -> None:
+    def merge(
+        self,
+        other: UsageRequirements,
+        separated_arg_flags: frozenset[str] | None = None,
+    ) -> None:
         """Merge another UsageRequirements into this one.
 
-        Avoids duplicates while preserving order.
+        Avoids duplicates while preserving order. For compiler and linker
+        flags, handles flags that take separate arguments (like -F path,
+        -framework Foo) by treating the flag+argument pair as a unit.
+
+        Args:
+            other: The UsageRequirements to merge from.
+            separated_arg_flags: Set of flags that take separate arguments.
+                               If None, uses default (empty set).
         """
         for inc_dir in other.include_dirs:
             if inc_dir not in self.include_dirs:
@@ -74,12 +87,9 @@ class UsageRequirements:
         for define in other.defines:
             if define not in self.defines:
                 self.defines.append(define)
-        for cflag in other.compile_flags:
-            if cflag not in self.compile_flags:
-                self.compile_flags.append(cflag)
-        for lflag in other.link_flags:
-            if lflag not in self.link_flags:
-                self.link_flags.append(lflag)
+        # Use flag-aware merge for compile and link flags
+        merge_flags(self.compile_flags, other.compile_flags, separated_arg_flags)
+        merge_flags(self.link_flags, other.link_flags, separated_arg_flags)
 
     def clone(self) -> UsageRequirements:
         """Create a copy of this UsageRequirements."""

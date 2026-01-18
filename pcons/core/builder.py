@@ -573,3 +573,130 @@ class MultiOutputBuilder(CommandBuilder):
                 }
 
         return OutputGroup(nodes, primary_name)
+
+
+class GenericCommandBuilder(BaseBuilder):
+    """A builder for arbitrary shell commands.
+
+    This builder allows users to run arbitrary shell commands as part of
+    the build process. It supports variable substitution for common patterns
+    like $SOURCE, $TARGET, $SOURCES, $TARGETS.
+
+    Example:
+        # Generate a header from a template
+        env.Command(
+            "config.h",
+            ["config.h.in", "version.txt"],
+            "python generate_config.py $SOURCES > $TARGET"
+        )
+
+        # Run a code generator
+        env.Command(
+            ["parser.c", "parser.h"],
+            "grammar.y",
+            "bison -d -o ${TARGETS[0]} $SOURCE"
+        )
+    """
+
+    # Counter for generating unique rule names
+    _rule_counter: int = 0
+
+    def __init__(
+        self,
+        command: str | list[str],
+        *,
+        rule_name: str | None = None,
+    ) -> None:
+        """Initialize a generic command builder.
+
+        Args:
+            command: The shell command to run. Supports variable substitution:
+                    - $SOURCE, $SOURCES: Source file(s)
+                    - $TARGET, $TARGETS: Target file(s)
+                    - ${SOURCES[n]}, ${TARGETS[n]}: Indexed access
+            rule_name: Optional custom rule name for Ninja. If not provided,
+                      a unique name is generated.
+        """
+        # Generate unique rule name if not provided
+        if rule_name is None:
+            GenericCommandBuilder._rule_counter += 1
+            rule_name = f"command_{GenericCommandBuilder._rule_counter}"
+
+        super().__init__(
+            name="Command",
+            tool_name="command",
+            src_suffixes=[],  # Accepts any source
+            target_suffixes=[],  # Produces any target
+            language=None,
+        )
+
+        # Store the command as a list for consistency
+        if isinstance(command, str):
+            self._command = command
+        else:
+            self._command = " ".join(command)
+        self._rule_name = rule_name
+
+    @property
+    def command(self) -> str:
+        """The command template."""
+        return self._command
+
+    @property
+    def rule_name(self) -> str:
+        """The Ninja rule name for this command."""
+        return self._rule_name
+
+    def _default_targets(
+        self,
+        sources: list[Node],
+        env: Environment,
+    ) -> list[Path]:
+        """Generic commands must have explicit targets."""
+        raise ValueError(
+            "GenericCommandBuilder requires explicit target(s). "
+            "Use env.Command(target, sources, command) with a target specified."
+        )
+
+    def _build(
+        self,
+        env: Environment,
+        targets: list[Path],
+        sources: list[Node],
+        **kwargs: Any,
+    ) -> list[Node]:
+        """Create target nodes for the command."""
+        defined_at = kwargs.get("defined_at") or get_caller_location()
+
+        # Create target nodes
+        result: list[Node] = []
+        for target in targets:
+            node = FileNode(target, defined_at=defined_at)
+            node.depends(sources)
+            node.builder = self
+            result.append(node)
+
+        # Store build info on the first (primary) target
+        # This is used by the Ninja generator to create build rules
+        if result:
+            primary = result[0]
+            primary._build_info = {
+                "tool": "command",
+                "command_var": "cmdline",
+                "command": self._command,
+                "rule_name": self._rule_name,
+                "language": None,
+                "sources": sources,
+                "all_targets": result,
+                "depfile": None,
+                "deps_style": None,
+            }
+
+            # For multiple outputs, mark secondary targets as referencing primary
+            for secondary in result[1:]:
+                secondary._build_info = {
+                    "primary_node": primary,
+                    "output_name": str(secondary.path),
+                }
+
+        return result

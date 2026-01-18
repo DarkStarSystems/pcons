@@ -255,6 +255,20 @@ class ClangClToolchain(BaseToolchain):
     compatible with the MSVC ecosystem.
     """
 
+    # Flags that take their argument as a separate token for Clang-CL.
+    # Clang-CL uses MSVC-style /FLAG:value syntax for most flags,
+    # but also supports some GCC-style flags when needed.
+    SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
+        [
+            # MSVC-style linker passthrough
+            "/link",
+            # GCC-style flags that clang-cl also supports
+            "-target",
+            "--target",
+            "-Xlinker",
+        ]
+    )
+
     def __init__(self) -> None:
         super().__init__("clang-cl")
 
@@ -310,6 +324,14 @@ class ClangClToolchain(BaseToolchain):
         Clang-CL doesn't need special flags like -fPIC on Windows.
         """
         return []
+
+    def get_separated_arg_flags(self) -> frozenset[str]:
+        """Return flags that take their argument as a separate token.
+
+        Returns:
+            A frozenset of Clang-CL flags that take separate arguments.
+        """
+        return self.SEPARATED_ARG_FLAGS
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

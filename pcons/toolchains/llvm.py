@@ -183,7 +183,22 @@ class LlvmArchiver(BaseTool):
 
 
 class LlvmLinker(BaseTool):
-    """LLVM linker tool."""
+    """LLVM linker tool.
+
+    Variables:
+        cmd: Linker command (default: 'clang')
+        flags: Linker flags (list)
+        lprefix: Library prefix (default: '-l')
+        libs: Libraries to link (list of names, no prefix)
+        Lprefix: Library directory prefix (default: '-L')
+        libdirs: Library directories (list of paths, no prefix)
+        Fprefix: Framework directory prefix (default: '-F', macOS only)
+        frameworkdirs: Framework directories (list of paths, no prefix)
+        fprefix: Framework prefix (default: '-framework', macOS only)
+        frameworks: Frameworks to link (list of names, no prefix)
+        progcmd: Command template for linking program
+        sharedcmd: Command template for linking shared library
+    """
 
     def __init__(self) -> None:
         super().__init__("link")
@@ -198,6 +213,11 @@ class LlvmLinker(BaseTool):
             "libs": [],
             "Lprefix": "-L",
             "libdirs": [],
+            # Framework support (macOS only, but always defined for portability)
+            "Fprefix": "-F",
+            "frameworkdirs": [],
+            "fprefix": "-framework",
+            "frameworks": [],
             "progcmd": [
                 "$link.cmd",
                 "$link.flags",
@@ -206,6 +226,8 @@ class LlvmLinker(BaseTool):
                 "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
+                "${prefix(link.Fprefix, link.frameworkdirs)}",
+                "${pairwise(link.fprefix, link.frameworks)}",
             ],
             "sharedcmd": [
                 "$link.cmd",
@@ -216,6 +238,8 @@ class LlvmLinker(BaseTool):
                 "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
+                "${prefix(link.Fprefix, link.frameworkdirs)}",
+                "${pairwise(link.fprefix, link.frameworks)}",
             ],
         }
 
@@ -326,6 +350,42 @@ class MetalCompiler(BaseTool):
 class LlvmToolchain(BaseToolchain):
     """LLVM/Clang toolchain for C and C++ development."""
 
+    # Flags that take their argument as a separate token (e.g., "-F path" not "-Fpath")
+    # LLVM/Clang is largely GCC-compatible, so it uses the same separated arg flags.
+    SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
+        [
+            # Framework/library paths (macOS)
+            "-F",
+            "-framework",
+            # Xcode/Apple toolchain
+            "-iframework",
+            # Linker flags that take arguments
+            "-Wl,-rpath",
+            "-Wl,-install_name",
+            "-Wl,-soname",
+            # Output-related
+            "-o",
+            "-MF",
+            "-MT",
+            "-MQ",
+            # Linker script
+            "-T",
+            # Architecture
+            "-arch",
+            "-target",
+            "--target",
+            # Include/library search modifiers
+            "-isystem",
+            "-isysroot",
+            "-iquote",
+            "-idirafter",
+            # Xlinker passthrough
+            "-Xlinker",
+            "-Xpreprocessor",
+            "-Xassembler",
+        ]
+    )
+
     def __init__(self) -> None:
         super().__init__("llvm")
 
@@ -410,6 +470,14 @@ class LlvmToolchain(BaseToolchain):
 
         # Static libraries, programs, and other types don't need special flags
         return []
+
+    def get_separated_arg_flags(self) -> frozenset[str]:
+        """Return flags that take their argument as a separate token.
+
+        Returns:
+            A frozenset of LLVM/Clang flags that take separate arguments.
+        """
+        return self.SEPARATED_ARG_FLAGS
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

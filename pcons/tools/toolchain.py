@@ -318,6 +318,18 @@ class Toolchain(Protocol):
         """Return additional compile flags needed for the target type."""
         ...
 
+    def get_separated_arg_flags(self) -> frozenset[str]:
+        """Return flags that take their argument as a separate token.
+
+        These are flags like -F, -framework, -arch where the argument
+        is a separate command-line token rather than attached to the flag.
+        This information is needed for proper flag deduplication.
+
+        Returns:
+            A frozenset of flag strings that take separate arguments.
+        """
+        ...
+
     def get_archiver_tool_name(self) -> str:
         """Return the name of the archiver tool for this toolchain.
 
@@ -575,6 +587,17 @@ class BaseToolchain(ABC):
             Default implementation returns an empty list.
         """
         return []
+
+    def get_separated_arg_flags(self) -> frozenset[str]:
+        """Return flags that take their argument as a separate token.
+
+        Override in subclasses to provide toolchain-specific flags.
+        Default implementation returns an empty frozenset.
+
+        Returns:
+            A frozenset of flag strings that take separate arguments.
+        """
+        return frozenset()
 
     def __repr__(self) -> str:
         tools = ", ".join(self._tools.keys())

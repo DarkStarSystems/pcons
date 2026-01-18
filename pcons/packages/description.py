@@ -95,6 +95,8 @@ class PackageDescription:
         defines: Preprocessor definitions (-D flags, without the -D prefix).
         compile_flags: Additional compile flags.
         link_flags: Additional link flags.
+        frameworks: macOS frameworks to link (-framework flags, names only).
+        framework_dirs: macOS framework search directories (-F flags).
         dependencies: Other packages this package depends on.
         components: Named components of this package.
         prefix: Installation prefix (root directory of the package).
@@ -114,6 +116,12 @@ class PackageDescription:
 
         # Load from TOML
         pkg2 = PackageDescription.from_toml(Path("zlib.pcons-pkg.toml"))
+
+        # macOS package with frameworks
+        pkg = PackageDescription(
+            name="metal",
+            frameworks=["Metal", "Foundation"],
+        )
     """
 
     name: str
@@ -124,6 +132,8 @@ class PackageDescription:
     defines: list[str] = field(default_factory=list)
     compile_flags: list[str] = field(default_factory=list)
     link_flags: list[str] = field(default_factory=list)
+    frameworks: list[str] = field(default_factory=list)
+    framework_dirs: list[str] = field(default_factory=list)
     dependencies: list[str] = field(default_factory=list)
     components: dict[str, ComponentDescription] = field(default_factory=dict)
     prefix: str = ""
@@ -161,6 +171,10 @@ class PackageDescription:
             link["libraries"] = self.libraries
         if self.link_flags:
             link["flags"] = self.link_flags
+        if self.frameworks:
+            link["frameworks"] = self.frameworks
+        if self.framework_dirs:
+            link["framework_dirs"] = self.framework_dirs
         if link:
             result["link"] = link
 
@@ -223,6 +237,8 @@ class PackageDescription:
             library_dirs=paths.get("library_dirs", []),
             libraries=link.get("libraries", []),
             link_flags=link.get("flags", []),
+            frameworks=link.get("frameworks", []),
+            framework_dirs=link.get("framework_dirs", []),
             defines=compile_section.get("defines", []),
             compile_flags=compile_section.get("flags", []),
             components=components,
@@ -270,11 +286,24 @@ class PackageDescription:
         flags.extend(self.compile_flags)
         return flags
 
+    def get_framework_flags(self) -> list[str]:
+        """Get framework flags (-framework ..., macOS only)."""
+        flags: list[str] = []
+        for fw in self.frameworks:
+            flags.extend(["-framework", fw])
+        return flags
+
+    def get_framework_dir_flags(self) -> list[str]:
+        """Get framework directory flags (-F..., macOS only)."""
+        return [f"-F{d}" for d in self.framework_dirs]
+
     def get_link_flags(self) -> list[str]:
         """Get all link flags."""
         flags: list[str] = []
         flags.extend(self.get_library_dir_flags())
         flags.extend(self.get_library_flags())
+        flags.extend(self.get_framework_dir_flags())
+        flags.extend(self.get_framework_flags())
         flags.extend(self.link_flags)
         return flags
 
@@ -314,5 +343,7 @@ class PackageDescription:
             defines=self.defines + component.defines,
             compile_flags=self.compile_flags + component.compile_flags,
             link_flags=self.link_flags + component.link_flags,
+            frameworks=self.frameworks,  # Components don't have frameworks
+            framework_dirs=self.framework_dirs,  # Components don't have framework dirs
             components=self.components,
         )

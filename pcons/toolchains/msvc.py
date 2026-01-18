@@ -398,6 +398,15 @@ class MsvcLinker(BaseTool):
 class MsvcToolchain(BaseToolchain):
     """Microsoft Visual C++ toolchain (Windows only)."""
 
+    # Flags that take their argument as a separate token for MSVC.
+    # MSVC generally uses /FLAG:value syntax, so there are fewer separated arg flags.
+    SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
+        [
+            # Linker passthrough (when invoking cl.exe which calls link.exe)
+            "/link",
+        ]
+    )
+
     def __init__(self) -> None:
         super().__init__("msvc")
 
@@ -469,6 +478,14 @@ class MsvcToolchain(BaseToolchain):
         # - Module definition files (.def)
         # - /EXPORT linker flag (not a compile flag)
         return []
+
+    def get_separated_arg_flags(self) -> frozenset[str]:
+        """Return flags that take their argument as a separate token.
+
+        Returns:
+            A frozenset of MSVC flags that take separate arguments.
+        """
+        return self.SEPARATED_ARG_FLAGS
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

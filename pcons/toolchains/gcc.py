@@ -231,6 +231,10 @@ class GccLinker(BaseTool):
         libs: Libraries to link (list of names, no prefix)
         Lprefix: Library directory prefix (default: '-L')
         libdirs: Library directories (list of paths, no prefix)
+        Fprefix: Framework directory prefix (default: '-F', macOS only)
+        frameworkdirs: Framework directories (list of paths, no prefix)
+        fprefix: Framework prefix (default: '-framework', macOS only)
+        frameworks: Frameworks to link (list of names, no prefix)
         progcmd: Command template for linking program
         sharedcmd: Command template for linking shared library
     """
@@ -248,6 +252,11 @@ class GccLinker(BaseTool):
             "libs": [],
             "Lprefix": "-L",
             "libdirs": [],
+            # Framework support (macOS only, but always defined for portability)
+            "Fprefix": "-F",
+            "frameworkdirs": [],
+            "fprefix": "-framework",
+            "frameworks": [],
             "progcmd": [
                 "$link.cmd",
                 "$link.flags",
@@ -256,6 +265,8 @@ class GccLinker(BaseTool):
                 "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
+                "${prefix(link.Fprefix, link.frameworkdirs)}",
+                "${pairwise(link.fprefix, link.frameworks)}",
             ],
             "sharedcmd": [
                 "$link.cmd",
@@ -266,6 +277,8 @@ class GccLinker(BaseTool):
                 "$$in",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
+                "${prefix(link.Fprefix, link.frameworkdirs)}",
+                "${pairwise(link.fprefix, link.frameworks)}",
             ],
         }
 
@@ -314,6 +327,43 @@ class GccToolchain(BaseToolchain):
 
     Includes: C compiler (gcc), C++ compiler (g++), archiver (ar), linker (gcc/g++)
     """
+
+    # Flags that take their argument as a separate token (e.g., "-F path" not "-Fpath")
+    # These are common GCC/Unix compiler/linker flags where the argument must be
+    # a separate element.
+    SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
+        [
+            # Framework/library paths (macOS)
+            "-F",
+            "-framework",
+            # Xcode/Apple toolchain
+            "-iframework",
+            # Linker flags that take arguments
+            "-Wl,-rpath",
+            "-Wl,-install_name",
+            "-Wl,-soname",
+            # Output-related
+            "-o",
+            "-MF",
+            "-MT",
+            "-MQ",
+            # Linker script
+            "-T",
+            # Architecture
+            "-arch",
+            "-target",
+            "--target",
+            # Include/library search modifiers
+            "-isystem",
+            "-isysroot",
+            "-iquote",
+            "-idirafter",
+            # Xlinker passthrough
+            "-Xlinker",
+            "-Xpreprocessor",
+            "-Xassembler",
+        ]
+    )
 
     def __init__(self) -> None:
         super().__init__("gcc")
@@ -392,6 +442,14 @@ class GccToolchain(BaseToolchain):
 
         # Static libraries, programs, and other types don't need special flags
         return []
+
+    def get_separated_arg_flags(self) -> frozenset[str]:
+        """Return flags that take their argument as a separate token.
+
+        Returns:
+            A frozenset of GCC/Unix flags that take separate arguments.
+        """
+        return self.SEPARATED_ARG_FLAGS
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

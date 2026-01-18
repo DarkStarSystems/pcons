@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.flags import get_separated_arg_flags_from_toolchains, merge_flags
+
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.target import Target, UsageRequirements
@@ -36,6 +38,8 @@ class EffectiveRequirements:
         link_flags: Linker flags.
         link_libs: Libraries to link against.
         link_dirs: Library search directories.
+        separated_arg_flags: Set of flags that take separate arguments,
+                            used for proper flag deduplication.
     """
 
     includes: list[Path] = field(default_factory=list)
@@ -44,11 +48,14 @@ class EffectiveRequirements:
     link_flags: list[str] = field(default_factory=list)
     link_libs: list[str] = field(default_factory=list)
     link_dirs: list[Path] = field(default_factory=list)
+    separated_arg_flags: frozenset[str] = field(default_factory=frozenset)
 
     def merge(self, reqs: UsageRequirements) -> None:
         """Merge UsageRequirements into this EffectiveRequirements.
 
-        Avoids duplicates while preserving order.
+        Avoids duplicates while preserving order. For compiler and linker
+        flags, handles flags that take separate arguments (like -F path,
+        -framework Foo) by treating the flag+argument pair as a unit.
 
         Args:
             reqs: UsageRequirements to merge in.
@@ -59,12 +66,9 @@ class EffectiveRequirements:
         for define in reqs.defines:
             if define not in self.defines:
                 self.defines.append(define)
-        for cflag in reqs.compile_flags:
-            if cflag not in self.compile_flags:
-                self.compile_flags.append(cflag)
-        for lflag in reqs.link_flags:
-            if lflag not in self.link_flags:
-                self.link_flags.append(lflag)
+        # Use flag-aware merge for compile and link flags
+        merge_flags(self.compile_flags, reqs.compile_flags, self.separated_arg_flags)
+        merge_flags(self.link_flags, reqs.link_flags, self.separated_arg_flags)
         for lib in reqs.link_libs:
             if lib not in self.link_libs:
                 self.link_libs.append(lib)
@@ -100,6 +104,7 @@ class EffectiveRequirements:
             link_flags=list(self.link_flags),
             link_libs=list(self.link_libs),
             link_dirs=list(self.link_dirs),
+            separated_arg_flags=self.separated_arg_flags,
         )
 
 
@@ -124,7 +129,9 @@ def compute_effective_requirements(
     Returns:
         EffectiveRequirements containing the merged requirements.
     """
-    result = EffectiveRequirements()
+    # Get separated arg flags from toolchains for proper flag deduplication
+    separated_arg_flags = get_separated_arg_flags_from_toolchains(env.toolchains)
+    result = EffectiveRequirements(separated_arg_flags=separated_arg_flags)
 
     # Layer 1: Base environment
     # Try to get tool config for the primary language
@@ -147,12 +154,10 @@ def compute_effective_requirements(
                 if define not in result.defines:
                     result.defines.append(define)
 
-        # Get flags from tool config
+        # Get flags from tool config (use flag-aware merge)
         flags = getattr(tool_config, "flags", None)
         if flags:
-            for flag in flags:
-                if flag not in result.compile_flags:
-                    result.compile_flags.append(flag)
+            merge_flags(result.compile_flags, list(flags), separated_arg_flags)
 
     # Layer 2: Target's own requirements
     # Private: only for this target

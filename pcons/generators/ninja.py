@@ -186,10 +186,18 @@ class NinjaGenerator(BaseGenerator):
         # Check if this is a target-centric build (has effective requirements)
         has_effective_reqs = any(k.startswith("effective_") for k in build_info.keys())
 
+        # Check if this is a generic command (has custom rule_name and command)
+        custom_rule_name = build_info.get("rule_name")
+        custom_command = build_info.get("command")
+
         # Create a unique key for this rule based on tool, command var, and mode
-        rule_key = f"{tool_name}_{command_var}"
-        if has_effective_reqs:
-            rule_key += "_effective"
+        if custom_rule_name:
+            # Generic command builder uses custom rule name
+            rule_key = custom_rule_name
+        else:
+            rule_key = f"{tool_name}_{command_var}"
+            if has_effective_reqs:
+                rule_key += "_effective"
 
         if rule_key not in self._rules:
             rule_name = rule_key
@@ -198,11 +206,18 @@ class NinjaGenerator(BaseGenerator):
             # Get the actual command from the environment or build_info
             command = f"echo 'No command for {rule_key}'"
 
-            # Special case for copy command (from Install)
+            # Special case for copy command (from Install) - check this BEFORE
+            # generic command since Install also sets a "command" field
             if tool_name == "copy":
                 copy_cmd = build_info.get("copy_cmd", "cp $in $out")
                 command = copy_cmd + "$post_build"
                 description = "INSTALL $out"
+            # Check for generic command builder (has custom command in build_info)
+            elif custom_command:
+                # Generic command builder - use the command directly
+                # Convert $SOURCE, $TARGET etc. to Ninja $in, $out
+                command = self._convert_command_variables(custom_command)
+                description = "COMMAND $out"
             elif env is not None:
                 tool_config = getattr(env, tool_name, None)
                 if tool_config is not None:
@@ -284,6 +299,47 @@ class NinjaGenerator(BaseGenerator):
 
         return command
 
+    def _convert_command_variables(self, command: str) -> str:
+        """Convert env.Command() variables to Ninja variables.
+
+        Converts SCons-style variables to Ninja-style:
+        - $SOURCE, $SOURCES -> $in
+        - $TARGET, $TARGETS -> $out
+        - ${SOURCES[n]} -> indexed source (handled at build time)
+        - ${TARGETS[n]} -> indexed target (handled at build time)
+
+        Args:
+            command: The command template with SCons-style variables.
+
+        Returns:
+            Command with Ninja-style variables.
+        """
+        import re
+
+        # Convert plural forms first (so they don't match singular)
+        command = command.replace("$SOURCES", "$in")
+        command = command.replace("$TARGETS", "$out")
+
+        # Convert singular forms
+        command = command.replace("$SOURCE", "$in")
+        command = command.replace("$TARGET", "$out")
+
+        # Handle indexed access ${SOURCES[n]} and ${TARGETS[n]}
+        # These need special handling - we'll convert to per-build variables
+        # that will be filled in by _write_build_variables
+        def replace_indexed_source(match: re.Match[str]) -> str:
+            index = match.group(1)
+            return f"$source_{index}"
+
+        def replace_indexed_target(match: re.Match[str]) -> str:
+            index = match.group(1)
+            return f"$target_{index}"
+
+        command = re.sub(r"\$\{SOURCES\[(\d+)\]\}", replace_indexed_source, command)
+        command = re.sub(r"\$\{TARGETS\[(\d+)\]\}", replace_indexed_target, command)
+
+        return command
+
     def _write_builds(self, f: TextIO, project: Project) -> None:
         """Write build statements for all targets."""
         f.write("# Build statements\n")
@@ -346,14 +402,25 @@ class NinjaGenerator(BaseGenerator):
         # Check if this is a target-centric build (has effective requirements)
         has_effective_reqs = any(k.startswith("effective_") for k in build_info.keys())
 
-        rule_name = f"{tool_name}_{command_var}"
-        if has_effective_reqs:
-            rule_name += "_effective"
+        # Check for custom rule name (from generic command builder)
+        custom_rule_name = build_info.get("rule_name")
+        if custom_rule_name:
+            rule_name = custom_rule_name
+        else:
+            rule_name = f"{tool_name}_{command_var}"
+            if has_effective_reqs:
+                rule_name += "_effective"
 
-        # Handle multi-output builds
+        # Handle multi-output builds from generic commands
+        all_targets = build_info.get("all_targets")
         outputs_info = build_info.get("outputs")
-        if outputs_info:
-            # Multi-output build
+
+        if all_targets and len(cast(list[Node], all_targets)) > 1:
+            # Generic command with multiple outputs
+            target_nodes = cast(list[FileNode], all_targets)
+            output = " ".join(self._escape_path(t.path) for t in target_nodes)
+        elif outputs_info:
+            # Multi-output build (from MultiOutputBuilder)
             explicit_outputs: list[str] = []
             implicit_outputs: list[str] = []
 
@@ -443,12 +510,23 @@ class NinjaGenerator(BaseGenerator):
                     return str(src_path)
             return str(s.path)
 
-        source_paths = " ".join(
-            get_source_path(s) for s in sources if isinstance(s, FileNode)
-        )
+        source_file_nodes = [s for s in sources if isinstance(s, FileNode)]
+        source_paths = " ".join(get_source_path(s) for s in source_file_nodes)
         if source_paths:
             f.write(f"  in = {source_paths}\n")
         f.write(f"  out = {node.path}\n")
+
+        # For generic commands with indexed access, write source_N and target_N
+        # variables for each source and target
+        all_targets = build_info.get("all_targets")
+        if all_targets:
+            # Write indexed source variables
+            for i, src in enumerate(source_file_nodes):
+                f.write(f"  source_{i} = {get_source_path(src)}\n")
+            # Write indexed target variables
+            target_nodes = cast(list[FileNode], all_targets)
+            for i, tgt in enumerate(target_nodes):
+                f.write(f"  target_{i} = {tgt.path}\n")
 
         # For multi-output builds, write out_<name> for each output
         outputs_info = build_info.get("outputs")
