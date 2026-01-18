@@ -330,6 +330,24 @@ class ConanFinder(BaseFinder):
         for key, value in sorted(settings.items()):
             lines.append(f"{key}={value}")
 
+        # Add buildenv section to set CC/CXX for CMake when building packages
+        # This ensures Conan uses the same compiler as the toolchain
+        buildenv: dict[str, str] = {}
+        if toolchain is not None:
+            # Get compiler commands from toolchain tools
+            cc_cmd = self._get_toolchain_compiler_cmd(toolchain, "cc")
+            cxx_cmd = self._get_toolchain_compiler_cmd(toolchain, "cxx")
+            if cc_cmd:
+                buildenv["CC"] = cc_cmd
+            if cxx_cmd:
+                buildenv["CXX"] = cxx_cmd
+
+        if buildenv:
+            lines.append("")
+            lines.append("[buildenv]")
+            for key, value in sorted(buildenv.items()):
+                lines.append(f"{key}={value}")
+
         # Add conf section if there are conf values
         if self._profile_conf:
             lines.append("")
@@ -345,6 +363,32 @@ class ConanFinder(BaseFinder):
         self.profile_path.write_text(profile_content)
 
         return self.profile_path
+
+    def _get_toolchain_compiler_cmd(
+        self, toolchain: Toolchain, tool_name: str
+    ) -> str | None:
+        """Get compiler command from toolchain.
+
+        Args:
+            toolchain: Toolchain to query.
+            tool_name: Tool name ("cc" for C compiler, "cxx" for C++ compiler).
+
+        Returns:
+            Compiler command string, or None if not found.
+        """
+        # Try to get the tool from toolchain
+        if hasattr(toolchain, "tools"):
+            tools_dict = toolchain.tools
+            if tool_name in tools_dict:
+                tool = tools_dict[tool_name]
+                # Get default vars which contain the cmd
+                if hasattr(tool, "default_vars"):
+                    defaults = tool.default_vars()
+                    cmd = defaults.get("cmd")
+                    if cmd:
+                        # cmd could be a string or path-like
+                        return str(cmd)
+        return None
 
     def _compute_cache_key(self) -> str:
         """Compute a hash for caching purposes.
