@@ -36,6 +36,7 @@ Before using pcons, ensure you have:
 2. **A C/C++ compiler** for C/C++ projects like the one in this user guide.
   - One of:
     - Clang/LLVM (macOS, Linux)
+    - Clang-CL (Windows - MSVC-compatible Clang)
     - GCC (Linux)
     - MSVC (Windows)
   For other types of projects like building docs, swig, or game assets, pcons can use your own tools.
@@ -203,7 +204,9 @@ A `Toolchain` is a coordinated set of tools (compiler, linker, archiver) that wo
 from pcons import find_c_toolchain
 
 # Auto-detect the best available toolchain
-# Tries: LLVM/Clang, GCC, MSVC (in order)
+# Uses platform-appropriate defaults:
+#   Windows: clang-cl, msvc, llvm, gcc
+#   Unix:    llvm, gcc
 toolchain = find_c_toolchain()
 
 # Or specify a preference order
@@ -211,7 +214,8 @@ toolchain = find_c_toolchain(prefer=["gcc", "llvm"])
 ```
 
 Available toolchains:
-- **LLVM** (Clang) - Default on macOS and many Linux systems
+- **LLVM** (Clang) - Default on macOS and Linux; uses GCC-style flags
+- **Clang-CL** - Clang with MSVC-compatible flags for Windows
 - **GCC** - Common on Linux
 - **MSVC** - Visual Studio on Windows
 
@@ -813,6 +817,36 @@ prefix = get_var('PREFIX', default='/usr/local')
 
 ## Advanced Topics
 
+### Supported Source File Types
+
+Pcons toolchains support various source file types beyond standard C/C++:
+
+| Extension | Description | Toolchains |
+|-----------|-------------|------------|
+| `.c` | C source | All |
+| `.cpp`, `.cxx`, `.cc` | C++ source | All |
+| `.m` | Objective-C | LLVM |
+| `.mm` | Objective-C++ | LLVM |
+| `.s` | Assembly (preprocessed) | GCC, LLVM |
+| `.S` | Assembly (needs C preprocessor) | GCC, LLVM |
+| `.asm` | MASM assembly | MSVC, Clang-CL |
+| `.rc` | Windows resource | MSVC, Clang-CL |
+| `.metal` | Metal shaders (macOS) | LLVM |
+
+These are handled automatically when you add sources to a target:
+
+```python
+# C/C++ sources
+app.add_sources(["main.cpp", "util.c"])
+
+# Windows resources (icons, dialogs, version info)
+app.add_sources(["app.rc"])
+
+# Assembly
+lib.add_sources(["fast_math.S"])  # Uses C preprocessor
+lib.add_sources(["startup.s"])    # Raw assembly
+```
+
 ### Custom Builders
 
 Create custom tools for specialized build steps:
@@ -855,13 +889,25 @@ Handle platform differences in your build script:
 
 ```python
 import sys
+from pcons import find_c_toolchain
 
+toolchain = find_c_toolchain()
+
+# Add platform-specific flags
 if sys.platform == "darwin":
     env.link.flags.append("-framework CoreFoundation")
 elif sys.platform == "linux":
     env.link.libs.extend(["pthread", "dl"])
 elif sys.platform == "win32":
     env.cxx.defines.append("WIN32")
+
+# Add toolchain-specific warning flags
+# clang-cl and msvc use MSVC-style flags (/W4)
+# gcc and llvm use GCC-style flags (-Wall)
+if toolchain.name in ("msvc", "clang-cl"):
+    env.cxx.flags.append("/W4")
+else:
+    env.cxx.flags.extend(["-Wall", "-Wextra"])
 ```
 
 ### IDE Integration
@@ -1018,7 +1064,8 @@ app_profile = project.Program("app_profile", profile_env)
 
 | Function | Description |
 |----------|-------------|
-| `find_c_toolchain()` | Find an available C/C++ toolchain |
+| `find_c_toolchain()` | Find an available C/C++ toolchain (platform-aware defaults) |
+| `find_c_toolchain(prefer=[...])` | Find toolchain with explicit preference order |
 | `get_var(name, default)` | Get a build variable |
 | `get_variant(default)` | Get the build variant |
 

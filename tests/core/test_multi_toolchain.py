@@ -67,6 +67,9 @@ class MockCToolchain(BaseToolchain):
             return SourceHandler("cxx", "cxx", ".o", "$out.d", "gcc")
         return None
 
+    def get_auxiliary_input_handler(self, suffix: str):
+        return None
+
     def get_object_suffix(self) -> str:
         return ".o"
 
@@ -84,6 +87,9 @@ class MockCudaToolchain(BaseToolchain):
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         if suffix.lower() == ".cu":
             return SourceHandler("cuda", "cuda", ".o", "$out.d", "gcc")
+        return None
+
+    def get_auxiliary_input_handler(self, suffix: str):
         return None
 
     def get_object_suffix(self) -> str:
@@ -232,6 +238,9 @@ class TestMultiToolchainResolver:
                 # Also claims to handle .cpp
                 if suffix.lower() == ".cpp":
                     return SourceHandler("alt", "alt", ".obj", None, None)
+                return None
+
+            def get_auxiliary_input_handler(self, suffix: str):
                 return None
 
         c_toolchain = MockCToolchain()

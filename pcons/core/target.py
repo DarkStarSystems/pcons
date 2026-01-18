@@ -156,6 +156,8 @@ class Target:
         "_install_as_dest",
         # Post-build commands:
         "_post_build_commands",
+        # Auxiliary input files (e.g., .def files passed to linker on Windows):
+        "_auxiliary_inputs",
     )
 
     def __init__(
@@ -209,6 +211,9 @@ class Target:
         self._install_as_dest: Path | None = None
         # Post-build commands (shell commands run after target is built)
         self._post_build_commands: list[str] = []
+        # Auxiliary input files (e.g., .def files passed to linker on Windows)
+        # Each entry is (FileNode, flag_string) where flag_string is the tool flag
+        self._auxiliary_inputs: list[tuple[FileNode, str]] = []
 
     @property
     def sources(self) -> list[Node]:

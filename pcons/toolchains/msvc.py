@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
-    from pcons.tools.toolchain import SourceHandler
+    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
 
 def _find_vswhere() -> Path | None:
@@ -420,6 +420,14 @@ class MsvcToolchain(BaseToolchain):
         if suffix_lower == ".asm":
             # MASM assembly files - compiled with ml64.exe (x64) or ml.exe (x86)
             return SourceHandler("ml", "asm", ".obj", None, None, "asmcmd")
+        return None
+
+    def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
+        """Return handler for auxiliary input files."""
+        from pcons.tools.toolchain import AuxiliaryInputHandler
+
+        if suffix.lower() == ".def":
+            return AuxiliaryInputHandler(".def", "/DEF:$file")
         return None
 
     def get_object_suffix(self) -> str:

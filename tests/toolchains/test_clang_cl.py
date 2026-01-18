@@ -141,3 +141,35 @@ class TestClangClCompileFlagsForTargetType:
         tc = ClangClToolchain()
         flags = tc.get_compile_flags_for_target_type("program")
         assert flags == []
+
+
+class TestClangClAuxiliaryInputHandler:
+    """Tests for the AuxiliaryInputHandler support in Clang-CL toolchain."""
+
+    def test_auxiliary_input_handler_def(self):
+        """Test that .def files are recognized as auxiliary inputs."""
+        tc = ClangClToolchain()
+        handler = tc.get_auxiliary_input_handler(".def")
+        assert handler is not None
+        assert handler.suffix == ".def"
+        assert handler.flag_template == "/DEF:$file"
+        assert handler.tool == "link"
+
+    def test_auxiliary_input_handler_def_case_insensitive(self):
+        """Test that .DEF files are also recognized (case insensitive)."""
+        tc = ClangClToolchain()
+        handler = tc.get_auxiliary_input_handler(".DEF")
+        assert handler is not None
+        assert handler.suffix == ".def"
+
+    def test_auxiliary_input_handler_c_not_auxiliary_input(self):
+        """Test that .c files are not auxiliary inputs."""
+        tc = ClangClToolchain()
+        handler = tc.get_auxiliary_input_handler(".c")
+        assert handler is None
+
+    def test_auxiliary_input_handler_unknown(self):
+        """Test that unknown suffixes return None."""
+        tc = ClangClToolchain()
+        handler = tc.get_auxiliary_input_handler(".xyz")
+        assert handler is None

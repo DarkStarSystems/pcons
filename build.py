@@ -8,7 +8,7 @@
 import os
 from pathlib import Path
 
-from pcons import get_var, get_variant
+from pcons import get_variant
 from pcons.configure.config import Configure
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator

@@ -47,6 +47,26 @@ class SourceHandler:
     command_var: str = "objcmd"
 
 
+@dataclass
+class AuxiliaryInputHandler:
+    """Describes how a toolchain handles auxiliary input files.
+
+    These files are not compiled but passed directly to a downstream tool
+    with specific flags. Examples include .def files passed to the linker,
+    .bib files passed to bibtex, or asset manifests passed to packers.
+
+    Attributes:
+        suffix: File suffix this handles (e.g., ".def")
+        flag_template: Flag template for the downstream tool. Use $file for
+                      the file path. Example: "/DEF:$file"
+        tool: Which downstream tool receives this file (e.g., "link", "bibtex")
+    """
+
+    suffix: str
+    flag_template: str
+    tool: str = "link"
+
+
 # =============================================================================
 # Toolchain Registry
 # =============================================================================
@@ -274,6 +294,10 @@ class Toolchain(Protocol):
         """Return handler for source file suffix, or None if not handled."""
         ...
 
+    def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
+        """Return handler for auxiliary input files, or None if not handled."""
+        ...
+
     def get_object_suffix(self) -> str:
         """Return the object file suffix for this toolchain."""
         ...
@@ -451,6 +475,22 @@ class BaseToolchain(ABC):
 
         Returns:
             SourceHandler describing how to compile, or None if not handled.
+        """
+        return None
+
+    def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
+        """Return handler for auxiliary input files, or None if not handled.
+
+        Override in subclasses to define what auxiliary input files this toolchain
+        handles. Auxiliary inputs are passed directly to a downstream tool with
+        specific flags rather than being compiled to object files.
+
+        Args:
+            suffix: File suffix including dot (e.g., ".def").
+
+        Returns:
+            AuxiliaryInputHandler describing how to pass to downstream tool,
+            or None if not an auxiliary input.
         """
         return None
 

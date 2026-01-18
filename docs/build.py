@@ -23,7 +23,6 @@ from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator
 from pcons.tools.tool import BaseTool
 
-
 # =============================================================================
 # Custom Tools
 # =============================================================================
@@ -49,10 +48,10 @@ class GitInfoTool(BaseTool):
             # Command that outputs version info to stdout, redirected to file
             # Escaping: $$$$ in pcons -> $$ in ninja -> $ in shell
             "versioncmd": (
-                '/bin/sh -c \''
+                "/bin/sh -c '"
                 'echo "pcons $$$$(git describe --tags --always 2>/dev/null || echo dev) '
                 '| $$$$(git log -1 --format=%cd --date=short 2>/dev/null || date +%Y-%m-%d)"'
-                '\' > $$out'
+                "' > $$out"
             ),
         }
 
@@ -151,6 +150,7 @@ class InsertFooterTool(BaseTool):
 # =============================================================================
 # Build Configuration
 # =============================================================================
+
 
 def get_git_info() -> str:
     """Get git version info for display purposes during build."""

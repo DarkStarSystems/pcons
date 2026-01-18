@@ -36,7 +36,7 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.core.target import Target
-    from pcons.tools.toolchain import SourceHandler
+    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
 
 # Legacy mapping from source suffix to (tool_name, language)
@@ -141,6 +141,29 @@ class ObjectNodeFactory:
                         handler.tool_name,
                         source.suffix,
                     )
+        return None
+
+    def get_auxiliary_input_handler(
+        self, source: Path, env: Environment
+    ) -> AuxiliaryInputHandler | None:
+        """Get auxiliary input handler from any of the environment's toolchains.
+
+        Auxiliary input files are passed directly to a downstream tool with
+        specific flags rather than being compiled to object files.
+
+        Args:
+            source: Source file path.
+            env: Environment containing the toolchain(s).
+
+        Returns:
+            AuxiliaryInputHandler if any toolchain handles this as an auxiliary
+            input, else None.
+        """
+        # Check all toolchains in order (primary first, then additional)
+        for toolchain in env.toolchains:
+            handler = toolchain.get_auxiliary_input_handler(source.suffix)
+            if handler is not None:
+                return handler
         return None
 
     def get_tool_for_source(
@@ -360,10 +383,21 @@ class OutputNodeFactory:
         if dep_libs:
             lib_node.depends(dep_libs)
 
+        # Add auxiliary input files as dependencies
+        auxiliary_inputs = getattr(target, "_auxiliary_inputs", [])
+        if auxiliary_inputs:
+            linker_input_nodes = [node for node, _ in auxiliary_inputs]
+            lib_node.depends(linker_input_nodes)
+
         # Compute effective link requirements
         effective_link = compute_effective_requirements(
             target, env, for_compilation=False
         )
+
+        # Add auxiliary input flags to link flags
+        link_flags = list(effective_link.link_flags)
+        for _, flag in auxiliary_inputs:
+            link_flags.append(flag)
 
         # Determine linker language - we use 'link' tool for linking
         # but track the language for description purposes
@@ -374,7 +408,7 @@ class OutputNodeFactory:
             "command_var": "sharedcmd",
             "language": link_language,
             "sources": target.object_nodes,
-            "effective_link_flags": list(effective_link.link_flags),
+            "effective_link_flags": link_flags,
             "effective_link_libs": list(effective_link.link_libs),
             "effective_link_dirs": [str(p) for p in effective_link.link_dirs],
         }
@@ -423,10 +457,21 @@ class OutputNodeFactory:
         if dep_libs:
             prog_node.depends(dep_libs)
 
+        # Add auxiliary input files as dependencies
+        auxiliary_inputs = getattr(target, "_auxiliary_inputs", [])
+        if auxiliary_inputs:
+            linker_input_nodes = [node for node, _ in auxiliary_inputs]
+            prog_node.depends(linker_input_nodes)
+
         # Compute effective link requirements
         effective_link = compute_effective_requirements(
             target, env, for_compilation=False
         )
+
+        # Add auxiliary input flags to link flags
+        link_flags = list(effective_link.link_flags)
+        for _, flag in auxiliary_inputs:
+            link_flags.append(flag)
 
         # Determine linker tool based on language - we use 'link' tool
         # but track the language for description purposes
@@ -437,7 +482,7 @@ class OutputNodeFactory:
             "command_var": "progcmd",
             "language": link_language,
             "sources": target.object_nodes,
-            "effective_link_flags": list(effective_link.link_flags),
+            "effective_link_flags": link_flags,
             "effective_link_libs": list(effective_link.link_libs),
             "effective_link_dirs": [str(p) for p in effective_link.link_dirs],
         }
@@ -676,14 +721,32 @@ class Resolver:
         if language:
             target.required_languages.add(language)
 
+        # Separate sources into compilable sources and auxiliary inputs
+        # Auxiliary inputs are files like .def that are passed directly to a downstream tool
+        auxiliary_inputs: list[tuple[FileNode, str]] = []  # (file_node, flag)
+
         # Create object nodes for each source (delegated to factory)
         for source in target.sources:
             if isinstance(source, FileNode):
+                # Check if this is an auxiliary input file
+                aux_handler = self._object_factory.get_auxiliary_input_handler(
+                    source.path, env
+                )
+                if aux_handler is not None:
+                    # This is an auxiliary input - generate the flag
+                    flag = aux_handler.flag_template.replace("$file", str(source.path))
+                    auxiliary_inputs.append((source, flag))
+                    continue
+
+                # Normal source file - create object node
                 obj_node = self._object_factory.create_object_node(
                     target, source, effective, env
                 )
                 if obj_node:
                     target.object_nodes.append(obj_node)
+
+        # Store auxiliary inputs on the target for use by output factories
+        target._auxiliary_inputs = auxiliary_inputs
 
         # Create output node(s) based on target type (delegated to factory)
         if target.target_type == "static_library":

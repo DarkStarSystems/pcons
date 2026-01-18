@@ -71,6 +71,20 @@ class TestBaseToolchain:
         assert env.cxx.cmd == "mock-cxx"
 
 
+class TestAuxiliaryInputHandler:
+    def test_base_toolchain_returns_none(self):
+        """Test that BaseToolchain.get_auxiliary_input_handler returns None by default."""
+        tc = MockToolchain()
+        handler = tc.get_auxiliary_input_handler(".def")
+        assert handler is None
+
+    def test_unknown_suffix_returns_none(self):
+        """Test that unknown suffixes return None."""
+        tc = MockToolchain()
+        handler = tc.get_auxiliary_input_handler(".xyz")
+        assert handler is None
+
+
 class TestLanguagePriority:
     def test_default_priorities(self):
         tc = MockToolchain()

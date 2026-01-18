@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
-    from pcons.tools.toolchain import SourceHandler
+    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
 
 class ClangClCompiler(BaseTool):
@@ -273,6 +273,15 @@ class ClangClToolchain(BaseToolchain):
             # MASM assembly files - compiled with ml64.exe (x64) or ml.exe (x86)
             # Uses the same assembler as MSVC
             return SourceHandler("ml", "asm", ".obj", None, None, "asmcmd")
+        return None
+
+    def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
+        """Return handler for auxiliary input files."""
+        from pcons.tools.toolchain import AuxiliaryInputHandler
+
+        # Clang-CL uses the same linker flags as MSVC
+        if suffix.lower() == ".def":
+            return AuxiliaryInputHandler(".def", "/DEF:$file")
         return None
 
     def get_object_suffix(self) -> str:

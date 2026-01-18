@@ -399,3 +399,35 @@ class TestMsvcLinkerAcceptsRes:
         builders = link.builders()
         shared_builder = builders["SharedLibrary"]
         assert ".res" in shared_builder.src_suffixes
+
+
+class TestMsvcAuxiliaryInputHandler:
+    """Tests for the AuxiliaryInputHandler support in MSVC toolchain."""
+
+    def test_auxiliary_input_handler_def(self):
+        """Test that .def files are recognized as auxiliary inputs."""
+        tc = MsvcToolchain()
+        handler = tc.get_auxiliary_input_handler(".def")
+        assert handler is not None
+        assert handler.suffix == ".def"
+        assert handler.flag_template == "/DEF:$file"
+        assert handler.tool == "link"
+
+    def test_auxiliary_input_handler_def_case_insensitive(self):
+        """Test that .DEF files are also recognized (case insensitive)."""
+        tc = MsvcToolchain()
+        handler = tc.get_auxiliary_input_handler(".DEF")
+        assert handler is not None
+        assert handler.suffix == ".def"
+
+    def test_auxiliary_input_handler_c_not_auxiliary_input(self):
+        """Test that .c files are not auxiliary inputs."""
+        tc = MsvcToolchain()
+        handler = tc.get_auxiliary_input_handler(".c")
+        assert handler is None
+
+    def test_auxiliary_input_handler_unknown(self):
+        """Test that unknown suffixes return None."""
+        tc = MsvcToolchain()
+        handler = tc.get_auxiliary_input_handler(".xyz")
+        assert handler is None
