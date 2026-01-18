@@ -475,6 +475,42 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def find_command_in_argv(argv: list[str]) -> str | None:
+    """Find a valid command in argv, skipping options and their values.
+
+    Returns the command name if found, None otherwise.
+    """
+    valid_commands = {"info", "init", "generate", "build", "clean"}
+    # Options that take a value
+    options_with_value = {
+        "-B",
+        "--build-dir",
+        "-b",
+        "--build-script",
+        "--variant",
+        "-j",
+        "--jobs",
+        "--graph",
+        "--mermaid",
+    }
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg.startswith("-"):
+            if arg in options_with_value:
+                i += 2  # Skip option and its value
+            elif "=" in arg:
+                i += 1  # Option with value like --build-dir=foo
+            else:
+                i += 1  # Boolean flag
+        else:
+            # First positional argument
+            if arg in valid_commands:
+                return arg
+            return None
+    return None
+
+
 def add_generate_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments for generate-related commands."""
     parser.add_argument(
@@ -491,20 +527,22 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("-b", "--build-script", help="Path to build.py script")
 
 
-def main() -> int:
-    """Main entry point for the pcons CLI."""
+def create_default_parser() -> argparse.ArgumentParser:
+    """Create a parser for default mode (no subcommand).
+
+    This parser is used when no valid subcommand is found in argv.
+    It accepts KEY=value args and targets as positional arguments.
+    """
+    from pcons import __version__
+
     parser = argparse.ArgumentParser(
         prog="pcons",
         description="A Python-based build system that generates Ninja files.",
         epilog="Run 'pcons <command> --help' for command-specific help.",
     )
-    from pcons import __version__
-
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
     )
-
-    # Default command args (for 'pcons' with no subcommand)
     add_common_args(parser)
     add_generate_args(parser)
     parser.add_argument(
@@ -514,6 +552,29 @@ def main() -> int:
         "extra",
         nargs="*",
         help="Build variables (KEY=value) or targets",
+    )
+    return parser
+
+
+def create_full_parser() -> argparse.ArgumentParser:
+    """Create a parser with subcommands.
+
+    This parser is used when a valid subcommand is found in argv.
+    """
+    from pcons import __version__
+
+    parser = argparse.ArgumentParser(
+        prog="pcons",
+        description="A Python-based build system that generates Ninja files.",
+        epilog="Run 'pcons <command> --help' for command-specific help.",
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
+    add_common_args(parser)
+    add_generate_args(parser)
+    parser.add_argument(
+        "-j", "--jobs", type=int, help="Number of parallel jobs for build"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
@@ -576,10 +637,29 @@ def main() -> int:
     )
     clean_parser.set_defaults(func=cmd_clean)
 
-    args = parser.parse_args()
+    return parser
 
-    # Handle default command (no subcommand specified)
-    if args.command is None:
+
+def main() -> int:
+    """Main entry point for the pcons CLI."""
+    # Check if argv contains a valid command
+    # If not, use the default parser (no subcommands) to avoid
+    # positional arguments being mistaken for commands
+    command = find_command_in_argv(sys.argv[1:])
+
+    # Special case: if --help or -h is present without a command,
+    # use the full parser so help shows available commands
+    if command is None and ("-h" in sys.argv or "--help" in sys.argv):
+        parser = create_full_parser()
+        parser.parse_args()  # This will print help and exit
+        return 0
+
+    if command is None:
+        # No command found - use default mode parser
+        parser = create_default_parser()
+        args = parser.parse_args()
+        args.command = None
+
         # Check if any extra args look like targets (don't contain =)
         extra = getattr(args, "extra", [])
         variables, remaining = parse_variables(extra)
@@ -593,6 +673,11 @@ def main() -> int:
 
         # Default: generate and build
         return cmd_default(args)
+
+    # Command found - use full parser with subcommands
+    parser = create_full_parser()
+    args = parser.parse_args()
+    args.extra = getattr(args, "extra", [])
 
     # Run the specified command
     result: int = args.func(args)

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 
 from pcons import get_var, get_variant
-from pcons.cli import find_script, parse_variables, setup_logging
+from pcons.cli import find_command_in_argv, find_script, parse_variables, setup_logging
 
 if TYPE_CHECKING:
     pass
@@ -165,6 +165,53 @@ class TestParseVariables:
         variables, remaining = parse_variables(["=value"])
         assert variables == {}
         assert remaining == ["=value"]
+
+
+class TestFindCommandInArgv:
+    """Tests for find_command_in_argv function."""
+
+    def test_find_command_first_positional(self) -> None:
+        """Test finding command as first positional argument."""
+        assert find_command_in_argv(["build"]) == "build"
+        assert find_command_in_argv(["generate"]) == "generate"
+        assert find_command_in_argv(["clean"]) == "clean"
+        assert find_command_in_argv(["info"]) == "info"
+        assert find_command_in_argv(["init"]) == "init"
+
+    def test_find_command_after_options(self) -> None:
+        """Test finding command after flag options."""
+        assert find_command_in_argv(["-v", "build"]) == "build"
+        assert find_command_in_argv(["--verbose", "--debug", "generate"]) == "generate"
+
+    def test_find_command_after_option_with_value(self) -> None:
+        """Test finding command after options that take values."""
+        assert find_command_in_argv(["-B", "mybuild", "build"]) == "build"
+        assert find_command_in_argv(["--build-dir", "out", "generate"]) == "generate"
+        assert find_command_in_argv(["-j", "4", "build"]) == "build"
+
+    def test_no_command_with_variable(self) -> None:
+        """Test that KEY=value is not mistaken for a command."""
+        assert find_command_in_argv(["VAR=value"]) is None
+        assert find_command_in_argv(["BUILD_PLUGINS=1"]) is None
+
+    def test_no_command_with_options_and_variable(self) -> None:
+        """Test no command found when only options and variables present."""
+        assert find_command_in_argv(["-B", "build/release", "VAR=1"]) is None
+        assert find_command_in_argv(["--verbose", "-B", "out", "FOO=bar"]) is None
+
+    def test_no_command_empty_argv(self) -> None:
+        """Test no command when argv is empty."""
+        assert find_command_in_argv([]) is None
+
+    def test_no_command_only_options(self) -> None:
+        """Test no command when only options are present."""
+        assert find_command_in_argv(["-v", "--debug"]) is None
+        assert find_command_in_argv(["-B", "build"]) is None  # build is value of -B
+
+    def test_invalid_command_returns_none(self) -> None:
+        """Test that invalid commands return None."""
+        assert find_command_in_argv(["notacommand"]) is None
+        assert find_command_in_argv(["BUILD"]) is None  # case sensitive
 
 
 class TestCLICommands:
@@ -405,6 +452,110 @@ print("hello")
         )
         assert result.returncode == 0
         assert not build_dir.exists()
+
+
+class TestCLIArgumentParsing:
+    """Tests for CLI argument parsing edge cases.
+
+    These tests ensure that KEY=value arguments are not mistaken for commands.
+    """
+
+    def test_variable_without_command_no_build_script(self, tmp_path: Path) -> None:
+        """Test that VAR=value without a command doesn't error on argument parsing.
+
+        Without build.py it should fail gracefully, not with 'invalid choice'.
+        """
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "FOO=bar"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        # Should fail because no build.py, not because of argument parsing
+        assert result.returncode != 0
+        assert "No build.py found" in result.stderr
+        assert "invalid choice" not in result.stderr
+
+    def test_variable_with_build_dir_option(self, tmp_path: Path) -> None:
+        """Test -B option with variable doesn't confuse argument parsing."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "-B", "mybuild", "VAR=value"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        # Should fail because no build.py, not because of argument parsing
+        assert result.returncode != 0
+        assert "No build.py found" in result.stderr
+        assert "invalid choice" not in result.stderr
+
+    def test_multiple_variables_without_command(self, tmp_path: Path) -> None:
+        """Test multiple KEY=value args without a command."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "FOO=1", "BAR=2", "BAZ=3"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode != 0
+        assert "No build.py found" in result.stderr
+        assert "invalid choice" not in result.stderr
+
+    def test_help_shows_commands(self) -> None:
+        """Test that --help shows available commands."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        # Should show available commands
+        assert "info" in result.stdout
+        assert "init" in result.stdout
+        assert "generate" in result.stdout
+        assert "build" in result.stdout
+        assert "clean" in result.stdout
+
+    def test_subcommand_help(self) -> None:
+        """Test that subcommand --help works."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "build", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "targets" in result.stdout
+        assert "--jobs" in result.stdout
+
+    def test_generate_with_variable(self, tmp_path: Path) -> None:
+        """Test pcons generate VAR=value works."""
+        # Create a minimal build.py that just prints the variable
+        build_py = tmp_path / "build.py"
+        build_py.write_text("""\
+import os
+from pcons import get_var
+print(f"TEST_VAR={get_var('TEST_VAR', 'not_set')}")
+""")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "generate", "TEST_VAR=myvalue"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        # The script will fail (no ninja generation) but should have received the var
+        assert "TEST_VAR=myvalue" in result.stdout
+
+    def test_options_before_and_after_command(self) -> None:
+        """Test that options work both before and after command."""
+        # Options before command
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "-v", "build", "--help"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "targets" in result.stdout
 
 
 class TestIntegration:
