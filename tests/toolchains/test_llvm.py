@@ -123,6 +123,150 @@ class TestLlvmToolchain:
         assert tc.tools == {}
 
 
+class TestLlvmSourceHandlers:
+    """Tests for LLVM source handler methods."""
+
+    def test_source_handler_c(self):
+        """Test that .c files are handled correctly."""
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(".c")
+        assert handler is not None
+        assert handler.tool_name == "cc"
+        assert handler.language == "c"
+        assert handler.object_suffix == ".o"
+        assert handler.depfile == "$out.d"
+        assert handler.deps_style == "gcc"
+
+    def test_source_handler_cpp(self):
+        """Test that .cpp files are handled correctly."""
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(".cpp")
+        assert handler is not None
+        assert handler.tool_name == "cxx"
+        assert handler.language == "cxx"
+
+    def test_source_handler_s_lowercase(self):
+        """Test that .s (lowercase) files are handled as preprocessed assembly."""
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(".s")
+        assert handler is not None
+        assert handler.tool_name == "cc"
+        assert handler.language == "asm"
+        assert handler.object_suffix == ".o"
+        # Preprocessed assembly has no dependency tracking
+        assert handler.depfile is None
+        assert handler.deps_style is None
+
+    def test_source_handler_S_uppercase(self):
+        """Test that .S (uppercase) files are handled as assembly needing preprocessing."""
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(".S")
+        assert handler is not None
+        assert handler.tool_name == "cc"
+        assert handler.language == "asm-cpp"
+        assert handler.object_suffix == ".o"
+        # Assembly needing preprocessing has gcc-style dependency tracking
+        assert handler.depfile == "$out.d"
+        assert handler.deps_style == "gcc"
+
+    def test_source_handler_metal_on_macos(self, monkeypatch):
+        """Test that .metal files are handled on macOS."""
+        macos_platform = Platform(
+            os="darwin",
+            arch="arm64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".dylib",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.get_platform", lambda: macos_platform
+        )
+
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(".metal")
+        assert handler is not None
+        assert handler.tool_name == "metal"
+        assert handler.language == "metal"
+        assert handler.object_suffix == ".air"
+        assert handler.command_var == "metalcmd"
+        # Metal has no dependency tracking
+        assert handler.depfile is None
+        assert handler.deps_style is None
+
+    def test_source_handler_metal_not_on_linux(self, monkeypatch):
+        """Test that .metal files are not handled on Linux."""
+        linux_platform = Platform(
+            os="linux",
+            arch="x86_64",
+            is_64bit=True,
+            exe_suffix="",
+            shared_lib_suffix=".so",
+            shared_lib_prefix="lib",
+            static_lib_suffix=".a",
+            static_lib_prefix="lib",
+            object_suffix=".o",
+        )
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.get_platform", lambda: linux_platform
+        )
+
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(".metal")
+        # Metal is not supported on Linux
+        assert handler is None
+
+    def test_source_handler_objc(self):
+        """Test that .m files are handled as Objective-C."""
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(".m")
+        assert handler is not None
+        assert handler.tool_name == "cc"
+        assert handler.language == "objc"
+
+    def test_source_handler_unknown(self):
+        """Test that unknown suffixes return None."""
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(".xyz")
+        assert handler is None
+
+
+class TestMetalCompiler:
+    """Tests for the Metal compiler tool."""
+
+    def test_creation(self):
+        from pcons.toolchains.llvm import MetalCompiler
+
+        metal = MetalCompiler()
+        assert metal.name == "metal"
+        assert metal.language == "metal"
+
+    def test_default_vars(self):
+        from pcons.toolchains.llvm import MetalCompiler
+
+        metal = MetalCompiler()
+        vars = metal.default_vars()
+        assert vars["cmd"] == "xcrun"
+        assert "metalcmd" in vars
+        metalcmd = vars["metalcmd"]
+        assert "metal" in metalcmd
+        assert "-c" in metalcmd
+
+    def test_builders(self):
+        from pcons.toolchains.llvm import MetalCompiler
+
+        metal = MetalCompiler()
+        builders = metal.builders()
+        assert "MetalObject" in builders
+        builder = builders["MetalObject"]
+        assert builder.name == "MetalObject"
+        assert ".metal" in builder.src_suffixes
+        assert ".air" in builder.target_suffixes
+
+
 class TestLlvmCompileFlagsForTargetType:
     """Tests for get_compile_flags_for_target_type method."""
 

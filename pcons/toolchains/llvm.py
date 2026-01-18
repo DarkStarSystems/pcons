@@ -255,6 +255,74 @@ class LlvmLinker(BaseTool):
         return ToolConfig("link", cmd=str(clang.path))
 
 
+class MetalCompiler(BaseTool):
+    """Apple Metal shader compiler tool (macOS only).
+
+    Compiles .metal shader files to .air (Apple Intermediate Representation).
+    The resulting .air files can be linked with metallib to create .metallib archives.
+
+    Variables:
+        cmd: Compiler command (default: 'xcrun metal')
+        flags: Compiler flags (list)
+        iprefix: Include directory prefix (default: '-I')
+        includes: Include directories (list of paths, no prefix)
+        metalcmd: Command template for compiling to .air
+    """
+
+    def __init__(self) -> None:
+        super().__init__("metal", language="metal")
+
+    def default_vars(self) -> dict[str, object]:
+        return {
+            "cmd": "xcrun",
+            "flags": [],
+            "iprefix": "-I",
+            "includes": [],
+            "metalcmd": [
+                "$metal.cmd",
+                "metal",
+                "$metal.flags",
+                "${prefix(metal.iprefix, metal.includes)}",
+                "-c",
+                "-o",
+                "$$out",
+                "$$in",
+            ],
+        }
+
+    def builders(self) -> dict[str, Builder]:
+        return {
+            "MetalObject": CommandBuilder(
+                "MetalObject",
+                "metal",
+                "metalcmd",
+                src_suffixes=[".metal"],
+                target_suffixes=[".air"],
+                language="metal",
+                single_source=True,
+            ),
+        }
+
+    def configure(self, config: object) -> ToolConfig | None:
+        from pcons.configure.config import Configure
+
+        if not isinstance(config, Configure):
+            return None
+
+        platform = get_platform()
+        if not platform.is_macos:
+            return None
+
+        # Check if xcrun metal is available
+        xcrun = config.find_program("xcrun", version_flag="")
+        if xcrun is None:
+            return None
+
+        from pcons.core.toolconfig import ToolConfig
+
+        return ToolConfig("metal", cmd=str(xcrun.path))
+
+
 class LlvmToolchain(BaseToolchain):
     """LLVM/Clang toolchain for C and C++ development."""
 
@@ -269,6 +337,8 @@ class LlvmToolchain(BaseToolchain):
         """Return handler for source file suffix, or None if not handled."""
         from pcons.tools.toolchain import SourceHandler
 
+        platform = get_platform()
+
         suffix_lower = suffix.lower()
         if suffix_lower == ".c":
             return SourceHandler("cc", "c", ".o", "$out.d", "gcc")
@@ -282,6 +352,20 @@ class LlvmToolchain(BaseToolchain):
             return SourceHandler("cc", "objc", ".o", "$out.d", "gcc")
         if suffix_lower == ".mm":
             return SourceHandler("cxx", "objcxx", ".o", "$out.d", "gcc")
+        # Assembly files - Clang handles .s (preprocessed) and .S (needs preprocessing)
+        # Both are processed by the C compiler which invokes the assembler
+        # Check .S (uppercase) first since .S.lower() == ".s"
+        if suffix == ".S":
+            # .S files need C preprocessing, so they can have dependencies
+            return SourceHandler("cc", "asm-cpp", ".o", "$out.d", "gcc")
+        if suffix_lower == ".s":
+            # .s files are already preprocessed assembly, no dependency tracking
+            return SourceHandler("cc", "asm", ".o", None, None)
+        # Metal shaders (macOS only)
+        if suffix_lower == ".metal" and platform.is_macos:
+            # Metal shaders compile to .air (Apple Intermediate Representation)
+            # Uses the 'metal' tool with 'metalcmd' command variable
+            return SourceHandler("metal", "metal", ".air", None, None, "metalcmd")
         return None
 
     def get_object_suffix(self) -> str:
@@ -348,6 +432,14 @@ class LlvmToolchain(BaseToolchain):
             return False
 
         self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
+
+        # Add Metal compiler on macOS (optional - not required for toolchain to work)
+        platform = get_platform()
+        if platform.is_macos:
+            metal = MetalCompiler()
+            if metal.configure(config) is not None:
+                self._tools["metal"] = metal
+
         return True
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
@@ -390,6 +482,12 @@ toolchain_registry.register(
     LlvmToolchain,
     aliases=["llvm", "clang"],
     check_command="clang",
-    tool_classes=[ClangCCompiler, ClangCxxCompiler, LlvmArchiver, LlvmLinker],
+    tool_classes=[
+        ClangCCompiler,
+        ClangCxxCompiler,
+        LlvmArchiver,
+        LlvmLinker,
+        MetalCompiler,
+    ],
     category="c",
 )

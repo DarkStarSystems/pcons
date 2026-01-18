@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.toolchains.msvc import MsvcAssembler
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain
 
@@ -268,6 +269,10 @@ class ClangClToolchain(BaseToolchain):
             return SourceHandler("cxx", "cxx", ".obj", None, "msvc")
         if suffix == ".C":
             return SourceHandler("cxx", "cxx", ".obj", None, "msvc")
+        if suffix_lower == ".asm":
+            # MASM assembly files - compiled with ml64.exe (x64) or ml.exe (x86)
+            # Uses the same assembler as MSVC
+            return SourceHandler("ml", "asm", ".obj", None, None, "asmcmd")
         return None
 
     def get_object_suffix(self) -> str:
@@ -321,7 +326,10 @@ class ClangClToolchain(BaseToolchain):
         if link.configure(config) is None:
             return False
 
-        self._tools = {"cc": cc, "cxx": cxx, "lib": lib, "link": link}
+        ml = MsvcAssembler()
+        ml.configure(config)  # Optional - not required for toolchain to work
+
+        self._tools = {"cc": cc, "cxx": cxx, "lib": lib, "link": link, "ml": ml}
         return True
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
@@ -375,6 +383,7 @@ toolchain_registry.register(
         ClangClCxxCompiler,
         ClangClLibrarian,
         ClangClLinker,
+        MsvcAssembler,
     ],
     category="c",
 )

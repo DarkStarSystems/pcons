@@ -7,6 +7,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import MultiOutputBuilder, OutputGroup
 from pcons.core.environment import Environment
 from pcons.toolchains.msvc import (
+    MsvcAssembler,
     MsvcCompiler,
     MsvcLibrarian,
     MsvcLinker,
@@ -311,6 +312,34 @@ class TestMsvcResourceCompiler:
         assert target._build_info.get("deps_style") is None
 
 
+class TestMsvcAssembler:
+    """Tests for the MASM assembler tool."""
+
+    def test_creation(self):
+        ml = MsvcAssembler()
+        assert ml.name == "ml"
+
+    def test_default_vars(self):
+        ml = MsvcAssembler()
+        vars = ml.default_vars()
+        assert vars["cmd"] == "ml64.exe"
+        assert vars["flags"] == ["/nologo"]
+        assert "asmcmd" in vars
+        asmcmd = vars["asmcmd"]
+        assert isinstance(asmcmd, list)
+        assert "$ml.cmd" in asmcmd
+        assert "/c" in asmcmd
+
+    def test_builders(self):
+        ml = MsvcAssembler()
+        builders = ml.builders()
+        assert "AsmObject" in builders
+        asm_builder = builders["AsmObject"]
+        assert asm_builder.name == "AsmObject"
+        assert ".asm" in asm_builder.src_suffixes
+        assert ".obj" in asm_builder.target_suffixes
+
+
 class TestMsvcSourceHandlers:
     def test_source_handler_rc(self):
         """Test that .rc files are handled by the resource compiler."""
@@ -335,6 +364,25 @@ class TestMsvcSourceHandlers:
         handler = tc.get_source_handler(".cpp")
         assert handler is not None
         assert handler.tool_name == "cxx"
+
+    def test_source_handler_asm(self):
+        """Test that .asm files are handled by the MASM assembler."""
+        tc = MsvcToolchain()
+        handler = tc.get_source_handler(".asm")
+        assert handler is not None
+        assert handler.tool_name == "ml"
+        assert handler.language == "asm"
+        assert handler.object_suffix == ".obj"
+        assert handler.command_var == "asmcmd"
+        # MASM doesn't generate depfiles
+        assert handler.depfile is None
+        assert handler.deps_style is None
+
+    def test_source_handler_unknown(self):
+        """Test that unknown suffixes return None."""
+        tc = MsvcToolchain()
+        handler = tc.get_source_handler(".xyz")
+        assert handler is None
 
 
 class TestMsvcLinkerAcceptsRes:

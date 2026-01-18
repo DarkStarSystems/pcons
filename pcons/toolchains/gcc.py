@@ -339,6 +339,15 @@ class GccToolchain(BaseToolchain):
             return SourceHandler("cc", "objc", ".o", "$out.d", "gcc")
         if suffix_lower == ".mm":
             return SourceHandler("cxx", "objcxx", ".o", "$out.d", "gcc")
+        # Assembly files - GCC/GAS handles .s (preprocessed) and .S (needs preprocessing)
+        # Both are processed by the C compiler which invokes the assembler
+        # Check .S (uppercase) first since .S.lower() == ".s"
+        if suffix == ".S":
+            # .S files need C preprocessing, so they can have dependencies
+            return SourceHandler("cc", "asm-cpp", ".o", "$out.d", "gcc")
+        if suffix_lower == ".s":
+            # .s files are already preprocessed assembly, no dependency tracking
+            return SourceHandler("cc", "asm", ".o", None, None)
         return None
 
     def get_object_suffix(self) -> str:

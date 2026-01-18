@@ -243,6 +243,85 @@ class MsvcResourceCompiler(BaseTool):
         return ToolConfig("rc", cmd=str(rc.path))
 
 
+class MsvcAssembler(BaseTool):
+    """MSVC macro assembler tool (ml64.exe for x64, ml.exe for x86).
+
+    Variables:
+        cmd: Assembler command (default: 'ml64.exe')
+        flags: Assembler flags (list)
+        iprefix: Include directory prefix (default: '/I')
+        includes: Include directories (list of paths, no prefix)
+        asmcmd: Command template for assembling to object
+    """
+
+    def __init__(self) -> None:
+        super().__init__("ml")
+
+    def default_vars(self) -> dict[str, object]:
+        return {
+            "cmd": "ml64.exe",
+            "flags": ["/nologo"],
+            "iprefix": "/I",
+            "includes": [],
+            "asmcmd": [
+                "$ml.cmd",
+                "$ml.flags",
+                "${prefix(ml.iprefix, ml.includes)}",
+                "/c",
+                "/Fo$$out",
+                "$$in",
+            ],
+        }
+
+    def builders(self) -> dict[str, Builder]:
+        return {
+            "AsmObject": CommandBuilder(
+                "AsmObject",
+                "ml",
+                "asmcmd",
+                src_suffixes=[".asm"],
+                target_suffixes=[".obj"],
+                language="asm",
+                single_source=True,
+                deps_style=None,  # MASM doesn't generate depfiles
+            ),
+        }
+
+    def configure(self, config: object) -> ToolConfig | None:
+        from pcons.configure.config import Configure
+
+        if not isinstance(config, Configure):
+            return None
+        platform = get_platform()
+        if not platform.is_windows:
+            return None
+
+        # Try to find ml64.exe (x64) first, then ml.exe (x86)
+        ml = config.find_program("ml64.exe", version_flag="")
+        if ml is None:
+            ml = config.find_program("ml.exe", version_flag="")
+        if ml is None:
+            # Try to find in Visual Studio installation
+            vs_path = _find_msvc_install()
+            if vs_path:
+                vc_tools = vs_path / "VC" / "Tools" / "MSVC"
+                if vc_tools.exists():
+                    for version_dir in sorted(vc_tools.iterdir(), reverse=True):
+                        ml_path = version_dir / "bin" / "Hostx64" / "x64" / "ml64.exe"
+                        if ml_path.exists():
+                            from pcons.configure.config import ProgramInfo
+
+                            ml = ProgramInfo(path=ml_path)
+                            break
+
+        if ml is None:
+            return None
+
+        from pcons.core.toolconfig import ToolConfig
+
+        return ToolConfig("ml", cmd=str(ml.path))
+
+
 class MsvcLinker(BaseTool):
     """MSVC linker tool."""
 
@@ -338,6 +417,9 @@ class MsvcToolchain(BaseToolchain):
         if suffix_lower == ".rc":
             # Resource files compile to .res and have no depfile
             return SourceHandler("rc", "resource", ".res", None, None, "rccmd")
+        if suffix_lower == ".asm":
+            # MASM assembly files - compiled with ml64.exe (x64) or ml.exe (x86)
+            return SourceHandler("ml", "asm", ".obj", None, None, "asmcmd")
         return None
 
     def get_object_suffix(self) -> str:
@@ -406,7 +488,17 @@ class MsvcToolchain(BaseToolchain):
         rc = MsvcResourceCompiler()
         rc.configure(config)  # Optional - not required for toolchain to work
 
-        self._tools = {"cc": cc, "cxx": cxx, "lib": lib, "link": link, "rc": rc}
+        ml = MsvcAssembler()
+        ml.configure(config)  # Optional - not required for toolchain to work
+
+        self._tools = {
+            "cc": cc,
+            "cxx": cxx,
+            "lib": lib,
+            "link": link,
+            "rc": rc,
+            "ml": ml,
+        }
         return True
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
@@ -456,6 +548,12 @@ toolchain_registry.register(
     MsvcToolchain,
     aliases=["msvc", "vc", "visualstudio"],
     check_command="cl.exe",
-    tool_classes=[MsvcCompiler, MsvcLibrarian, MsvcLinker, MsvcResourceCompiler],
+    tool_classes=[
+        MsvcCompiler,
+        MsvcLibrarian,
+        MsvcLinker,
+        MsvcResourceCompiler,
+        MsvcAssembler,
+    ],
     category="c",
 )
