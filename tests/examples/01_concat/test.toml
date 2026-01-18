@@ -10,6 +10,7 @@ expected_outputs = [
 
 [verify]
 # Verify the output contains expected content
+# Commands are Unix-style; automatically adapted for Windows (cat -> type)
 commands = [
     { run = "cat build/combined.txt", expect_stdout = "Welcome to the Concat Example" },
     { run = "cat build/combined.txt", expect_stdout = "Key concepts:" },
@@ -17,5 +18,4 @@ commands = [
 ]
 
 [skip]
-# Skip on Windows (no 'cat' command by default)
-platforms = ["windows"]
+# Works on all platforms now
