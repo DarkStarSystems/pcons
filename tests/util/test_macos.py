@@ -9,7 +9,11 @@ import pytest
 
 # Only import on macOS to avoid issues on other platforms
 if sys.platform == "darwin":
-    from pcons.util.macos import fix_dylib_references, get_dylib_install_name
+    from pcons.util.macos import (
+        create_universal_binary,
+        fix_dylib_references,
+        get_dylib_install_name,
+    )
 
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
@@ -117,3 +121,106 @@ class TestFixDylibReferences:
 
         call_arg = mock_target.post_build.call_args[0][0]
         assert "@loader_path/../Frameworks/libfoo.dylib" in call_arg
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+class TestCreateUniversalBinary:
+    """Tests for create_universal_binary function."""
+
+    def test_creates_lipo_command(self):
+        """Test that create_universal_binary creates a lipo command target."""
+        from pcons.core.node import FileNode
+        from pcons.core.project import Project
+
+        project = Project("test_project")
+
+        # Create mock input nodes
+        input1 = FileNode(Path("build/arm64/libtest.a"))
+        input2 = FileNode(Path("build/x86_64/libtest.a"))
+
+        # Create universal binary
+        result = create_universal_binary(
+            project,
+            "test_universal",
+            inputs=[input1, input2],
+            output="build/universal/libtest.a",
+        )
+
+        # Should return a list of FileNodes
+        assert len(result) > 0
+        assert all(isinstance(n, FileNode) for n in result)
+
+        # Output should have the correct path
+        assert result[0].path == Path("build/universal/libtest.a")
+
+        # Should have build info with lipo tool
+        assert hasattr(result[0], "_build_info")
+        assert result[0]._build_info is not None
+        assert result[0]._build_info.get("tool") == "lipo"
+
+    def test_accepts_path_inputs(self):
+        """Test that create_universal_binary accepts Path inputs."""
+        from pcons.core.project import Project
+
+        project = Project("test_project")
+
+        # Create using Path inputs
+        result = create_universal_binary(
+            project,
+            "test_universal",
+            inputs=[
+                Path("build/arm64/libtest.a"),
+                "build/x86_64/libtest.a",
+            ],
+            output="build/universal/libtest.a",
+        )
+
+        assert len(result) > 0
+        assert result[0].path == Path("build/universal/libtest.a")
+
+    def test_raises_on_empty_inputs(self):
+        """Test that create_universal_binary raises on empty inputs."""
+        from pcons.core.project import Project
+
+        project = Project("test_project")
+
+        with pytest.raises(ValueError, match="requires at least one input"):
+            create_universal_binary(
+                project,
+                "test_universal",
+                inputs=[],
+                output="build/universal/libtest.a",
+            )
+
+    def test_accepts_target_inputs(self):
+        """Test that create_universal_binary accepts Target inputs."""
+        from pcons.core.node import FileNode
+        from pcons.core.project import Project
+        from pcons.core.target import Target
+
+        project = Project("test_project")
+
+        # Create mock targets with output nodes
+        target1 = Target(
+            "lib_arm64",
+            target_type="static_library",
+        )
+        output1 = FileNode(Path("build/arm64/libtest.a"))
+        target1.output_nodes.append(output1)
+
+        target2 = Target(
+            "lib_x86_64",
+            target_type="static_library",
+        )
+        output2 = FileNode(Path("build/x86_64/libtest.a"))
+        target2.output_nodes.append(output2)
+
+        result = create_universal_binary(
+            project,
+            "test_universal",
+            inputs=[target1, target2],
+            output="build/universal/libtest.a",
+        )
+
+        assert len(result) > 0
+        assert result[0].path == Path("build/universal/libtest.a")

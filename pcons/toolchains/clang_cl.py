@@ -363,6 +363,71 @@ class ClangClToolchain(BaseToolchain):
         self._tools = {"cc": cc, "cxx": cxx, "lib": lib, "link": link, "ml": ml}
         return True
 
+    # Architecture to Clang target triple mapping for Windows
+    CLANG_CL_TARGET_MAP: dict[str, str] = {
+        "x64": "x86_64-pc-windows-msvc",
+        "x86": "i686-pc-windows-msvc",
+        "arm64": "aarch64-pc-windows-msvc",
+        # Common aliases
+        "amd64": "x86_64-pc-windows-msvc",
+        "x86_64": "x86_64-pc-windows-msvc",
+        "i386": "i686-pc-windows-msvc",
+        "i686": "i686-pc-windows-msvc",
+        "aarch64": "aarch64-pc-windows-msvc",
+    }
+
+    # Architecture to MSVC machine type mapping (for linker)
+    MSVC_MACHINE_MAP: dict[str, str] = {
+        "x64": "X64",
+        "x86": "X86",
+        "arm64": "ARM64",
+        "amd64": "X64",
+        "x86_64": "X64",
+        "i386": "X86",
+        "i686": "X86",
+        "aarch64": "ARM64",
+    }
+
+    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
+        """Apply target architecture flags for Clang-CL.
+
+        Adds --target flag to compilers for cross-compilation and
+        /MACHINE:xxx to the linker.
+
+        Supported architectures:
+        - x64 (or amd64, x86_64): 64-bit Intel/AMD
+        - x86 (or i386, i686): 32-bit Intel/AMD
+        - arm64 (or aarch64): 64-bit ARM
+
+        Args:
+            env: Environment to modify.
+            arch: Architecture name.
+            **kwargs: Toolchain-specific options (unused).
+        """
+        super().apply_target_arch(env, arch, **kwargs)
+        arch_lower = arch.lower()
+
+        # Add --target flag to compilers
+        target_triple = self.CLANG_CL_TARGET_MAP.get(arch_lower)
+        if target_triple:
+            target_flag = [f"--target={target_triple}"]
+            for tool_name in ("cc", "cxx"):
+                if env.has_tool(tool_name):
+                    tool = getattr(env, tool_name)
+                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                        tool.flags.extend(target_flag)
+
+        # Add /MACHINE:xxx to linker (lld-link or link.exe)
+        machine = self.MSVC_MACHINE_MAP.get(arch_lower, arch.upper())
+        if env.has_tool("link"):
+            if isinstance(env.link.flags, list):
+                env.link.flags.append(f"/MACHINE:{machine}")
+
+        # Add /MACHINE:xxx to librarian
+        if env.has_tool("lib"):
+            if isinstance(env.lib.flags, list):
+                env.lib.flags.append(f"/MACHINE:{machine}")
+
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply build variant (debug, release, etc.)."""
         super().apply_variant(env, variant, **kwargs)

@@ -981,6 +981,170 @@ app_release = project.Program("app", env)
 app_profile = project.Program("app_profile", profile_env)
 ```
 
+### Custom Commands with env.Command()
+
+Use `env.Command()` to run arbitrary shell commands as build steps. This is useful for code generators, asset processing, or any tool that doesn't fit the standard compile/link model.
+
+```python
+# Generate a header from a template
+env.Command(
+    "config.h",                              # Target file(s)
+    ["config.h.in", "version.txt"],          # Source file(s)
+    "python generate_config.py $SOURCES > $TARGET"
+)
+
+# Run a code generator with multiple outputs
+env.Command(
+    ["parser.c", "parser.h"],                # Multiple targets
+    "grammar.y",                             # Single source
+    "bison -d -o ${TARGETS[0]} $SOURCE"
+)
+
+# Command with no source dependencies
+env.Command(
+    "timestamp.txt",
+    None,                                    # No sources
+    "date > $TARGET"
+)
+```
+
+**Variable substitution:**
+
+| Variable | Description |
+|----------|-------------|
+| `$SOURCE` | First source file |
+| `$SOURCES` | All source files (space-separated) |
+| `$TARGET` | First target file |
+| `$TARGETS` | All target files (space-separated) |
+| `${SOURCES[n]}` | Indexed source access (0-based) |
+| `${TARGETS[n]}` | Indexed target access (0-based) |
+
+The command runs during the build phase, and Ninja tracks dependencies so the command only re-runs when sources change.
+
+### macOS Framework Linking
+
+On macOS, link against system frameworks using `env.Framework()`:
+
+```python
+import sys
+
+if sys.platform == "darwin":
+    # Link a single framework
+    env.Framework("CoreFoundation")
+
+    # Link multiple frameworks
+    env.Framework("Foundation", "Metal", "QuartzCore")
+
+    # Add framework search paths for non-system frameworks
+    env.link.frameworkdirs.append("/Library/Frameworks")
+    env.Framework("SomeThirdParty")
+```
+
+This adds the appropriate `-framework` and `-F` flags to the linker command. Framework linking is only available on macOS with GCC or LLVM toolchains.
+
+For more complex scenarios where you need framework flags in compile commands (e.g., for headers), you can also access the raw flags:
+
+```python
+# Manual approach (usually not needed)
+env.link.flags.extend(["-framework", "Metal"])
+env.link.flags.extend(["-F", "/path/to/frameworks"])
+```
+
+### Multi-Architecture Builds
+
+Pcons supports building for multiple CPU architectures, which is useful for:
+- **macOS**: Creating universal binaries that run on both Intel and Apple Silicon
+- **Windows**: Building for x64, x86, or ARM64
+
+#### Target Architecture API
+
+Use `env.set_target_arch()` to configure an environment for a specific architecture:
+
+```python
+from pcons import Project, find_c_toolchain, NinjaGenerator
+
+project = Project("mylib")
+toolchain = find_c_toolchain()
+
+# Create environment for arm64
+env_arm64 = project.Environment(toolchain=toolchain)
+env_arm64.set_target_arch("arm64")
+env_arm64.build_dir = Path("build/arm64")
+
+# Create environment for x86_64
+env_x86_64 = project.Environment(toolchain=toolchain)
+env_x86_64.set_target_arch("x86_64")
+env_x86_64.build_dir = Path("build/x86_64")
+```
+
+The architecture setting is orthogonal to build variants, so you can combine them:
+
+```python
+env.set_variant("release")
+env.set_target_arch("arm64")
+```
+
+#### Platform-Specific Behavior
+
+**macOS (GCC/LLVM):**
+- Adds `-arch <arch>` flags to compiler and linker
+- Supported architectures: `arm64`, `x86_64`
+
+**Windows (MSVC):**
+- Adds `/MACHINE:<ARCH>` to linker and librarian
+- Supported architectures: `x64`, `x86`, `arm64`, `arm64ec`
+- Aliases: `amd64`→`x64`, `x86_64`→`x64`, `aarch64`→`arm64`
+
+**Windows (Clang-CL):**
+- Adds `--target=<triple>` to compilers (e.g., `--target=aarch64-pc-windows-msvc`)
+- Adds `/MACHINE:<ARCH>` to linker
+
+#### macOS Universal Binaries
+
+To create a universal binary that runs on both Intel and Apple Silicon Macs, build for each architecture separately and combine with `lipo`:
+
+```python
+from pathlib import Path
+from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons.util.macos import create_universal_binary
+
+project = Project("mylib")
+toolchain = find_c_toolchain()
+
+# Build for arm64
+env_arm64 = project.Environment(toolchain=toolchain)
+env_arm64.set_target_arch("arm64")
+env_arm64.set_variant("release")
+lib_arm64 = project.StaticLibrary("mylib", env_arm64, sources=["lib.c"])
+# Note: output goes to build/libmylib.a by default
+
+# Build for x86_64 (use different build dir to avoid conflicts)
+env_x86_64 = project.Environment(toolchain=toolchain)
+env_x86_64.set_target_arch("x86_64")
+env_x86_64.set_variant("release")
+env_x86_64.build_dir = Path("build/x86_64")
+lib_x86_64 = project.StaticLibrary("mylib_x86", env_x86_64, sources=["lib.c"])
+
+# Combine into universal binary
+lib_universal = create_universal_binary(
+    project,
+    "mylib_universal",
+    inputs=[lib_arm64, lib_x86_64],
+    output="build/universal/libmylib.a"
+)
+
+project.Default(lib_universal)
+project.resolve()
+NinjaGenerator().generate(project, "build")
+```
+
+The `create_universal_binary()` function:
+- Takes a list of architecture-specific binaries (as Targets, FileNodes, or paths)
+- Uses `lipo -create` to combine them
+- Returns FileNode(s) for the universal binary
+
+This works for static libraries, dynamic libraries, and executables.
+
 ---
 
 ## Troubleshooting
@@ -1054,8 +1218,11 @@ app_profile = project.Program("app_profile", profile_env)
 | Method | Description |
 |--------|-------------|
 | `env.set_variant(name)` | Set debug/release variant |
+| `env.set_target_arch(arch)` | Set target CPU architecture |
 | `env.use(package)` | Apply package settings |
 | `env.clone()` | Create a copy |
+| `env.Command(target, source, cmd)` | Run arbitrary shell command |
+| `env.Framework(*names)` | Link macOS frameworks (macOS only) |
 | `env.cc` | C compiler settings |
 | `env.cxx` | C++ compiler settings |
 | `env.link` | Linker settings |
@@ -1068,6 +1235,16 @@ app_profile = project.Program("app_profile", profile_env)
 | `find_c_toolchain(prefer=[...])` | Find toolchain with explicit preference order |
 | `get_var(name, default)` | Get a build variable |
 | `get_variant(default)` | Get the build variant |
+
+### macOS Utilities
+
+| Function | Description |
+|----------|-------------|
+| `create_universal_binary(project, name, inputs, output)` | Combine arch-specific binaries into universal binary |
+| `get_dylib_install_name(path)` | Get a dylib's install name |
+| `fix_dylib_references(target, dylibs, lib_dir)` | Fix dylib references for bundle creation |
+
+Import from `pcons.util.macos`.
 
 ---
 

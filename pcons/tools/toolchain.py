@@ -290,6 +290,25 @@ class Toolchain(Protocol):
         """
         ...
 
+    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
+        """Apply target architecture flags to the environment.
+
+        Toolchains implement this to configure their tools for different
+        CPU architectures. The core knows nothing about what these
+        architectures mean - each toolchain defines its own semantics.
+
+        For example:
+        - GCC/LLVM on macOS: adds -arch flags to compiler and linker
+        - MSVC: adds /MACHINE:xxx to linker
+        - Clang-CL: adds --target flag to compiler
+
+        Args:
+            env: Environment to configure.
+            arch: Architecture name (e.g., "arm64", "x86_64", "x64").
+            **kwargs: Toolchain-specific options.
+        """
+        ...
+
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
         ...
@@ -425,6 +444,21 @@ class BaseToolchain(ABC):
         """
         # Store variant name on environment
         env.variant = variant
+
+    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
+        """Apply target architecture flags to the environment.
+
+        Default implementation just stores the arch name. Subclasses override
+        this to implement toolchain-specific architecture handling, calling
+        super().apply_target_arch() to store the name.
+
+        Args:
+            env: Environment to configure.
+            arch: Architecture name (e.g., "arm64", "x86_64", "x64").
+            **kwargs: Toolchain-specific options.
+        """
+        # Store target architecture name on environment
+        env.target_arch = arch
 
     def get_linker_for_languages(self, languages: set[str]) -> str:
         """Determine which tool should link based on languages used.

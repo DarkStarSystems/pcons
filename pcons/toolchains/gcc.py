@@ -474,6 +474,37 @@ class GccToolchain(BaseToolchain):
         self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
         return True
 
+    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
+        """Apply target architecture flags.
+
+        On macOS, uses the -arch flag for cross-compilation (e.g., building
+        arm64 binaries on x86_64 or vice versa). This enables building
+        universal binaries by compiling each architecture separately and
+        combining with lipo.
+
+        On Linux, GCC typically requires a cross-compilation toolchain,
+        so this method is a no-op there (use a different toolchain instead).
+
+        Args:
+            env: Environment to modify.
+            arch: Architecture name (e.g., "arm64", "x86_64").
+            **kwargs: Toolchain-specific options (unused).
+        """
+        super().apply_target_arch(env, arch, **kwargs)
+        platform = get_platform()
+
+        if platform.is_macos:
+            # macOS uses -arch flag for universal binary builds
+            arch_flags = ["-arch", arch]
+            for tool_name in ("cc", "cxx"):
+                if env.has_tool(tool_name):
+                    tool = getattr(env, tool_name)
+                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                        tool.flags.extend(arch_flags)
+            if env.has_tool("link"):
+                if isinstance(env.link.flags, list):
+                    env.link.flags.extend(arch_flags)
+
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply build variant (debug, release, etc.).
 

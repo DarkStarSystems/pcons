@@ -212,6 +212,10 @@ class NinjaGenerator(BaseGenerator):
                 copy_cmd = build_info.get("copy_cmd", "cp $in $out")
                 command = copy_cmd + "$post_build"
                 description = "INSTALL $out"
+            # Special case for lipo (universal binary creation on macOS)
+            elif tool_name == "lipo":
+                command = "lipo -create -output $out $in"
+                description = "LIPO $out"
             # Check for generic command builder (has custom command in build_info)
             elif custom_command:
                 # Generic command builder - use the command directly

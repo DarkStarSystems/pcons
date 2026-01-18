@@ -526,6 +526,51 @@ class MsvcToolchain(BaseToolchain):
         }
         return True
 
+    # Architecture to MSVC machine type mapping
+    MSVC_ARCH_MAP: dict[str, str] = {
+        "x64": "X64",
+        "x86": "X86",
+        "arm64": "ARM64",
+        "arm64ec": "ARM64EC",
+        # Common aliases
+        "amd64": "X64",
+        "x86_64": "X64",
+        "i386": "X86",
+        "i686": "X86",
+        "aarch64": "ARM64",
+    }
+
+    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
+        """Apply target architecture flags for MSVC.
+
+        Adds the /MACHINE:xxx flag to the linker. Note that for full
+        cross-compilation support, you may also need to run vcvarsall.bat
+        with the appropriate architecture argument, or use a cross-toolset.
+
+        Supported architectures:
+        - x64 (or amd64, x86_64): 64-bit Intel/AMD
+        - x86 (or i386, i686): 32-bit Intel/AMD
+        - arm64 (or aarch64): 64-bit ARM
+        - arm64ec: ARM64EC emulation compatible
+
+        Args:
+            env: Environment to modify.
+            arch: Architecture name.
+            **kwargs: Toolchain-specific options (unused).
+        """
+        super().apply_target_arch(env, arch, **kwargs)
+        machine = self.MSVC_ARCH_MAP.get(arch.lower(), arch.upper())
+
+        # MSVC linker uses /MACHINE:xxx
+        if env.has_tool("link"):
+            if isinstance(env.link.flags, list):
+                env.link.flags.append(f"/MACHINE:{machine}")
+
+        # MSVC librarian also uses /MACHINE:xxx
+        if env.has_tool("lib"):
+            if isinstance(env.lib.flags, list):
+                env.lib.flags.append(f"/MACHINE:{machine}")
+
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply build variant with MSVC flags."""
         super().apply_variant(env, variant, **kwargs)

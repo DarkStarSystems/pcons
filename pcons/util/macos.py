@@ -1,15 +1,21 @@
 # SPDX-License-Identifier: MIT
 """macOS-specific utilities for pcons.
 
-These utilities help with common macOS build tasks like managing
-dynamic library paths for bundles.
+These utilities help with common macOS build tasks like:
+- Managing dynamic library paths for bundles
+- Creating universal binaries from architecture-specific builds
 """
 
 from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pcons.core.node import FileNode
+    from pcons.core.project import Project
+    from pcons.core.target import Target
 
 
 def get_dylib_install_name(path: Path | str) -> str:
@@ -99,3 +105,113 @@ def fix_dylib_references(
         )
 
     return install_names
+
+
+def create_universal_binary(
+    project: Project,
+    name: str,  # noqa: ARG001
+    inputs: list[Target | FileNode | Path | str],
+    output: Path | str,
+) -> list[FileNode]:
+    """Create a macOS universal binary by combining architecture-specific binaries.
+
+    Uses `lipo -create` to combine multiple architecture-specific binaries
+    (e.g., arm64 and x86_64) into a single universal binary.
+
+    This is typically used after building the same target for multiple
+    architectures using set_target_arch().
+
+    Args:
+        project: The pcons Project instance.
+        name: A unique name for this universal binary target.
+        inputs: List of architecture-specific binaries to combine.
+                Can be Target objects (uses their output files), FileNode objects,
+                or Path/str paths to files.
+        output: Path for the output universal binary.
+
+    Returns:
+        List of FileNode objects representing the output file(s).
+
+    Example:
+        from pcons import Project, find_c_toolchain
+        from pcons.util.macos import create_universal_binary
+
+        project = Project("mylib")
+        toolchain = find_c_toolchain()
+
+        # Build for each architecture
+        env_arm64 = project.Environment(toolchain=toolchain)
+        env_arm64.set_target_arch("arm64")
+        env_arm64.build_dir = Path("build/arm64")
+
+        env_x86_64 = project.Environment(toolchain=toolchain)
+        env_x86_64.set_target_arch("x86_64")
+        env_x86_64.build_dir = Path("build/x86_64")
+
+        lib_arm64 = project.StaticLibrary("mylib", env_arm64, sources=["lib.c"])
+        lib_x86_64 = project.StaticLibrary("mylib", env_x86_64, sources=["lib.c"])
+
+        # Combine into universal binary
+        lib_universal = create_universal_binary(
+            project, "mylib_universal",
+            inputs=[lib_arm64, lib_x86_64],
+            output="build/universal/libmylib.a"
+        )
+    """
+    from pcons.core.node import FileNode
+    from pcons.core.target import Target
+
+    output_path = Path(output)
+
+    # Resolve inputs to file paths
+    input_nodes: list[FileNode] = []
+    for inp in inputs:
+        if isinstance(inp, Target):
+            # Get the target's output nodes
+            if inp.output_nodes:
+                for node in inp.output_nodes:
+                    if isinstance(node, FileNode):
+                        input_nodes.append(node)
+            elif inp.nodes:
+                # Fallback to nodes for unresolved targets
+                for node in inp.nodes:
+                    if isinstance(node, FileNode):
+                        input_nodes.append(node)
+        elif isinstance(inp, FileNode):
+            input_nodes.append(inp)
+        elif isinstance(inp, (Path, str)):
+            input_nodes.append(FileNode(Path(inp)))
+
+    if not input_nodes:
+        raise ValueError("create_universal_binary requires at least one input")
+
+    # Get any environment from the project to use for Command()
+    # We need an environment to call Command(), but lipo doesn't need
+    # toolchain-specific settings
+    if project.environments:
+        env = project.environments[0]
+    else:
+        # Create a minimal environment if none exists
+        from pcons.core.environment import Environment
+
+        env = Environment()
+        env._project = project
+
+    # Create the lipo command
+    # The command uses $SOURCES and $TARGET which are converted to Ninja's $in and $out
+    # Convert FileNodes to paths for the source argument
+    source_paths: list[Path | str] = [node.path for node in input_nodes]
+
+    result = env.Command(
+        target=output_path,
+        source=source_paths,
+        command="lipo -create -output $TARGET $SOURCES",
+    )
+
+    # Register this with the project's node tracking
+    for node in result:
+        # Mark the build info with tool="lipo" for the ninja generator
+        if hasattr(node, "_build_info") and node._build_info:
+            node._build_info["tool"] = "lipo"
+
+    return result

@@ -17,7 +17,7 @@ from pcons.core.toolconfig import ToolConfig
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
-    from pcons.core.node import FileNode
+    from pcons.core.node import FileNode, Node
     from pcons.tools.toolchain import Toolchain
 
 
@@ -406,6 +406,44 @@ class Environment:
             # No toolchains - just set the variant name
             self.variant = name
 
+    def set_target_arch(self, arch: str, **kwargs: Any) -> None:
+        """Set the target CPU architecture for cross-compilation.
+
+        Delegates to each toolchain's apply_target_arch() method for all
+        configured toolchains. Each toolchain is responsible for translating
+        the architecture name into appropriate tool-specific flags.
+
+        The core knows nothing about what architectures mean - it's just a
+        string. Each toolchain defines its own semantics (e.g., GCC/LLVM on
+        macOS uses -arch flags, while MSVC uses /MACHINE: linker flags).
+
+        This is orthogonal to the variant system - you can combine them:
+            env.set_variant("release")
+            env.set_target_arch("arm64")
+
+        Args:
+            arch: Architecture name (e.g., "arm64", "x86_64", "x64").
+            **kwargs: Toolchain-specific options passed to apply_target_arch().
+
+        Example:
+            # macOS universal binary build
+            env_arm64 = project.Environment(toolchain=toolchain)
+            env_arm64.set_target_arch("arm64")
+
+            env_x86_64 = project.Environment(toolchain=toolchain)
+            env_x86_64.set_target_arch("x86_64")
+
+            # Windows cross-compilation
+            env.set_target_arch("arm64")  # Uses /MACHINE:ARM64 for MSVC
+        """
+        all_toolchains = self.toolchains
+        if all_toolchains:
+            for toolchain in all_toolchains:
+                toolchain.apply_target_arch(self, arch, **kwargs)
+        else:
+            # No toolchains - just set the target arch name
+            self.target_arch = arch
+
     def Glob(self, pattern: str) -> list[FileNode]:
         """Find files matching a glob pattern.
 
@@ -616,8 +654,10 @@ class Environment:
             targets = [Path(t) for t in target]
 
         # Normalize source to list
+        # Type annotation uses Node to match _normalize_sources signature
+        sources: list[str | Path | Node]
         if source is None:
-            sources: list[str | Path | FileNode] = []
+            sources = []
         elif isinstance(source, (str, Path)):
             sources = [source]
         else:

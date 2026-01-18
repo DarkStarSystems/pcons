@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2025-01-18
+
 ### Added
 
+- **Multi-architecture build support**: New `env.set_target_arch()` method for building for different CPU architectures
+  - macOS: Uses `-arch` flags for arm64/x86_64 builds, enabling universal binary creation
+  - Windows MSVC: Uses `/MACHINE:` linker flags for x64/x86/arm64/arm64ec
+  - Windows Clang-CL: Uses `--target` compiler flags plus `/MACHINE:` linker flags
+- **macOS universal binary helper**: New `create_universal_binary()` function in `pcons.util.macos` combines architecture-specific binaries using `lipo`
 - **`env.Command()` builder**: Run arbitrary shell commands with automatic variable substitution (`$SOURCE`, `$TARGET`, `$SOURCES`, `$TARGETS`, `${SOURCES[n]}`, `${TARGETS[n]}`)
 - **macOS Framework linking**: New `env.Framework()` method and `-framework`/`-F` flag support in GCC/LLVM toolchains
 - **`pairwise()` substitution function**: For flags that need interleaved prefix/value pairs (e.g., `-framework Foundation -framework Metal`)
@@ -54,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/garyo/pcons/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/garyo/pcons/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/garyo/pcons/releases/tag/v0.1.2
