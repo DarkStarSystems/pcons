@@ -8,12 +8,11 @@ This example demonstrates the target-centric build API:
 - Using private requirements for compile flags
 - Automatic resolution and generation
 
-Works cross-platform: uses find_c_toolchain() which selects
-GCC/Clang on Unix or MSVC on Windows.
+Works cross-platform: find_c_toolchain() selects the best available
+toolchain (clang-cl/MSVC on Windows, clang/gcc on Unix).
 """
 
 import os
-import sys
 from pathlib import Path
 
 from pcons.core.project import Project
@@ -28,13 +27,8 @@ from pcons.toolchains import find_c_toolchain
 build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 
-# Find a C toolchain
-# On Windows, prefer MSVC for native Windows executables (.exe)
-# On Unix, use the default order (clang, gcc)
-if sys.platform == "win32":
-    toolchain = find_c_toolchain(prefer=["msvc", "llvm", "gcc"])
-else:
-    toolchain = find_c_toolchain()
+# Find a C toolchain (uses platform-appropriate defaults)
+toolchain = find_c_toolchain()
 
 # Create project with the toolchain
 project = Project("hello_c", build_dir=build_dir)
@@ -45,7 +39,8 @@ hello = project.Program("hello", env)
 hello.sources = [project.node(src_dir / "hello.c")]
 
 # Add warning flags appropriate for the toolchain
-if toolchain.name == "msvc":
+# clang-cl and msvc use MSVC-style flags, others use GCC-style
+if toolchain.name in ("msvc", "clang-cl"):
     hello.private.compile_flags.extend(["/W4"])
 else:
     hello.private.compile_flags.extend(["-Wall", "-Wextra"])

@@ -10,6 +10,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pcons.toolchains.clang_cl import (
+    ClangClCCompiler,
+    ClangClCxxCompiler,
+    ClangClLibrarian,
+    ClangClLinker,
+    ClangClToolchain,
+)
+
 # Import toolchain modules to trigger registration
 # These imports cause each toolchain to register itself
 from pcons.toolchains.cuda import CudaToolchain, find_cuda_toolchain
@@ -63,7 +71,9 @@ def find_c_toolchain(
 
     Args:
         prefer: List of toolchain names to try, in order.
-                Defaults to ["llvm", "gcc", "msvc"].
+                Defaults to platform-appropriate order:
+                - Windows: ["clang-cl", "msvc", "llvm", "gcc"]
+                - Others: ["llvm", "gcc"]
 
     Returns:
         A configured toolchain ready for use.
@@ -89,7 +99,13 @@ def find_c_toolchain(
         )
     """
     if prefer is None:
-        prefer = ["llvm", "gcc", "msvc"]
+        import sys
+
+        if sys.platform == "win32":
+            # On Windows, prefer MSVC-compatible toolchains
+            prefer = ["clang-cl", "msvc", "llvm", "gcc"]
+        else:
+            prefer = ["llvm", "gcc"]
 
     toolchain = toolchain_registry.find_available("c", prefer)
     if toolchain is not None:
@@ -99,7 +115,7 @@ def find_c_toolchain(
     tried = toolchain_registry.get_tried_names("c", prefer)
     raise RuntimeError(
         f"No C/C++ toolchain found. Tried: {', '.join(tried)}. "
-        "Make sure a compiler (clang, gcc, or MSVC) is installed and in PATH."
+        "Make sure a compiler (clang, clang-cl, gcc, or MSVC) is installed and in PATH."
     )
 
 
@@ -128,6 +144,12 @@ __all__ = [
     "LlvmArchiver",
     "LlvmLinker",
     "LlvmToolchain",
+    # Clang-CL toolchain (MSVC-compatible)
+    "ClangClCCompiler",
+    "ClangClCxxCompiler",
+    "ClangClLibrarian",
+    "ClangClLinker",
+    "ClangClToolchain",
     # MSVC toolchain
     "MsvcCompiler",
     "MsvcLibrarian",

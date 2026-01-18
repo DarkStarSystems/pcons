@@ -9,7 +9,6 @@ This example demonstrates the target-centric build API:
 """
 
 import os
-import sys
 from pathlib import Path
 
 from pcons.core.project import Project
@@ -25,12 +24,8 @@ build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
 
-# Find a C toolchain
-# On Windows, prefer MSVC for native Windows executables
-if sys.platform == "win32":
-    toolchain = find_c_toolchain(prefer=["msvc", "llvm", "gcc"])
-else:
-    toolchain = find_c_toolchain()
+# Find a C toolchain (uses platform-appropriate defaults)
+toolchain = find_c_toolchain()
 
 # Create project with the toolchain
 project = Project("multi_file", build_dir=build_dir)
@@ -43,7 +38,9 @@ calculator.sources = [
     project.node(src_dir / "main.c"),
 ]
 calculator.private.include_dirs.append(include_dir)
-if toolchain.name == "msvc":
+
+# Add warning flags appropriate for the toolchain
+if toolchain.name in ("msvc", "clang-cl"):
     calculator.private.compile_flags.extend(["/W4"])
 else:
     calculator.private.compile_flags.extend(["-Wall", "-Wextra"])
