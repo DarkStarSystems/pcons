@@ -47,6 +47,9 @@ jobs:
       - uses: astral-sh/setup-uv@v4
         with:
           version: "latest"
+      - name: Set up MSVC (Windows only)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
       - name: Set Python version
         run: uv python install ${{ matrix.python-version }}
       - name: Install dependencies
