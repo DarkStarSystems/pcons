@@ -172,13 +172,13 @@ def subst(
         Single command: list[str] - flat list of tokens
         MultiCmd: list[list[str]] - list of commands, each a list of tokens
     """
-    if isinstance(namespace, dict):
-        namespace = Namespace(namespace)
+    # Convert dict to Namespace if needed
+    ns = namespace if isinstance(namespace, Namespace) else Namespace(namespace)
 
     if isinstance(template, MultiCmd):
-        return [_subst_command(cmd, namespace, location) for cmd in template.commands]
+        return [_subst_command(cmd, ns, location) for cmd in template.commands]
     else:
-        return _subst_command(template, namespace, location)
+        return _subst_command(template, ns, location)
 
 
 def _subst_command(

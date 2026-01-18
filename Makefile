@@ -27,10 +27,10 @@ fmt:              ## Format code using ruff.
 	uv run ruff check --fix pcons/ tests/
 
 .PHONY: lint
-lint:             ## Run ruff and mypy linters.
+lint:             ## Run ruff and ty linters.
 	uv run ruff check pcons/ tests/
 	uv run ruff format --check pcons/ tests/
-	uv run mypy pcons/
+	uvx ty check pcons/
 
 .PHONY: test
 test:             ## Run tests.

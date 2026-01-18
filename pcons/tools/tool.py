@@ -173,8 +173,9 @@ class BuilderMethod:
         from pcons.core.node import Node
 
         # Normalize sources to a list
+        source_list: list[str | PathlibPath | Node]
         if sources is None:
-            source_list: list[str | PathlibPath | Node] = []
+            source_list = []
         elif isinstance(sources, (str, PathlibPath)):
             source_list = [sources]
         else:

@@ -382,8 +382,9 @@ class ConanFinder(BaseFinder):
             if tool_name in tools_dict:
                 tool = tools_dict[tool_name]
                 # Get default vars which contain the cmd
-                if hasattr(tool, "default_vars"):
-                    defaults = tool.default_vars()
+                default_vars_method = getattr(tool, "default_vars", None)
+                if callable(default_vars_method):
+                    defaults = default_vars_method()
                     cmd = defaults.get("cmd")
                     if cmd:
                         # cmd could be a string or path-like

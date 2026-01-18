@@ -21,8 +21,8 @@ jobs:
         run: uv run ruff check pcons/ tests/
       - name: Run ruff format check
         run: uv run ruff format --check pcons/ tests/
-      - name: Run mypy
-        run: uv run mypy pcons/
+      - name: Run ty typecheck
+        run: uvx ty check pcons/
 
   test:
     needs: lint

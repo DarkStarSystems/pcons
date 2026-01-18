@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from pcons.core.node import FileNode, Node
 from pcons.generators.generator import BaseGenerator
@@ -456,7 +456,8 @@ class NinjaGenerator(BaseGenerator):
             for name, info in outputs_info.items():
                 # Write out_<name> variable for each output
                 if isinstance(info, dict):
-                    f.write(f"  out_{name} = {info['path']}\n")
+                    info_dict = cast(dict[str, Any], info)
+                    f.write(f"  out_{name} = {info_dict['path']}\n")
 
         # Write effective requirements from target-centric build model
         # These are used to generate the actual compilation/link flags
