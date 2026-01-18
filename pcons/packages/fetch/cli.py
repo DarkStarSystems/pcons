@@ -540,7 +540,7 @@ def main() -> int:
         prog="pcons-fetch",
         description="Download and build external dependencies for pcons.",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0-dev")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.1.1")
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output"
     )
