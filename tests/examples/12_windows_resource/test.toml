@@ -1,0 +1,24 @@
+# Test configuration for the Windows resource example
+
+[test]
+description = "Demonstrates compiling Windows resource files (.rc) with MSVC"
+
+# Files that should exist after the build
+# Note: resource files compile to .res, not .obj
+expected_outputs = [
+    "build/obj.myapp/main.obj",
+    "build/obj.myapp/app.res",
+    "build/myapp.exe",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/myapp.exe", expect_stdout = "Hello from Windows resource example!" },
+]
+
+[skip]
+# Only run on Windows - requires MSVC toolchain and rc.exe
+platforms = ["linux", "darwin"]
+# Requires MSVC (cl.exe) to be installed
+requires = ["cl.exe"]

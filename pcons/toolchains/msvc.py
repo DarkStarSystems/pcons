@@ -166,6 +166,83 @@ class MsvcLibrarian(BaseTool):
         return ToolConfig("lib", cmd=str(lib.path))
 
 
+class MsvcResourceCompiler(BaseTool):
+    """MSVC resource compiler tool (rc.exe)."""
+
+    def __init__(self) -> None:
+        super().__init__("rc")
+
+    def default_vars(self) -> dict[str, object]:
+        return {
+            "cmd": "rc.exe",
+            "flags": ["/nologo"],
+            "iprefix": "/I",
+            "includes": [],
+            "dprefix": "/D",
+            "defines": [],
+            "rccmd": [
+                "$rc.cmd",
+                "$rc.flags",
+                "${prefix(rc.iprefix, rc.includes)}",
+                "${prefix(rc.dprefix, rc.defines)}",
+                "/fo$$out",
+                "$$in",
+            ],
+        }
+
+    def builders(self) -> dict[str, Builder]:
+        return {
+            "Resource": CommandBuilder(
+                "Resource",
+                "rc",
+                "rccmd",
+                src_suffixes=[".rc"],
+                target_suffixes=[".res"],
+                single_source=True,
+                deps_style=None,  # rc.exe doesn't generate depfiles
+            ),
+        }
+
+    def configure(self, config: object) -> ToolConfig | None:
+        from pcons.configure.config import Configure
+
+        if not isinstance(config, Configure):
+            return None
+        platform = get_platform()
+        if not platform.is_windows:
+            return None
+
+        # Try to find rc.exe in PATH first
+        rc = config.find_program("rc.exe", version_flag="")
+        if rc is None:
+            # Look in Windows SDK
+            program_files_x86 = os.environ.get(
+                "ProgramFiles(x86)", r"C:\Program Files (x86)"
+            )
+            sdk_path = Path(program_files_x86) / "Windows Kits" / "10" / "bin"
+            if sdk_path.exists():
+                # Find the latest SDK version
+                for version_dir in sorted(sdk_path.iterdir(), reverse=True):
+                    if version_dir.is_dir() and version_dir.name.startswith("10."):
+                        # Check architecture-specific paths
+                        for arch in ["x64", "arm64", "x86"]:
+                            rc_path = version_dir / arch / "rc.exe"
+                            if rc_path.exists():
+                                from pcons.configure.config import ProgramInfo
+
+                                rc = ProgramInfo(path=rc_path)
+                                break
+                        if rc is not None:
+                            break
+
+        if rc is None:
+            return None
+
+        from pcons.core.toolconfig import ToolConfig
+
+        return ToolConfig("rc", cmd=str(rc.path))
+
+
 class MsvcLinker(BaseTool):
     """MSVC linker tool."""
 
@@ -205,7 +282,7 @@ class MsvcLinker(BaseTool):
                 "Program",
                 "link",
                 "progcmd",
-                src_suffixes=[".obj"],
+                src_suffixes=[".obj", ".res"],
                 target_suffixes=[".exe"],
                 single_source=False,
             ),
@@ -218,7 +295,7 @@ class MsvcLinker(BaseTool):
                     OutputSpec("import_lib", ".lib"),
                     OutputSpec("export_file", ".exp", implicit=True),
                 ],
-                src_suffixes=[".obj"],
+                src_suffixes=[".obj", ".res"],
                 single_source=False,
             ),
         }
@@ -258,6 +335,9 @@ class MsvcToolchain(BaseToolchain):
             return SourceHandler("cc", "c", ".obj", None, "msvc")
         if suffix_lower in (".cpp", ".cxx", ".cc"):
             return SourceHandler("cxx", "cxx", ".obj", None, "msvc")
+        if suffix_lower == ".rc":
+            # Resource files compile to .res and have no depfile
+            return SourceHandler("rc", "resource", ".res", None, None, "rccmd")
         return None
 
     def get_object_suffix(self) -> str:
@@ -319,7 +399,10 @@ class MsvcToolchain(BaseToolchain):
         if link.configure(config) is None:
             return False
 
-        self._tools = {"cc": cc, "cxx": cxx, "lib": lib, "link": link}
+        rc = MsvcResourceCompiler()
+        rc.configure(config)  # Optional - not required for toolchain to work
+
+        self._tools = {"cc": cc, "cxx": cxx, "lib": lib, "link": link, "rc": rc}
         return True
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
@@ -369,6 +452,6 @@ toolchain_registry.register(
     MsvcToolchain,
     aliases=["msvc", "vc", "visualstudio"],
     check_command="cl.exe",
-    tool_classes=[MsvcCompiler, MsvcLibrarian, MsvcLinker],
+    tool_classes=[MsvcCompiler, MsvcLibrarian, MsvcLinker, MsvcResourceCompiler],
     category="c",
 )

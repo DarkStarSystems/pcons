@@ -35,6 +35,8 @@ class SourceHandler:
         object_suffix: Suffix for compiled objects (e.g., ".o", ".obj", ".aux").
         depfile: Dependency file template (e.g., "$out.d") or None.
         deps_style: Dependency file style (e.g., "gcc", "msvc") or None.
+        command_var: Name of the command variable (e.g., "objcmd", "rccmd").
+                     Defaults to "objcmd" for backwards compatibility.
     """
 
     tool_name: str
@@ -42,6 +44,7 @@ class SourceHandler:
     object_suffix: str
     depfile: str | None = None
     deps_style: str | None = None
+    command_var: str = "objcmd"
 
 
 # =============================================================================

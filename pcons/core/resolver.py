@@ -83,8 +83,9 @@ class ObjectNodeFactory:
         and the final output file (e.g., program named "hello" vs directory
         containing object files).
 
-        The object suffix is obtained from the toolchain if available,
-        otherwise defaults to ".o".
+        The object suffix is obtained from the source handler if available
+        (e.g., ".res" for resource files), otherwise from the toolchain's
+        default object suffix.
 
         Args:
             target: The target owning this object.
@@ -98,9 +99,14 @@ class ObjectNodeFactory:
         # Use "obj.<target_name>" as subdirectory to avoid conflicts with outputs
         obj_dir = build_dir / f"obj.{target.name}"
 
-        # Get suffix from toolchain if available
-        toolchain = env._toolchain
-        suffix = toolchain.get_object_suffix() if toolchain else ".o"
+        # Try to get suffix from source handler first (for special file types like .rc)
+        handler = self.get_source_handler(source, env)
+        if handler:
+            suffix = handler.object_suffix
+        else:
+            # Fallback to toolchain's default object suffix
+            toolchain = env._toolchain
+            suffix = toolchain.get_object_suffix() if toolchain else ".o"
 
         obj_name = source.stem + suffix
         return obj_dir / obj_name
@@ -198,11 +204,13 @@ class ObjectNodeFactory:
             tool_name, language = tool_info
             depfile: str | None = "$out.d"
             deps_style: str | None = "gcc"
+            command_var: str = "objcmd"
         else:
             tool_name = handler.tool_name
             language = handler.language
             depfile = handler.depfile
             deps_style = handler.deps_style
+            command_var = handler.command_var
 
         # Generate cache key: (source path, effective requirements hash)
         # Use resolved (absolute) path to avoid duplicate objects for same file
@@ -222,7 +230,7 @@ class ObjectNodeFactory:
         # Use handler's depfile/deps_style (from toolchain, not hardcoded)
         obj_node._build_info = {
             "tool": tool_name,
-            "command_var": "objcmd",
+            "command_var": command_var,
             "language": language,
             "sources": [source],
             "depfile": depfile,

@@ -10,6 +10,7 @@ from pcons.toolchains.msvc import (
     MsvcCompiler,
     MsvcLibrarian,
     MsvcLinker,
+    MsvcResourceCompiler,
     MsvcToolchain,
 )
 
@@ -245,3 +246,108 @@ class TestMsvcCompileFlagsForTargetType:
         tc = MsvcToolchain()
         flags = tc.get_compile_flags_for_target_type("interface")
         assert flags == []
+
+
+class TestMsvcResourceCompiler:
+    def test_creation(self):
+        rc = MsvcResourceCompiler()
+        assert rc.name == "rc"
+
+    def test_default_vars(self):
+        rc = MsvcResourceCompiler()
+        vars = rc.default_vars()
+        assert vars["cmd"] == "rc.exe"
+        assert vars["flags"] == ["/nologo"]
+        assert vars["includes"] == []
+        assert vars["defines"] == []
+        assert "rccmd" in vars
+        # rccmd is a list template
+        rccmd = vars["rccmd"]
+        assert isinstance(rccmd, list)
+        assert "$rc.cmd" in rccmd
+        # Output uses $$out which becomes $out for ninja
+        assert "/fo$$out" in rccmd
+
+    def test_builders(self):
+        rc = MsvcResourceCompiler()
+        builders = rc.builders()
+        assert "Resource" in builders
+        res_builder = builders["Resource"]
+        assert res_builder.name == "Resource"
+        assert ".rc" in res_builder.src_suffixes
+        assert ".res" in res_builder.target_suffixes
+
+    def test_resource_builder_creates_node(self):
+        rc = MsvcResourceCompiler()
+        builders = rc.builders()
+        res_builder = builders["Resource"]
+
+        env = Environment()
+        env.add_tool("rc")
+        env.rc.cmd = "rc.exe"
+        env.rc.rccmd = ["rc.exe", "/nologo", "/fo$$out", "$$in"]
+
+        result = res_builder(env, "app.res", ["app.rc"])
+        assert len(result) == 1
+        target = result[0]
+        assert target.path == Path("app.res")
+
+    def test_resource_builder_no_depfile(self):
+        """Resource compiler doesn't generate depfiles."""
+        rc = MsvcResourceCompiler()
+        builders = rc.builders()
+        res_builder = builders["Resource"]
+
+        env = Environment()
+        env.add_tool("rc")
+        env.rc.cmd = "rc.exe"
+        env.rc.rccmd = ["rc.exe", "/nologo", "/fo$$out", "$$in"]
+
+        result = res_builder(env, "app.res", ["app.rc"])
+        assert len(result) == 1
+        target = result[0]
+        # No depfile for resource files
+        assert target._build_info.get("depfile") is None
+        assert target._build_info.get("deps_style") is None
+
+
+class TestMsvcSourceHandlers:
+    def test_source_handler_rc(self):
+        """Test that .rc files are handled by the resource compiler."""
+        tc = MsvcToolchain()
+        handler = tc.get_source_handler(".rc")
+        assert handler is not None
+        assert handler.tool_name == "rc"
+        assert handler.language == "resource"
+        assert handler.object_suffix == ".res"
+        assert handler.deps_style is None  # No depfile support
+
+    def test_source_handler_c(self):
+        """Test that .c files are still handled correctly."""
+        tc = MsvcToolchain()
+        handler = tc.get_source_handler(".c")
+        assert handler is not None
+        assert handler.tool_name == "cc"
+
+    def test_source_handler_cpp(self):
+        """Test that .cpp files are still handled correctly."""
+        tc = MsvcToolchain()
+        handler = tc.get_source_handler(".cpp")
+        assert handler is not None
+        assert handler.tool_name == "cxx"
+
+
+class TestMsvcLinkerAcceptsRes:
+    def test_program_builder_accepts_res(self):
+        """Test that Program builder accepts .res files."""
+        link = MsvcLinker()
+        builders = link.builders()
+        prog_builder = builders["Program"]
+        assert ".res" in prog_builder.src_suffixes
+
+    def test_shared_library_builder_accepts_res(self):
+        """Test that SharedLibrary builder accepts .res files."""
+        link = MsvcLinker()
+        builders = link.builders()
+        shared_builder = builders["SharedLibrary"]
+        assert ".res" in shared_builder.src_suffixes
