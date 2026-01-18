@@ -192,7 +192,10 @@ class TestCLICommands:
             text=True,
         )
         assert result.returncode == 0
-        assert "0.1.0" in result.stdout
+        # Check version is present (don't hardcode specific version)
+        import pcons
+
+        assert pcons.__version__ in result.stdout
 
     def test_pcons_init(self, tmp_path: Path) -> None:
         """Test pcons init creates template build.py."""
