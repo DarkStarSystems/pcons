@@ -108,20 +108,21 @@ class ObjectNodeFactory:
     def get_source_handler(
         self, source: Path, env: Environment
     ) -> SourceHandler | None:
-        """Get source handler from the environment's toolchain.
+        """Get source handler from any of the environment's toolchains.
 
         This is the tool-agnostic way to determine how to compile a source.
-        Falls back to the legacy SOURCE_SUFFIX_MAP if no toolchain.
+        Checks all toolchains in order (primary first, then additional).
+        Falls back to the legacy SOURCE_SUFFIX_MAP if no toolchain handles it.
 
         Args:
             source: Source file path.
-            env: Environment containing the toolchain.
+            env: Environment containing the toolchain(s).
 
         Returns:
-            SourceHandler if the toolchain can handle this source, else None.
+            SourceHandler if any toolchain can handle this source, else None.
         """
-        toolchain = env._toolchain
-        if toolchain is not None:
+        # Check all toolchains in order (primary first, then additional)
+        for toolchain in env.toolchains:
             handler = toolchain.get_source_handler(source.suffix)
             if handler is not None:
                 if env.has_tool(handler.tool_name):
@@ -691,27 +692,31 @@ class Resolver:
     def _determine_language(self, target: Target, env: Environment) -> str | None:
         """Determine the primary language for a target based on its sources.
 
-        Uses the toolchain to determine language (tool-agnostic), falling back
-        to hardcoded suffixes if no toolchain is available.
+        Uses all toolchains to determine language (tool-agnostic), falling back
+        to hardcoded suffixes if no toolchain handles the source.
 
         Args:
             target: The target to analyze.
-            env: Environment containing the toolchain.
+            env: Environment containing the toolchain(s).
 
         Returns:
             Language name ('c', 'cxx', etc.) or None.
         """
-        toolchain = env._toolchain
         languages: set[str] = set()
 
         for source in target.sources:
             if isinstance(source, FileNode):
-                # Try toolchain first (tool-agnostic)
-                if toolchain:
+                # Try all toolchains (tool-agnostic)
+                handler_found = False
+                for toolchain in env.toolchains:
                     handler = toolchain.get_source_handler(source.path.suffix)
                     if handler:
                         languages.add(handler.language)
-                        continue
+                        handler_found = True
+                        break  # First handler wins for this source
+
+                if handler_found:
+                    continue
 
                 # Fallback to hardcoded suffixes
                 suffix = source.path.suffix.lower()

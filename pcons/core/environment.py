@@ -47,6 +47,7 @@ class Environment:
         "_vars",
         "_project",
         "_toolchain",
+        "_additional_toolchains",
         "_created_nodes",
         "defined_at",
     )
@@ -70,6 +71,7 @@ class Environment:
         }
         self._project: Any = None  # Set by Project when env is created
         self._toolchain = toolchain
+        self._additional_toolchains: list[Toolchain] = []
         self._created_nodes: list[Any] = []  # Nodes created by builders
         self.defined_at = defined_at or get_caller_location()
 
@@ -152,6 +154,46 @@ class Environment:
     def has_tool(self, name: str) -> bool:
         """Check if a tool namespace exists."""
         return name in self._get_tools()
+
+    def add_toolchain(self, toolchain: Toolchain) -> None:
+        """Add an additional toolchain to this environment.
+
+        Additional toolchains provide extra source handlers and tools.
+        The primary toolchain (from constructor) has precedence for
+        output naming conventions.
+
+        Args:
+            toolchain: Toolchain to add.
+
+        Example:
+            env = project.Environment(toolchain=gcc_toolchain)
+            env.add_toolchain(cuda_toolchain)  # Adds CUDA support
+        """
+        additional: list[Toolchain] = object.__getattribute__(
+            self, "_additional_toolchains"
+        )
+        additional.append(toolchain)
+        toolchain.setup(self)
+
+    @property
+    def toolchains(self) -> list[Toolchain]:
+        """Return all toolchains (primary + additional).
+
+        The primary toolchain (passed to constructor) is first in the list,
+        followed by additional toolchains in the order they were added.
+
+        Returns:
+            List of all toolchains, or empty list if none configured.
+        """
+        result: list[Toolchain] = []
+        primary: Toolchain | None = object.__getattribute__(self, "_toolchain")
+        if primary is not None:
+            result.append(primary)
+        additional: list[Toolchain] = object.__getattribute__(
+            self, "_additional_toolchains"
+        )
+        result.extend(additional)
+        return result
 
     def tool_names(self) -> list[str]:
         """Return list of configured tool names."""
@@ -269,8 +311,12 @@ class Environment:
         for name, config in tools.items():
             new_tools[name] = config.clone()
 
-        # Copy toolchain reference (not cloned - it's shared)
+        # Copy toolchain references (not cloned - they're shared)
         new_env._toolchain = self._toolchain
+        additional: list[Toolchain] = object.__getattribute__(
+            self, "_additional_toolchains"
+        )
+        new_env._additional_toolchains = list(additional)
 
         # Copy project reference
         new_env._project = object.__getattribute__(self, "_project")
@@ -336,13 +382,13 @@ class Environment:
     def set_variant(self, name: str, **kwargs: Any) -> None:
         """Set the build variant.
 
-        Delegates to the toolchain's apply_variant() method if a toolchain
-        is configured. The toolchain is responsible for translating the
-        variant name into appropriate tool-specific settings.
+        Delegates to each toolchain's apply_variant() method for all
+        configured toolchains. Each toolchain is responsible for translating
+        the variant name into appropriate tool-specific settings.
 
         The core knows nothing about what variants mean - it's just a name.
         Each toolchain defines its own semantics (e.g., GCC defines "debug"
-        as -O0 -g, while a LaTeX toolchain might use "draft" mode).
+        as -O0 -g, while a CUDA toolchain might add -G for device debugging).
 
         Args:
             name: Variant name (e.g., "debug", "release").
@@ -352,10 +398,12 @@ class Environment:
             env.set_variant("debug")
             env.set_variant("release", extra_flags=["-march=native"])
         """
-        if self._toolchain is not None:
-            self._toolchain.apply_variant(self, name, **kwargs)
+        all_toolchains = self.toolchains
+        if all_toolchains:
+            for toolchain in all_toolchains:
+                toolchain.apply_variant(self, name, **kwargs)
         else:
-            # No toolchain - just set the variant name
+            # No toolchains - just set the variant name
             self.variant = name
 
     def Glob(self, pattern: str) -> list[FileNode]:

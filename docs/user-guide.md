@@ -1,6 +1,6 @@
 # Pcons User Guide
 
-Pcons is a Python-based build system that generates [Ninja](https://ninja-build.org/) build files for C/C++ projects. It combines the best ideas from SCons and CMake: Python as the configuration language, environments with tools, and a fast generator architecture with proper dependency tracking.
+Pcons is a Python-based build system that generates [Ninja](https://ninja-build.org/) build files for C/C++ projects. It combines some of the best ideas from SCons and CMake: Python as the configuration language, environments with tools, and a fast generator architecture with proper dependency tracking.
 
 ## Why Pcons?
 
@@ -20,7 +20,7 @@ Pcons is a Python-based build system that generates [Ninja](https://ninja-build.
 | Configuration language | Python | Makefile | CMake DSL | Python |
 | Build executor | Ninja | Make | Make/Ninja | SCons |
 | Learning curve | Low (if you know Python) | Medium | High | Medium |
-| IDE integration | Yes (`compile_commands.json`) | Limited | Yes | Limited |
+| IDE integration | Yes (`compile_commands.json`) | Limited | Yes | Yes |
 | Dependency tracking | Automatic | Manual | Automatic | Automatic |
 | Transitive dependencies | Yes | No | Yes | Limited |
 
@@ -33,15 +33,18 @@ Pcons is a Python-based build system that generates [Ninja](https://ninja-build.
 Before using pcons, ensure you have:
 
 1. **uv** - The fast Python package manager ([install guide](https://docs.astral.sh/uv/getting-started/installation/))
-2. **A C/C++ compiler** - One of:
-   - Clang/LLVM (macOS, Linux)
-   - GCC (Linux)
-   - MSVC (Windows)
+2. **A C/C++ compiler** for C/C++ projects like the one in this user guide.
+  - One of:
+    - Clang/LLVM (macOS, Linux)
+    - GCC (Linux)
+    - MSVC (Windows)
+  For other types of projects like building docs, swig, or game assets, pcons can use your own tools.
 3. **Ninja** - The build executor ([install guide](https://ninja-build.org/))
+You don't really need to install ninja because pcons will use `uvx ninja` when needed.
 
 ### Installing Pcons
 
-You can run pcons directly with `uvx` (no installation required):
+You can run pcons directly from PyPI with `uvx` (no installation required):
 
 ```bash
 uvx pcons
@@ -194,7 +197,7 @@ Each environment has namespaced tool configurations:
 
 ### Toolchain
 
-A `Toolchain` is a coordinated set of tools (compiler, linker, archiver) that work together. Pcons automatically detects available toolchains.
+A `Toolchain` is a coordinated set of tools (compiler, linker, archiver) that work together. Pcons automatically detects available C/C++ toolchains.
 
 ```python
 from pcons import find_c_toolchain
@@ -217,7 +220,7 @@ Available toolchains:
 A `Target` represents something to build: a program, library, or other output. Targets have:
 
 - **Sources**: Input files to compile
-- **Dependencies**: Other targets this links against
+- **Dependencies**: Other targets this links against or requires
 - **Usage Requirements**: Include dirs, defines, and flags
 
 ```python
@@ -226,6 +229,9 @@ app = project.Program("myapp", env)
 app.add_sources(["main.cpp", "util.cpp"])
 
 # Create a library target
+# Adding "include" as a public include_dir will cause
+# the app's build to get the proper include flags to
+# find this lib's headers.
 lib = project.StaticLibrary("mylib", env)
 lib.add_sources(["lib.cpp"])
 lib.public.include_dirs.append(Path("include"))
@@ -284,7 +290,7 @@ When you run `pcons build`, Ninja uses this graph to:
 
 ## Building Projects Step by Step
 
-Let's walk through progressively complex examples.
+Let's walk through a few progressively more complex examples.
 
 ### Hello World - Single File Program
 

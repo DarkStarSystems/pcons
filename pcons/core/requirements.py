@@ -176,8 +176,8 @@ def compute_effective_requirements(
 def _get_primary_tool(target: Target, env: Environment) -> str | None:
     """Determine the primary compilation tool for a target.
 
-    Uses the toolchain to determine the tool (tool-agnostic), falling back
-    to hardcoded suffixes if no toolchain is available.
+    Uses all toolchains to determine the tool (tool-agnostic), falling back
+    to hardcoded suffixes if no toolchain handles the source.
 
     Args:
         target: The target to analyze.
@@ -193,12 +193,12 @@ def _get_primary_tool(target: Target, env: Environment) -> str | None:
         return "cc"
 
     # Try toolchain-based detection (tool-agnostic approach)
-    toolchain = env._toolchain
     from pcons.core.node import FileNode
 
-    if toolchain is not None:
-        for source in target.sources:
-            if isinstance(source, FileNode):
+    for source in target.sources:
+        if isinstance(source, FileNode):
+            # Check all toolchains in order
+            for toolchain in env.toolchains:
                 handler = toolchain.get_source_handler(source.path.suffix)
                 if handler is not None:
                     tool_name: str = handler.tool_name
