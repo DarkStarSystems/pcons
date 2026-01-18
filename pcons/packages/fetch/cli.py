@@ -536,11 +536,15 @@ def cmd_clean(args: argparse.Namespace) -> int:
 
 def main() -> int:
     """Main entry point for pcons-fetch."""
+    from pcons import __version__
+
     parser = argparse.ArgumentParser(
         prog="pcons-fetch",
         description="Download and build external dependencies for pcons.",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.1")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output"
     )
