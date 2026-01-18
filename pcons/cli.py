@@ -10,7 +10,12 @@ import os
 import shutil
 import subprocess
 import sys
+import traceback
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pcons.core.project import Project
 
 # Set up logging
 logger = logging.getLogger("pcons")
@@ -83,8 +88,11 @@ def run_script(
     variant: str | None = None,
     reconfigure: bool = False,
     extra_env: dict[str, str] | None = None,
-) -> int:
-    """Execute a Python build script.
+) -> tuple[int, list[Project]]:
+    """Execute a Python build script in-process.
+
+    Runs the script using exec() so we can access the Project objects
+    created by the script via the global registry.
 
     Args:
         script_path: Path to the script to run.
@@ -95,43 +103,82 @@ def run_script(
         extra_env: Additional environment variables to set.
 
     Returns:
-        Exit code from script execution.
+        Tuple of (exit_code, list of registered Projects).
     """
-    # Set environment variables for the script
-    env = os.environ.copy()
-    env["PCONS_BUILD_DIR"] = str(build_dir.absolute())
-    env["PCONS_SOURCE_DIR"] = str(script_path.parent.absolute())
+    import pcons
+
+    # Clear any previously registered projects
+    pcons._clear_registered_projects()
+
+    # Also clear cached CLI vars so they get re-read
+    pcons._cli_vars = None
+
+    # Set environment variables (scripts still read these)
+    os.environ["PCONS_BUILD_DIR"] = str(build_dir.absolute())
+    os.environ["PCONS_SOURCE_DIR"] = str(script_path.parent.absolute())
 
     if variables:
-        env["PCONS_VARS"] = json.dumps(variables)
+        os.environ["PCONS_VARS"] = json.dumps(variables)
 
     if variant:
-        env["PCONS_VARIANT"] = variant
+        os.environ["PCONS_VARIANT"] = variant
 
     if reconfigure:
-        env["PCONS_RECONFIGURE"] = "1"
+        os.environ["PCONS_RECONFIGURE"] = "1"
 
     if extra_env:
-        env.update(extra_env)
+        os.environ.update(extra_env)
 
     logger.info("Running %s", script_path)
-    logger.debug("  PCONS_BUILD_DIR=%s", env["PCONS_BUILD_DIR"])
-    logger.debug("  PCONS_SOURCE_DIR=%s", env["PCONS_SOURCE_DIR"])
+    logger.debug("  PCONS_BUILD_DIR=%s", os.environ["PCONS_BUILD_DIR"])
+    logger.debug("  PCONS_SOURCE_DIR=%s", os.environ["PCONS_SOURCE_DIR"])
     if variables:
-        logger.debug("  PCONS_VARS=%s", env["PCONS_VARS"])
+        logger.debug("  PCONS_VARS=%s", os.environ["PCONS_VARS"])
     if variant:
         logger.debug("  PCONS_VARIANT=%s", variant)
 
+    # Save and modify sys.path and cwd for script imports
+    old_cwd = os.getcwd()
+    old_path = sys.path.copy()
+
     try:
-        result = subprocess.run(
-            [sys.executable, str(script_path)],
-            env=env,
-            cwd=script_path.parent,
-        )
-        return result.returncode
-    except OSError as e:
-        logger.error("Failed to run script: %s", e)
-        return 1
+        os.chdir(script_path.parent)
+        sys.path.insert(0, str(script_path.parent))
+
+        # Execute the script
+        script_source = script_path.read_text()
+        code = compile(script_source, str(script_path), "exec")
+        namespace: dict[str, object] = {
+            "__name__": "__main__",
+            "__file__": str(script_path),
+        }
+        exec(code, namespace)
+
+        return 0, pcons.get_registered_projects()
+
+    except SystemExit as e:
+        # Script called sys.exit()
+        exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
+        return exit_code, pcons.get_registered_projects()
+    except Exception as e:
+        logger.error("Build script failed: %s", e)
+        traceback.print_exc()
+        return 1, []
+    finally:
+        os.chdir(old_cwd)
+        sys.path[:] = old_path
+        # Clean up environment variables
+        for key in [
+            "PCONS_BUILD_DIR",
+            "PCONS_SOURCE_DIR",
+            "PCONS_VARS",
+            "PCONS_VARIANT",
+            "PCONS_RECONFIGURE",
+        ]:
+            os.environ.pop(key, None)
+        if extra_env:
+            for key in extra_env:
+                os.environ.pop(key, None)
 
 
 def run_ninja(
@@ -194,21 +241,29 @@ def cmd_default(args: argparse.Namespace) -> int:
     Equivalent to: pcons generate && pcons build
     """
     # First, generate
-    result = cmd_generate(args)
+    result, project = cmd_generate(args)
     if result != 0:
         return result
+
+    # Use the actual build directory from the Project
+    if project:
+        args.build_dir = str(project.build_dir)
 
     # Then, build
     return cmd_build(args)
 
 
-def cmd_generate(args: argparse.Namespace) -> int:
+def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
     """Run the generate phase.
 
     This command:
     1. Finds build.py in the current directory
     2. Runs build.py to define the build (includes configure if needed)
     3. Generates build.ninja in the build directory
+
+    Returns:
+        Tuple of (exit_code, project) where project is the first registered
+        Project, or None if no project was created.
     """
     setup_logging(args.verbose, args.debug)
 
@@ -216,7 +271,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
     script_path = getattr(args, "build_script", None)
 
     # Parse variables from extra args
-    variables, remaining = parse_variables(getattr(args, "extra", []))
+    variables, _ = parse_variables(getattr(args, "extra", []))
 
     # Find build script
     script: Path
@@ -224,13 +279,13 @@ def cmd_generate(args: argparse.Namespace) -> int:
         script = Path(script_path)
         if not script.exists():
             logger.error("Build script not found: %s", script_path)
-            return 1
+            return 1, None
     else:
         found_script = find_script("build.py")
         if found_script is None:
             logger.error("No build.py found in current directory")
             logger.info("Create a build.py file or run 'pcons init'")
-            return 1
+            return 1, None
         script = found_script
 
     # Create build directory if it doesn't exist
@@ -250,7 +305,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
         extra_env["PCONS_MERMAID"] = mermaid
 
     # Run build script
-    return run_script(
+    exit_code, projects = run_script(
         script,
         build_dir,
         variables=variables,
@@ -258,6 +313,27 @@ def cmd_generate(args: argparse.Namespace) -> int:
         reconfigure=reconfigure,
         extra_env=extra_env if extra_env else None,
     )
+
+    if exit_code != 0:
+        return exit_code, None
+
+    if not projects:
+        logger.warning("No Project created in build script")
+        return 0, None
+
+    if len(projects) > 1:
+        logger.warning("Multiple Projects created; using first one")
+
+    return 0, projects[0]
+
+
+def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
+    """Wrapper for cmd_generate that returns only the exit code.
+
+    Used as the handler for the 'generate' subcommand.
+    """
+    exit_code, _ = cmd_generate(args)
+    return exit_code
 
 
 def cmd_build(args: argparse.Namespace) -> int:
@@ -620,7 +696,7 @@ def create_full_parser() -> argparse.ArgumentParser:
         nargs="*",
         help="Build variables (KEY=value)",
     )
-    gen_parser.set_defaults(func=cmd_generate)
+    gen_parser.set_defaults(func=_cmd_generate_wrapper)
 
     # pcons build
     build_parser = subparsers.add_parser("build", help="Build targets using ninja")

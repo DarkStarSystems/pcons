@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import json
 import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pcons.core.project import Project
 
 # Re-export commonly used classes for convenient imports
 # These imports must be after __version__ is defined but we use noqa to allow it
 from pcons.configure.config import Configure  # noqa: E402
-from pcons.core.project import Project  # noqa: E402
+from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.toolchains import find_c_toolchain  # noqa: E402
 
@@ -22,6 +26,24 @@ __version__ = "0.1.3"
 
 # Internal storage for CLI variables
 _cli_vars: dict[str, str] | None = None
+
+# Global registry for Project instances
+_registered_projects: list[Project] = []
+
+
+def _register_project(project: Project) -> None:
+    """Register a project (called by Project.__init__)."""
+    _registered_projects.append(project)
+
+
+def get_registered_projects() -> list[Project]:
+    """Get all registered projects."""
+    return list(_registered_projects)
+
+
+def _clear_registered_projects() -> None:
+    """Clear the registry (called by CLI before running a script)."""
+    _registered_projects.clear()
 
 
 def get_var(name: str, default: str | None = None) -> str | None:
@@ -96,6 +118,10 @@ __all__ = [
     # CLI variable access
     "get_var",
     "get_variant",
+    # Project registry (for CLI use)
+    "get_registered_projects",
+    "_register_project",
+    "_clear_registered_projects",
     # Core classes
     "Configure",
     "Project",

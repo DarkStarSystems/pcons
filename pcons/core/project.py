@@ -101,6 +101,11 @@ class Project:
         self._config = config
         self.defined_at = defined_at or get_caller_location()
 
+        # Auto-register with global registry (for CLI access)
+        from pcons import _register_project
+
+        _register_project(self)
+
     @property
     def config(self) -> Any:
         """Get the cached configuration."""
