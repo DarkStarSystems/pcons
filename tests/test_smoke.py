@@ -7,7 +7,7 @@ import pcons
 def test_version():
     """Verify pcons has a version."""
     assert pcons.__version__ is not None
-    assert "0.1" in pcons.__version__
+    assert "0." in pcons.__version__
 
 
 def test_import_core():

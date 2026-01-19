@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-01-19
+
 ### Added
 
 - **Archive builders**: New `project.Tarfile()` and `project.Zipfile()` methods for creating tar and zip archives
@@ -29,10 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Access output nodes via `target.output_nodes` instead of indexing the result
   - Optional `name` parameter for explicit target naming
 
+- Merged `tests/examples/` into `examples/` - examples now serve as both tests and user documentation
+- Example tests now verify both invocation methods: `python pcons-build.py` and `python -m pcons`
+
+### Fixed
+
+- Windows `Install` command now works correctly (uses `cmd /c copy` instead of bare `copy`)
+
 ### Documentation
 
 - Added "All Build Outputs Are Targets" section to ARCHITECTURE.md documenting the design principle
 - Added archive builders documentation to user guide
+- New `07_archive_install` example demonstrating Tarfile builders and Install targets
 
 ## [0.1.4] - 2025-01-18
 
@@ -88,7 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/garyo/pcons/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/garyo/pcons/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/garyo/pcons/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/garyo/pcons/releases/tag/v0.1.2
