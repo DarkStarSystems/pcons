@@ -20,10 +20,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Makefile generator uses appropriate quoting for Make
   - compile_commands.json uses `shlex.quote()` for POSIX compliance
 - **New example `08_paths_with_spaces`**: Demonstrates building with spaces in directory names, filenames, and define values
+- **UnixToolchain base class**: Shared implementation for GCC and LLVM toolchains (source handlers, separated arg flags, variant application, -fPIC handling)
+- **BuildInfo TypedDict**: Type-safe dictionary for `node._build_info` with proper typing for tool, command, language, depfile, and context fields
+- **Environment.name parameter**: Environments can now have names for more readable ninja rule names
 
 ### Changed
 
+- **Per-environment ninja rules**: Each environment now generates its own ninja rules (e.g., `link_sharedcmd_release_abc123`) instead of sharing rules with `_effective` suffix. This fixes `env.Framework()` and other env-specific settings.
 - **Test runner uses `ninja -C build`**: Changed from `ninja -f build/build.ninja` to the correct `ninja -C build` invocation per ninja best practices
+- Source suffix handling now centralized through toolchain handlers with deprecation warnings for legacy `SOURCE_SUFFIX_MAP` fallback
+
+### Fixed
+
+- **env.Framework() now works correctly**: Framework flags are now properly baked into each environment's rules instead of requiring per-target overrides
+
+### Documentation
+
+- Added CLAUDE.md with project conventions and development guidelines
 
 ## [0.2.0] - 2025-01-19
 

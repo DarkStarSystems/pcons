@@ -114,3 +114,36 @@ pcons/
 2. **Platform suffixes vary**: `.o` (Unix), `.obj` (MSVC) - get from toolchain, don't hardcode
 3. **Circular variable refs detected**: `$foo` referencing `$bar` referencing `$foo` raises `CircularReferenceError`
 4. **Commands as lists**: Keep commands as `["$cc.cmd", "$flags", ...]` not strings, for proper space handling
+
+## Releasing
+
+To create a new release (e.g., `v0.3.0`):
+
+1. **Update version** in `pcons/__init__.py` (line ~25):
+   ```python
+   __version__ = "0.3.0"
+   ```
+
+2. **Update CHANGELOG.md**:
+   - Ensure it has all the release notes for this release (check git)
+   - Change `## [Unreleased]` to `## [0.3.0] - YYYY-MM-DD`
+   - Add new empty `## [Unreleased]` section at top
+   - Update links at bottom:
+     ```markdown
+     [Unreleased]: https://github.com/garyo/pcons/compare/v0.3.0...HEAD
+     [0.3.0]: https://github.com/garyo/pcons/compare/v0.2.0...v0.3.0
+     ```
+
+3. **Commit**:
+   ```bash
+   git add pcons/__init__.py CHANGELOG.md
+   git commit -m "Bump version to v0.3.0"
+   ```
+
+4. **Tag and push**:
+   ```bash
+   git tag v0.3.0
+   git push && git push --tags
+   ```
+
+CI will run tests on all platforms, then automatically create a GitHub release and publish to PyPI.
