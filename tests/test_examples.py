@@ -6,7 +6,7 @@ Each example is a self-contained project that serves as both
 a test and documentation for users.
 
 Tests both invocation methods:
-- Direct: python build.py
+- Direct: python pcons-build.py
 - CLI: python -m pcons
 """
 
@@ -94,7 +94,7 @@ def adapt_command_for_windows(cmd: str) -> str:
 
 
 def discover_examples() -> list[Path]:
-    """Discover all example directories that have a build.py and test.toml."""
+    """Discover all example directories that have a pcons-build.py and test.toml."""
     examples = []
     if not EXAMPLES_DIR.exists():
         return examples
@@ -102,7 +102,7 @@ def discover_examples() -> list[Path]:
     for item in sorted(EXAMPLES_DIR.iterdir()):
         if (
             item.is_dir()
-            and (item / "build.py").exists()
+            and (item / "pcons-build.py").exists()
             and (item / "test.toml").exists()
         ):
             examples.append(item)
@@ -189,7 +189,7 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
         example_dir: Path to the example directory
         tmp_path: Temporary directory for test isolation
         invocation: How to invoke the build script:
-            - "direct": python build.py
+            - "direct": python pcons-build.py
             - "cli": python -m pcons
     """
     config = load_test_config(example_dir)
@@ -214,10 +214,10 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
 
     # Run build script using specified invocation method
     if invocation == "direct":
-        # Direct: python build.py
-        build_script = work_dir / "build.py"
+        # Direct: python pcons-build.py
+        build_script = work_dir / "pcons-build.py"
         cmd = [sys.executable, str(build_script)]
-        cmd_desc = "build.py"
+        cmd_desc = "pcons-build.py"
     else:
         # CLI: python -m pcons
         cmd = [sys.executable, "-m", "pcons"]
@@ -372,7 +372,7 @@ def test_example(example_dir: Path, tmp_path: Path, invocation: str) -> None:
     """Run an example project end-to-end.
 
     Tests both invocation methods:
-    - direct: python build.py
+    - direct: python pcons-build.py
     - cli: python -m pcons
     """
     run_example(example_dir, tmp_path, invocation)

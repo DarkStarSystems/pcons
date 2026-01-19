@@ -52,5 +52,5 @@ uvx pcons
 ## Files
 
 - `conanfile.txt` - Conan dependencies (fmt library)
-- `build.py` - pcons build script showing the pattern
+- `pcons-build.py` - pcons build script showing the pattern
 - `src/main.cpp` - Simple program using fmt

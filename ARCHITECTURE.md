@@ -96,7 +96,7 @@ pcons configure [options]
 This is slow and shouldn't run on every build description parse.
 
 ```python
-# configure.py - runs during configure phase
+# pcons-configure.py - runs during configure phase
 from pcons import Configure
 
 config = Configure()
@@ -131,7 +131,7 @@ pcons generate
 **Output:** In-memory Project with complete dependency graph
 
 ```python
-# build.py - runs during generate phase
+# pcons-build.py - runs during generate phase
 from pcons import Project, load_config
 
 config = load_config()  # Fast: loads cached results
@@ -391,7 +391,7 @@ class Toolchain:
 gcc = config.find_toolchain('gcc')
 llvm = config.find_toolchain('llvm')
 
-# build.py
+# pcons-build.py
 env_gcc = project.Environment(toolchain=gcc)
 env_llvm = project.Environment(toolchain=llvm)
 ```
@@ -863,7 +863,7 @@ pcons/
 ## Example: Complete Build
 > **Note:** This example shows the intended API. Some features (like `find_toolchain('cxx')` auto-detection and `config.packages` dict) are partially implemented or planned.
 
-### configure.py
+### pcons-configure.py
 ```python
 from pcons import Configure
 from pcons.packages import PkgConfigFinder, ConanFinder, SystemFinder
@@ -898,7 +898,7 @@ for pkg_file in Path('deps/install').glob('*.pcons-pkg.toml'):
 config.save()
 ```
 
-### build.py
+### pcons-build.py
 ```python
 from pcons import Project, load_config
 
@@ -1113,7 +1113,7 @@ config.save()
 > **Status: Planned** - This API pattern is the goal; current implementation requires manual flag handling.
 
 ```python
-# In build.py
+# In pcons-build.py
 from pcons import Project, load_config
 
 config = load_config()

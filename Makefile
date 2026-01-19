@@ -65,5 +65,5 @@ clean:            ## Clean unused files.
 .PHONY: docs
 docs:             ## Build the documentation.
 	@echo "building documentation ..."
-	cd docs && uv run python build.py
+	cd docs && uv run python pcons-build.py
 	@open docs/build/index.html || xdg-open docs/build/index.html

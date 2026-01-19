@@ -245,7 +245,7 @@ class TestCLICommands:
         assert pcons.__version__ in result.stdout
 
     def test_pcons_init(self, tmp_path: Path) -> None:
-        """Test pcons init creates template build.py."""
+        """Test pcons init creates template pcons-build.py."""
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "init"],
             capture_output=True,
@@ -253,10 +253,10 @@ class TestCLICommands:
             cwd=tmp_path,
         )
         assert result.returncode == 0
-        assert (tmp_path / "build.py").exists()
+        assert (tmp_path / "pcons-build.py").exists()
 
         # Check content - should have configure and build together
-        build_content = (tmp_path / "build.py").read_text()
+        build_content = (tmp_path / "pcons-build.py").read_text()
         assert "Project" in build_content
         assert "NinjaGenerator" in build_content
         assert "Configure" in build_content
@@ -276,7 +276,7 @@ class TestCLICommands:
         assert result.returncode == 0
 
         # Verify it's valid Python by compiling it
-        build_py = tmp_path / "build.py"
+        build_py = tmp_path / "pcons-build.py"
         result = subprocess.run(
             [sys.executable, "-m", "py_compile", str(build_py)],
             capture_output=True,
@@ -300,9 +300,9 @@ class TestCLICommands:
         )
         assert result.returncode == 0
 
-        build_py = tmp_path / "build.py"
+        build_py = tmp_path / "pcons-build.py"
         mode = build_py.stat().st_mode
-        assert mode & stat.S_IXUSR, "build.py should be executable"
+        assert mode & stat.S_IXUSR, "pcons-build.py should be executable"
 
     def test_pcons_init_template_runs(self, tmp_path: Path) -> None:
         """Test that the init template can actually run and generate ninja."""
@@ -320,7 +320,7 @@ class TestCLICommands:
         )
         assert result.returncode == 0
 
-        # Run the generated build.py via pcons generate
+        # Run the generated pcons-build.py via pcons generate
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "generate"],
             capture_output=True,
@@ -333,7 +333,7 @@ class TestCLICommands:
     def test_pcons_init_force(self, tmp_path: Path) -> None:
         """Test pcons init --force overwrites files."""
         # Create existing file
-        (tmp_path / "build.py").write_text("# old content")
+        (tmp_path / "pcons-build.py").write_text("# old content")
 
         # Without --force should fail
         result = subprocess.run(
@@ -354,14 +354,14 @@ class TestCLICommands:
         assert result.returncode == 0
 
         # Check content was replaced
-        build_content = (tmp_path / "build.py").read_text()
+        build_content = (tmp_path / "pcons-build.py").read_text()
         assert "Project" in build_content
         assert "Configure" in build_content
 
     def test_pcons_info(self, tmp_path: Path) -> None:
-        """Test pcons info shows build.py docstring."""
-        # Create a build.py with a docstring
-        build_py = tmp_path / "build.py"
+        """Test pcons info shows pcons-build.py docstring."""
+        # Create a pcons-build.py with a docstring
+        build_py = tmp_path / "pcons-build.py"
         build_py.write_text('''"""My project build script.
 
 Variables:
@@ -382,7 +382,7 @@ print("hello")
 
     def test_pcons_info_no_docstring(self, tmp_path: Path) -> None:
         """Test pcons info handles missing docstring gracefully."""
-        build_py = tmp_path / "build.py"
+        build_py = tmp_path / "pcons-build.py"
         build_py.write_text('print("hello")\n')
 
         result = subprocess.run(
@@ -395,7 +395,7 @@ print("hello")
         assert "No docstring found" in result.stdout
 
     def test_pcons_info_no_script(self, tmp_path: Path) -> None:
-        """Test pcons info without build.py."""
+        """Test pcons info without pcons-build.py."""
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "info"],
             capture_output=True,
@@ -403,10 +403,10 @@ print("hello")
             cwd=tmp_path,
         )
         assert result.returncode != 0
-        assert "No build.py found" in result.stderr
+        assert "No pcons-build.py found" in result.stderr
 
     def test_pcons_generate_no_script(self, tmp_path: Path) -> None:
-        """Test pcons generate without build.py."""
+        """Test pcons generate without pcons-build.py."""
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "generate"],
             capture_output=True,
@@ -414,7 +414,7 @@ print("hello")
             cwd=tmp_path,
         )
         assert result.returncode != 0
-        assert "No build.py found" in result.stderr
+        assert "No pcons-build.py found" in result.stderr
 
     def test_pcons_build_no_ninja(self, tmp_path: Path) -> None:
         """Test pcons build without build.ninja."""
@@ -463,7 +463,7 @@ class TestCLIArgumentParsing:
     def test_variable_without_command_no_build_script(self, tmp_path: Path) -> None:
         """Test that VAR=value without a command doesn't error on argument parsing.
 
-        Without build.py it should fail gracefully, not with 'invalid choice'.
+        Without pcons-build.py it should fail gracefully, not with 'invalid choice'.
         """
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "FOO=bar"],
@@ -471,9 +471,9 @@ class TestCLIArgumentParsing:
             text=True,
             cwd=tmp_path,
         )
-        # Should fail because no build.py, not because of argument parsing
+        # Should fail because no pcons-build.py, not because of argument parsing
         assert result.returncode != 0
-        assert "No build.py found" in result.stderr
+        assert "No pcons-build.py found" in result.stderr
         assert "invalid choice" not in result.stderr
 
     def test_variable_with_build_dir_option(self, tmp_path: Path) -> None:
@@ -484,9 +484,9 @@ class TestCLIArgumentParsing:
             text=True,
             cwd=tmp_path,
         )
-        # Should fail because no build.py, not because of argument parsing
+        # Should fail because no pcons-build.py, not because of argument parsing
         assert result.returncode != 0
-        assert "No build.py found" in result.stderr
+        assert "No pcons-build.py found" in result.stderr
         assert "invalid choice" not in result.stderr
 
     def test_multiple_variables_without_command(self, tmp_path: Path) -> None:
@@ -498,7 +498,7 @@ class TestCLIArgumentParsing:
             cwd=tmp_path,
         )
         assert result.returncode != 0
-        assert "No build.py found" in result.stderr
+        assert "No pcons-build.py found" in result.stderr
         assert "invalid choice" not in result.stderr
 
     def test_help_shows_commands(self) -> None:
@@ -529,8 +529,8 @@ class TestCLIArgumentParsing:
 
     def test_generate_with_variable(self, tmp_path: Path) -> None:
         """Test pcons generate VAR=value works."""
-        # Create a minimal build.py that just prints the variable
-        build_py = tmp_path / "build.py"
+        # Create a minimal pcons-build.py that just prints the variable
+        build_py = tmp_path / "pcons-build.py"
         build_py.write_text("""\
 import os
 from pcons import get_var
@@ -586,8 +586,8 @@ int main(void) {
 """
         )
 
-        # Create build.py (configuration is done inline)
-        build_py = tmp_path / "build.py"
+        # Create pcons-build.py (configuration is done inline)
+        build_py = tmp_path / "pcons-build.py"
         build_py.write_text(
             """\
 import os

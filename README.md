@@ -27,7 +27,7 @@ Core functionality is working: C/C++ compilation, static and shared libraries, p
 ## Quick Example
 
 ```python
-# build.py
+# pcons-build.py
 from pcons.core.project import Project
 from pcons.toolchains import find_c_toolchain
 
@@ -54,7 +54,7 @@ project.generate()
 ```
 
 ```bash
-uv run build.py
+uv run pcons-build.py
 ninja -C build
 ```
 

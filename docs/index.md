@@ -4,7 +4,7 @@ pcons is a Python-based build system that generates [Ninja](https://ninja-build.
 
 ## Why pcons?
 
-- **No framework magic** - Your `build.py` is just a Python script. Import pcons and use it however you want.
+- **No framework magic** - Your `pcons-build.py` is just a Python script. Import pcons and use it however you want.
 - **Tool-agnostic core** - The core knows nothing about C++ or any language. All language support comes through Tools and Toolchains.
 - **Ninja backend** - Fast, parallel builds with proper dependency tracking.
 - **Extensible** - Create custom tools for any build step.
@@ -19,7 +19,7 @@ pip install pcons
 
 ### Your First Build Script
 
-Create a `build.py`:
+Create a `pcons-build.py`:
 
 ```python
 from pcons.core.project import Project
@@ -45,7 +45,7 @@ generator.generate(project, "build")
 Run it:
 
 ```bash
-python build.py
+python pcons-build.py
 ninja -C build
 ```
 
@@ -60,7 +60,7 @@ pcons              # Configure (if needed) → Generate → Build
 pcons build        # Same as above
 pcons generate     # Configure (if needed) → Generate only
 pcons clean        # Clean build outputs (runs ninja -t clean)
-pcons info         # Show build.py documentation and available variables
+pcons info         # Show pcons-build.py documentation and available variables
 ```
 
 ### Configuration
@@ -76,7 +76,7 @@ pcons --reconfigure    # Force re-run configuration checks
 pcons -C               # Short form
 ```
 
-In your `build.py`, configuration typically looks like:
+In your `pcons-build.py`, configuration typically looks like:
 
 ```python
 from pcons.configure.config import Configure
@@ -102,7 +102,7 @@ pcons --variant=release   # Release build (-O2 -DNDEBUG)
 pcons -v debug            # Short form
 ```
 
-The variant is passed to your build script and affects toolchain flags. In `build.py`:
+The variant is passed to your build script and affects toolchain flags. In `pcons-build.py`:
 
 ```python
 env = project.Environment(toolchain=toolchain)
@@ -118,7 +118,7 @@ pcons PORT=ofx VARIANT=release
 pcons CC=clang CXX=clang++ USE_CUDA=1
 ```
 
-Access variables in `build.py` using `get_var()`:
+Access variables in `pcons-build.py` using `get_var()`:
 
 ```python
 from pcons import get_var
@@ -146,7 +146,7 @@ Variables are stored internally by pcons and do not pollute the shell environmen
 - `PREFIX` - Installation prefix
 - Custom project-specific variables
 
-**Documenting variables**: Add a docstring to your `build.py` to document available variables. Users can view it with `pcons info`:
+**Documenting variables**: Add a docstring to your `pcons-build.py` to document available variables. Users can view it with `pcons info`:
 
 ```python
 """Build script for MyProject.
@@ -159,7 +159,7 @@ Variables:
 
 ```bash
 $ pcons info
-Build script: build.py
+Build script: pcons-build.py
 
 Build script for MyProject.
 

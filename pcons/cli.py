@@ -40,7 +40,7 @@ def find_script(name: str, search_dir: Path | None = None) -> Path | None:
     """Find a build script by name.
 
     Args:
-        name: Script name (e.g., 'build.py')
+        name: Script name (e.g., 'pcons-build.py')
         search_dir: Directory to search in (default: current dir)
 
     Returns:
@@ -257,8 +257,8 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
     """Run the generate phase.
 
     This command:
-    1. Finds build.py in the current directory
-    2. Runs build.py to define the build (includes configure if needed)
+    1. Finds pcons-build.py in the current directory
+    2. Runs pcons-build.py to define the build (includes configure if needed)
     3. Generates build.ninja in the build directory
 
     Returns:
@@ -281,10 +281,10 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
             logger.error("Build script not found: %s", script_path)
             return 1, None
     else:
-        found_script = find_script("build.py")
+        found_script = find_script("pcons-build.py")
         if found_script is None:
-            logger.error("No build.py found in current directory")
-            logger.info("Create a build.py file or run 'pcons init'")
+            logger.error("No pcons-build.py found in current directory")
+            logger.info("Create a pcons-build.py file or run 'pcons init'")
             return 1, None
         script = found_script
 
@@ -407,7 +407,7 @@ def cmd_clean(args: argparse.Namespace) -> int:
 def cmd_info(args: argparse.Namespace) -> int:
     """Show information about the build script.
 
-    Displays the docstring from build.py which should document
+    Displays the docstring from pcons-build.py which should document
     available build variables and usage.
     """
     setup_logging(args.verbose, args.debug)
@@ -421,9 +421,9 @@ def cmd_info(args: argparse.Namespace) -> int:
             logger.error("Build script not found: %s", script_path)
             return 1
     else:
-        found_script = find_script("build.py")
+        found_script = find_script("pcons-build.py")
         if found_script is None:
-            logger.error("No build.py found in current directory")
+            logger.error("No pcons-build.py found in current directory")
             return 1
         script = found_script
 
@@ -443,7 +443,7 @@ def cmd_info(args: argparse.Namespace) -> int:
     if docstring:
         print(docstring)
     else:
-        print("(No docstring found in build.py)")
+        print("(No docstring found in pcons-build.py)")
         print()
         print("Tip: Add a docstring to document available build variables:")
         print('  """Build script for MyProject.')
@@ -459,17 +459,17 @@ def cmd_info(args: argparse.Namespace) -> int:
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize a new pcons project.
 
-    Creates a template build.py file.
+    Creates a template pcons-build.py file.
     """
     setup_logging(args.verbose, args.debug)
 
-    build_py = Path("build.py")
+    build_py = Path("pcons-build.py")
 
     if build_py.exists() and not args.force:
-        logger.error("build.py already exists (use --force to overwrite)")
+        logger.error("pcons-build.py already exists (use --force to overwrite)")
         return 1
 
-    # Write build.py template
+    # Write pcons-build.py template
     build_template = '''\
 #!/usr/bin/env python3
 # /// script
@@ -531,7 +531,7 @@ print(f"Generated {build_dir / 'build.ninja'}")
 
     print("Project initialized!")
     print("Next steps:")
-    print("  1. Edit build.py to define your build targets")
+    print("  1. Edit pcons-build.py to define your build targets")
     print("  2. Run 'pcons' to build")
     print()
     print("Build variables:")
@@ -600,7 +600,7 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Force re-run configuration checks",
     )
-    parser.add_argument("-b", "--build-script", help="Path to build.py script")
+    parser.add_argument("-b", "--build-script", help="Path to pcons-build.py script")
 
 
 def create_default_parser() -> argparse.ArgumentParser:
@@ -660,7 +660,9 @@ def create_full_parser() -> argparse.ArgumentParser:
         "info", help="Show build script info and available variables"
     )
     add_common_args(info_parser)
-    info_parser.add_argument("-b", "--build-script", help="Path to build.py script")
+    info_parser.add_argument(
+        "-b", "--build-script", help="Path to pcons-build.py script"
+    )
     info_parser.set_defaults(func=cmd_info)
 
     # pcons init
@@ -673,7 +675,7 @@ def create_full_parser() -> argparse.ArgumentParser:
 
     # pcons generate
     gen_parser = subparsers.add_parser(
-        "generate", help="Generate build files from build.py"
+        "generate", help="Generate build files from pcons-build.py"
     )
     add_common_args(gen_parser)
     add_generate_args(gen_parser)
@@ -740,9 +742,9 @@ def main() -> int:
         extra = getattr(args, "extra", [])
         variables, remaining = parse_variables(extra)
 
-        # If we have remaining args and no build.py, they might be targets
+        # If we have remaining args and no pcons-build.py, they might be targets
         # for an existing build.ninja
-        if remaining and not find_script("build.py"):
+        if remaining and not find_script("pcons-build.py"):
             # Just run build with the targets
             args.targets = remaining
             return cmd_build(args)

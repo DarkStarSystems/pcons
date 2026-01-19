@@ -6,7 +6,7 @@ Pcons is a Python-based build system that generates [Ninja](https://ninja-build.
 
 ### Key Features
 
-- **Python is the language**: No custom DSL to learn. Your `build.py` is real Python with full IDE support, debugging, and all the power of the Python ecosystem.
+- **Python is the language**: No custom DSL to learn. Your `pcons-build.py` is real Python with full IDE support, debugging, and all the power of the Python ecosystem.
 - **Fast builds with Ninja**: Pcons generates Ninja files and lets Ninja handle the actual compilation. This means fast, parallel builds with minimal overhead.
 - **Automatic dependency tracking**: Pcons tracks dependencies between source files, object files, and outputs, rebuilding only what's necessary.
 - **Transitive requirements**: Like CMake's "usage requirements," include directories and link flags automatically propagate through your dependency tree.
@@ -78,7 +78,7 @@ int main() {
 }
 ```
 
-**2. Create the build script** (`build.py`):
+**2. Create the build script** (`pcons-build.py`):
 
 ```python
 #!/usr/bin/env python3
@@ -118,7 +118,7 @@ uvx pcons
 pcons
 ```
 
-This runs your `build.py` to generate `build/build.ninja`, then invokes Ninja to compile your program.
+This runs your `pcons-build.py` to generate `build/build.ninja`, then invokes Ninja to compile your program.
 
 **4. Run your program**:
 
@@ -137,8 +137,8 @@ pcons generate           # Only generate build.ninja
 pcons build              # Only run ninja (assumes build.ninja exists)
 pcons clean              # Clean build artifacts
 pcons clean --all        # Remove entire build directory
-pcons info               # Show build.py documentation
-pcons init               # Create a template build.py
+pcons info               # Show pcons-build.py documentation
+pcons init               # Create a template pcons-build.py
 ```
 
 ---
@@ -303,7 +303,7 @@ The simplest possible project: one source file, one output.
 **File structure:**
 ```
 project/
-├── build.py
+├── pcons-build.py
 └── hello.c
 ```
 
@@ -317,7 +317,7 @@ int main(void) {
 }
 ```
 
-**build.py:**
+**pcons-build.py:**
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
@@ -353,7 +353,7 @@ A program with multiple source files and a header.
 **File structure:**
 ```
 project/
-├── build.py
+├── pcons-build.py
 ├── include/
 │   └── math_ops.h
 └── src/
@@ -398,7 +398,7 @@ int main(void) {
 }
 ```
 
-**build.py:**
+**pcons-build.py:**
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
@@ -437,7 +437,7 @@ Create a reusable static library and link it to a program.
 **File structure:**
 ```
 project/
-├── build.py
+├── pcons-build.py
 ├── include/
 │   └── math_utils.h
 └── src/
@@ -445,7 +445,7 @@ project/
     └── math_utils.c
 ```
 
-**build.py:**
+**pcons-build.py:**
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
@@ -486,7 +486,7 @@ Key points:
 
 Create a shared library (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows).
 
-**build.py:**
+**pcons-build.py:**
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
@@ -524,7 +524,7 @@ Organize a larger project with separate directories.
 **File structure:**
 ```
 project/
-├── build.py
+├── pcons-build.py
 ├── include/
 │   ├── math_utils.h
 │   └── physics.h
@@ -534,7 +534,7 @@ project/
     └── physics.c
 ```
 
-**build.py:**
+**pcons-build.py:**
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
@@ -584,7 +584,7 @@ print(f"Generated {build_dir / 'compile_commands.json'}")
 
 Use `set_variant()` to switch between debug and release builds.
 
-**build.py:**
+**pcons-build.py:**
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
@@ -669,7 +669,7 @@ fmt/10.1.1
 PkgConfigDeps
 ```
 
-**build.py:**
+**pcons-build.py:**
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
@@ -803,7 +803,7 @@ Pass variables to your build script:
 pcons PORT=ofx USE_CUDA=1 PREFIX=/usr/local
 ```
 
-Access them in `build.py`:
+Access them in `pcons-build.py`:
 
 ```python
 from pcons import get_var
@@ -1136,11 +1136,11 @@ project.Install("packages/", [docs_tar, release_zip])
 project.Default(docs_tar, release_zip)
 ```
 
-For a complete example, see `examples/hello/build.py` which creates source and binary tarballs with an `install` alias:
+For a complete example, see `examples/hello/pcons-build.py` which creates source and binary tarballs with an `install` alias:
 
 ```bash
 cd examples/hello
-python build.py
+python pcons-build.py
 ninja -f build/build.ninja          # Build the program
 ninja -f build/build.ninja install  # Create and install tarballs to ./Installers
 ```

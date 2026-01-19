@@ -52,7 +52,7 @@ def get_var(name: str, default: str | None = None) -> str | None:
     Variables can be set when invoking pcons:
         pcons PORT=ofx USE_CUDA=1
 
-    In your build.py, access them with:
+    In your pcons-build.py, access them with:
         port = get_var('PORT', default='ofx')
         use_cuda = get_var('USE_CUDA', default='0') == '1'
 
@@ -95,7 +95,7 @@ def get_variant(default: str = "release") -> str:
         pcons --variant=debug
 
     Or when running directly:
-        VARIANT=debug python build.py
+        VARIANT=debug python pcons-build.py
 
     Precedence (highest to lowest):
         1. PCONS_VARIANT (set by pcons CLI)

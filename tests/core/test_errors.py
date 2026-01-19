@@ -24,9 +24,9 @@ class TestPconsError:
         assert err.location is None
 
     def test_error_with_location(self):
-        loc = SourceLocation("build.py", 42, "configure")
+        loc = SourceLocation("pcons-build.py", 42, "configure")
         err = PconsError("something went wrong", location=loc)
-        assert "build.py:42" in str(err)
+        assert "pcons-build.py:42" in str(err)
         assert "something went wrong" in str(err)
         assert err.location == loc
 
@@ -49,9 +49,9 @@ class TestMissingVariableError:
         assert err.variable == "FOO"
 
     def test_with_location(self):
-        loc = SourceLocation("build.py", 10)
+        loc = SourceLocation("pcons-build.py", 10)
         err = MissingVariableError("BAR", location=loc)
-        assert "build.py:10" in str(err)
+        assert "pcons-build.py:10" in str(err)
         assert "BAR" in str(err)
 
 

@@ -9,7 +9,7 @@ its own documentation. It showcases:
 - Variable substitution in commands
 
 Usage:
-    python docs/build.py
+    python docs/pcons-build.py
     ninja -C docs/build
 """
 

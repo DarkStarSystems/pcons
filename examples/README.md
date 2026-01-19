@@ -11,7 +11,7 @@ Each example is a self-contained directory:
 
 ```
 example_name/
-├── build.py          # Pcons build script
+├── pcons-build.py    # Pcons build script
 ├── test.toml         # Test configuration (what to verify)
 ├── src/              # Source files
 │   └── ...
@@ -59,7 +59,7 @@ uv run pytest tests/test_examples.py -v -k "concat"
 ## Adding New Examples
 
 1. Create a new directory under `tests/examples/`
-2. Add source files and a `build.py`
+2. Add source files and a `pcons-build.py`
 3. Add a `test.toml` describing expected outputs
 4. Run the tests to verify it works
 

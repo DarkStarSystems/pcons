@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: Renamed default build script from `build.py` to `pcons-build.py`**
+  - CLI now looks for `pcons-build.py` by default instead of `build.py`
+  - `pcons init` creates `pcons-build.py` instead of `build.py`
+  - All examples updated to use `pcons-build.py`
+  - Use `-b build.py` flag to run legacy scripts
+
 - **BREAKING: `env.Command()` signature changed**: Now uses keyword-only arguments and returns `Target` instead of `list[FileNode]`
   - Old: `env.Command("output.txt", "input.txt", "cmd")`
   - New: `env.Command(target="output.txt", source="input.txt", command="cmd")`
