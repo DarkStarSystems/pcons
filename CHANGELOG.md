@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-01-19
+
 ### Added
 
 - **Relative paths in ninja files**: Generated `build.ninja` files now use relative paths instead of absolute paths
@@ -129,7 +131,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/garyo/pcons/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/garyo/pcons/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/garyo/pcons/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/garyo/pcons/compare/v0.1.2...v0.1.3
