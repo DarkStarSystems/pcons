@@ -1,0 +1,116 @@
+# Pcons - Python Build System
+
+An open source Python-based build system that generates Ninja (or Make) build files. Zero install, tool-agnostic core.
+Designed for maintainability and extensibility.
+
+**Design philosophy**:
+1. Configuration, not execution. Python scripts describe what to build; Ninja handles execution.
+2. pcons core is completely tool-agnostic. It knows nothing about compilers or linkers; should be just as good at document preparation or game asset building or scientific dataflows. All tool-specific logic is in toolchains and tools.
+
+
+## Critical Rules
+
+**NEVER add tool-specific code to `pcons/core/`**. Compiler flags, tool names, and language-specific logic belong in `pcons/toolchains/` or `pcons/tools/`.
+
+**NEVER check filesystem existence to determine if something is a target**
+
+**ALL builders must return `Target` objects**, not raw FileNodes. This ensures consistency across Install(), dependencies, etc.
+
+**ALL features must have tests.** The best tests are the user-visible examples in examples/, because they get tested on all platforms in CI as well as serving as references for users.
+
+## Development Commands
+
+```bash
+make test              # Run all tests
+make test-cov          # Tests with coverage report
+make fmt               # Format code (ruff format + ruff check --fix)
+make lint              # Lint and type check (ruff check + ty check)
+make install-hooks     # Install pre-commit hook
+```
+
+Or directly:
+```bash
+uv run pytest tests/ -x -q     # Stop on first failure, quiet
+uv run pytest tests/test_examples.py  # Run example integration tests
+```
+
+Pre-commit hooks run ruff check, ruff format, and ty (type checking) automatically.
+
+## Architecture Quick Reference
+
+**Three phases** (pcons only handles 1-3):
+1. **Configure** - Tool detection, feature checks, caching
+2. **Build Description** - Python scripts create dependency graph (fast, uses cached config)
+3. **Generate** - Write Ninja/Make files
+4. *Build* - User runs `ninja` (pcons not involved)
+
+**Target resolution is lazy**: `lib.output_nodes` is empty until `project.resolve()` is called. This allows customizing `output_name` after target creation.
+
+**Namespaced tools**: `env.cc.flags`, `env.cxx.cmd`, `env.link.libs` - no flat variable collisions.
+
+**ToolchainContext protocol**: Decouples core from C/C++ specifics. Implementations (CompileLinkContext, MsvcCompileLinkContext) format flags like `-I`, `/I`.
+
+See `ARCHITECTURE.md` for full design documentation.
+
+## Key Patterns
+
+**Ninja paths**: All paths in `build.ninja` must be relative to the build directory. Use `$topdir` variable for source files outside the build dir (e.g., `$topdir/src/file.c`).
+
+**Quoting**: Command lines are stored as lists of tokens until final output. Generators handle shell-appropriate quoting. Ninja generator uses `$ ` escaping for paths.
+
+**Language propagation**: When linking, the "strongest" language's linker is used (e.g., C++ linker for mixed C/C++ objects).
+
+**Usage requirements**: `target.public.*` propagates to dependents; `target.private.*` is local only.
+
+## Directory Structure
+
+```
+pcons/
+├── core/           # Tool-agnostic: node.py, target.py, environment.py, resolver.py, subst.py
+├── toolchains/     # GCC, LLVM, MSVC, clang-cl, CUDA, Cython
+├── tools/          # Tool base classes and registry
+├── generators/     # ninja.py, makefile.py, compile_commands.py, mermaid.py
+├── configure/      # Configuration and tool detection
+├── packages/       # External dependency management (pkg-config, Conan finders)
+└── util/           # Path utilities, macOS helpers
+```
+
+## Key Files by Task
+
+| Task | Files |
+|------|-------|
+| Add new builder | `pcons/core/resolver.py` (factory classes), `pcons/core/project.py` |
+| Modify Ninja output | `pcons/generators/ninja.py` |
+| Add toolchain | `pcons/toolchains/` (see gcc.py as template) |
+| Change variable substitution | `pcons/core/subst.py` |
+| Modify target resolution | `pcons/core/resolver.py` |
+| Add compile/link flags | `pcons/core/build_context.py` (ToolchainContext) |
+| Package management | `pcons/packages/finders/`, `pcons/packages/imported.py` |
+
+## Testing
+
+**Test structure:**
+- `tests/core/` - Core system unit tests
+- `tests/generators/` - Generator tests
+- `tests/toolchains/` - Toolchain tests
+- `tests/test_examples.py` - Integration tests running all examples
+
+**Examples** (`examples/`): Each has `pcons-build.py` and `test.toml` with expected outputs and verification commands.
+
+**Fixtures** (conftest.py): `tmp_project`, `sample_c_source`
+
+## Code Conventions
+
+- **Python 3.11+** required
+- **uv-first workflow** with PEP723 front matter dependencies
+- **Type hints** everywhere (mypy strict mode)
+- **SPDX headers**: `# SPDX-License-Identifier: MIT` on all files
+- **Private attributes**: `_build_info`, `_tools`, `_vars`
+- **Fail fast**: Missing sources, unknown variables, cycles all raise errors immediately
+
+## Common Gotchas
+
+1. **Target nodes empty until resolved**: Always call `project.resolve()` before accessing `target.output_nodes`
+2. **Platform suffixes vary**: `.o` (Unix), `.obj` (MSVC) - get from toolchain, don't hardcode
+3. **Circular variable refs detected**: `$foo` referencing `$bar` referencing `$foo` raises `CircularReferenceError`
+4. **Commands as lists**: Keep commands as `["$cc.cmd", "$flags", ...]` not strings, for proper space handling
