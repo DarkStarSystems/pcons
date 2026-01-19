@@ -15,9 +15,9 @@ commands = [
     { run = "./build/hello", expect_stdout = "Hello from pcons!" },
     # Test the install alias - builds tarballs and copies to Installers/
     { run = "ninja -C build install" },
-    # Verify the installed tarballs exist
-    { run = "test -f Installers/hello-src.tar.gz" },
-    { run = "test -f Installers/hello-bin.tar.gz" },
+    # Verify the installed tarballs exist (inside build dir since ninja -C build)
+    { run = "test -f build/Installers/hello-src.tar.gz" },
+    { run = "test -f build/Installers/hello-bin.tar.gz" },
 ]
 
 [skip]

@@ -599,11 +599,11 @@ class InstallNodeFactory:
             sources: Resolved source file nodes.
             dest_dir: Destination directory.
         """
-        from pcons.configure.platform import get_platform
+        import sys
 
-        platform = get_platform()
-        # On Windows, 'copy' is a shell built-in, so we need cmd /c
-        copy_cmd = "cmd /c copy" if platform.is_windows else "cp"
+        # Use pcons helper for cross-platform copy (handles forward slashes on Windows)
+        python_cmd = sys.executable.replace("\\", "/")
+        copy_cmd = f"{python_cmd} -m pcons.util.commands copy"
 
         installed_nodes: list[FileNode] = []
         for file_node in sources:
@@ -646,7 +646,7 @@ class InstallNodeFactory:
             sources: Resolved source file nodes (should have exactly one).
             dest: Destination path (full path including filename).
         """
-        from pcons.configure.platform import get_platform
+        import sys
 
         if not sources:
             return
@@ -660,9 +660,9 @@ class InstallNodeFactory:
                 location=target.defined_at,
             )
 
-        platform = get_platform()
-        # On Windows, 'copy' is a shell built-in, so we need cmd /c
-        copy_cmd = "cmd /c copy" if platform.is_windows else "cp"
+        # Use pcons helper for cross-platform copy (handles forward slashes on Windows)
+        python_cmd = sys.executable.replace("\\", "/")
+        copy_cmd = f"{python_cmd} -m pcons.util.commands copy"
 
         source_node = sources[0]
 

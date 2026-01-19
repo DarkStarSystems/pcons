@@ -17,10 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Include paths use `$topdir/` prefix (e.g., `-I$topdir/include`)
   - Build outputs remain relative to build directory
   - Makes ninja files portable and more readable
-- **Proper shell quoting for paths with spaces**: `ToolchainContext.get_variables()` now returns `dict[str, list[str]]` so generators can properly quote each token
-  - Ninja generator uses shell quoting (single quotes) for variable values
+- **Proper escaping for paths with spaces**: `ToolchainContext.get_variables()` now returns `dict[str, list[str]]` so generators can properly escape each token
+  - Ninja generator uses Ninja escaping (`$ ` for spaces) for cross-platform compatibility
   - Makefile generator uses appropriate quoting for Make
   - compile_commands.json uses `shlex.quote()` for POSIX compliance
+  - All paths normalized to forward slashes (works on Windows)
 - **New example `08_paths_with_spaces`**: Demonstrates building with spaces in directory names, filenames, and define values
 - **UnixToolchain base class**: Shared implementation for GCC and LLVM toolchains (source handlers, separated arg flags, variant application, -fPIC handling)
 - **BuildInfo TypedDict**: Type-safe dictionary for `node._build_info` with proper typing for tool, command, language, depfile, and context fields

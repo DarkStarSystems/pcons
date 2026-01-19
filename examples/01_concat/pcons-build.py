@@ -5,7 +5,7 @@
 This example demonstrates how to create and use a custom tool
 that concatenates multiple text files into one.
 
-Works cross-platform: uses 'cat' on Unix and 'type' on Windows.
+Uses Python for cross-platform file concatenation.
 """
 
 import os
@@ -33,15 +33,13 @@ class ConcatTool(BaseTool):
         super().__init__("concat")
 
     def default_vars(self) -> dict[str, object]:
-        # Use 'type' on Windows, 'cat' on Unix
-        if sys.platform == "win32":
-            cmd = "cmd /c type"
-        else:
-            cmd = "cat"
+        # Use pcons helper for cross-platform file concatenation
+        # This handles forward slashes and spaces in paths on all platforms
+        python_cmd = sys.executable.replace("\\", "/")
         return {
-            "cmd": cmd,
+            "cmd": f"{python_cmd} -m pcons.util.commands concat",
             "flags": [],
-            "bundlecmd": "$concat.cmd $concat.flags $$in > $$out",
+            "bundlecmd": "$concat.cmd $concat.flags $$in $$out",
         }
 
     def builders(self) -> dict[str, object]:

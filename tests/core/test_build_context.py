@@ -134,13 +134,14 @@ class TestNinjaQuoting:
         # Read ninja file
         ninja_content = (build_dir / "build.ninja").read_text()
 
-        # Check that paths with spaces are properly quoted for shell
-        # The include path should be quoted (single quotes for shell)
-        assert "'include path'" in ninja_content or "include path" in ninja_content
-        # Note: Variable values use shell quoting since they're substituted into commands
+        # Check that paths with spaces are properly escaped for Ninja
+        # Ninja escapes spaces as "$ " (dollar-space) in variable values
+        assert "include$ path" in ninja_content
 
-        # The define with quotes should be preserved
+        # The define with quotes should be preserved (spaces escaped)
         assert "MESSAGE" in ninja_content
+        # Quotes inside the define value should be preserved
+        assert "Hello$ World" in ninja_content or "Hello World" in ninja_content
 
     def test_ninja_escapes_special_chars(self) -> None:
         """Verify _escape_path handles special characters."""
@@ -287,13 +288,10 @@ class TestEndToEndSpacesInPaths:
 
         ninja = (build_dir / "build.ninja").read_text()
 
-        # Verify quoting in ninja output
-        # Variable values use shell quoting (single quotes) for paths with spaces
-        # Build statement paths use Ninja $ escaping
+        # Verify escaping in ninja output
+        # All paths use Ninja $ escaping (dollar-space for spaces)
         assert "My$ Source$ Files" in ninja  # Build statement path uses Ninja escaping
-        assert (
-            "'My Headers'" in ninja or "My Headers" in ninja
-        )  # Variable values use shell quoting
+        assert "My$ Headers" in ninja  # Variable values also use Ninja escaping
 
         # The build should be syntactically valid (no unescaped spaces breaking parsing)
         # We can't easily run ninja, but we can check there are no obvious errors

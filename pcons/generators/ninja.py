@@ -586,11 +586,11 @@ class NinjaGenerator(BaseGenerator):
                         var_value = [
                             self._relativize_flag_with_path(t) for t in var_value
                         ]
-                    # Quote for shell since these get substituted into commands
-                    quoted_tokens = [
-                        self._quote_for_shell(token) for token in var_value
+                    # Escape for Ninja variable substitution
+                    escaped_tokens = [
+                        self._escape_for_ninja_variable(token) for token in var_value
                     ]
-                    f.write(f"  {var_name} = {' '.join(quoted_tokens)}\n")
+                    f.write(f"  {var_name} = {' '.join(escaped_tokens)}\n")
 
         # Write post-build commands if target has them
         # Check if this is an output node (not an intermediate object file)
@@ -716,8 +716,11 @@ class NinjaGenerator(BaseGenerator):
         """Escape a path for use in Ninja files.
 
         Ninja requires escaping of $, :, and whitespace.
+        Always uses forward slashes for cross-platform compatibility.
         """
         path_str = str(path)
+        # Normalize to forward slashes (Ninja handles them on all platforms)
+        path_str = path_str.replace("\\", "/")
         # Escape special characters
         return self.ESCAPE_CHARS.sub(r"$\1", path_str)
 
@@ -728,19 +731,21 @@ class NinjaGenerator(BaseGenerator):
         should be relative to that directory. For example, if the build dir
         is '/abs/path/build/' and a path is '/abs/path/build/my_program',
         this returns 'my_program'.
+
+        Always uses forward slashes for cross-platform compatibility.
         """
         if self._output_dir is None:
-            return str(path)
+            return str(path).replace("\\", "/")
 
         path_obj = Path(path)
 
         # Handle absolute paths
         if path_obj.is_absolute():
             try:
-                return str(path_obj.relative_to(self._output_dir))
+                return str(path_obj.relative_to(self._output_dir)).replace("\\", "/")
             except ValueError:
                 # Path is not under output_dir - return as-is
-                return str(path)
+                return str(path).replace("\\", "/")
 
         # Handle relative paths - try to strip the build dir prefix
         # e.g., "build/my_program" when output_dir is "build"
@@ -749,10 +754,10 @@ class NinjaGenerator(BaseGenerator):
         if parts and parts[0] == build_dir_name:
             # Strip the build dir prefix
             if len(parts) > 1:
-                return str(Path(*parts[1:]))
+                return str(Path(*parts[1:])).replace("\\", "/")
             return "."
 
-        return str(path)
+        return str(path).replace("\\", "/")
 
     def _escape_output_path(self, path: Path | str) -> str:
         """Make an output path relative to build dir and escape for Ninja."""
@@ -781,7 +786,8 @@ class NinjaGenerator(BaseGenerator):
         # Try to make path relative to project root
         try:
             rel_to_root = path_obj.relative_to(self._project_root)
-            return str(rel_to_root)
+            # Use forward slashes for cross-platform compatibility
+            return str(rel_to_root).replace("\\", "/")
         except ValueError:
             # Path is not under project root
             return None
@@ -839,26 +845,34 @@ class NinjaGenerator(BaseGenerator):
 
         return token
 
-    def _quote_for_shell(self, token: str) -> str:
-        """Quote a token for shell command substitution.
+    def _escape_for_ninja_variable(self, token: str) -> str:
+        """Escape a token for use in a Ninja variable value.
 
         Used for variable values that get substituted into commands.
-        Unlike _escape_path (which uses Ninja $ escaping), this uses
-        shell quoting so paths with spaces work when the variable is
-        expanded into the command line.
+        Uses Ninja escaping ($ prefix) rather than shell quoting,
+        which works consistently across all platforms.
+
+        Ninja escaping: space -> $  (dollar-space), colon -> $:, dollar -> $$
+        Also normalizes backslashes to forward slashes for cross-platform paths.
+
+        Preserves Ninja variable references like $topdir, $in, $out.
         """
-        # If no special chars, return as-is
-        if not any(c in token for c in " \t\n\"'\\`!$&*()[]{}|;<>?"):
-            return token
-        # Use single quotes (simplest), but handle embedded single quotes
-        if "'" not in token:
-            return f"'{token}'"
-        # Has single quotes - use double quotes with escaping
-        escaped = token.replace("\\", "\\\\")
-        escaped = escaped.replace('"', '\\"')
-        escaped = escaped.replace("`", "\\`")
-        escaped = escaped.replace("$", "\\$")
-        return f'"{escaped}"'
+        # Normalize backslashes to forward slashes
+        token = token.replace("\\", "/")
+
+        # Escape special characters for Ninja, but preserve $topdir and other
+        # Ninja variables. We do this by temporarily replacing known patterns.
+        # $topdir is the main one we use for relative paths.
+        token = token.replace("$topdir", "\x00TOPDIR\x00")
+
+        # Escape remaining $ to $$
+        token = token.replace("$", "$$")
+        token = token.replace(" ", "$ ")
+        token = token.replace(":", "$:")
+
+        # Restore $topdir
+        token = token.replace("\x00TOPDIR\x00", "$topdir")
+        return token
 
     def _get_rule_command(
         self, env: Environment, builder: Builder, build_info: dict[str, object]
