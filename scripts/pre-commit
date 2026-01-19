@@ -20,4 +20,12 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
+echo "Running ty typecheck..."
+uvx ty check pcons/
+if [ $? -ne 0 ]; then
+    echo ""
+    echo "Type check failed. Fix the type errors above before committing."
+    exit 1
+fi
+
 echo "Lint checks passed."
