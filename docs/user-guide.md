@@ -1640,6 +1640,6 @@ Import from `pcons.util.macos`.
 
 ## Further Reading
 
-- [Architecture Document](../ARCHITECTURE.md) - Design details and implementation status
-- [Example Projects](../examples/) - Working examples to learn from
-- [Contributing Guide](../CONTRIBUTING.md) - How to contribute to pcons
+- [Architecture Document](architecture.md) - Design details and implementation status
+- [Example Projects](https://github.com/garyo/pcons/tree/main/examples) - Working examples to learn from
+- [Contributing Guide](contributing.md) - How to contribute to pcons

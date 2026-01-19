@@ -44,7 +44,7 @@ pcons-fetch = "pcons.packages.fetch.cli:main"
 [project.urls]
 Homepage = "https://github.com/garyo/pcons"
 Repository = "https://github.com/garyo/pcons"
-Documentation = "https://github.com/garyo/pcons"
+Documentation = "https://pcons.readthedocs.io/"
 Issues = "https://github.com/garyo/pcons/issues"
 
 [build-system]
