@@ -1,0 +1,19 @@
+# Test configuration for archive_install example
+# Demonstrates C program with Tarfile archive installers
+
+[test]
+description = "C program with Tarfile archive installers"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/hello",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/hello", expect_stdout = "Hello from pcons!" },
+]
+
+[skip]
+# Works on all platforms with a C compiler

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Test runner for example projects.
 
-Discovers and runs all example projects in tests/examples/.
+Discovers and runs all example projects in examples/.
 Each example is a self-contained project that serves as both
 a test and documentation for users.
 """
@@ -28,7 +28,7 @@ except ImportError:
         tomllib = None  # type: ignore[assignment]
 
 
-EXAMPLES_DIR = Path(__file__).parent / "examples"
+EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 IS_WINDOWS = platform.system().lower() == "windows"
 
 
