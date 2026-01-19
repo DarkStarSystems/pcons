@@ -4,7 +4,7 @@
 [test]
 description = "C program with Tarfile archive installers"
 
-# Files that should exist after the build
+# Files that should exist after the default build
 expected_outputs = [
     "build/hello",
 ]
@@ -13,6 +13,11 @@ expected_outputs = [
 # Run the built program and check output
 commands = [
     { run = "./build/hello", expect_stdout = "Hello from pcons!" },
+    # Test the install alias - builds tarballs and copies to Installers/
+    { run = "ninja -f build/build.ninja install" },
+    # Verify the installed tarballs exist
+    { run = "test -f Installers/hello-src.tar.gz" },
+    { run = "test -f Installers/hello-bin.tar.gz" },
 ]
 
 [skip]
