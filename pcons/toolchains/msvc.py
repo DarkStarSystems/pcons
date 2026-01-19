@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from pathlib import Path
@@ -12,6 +13,8 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -594,6 +597,8 @@ class MsvcToolchain(BaseToolchain):
         elif variant_lower == "minsizerel":
             compile_flags = ["/O1"]
             defines = ["NDEBUG"]
+        else:
+            logger.warning("Unknown variant '%s', no flags applied", variant)
 
         for tool_name in ("cc", "cxx"):
             if env.has_tool(tool_name):

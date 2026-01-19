@@ -439,7 +439,9 @@ class TestResolverSharedLibraryCompileFlags:
             object_suffix=".o",
         )
         # Need to patch in multiple places
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
+        )
 
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
@@ -480,7 +482,9 @@ class TestResolverSharedLibraryCompileFlags:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: macos_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: macos_platform
+        )
 
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
@@ -521,7 +525,9 @@ class TestResolverSharedLibraryCompileFlags:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
+        )
 
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
@@ -562,7 +568,9 @@ class TestResolverSharedLibraryCompileFlags:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
+        )
 
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")

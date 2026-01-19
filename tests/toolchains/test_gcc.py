@@ -199,7 +199,9 @@ class TestGccCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
+        )
 
         tc = GccToolchain()
         flags = tc.get_compile_flags_for_target_type("shared_library")
@@ -219,7 +221,9 @@ class TestGccCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: macos_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: macos_platform
+        )
 
         tc = GccToolchain()
         flags = tc.get_compile_flags_for_target_type("shared_library")
@@ -239,7 +243,9 @@ class TestGccCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
+        )
 
         tc = GccToolchain()
         flags = tc.get_compile_flags_for_target_type("static_library")
@@ -259,7 +265,9 @@ class TestGccCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
+        )
 
         tc = GccToolchain()
         flags = tc.get_compile_flags_for_target_type("program")
@@ -279,7 +287,9 @@ class TestGccCompileFlagsForTargetType:
             static_lib_prefix="lib",
             object_suffix=".o",
         )
-        monkeypatch.setattr("pcons.toolchains.gcc.get_platform", lambda: linux_platform)
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
+        )
 
         tc = GccToolchain()
         flags = tc.get_compile_flags_for_target_type("interface")

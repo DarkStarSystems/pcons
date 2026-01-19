@@ -25,11 +25,14 @@ Example:
 
 from __future__ import annotations
 
+import logging
 import shutil
 from typing import TYPE_CHECKING, Any
 
 from pcons.tools.cuda import CudaCompiler
 from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_registry
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -123,6 +126,8 @@ class CudaToolchain(BaseToolchain):
         elif variant_lower == "minsizerel":
             compile_flags = ["-O1"]  # nvcc doesn't have -Os
             defines = ["NDEBUG"]
+        else:
+            logger.warning("Unknown variant '%s', no flags applied", variant)
 
         # Add extra flags/defines from kwargs
         extra_flags = kwargs.get("extra_flags", [])

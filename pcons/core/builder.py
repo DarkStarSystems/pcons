@@ -8,6 +8,7 @@ an Object builder that turns .c files into .o files).
 
 from __future__ import annotations
 
+import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -553,7 +554,7 @@ class MultiOutputBuilder(CommandBuilder):
             for spec in self._outputs
         }
 
-        primary_node._build_info = {
+        primary_node._build_info = {  # type: ignore[assignment]
             "tool": self._tool_name,
             "command_var": self._command_var,
             "language": self._language,
@@ -598,9 +599,6 @@ class GenericCommandBuilder(BaseBuilder):
         )
     """
 
-    # Counter for generating unique rule names
-    _rule_counter: int = 0
-
     def __init__(
         self,
         command: str | list[str],
@@ -615,12 +613,12 @@ class GenericCommandBuilder(BaseBuilder):
                     - $TARGET, $TARGETS: Target file(s)
                     - ${SOURCES[n]}, ${TARGETS[n]}: Indexed access
             rule_name: Optional custom rule name for Ninja. If not provided,
-                      a unique name is generated.
+                      a unique name is generated using uuid.
         """
         # Generate unique rule name if not provided
+        # Using uuid4 ensures uniqueness without thread synchronization
         if rule_name is None:
-            GenericCommandBuilder._rule_counter += 1
-            rule_name = f"command_{GenericCommandBuilder._rule_counter}"
+            rule_name = f"command_{uuid.uuid4().hex[:8]}"
 
         super().__init__(
             name="Command",

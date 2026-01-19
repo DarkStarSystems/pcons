@@ -192,6 +192,11 @@ class ObjectNodeFactory:
         if result:
             tool_name, language = result
             if env.has_tool(tool_name):
+                logger.warning(
+                    "Using deprecated SOURCE_SUFFIX_MAP fallback for '%s' files. "
+                    "Consider configuring a toolchain that handles this suffix.",
+                    suffix,
+                )
                 return result
         return None
 
@@ -850,10 +855,24 @@ class Resolver:
                 # Fallback to hardcoded suffixes
                 suffix = source.path.suffix.lower()
                 if suffix in (".cpp", ".cxx", ".cc", ".c++", ".mm"):
+                    logger.warning(
+                        "Using deprecated hardcoded suffix fallback for '%s'. "
+                        "Consider configuring a toolchain that handles this suffix.",
+                        source.path.suffix,
+                    )
                     languages.add("cxx")
                 elif source.path.suffix == ".C":  # Case-sensitive
+                    logger.warning(
+                        "Using deprecated hardcoded suffix fallback for '.C'. "
+                        "Consider configuring a toolchain that handles this suffix.",
+                    )
                     languages.add("cxx")
                 elif suffix in (".c", ".m"):
+                    logger.warning(
+                        "Using deprecated hardcoded suffix fallback for '%s'. "
+                        "Consider configuring a toolchain that handles this suffix.",
+                        source.path.suffix,
+                    )
                     languages.add("c")
 
         # Return highest priority language

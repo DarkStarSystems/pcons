@@ -10,6 +10,7 @@ compilation/link requirements for a target, computed by merging:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,6 +20,8 @@ from pcons.core.flags import get_separated_arg_flags_from_toolchains, merge_flag
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.target import Target, UsageRequirements
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -215,13 +218,20 @@ def _get_primary_tool(target: Target, env: Environment) -> str | None:
                     return tool_name
 
     # Fallback to hardcoded suffixes for backwards compatibility
+    # Import the centralized suffix map from resolver
+    from pcons.core.resolver import SOURCE_SUFFIX_MAP
+
     for source in target.sources:
         if isinstance(source, FileNode):
             suffix = source.path.suffix.lower()
-            if suffix in (".cpp", ".cxx", ".cc", ".c++"):
-                return "cxx"
-            if suffix == ".c":
-                return "cc"
+            if suffix in SOURCE_SUFFIX_MAP:
+                tool_name, _ = SOURCE_SUFFIX_MAP[suffix]
+                logger.warning(
+                    "Using deprecated SOURCE_SUFFIX_MAP fallback for '%s' files. "
+                    "Consider configuring a toolchain that handles this suffix.",
+                    suffix,
+                )
+                return tool_name
 
     # Default to C++ if available
     if env.has_tool("cxx"):

@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode, Node
+    from pcons.core.project import Project
 
 
 class TargetType(StrEnum):
@@ -208,7 +209,7 @@ class Target:
         else:
             self.target_type = target_type
         self._env: Environment | None = None
-        self._project: Any = None  # Set by Project when target is created
+        self._project: Project | None = None  # Set by Project when target is created
         self.object_nodes: list[FileNode] = []
         self.output_nodes: list[FileNode] = []
         self._resolved: bool = False

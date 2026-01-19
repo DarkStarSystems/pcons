@@ -94,7 +94,7 @@ class NinjaGenerator(BaseGenerator):
         # Collect all unique rules from targets
         for target in project.targets:
             env = target._env
-            for node in self._get_target_build_nodes(target, project):
+            for node in self._get_target_build_nodes(target):
                 self._ensure_rule(f, node, target, env)
 
         # Also check nodes tracked in environments
@@ -104,54 +104,6 @@ class NinjaGenerator(BaseGenerator):
                     self._ensure_rule(f, node, None, env)
 
         f.write("\n")
-
-    def _get_target_build_nodes(
-        self, target: Target, project: Project
-    ) -> list[FileNode]:
-        """Get all buildable file nodes from a target.
-
-        This is a helper method that handles both resolved (target-centric)
-        and legacy targets, extracting nodes that have build information.
-
-        Args:
-            target: The target to get nodes from.
-            project: The project (used for legacy path to find environment).
-
-        Returns:
-            List of FileNodes that have build information.
-        """
-        nodes: list[FileNode] = []
-
-        if getattr(target, "_resolved", False):
-            # Resolved target (target-centric model)
-            # Add object nodes and output nodes
-            for obj_node in target.object_nodes:
-                if isinstance(obj_node, FileNode):
-                    nodes.append(obj_node)
-            for out_node in target.output_nodes:
-                if isinstance(out_node, FileNode):
-                    nodes.append(out_node)
-            # For interface targets (like Install), also check target.nodes
-            if target.target_type == "interface":
-                for target_node in target.nodes:
-                    if isinstance(target_node, FileNode):
-                        has_build = (
-                            getattr(target_node, "_build_info", None) is not None
-                        )
-                        if has_build:
-                            nodes.append(target_node)
-        else:
-            # Legacy path: use target.nodes directly
-            for target_node in target.nodes:
-                # Check for builder or build_info (install nodes use build_info)
-                has_build = (
-                    target_node.builder is not None
-                    or getattr(target_node, "_build_info", None) is not None
-                )
-                if isinstance(target_node, FileNode) and has_build:
-                    nodes.append(target_node)
-
-        return nodes
 
     def _find_env_for_node(
         self, node: FileNode, project: Project
@@ -412,7 +364,7 @@ class NinjaGenerator(BaseGenerator):
         Uses _get_target_build_nodes() to handle both resolved (target-centric)
         and legacy targets uniformly.
         """
-        for node in self._get_target_build_nodes(target, project):
+        for node in self._get_target_build_nodes(target):
             if node.path not in written_nodes:
                 self._write_build_statement(f, node, target, project)
                 written_nodes.add(node.path)

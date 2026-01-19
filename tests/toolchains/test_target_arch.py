@@ -40,7 +40,7 @@ class TestGccTargetArch:
         toolchain = GccToolchain()
 
         # Mock macOS platform
-        with patch("pcons.toolchains.gcc.get_platform") as mock_platform:
+        with patch("pcons.toolchains.unix.get_platform") as mock_platform:
             mock_platform.return_value.is_macos = True
             mock_platform.return_value.is_linux = False
             mock_platform.return_value.is_posix = True
@@ -69,7 +69,7 @@ class TestGccTargetArch:
 
         toolchain = GccToolchain()
 
-        with patch("pcons.toolchains.gcc.get_platform") as mock_platform:
+        with patch("pcons.toolchains.unix.get_platform") as mock_platform:
             mock_platform.return_value.is_macos = True
             mock_platform.return_value.is_linux = False
             mock_platform.return_value.is_posix = True
@@ -95,7 +95,7 @@ class TestGccTargetArch:
 
         toolchain = GccToolchain()
 
-        with patch("pcons.toolchains.gcc.get_platform") as mock_platform:
+        with patch("pcons.toolchains.unix.get_platform") as mock_platform:
             mock_platform.return_value.is_macos = False
             mock_platform.return_value.is_linux = True
             mock_platform.return_value.is_posix = True
@@ -128,7 +128,7 @@ class TestLlvmTargetArch:
 
         toolchain = LlvmToolchain()
 
-        with patch("pcons.toolchains.llvm.get_platform") as mock_platform:
+        with patch("pcons.toolchains.unix.get_platform") as mock_platform:
             mock_platform.return_value.is_macos = True
             mock_platform.return_value.is_linux = False
             mock_platform.return_value.is_posix = True
@@ -330,7 +330,7 @@ class TestEnvironmentSetTargetArch:
         toolchain = GccToolchain()
         env._toolchain = toolchain
 
-        with patch("pcons.toolchains.gcc.get_platform") as mock_platform:
+        with patch("pcons.toolchains.unix.get_platform") as mock_platform:
             mock_platform.return_value.is_macos = True
             mock_platform.return_value.is_linux = False
             mock_platform.return_value.is_posix = True
@@ -362,7 +362,7 @@ class TestEnvironmentSetTargetArch:
         toolchain.apply_variant(env, "release")
 
         # Then apply target arch
-        with patch("pcons.toolchains.gcc.get_platform") as mock_platform:
+        with patch("pcons.toolchains.unix.get_platform") as mock_platform:
             mock_platform.return_value.is_macos = True
             mock_platform.return_value.is_linux = False
             mock_platform.return_value.is_posix = True

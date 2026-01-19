@@ -16,12 +16,107 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypedDict
 
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
+
+
+class OutputInfo(TypedDict, total=False):
+    """Information about a single output in a multi-output build.
+
+    Attributes:
+        path: Path to the output file.
+        suffix: File suffix for the output.
+        implicit: If True, this is an implicit output (not tracked by Ninja).
+        required: If True, this output must be generated.
+    """
+
+    path: Path
+    suffix: str
+    implicit: bool
+    required: bool
+
+
+class BuildInfo(TypedDict, total=False):
+    """Build information stored on nodes for code generation.
+
+    This TypedDict documents all the fields that can appear in a node's
+    _build_info dictionary. Different builders populate different subsets
+    of these fields.
+
+    Common fields (most builders):
+        tool: Name of the tool to use (e.g., "cc", "cxx", "link", "ar", "copy").
+        command_var: Variable name containing command template (e.g., "objcmd").
+        language: Language for linker selection (e.g., "c", "cxx").
+        sources: List of source Node objects.
+        depfile: Depfile path pattern for Ninja (e.g., "$out.d").
+        deps_style: Dependency style for Ninja ("gcc" or "msvc").
+
+    Effective requirements (from target-centric resolution):
+        effective_includes: List of include directories (strings).
+        effective_defines: List of preprocessor defines.
+        effective_flags: List of additional compile flags.
+        effective_link_flags: List of link flags.
+        effective_link_libs: List of libraries to link.
+        effective_link_dirs: List of library search directories (strings).
+
+    Multi-output builds:
+        outputs: Dict mapping output name to OutputInfo.
+        all_output_nodes: Dict mapping output name to FileNode.
+        primary_node: Reference to primary node (for secondary outputs).
+        output_name: Name of this output (for secondary outputs).
+
+    Generic command builder:
+        command: The shell command to run.
+        rule_name: Custom rule name for Ninja.
+        all_targets: List of all target nodes.
+
+    Install/copy:
+        copy_cmd: Copy command template (e.g., "cp $in $out").
+
+    Archive builders (Tarfile, Zipfile):
+        output: Output archive path (string).
+        compression: Compression type for tar (e.g., "gz", "bz2", "xz").
+        base_dir: Base directory for archive paths.
+    """
+
+    # Common fields
+    tool: str
+    command_var: str
+    language: str | None
+    sources: list[Any]  # list[Node], but avoid circular import
+    depfile: str | None
+    deps_style: str | None
+
+    # Effective requirements
+    effective_includes: list[str]
+    effective_defines: list[str]
+    effective_flags: list[str]
+    effective_link_flags: list[str]
+    effective_link_libs: list[str]
+    effective_link_dirs: list[str]
+
+    # Multi-output builds
+    outputs: dict[str, OutputInfo]
+    all_output_nodes: dict[str, Any]  # dict[str, FileNode]
+    primary_node: Any  # FileNode
+    output_name: str
+
+    # Generic command builder
+    command: str
+    rule_name: str
+    all_targets: list[Any]  # list[Node]
+
+    # Install/copy
+    copy_cmd: str
+
+    # Archive builders
+    output: str
+    compression: str | None
+    base_dir: str
 
 
 class Node(ABC):
@@ -100,6 +195,7 @@ class FileNode(Node):
     Attributes:
         path: The path to the file.
         _build_info: Builder-specific information for code generation.
+                    See BuildInfo TypedDict for documented fields.
     """
 
     __slots__ = ("path", "_build_info")
@@ -118,7 +214,7 @@ class FileNode(Node):
         """
         super().__init__(defined_at=defined_at)
         self.path = Path(path) if isinstance(path, str) else path
-        self._build_info: dict[str, object] | None = None
+        self._build_info: BuildInfo | None = None
 
     @property
     def name(self) -> str:

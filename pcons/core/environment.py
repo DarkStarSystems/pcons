@@ -18,6 +18,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core.node import FileNode, Node
+    from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.tools.toolchain import Toolchain
 
@@ -73,7 +74,7 @@ class Environment:
             "build_dir": Path("build"),
             "variant": "default",
         }
-        self._project: Any = None  # Set by Project when env is created
+        self._project: Project | None = None  # Set by Project when env is created
         self._toolchain = toolchain
         self._additional_toolchains: list[Toolchain] = []
         self._created_nodes: list[Any] = []  # Nodes created by builders

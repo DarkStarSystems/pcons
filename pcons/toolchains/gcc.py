@@ -10,18 +10,16 @@ Provides GCC-based C and C++ compilation toolchain including:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
-from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
-    from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
-    from pcons.tools.toolchain import SourceHandler
 
 
 class GccCCompiler(BaseTool):
@@ -322,134 +320,22 @@ class GccLinker(BaseTool):
         return ToolConfig("link", cmd=str(gcc.path))
 
 
-class GccToolchain(BaseToolchain):
+class GccToolchain(UnixToolchain):
     """GCC toolchain for C and C++ development.
 
     Includes: C compiler (gcc), C++ compiler (g++), archiver (ar), linker (gcc/g++)
-    """
 
-    # Flags that take their argument as a separate token (e.g., "-F path" not "-Fpath")
-    # These are common GCC/Unix compiler/linker flags where the argument must be
-    # a separate element.
-    SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
-        [
-            # Framework/library paths (macOS)
-            "-F",
-            "-framework",
-            # Xcode/Apple toolchain
-            "-iframework",
-            # Linker flags that take arguments
-            "-Wl,-rpath",
-            "-Wl,-install_name",
-            "-Wl,-soname",
-            # Output-related
-            "-o",
-            "-MF",
-            "-MT",
-            "-MQ",
-            # Linker script
-            "-T",
-            # Architecture
-            "-arch",
-            "-target",
-            "--target",
-            # Include/library search modifiers
-            "-isystem",
-            "-isysroot",
-            "-iquote",
-            "-idirafter",
-            # Xlinker passthrough
-            "-Xlinker",
-            "-Xpreprocessor",
-            "-Xassembler",
-        ]
-    )
+    Inherits from UnixToolchain which provides:
+    - get_source_handler() for C/C++/Objective-C/assembly files
+    - get_object_suffix(), get_static_library_name(), etc.
+    - get_compile_flags_for_target_type() for -fPIC handling
+    - get_separated_arg_flags() for flags like -arch, -framework, etc.
+    - apply_target_arch() for macOS cross-compilation
+    - apply_variant() for debug/release/etc. configurations
+    """
 
     def __init__(self) -> None:
         super().__init__("gcc")
-
-    # =========================================================================
-    # Source Handler Methods
-    # =========================================================================
-
-    def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Return handler for source file suffix, or None if not handled."""
-        from pcons.tools.toolchain import SourceHandler
-
-        suffix_lower = suffix.lower()
-        if suffix_lower == ".c":
-            return SourceHandler("cc", "c", ".o", "$out.d", "gcc")
-        if suffix_lower in (".cpp", ".cxx", ".cc", ".c++"):
-            return SourceHandler("cxx", "cxx", ".o", "$out.d", "gcc")
-        # Handle case-sensitive .C (C++ on Unix)
-        if suffix == ".C":
-            return SourceHandler("cxx", "cxx", ".o", "$out.d", "gcc")
-        # Objective-C
-        if suffix_lower == ".m":
-            return SourceHandler("cc", "objc", ".o", "$out.d", "gcc")
-        if suffix_lower == ".mm":
-            return SourceHandler("cxx", "objcxx", ".o", "$out.d", "gcc")
-        # Assembly files - GCC/GAS handles .s (preprocessed) and .S (needs preprocessing)
-        # Both are processed by the C compiler which invokes the assembler
-        # Check .S (uppercase) first since .S.lower() == ".s"
-        if suffix == ".S":
-            # .S files need C preprocessing, so they can have dependencies
-            return SourceHandler("cc", "asm-cpp", ".o", "$out.d", "gcc")
-        if suffix_lower == ".s":
-            # .s files are already preprocessed assembly, no dependency tracking
-            return SourceHandler("cc", "asm", ".o", None, None)
-        return None
-
-    def get_object_suffix(self) -> str:
-        """Return the object file suffix for GCC toolchain."""
-        return ".o"
-
-    def get_static_library_name(self, name: str) -> str:
-        """Return filename for a static library (Unix-style)."""
-        return f"lib{name}.a"
-
-    def get_shared_library_name(self, name: str) -> str:
-        """Return filename for a shared library (platform-aware)."""
-        platform = get_platform()
-        if platform.is_macos:
-            return f"lib{name}.dylib"
-        return f"lib{name}.so"
-
-    def get_program_name(self, name: str) -> str:
-        """Return filename for a program (no suffix on Unix)."""
-        return name
-
-    def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
-        """Return additional compile flags needed for the target type.
-
-        For GCC on Linux, shared libraries need -fPIC.
-        On macOS, PIC is the default for 64-bit, so no flag is needed.
-
-        Args:
-            target_type: The target type (e.g., "shared_library", "static_library").
-
-        Returns:
-            List of additional compile flags.
-        """
-        platform = get_platform()
-
-        if target_type == "shared_library":
-            # On Linux (and other non-macOS POSIX systems), we need -fPIC
-            # for position-independent code in shared libraries.
-            # On macOS 64-bit, PIC is the default, so no flag needed.
-            if platform.is_linux or (platform.is_posix and not platform.is_macos):
-                return ["-fPIC"]
-
-        # Static libraries, programs, and other types don't need special flags
-        return []
-
-    def get_separated_arg_flags(self) -> frozenset[str]:
-        """Return flags that take their argument as a separate token.
-
-        Returns:
-            A frozenset of GCC/Unix flags that take separate arguments.
-        """
-        return self.SEPARATED_ARG_FLAGS
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
@@ -473,85 +359,6 @@ class GccToolchain(BaseToolchain):
 
         self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
         return True
-
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        """Apply target architecture flags.
-
-        On macOS, uses the -arch flag for cross-compilation (e.g., building
-        arm64 binaries on x86_64 or vice versa). This enables building
-        universal binaries by compiling each architecture separately and
-        combining with lipo.
-
-        On Linux, GCC typically requires a cross-compilation toolchain,
-        so this method is a no-op there (use a different toolchain instead).
-
-        Args:
-            env: Environment to modify.
-            arch: Architecture name (e.g., "arm64", "x86_64").
-            **kwargs: Toolchain-specific options (unused).
-        """
-        super().apply_target_arch(env, arch, **kwargs)
-        platform = get_platform()
-
-        if platform.is_macos:
-            # macOS uses -arch flag for universal binary builds
-            arch_flags = ["-arch", arch]
-            for tool_name in ("cc", "cxx"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                        tool.flags.extend(arch_flags)
-            if env.has_tool("link"):
-                if isinstance(env.link.flags, list):
-                    env.link.flags.extend(arch_flags)
-
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply build variant (debug, release, etc.).
-
-        Args:
-            env: Environment to modify.
-            variant: Variant name (debug, release, relwithdebinfo, minsizerel).
-            **kwargs: Optional extra_flags and extra_defines to add.
-        """
-        super().apply_variant(env, variant, **kwargs)
-
-        compile_flags: list[str] = []
-        defines: list[str] = []
-        link_flags: list[str] = []
-
-        variant_lower = variant.lower()
-        if variant_lower == "debug":
-            compile_flags = ["-O0", "-g"]
-            defines = ["DEBUG", "_DEBUG"]
-        elif variant_lower == "release":
-            compile_flags = ["-O2"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "relwithdebinfo":
-            compile_flags = ["-O2", "-g"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "minsizerel":
-            compile_flags = ["-Os"]
-            defines = ["NDEBUG"]
-
-        # Add extra flags/defines from kwargs
-        extra_flags = kwargs.get("extra_flags", [])
-        extra_defines = kwargs.get("extra_defines", [])
-        compile_flags.extend(extra_flags)
-        defines.extend(extra_defines)
-
-        # Apply to compilers
-        for tool_name in ("cc", "cxx"):
-            if env.has_tool(tool_name):
-                tool = getattr(env, tool_name)
-                if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                    tool.flags.extend(compile_flags)
-                if hasattr(tool, "defines") and isinstance(tool.defines, list):
-                    tool.defines.extend(defines)
-
-        # Apply to linker
-        if env.has_tool("link") and link_flags:
-            if isinstance(env.link.flags, list):
-                env.link.flags.extend(link_flags)
 
 
 # =============================================================================

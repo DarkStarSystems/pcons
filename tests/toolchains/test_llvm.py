@@ -183,7 +183,7 @@ class TestLlvmSourceHandlers:
             object_suffix=".o",
         )
         monkeypatch.setattr(
-            "pcons.toolchains.llvm.get_platform", lambda: macos_platform
+            "pcons.toolchains.unix.get_platform", lambda: macos_platform
         )
 
         tc = LlvmToolchain()
@@ -209,6 +209,10 @@ class TestLlvmSourceHandlers:
             static_lib_suffix=".a",
             static_lib_prefix="lib",
             object_suffix=".o",
+        )
+        # Need to mock in both locations: unix.py (base class) and llvm.py
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
         )
         monkeypatch.setattr(
             "pcons.toolchains.llvm.get_platform", lambda: linux_platform
@@ -285,7 +289,7 @@ class TestLlvmCompileFlagsForTargetType:
             object_suffix=".o",
         )
         monkeypatch.setattr(
-            "pcons.toolchains.llvm.get_platform", lambda: linux_platform
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
         )
 
         tc = LlvmToolchain()
@@ -307,7 +311,7 @@ class TestLlvmCompileFlagsForTargetType:
             object_suffix=".o",
         )
         monkeypatch.setattr(
-            "pcons.toolchains.llvm.get_platform", lambda: macos_platform
+            "pcons.toolchains.unix.get_platform", lambda: macos_platform
         )
 
         tc = LlvmToolchain()
@@ -329,7 +333,7 @@ class TestLlvmCompileFlagsForTargetType:
             object_suffix=".o",
         )
         monkeypatch.setattr(
-            "pcons.toolchains.llvm.get_platform", lambda: linux_platform
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
         )
 
         tc = LlvmToolchain()
@@ -351,7 +355,7 @@ class TestLlvmCompileFlagsForTargetType:
             object_suffix=".o",
         )
         monkeypatch.setattr(
-            "pcons.toolchains.llvm.get_platform", lambda: linux_platform
+            "pcons.toolchains.unix.get_platform", lambda: linux_platform
         )
 
         tc = LlvmToolchain()
