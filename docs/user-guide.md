@@ -929,6 +929,32 @@ This enables features in:
 - **Vim/Neovim** with coc-clangd
 - **Emacs** with eglot or lsp-mode
 
+### Alternative Generators
+
+While Ninja is the default and recommended build executor, pcons also supports generating Makefiles for environments where Ninja isn't available.
+
+#### MakefileGenerator
+
+Generate a traditional Makefile instead of Ninja build files:
+
+```python
+from pcons.generators.makefile import MakefileGenerator
+
+project.resolve()
+
+# Generate Makefile
+MakefileGenerator().generate(project, build_dir)
+# Creates build/Makefile
+```
+
+Then build with:
+
+```bash
+make -C build
+```
+
+The MakefileGenerator supports the same project structure as NinjaGenerator, so you can switch between them without changing your build script.
+
 ### Dependency Visualization
 
 Generate dependency graphs:
@@ -980,6 +1006,34 @@ profile_env.cxx.flags.extend(["-pg", "-fno-omit-frame-pointer"])
 app_release = project.Program("app", env)
 app_profile = project.Program("app_profile", profile_env)
 ```
+
+### Temporary Environment Overrides
+
+Use `env.override()` as a context manager to temporarily modify settings for specific files or targets. This creates a cloned environment with the specified changes, leaving the original unchanged.
+
+```python
+# Override cross-tool variables
+with env.override(variant="profile") as profile_env:
+    project.Program("app_profile", profile_env, sources=["main.cpp"])
+
+# Override tool settings using double-underscore notation
+# (because Python kwargs can't contain dots)
+with env.override(cxx__flags=["-fno-exceptions"]) as no_except_env:
+    project.Library("mylib", no_except_env, sources=["lib.cpp"])
+
+# The yielded env is a full clone - you can modify it further
+with env.override(variant="debug") as debug_env:
+    debug_env.cxx.defines.append("EXTRA_DEBUG")
+    debug_env.cxx.flags.extend(["-g3", "-fno-omit-frame-pointer"])
+    project.Library("mylib_debug", debug_env, sources=["lib.cpp"])
+
+# Combine multiple overrides
+with env.override(variant="debug", cc__cmd="clang") as temp_env:
+    # temp_env has both changes applied
+    pass
+```
+
+This is particularly useful when you need to compile a few files with different settings without creating a permanent cloned environment.
 
 ### Custom Commands with env.Command()
 
@@ -1269,6 +1323,187 @@ The `create_universal_binary()` function:
 
 This works for static libraries, dynamic libraries, and executables.
 
+### Multiple Toolchains
+
+Pcons supports combining multiple toolchains in a single environment. This is useful for projects that mix languages, such as C++ with CUDA, or C++ with Cython.
+
+#### Adding Additional Toolchains
+
+Use `env.add_toolchain()` to add extra toolchains to an environment:
+
+```python
+from pcons import Project, find_c_toolchain
+from pcons.toolchains import find_cuda_toolchain
+
+project = Project("gpu_app", build_dir="build")
+toolchain = find_c_toolchain()
+
+# Create environment with C/C++ toolchain
+env = project.Environment(toolchain=toolchain)
+
+# Add CUDA toolchain for .cu files
+cuda_toolchain = find_cuda_toolchain()
+if cuda_toolchain:
+    env.add_toolchain(cuda_toolchain)
+
+# Now this target can have both .cpp and .cu sources
+app = project.Program("gpu_app", env)
+app.add_sources([
+    "main.cpp",       # Compiled with C++ compiler
+    "kernel.cu",      # Compiled with CUDA nvcc
+])
+
+project.resolve()
+```
+
+#### How Source Routing Works
+
+When a target has sources with different file extensions, pcons routes each source to the appropriate compiler:
+
+- `.c` files → C compiler from primary toolchain
+- `.cpp`, `.cxx`, `.cc` files → C++ compiler from primary toolchain
+- `.cu` files → CUDA compiler from CUDA toolchain (if added)
+
+The primary toolchain (passed to `project.Environment()`) has precedence. If multiple toolchains claim to handle the same file type, the primary toolchain wins.
+
+#### Variant Support with Multiple Toolchains
+
+When you call `env.set_variant()`, the variant is applied to all toolchains:
+
+```python
+env = project.Environment(toolchain=c_toolchain)
+env.add_toolchain(cuda_toolchain)
+
+# This applies "debug" settings to both C++ AND CUDA compilers
+env.set_variant("debug")
+# C++ gets: -O0 -g
+# CUDA gets: -G -g (device debugging)
+```
+
+#### Available Toolchain Finders
+
+| Function | Description |
+|----------|-------------|
+| `find_c_toolchain()` | Find C/C++ toolchain (LLVM, GCC, MSVC, etc.) |
+| `find_cuda_toolchain()` | Find CUDA toolchain (returns `None` if nvcc not found) |
+
+```python
+from pcons.toolchains import find_c_toolchain, find_cuda_toolchain
+
+# Both return None if not available
+c_toolchain = find_c_toolchain()
+cuda_toolchain = find_cuda_toolchain()
+```
+
+---
+
+## Feature Detection
+
+Pcons provides a configuration system for detecting compiler capabilities, headers, and types. This is useful for generating config headers or conditionally enabling features.
+
+### Configure and ToolChecks
+
+```python
+from pcons.configure.config import Configure
+from pcons.configure.checks import ToolChecks
+
+# Create configuration context
+config = Configure(build_dir=Path("build"))
+
+# Create environment with toolchain
+env = project.Environment(toolchain=toolchain)
+
+# Create checker for the C compiler
+checks = ToolChecks(config, env, "cc")
+
+# Check if a compiler flag is supported
+if checks.check_flag("-Wall").success:
+    env.cc.flags.append("-Wall")
+
+# Check if a header exists
+if checks.check_header("sys/mman.h").success:
+    env.cc.defines.append("HAVE_MMAN_H")
+
+# Check if a type exists (optionally with headers)
+if checks.check_type("size_t", headers=["stddef.h"]).success:
+    pass
+
+# Get the size of a type
+int_size = checks.check_type_size("int")  # Returns 4 on most systems
+ptr_size = checks.check_type_size("void*")  # 8 on 64-bit, 4 on 32-bit
+```
+
+### Caching
+
+Check results are automatically cached in the build directory. Subsequent runs with the same compiler and flags will use cached results, making configuration fast:
+
+```python
+# First run - compiles test programs
+result1 = checks.check_flag("-Wall")
+assert result1.cached is False
+
+# Second run - uses cache
+result2 = checks.check_flag("-Wall")
+assert result2.cached is True
+```
+
+### Generating Config Headers
+
+Use `Configure` to detect features and generate a `config.h` file:
+
+```python
+from pathlib import Path
+from pcons.configure.config import Configure
+
+config = Configure(build_dir=Path("build"))
+
+# Define features
+config.define("HAVE_FEATURE_A")
+config.define("VERSION_MAJOR", 1)
+config.define("VERSION_MINOR", 2)
+config.define("VERSION_STRING", "1.2.0")
+
+# Conditionally define based on checks
+if config.check_header("sys/mman.h"):
+    pass  # HAVE_SYS_MMAN_H is automatically defined
+
+# Check and record type sizes
+config.check_sizeof("int")    # Defines SIZEOF_INT
+config.check_sizeof("void*")  # Defines SIZEOF_VOIDP
+
+# Mark missing features
+config.undefine("MISSING_FEATURE")
+
+# Generate the header file
+config.write_config_header(
+    Path("build/config.h"),
+    guard="MY_CONFIG_H",           # Custom include guard
+    include_platform=True,         # Add PCONS_OS_* and PCONS_ARCH_* defines
+)
+```
+
+This generates a header like:
+
+```c
+#ifndef MY_CONFIG_H
+#define MY_CONFIG_H
+
+/* Platform detection */
+#define PCONS_OS_MACOS 1
+#define PCONS_ARCH_ARM64 1
+
+/* Feature detection */
+#define HAVE_FEATURE_A 1
+#define VERSION_MAJOR 1
+#define VERSION_MINOR 2
+#define VERSION_STRING "1.2.0"
+#define SIZEOF_INT 4
+#define SIZEOF_VOIDP 8
+/* #undef MISSING_FEATURE */
+
+#endif /* MY_CONFIG_H */
+```
+
 ---
 
 ## Troubleshooting
@@ -1347,8 +1582,11 @@ This works for static libraries, dynamic libraries, and executables.
 | `env.set_target_arch(arch)` | Set target CPU architecture |
 | `env.use(package)` | Apply package settings |
 | `env.clone()` | Create a copy |
+| `env.override(**kwargs)` | Context manager for temporary overrides |
+| `env.add_toolchain(toolchain)` | Add additional toolchain (e.g., CUDA) |
 | `env.Command(target, source, cmd)` | Run arbitrary shell command |
 | `env.Framework(*names)` | Link macOS frameworks (macOS only) |
+| `env.Glob(pattern)` | Find files matching a glob pattern |
 | `env.cc` | C compiler settings |
 | `env.cxx` | C++ compiler settings |
 | `env.link` | Linker settings |
@@ -1359,8 +1597,34 @@ This works for static libraries, dynamic libraries, and executables.
 |----------|-------------|
 | `find_c_toolchain()` | Find an available C/C++ toolchain (platform-aware defaults) |
 | `find_c_toolchain(prefer=[...])` | Find toolchain with explicit preference order |
+| `find_cuda_toolchain()` | Find CUDA toolchain (returns `None` if nvcc not found) |
 | `get_var(name, default)` | Get a build variable |
 | `get_variant(default)` | Get the build variant |
+
+### Generators
+
+| Class | Description |
+|-------|-------------|
+| `NinjaGenerator` | Generate Ninja build files (default) |
+| `MakefileGenerator` | Generate traditional Makefiles |
+| `CompileCommandsGenerator` | Generate compile_commands.json for IDEs |
+| `MermaidGenerator` | Generate Mermaid dependency diagrams |
+
+### Configuration and Feature Detection
+
+| Class/Method | Description |
+|--------------|-------------|
+| `Configure(build_dir)` | Create configuration context |
+| `config.define(name, value=1)` | Define a preprocessor symbol |
+| `config.undefine(name)` | Mark a symbol as undefined |
+| `config.check_sizeof(type)` | Get the size of a type and define `SIZEOF_*` |
+| `config.check_header(name)` | Check if a header exists |
+| `config.write_config_header(path)` | Generate a config.h file |
+| `ToolChecks(config, env, tool)` | Create feature checker for a tool |
+| `checks.check_flag(flag)` | Check if compiler accepts a flag |
+| `checks.check_header(name)` | Check if a header exists |
+| `checks.check_type(name, headers=[])` | Check if a type exists |
+| `checks.check_type_size(name)` | Get the size of a type |
 
 ### macOS Utilities
 
@@ -1377,5 +1641,5 @@ Import from `pcons.util.macos`.
 ## Further Reading
 
 - [Architecture Document](../ARCHITECTURE.md) - Design details and implementation status
-- [Example Projects](../tests/examples/) - Working examples to learn from
+- [Example Projects](../examples/) - Working examples to learn from
 - [Contributing Guide](../CONTRIBUTING.md) - How to contribute to pcons
