@@ -14,7 +14,47 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+    from pcons.core.target import Target
     from pcons.tools.tool import BaseTool, Tool
+
+
+# =============================================================================
+# Toolchain Context - provides variables for build statements
+# =============================================================================
+
+
+@runtime_checkable
+class ToolchainContext(Protocol):
+    """Toolchain-specific build context.
+
+    Provides variables that fill placeholders in command templates.
+    The toolchain controls what variables exist and how they're formatted.
+
+    This protocol allows toolchains to define domain-specific build contexts
+    without polluting the core BuildInfo with C/C++ specific fields like
+    effective_includes, effective_defines, etc.
+
+    Example implementations:
+    - CompileLinkContext: For C/C++ compilation and linking
+    - DocumentContext: For document generation (hypothetical)
+    - AssetBundleContext: For asset bundling (hypothetical)
+    """
+
+    def get_variables(self) -> dict[str, list[str]]:
+        """Return variables for build statement.
+
+        Keys must match placeholders in the tool's command template.
+        Values are lists of individual tokens (flags, paths, etc.).
+        Shell escaping/quoting is handled by the generator based on target format.
+
+        This design ensures proper handling of paths with spaces, defines with
+        special characters, etc. The generator joins these with appropriate
+        quoting for the target (Ninja, Make, etc.).
+
+        Returns:
+            Dictionary mapping variable names to lists of string tokens.
+        """
+        ...
 
 
 # =============================================================================
@@ -358,6 +398,30 @@ class Toolchain(Protocol):
         """
         ...
 
+    def create_build_context(
+        self,
+        target: Target,
+        env: Environment,
+        for_compilation: bool = True,
+    ) -> ToolchainContext | None:
+        """Create a toolchain-specific build context for a target.
+
+        This is the factory method that creates the appropriate context
+        object for this toolchain. The context provides variables that
+        fill placeholders in command templates.
+
+        Args:
+            target: The target being built.
+            env: The build environment.
+            for_compilation: If True, create context for compilation.
+                            If False, create context for linking.
+
+        Returns:
+            A ToolchainContext providing variables for the build statement,
+            or None if this toolchain doesn't use the context mechanism.
+        """
+        ...
+
 
 class BaseToolchain(ABC):
     """Abstract base class for toolchains.
@@ -632,6 +696,38 @@ class BaseToolchain(ABC):
             A frozenset of flag strings that take separate arguments.
         """
         return frozenset()
+
+    def create_build_context(
+        self,
+        target: Target,
+        env: Environment,
+        for_compilation: bool = True,
+    ) -> ToolchainContext | None:
+        """Create a toolchain-specific build context for a target.
+
+        Default implementation returns None, meaning the toolchain doesn't
+        use the context mechanism. Subclasses should override this to return
+        an appropriate context object (e.g., CompileLinkContext for C/C++).
+
+        Args:
+            target: The target being built.
+            env: The build environment.
+            for_compilation: If True, create context for compilation.
+                            If False, create context for linking.
+
+        Returns:
+            A ToolchainContext providing variables for the build statement,
+            or None if this toolchain doesn't use the context mechanism.
+        """
+        # Import here to avoid circular imports
+        from pcons.core.build_context import CompileLinkContext
+        from pcons.core.requirements import compute_effective_requirements
+
+        # Compute effective requirements
+        effective = compute_effective_requirements(target, env, for_compilation)
+
+        # Create and return context
+        return CompileLinkContext.from_effective_requirements(effective)
 
     def __repr__(self) -> str:
         tools = ", ".join(self._tools.keys())

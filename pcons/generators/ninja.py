@@ -6,12 +6,14 @@ Generates build.ninja files from a configured pcons Project.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from pcons.core.node import FileNode, Node
 from pcons.generators.generator import BaseGenerator
+from pcons.tools.toolchain import ToolchainContext
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -46,6 +48,9 @@ class NinjaGenerator(BaseGenerator):
         super().__init__("ninja")
         self._rules: dict[str, str] = {}  # rule_name -> command
         self._rule_counter = 0
+        self._output_dir: Path | None = None  # Set during generate()
+        self._project_root: Path | None = None  # Set during generate()
+        self._topdir: str = ".."  # Relative path from output_dir to project root
 
     def generate(self, project: Project, output_dir: Path) -> None:
         """Generate build.ninja file.
@@ -60,6 +65,16 @@ class NinjaGenerator(BaseGenerator):
         # Reset state for this generation
         self._rules = {}
         self._rule_counter = 0
+        self._output_dir = output_dir.resolve()
+        self._project_root = project.root_dir.resolve()
+        # Compute relative path from output_dir to project root
+        try:
+            self._topdir = str(
+                Path(os.path.relpath(self._project_root, self._output_dir))
+            )
+        except ValueError:
+            # On Windows, relpath fails for paths on different drives
+            self._topdir = str(self._project_root)
 
         with open(ninja_file, "w") as f:
             self._write_header(f, project)
@@ -79,7 +94,11 @@ class NinjaGenerator(BaseGenerator):
     def _write_variables(self, f: TextIO, project: Project) -> None:
         """Write global variables."""
         f.write("# Global variables\n")
-        f.write(f"builddir = {self._escape_path(project.build_dir)}\n")
+        # builddir is "." since the ninja file is in the build directory
+        f.write("builddir = .\n")
+        # topdir is the relative path from build dir to project root
+        # Used for source files, include paths, etc.
+        f.write(f"topdir = {self._escape_path(self._topdir)}\n")
         f.write("\n")
 
     def _write_rules(self, f: TextIO, project: Project) -> None:
@@ -136,7 +155,7 @@ class NinjaGenerator(BaseGenerator):
         command_var = build_info.get("command_var", "cmdline")
 
         # Check if this is a target-centric build (has effective requirements)
-        has_effective_reqs = any(k.startswith("effective_") for k in build_info.keys())
+        has_effective_reqs = build_info.get("context") is not None
 
         # Check if this is a generic command (has custom rule_name and command)
         custom_rule_name = build_info.get("rule_name")
@@ -394,7 +413,7 @@ class NinjaGenerator(BaseGenerator):
         sources: list[Node] = build_info.get("sources", [])
 
         # Check if this is a target-centric build (has effective requirements)
-        has_effective_reqs = any(k.startswith("effective_") for k in build_info.keys())
+        has_effective_reqs = build_info.get("context") is not None
 
         # Get the environment for this build (needed for per-env rule naming)
         env = target._env if target else None
@@ -418,14 +437,14 @@ class NinjaGenerator(BaseGenerator):
         if all_targets and len(cast(list[Node], all_targets)) > 1:
             # Generic command with multiple outputs
             target_nodes = cast(list[FileNode], all_targets)
-            output = " ".join(self._escape_path(t.path) for t in target_nodes)
+            output = " ".join(self._escape_output_path(t.path) for t in target_nodes)
         elif outputs_info:
             # Multi-output build (from MultiOutputBuilder)
             explicit_outputs: list[str] = []
             implicit_outputs: list[str] = []
 
             for _name, info in outputs_info.items():
-                path = self._escape_path(info["path"])
+                path = self._escape_output_path(info["path"])
                 if info.get("implicit", False):
                     implicit_outputs.append(path)
                 else:
@@ -436,23 +455,29 @@ class NinjaGenerator(BaseGenerator):
                 output += " | " + " ".join(implicit_outputs)
         else:
             # Single-output build
-            output = self._escape_path(node.path)
+            output = self._escape_output_path(node.path)
 
         # Explicit dependencies (sources + library dependencies)
         # For source files, we need to reference them from the build directory
-        def get_source_path(s: FileNode) -> str:
-            # If source is in build dir, use relative path
-            # Otherwise, make it relative to build dir or absolute
-            if project and not s.path.is_absolute():
-                # Make path relative from build dir to source dir
-                src_path = project.root_dir / s.path
-                if src_path.exists():
-                    return self._escape_path(src_path)
+        def get_dep_path(s: FileNode) -> str:
+            # Check if this is a build output (has _build_info from resolver)
+            # or has a builder (legacy path)
+            if getattr(s, "_build_info", None) is not None or s.is_target:
+                # Build output - make relative to build dir
+                return self._escape_output_path(s.path)
+
+            # Source file - try to make relative with $topdir
+            rel = self._make_source_relative(s.path)
+            if rel is not None:
+                # $topdir is a ninja variable - escape the path part
+                return "$topdir/" + self._escape_path(rel)
+
+            # Fall back: escape the path as-is (external files)
             return self._escape_path(s.path)
 
         # Start with sources from build_info
         explicit_deps_list = [
-            get_source_path(s) for s in sources if isinstance(s, FileNode)
+            get_dep_path(s) for s in sources if isinstance(s, FileNode)
         ]
 
         # Add any additional explicit deps (e.g., libraries for linking)
@@ -460,7 +485,8 @@ class NinjaGenerator(BaseGenerator):
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                explicit_deps_list.append(self._escape_path(dep.path))
+                # Use _escape_output_path for build outputs (objects, libraries)
+                explicit_deps_list.append(self._escape_output_path(dep.path))
 
         explicit_deps = " ".join(explicit_deps_list)
 
@@ -468,7 +494,7 @@ class NinjaGenerator(BaseGenerator):
         implicit_deps = ""
         if node.implicit_deps:
             implicit = " ".join(
-                self._escape_path(d.path)
+                self._escape_output_path(d.path)
                 for d in node.implicit_deps
                 if isinstance(d, FileNode)
             )
@@ -498,23 +524,33 @@ class NinjaGenerator(BaseGenerator):
         """Write variables for a build statement.
 
         For multi-output builds, also writes out_<name> variables for each output.
-        For target-centric builds, writes effective_* variables from build_info.
+        For target-centric builds, writes variables from context.get_variables()
+        or falls back to effective_* fields for backward compatibility.
         """
         sources: list[Node] = build_info.get("sources", [])  # type: ignore[assignment]
 
-        # Standard variables - use absolute paths for sources
+        # Standard variables - handle both source files and build outputs
         def get_source_path(s: FileNode) -> str:
-            if project and not s.path.is_absolute():
-                src_path = project.root_dir / s.path
-                if src_path.exists():
-                    return str(src_path)
+            # Check if this is a build output (has _build_info from resolver)
+            # or has a builder (legacy path)
+            if getattr(s, "_build_info", None) is not None or s.is_target:
+                # Build output - make relative to build dir
+                return self._make_output_relative(s.path)
+
+            # Source file - try to make relative with $topdir
+            rel = self._make_source_relative(s.path)
+            if rel is not None:
+                # $topdir is a ninja variable, expanded when used in command
+                return f"$topdir/{rel}"
+
+            # Fall back to original path (external files)
             return str(s.path)
 
         source_file_nodes = [s for s in sources if isinstance(s, FileNode)]
         source_paths = " ".join(get_source_path(s) for s in source_file_nodes)
         if source_paths:
             f.write(f"  in = {source_paths}\n")
-        f.write(f"  out = {node.path}\n")
+        f.write(f"  out = {self._make_output_relative(node.path)}\n")
 
         # For generic commands with indexed access, write source_N and target_N
         # variables for each source and target
@@ -526,7 +562,7 @@ class NinjaGenerator(BaseGenerator):
             # Write indexed target variables
             target_nodes = cast(list[FileNode], all_targets)
             for i, tgt in enumerate(target_nodes):
-                f.write(f"  target_{i} = {tgt.path}\n")
+                f.write(f"  target_{i} = {self._make_output_relative(tgt.path)}\n")
 
         # For multi-output builds, write out_<name> for each output
         outputs_info = build_info.get("outputs")
@@ -535,40 +571,26 @@ class NinjaGenerator(BaseGenerator):
                 # Write out_<name> variable for each output
                 if isinstance(info, dict):
                     info_dict = cast(dict[str, Any], info)
-                    f.write(f"  out_{name} = {info_dict['path']}\n")
+                    out_path = self._make_output_relative(info_dict["path"])
+                    f.write(f"  out_{name} = {out_path}\n")
 
-        # Write effective requirements from target-centric build model
-        # These are used to generate the actual compilation/link flags
-        effective_includes = build_info.get("effective_includes")
-        if effective_includes and isinstance(effective_includes, list):
-            include_flags = " ".join(f"-I{inc}" for inc in effective_includes)
-            f.write(f"  includes = {include_flags}\n")
-
-        effective_defines = build_info.get("effective_defines")
-        if effective_defines and isinstance(effective_defines, list):
-            define_flags = " ".join(f"-D{d}" for d in effective_defines)
-            f.write(f"  defines = {define_flags}\n")
-
-        effective_flags = build_info.get("effective_flags")
-        if effective_flags and isinstance(effective_flags, list):
-            flags_str = " ".join(str(f) for f in effective_flags)
-            f.write(f"  extra_flags = {flags_str}\n")
-
-        # Link-time effective requirements
-        effective_link_flags = build_info.get("effective_link_flags")
-        if effective_link_flags and isinstance(effective_link_flags, list):
-            link_flags_str = " ".join(str(f) for f in effective_link_flags)
-            f.write(f"  ldflags = {link_flags_str}\n")
-
-        effective_link_libs = build_info.get("effective_link_libs")
-        if effective_link_libs and isinstance(effective_link_libs, list):
-            libs_str = " ".join(f"-l{lib}" for lib in effective_link_libs)
-            f.write(f"  libs = {libs_str}\n")
-
-        effective_link_dirs = build_info.get("effective_link_dirs")
-        if effective_link_dirs and isinstance(effective_link_dirs, list):
-            link_dirs_str = " ".join(f"-L{d}" for d in effective_link_dirs)
-            f.write(f"  libdirs = {link_dirs_str}\n")
+        # Write build variables from context (toolchain-specific formatting)
+        context = build_info.get("context")
+        if context is not None and isinstance(context, ToolchainContext):
+            variables = context.get_variables()
+            for var_name, var_value in variables.items():
+                if var_value:  # Only write non-empty values
+                    # var_value is a list of tokens
+                    # For includes and libdirs, try to relativize paths
+                    if var_name in ("includes", "libdirs"):
+                        var_value = [
+                            self._relativize_flag_with_path(t) for t in var_value
+                        ]
+                    # Quote for shell since these get substituted into commands
+                    quoted_tokens = [
+                        self._quote_for_shell(token) for token in var_value
+                    ]
+                    f.write(f"  {var_name} = {' '.join(quoted_tokens)}\n")
 
         # Write post-build commands if target has them
         # Check if this is an output node (not an intermediate object file)
@@ -606,7 +628,7 @@ class NinjaGenerator(BaseGenerator):
         f.write("# Aliases\n")
         for name, alias in project.aliases.items():
             targets = " ".join(
-                self._escape_path(t.path)
+                self._escape_output_path(t.path)
                 for t in alias.targets
                 if isinstance(t, FileNode)
             )
@@ -625,12 +647,12 @@ class NinjaGenerator(BaseGenerator):
             if target.output_nodes:
                 for out_node in target.output_nodes:
                     if isinstance(out_node, FileNode):
-                        defaults.append(self._escape_path(out_node.path))
+                        defaults.append(self._escape_output_path(out_node.path))
             # Fall back to nodes for legacy/unresolved targets
             else:
                 for target_node in target.nodes:
                     if isinstance(target_node, FileNode):
-                        defaults.append(self._escape_path(target_node.path))
+                        defaults.append(self._escape_output_path(target_node.path))
 
         # If no default targets, auto-detect "final" outputs
         if not defaults:
@@ -645,7 +667,7 @@ class NinjaGenerator(BaseGenerator):
                     ):
                         for node in target.output_nodes:
                             if isinstance(node, FileNode):
-                                defaults.append(self._escape_path(node.path))
+                                defaults.append(self._escape_output_path(node.path))
 
             # If still no defaults, use legacy path
             if not defaults:
@@ -656,7 +678,7 @@ class NinjaGenerator(BaseGenerator):
                             build_info = getattr(node, "_build_info", {})
                             tool = build_info.get("tool", "")
                             if tool == "link":
-                                defaults.append(self._escape_path(node.path))
+                                defaults.append(self._escape_output_path(node.path))
 
         if defaults:
             f.write(f"default {' '.join(defaults)}\n")
@@ -698,6 +720,145 @@ class NinjaGenerator(BaseGenerator):
         path_str = str(path)
         # Escape special characters
         return self.ESCAPE_CHARS.sub(r"$\1", path_str)
+
+    def _make_output_relative(self, path: Path | str) -> str:
+        """Make an output path relative to the ninja file location.
+
+        Since the ninja file is written to the build directory, output paths
+        should be relative to that directory. For example, if the build dir
+        is '/abs/path/build/' and a path is '/abs/path/build/my_program',
+        this returns 'my_program'.
+        """
+        if self._output_dir is None:
+            return str(path)
+
+        path_obj = Path(path)
+
+        # Handle absolute paths
+        if path_obj.is_absolute():
+            try:
+                return str(path_obj.relative_to(self._output_dir))
+            except ValueError:
+                # Path is not under output_dir - return as-is
+                return str(path)
+
+        # Handle relative paths - try to strip the build dir prefix
+        # e.g., "build/my_program" when output_dir is "build"
+        build_dir_name = self._output_dir.name
+        parts = path_obj.parts
+        if parts and parts[0] == build_dir_name:
+            # Strip the build dir prefix
+            if len(parts) > 1:
+                return str(Path(*parts[1:]))
+            return "."
+
+        return str(path)
+
+    def _escape_output_path(self, path: Path | str) -> str:
+        """Make an output path relative to build dir and escape for Ninja."""
+        return self._escape_path(self._make_output_relative(path))
+
+    def _make_source_relative(self, path: Path | str) -> str | None:
+        """Try to make a source path relative to project root.
+
+        Returns a path like "src/file.c" (relative to project root) if the path
+        is within the project root, or None if it cannot be made relative
+        (e.g., path is outside project or on different drive on Windows).
+
+        The caller is responsible for prepending $topdir if needed.
+        """
+        if self._project_root is None or self._output_dir is None:
+            return None
+
+        path_obj = Path(path)
+
+        # Make absolute if relative
+        if not path_obj.is_absolute():
+            path_obj = self._project_root / path_obj
+
+        path_obj = path_obj.resolve()
+
+        # Try to make path relative to project root
+        try:
+            rel_to_root = path_obj.relative_to(self._project_root)
+            return str(rel_to_root)
+        except ValueError:
+            # Path is not under project root
+            return None
+
+    def _relativize_path_for_variable(self, path: str) -> str:
+        """Make a path relative for use in ninja variables (like includes).
+
+        For paths within the project, returns $topdir/relative/path.
+        For paths outside the project, returns the original path.
+        The result is shell-quoted if needed.
+        """
+        rel = self._make_source_relative(path)
+        if rel is not None:
+            return rel
+        return path
+
+    def _relativize_flag_with_path(self, token: str) -> str:
+        """Relativize a compiler flag that contains a path.
+
+        Handles flags like:
+        - -I/path/to/include -> -I$topdir/relative/path
+        - /I/path/to/include -> /I$topdir/relative/path (MSVC)
+        - -L/path/to/lib -> -L$topdir/relative/path
+        - /LIBPATH:/path -> /LIBPATH:$topdir/relative/path (MSVC)
+
+        Returns the token unchanged if it's not a path flag or can't be relativized.
+        """
+        # Common Unix-style flags with path
+        for prefix in ("-I", "-L", "-isystem"):
+            if token.startswith(prefix):
+                path = token[len(prefix) :]
+                if path:  # Has a path after the prefix
+                    rel = self._make_source_relative(path)
+                    if rel is not None:
+                        return f"{prefix}$topdir/{rel}"
+                return token
+
+        # MSVC-style flags
+        if token.startswith("/I"):
+            path = token[2:]
+            if path:
+                rel = self._make_source_relative(path)
+                if rel is not None:
+                    return f"/I$topdir/{rel}"
+            return token
+
+        if token.upper().startswith("/LIBPATH:"):
+            prefix = token[:9]  # Preserve original case
+            path = token[9:]
+            if path:
+                rel = self._make_source_relative(path)
+                if rel is not None:
+                    return f"{prefix}$topdir/{rel}"
+            return token
+
+        return token
+
+    def _quote_for_shell(self, token: str) -> str:
+        """Quote a token for shell command substitution.
+
+        Used for variable values that get substituted into commands.
+        Unlike _escape_path (which uses Ninja $ escaping), this uses
+        shell quoting so paths with spaces work when the variable is
+        expanded into the command line.
+        """
+        # If no special chars, return as-is
+        if not any(c in token for c in " \t\n\"'\\`!$&*()[]{}|;<>?"):
+            return token
+        # Use single quotes (simplest), but handle embedded single quotes
+        if "'" not in token:
+            return f"'{token}'"
+        # Has single quotes - use double quotes with escaping
+        escaped = token.replace("\\", "\\\\")
+        escaped = escaped.replace('"', '\\"')
+        escaped = escaped.replace("`", "\\`")
+        escaped = escaped.replace("$", "\\$")
+        return f'"{escaped}"'
 
     def _get_rule_command(
         self, env: Environment, builder: Builder, build_info: dict[str, object]

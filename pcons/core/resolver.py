@@ -22,6 +22,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.build_context import CompileLinkContext
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode
 from pcons.core.requirements import (
@@ -254,7 +255,10 @@ class ObjectNodeFactory:
         obj_node = FileNode(obj_path, defined_at=get_caller_location())
         obj_node.depends([source])
 
-        # Store effective requirements in build_info for the generator
+        # Create context object from effective requirements
+        context = CompileLinkContext.from_effective_requirements(effective)
+
+        # Store build info for the generator
         # Use handler's depfile/deps_style (from toolchain, not hardcoded)
         obj_node._build_info = {
             "tool": tool_name,
@@ -263,10 +267,7 @@ class ObjectNodeFactory:
             "sources": [source],
             "depfile": depfile,
             "deps_style": deps_style,
-            # Effective requirements for this specific compilation
-            "effective_includes": [str(p) for p in effective.includes],
-            "effective_defines": list(effective.defines),
-            "effective_flags": list(effective.compile_flags),
+            "context": context,
         }
 
         # Cache the object node
@@ -330,6 +331,9 @@ class OutputNodeFactory:
             target, env, for_compilation=False
         )
 
+        # Create context object from effective requirements
+        context = CompileLinkContext.from_effective_requirements(effective_link)
+
         # Get archiver tool name from toolchain (e.g., "ar" for GCC, "lib" for MSVC)
         archiver_tool = "ar"  # default
         if toolchain := env._toolchain:
@@ -339,7 +343,7 @@ class OutputNodeFactory:
             "tool": archiver_tool,
             "command_var": "libcmd",
             "sources": target.object_nodes,
-            "effective_link_flags": list(effective_link.link_flags),
+            "context": context,
         }
 
         target.output_nodes.append(lib_node)
@@ -404,6 +408,11 @@ class OutputNodeFactory:
         for _, flag in auxiliary_inputs:
             link_flags.append(flag)
 
+        # Create context object from effective requirements
+        # We need to update link_flags in effective_link before creating context
+        effective_link.link_flags = link_flags
+        context = CompileLinkContext.from_effective_requirements(effective_link)
+
         # Determine linker language - we use 'link' tool for linking
         # but track the language for description purposes
         link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
@@ -413,9 +422,7 @@ class OutputNodeFactory:
             "command_var": "sharedcmd",
             "language": link_language,
             "sources": target.object_nodes,
-            "effective_link_flags": link_flags,
-            "effective_link_libs": list(effective_link.link_libs),
-            "effective_link_dirs": [str(p) for p in effective_link.link_dirs],
+            "context": context,
         }
 
         target.output_nodes.append(lib_node)
@@ -478,6 +485,11 @@ class OutputNodeFactory:
         for _, flag in auxiliary_inputs:
             link_flags.append(flag)
 
+        # Create context object from effective requirements
+        # We need to update link_flags in effective_link before creating context
+        effective_link.link_flags = link_flags
+        context = CompileLinkContext.from_effective_requirements(effective_link)
+
         # Determine linker tool based on language - we use 'link' tool
         # but track the language for description purposes
         link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
@@ -487,9 +499,7 @@ class OutputNodeFactory:
             "command_var": "progcmd",
             "language": link_language,
             "sources": target.object_nodes,
-            "effective_link_flags": link_flags,
-            "effective_link_libs": list(effective_link.link_libs),
-            "effective_link_dirs": [str(p) for p in effective_link.link_dirs],
+            "context": context,
         }
 
         target.output_nodes.append(prog_node)

@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Relative paths in ninja files**: Generated `build.ninja` files now use relative paths instead of absolute paths
+  - New `topdir` variable points from build directory to project root (e.g., `topdir = ..`)
+  - Source files use `$topdir/path/to/source.c` format
+  - Include paths use `$topdir/` prefix (e.g., `-I$topdir/include`)
+  - Build outputs remain relative to build directory
+  - Makes ninja files portable and more readable
+- **Proper shell quoting for paths with spaces**: `ToolchainContext.get_variables()` now returns `dict[str, list[str]]` so generators can properly quote each token
+  - Ninja generator uses shell quoting (single quotes) for variable values
+  - Makefile generator uses appropriate quoting for Make
+  - compile_commands.json uses `shlex.quote()` for POSIX compliance
+- **New example `08_paths_with_spaces`**: Demonstrates building with spaces in directory names, filenames, and define values
+
+### Changed
+
+- **Test runner uses `ninja -C build`**: Changed from `ninja -f build/build.ninja` to the correct `ninja -C build` invocation per ninja best practices
+
 ## [0.2.0] - 2025-01-19
 
 ### Added

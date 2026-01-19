@@ -45,7 +45,8 @@ class TestNinjaGenerator:
         gen.generate(project, tmp_path)
 
         content = (tmp_path / "build.ninja").read_text()
-        assert "builddir = out" in content
+        # builddir is always "." since the ninja file is inside the build directory
+        assert "builddir = ." in content
 
 
 class TestNinjaBuildStatements:

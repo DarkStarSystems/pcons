@@ -22,10 +22,11 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | Config header generation | Implemented | write_config_header() |
 | load_config() function | Implemented | Loads saved config |
 | **Toolchains** | | |
-| Toolchain base class | Implemented | Plugin registry |
+| Toolchain base class | Implemented | Plugin registry, ToolchainContext |
 | GCC toolchain | Implemented | Auto-detection, C/C++ |
-| LLVM/Clang toolchain | Planned | Not yet implemented |
-| MSVC toolchain | Planned | Not yet implemented |
+| LLVM/Clang toolchain | Implemented | Auto-detection, C/C++ |
+| MSVC toolchain | Implemented | Auto-detection, C/C++ |
+| Clang-cl toolchain | Implemented | Clang with MSVC compatibility |
 | **Generators** | | |
 | Ninja generator | Implemented | Primary, full support |
 | compile_commands.json | Implemented | For IDE integration |
@@ -357,7 +358,7 @@ obj = env.Object('foo.o', 'foo.cpp')  # Dispatches to env.cxx.Object
 ```
 
 ### Toolchain
-> **Status: Partial** - Base Toolchain class implemented. GCC toolchain working. LLVM and MSVC toolchains planned.
+> **Status: Implemented** - Base Toolchain class with ToolchainContext support. GCC, LLVM, MSVC, and Clang-cl toolchains all working.
 
 A Toolchain is a coordinated set of Tools that work together.
 
@@ -549,6 +550,237 @@ project.resolve()
 ```
 
 This makes build scripts declarative - the order of declarations doesn't matter.
+
+### ToolchainContext: Extensible Build Variables
+> **Status: Implemented**
+
+**Problem:** The core shouldn't know about C/C++ concepts like `-I` include flags or `-D` defines, but generators need to write these flags to build files. How do we keep the core tool-agnostic while supporting toolchain-specific flag formatting?
+
+**Solution:** The `ToolchainContext` protocol provides a clean abstraction layer between the resolver and generators.
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                            Resolution Phase                              │
+│                                                                          │
+│  Target + Environment                                                    │
+│         │                                                                │
+│         ▼                                                                │
+│  compute_effective_requirements()  ──► EffectiveRequirements            │
+│         │                              (includes, defines, flags, etc.)  │
+│         ▼                                                                │
+│  toolchain.create_build_context()  ──► ToolchainContext                 │
+│         │                              (CompileLinkContext for C/C++)   │
+│         ▼                                                                │
+│  node._build_info["context"] = context                                  │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                           Generation Phase                               │
+│                                                                          │
+│  Generator reads node._build_info["context"]                            │
+│         │                                                                │
+│         ▼                                                                │
+│  context.get_variables()  ──► {"includes": ["-I/path1", "-I/path2"],    │
+│                                "defines": ["-DFOO", "-DBAR=1"],         │
+│                                "extra_flags": ["-Wall", "-O2"],         │
+│                                "ldflags": ["-L/lib", "-pthread"],       │
+│                                "libs": ["-lfoo", "-lbar"],              │
+│                                "libdirs": ["-L/path1", "-L/path2"]}     │
+│         │                                                                │
+│         ▼                                                                │
+│  Generator escapes/quotes each token for target format                  │
+│         │                                                                │
+│         ▼                                                                │
+│  Generator writes variables to build file (per-build overrides)         │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+**Key design points:**
+
+1. **ToolchainContext Protocol** - Defines a single method:
+   ```python
+   class ToolchainContext(Protocol):
+       def get_variables(self) -> dict[str, list[str]]:
+           """Return variables for build statement.
+
+           Keys match placeholders in command templates.
+           Values are lists of tokens - generators handle quoting.
+           """
+           ...
+   ```
+
+2. **CompileLinkContext** - Standard implementation for C/C++ toolchains:
+   ```python
+   @dataclass
+   class CompileLinkContext:
+       includes: list[str]      # Include directories (no prefix)
+       defines: list[str]       # Preprocessor definitions (no prefix)
+       flags: list[str]         # Additional compiler flags
+       link_flags: list[str]    # Linker flags
+       libs: list[str]          # Libraries to link (no prefix)
+       libdirs: list[str]       # Library search directories (no prefix)
+
+       # Prefixes (customizable per toolchain)
+       include_prefix: str = "-I"
+       define_prefix: str = "-D"
+       libdir_prefix: str = "-L"
+       lib_prefix: str = "-l"
+
+       def get_variables(self) -> dict[str, list[str]]:
+           # Returns lists: ["-I/path1", "-I/path2"], ["-DFOO", "-DBAR"], etc.
+           # Generators join with proper quoting for paths with spaces
+           ...
+   ```
+
+3. **MsvcCompileLinkContext** - MSVC-specific formatting:
+   ```python
+   @dataclass
+   class MsvcCompileLinkContext(CompileLinkContext):
+       include_prefix: str = "/I"
+       define_prefix: str = "/D"
+       libdir_prefix: str = "/LIBPATH:"
+       lib_prefix: str = ""  # MSVC uses full names: kernel32.lib
+   ```
+
+**Variable substitution flow:**
+
+1. **Command templates** in toolchains include placeholders:
+   ```python
+   # In LlvmCcTool
+   "objcmd": ["$cc.cmd", "$cc.flags", "-c", "-o", "$$out", "$$in"]
+   ```
+
+2. **Ninja generator** augments commands with effective requirement placeholders:
+   ```python
+   # objcmd becomes:
+   command = "clang $flags $includes $defines $extra_flags -c -o $out $in"
+   ```
+
+3. **Per-build variables** are written from context (with proper escaping):
+   ```ninja
+   build obj/foo.o: cc_objcmd src/foo.c
+     includes = -I/usr/include -I/path$ with$ spaces/include
+     defines = -DDEBUG '-DMSG="Hello World"'
+     extra_flags = -Wall -O2
+   ```
+
+   Note: Ninja escapes spaces as `$ ` (dollar-space). Generators call
+   `context.get_variables()` which returns lists, then escape/quote
+   each token appropriately for the target format.
+
+**Shell quoting and command formatting:**
+
+Commands flow through two stages before becoming the final string written to build files:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          Command Template                                │
+│   ["$cc.cmd", "$cc.flags", "-c", "-o", "$$out", "$$in"]                 │
+│   (stored as list of tokens in toolchain)                               │
+└─────────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                        subst() - Variable Expansion                      │
+│                                                                          │
+│   Input:  ["$cc.cmd", "$cc.flags", "-c", "-o", "$$out", "$$in"]        │
+│   Output: ["clang", "-Wall", "-O2", "-c", "-o", "$out", "$in"]         │
+│                                                                          │
+│   Returns list[str] - tokens stay separate, no quoting yet             │
+│   $$out becomes $out (ninja variables preserved)                        │
+└─────────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                   to_shell_command() - Final Formatting                  │
+│                                                                          │
+│   shell="ninja": No quoting - Ninja handles its own escaping            │
+│                  $in, $out preserved as-is                              │
+│                  Output: "clang -Wall -O2 -c -o $out $in"               │
+│                                                                          │
+│   shell="bash":  POSIX quoting for special chars (spaces, $, etc.)     │
+│                  Output: "clang -Wall -O2 -c -o '$out' '$in'"           │
+│                                                                          │
+│   shell="cmd":   Windows CMD quoting rules                              │
+│   shell="powershell": PowerShell quoting rules                          │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+Key implementation details (in `pcons/core/subst.py`):
+
+- **`subst()`** expands variables recursively but returns a **list of tokens**, preserving structure
+- **`to_shell_command()`** joins tokens with shell-appropriate quoting via `_quote_for_shell()`
+- **`shell="ninja"`** is special: no quoting is applied because Ninja handles its own variable expansion and escaping. Ninja variables like `$in`, `$out`, `$out.d` pass through unmodified.
+- **Lists stay as lists** until the final `to_shell_command()` call - this ensures proper quoting of paths with spaces, special characters, etc.
+
+Generators call `env.subst(template, shell=...)` which internally calls both functions:
+```python
+# In ninja.py - Ninja handles quoting, preserve $in/$out
+command = env.subst(cmd_template, shell="ninja")
+
+# In makefile.py - Need POSIX quoting
+command = env.subst(command_template, shell="posix")
+```
+
+**Context variable quoting (per-build variables):**
+
+When generators write per-build variables from `context.get_variables()`, they apply
+format-specific quoting:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    context.get_variables()                               │
+│                                                                          │
+│   Returns: {"includes": ["-I/path", "-I/My Headers"],                   │
+│             "defines": ["-DFOO", '-DMSG="Hello World"']}                │
+│   (list of tokens - each is a single argument)                          │
+└─────────────────────────────────────────────────────────────────────────┘
+                                │
+            ┌───────────────────┴───────────────────┐
+            ▼                                       ▼
+┌───────────────────────────┐           ┌───────────────────────────┐
+│      Ninja Generator      │           │    Makefile Generator     │
+│                           │           │                           │
+│ _escape_path() on each:   │           │ _quote_tokens_for_make(): │
+│ - space -> "$ "           │           │ - Paths with spaces get   │
+│ - colon -> "$:"           │           │   single-quoted           │
+│ - dollar -> "$$"          │           │ - $ -> $$ for Make        │
+│                           │           │                           │
+│ Output:                   │           │ Output:                   │
+│ includes = -I/path        │           │ '-I/My Headers'           │
+│            -I/My$ Headers │           │ '-DMSG="Hello World"'     │
+└───────────────────────────┘           └───────────────────────────┘
+```
+
+This design ensures paths with spaces (e.g., `/Users/Alice/My Projects/include`)
+and defines with special characters (e.g., `MSG="Hello World"`) work correctly
+across all output formats.
+
+**Why this design?**
+
+- **Core stays generic**: The core only sees `ToolchainContext.get_variables() -> dict[str, list[str]]`
+- **Toolchains control formatting**: GCC uses `-I`, MSVC uses `/I` - each toolchain handles its own conventions
+- **Generators handle quoting**: Each generator knows its target format (Ninja, Make, etc.) and applies appropriate escaping
+- **Paths with spaces work**: By keeping tokens as lists until final output, paths like `/My Projects/include` are properly quoted
+- **Extensible**: A hypothetical LaTeX toolchain could define `DocumentContext` with completely different variables
+
+**Custom toolchains** can provide their own context classes:
+
+```python
+@dataclass
+class DocumentContext:
+    """Context for document generation (hypothetical)."""
+    input_format: str = "markdown"
+    output_format: str = "pdf"
+    template: str | None = None
+
+    def get_variables(self) -> dict[str, list[str]]:
+        result = {"format": [f"--from={self.input_format}", f"--to={self.output_format}"]}
+        if self.template:
+            result["template"] = [f"--template={self.template}"]
+        return result
+```
 
 ### All Build Outputs Are Targets
 > **Status: Implemented** - All builder methods return Target objects for consistency.
@@ -805,7 +1037,8 @@ pcons/
 │   ├── scanner.py           # Scanner interface .................. [Partial]
 │   ├── target.py            # Target with usage requirements ..... [Implemented]
 │   ├── project.py           # Project container .................. [Implemented]
-│   └── subst.py             # Variable substitution engine ....... [Implemented]
+│   ├── subst.py             # Variable substitution engine ....... [Implemented]
+│   └── build_context.py     # ToolchainContext implementations ... [Implemented]
 ├── configure/
 │   ├── __init__.py
 │   ├── config.py            # Configure context and caching ...... [Implemented]
@@ -823,9 +1056,10 @@ pcons/
 ├── toolchains/
 │   ├── __init__.py
 │   ├── gcc.py               # GCC toolchain ...................... [Implemented]
-│   ├── llvm.py              # LLVM/Clang toolchain ............... [Planned]
-│   ├── msvc.py              # MSVC toolchain ..................... [Planned]
-│   └── ...
+│   ├── llvm.py              # LLVM/Clang toolchain ............... [Implemented]
+│   ├── msvc.py              # MSVC toolchain ..................... [Implemented]
+│   ├── clang_cl.py          # Clang-cl toolchain ................. [Implemented]
+│   └── unix.py              # Base Unix toolchain ................ [Implemented]
 ├── generators/
 │   ├── __init__.py          # Generator registry ................. [Implemented]
 │   ├── generator.py         # Generator base class ............... [Implemented]

@@ -76,9 +76,13 @@ class TestResolverSingleTarget:
 
         assert build_info["tool"] == "cc"
         assert build_info["command_var"] == "objcmd"
-        assert "effective_includes" in build_info
-        assert "effective_defines" in build_info
-        assert "effective_flags" in build_info
+        # Build variables come from context.get_variables()
+        assert "context" in build_info
+        context = build_info["context"]
+        assert context is not None
+        # Context provides variables for includes, defines, flags
+        variables = context.get_variables()
+        assert isinstance(variables, dict)
 
 
 class TestResolverSameSourceDifferentTargets:
@@ -120,11 +124,13 @@ class TestResolverSameSourceDifferentTargets:
         assert "lib1" in str(obj1.path)
         assert "lib2" in str(obj2.path)
 
-        # Objects should have different effective defines
-        assert "TARGET1_DEFINE" in obj1._build_info["effective_defines"]
-        assert "TARGET2_DEFINE" in obj2._build_info["effective_defines"]
-        assert "TARGET2_DEFINE" not in obj1._build_info["effective_defines"]
-        assert "TARGET1_DEFINE" not in obj2._build_info["effective_defines"]
+        # Objects should have different defines in their context
+        context1 = obj1._build_info["context"]
+        context2 = obj2._build_info["context"]
+        assert "TARGET1_DEFINE" in context1.defines
+        assert "TARGET2_DEFINE" in context2.defines
+        assert "TARGET2_DEFINE" not in context1.defines
+        assert "TARGET1_DEFINE" not in context2.defines
 
 
 class TestResolverTransitiveRequirements:
@@ -154,10 +160,9 @@ class TestResolverTransitiveRequirements:
 
         # App's objects should have lib's public requirements
         app_obj = app.object_nodes[0]
-        assert Path("include") in [
-            Path(p) for p in app_obj._build_info["effective_includes"]
-        ]
-        assert "LIB_API" in app_obj._build_info["effective_defines"]
+        context = app_obj._build_info["context"]
+        assert Path("include") in [Path(p) for p in context.includes]
+        assert "LIB_API" in context.defines
 
 
 class TestResolverHeaderOnlyLibrary:
@@ -191,12 +196,13 @@ class TestResolverHeaderOnlyLibrary:
 
         # App should have header lib's requirements
         app_obj = app.object_nodes[0]
+        context = app_obj._build_info["context"]
         # Normalize path separators for cross-platform comparison
         includes_normalized = " ".join(
-            inc.replace("\\", "/") for inc in app_obj._build_info["effective_includes"]
+            inc.replace("\\", "/") for inc in context.includes
         )
         assert "headers/include" in includes_normalized
-        assert "HEADER_LIB_API" in app_obj._build_info["effective_defines"]
+        assert "HEADER_LIB_API" in context.defines
 
 
 class TestResolverObjectCaching:
@@ -461,9 +467,10 @@ class TestResolverSharedLibraryCompileFlags:
         assert target._resolved
         assert len(target.object_nodes) == 1
 
-        # Check that -fPIC is in the effective flags
+        # Check that -fPIC is in the compile flags via context
         obj_node = target.object_nodes[0]
-        assert "-fPIC" in obj_node._build_info["effective_flags"]
+        context = obj_node._build_info["context"]
+        assert "-fPIC" in context.flags
 
     def test_shared_library_no_fpic_on_macos(self, tmp_path, monkeypatch):
         """Test that shared library objects don't get -fPIC on macOS (it's default)."""
@@ -504,9 +511,10 @@ class TestResolverSharedLibraryCompileFlags:
         assert target._resolved
         assert len(target.object_nodes) == 1
 
-        # Check that -fPIC is NOT in the effective flags
+        # Check that -fPIC is NOT in the compile flags via context
         obj_node = target.object_nodes[0]
-        assert "-fPIC" not in obj_node._build_info["effective_flags"]
+        context = obj_node._build_info["context"]
+        assert "-fPIC" not in context.flags
 
     def test_static_library_no_fpic(self, tmp_path, monkeypatch):
         """Test that static library objects don't get -fPIC."""
@@ -547,9 +555,10 @@ class TestResolverSharedLibraryCompileFlags:
         assert target._resolved
         assert len(target.object_nodes) == 1
 
-        # Check that -fPIC is NOT in the effective flags
+        # Check that -fPIC is NOT in the compile flags via context
         obj_node = target.object_nodes[0]
-        assert "-fPIC" not in obj_node._build_info["effective_flags"]
+        context = obj_node._build_info["context"]
+        assert "-fPIC" not in context.flags
 
     def test_program_no_fpic(self, tmp_path, monkeypatch):
         """Test that program objects don't get -fPIC."""
@@ -590,9 +599,10 @@ class TestResolverSharedLibraryCompileFlags:
         assert target._resolved
         assert len(target.object_nodes) == 1
 
-        # Check that -fPIC is NOT in the effective flags
+        # Check that -fPIC is NOT in the compile flags via context
         obj_node = target.object_nodes[0]
-        assert "-fPIC" not in obj_node._build_info["effective_flags"]
+        context = obj_node._build_info["context"]
+        assert "-fPIC" not in context.flags
 
 
 class TestResolverToolAgnostic:

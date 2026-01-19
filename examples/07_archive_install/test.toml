@@ -14,7 +14,7 @@ expected_outputs = [
 commands = [
     { run = "./build/hello", expect_stdout = "Hello from pcons!" },
     # Test the install alias - builds tarballs and copies to Installers/
-    { run = "ninja -f build/build.ninja install" },
+    { run = "ninja -C build install" },
     # Verify the installed tarballs exist
     { run = "test -f Installers/hello-src.tar.gz" },
     { run = "test -f Installers/hello-bin.tar.gz" },

@@ -12,13 +12,14 @@ from typing import TYPE_CHECKING, Any
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.tools.tool import BaseTool
-from pcons.tools.toolchain import BaseToolchain
+from pcons.tools.toolchain import BaseToolchain, ToolchainContext
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
+    from pcons.core.target import Target
     from pcons.core.toolconfig import ToolConfig
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
@@ -611,6 +612,35 @@ class MsvcToolchain(BaseToolchain):
         if env.has_tool("link") and link_flags:
             if isinstance(env.link.flags, list):
                 env.link.flags.extend(link_flags)
+
+    def create_build_context(
+        self,
+        target: Target,
+        env: Environment,
+        for_compilation: bool = True,
+    ) -> ToolchainContext | None:
+        """Create a toolchain-specific build context for MSVC.
+
+        Overrides the base implementation to use MsvcCompileLinkContext,
+        which provides MSVC-style flag prefixes (/I, /D, /LIBPATH:).
+
+        Args:
+            target: The target being built.
+            env: The build environment.
+            for_compilation: If True, create context for compilation.
+                            If False, create context for linking.
+
+        Returns:
+            A MsvcCompileLinkContext providing MSVC-formatted variables.
+        """
+        from pcons.core.build_context import MsvcCompileLinkContext
+        from pcons.core.requirements import compute_effective_requirements
+
+        # Compute effective requirements
+        effective = compute_effective_requirements(target, env, for_compilation)
+
+        # Create and return MSVC-specific context
+        return MsvcCompileLinkContext.from_effective_requirements(effective)
 
 
 # =============================================================================

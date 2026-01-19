@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.core.node import FileNode
 from pcons.generators.generator import BaseGenerator
+from pcons.tools.toolchain import ToolchainContext
 
 if TYPE_CHECKING:
     from pcons.core.project import Project
@@ -142,8 +143,11 @@ class CompileCommandsGenerator(BaseGenerator):
     ) -> str:
         """Format the command for a source file.
 
-        Includes effective flags from build_info if available.
+        Includes effective flags from build_info context if available.
+        The command is formatted as a shell command string with proper quoting.
         """
+        import shlex
+
         # Basic command format
         tool_cmd = tool_name
         if tool_name == "cc":
@@ -151,25 +155,20 @@ class CompileCommandsGenerator(BaseGenerator):
         elif tool_name == "cxx":
             tool_cmd = "c++"
 
-        parts = [tool_cmd, "-c"]
+        parts: list[str] = [tool_cmd, "-c"]
 
-        # Add effective requirements from build_info
+        # Add effective requirements from context
         if build_info:
-            includes = build_info.get("effective_includes", [])
-            if isinstance(includes, list):
-                for inc in includes:
-                    parts.append(f"-I{inc}")
-
-            defines = build_info.get("effective_defines", [])
-            if isinstance(defines, list):
-                for define in defines:
-                    parts.append(f"-D{define}")
-
-            flags = build_info.get("effective_flags", [])
-            if isinstance(flags, list):
-                for flag in flags:
-                    parts.append(str(flag))
+            context = build_info.get("context")
+            if context is not None and isinstance(context, ToolchainContext):
+                # Use context.get_variables() for flags (returns list of tokens)
+                variables = context.get_variables()
+                # Append each token from the relevant variables
+                for var_name in ["includes", "defines", "extra_flags"]:
+                    tokens = variables.get(var_name, [])
+                    parts.extend(tokens)
 
         parts.extend(["-o", str(output.path), str(source.path)])
 
-        return " ".join(parts)
+        # Quote each part for shell, then join
+        return " ".join(shlex.quote(p) for p in parts)

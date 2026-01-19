@@ -22,6 +22,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
+    from pcons.tools.toolchain import ToolchainContext
 
 
 class OutputInfo(TypedDict, total=False):
@@ -55,13 +56,10 @@ class BuildInfo(TypedDict, total=False):
         depfile: Depfile path pattern for Ninja (e.g., "$out.d").
         deps_style: Dependency style for Ninja ("gcc" or "msvc").
 
-    Effective requirements (from target-centric resolution):
-        effective_includes: List of include directories (strings).
-        effective_defines: List of preprocessor defines.
-        effective_flags: List of additional compile flags.
-        effective_link_flags: List of link flags.
-        effective_link_libs: List of libraries to link.
-        effective_link_dirs: List of library search directories (strings).
+    Toolchain context:
+        context: ToolchainContext providing variables for build statements.
+                 Generators use context.get_variables() to get formatted
+                 build variables (includes, defines, flags, etc.).
 
     Multi-output builds:
         outputs: Dict mapping output name to OutputInfo.
@@ -91,13 +89,9 @@ class BuildInfo(TypedDict, total=False):
     depfile: str | None
     deps_style: str | None
 
-    # Effective requirements
-    effective_includes: list[str]
-    effective_defines: list[str]
-    effective_flags: list[str]
-    effective_link_flags: list[str]
-    effective_link_libs: list[str]
-    effective_link_dirs: list[str]
+    # Toolchain-provided context
+    # Generators use context.get_variables() for build variables
+    context: ToolchainContext | None
 
     # Multi-output builds
     outputs: dict[str, OutputInfo]

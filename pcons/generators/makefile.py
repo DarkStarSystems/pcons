@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, TextIO
 
 from pcons.core.node import FileNode, Node
 from pcons.generators.generator import BaseGenerator
+from pcons.tools.toolchain import ToolchainContext
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -347,59 +348,60 @@ class MakefileGenerator(BaseGenerator):
     def _substitute_effective_vars(
         self, command: str, build_info: dict[str, object]
     ) -> str:
-        """Substitute effective requirement placeholders in command."""
-        # Include directories
-        effective_includes = build_info.get("effective_includes", [])
-        if effective_includes and isinstance(effective_includes, list):
-            include_flags = " ".join(f"-I{inc}" for inc in effective_includes)
-            command = command.replace("$includes", include_flags)
-        else:
-            command = command.replace("$includes", "")
+        """Substitute effective requirement placeholders in command.
 
-        # Defines
-        effective_defines = build_info.get("effective_defines", [])
-        if effective_defines and isinstance(effective_defines, list):
-            define_flags = " ".join(f"-D{d}" for d in effective_defines)
-            command = command.replace("$defines", define_flags)
-        else:
-            command = command.replace("$defines", "")
-
-        # Extra compile flags
-        effective_flags = build_info.get("effective_flags", [])
-        if effective_flags and isinstance(effective_flags, list):
-            flags_str = " ".join(str(f) for f in effective_flags)
-            command = command.replace("$extra_flags", flags_str)
-        else:
-            command = command.replace("$extra_flags", "")
-
-        # Link flags
-        effective_link_flags = build_info.get("effective_link_flags", [])
-        if effective_link_flags and isinstance(effective_link_flags, list):
-            link_flags_str = " ".join(str(f) for f in effective_link_flags)
-            command = command.replace("$ldflags", link_flags_str)
-        else:
-            command = command.replace("$ldflags", "")
-
-        # Libraries
-        effective_link_libs = build_info.get("effective_link_libs", [])
-        if effective_link_libs and isinstance(effective_link_libs, list):
-            libs_str = " ".join(f"-l{lib}" for lib in effective_link_libs)
-            command = command.replace("$libs", libs_str)
-        else:
-            command = command.replace("$libs", "")
-
-        # Library directories
-        effective_link_dirs = build_info.get("effective_link_dirs", [])
-        if effective_link_dirs and isinstance(effective_link_dirs, list):
-            link_dirs_str = " ".join(f"-L{d}" for d in effective_link_dirs)
-            command = command.replace("$libdirs", link_dirs_str)
-        else:
-            command = command.replace("$libdirs", "")
+        Uses context.get_variables() to get toolchain-formatted values.
+        Each value is a list of tokens which are joined with shell quoting.
+        """
+        context = build_info.get("context")
+        if context is not None and isinstance(context, ToolchainContext):
+            variables = context.get_variables()
+            for var_name, var_value in variables.items():
+                placeholder = f"${var_name}"
+                if placeholder in command:
+                    # var_value is a list of tokens - quote each for shell and join
+                    quoted_value = self._quote_tokens_for_make(var_value)
+                    command = command.replace(placeholder, quoted_value)
 
         # Clean up multiple spaces
         command = re.sub(r"\s+", " ", command).strip()
 
         return command
+
+    def _quote_tokens_for_make(self, tokens: list[str]) -> str:
+        """Quote and join tokens for use in Makefile shell commands.
+
+        Handles:
+        - Shell quoting for tokens with spaces or special characters
+        - Escaping $ as $$ for Make
+        """
+        if not tokens:
+            return ""
+
+        quoted = []
+        for token in tokens:
+            # Escape $ as $$ for Make (must be done first)
+            escaped = token.replace("$", "$$")
+            # Shell quote if needed (spaces, special chars)
+            if self._needs_shell_quote(escaped):
+                # Use single quotes, but handle existing single quotes
+                if "'" not in escaped:
+                    escaped = f"'{escaped}'"
+                else:
+                    # Escape for double quotes
+                    escaped = escaped.replace("\\", "\\\\")
+                    escaped = escaped.replace('"', '\\"')
+                    escaped = escaped.replace("`", "\\`")
+                    escaped = f'"{escaped}"'
+            quoted.append(escaped)
+        return " ".join(quoted)
+
+    def _needs_shell_quote(self, s: str) -> bool:
+        """Check if a string needs shell quoting."""
+        if not s:
+            return True
+        # Characters that trigger quoting
+        return any(c in s for c in " \t\n\"'\\`!*?[](){}|&;<>")
 
     def _substitute_make_vars(
         self,

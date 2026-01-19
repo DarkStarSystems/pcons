@@ -269,9 +269,11 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
         if shutil.which("ninja") is None:
             pytest.skip("ninja not available")
 
+        # Run ninja from the build directory using -C
+        # Paths in build.ninja are relative to the build dir
         result = subprocess.run(
-            ["ninja", "-f", str(ninja_file)],
-            cwd=work_dir,  # Run from project root, not build dir
+            ["ninja", "-C", str(build_dir)],
+            cwd=work_dir,
             capture_output=True,
             text=True,
             timeout=120,
