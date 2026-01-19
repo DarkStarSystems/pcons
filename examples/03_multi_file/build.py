@@ -33,10 +33,7 @@ env = project.Environment(toolchain=toolchain)
 
 # Create calculator program target using target-centric API
 calculator = project.Program("calculator", env)
-calculator.sources = [
-    project.node(src_dir / "math_ops.c"),
-    project.node(src_dir / "main.c"),
-]
+calculator.add_sources([src_dir / "math_ops.c", src_dir / "main.c"])
 calculator.private.include_dirs.append(include_dir)
 
 # Add warning flags appropriate for the toolchain

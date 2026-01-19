@@ -90,8 +90,8 @@ env = project.Environment(toolchain=toolchain)
 env.set_variant(VARIANT)
 env.cxx.flags.append("-std=c++17")
 
-# Use C++ linker for C++ programs
-env.link.cmd = "clang++"
+# Use C++ compiler as linker for C++ programs (gets correct runtime libraries)
+env.link.cmd = env.cxx.cmd
 
 # =============================================================================
 # Apply package settings - use env.use() for simple integration

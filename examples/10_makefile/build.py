@@ -30,7 +30,7 @@ env = project.Environment(toolchain=toolchain)
 
 # Create program target using the target-centric API
 hello = project.Program("hello", env)
-hello.sources = [project.node(src_dir / "hello.c")]
+hello.add_sources([src_dir / "hello.c"])
 hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 # Resolve targets (computes effective requirements, creates nodes)

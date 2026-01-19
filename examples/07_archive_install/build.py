@@ -36,7 +36,7 @@ env = project.Environment(toolchain=toolchain)
 
 # Build hello program using target-centric API
 hello = project.Program("hello", env)
-hello.sources = [project.node(src_dir / "hello.c")]
+hello.add_sources([src_dir / "hello.c"])
 
 # Add warning flags
 if toolchain.name in ("msvc", "clang-cl"):

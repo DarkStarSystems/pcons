@@ -38,7 +38,7 @@ env = project.Environment(toolchain=toolchain)
 # Library: libmath - low-level math utilities
 # -----------------------------------------------------------------------------
 libmath = project.StaticLibrary("math", env)
-libmath.sources = [project.node(src_dir / "math_utils.c")]
+libmath.add_sources([src_dir / "math_utils.c"])
 # Public includes propagate to consumers
 libmath.public.include_dirs.append(include_dir)
 # Link against libm for math functions (required on Linux, not needed on Windows)
@@ -49,14 +49,14 @@ if sys.platform != "win32":
 # Library: libphysics - physics simulation, depends on libmath
 # -----------------------------------------------------------------------------
 libphysics = project.StaticLibrary("physics", env)
-libphysics.sources = [project.node(src_dir / "physics.c")]
+libphysics.add_sources([src_dir / "physics.c"])
 libphysics.link(libmath)  # Gets libmath's public includes transitively
 
 # -----------------------------------------------------------------------------
 # Program: simulator - main application
 # -----------------------------------------------------------------------------
 simulator = project.Program("simulator", env)
-simulator.sources = [project.node(src_dir / "main.c")]
+simulator.add_sources([src_dir / "main.c"])
 simulator.link(libphysics)  # Gets both libphysics and libmath includes
 
 # -----------------------------------------------------------------------------

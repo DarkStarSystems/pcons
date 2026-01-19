@@ -4,6 +4,10 @@
 Discovers and runs all example projects in examples/.
 Each example is a self-contained project that serves as both
 a test and documentation for users.
+
+Tests both invocation methods:
+- Direct: python build.py
+- CLI: python -m pcons
 """
 
 from __future__ import annotations
@@ -178,8 +182,16 @@ def get_platform_value(
     return value
 
 
-def run_example(example_dir: Path, tmp_path: Path) -> None:
-    """Run a single example project."""
+def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -> None:
+    """Run a single example project.
+
+    Args:
+        example_dir: Path to the example directory
+        tmp_path: Temporary directory for test isolation
+        invocation: How to invoke the build script:
+            - "direct": python build.py
+            - "cli": python -m pcons
+    """
     config = load_test_config(example_dir)
     test_config = config.get("test", {})
 
@@ -188,6 +200,11 @@ def run_example(example_dir: Path, tmp_path: Path) -> None:
     if skip_reason:
         pytest.skip(skip_reason)
 
+    # CLI invocation requires ninja (pcons CLI runs ninja after generation)
+    # Skip CLI tests for examples that use custom build commands (e.g., make)
+    if invocation == "cli" and test_config.get("build_command"):
+        pytest.skip("CLI invocation requires ninja; this example uses custom build")
+
     # Copy example to temp directory (so we don't pollute the source tree)
     work_dir = tmp_path / example_dir.name
     shutil.copytree(example_dir, work_dir)
@@ -195,10 +212,19 @@ def run_example(example_dir: Path, tmp_path: Path) -> None:
     build_dir = work_dir / "build"
     build_dir.mkdir(exist_ok=True)
 
-    # Run build.py to generate ninja file
-    build_script = work_dir / "build.py"
+    # Run build script using specified invocation method
+    if invocation == "direct":
+        # Direct: python build.py
+        build_script = work_dir / "build.py"
+        cmd = [sys.executable, str(build_script)]
+        cmd_desc = "build.py"
+    else:
+        # CLI: python -m pcons
+        cmd = [sys.executable, "-m", "pcons"]
+        cmd_desc = "pcons"
+
     result = subprocess.run(
-        [sys.executable, str(build_script)],
+        cmd,
         cwd=work_dir,
         capture_output=True,
         text=True,
@@ -207,9 +233,9 @@ def run_example(example_dir: Path, tmp_path: Path) -> None:
     )
 
     if result.returncode != 0:
-        print(f"build.py stdout:\n{result.stdout}")
-        print(f"build.py stderr:\n{result.stderr}")
-        pytest.fail(f"build.py failed with code {result.returncode}")
+        print(f"{cmd_desc} stdout:\n{result.stdout}")
+        print(f"{cmd_desc} stderr:\n{result.stderr}")
+        pytest.fail(f"{cmd_desc} failed with code {result.returncode}")
 
     # Check for custom build command or use ninja default
     build_command = test_config.get("build_command")
@@ -332,15 +358,24 @@ def run_example(example_dir: Path, tmp_path: Path) -> None:
 # Discover examples and create test parameters
 EXAMPLES = discover_examples()
 
+# Invocation methods to test
+INVOCATIONS = ["direct", "cli"]
 
+
+@pytest.mark.parametrize("invocation", INVOCATIONS, ids=INVOCATIONS)
 @pytest.mark.parametrize(
     "example_dir",
     EXAMPLES,
     ids=[e.name for e in EXAMPLES],
 )
-def test_example(example_dir: Path, tmp_path: Path) -> None:
-    """Run an example project end-to-end."""
-    run_example(example_dir, tmp_path)
+def test_example(example_dir: Path, tmp_path: Path, invocation: str) -> None:
+    """Run an example project end-to-end.
+
+    Tests both invocation methods:
+    - direct: python build.py
+    - cli: python -m pcons
+    """
+    run_example(example_dir, tmp_path, invocation)
 
 
 # If no examples found, create a placeholder test
@@ -348,4 +383,4 @@ if not EXAMPLES:
 
     def test_no_examples() -> None:
         """Placeholder when no examples are found."""
-        pytest.skip("No example projects found in tests/examples/")
+        pytest.skip("No example projects found in examples/")
