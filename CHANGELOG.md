@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Archive builders**: New `project.Tarfile()` and `project.Zipfile()` methods for creating tar and zip archives
+  - Supports all common compression formats: `.tar.gz`, `.tar.bz2`, `.tar.xz`, `.tgz`, `.tar`, `.zip`
+  - Compression auto-detected from output extension
+  - Cross-platform using Python's built-in `tarfile`/`zipfile` modules
+  - Returns `Target` objects that can be passed to `Install()` and other builders
+
+### Changed
+
+- **BREAKING: `env.Command()` signature changed**: Now uses keyword-only arguments and returns `Target` instead of `list[FileNode]`
+  - Old: `env.Command("output.txt", "input.txt", "cmd")`
+  - New: `env.Command(target="output.txt", source="input.txt", command="cmd")`
+  - Access output nodes via `target.output_nodes` instead of indexing the result
+  - Optional `name` parameter for explicit target naming
+
+### Documentation
+
+- Added "All Build Outputs Are Targets" section to ARCHITECTURE.md documenting the design principle
+- Added archive builders documentation to user guide
+
 ## [0.1.4] - 2025-01-18
 
 ### Added

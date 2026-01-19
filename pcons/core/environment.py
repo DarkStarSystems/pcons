@@ -18,6 +18,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core.node import FileNode, Node
+    from pcons.core.target import Target
     from pcons.tools.toolchain import Toolchain
 
 
@@ -597,15 +598,21 @@ class Environment:
 
     def Command(
         self,
+        *,
         target: str | Path | list[str | Path],
         source: str | Path | list[str | Path] | None = None,
         command: str | list[str] = "",
-    ) -> list[FileNode]:
+        name: str | None = None,
+    ) -> Target:
         """Run an arbitrary shell command to build targets from sources.
 
         This is a general-purpose builder for running shell commands that
         don't fit into the standard compile/link model. It supports variable
         substitution for common patterns.
+
+        **BREAKING CHANGE (v0.2.0):** This method now returns a `Target` object
+        instead of `list[FileNode]`, and uses keyword-only arguments. To access
+        output nodes, use `target.output_nodes`.
 
         Args:
             target: Output file(s) that the command produces.
@@ -618,40 +625,50 @@ class Environment:
                     - $TARGETS: All target files (space-separated)
                     - ${SOURCES[n]}: Indexed source access (0-based)
                     - ${TARGETS[n]}: Indexed target access (0-based)
+            name: Optional target name for `ninja <name>`. Derived from first
+                  target filename if not specified.
 
         Returns:
-            List of FileNode objects representing the target files.
+            Target object representing the command outputs.
 
         Example:
             # Generate a header from a template
-            env.Command(
-                "config.h",
-                ["config.h.in", "version.txt"],
-                "python generate_config.py $SOURCES > $TARGET"
+            generated = env.Command(
+                target="config.h",
+                source=["config.h.in", "version.txt"],
+                command="python generate_config.py $SOURCES > $TARGET"
             )
 
             # Run a code generator with multiple outputs
-            env.Command(
-                ["parser.c", "parser.h"],
-                "grammar.y",
-                "bison -d -o ${TARGETS[0]} $SOURCE"
+            parser = env.Command(
+                target=["parser.c", "parser.h"],
+                source="grammar.y",
+                command="bison -d -o ${TARGETS[0]} $SOURCE"
             )
 
             # Command with no source dependencies
-            env.Command(
-                "timestamp.txt",
-                None,
-                "date > $TARGET"
+            timestamp = env.Command(
+                target="timestamp.txt",
+                source=None,
+                command="date > $TARGET"
             )
+
+            # Can be passed to Install() since it's a Target
+            project.Install("dist/", [generated])
         """
         from pcons.core.builder import GenericCommandBuilder
         from pcons.core.node import FileNode
+        from pcons.core.target import Target, TargetType
 
         # Normalize target to list
         if isinstance(target, (str, Path)):
             targets = [Path(target)]
         else:
             targets = [Path(t) for t in target]
+
+        # Derive name from first target if not specified
+        if name is None:
+            name = targets[0].stem
 
         # Normalize source to list
         # Type annotation uses Node to match _normalize_sources signature
@@ -674,12 +691,35 @@ class Environment:
             defined_at=get_caller_location(),
         )
 
-        # Register nodes with the environment
+        # Create Target object
+        cmd_target = Target(
+            name,
+            target_type=TargetType.COMMAND,
+            defined_at=get_caller_location(),
+        )
+        cmd_target._env = self
+        cmd_target._project = self._project
+
+        # Register nodes with the environment and add to target
         for node in nodes:
             if isinstance(node, FileNode):
                 self.register_node(node)
+                cmd_target.output_nodes.append(node)
+                cmd_target.nodes.append(node)
 
-        return [n for n in nodes if isinstance(n, FileNode)]
+        # Register target with project if available
+        if self._project is not None:
+            # Handle duplicate target names by appending a suffix
+            base_name = name
+            counter = 1
+            while name in self._project._targets:
+                name = f"{base_name}_{counter}"
+                counter += 1
+            if name != base_name:
+                cmd_target.name = name
+            self._project.add_target(cmd_target)
+
+        return cmd_target
 
     def __repr__(self) -> str:
         tools = self._get_tools()

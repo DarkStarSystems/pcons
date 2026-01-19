@@ -109,10 +109,10 @@ def fix_dylib_references(
 
 def create_universal_binary(
     project: Project,
-    name: str,  # noqa: ARG001
+    name: str,
     inputs: list[Target | FileNode | Path | str],
     output: Path | str,
-) -> list[FileNode]:
+) -> Target:
     """Create a macOS universal binary by combining architecture-specific binaries.
 
     Uses `lipo -create` to combine multiple architecture-specific binaries
@@ -130,7 +130,7 @@ def create_universal_binary(
         output: Path for the output universal binary.
 
     Returns:
-        List of FileNode objects representing the output file(s).
+        Target object representing the universal binary.
 
     Example:
         from pcons import Project, find_c_toolchain
@@ -202,16 +202,17 @@ def create_universal_binary(
     # Convert FileNodes to paths for the source argument
     source_paths: list[Path | str] = [node.path for node in input_nodes]
 
-    result = env.Command(
+    lipo_target = env.Command(
         target=output_path,
         source=source_paths,
         command="lipo -create -output $TARGET $SOURCES",
+        name=name,
     )
 
-    # Register this with the project's node tracking
-    for node in result:
-        # Mark the build info with tool="lipo" for the ninja generator
-        if hasattr(node, "_build_info") and node._build_info:
-            node._build_info["tool"] = "lipo"
+    # Mark the build info with tool="lipo" for the ninja generator
+    # This is used after resolve() populates output_nodes
+    build_info = lipo_target._build_info if lipo_target._build_info is not None else {}
+    build_info["tool"] = "lipo"
+    lipo_target._build_info = build_info
 
-    return result
+    return lipo_target

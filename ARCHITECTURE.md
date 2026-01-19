@@ -550,6 +550,47 @@ project.resolve()
 
 This makes build scripts declarative - the order of declarations doesn't matter.
 
+### All Build Outputs Are Targets
+> **Status: Implemented** - All builder methods return Target objects for consistency.
+
+**Design principle:** Every builder that creates output files should return a `Target` object, not raw `FileNode`s or `list[FileNode]`.
+
+**Why this matters:**
+- **Consistency**: Users can pass any build output to `Install()`, other builders, etc.
+- **Dependency tracking**: Targets participate in the dependency resolution system
+- **Future extensibility**: Targets can have usage requirements if needed later
+
+**Correct pattern:**
+```python
+# Project methods return Target
+lib = project.StaticLibrary("mylib", env, sources=["lib.c"])
+archive = project.Tarfile(env, output="dist/docs.tar.gz", sources=["docs/"])
+generated = env.Command(target="out.h", source="in.txt", command="...")
+
+# All can be used uniformly
+project.Install("dist/", [lib, archive, generated])
+```
+
+**Builder methods that return Target:**
+- `project.Program()` - Executable programs
+- `project.StaticLibrary()` - Static libraries
+- `project.SharedLibrary()` - Shared/dynamic libraries
+- `project.HeaderOnlyLibrary()` - Header-only interface libraries
+- `project.ObjectLibrary()` - Object files without linking
+- `project.Tarfile()` - Tar archives (.tar, .tar.gz, .tar.bz2, .tar.xz)
+- `project.Zipfile()` - Zip archives
+- `project.Install()` - Install/copy operations
+- `project.InstallAs()` - Install with rename
+- `env.Command()` - Custom shell commands
+
+**Historical note:** Early versions of `env.Command()` returned `list[FileNode]` for simplicity. This was changed in v0.2.0 to return `Target` for consistency. The new signature uses keyword-only arguments for clarity.
+
+**Implementation guideline:** When adding new builders:
+1. Create a `Target` object with appropriate `target_type`
+2. Store build info in `target._build_info`
+3. Register with `project.add_target(target)`
+4. Return the `Target`, not the output nodes
+
 ### Scanner
 > **Status: Partial** - Scanner protocol defined. Build-time depfiles work via Ninja. Configure-time scanning not yet implemented.
 

@@ -243,7 +243,9 @@ class Project:
         alias = self._aliases[name]
         for t in targets:
             if isinstance(t, Target):
-                alias.add_targets(t.nodes)
+                # Use output_nodes (populated after resolve()) or fall back to nodes
+                nodes = t.output_nodes if t.output_nodes else t.nodes
+                alias.add_targets(nodes)
             else:
                 alias.add_target(t)
 
@@ -927,6 +929,146 @@ class Project:
 
         self.add_target(install_target)
         return install_target
+
+    def _name_from_output(self, output: str | Path, suffixes: list[str]) -> str:
+        """Derive target name from output path by stripping archive suffixes.
+
+        Args:
+            output: Output path (e.g., "dist/docs.tar.gz").
+            suffixes: List of suffixes to strip (e.g., [".tar.gz", ".tar"]).
+
+        Returns:
+            Derived name (e.g., "dist/docs").
+        """
+        name = str(output)
+        for suffix in suffixes:
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+        return name
+
+    def Tarfile(
+        self,
+        env: Env,
+        *,
+        output: str | Path,
+        sources: list[str | Path | Node | Target] | None = None,
+        compression: str | None = None,
+        base_dir: str | Path | None = None,
+        name: str | None = None,
+    ) -> Target:
+        """Create a tar archive from source files/directories.
+
+        Args:
+            env: Environment for this build.
+            output: Output archive path (.tar, .tar.gz, .tar.bz2, .tar.xz).
+            sources: Input files, directories, and/or Targets.
+            compression: Compression type (None, "gzip", "bz2", "xz").
+                        If None, inferred from output extension.
+            base_dir: Base directory for archive paths (default: ".").
+            name: Optional target name for `ninja <name>`. Derived from output if not specified.
+
+        Returns:
+            Target representing the archive.
+
+        Example:
+            docs = project.Tarfile(env,
+                output="dist/docs.tar.gz",
+                sources=["docs/", "README.md"])
+            project.Install("packages/", [docs])  # Works because it's a Target
+        """
+        output_path = Path(output)
+
+        # Infer compression from extension if not specified
+        if compression is None:
+            if str(output).endswith(".tar.gz") or str(output).endswith(".tgz"):
+                compression = "gzip"
+            elif str(output).endswith(".tar.bz2"):
+                compression = "bz2"
+            elif str(output).endswith(".tar.xz"):
+                compression = "xz"
+            # .tar gets no compression
+
+        # Derive name from output if not specified
+        if name is None:
+            name = self._name_from_output(
+                output, [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tar"]
+            )
+
+        target = Target(
+            name,
+            target_type=TargetType.ARCHIVE,
+            defined_at=get_caller_location(),
+        )
+        target._env = env
+        target._project = self
+
+        # Store sources for lazy resolution
+        target._pending_sources = list(sources) if sources else []
+
+        # Store build info for Ninja generator
+        target._build_info = {
+            "tool": "tarfile",
+            "output": str(output_path),
+            "compression": compression,
+            "base_dir": str(base_dir) if base_dir else ".",
+        }
+
+        self.add_target(target)
+        return target
+
+    def Zipfile(
+        self,
+        env: Env,
+        *,
+        output: str | Path,
+        sources: list[str | Path | Node | Target] | None = None,
+        base_dir: str | Path | None = None,
+        name: str | None = None,
+    ) -> Target:
+        """Create a zip archive from source files/directories.
+
+        Args:
+            env: Environment for this build.
+            output: Output archive path (.zip).
+            sources: Input files, directories, and/or Targets.
+            base_dir: Base directory for archive paths (default: ".").
+            name: Optional target name for `ninja <name>`. Derived from output if not specified.
+
+        Returns:
+            Target representing the archive.
+
+        Example:
+            release = project.Zipfile(env,
+                output="dist/release.zip",
+                sources=["bin/", "lib/", "README.md"])
+        """
+        output_path = Path(output)
+
+        # Derive name from output if not specified
+        if name is None:
+            name = self._name_from_output(output, [".zip"])
+
+        target = Target(
+            name,
+            target_type=TargetType.ARCHIVE,
+            defined_at=get_caller_location(),
+        )
+        target._env = env
+        target._project = self
+
+        # Store sources for lazy resolution
+        target._pending_sources = list(sources) if sources else []
+
+        # Store build info for Ninja generator
+        target._build_info = {
+            "tool": "zipfile",
+            "output": str(output_path),
+            "base_dir": str(base_dir) if base_dir else ".",
+        }
+
+        self.add_target(target)
+        return target
 
     def __repr__(self) -> str:
         return (

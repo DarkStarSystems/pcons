@@ -131,6 +131,7 @@ class TestCreateUniversalBinary:
         """Test that create_universal_binary creates a lipo command target."""
         from pcons.core.node import FileNode
         from pcons.core.project import Project
+        from pcons.core.target import Target
 
         project = Project("test_project")
 
@@ -146,21 +147,22 @@ class TestCreateUniversalBinary:
             output="build/universal/libtest.a",
         )
 
-        # Should return a list of FileNodes
-        assert len(result) > 0
-        assert all(isinstance(n, FileNode) for n in result)
+        # Should return a Target
+        assert isinstance(result, Target)
+        assert result.name == "test_universal"
 
-        # Output should have the correct path
-        assert result[0].path == Path("build/universal/libtest.a")
+        # Should have build info with lipo tool marked on the target
+        assert result._build_info is not None
+        assert result._build_info.get("tool") == "lipo"
 
-        # Should have build info with lipo tool
-        assert hasattr(result[0], "_build_info")
-        assert result[0]._build_info is not None
-        assert result[0]._build_info.get("tool") == "lipo"
+        # Output nodes should be populated immediately by Command()
+        assert len(result.output_nodes) > 0
+        assert result.output_nodes[0].path == Path("build/universal/libtest.a")
 
     def test_accepts_path_inputs(self):
         """Test that create_universal_binary accepts Path inputs."""
         from pcons.core.project import Project
+        from pcons.core.target import Target
 
         project = Project("test_project")
 
@@ -175,8 +177,9 @@ class TestCreateUniversalBinary:
             output="build/universal/libtest.a",
         )
 
-        assert len(result) > 0
-        assert result[0].path == Path("build/universal/libtest.a")
+        assert isinstance(result, Target)
+        assert len(result.output_nodes) > 0
+        assert result.output_nodes[0].path == Path("build/universal/libtest.a")
 
     def test_raises_on_empty_inputs(self):
         """Test that create_universal_binary raises on empty inputs."""
@@ -222,5 +225,6 @@ class TestCreateUniversalBinary:
             output="build/universal/libtest.a",
         )
 
-        assert len(result) > 0
-        assert result[0].path == Path("build/universal/libtest.a")
+        assert isinstance(result, Target)
+        assert len(result.output_nodes) > 0
+        assert result.output_nodes[0].path == Path("build/universal/libtest.a")

@@ -46,7 +46,33 @@ prog = env.link.Program("hello", obj)
 # Set as default target
 project.Default(prog)
 
-# Generate ninja file
+# --- Installer targets (not built by default) ---
+
+# Tarball of source files and headers
+src_tarball = project.Tarfile(
+    env,
+    output=build_dir / "hello-src.tar.gz",
+    sources=["hello.c", "hello.h"],
+    compression="gzip",
+)
+
+# Tarball of the built binary
+bin_tarball = project.Tarfile(
+    env,
+    output=build_dir / "hello-bin.tar.gz",
+    sources=prog,  # prog is already a list of FileNodes
+    compression="gzip",
+)
+
+# Install target: copy tarballs to ./Installers directory
+install = project.Install("Installers", [src_tarball, bin_tarball])
+
+# Resolve all targets and generate ninja file
+project.resolve()
+
+# Create an alias for convenience: `ninja install`
+# Note: Must be after resolve() so Target.output_nodes is populated
+project.Alias("install", install)
 generator = NinjaGenerator()
 generator.generate(project, build_dir)
 print(f"Generated {build_dir / 'build.ninja'}")

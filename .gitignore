@@ -131,3 +131,6 @@ dmypy.json
 # templates
 .github/templates/*
 .claude/
+
+# Example build artifacts
+examples/*/Installers/

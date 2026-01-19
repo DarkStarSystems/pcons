@@ -1021,6 +1021,130 @@ env.Command(
 
 The command runs during the build phase, and Ninja tracks dependencies so the command only re-runs when sources change.
 
+### Archive Builders (Tarfile and Zipfile)
+
+Pcons provides built-in builders for creating tar and zip archives. These are useful for packaging releases, bundling documentation, or creating distributable artifacts.
+
+#### Creating Tar Archives
+
+Use `project.Tarfile()` to create tar archives with optional compression:
+
+```python
+# Create a gzipped tarball (compression inferred from extension)
+docs_archive = project.Tarfile(
+    env,
+    output="dist/docs.tar.gz",
+    sources=["docs/", "README.md", "LICENSE"],
+)
+
+# Create a bz2-compressed tarball
+backup = project.Tarfile(
+    env,
+    output="dist/backup.tar.bz2",
+    sources=["data/"],
+)
+
+# Create an xz-compressed tarball
+release = project.Tarfile(
+    env,
+    output="dist/release.tar.xz",
+    sources=["bin/", "lib/"],
+)
+
+# Create an uncompressed tarball
+raw = project.Tarfile(
+    env,
+    output="dist/raw.tar",
+    sources=["files/"],
+)
+```
+
+**Compression options:**
+| Extension | Compression |
+|-----------|-------------|
+| `.tar.gz`, `.tgz` | gzip |
+| `.tar.bz2` | bz2 |
+| `.tar.xz` | xz |
+| `.tar` | None (uncompressed) |
+
+You can also specify compression explicitly:
+
+```python
+# Override inferred compression
+archive = project.Tarfile(
+    env,
+    output="dist/archive.tar.gz",
+    sources=["files/"],
+    compression="bz2",  # Use bz2 despite .tar.gz extension
+)
+```
+
+#### Creating Zip Archives
+
+Use `project.Zipfile()` to create zip archives:
+
+```python
+# Create a zip archive
+release_zip = project.Zipfile(
+    env,
+    output="dist/release.zip",
+    sources=["bin/myapp", "lib/libcore.so", "README.md"],
+)
+```
+
+#### Common Options
+
+Both archive builders support:
+
+- **`output`**: Path to the output archive file
+- **`sources`**: List of files, directories, or Targets to include
+- **`base_dir`**: Base directory for computing archive paths (default: ".")
+- **`name`**: Optional target name for `ninja <name>` (default: derived from output path)
+
+```python
+# Custom base_dir to strip source paths
+# Files in "build/release/bin/" become just "bin/" in the archive
+archive = project.Tarfile(
+    env,
+    output="dist/package.tar.gz",
+    sources=["build/release/bin/", "build/release/lib/"],
+    base_dir="build/release",
+)
+
+# Custom target name
+archive = project.Tarfile(
+    env,
+    output="dist/docs.tar.gz",
+    sources=["docs/"],
+    name="package_docs",  # Run with: ninja package_docs
+)
+```
+
+#### Using Archives with Install
+
+Since archive builders return `Target` objects, you can pass them to `Install()`:
+
+```python
+# Create archives
+docs_tar = project.Tarfile(env, output="build/docs.tar.gz", sources=["docs/"])
+release_zip = project.Zipfile(env, output="build/release.zip", sources=["bin/", "lib/"])
+
+# Install archives to a packages directory
+project.Install("packages/", [docs_tar, release_zip])
+
+# Set archives as default build targets
+project.Default(docs_tar, release_zip)
+```
+
+For a complete example, see `examples/hello/build.py` which creates source and binary tarballs with an `install` alias:
+
+```bash
+cd examples/hello
+python build.py
+ninja -f build/build.ninja          # Build the program
+ninja -f build/build.ninja install  # Create and install tarballs to ./Installers
+```
+
 ### macOS Framework Linking
 
 On macOS, link against system frameworks using `env.Framework()`:
@@ -1141,7 +1265,7 @@ NinjaGenerator().generate(project, "build")
 The `create_universal_binary()` function:
 - Takes a list of architecture-specific binaries (as Targets, FileNodes, or paths)
 - Uses `lipo -create` to combine them
-- Returns FileNode(s) for the universal binary
+- Returns a Target object representing the universal binary
 
 This works for static libraries, dynamic libraries, and executables.
 
@@ -1196,6 +1320,8 @@ This works for static libraries, dynamic libraries, and executables.
 | `project.HeaderOnlyLibrary(name)` | Create a header-only library |
 | `project.Install(dir, sources)` | Install files to a directory |
 | `project.InstallAs(dest, source)` | Install with rename |
+| `project.Tarfile(env, output, sources)` | Create tar archive (.tar, .tar.gz, etc.) |
+| `project.Zipfile(env, output, sources)` | Create zip archive |
 | `project.Default(*targets)` | Set default build targets |
 | `project.Alias(name, *targets)` | Create a named alias |
 | `project.resolve()` | Resolve all dependencies |
@@ -1240,7 +1366,7 @@ This works for static libraries, dynamic libraries, and executables.
 
 | Function | Description |
 |----------|-------------|
-| `create_universal_binary(project, name, inputs, output)` | Combine arch-specific binaries into universal binary |
+| `create_universal_binary(project, name, inputs, output)` | Combine arch-specific binaries into universal binary (returns Target) |
 | `get_dylib_install_name(path)` | Get a dylib's install name |
 | `fix_dylib_references(target, dylibs, lib_dir)` | Fix dylib references for bundle creation |
 

@@ -506,6 +506,56 @@ class OutputNodeFactory:
         return result
 
 
+class ArchiveNodeFactory:
+    """Factory for creating archive (tar/zip) output nodes.
+
+    Handles creation of nodes for Tarfile and Zipfile targets,
+    which bundle source files into archives.
+
+    Attributes:
+        project: The project being resolved.
+    """
+
+    def __init__(self, project: Project) -> None:
+        """Initialize the factory.
+
+        Args:
+            project: The project to resolve.
+        """
+        self.project = project
+
+    def create_archive_node(self, target: Target, sources: list[FileNode]) -> None:
+        """Create archive output node for a Tarfile or Zipfile target.
+
+        Args:
+            target: The archive target.
+            sources: Resolved source file nodes.
+        """
+        build_info = target._build_info
+        if build_info is None:
+            return
+
+        output_path = Path(build_info["output"])
+
+        # Create the archive output node
+        archive_node = FileNode(output_path, defined_at=get_caller_location())
+        archive_node.depends(sources)
+
+        # Copy build info to the node and add sources
+        archive_node._build_info = {
+            **build_info,
+            "sources": sources,
+        }
+
+        # Add to target's output nodes
+        target.output_nodes.append(archive_node)
+        target.nodes.append(archive_node)
+
+        # Register with project
+        if output_path not in self.project._nodes:
+            self.project._nodes[output_path] = archive_node
+
+
 class InstallNodeFactory:
     """Factory for creating install/copy nodes.
 
@@ -648,6 +698,7 @@ class Resolver:
         self._object_factory = ObjectNodeFactory(project)
         self._output_factory = OutputNodeFactory(project)
         self._install_factory = InstallNodeFactory(project)
+        self._archive_factory = ArchiveNodeFactory(project)
 
     # Expose object cache for backwards compatibility
     @property
@@ -925,7 +976,7 @@ class Resolver:
             elif isinstance(source, (Path, str)):
                 resolved_sources.append(self.project.node(source))
 
-        # Create nodes based on target type (delegated to InstallNodeFactory)
+        # Create nodes based on target type
         if target._install_dest_dir is not None:
             # This is an Install target
             self._install_factory.create_install_nodes(
@@ -936,6 +987,9 @@ class Resolver:
             self._install_factory.create_install_as_node(
                 target, resolved_sources, target._install_as_dest
             )
+        elif target.target_type == "archive":
+            # This is a Tarfile or Zipfile target
+            self._archive_factory.create_archive_node(target, resolved_sources)
 
         # Mark as processed
         target._pending_sources = None

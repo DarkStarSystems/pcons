@@ -41,6 +41,8 @@ class TargetType(StrEnum):
     PROGRAM = "program"
     INTERFACE = "interface"  # Header-only library
     OBJECT = "object"  # Object files only (no linking)
+    ARCHIVE = "archive"  # Tar/Zip archives
+    COMMAND = "command"  # Generic command output
 
 
 # Re-export SourceSpec for backwards compatibility
@@ -168,6 +170,8 @@ class Target:
         "_post_build_commands",
         # Auxiliary input files (e.g., .def files passed to linker on Windows):
         "_auxiliary_inputs",
+        # Build info for archive and command targets:
+        "_build_info",
     )
 
     def __init__(
@@ -224,6 +228,8 @@ class Target:
         # Auxiliary input files (e.g., .def files passed to linker on Windows)
         # Each entry is (FileNode, flag_string) where flag_string is the tool flag
         self._auxiliary_inputs: list[tuple[FileNode, str]] = []
+        # Build info for archive and command targets
+        self._build_info: dict[str, Any] | None = None
 
     @property
     def sources(self) -> list[Node]:

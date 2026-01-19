@@ -216,6 +216,34 @@ class NinjaGenerator(BaseGenerator):
             elif tool_name == "lipo":
                 command = "lipo -create -output $out $in"
                 description = "LIPO $out"
+            # Archive builders (Tarfile, Zipfile)
+            # Use sys.executable (Python that ran pcons) with the standalone helper script
+            elif tool_name == "tarfile":
+                import sys
+
+                import pcons.util.archive_helper as archive_mod
+
+                compression = build_info.get("compression")
+                base_dir = build_info.get("base_dir", ".")
+                compression_flag = f"--compression {compression}" if compression else ""
+                helper_path = Path(archive_mod.__file__)  # type: ignore[arg-type]
+                command = (
+                    f"{sys.executable} {helper_path} --type tar "
+                    f"{compression_flag} --output $out --base-dir {base_dir} $in"
+                )
+                description = "TAR $out"
+            elif tool_name == "zipfile":
+                import sys
+
+                import pcons.util.archive_helper as archive_mod
+
+                base_dir = build_info.get("base_dir", ".")
+                helper_path = Path(archive_mod.__file__)  # type: ignore[arg-type]
+                command = (
+                    f"{sys.executable} {helper_path} --type zip "
+                    f"--output $out --base-dir {base_dir} $in"
+                )
+                description = "ZIP $out"
             # Check for generic command builder (has custom command in build_info)
             elif custom_command:
                 # Generic command builder - use the command directly

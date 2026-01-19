@@ -83,39 +83,53 @@ class TestGenericCommandBuilder:
 
 
 class TestEnvironmentCommand:
-    """Tests for Environment.Command() method."""
+    """Tests for Environment.Command() method.
+
+    Note: As of v0.2.0, env.Command() returns a Target object instead of
+    list[FileNode], and uses keyword-only arguments.
+    """
 
     def test_command_with_single_target_and_source(self):
         """Command with single target and source."""
         env = Environment()
 
-        nodes = env.Command("output.txt", "input.txt", "cp $SOURCE $TARGET")
+        result = env.Command(
+            target="output.txt", source="input.txt", command="cp $SOURCE $TARGET"
+        )
 
-        assert len(nodes) == 1
-        assert nodes[0].path == Path("output.txt")
+        # Returns Target, not list
+        from pcons.core.target import Target
+
+        assert isinstance(result, Target)
+        assert len(result.output_nodes) == 1
+        assert result.output_nodes[0].path == Path("output.txt")
 
     def test_command_with_multiple_sources(self):
         """Command with multiple sources."""
         env = Environment()
 
-        nodes = env.Command(
-            "combined.txt", ["a.txt", "b.txt", "c.txt"], "cat $SOURCES > $TARGET"
+        result = env.Command(
+            target="combined.txt",
+            source=["a.txt", "b.txt", "c.txt"],
+            command="cat $SOURCES > $TARGET",
         )
 
-        assert len(nodes) == 1
-        target = nodes[0]
-        assert len(target.explicit_deps) == 3
+        assert len(result.output_nodes) == 1
+        output_node = result.output_nodes[0]
+        assert len(output_node.explicit_deps) == 3
 
     def test_command_with_multiple_targets(self):
         """Command with multiple targets."""
         env = Environment()
 
-        nodes = env.Command(
-            ["output.h", "output.c"], "input.y", "bison -d -o ${TARGETS[0]} $SOURCE"
+        result = env.Command(
+            target=["output.h", "output.c"],
+            source="input.y",
+            command="bison -d -o ${TARGETS[0]} $SOURCE",
         )
 
-        assert len(nodes) == 2
-        paths = [n.path for n in nodes]
+        assert len(result.output_nodes) == 2
+        paths = [n.path for n in result.output_nodes]
         assert Path("output.h") in paths
         assert Path("output.c") in paths
 
@@ -123,39 +137,64 @@ class TestEnvironmentCommand:
         """Command with no source dependencies."""
         env = Environment()
 
-        nodes = env.Command("timestamp.txt", None, "date > $TARGET")
+        result = env.Command(
+            target="timestamp.txt", source=None, command="date > $TARGET"
+        )
 
-        assert len(nodes) == 1
-        assert len(nodes[0].explicit_deps) == 0
+        assert len(result.output_nodes) == 1
+        assert len(result.output_nodes[0].explicit_deps) == 0
 
     def test_command_with_path_objects(self):
         """Command accepts Path objects."""
         env = Environment()
 
-        nodes = env.Command(
-            Path("build/output.txt"),
-            [Path("src/input.txt")],
-            "process $SOURCE > $TARGET",
+        result = env.Command(
+            target=Path("build/output.txt"),
+            source=[Path("src/input.txt")],
+            command="process $SOURCE > $TARGET",
         )
 
-        assert len(nodes) == 1
-        assert nodes[0].path == Path("build/output.txt")
+        assert len(result.output_nodes) == 1
+        assert result.output_nodes[0].path == Path("build/output.txt")
 
     def test_command_registers_nodes(self):
         """Command registers nodes with environment."""
         env = Environment()
 
-        nodes = env.Command("out.txt", "in.txt", "cmd")
+        result = env.Command(target="out.txt", source="in.txt", command="cmd")
 
-        assert nodes[0] in env.created_nodes
+        assert result.output_nodes[0] in env.created_nodes
 
-    def test_command_returns_file_nodes(self):
-        """Command returns only FileNode objects."""
+    def test_command_returns_target(self):
+        """Command returns Target object (not list[FileNode])."""
         env = Environment()
 
-        nodes = env.Command(["a.txt", "b.txt"], "source.txt", "split $SOURCE")
+        result = env.Command(
+            target=["a.txt", "b.txt"], source="source.txt", command="split $SOURCE"
+        )
 
-        assert all(isinstance(n, FileNode) for n in nodes)
+        from pcons.core.target import Target
+
+        assert isinstance(result, Target)
+        assert all(isinstance(n, FileNode) for n in result.output_nodes)
+
+    def test_command_name_derived_from_target(self):
+        """Command target name is derived from first target file if not specified."""
+        env = Environment()
+
+        result = env.Command(target="my_output.txt", source="in.txt", command="cmd")
+
+        assert result.name == "my_output"
+
+    def test_command_explicit_name(self):
+        """Command can have an explicit name."""
+        env = Environment()
+
+        result = env.Command(
+            target="out.txt", source="in.txt", command="cmd", name="my_custom_name"
+        )
+
+        assert result.name == "my_custom_name"
 
 
 class TestGenericCommandNinja:
@@ -169,7 +208,9 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command("out.txt", "in.txt", "process $SOURCE > $TARGET")
+        env.Command(
+            target="out.txt", source="in.txt", command="process $SOURCE > $TARGET"
+        )
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -188,7 +229,9 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command("output.txt", "input.txt", "cp $SOURCE $TARGET")
+        env.Command(
+            target="output.txt", source="input.txt", command="cp $SOURCE $TARGET"
+        )
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -205,7 +248,11 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command("out.txt", ["a.txt", "b.txt"], "cat $SOURCES > $TARGET")
+        env.Command(
+            target="out.txt",
+            source=["a.txt", "b.txt"],
+            command="cat $SOURCES > $TARGET",
+        )
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -223,7 +270,9 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command(["out.c", "out.h"], "grammar.y", "bison -d $SOURCE")
+        env.Command(
+            target=["out.c", "out.h"], source="grammar.y", command="bison -d $SOURCE"
+        )
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -241,7 +290,7 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command("out.txt", "in.txt", "process $SOURCE")
+        env.Command(target="out.txt", source="in.txt", command="process $SOURCE")
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -259,7 +308,7 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command("out.txt", "in.txt", "process > $TARGET")
+        env.Command(target="out.txt", source="in.txt", command="process > $TARGET")
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -277,7 +326,11 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command("out.txt", ["a.txt", "b.txt"], "cat $SOURCES > $TARGET")
+        env.Command(
+            target="out.txt",
+            source=["a.txt", "b.txt"],
+            command="cat $SOURCES > $TARGET",
+        )
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -294,9 +347,9 @@ class TestGenericCommandNinja:
         env = project.Environment()
 
         env.Command(
-            "out.txt",
-            ["first.txt", "second.txt"],
-            "diff ${SOURCES[0]} ${SOURCES[1]} > $TARGET",
+            target="out.txt",
+            source=["first.txt", "second.txt"],
+            command="diff ${SOURCES[0]} ${SOURCES[1]} > $TARGET",
         )
 
         gen = NinjaGenerator()
@@ -318,9 +371,9 @@ class TestGenericCommandNinja:
         env = project.Environment()
 
         env.Command(
-            ["out.c", "out.h"],
-            "grammar.y",
-            "bison -o ${TARGETS[0]} -H ${TARGETS[1]} $SOURCE",
+            target=["out.c", "out.h"],
+            source="grammar.y",
+            command="bison -o ${TARGETS[0]} -H ${TARGETS[1]} $SOURCE",
         )
 
         gen = NinjaGenerator()
