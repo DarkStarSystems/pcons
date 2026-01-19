@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-01-19
+
+### Added
+
+- **Cross-platform command helpers** (`pcons.util.commands`): New module providing `copy` and `concat` commands that handle forward slashes and spaces in paths on all platforms
+  - Usage: `python -m pcons.util.commands copy <src> <dest>`
+  - Usage: `python -m pcons.util.commands concat <src1> [src2...] <dest>`
+  - Used by Install/InstallAs builders and concat example
+
+### Changed
+
+- Install and InstallAs now use `pcons.util.commands copy` instead of platform-specific shell commands
+- Concat example (01_concat) now uses `pcons.util.commands concat` for better cross-platform support
+
 ## [0.2.1] - 2026-01-19
 
 ### Added
@@ -132,7 +146,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/garyo/pcons/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/garyo/pcons/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/garyo/pcons/compare/v0.1.4...v0.2.0
 [0.1.4]: https://github.com/garyo/pcons/compare/v0.1.3...v0.1.4
