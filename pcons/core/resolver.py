@@ -587,7 +587,8 @@ class InstallNodeFactory:
         from pcons.configure.platform import get_platform
 
         platform = get_platform()
-        copy_cmd = "copy" if platform.is_windows else "cp"
+        # On Windows, 'copy' is a shell built-in, so we need cmd /c
+        copy_cmd = "cmd /c copy" if platform.is_windows else "cp"
 
         installed_nodes: list[FileNode] = []
         for file_node in sources:
@@ -645,7 +646,8 @@ class InstallNodeFactory:
             )
 
         platform = get_platform()
-        copy_cmd = "copy" if platform.is_windows else "cp"
+        # On Windows, 'copy' is a shell built-in, so we need cmd /c
+        copy_cmd = "cmd /c copy" if platform.is_windows else "cp"
 
         source_node = sources[0]
 
