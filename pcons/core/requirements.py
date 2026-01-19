@@ -159,6 +159,11 @@ def compute_effective_requirements(
         if flags:
             merge_flags(result.compile_flags, list(flags), separated_arg_flags)
 
+    # Note: env.link settings (frameworks, libs, libdirs) are baked into the
+    # ninja rule via template expansion. Effective requirements only contain
+    # target-specific settings (private/public requirements from targets and
+    # their dependencies).
+
     # Layer 2: Target's own requirements
     # Private: only for this target
     result.merge(target.private)

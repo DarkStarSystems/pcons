@@ -50,18 +50,21 @@ class Environment:
         "_toolchain",
         "_additional_toolchains",
         "_created_nodes",
+        "_name",
         "defined_at",
     )
 
     def __init__(
         self,
         *,
+        name: str | None = None,
         toolchain: Toolchain | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
         """Create an environment.
 
         Args:
+            name: Optional name for this environment (used in ninja rule names).
             toolchain: Optional toolchain to initialize tools from.
             defined_at: Source location where this was created.
         """
@@ -74,6 +77,7 @@ class Environment:
         self._toolchain = toolchain
         self._additional_toolchains: list[Toolchain] = []
         self._created_nodes: list[Any] = []  # Nodes created by builders
+        self._name = name
         self.defined_at = defined_at or get_caller_location()
 
         # Initialize tools from toolchain if provided
@@ -215,6 +219,16 @@ class Environment:
         """Return list of nodes created by builders in this environment."""
         return self._get_created_nodes()
 
+    @property
+    def name(self) -> str | None:
+        """Return the environment name, if set."""
+        return object.__getattribute__(self, "_name")
+
+    @name.setter
+    def name(self, value: str | None) -> None:
+        """Set the environment name."""
+        object.__setattr__(self, "_name", value)
+
     def get(self, name: str, default: Any = None) -> Any:
         """Get a variable or tool with a default."""
         try:
@@ -321,6 +335,10 @@ class Environment:
 
         # Copy project reference
         new_env._project = object.__getattribute__(self, "_project")
+
+        # Don't copy name - cloned env should get a new name if needed
+        # (otherwise two envs could generate the same ninja rule names)
+        new_env._name = None
 
         # Don't copy created_nodes - new environment starts fresh
 

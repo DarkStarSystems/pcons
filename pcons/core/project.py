@@ -119,18 +119,21 @@ class Project:
     def Environment(
         self,
         toolchain: Toolchain | None = None,
+        name: str | None = None,
         **kwargs: Any,
     ) -> Env:
         """Create and register a new environment.
 
         Args:
             toolchain: Optional toolchain to initialize with.
+            name: Optional name for this environment (used in ninja rule names).
             **kwargs: Additional variables to set on the environment.
 
         Returns:
             A new Environment attached to this project.
         """
         env = Env(
+            name=name,
             toolchain=toolchain,
             defined_at=get_caller_location(),
         )

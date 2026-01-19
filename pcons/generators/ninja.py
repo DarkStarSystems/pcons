@@ -190,14 +190,20 @@ class NinjaGenerator(BaseGenerator):
         custom_rule_name = build_info.get("rule_name")
         custom_command = build_info.get("command")
 
-        # Create a unique key for this rule based on tool, command var, and mode
+        # Create a unique key for this rule based on tool, command var, and env
+        # Each env gets its own rule so env-specific settings (frameworks, libs, etc.)
+        # are correctly baked into the rule via template expansion.
         if custom_rule_name:
             # Generic command builder uses custom rule name
             rule_key = custom_rule_name
         else:
             rule_key = f"{tool_name}_{command_var}"
             if has_effective_reqs:
-                rule_key += "_effective"
+                # Include env identity so each env gets its own rule
+                # This allows env.Framework(), env.link.libs, etc. to be baked in
+                # Use env name if available for readability, plus id for uniqueness
+                env_suffix = self._get_env_suffix(env)
+                rule_key += f"_{env_suffix}"
 
         if rule_key not in self._rules:
             rule_name = rule_key
@@ -260,6 +266,10 @@ class NinjaGenerator(BaseGenerator):
                         # Using shell="ninja" ensures $in, $out aren't quoted
                         # Ninja variables like $in, $out are escaped as $$in, $$out
                         # in the toolchain defaults, and become $in, $out after subst
+                        #
+                        # Since each env gets its own rule, env-specific settings
+                        # (frameworks, libs, etc.) are correctly baked into this
+                        # env's rule via normal template expansion.
                         command = env.subst(cmd_template, shell="ninja")
 
                         # For target-centric builds, append effective requirement
@@ -434,14 +444,20 @@ class NinjaGenerator(BaseGenerator):
         # Check if this is a target-centric build (has effective requirements)
         has_effective_reqs = any(k.startswith("effective_") for k in build_info.keys())
 
+        # Get the environment for this build (needed for per-env rule naming)
+        env = target._env if target else None
+
         # Check for custom rule name (from generic command builder)
         custom_rule_name = build_info.get("rule_name")
         if custom_rule_name:
             rule_name = custom_rule_name
         else:
+            # Rule name must match _ensure_rule() logic
             rule_name = f"{tool_name}_{command_var}"
             if has_effective_reqs:
-                rule_name += "_effective"
+                # Each env gets its own rule
+                env_suffix = self._get_env_suffix(env)
+                rule_name += f"_{env_suffix}"
 
         # Handle multi-output builds from generic commands
         all_targets = build_info.get("all_targets")
@@ -692,6 +708,35 @@ class NinjaGenerator(BaseGenerator):
 
         if defaults:
             f.write(f"default {' '.join(defaults)}\n")
+
+    def _get_env_suffix(self, env: Environment | None) -> str:
+        """Generate a suffix for rule names that identifies the environment.
+
+        Uses the env name if available for readability, plus a unique id
+        to ensure different envs get different rules even with the same name.
+
+        Args:
+            env: The environment to generate a suffix for.
+
+        Returns:
+            A string suffix safe for use in ninja rule names.
+        """
+        import re
+
+        if env is None:
+            return "0"
+
+        parts = []
+        # Use env name if available
+        if env.name:
+            # Sanitize: only allow alphanumeric and underscore
+            sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", env.name)
+            parts.append(sanitized)
+
+        # Always include id for uniqueness
+        parts.append(str(id(env)))
+
+        return "_".join(parts)
 
     def _escape_path(self, path: Path | str) -> str:
         """Escape a path for use in Ninja files.
