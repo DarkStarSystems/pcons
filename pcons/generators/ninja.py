@@ -639,51 +639,63 @@ class NinjaGenerator(BaseGenerator):
         f.write("\n")
 
     def _write_defaults(self, f: TextIO, project: Project) -> None:
-        """Write default targets."""
+        """Write default targets and 'all' phony target."""
         f.write("# Default targets\n")
-        defaults: list[str] = []
+        user_defaults: list[str] = []
+        all_outputs: list[str] = []
 
-        # Add nodes from default targets
+        # Collect user-specified default targets
         for target in project.default_targets:
             # For resolved targets, use output_nodes
             if target.output_nodes:
                 for out_node in target.output_nodes:
                     if isinstance(out_node, FileNode):
-                        defaults.append(self._escape_output_path(out_node.path))
+                        user_defaults.append(self._escape_output_path(out_node.path))
             # Fall back to nodes for legacy/unresolved targets
             else:
                 for target_node in target.nodes:
                     if isinstance(target_node, FileNode):
-                        defaults.append(self._escape_output_path(target_node.path))
+                        user_defaults.append(self._escape_output_path(target_node.path))
 
-        # If no default targets, auto-detect "final" outputs
-        if not defaults:
-            # First, try resolved targets with output nodes
-            for target in project.targets:
-                if getattr(target, "_resolved", False):
-                    # Check if this is a "final" target (program or library)
-                    if target.target_type in (
-                        "program",
-                        "shared_library",
-                        "static_library",
-                    ):
-                        for node in target.output_nodes:
-                            if isinstance(node, FileNode):
-                                defaults.append(self._escape_output_path(node.path))
+        # Collect all "final" outputs for 'all' target
+        # First, try resolved targets with output nodes
+        for target in project.targets:
+            if getattr(target, "_resolved", False):
+                # Check if this is a "final" target (program or library)
+                if target.target_type in (
+                    "program",
+                    "shared_library",
+                    "static_library",
+                ):
+                    for node in target.output_nodes:
+                        if isinstance(node, FileNode):
+                            all_outputs.append(self._escape_output_path(node.path))
 
-            # If still no defaults, use legacy path
-            if not defaults:
-                for env in project.environments:
-                    for node in getattr(env, "_created_nodes", []):
-                        if isinstance(node, FileNode) and node.builder is not None:
-                            # Check if this is a "final" output (Program, SharedLibrary)
-                            build_info = getattr(node, "_build_info", {})
-                            tool = build_info.get("tool", "")
-                            if tool == "link":
-                                defaults.append(self._escape_output_path(node.path))
+        # If no resolved targets, use legacy path
+        if not all_outputs:
+            for env in project.environments:
+                for node in getattr(env, "_created_nodes", []):
+                    if isinstance(node, FileNode) and node.builder is not None:
+                        # Check if this is a "final" output (Program, SharedLibrary)
+                        build_info = getattr(node, "_build_info", {})
+                        tool = build_info.get("tool", "")
+                        if tool == "link":
+                            all_outputs.append(self._escape_output_path(node.path))
 
-        if defaults:
-            f.write(f"default {' '.join(defaults)}\n")
+        # Include user defaults in all_outputs if not already present
+        for ud in user_defaults:
+            if ud not in all_outputs:
+                all_outputs.append(ud)
+
+        if all_outputs:
+            # Create 'all' phony target (standard convention from Make)
+            f.write(f"build all: phony {' '.join(all_outputs)}\n")
+
+        # Set default: user-specified targets if any, otherwise 'all'
+        if user_defaults:
+            f.write(f"default {' '.join(user_defaults)}\n")
+        elif all_outputs:
+            f.write("default all\n")
 
     def _get_env_suffix(self, env: Environment | None) -> str:
         """Generate a suffix for rule names that identifies the environment.

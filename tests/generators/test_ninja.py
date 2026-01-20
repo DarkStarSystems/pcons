@@ -142,6 +142,9 @@ class TestNinjaDefaults:
         gen.generate(project, tmp_path)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
+        # Check for 'all' phony target and user-specified default
+        assert "build all: phony build/app" in content
+        # User called project.Default(), so default is user-specified, not 'all'
         assert "default build/app" in content
 
 
