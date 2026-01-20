@@ -50,9 +50,10 @@ project.Default(hello)
 # --- Installer targets (not built by default) ---
 
 # Tarball of source files and headers
+# Note: output paths are relative to build_dir (consistent with Install, InstallDir)
 src_tarball = project.Tarfile(
     env,
-    output=build_dir / "hello-src.tar.gz",
+    output="hello-src.tar.gz",
     sources=[src_dir / "hello.c", src_dir / "hello.h"],
     compression="gzip",
 )
@@ -60,7 +61,7 @@ src_tarball = project.Tarfile(
 # Tarball of the built binary (pass the Target - sources are resolved later)
 bin_tarball = project.Tarfile(
     env,
-    output=build_dir / "hello-bin.tar.gz",
+    output="hello-bin.tar.gz",
     sources=[hello],
     compression="gzip",
 )

@@ -900,6 +900,16 @@ class Project:
         """
         output_path = Path(output)
 
+        # Normalize output path to be relative to build_dir
+        # This ensures consistent behavior: users pass paths relative to build_dir
+        # (e.g., "dist/file.tar.gz") and we store them that way
+        if output_path.is_absolute():
+            try:
+                output_path = output_path.relative_to(self.build_dir)
+            except ValueError:
+                # Path is not under build_dir - keep as-is (external output)
+                pass
+
         # Infer compression from extension if not specified
         if compression is None:
             if str(output).endswith(".tar.gz") or str(output).endswith(".tgz"):
@@ -965,6 +975,16 @@ class Project:
                 sources=["bin/", "lib/", "README.md"])
         """
         output_path = Path(output)
+
+        # Normalize output path to be relative to build_dir
+        # This ensures consistent behavior: users pass paths relative to build_dir
+        # (e.g., "dist/file.zip") and we store them that way
+        if output_path.is_absolute():
+            try:
+                output_path = output_path.relative_to(self.build_dir)
+            except ValueError:
+                # Path is not under build_dir - keep as-is (external output)
+                pass
 
         # Derive name from output if not specified
         if name is None:

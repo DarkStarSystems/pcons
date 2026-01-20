@@ -29,7 +29,8 @@ project = Project("install_dir", build_dir=build_dir)
 
 # Install the assets directory to the build output
 # This copies the entire 'assets' directory tree to 'build/dist/assets'
-installed_assets = project.InstallDir("build/dist", src_dir / "assets")
+# Note: destination is relative to build_dir, so "dist" becomes "build/dist"
+installed_assets = project.InstallDir("dist", src_dir / "assets")
 
 # Set as default target
 project.Default(installed_assets)

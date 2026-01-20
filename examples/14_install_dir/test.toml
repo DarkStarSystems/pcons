@@ -6,7 +6,7 @@ description = "InstallDir for recursive directory copying"
 
 # The stamp file is in .stamps/; actual files are in the directory
 expected_outputs = [
-    "build/.stamps/build_dist_assets.stamp",
+    "build/.stamps/dist_assets.stamp",
 ]
 
 [verify]
@@ -30,4 +30,4 @@ expect_no_work = true
 [[rebuild]]
 description = "Touching a source file triggers reinstall"
 touch = "assets/data.txt"
-expect_rebuild = [".stamps/build_dist_assets.stamp"]
+expect_rebuild = [".stamps/dist_assets.stamp"]
