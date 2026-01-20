@@ -164,8 +164,8 @@ class TestNormalizeTargetPath:
 
         # Windows-style path with backslashes
         result = resolver.normalize_target_path("dist\\subdir\\foo.tar.gz")
-        # Should be normalized to forward slashes
-        assert "/" in str(result) or "\\" not in str(result)
+        # Path parts should be correct regardless of platform string representation
+        # (Windows Path objects use backslashes when stringified, which is fine)
         assert result.parts == ("dist", "subdir", "foo.tar.gz")
 
 
