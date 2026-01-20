@@ -60,8 +60,11 @@ ninja -C build
 
 ## Installation
 
+No installation needed, if you have `uv`; just use `uvx pcons` to configure and build. `uvx pcons --help` for more info.
+If you want to install it, though:
+
 ```bash
-# Using uv (recommended)
+# Using uv
 uv add pcons
 
 # Or pip
@@ -75,6 +78,12 @@ git clone https://github.com/garyo/pcons.git
 cd pcons
 uv sync
 ```
+
+## Documentation
+
+- User Guide is at [ReadTheDocs](https://pcons.readthedocs.io)
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Design document and implementation status
+- [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
 
 ## Development
 
@@ -92,11 +101,6 @@ make fmt
 uv run ruff check pcons/
 uv run mypy pcons/
 ```
-
-## Documentation
-
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Design document and implementation status
-- [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
 
 ## License
 

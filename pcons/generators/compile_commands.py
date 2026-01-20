@@ -49,7 +49,7 @@ class CompileCommandsGenerator(BaseGenerator):
     def __init__(self) -> None:
         super().__init__("compile_commands")
 
-    def generate(self, project: Project, output_dir: Path) -> None:
+    def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate compile_commands.json.
 
         Args:

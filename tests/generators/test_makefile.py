@@ -301,6 +301,7 @@ class TestMakefilePostBuild:
         target.output_nodes.append(output_node)
         target._post_build_commands = ["chmod +x $out", "echo 'Built $out'"]
         project.add_target(target)
+        project._resolved = True  # Skip auto-resolve since we set up nodes manually
 
         gen = MakefileGenerator()
         gen.generate(project, tmp_path)

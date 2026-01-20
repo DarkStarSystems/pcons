@@ -52,7 +52,7 @@ class NinjaGenerator(BaseGenerator):
         self._project_root: Path | None = None  # Set during generate()
         self._topdir: str = ".."  # Relative path from output_dir to project root
 
-    def generate(self, project: Project, output_dir: Path) -> None:
+    def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate build.ninja file.
 
         Args:
@@ -169,10 +169,9 @@ class NinjaGenerator(BaseGenerator):
             rule_key = custom_rule_name
         else:
             rule_key = f"{tool_name}_{command_var}"
-            if has_effective_reqs:
-                # Include env identity so each env gets its own rule
-                # This allows env.Framework(), env.link.libs, etc. to be baked in
-                # Use env name if available for readability, plus id for uniqueness
+            if env is not None:
+                # Always include env identity so each env gets its own rule
+                # This allows env.override() settings to work correctly
                 env_suffix = self._get_env_suffix(env)
                 rule_key += f"_{env_suffix}"
 
@@ -412,11 +411,14 @@ class NinjaGenerator(BaseGenerator):
         command_var = build_info.get("command_var", "cmdline")
         sources: list[Node] = build_info.get("sources", [])
 
-        # Check if this is a target-centric build (has effective requirements)
-        has_effective_reqs = build_info.get("context") is not None
-
         # Get the environment for this build (needed for per-env rule naming)
-        env = target._env if target else None
+        # For target-centric builds, use target._env
+        # For direct builder calls, find the env that created the node
+        env: Environment | None = None
+        if target:
+            env = target._env
+        elif project:
+            env = self._find_env_for_node(node, project)
 
         # Check for custom rule name (from generic command builder)
         custom_rule_name = build_info.get("rule_name")
@@ -425,7 +427,7 @@ class NinjaGenerator(BaseGenerator):
         else:
             # Rule name must match _ensure_rule() logic
             rule_name = f"{tool_name}_{command_var}"
-            if has_effective_reqs:
+            if env is not None:
                 # Each env gets its own rule
                 env_suffix = self._get_env_suffix(env)
                 rule_name += f"_{env_suffix}"

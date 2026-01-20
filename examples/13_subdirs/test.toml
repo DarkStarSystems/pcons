@@ -1,0 +1,13 @@
+# Test configuration for subdirs example
+
+[test]
+# Build the complete project
+build_targets = ["app/subdirs_demo"]
+
+[test.expected_output]
+# Check that all expected files are built
+files = [
+    "libfoo/foo.o",
+    "app/main.o",
+    "app/subdirs_demo",
+]

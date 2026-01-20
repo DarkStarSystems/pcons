@@ -3,8 +3,10 @@
 """Build script demonstrating debug/release build variants.
 
 This example demonstrates:
-- Using set_variant() for debug/release builds
+- Using env.clone() to create multiple environments
+- Building both debug and release variants in one project
 - How variants affect compiler flags and defines
+- Organizing outputs into variant-specific directories
 """
 
 import os
@@ -25,30 +27,24 @@ src_dir = Path(__file__).parent / "src"
 # Find a C toolchain (uses platform-appropriate defaults)
 toolchain = find_c_toolchain()
 project = Project("variants_example", build_dir=build_dir)
-env = project.Environment(toolchain=toolchain)
 
-# Apply release variant - sets optimization flags and NDEBUG
-env.set_variant("release")
-
-# Add extra flags (platform-specific)
+# Create base environment with common settings
+base_env = project.Environment(toolchain=toolchain)
 if toolchain.name in ("msvc", "clang-cl"):
-    env.cc.flags.append("/W4")
+    base_env.cc.flags.append("/W4")
 else:
-    env.cc.flags.append("-Wall")
+    base_env.cc.flags.append("-Wall")
 
-# Use toolchain to get correct suffixes
-obj_suffix = toolchain.get_object_suffix()
-prog_name = toolchain.get_program_name("variant_demo")
+# Build both debug and release variants
+for variant in ["debug", "release"]:
+    env = base_env.clone()
+    env.set_variant(variant)  # Sets appropriate flags for each variant
 
-# Compile and link
-obj = env.cc.Object(build_dir / f"main{obj_suffix}", src_dir / "main.c")
-env.link.Program(build_dir / prog_name, obj)
+    prog = project.Program(f"variant_demo_{variant}", env)
+    prog.output_name = f"{variant}/" + toolchain.get_program_name("variant_demo")
+    prog.add_sources([src_dir / "main.c"])
 
-# Generate ninja build file
-generator = NinjaGenerator()
-generator.generate(project, build_dir)
-
+# Resolve and generate
+project.resolve()
+NinjaGenerator().generate(project, build_dir)
 print(f"Generated {build_dir / 'build.ninja'}")
-print(f"Variant: {env.variant}")
-print(f"CC flags: {env.cc.flags}")
-print(f"CC defines: {env.cc.defines}")

@@ -57,7 +57,17 @@ class BaseGenerator:
         return self._name
 
     def generate(self, project: Project, output_dir: Path) -> None:
-        """Generate build files. Subclasses must implement."""
+        """Generate build files.
+
+        Auto-resolves the project if not already resolved, then
+        calls _generate_impl() which subclasses must implement.
+        """
+        if not project._resolved:
+            project.resolve()
+        self._generate_impl(project, output_dir)
+
+    def _generate_impl(self, project: Project, output_dir: Path) -> None:
+        """Implementation of generate. Subclasses must override."""
         raise NotImplementedError
 
     def _get_target_build_nodes(self, target: Target) -> list[FileNode]:

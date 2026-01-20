@@ -53,7 +53,7 @@ class MakefileGenerator(BaseGenerator):
         self._directories: set[Path] = set()
         self._depfile_dirs: set[Path] = set()
 
-    def generate(self, project: Project, output_dir: Path) -> None:
+    def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate Makefile.
 
         Args:

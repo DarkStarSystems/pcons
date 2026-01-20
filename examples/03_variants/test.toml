@@ -1,21 +1,24 @@
 # Test configuration for the build variants example
 
 [test]
-description = "Demonstrates debug/release build variants with different compiler flags"
+description = "Demonstrates debug/release build variants using env.clone()"
 
 # Files that should exist after the build
 # Paths are Unix-style; automatically adapted for Windows
 expected_outputs = [
-    "build/main.o",
-    "build/variant_demo",
+    "build/debug/variant_demo",
+    "build/release/variant_demo",
 ]
 
 [verify]
-# The release variant should define NDEBUG, so output should reflect that
+# Debug variant should have DEBUG defined and assertions enabled
+# Release variant should have NDEBUG defined (assertions disabled)
 # Commands are Unix-style; automatically adapted for Windows
 commands = [
-    { run = "./build/variant_demo", expect_stdout = "Running in RELEASE mode" },
-    { run = "./build/variant_demo", expect_stdout = "Assertions disabled" },
+    { run = "./build/debug/variant_demo", expect_stdout = "Running in DEBUG mode" },
+    { run = "./build/debug/variant_demo", expect_stdout = "Assertions enabled" },
+    { run = "./build/release/variant_demo", expect_stdout = "Running in RELEASE mode" },
+    { run = "./build/release/variant_demo", expect_stdout = "Assertions disabled" },
 ]
 
 [skip]

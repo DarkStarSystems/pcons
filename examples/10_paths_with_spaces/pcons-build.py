@@ -68,8 +68,3 @@ generator = NinjaGenerator()
 generator.generate(project, build_dir)
 
 print(f"Generated {build_dir / 'build.ninja'}")
-print()
-print("To build and run:")
-print(f"  cd {build_dir}")
-print("  ninja")
-print("  ./my_program")

@@ -327,6 +327,17 @@ class Environment:
         for name, config in tools.items():
             new_tools[name] = config.clone()
 
+        # Rebind BuilderMethod instances to reference the new environment
+        # (BuilderMethod stores env reference for node registration)
+        from pcons.tools.tool import BuilderMethod
+
+        for config in new_tools.values():
+            for var_name in list(config):
+                var_value = config.get(var_name)
+                if isinstance(var_value, BuilderMethod):
+                    # Create new BuilderMethod pointing to new_env
+                    config.set(var_name, BuilderMethod(new_env, var_value._builder))
+
         # Copy toolchain references (not cloned - they're shared)
         new_env._toolchain = self._toolchain
         additional: list[Toolchain] = object.__getattribute__(
@@ -334,8 +345,12 @@ class Environment:
         )
         new_env._additional_toolchains = list(additional)
 
-        # Copy project reference
-        new_env._project = object.__getattribute__(self, "_project")
+        # Copy project reference and register with project
+        project = object.__getattribute__(self, "_project")
+        new_env._project = project
+        if project is not None:
+            # Register cloned env so its nodes are found by generators
+            project._environments.append(new_env)
 
         # Don't copy name - cloned env should get a new name if needed
         # (otherwise two envs could generate the same ninja rule names)

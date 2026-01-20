@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Auto-resolve in generators**: Generators now automatically call `project.resolve()` if the project hasn't been resolved yet. Users can still call `resolve()` explicitly (backward compatible), or simply omit it for simpler build scripts.
+- **New example `12_env_override`**: Demonstrates using `env.override()` to compile specific source files with different flags (extra defines, include paths).
+- **New example `13_subdirs`**: Demonstrates subdirectory builds where each subdir can be built standalone or as part of the parent project.
+
+### Fixed
+
+- **`env.override()` and `env.clone()` now work correctly with direct builder API**: Previously, nodes created in a cloned/overridden environment were registered with the original environment, causing per-environment compiler flags to be lost. Fixed by:
+  - Cloned environments now register with the project
+  - `BuilderMethod` instances are rebound to reference the new environment
+  - Ninja generator creates per-environment rules for all environments
+
+### Changed
+
+- **`03_variants` example improved**: Now uses a Python loop to build both debug and release variants, demonstrating the power of Python for build configuration.
+- **Example cleanups**: Removed verbose print statements from `05_multi_library`, `07_conan_example`, and `10_paths_with_spaces` examples.
+
 ## [0.2.2] - 2026-01-19
 
 ### Added

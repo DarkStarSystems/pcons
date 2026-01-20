@@ -1,0 +1,19 @@
+# Test configuration for env.override() example
+
+[test]
+description = "Demonstrates env.override() for per-file compiler settings"
+
+expected_outputs = [
+    "build/main.o",
+    "build/extra.o",
+    "build/demo",
+]
+
+[verify]
+commands = [
+    { run = "./build/demo", expect_stdout = "Hello from main" },
+    { run = "./build/demo", expect_stdout = "Extra feature: enabled via override" },
+]
+
+[skip]
+# Works on all platforms with a C compiler

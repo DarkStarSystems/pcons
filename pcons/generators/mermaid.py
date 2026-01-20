@@ -69,7 +69,7 @@ class MermaidGenerator(BaseGenerator):
         self._direction = direction
         self._output_filename = output_filename
 
-    def generate(self, project: Project, output_dir: Path) -> None:
+    def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate Mermaid diagram file.
 
         Args:

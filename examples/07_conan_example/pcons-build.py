@@ -52,8 +52,6 @@ project = Project("conan_example", root_dir=project_dir, build_dir=build_dir)
 # Find Conan packages
 # =============================================================================
 
-print("Finding Conan packages...")
-
 # Create finder - compiler version is auto-detected
 conan = ConanFinder(
     config,
@@ -67,8 +65,6 @@ conan.sync_profile(toolchain, build_type=VARIANT.capitalize())
 # Install packages - cmake_layout subfolders are auto-searched
 packages = conan.install()
 
-print(f"Found packages: {list(packages.keys())}")
-
 # Get fmt package
 fmt_pkg = packages.get("fmt")
 if not fmt_pkg:
@@ -76,11 +72,6 @@ if not fmt_pkg:
         "fmt package not found - try running:\n"
         "  conan install . --output-folder=build/conan --build=missing"
     )
-
-print(f"fmt version: {fmt_pkg.version}")
-print(f"fmt includes: {fmt_pkg.include_dirs}")
-print(f"fmt defines: {fmt_pkg.defines}")  # e.g., ['FMT_HEADER_ONLY=1']
-print(f"fmt libraries: {fmt_pkg.libraries}")
 
 # =============================================================================
 # Environment Setup
@@ -117,9 +108,4 @@ project.resolve()
 NinjaGenerator().generate(project, build_dir)
 CompileCommandsGenerator().generate(project, build_dir)
 
-rel_build_dir = build_dir.relative_to(Path.cwd())
-print()
-print(f"Generated {rel_build_dir / 'build.ninja'}")
-print()
-print(f"Build: ninja -C {rel_build_dir}")
-print(f"Run:   {rel_build_dir / 'hello_fmt'}")
+print(f"Generated {build_dir / 'build.ninja'}")

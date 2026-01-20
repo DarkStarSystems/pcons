@@ -69,6 +69,7 @@ class Project:
         "_aliases",
         "_default_targets",
         "_config",
+        "_resolved",
         "defined_at",
     )
 
@@ -99,6 +100,7 @@ class Project:
         self._aliases: dict[str, AliasNode] = {}
         self._default_targets: list[Target] = []
         self._config = config
+        self._resolved = False
         self.defined_at = defined_at or get_caller_location()
 
         # Auto-register with global registry (for CLI access)
@@ -592,6 +594,8 @@ class Project:
                     f"Validation failed with {len(errors)} error(s). "
                     f"First error: {errors[0]}"
                 )
+
+        self._resolved = True
 
         # Check for graph output requests (set by CLI --graph/--mermaid options)
         self._output_graphs_if_requested()
