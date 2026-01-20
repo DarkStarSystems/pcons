@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Mermaid diagram generator for dependency visualization.
+"""GraphViz DOT generator for dependency visualization.
 
-Generates Mermaid flowchart syntax showing the complete dependency graph.
-Output can be rendered in GitHub markdown, documentation tools,
-or the Mermaid live editor (https://mermaid.live).
+Generates GraphViz DOT format showing the complete dependency graph.
+Output can be rendered with `dot`, `neato`, or other GraphViz tools,
+or viewed in online tools like https://dreampuf.github.io/GraphvizOnline/.
 """
 
 from __future__ import annotations
@@ -19,58 +19,62 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
 
 
-class MermaidGenerator(BaseGenerator):
-    """Generator that produces Mermaid flowchart diagrams.
+class DotGenerator(BaseGenerator):
+    """Generator that produces GraphViz DOT diagrams.
 
     Generates the complete dependency graph showing all files:
     sources, objects, libraries, and programs with their relationships.
 
     Example output:
-        ```mermaid
-        flowchart LR
-          math_c>math.c]
-          math_o(math.o)
-          libmath_a[libmath.a]
-          main_c>main.c]
-          main_o(main.o)
-          app[[app]]
+        digraph "project_name" {
+          rankdir=LR;
+          node [fontname="Helvetica"];
 
-          math_c --> math_o
-          math_o --> libmath_a
-          main_c --> main_o
-          main_o --> app
-          libmath_a --> app
-        ```
+          // Sources
+          math_c [label="math.c" shape=note];
+
+          // Objects
+          math_o [label="math.o" shape=ellipse];
+
+          // Outputs
+          libmath_a [label="libmath.a" shape=box];
+          app [label="app" shape=box3d];
+
+          // Edges
+          math_c -> math_o;
+          math_o -> libmath_a;
+          libmath_a -> app;
+        }
 
     Usage:
-        generator = MermaidGenerator()
+        generator = DotGenerator()
         generator.generate(project, Path("build"))
-        # Creates build/deps.mmd
+        # Creates build/deps.dot
     """
 
     def __init__(
         self,
         *,
         include_headers: bool = False,
-        direction: str = "LR",
-        output_filename: str = "deps.mmd",
+        rankdir: str = "LR",
+        output_filename: str = "deps.dot",
     ) -> None:
-        """Initialize the Mermaid generator.
+        """Initialize the DOT generator.
 
         Args:
             include_headers: If True, parse .d files to include header
                            dependencies. Requires a prior build.
-            direction: Graph direction - "LR" (left-right), "TB" (top-bottom),
-                      "RL" (right-left), or "BT" (bottom-top).
+            rankdir: Graph direction - "LR" (left-right), "TB" (top-bottom),
+                    "RL" (right-left), or "BT" (bottom-top).
             output_filename: Name of the output file.
         """
-        super().__init__("mermaid")
+        super().__init__("dot")
         self._include_headers = include_headers
-        self._direction = direction
+        self._rankdir = rankdir
         self._output_filename = output_filename
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
-        """Generate Mermaid diagram file.
+        """Generate DOT diagram file.
 
         Args:
             project: Configured project to visualize.
@@ -82,13 +86,19 @@ class MermaidGenerator(BaseGenerator):
         with open(output_file, "w") as f:
             self._write_header(f, project)
             self._write_graph(f, project)
+            self._write_footer(f)
 
     def _write_header(self, f: TextIO, project: Project) -> None:
-        """Write Mermaid header."""
-        f.write("---\n")
-        f.write(f"title: {project.name} Dependencies\n")
-        f.write("---\n")
-        f.write(f"flowchart {self._direction}\n")
+        """Write DOT header."""
+        f.write(f'digraph "{project.name}" {{\n')
+        f.write(f"  rankdir={self._rankdir};\n")
+        f.write('  node [fontname="Helvetica" fontsize=10];\n')
+        f.write('  edge [color="#666666"];\n')
+        f.write("\n")
+
+    def _write_footer(self, f: TextIO) -> None:
+        """Write DOT footer."""
+        f.write("}\n")
 
     def _write_graph(self, f: TextIO, project: Project) -> None:
         """Write the complete dependency graph.
@@ -140,6 +150,7 @@ class MermaidGenerator(BaseGenerator):
                             register_path(dep.path)
 
         # Second pass: write nodes and collect edges
+        f.write("  // Nodes\n")
         for target in project.targets:
             # Output nodes (libraries, programs, command outputs)
             for node in target.output_nodes:
@@ -147,8 +158,11 @@ class MermaidGenerator(BaseGenerator):
                     node_id = get_short_id(node.path)
                     if node_id not in written_nodes:
                         label = node.path.name
-                        shape = self._get_output_shape(target)
-                        f.write(f"  {node_id}{shape[0]}{label}{shape[1]}\n")
+                        shape, style = self._get_output_shape(target)
+                        style_attr = f" style={style}" if style else ""
+                        f.write(
+                            f'  {node_id} [label="{label}" shape={shape}{style_attr}];\n'
+                        )
                         written_nodes.add(node_id)
 
                     # Source dependencies directly on output_nodes (for Command targets)
@@ -158,8 +172,8 @@ class MermaidGenerator(BaseGenerator):
                             if dep_id not in written_nodes:
                                 dep_label = dep.path.name
                                 f.write(
-                                    f"  {dep_id}>{dep_label}]\n"
-                                )  # Flag shape for sources
+                                    f'  {dep_id} [label="{dep_label}" shape=note];\n'
+                                )
                                 written_nodes.add(dep_id)
                             edges.append((dep_id, node_id))
 
@@ -169,7 +183,7 @@ class MermaidGenerator(BaseGenerator):
                     node_id = get_short_id(node.path)
                     if node_id not in written_nodes:
                         label = node.path.name
-                        f.write(f"  {node_id}({label})\n")  # Rounded for objects
+                        f.write(f'  {node_id} [label="{label}" shape=ellipse];\n')
                         written_nodes.add(node_id)
 
                     # Source dependencies
@@ -179,8 +193,8 @@ class MermaidGenerator(BaseGenerator):
                             if dep_id not in written_nodes:
                                 dep_label = dep.path.name
                                 f.write(
-                                    f"  {dep_id}>{dep_label}]\n"
-                                )  # Flag for sources
+                                    f'  {dep_id} [label="{dep_label}" shape=note];\n'
+                                )
                                 written_nodes.add(dep_id)
                             edges.append((dep_id, node_id))
 
@@ -190,7 +204,9 @@ class MermaidGenerator(BaseGenerator):
                         for header in header_deps:
                             header_id = get_short_id(header)
                             if header_id not in written_nodes:
-                                f.write(f"  {header_id}>{header.name}]\n")
+                                f.write(
+                                    f'  {header_id} [label="{header.name}" shape=note];\n'
+                                )
                                 written_nodes.add(header_id)
                             edges.append((header_id, node_id))
 
@@ -211,30 +227,34 @@ class MermaidGenerator(BaseGenerator):
                             if isinstance(dep_output, FileNode):
                                 edges.append((get_short_id(dep_output.path), output_id))
 
-        f.write("\n")
+        f.write("\n  // Edges\n")
 
         # Write edges (deduplicated)
         seen_edges: set[tuple[str, str]] = set()
         for src, dst in edges:
             if (src, dst) not in seen_edges:
-                f.write(f"  {src} --> {dst}\n")
+                f.write(f"  {src} -> {dst};\n")
                 seen_edges.add((src, dst))
 
     def _get_output_shape(self, target: Target) -> tuple[str, str]:
-        """Get Mermaid shape for output node based on target type."""
+        """Get DOT shape for output node based on target type.
+
+        Returns:
+            Tuple of (shape, style) for the node.
+        """
         target_type = getattr(target, "target_type", None)
         if target_type == "program":
-            return ("[[", "]]")  # Stadium for executables
+            return ("box3d", "")  # 3D box for executables
         elif target_type == "shared_library":
-            return ("([", "])")  # Stadium
+            return ("component", "")  # Component shape
         elif target_type == "static_library":
-            return ("[", "]")  # Rectangle
+            return ("box", "")  # Rectangle
         elif target_type == "interface":
-            return ("{{", "}}")  # Hexagon for header-only
+            return ("hexagon", "")  # Hexagon for header-only
         elif target_type == "command":
-            return ("([", "])")  # Rounded rectangle for command outputs
+            return ("box", "rounded")  # Rounded box for command outputs
         else:
-            return ("[", "]")
+            return ("box", "")
 
     def _parse_depfile(self, obj_path: Path) -> list[Path]:
         """Parse a .d dependency file to extract header dependencies.
@@ -268,7 +288,7 @@ class MermaidGenerator(BaseGenerator):
         return headers
 
     def _sanitize_id(self, name: str) -> str:
-        """Sanitize a name for use as a Mermaid node ID."""
+        """Sanitize a name for use as a DOT node ID."""
         result = name.replace("/", "_").replace("\\", "_")
         result = result.replace(".", "_").replace("-", "_")
         result = result.replace(" ", "_").replace(":", "_")

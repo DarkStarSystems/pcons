@@ -328,208 +328,6 @@ class Project:
         """
         return topological_sort_targets(list(self._targets.values()))
 
-    def dump_graph(self, path: Path | str | None = None) -> str:
-        """Dump the dependency graph in Graphviz DOT format.
-
-        Shows all files: sources, objects, libraries, and programs with
-        their relationships. Call this after resolve() for complete information.
-
-        Args:
-            path: Optional file path to write the DOT file.
-                  If None, just returns the DOT string.
-
-        Returns:
-            The DOT format string.
-
-        Example:
-            project.resolve()
-            project.dump_graph("build/graph.dot")
-            # Then: dot -Tpng build/graph.dot -o build/graph.png
-        """
-        lines = [
-            f"// Dependency graph for {self.name}",
-            "digraph pcons {",
-            "  rankdir=LR;",
-            "  node [shape=box];",
-            "",
-        ]
-
-        written_nodes: set[str] = set()
-        edges: list[tuple[str, str]] = []
-
-        # Track file names to detect conflicts (same name, different path)
-        name_to_paths: dict[str, list[Path]] = {}
-
-        def sanitize_id(name: str) -> str:
-            """Sanitize a name for use as a DOT node ID."""
-            result = name.replace("/", "_").replace("\\", "_")
-            result = result.replace(".", "_").replace("-", "_")
-            result = result.replace(" ", "_").replace(":", "_")
-            if result and result[0].isdigit():
-                result = "n" + result
-            return result
-
-        def get_short_id(file_path: Path) -> str:
-            """Get a short but unique ID for a file path."""
-            name = file_path.name
-            if name not in name_to_paths:
-                name_to_paths[name] = []
-            if file_path not in name_to_paths[name]:
-                name_to_paths[name].append(file_path)
-
-            # If multiple files have the same name, include parent dir
-            if len(name_to_paths[name]) > 1:
-                return sanitize_id(f"{file_path.parent.name}_{name}")
-            return sanitize_id(name)
-
-        # First pass: collect all file paths to detect name conflicts
-        for target in self._targets.values():
-            for node in target.output_nodes:
-                if isinstance(node, FileNode):
-                    name = node.path.name
-                    if name not in name_to_paths:
-                        name_to_paths[name] = []
-                    if node.path not in name_to_paths[name]:
-                        name_to_paths[name].append(node.path)
-
-            for node in target.object_nodes:
-                if isinstance(node, FileNode):
-                    name = node.path.name
-                    if name not in name_to_paths:
-                        name_to_paths[name] = []
-                    if node.path not in name_to_paths[name]:
-                        name_to_paths[name].append(node.path)
-
-                    for dep in node.explicit_deps:
-                        if isinstance(dep, FileNode):
-                            name = dep.path.name
-                            if name not in name_to_paths:
-                                name_to_paths[name] = []
-                            if dep.path not in name_to_paths[name]:
-                                name_to_paths[name].append(dep.path)
-
-        # Node styles by type
-        def get_node_style(target: Target) -> tuple[str, str]:
-            """Get DOT style for output node based on target type."""
-            target_type_str = (
-                str(target.target_type) if target.target_type else "unknown"
-            )
-            styles = {
-                "program": ("shape=doubleoctagon", "lightyellow"),
-                "shared_library": ("shape=box3d", "lightgreen"),
-                "static_library": ("shape=box", "lightblue"),
-                "interface": ("shape=hexagon", "lightgray"),
-                "object": ("shape=ellipse", "white"),
-            }
-            shape, color = styles.get(target_type_str, ("shape=box", "white"))
-            return shape, color
-
-        # Second pass: write nodes and collect edges
-        lines.append("  // Source files")
-        for target in self._targets.values():
-            for node in target.object_nodes:
-                if isinstance(node, FileNode):
-                    for dep in node.explicit_deps:
-                        if isinstance(dep, FileNode):
-                            dep_id = get_short_id(dep.path)
-                            if dep_id not in written_nodes:
-                                label = dep.path.name
-                                lines.append(
-                                    f'  {dep_id} [label="{label}", '
-                                    f"shape=note, fillcolor=white, style=filled];"
-                                )
-                                written_nodes.add(dep_id)
-
-        lines.append("")
-        lines.append("  // Object files")
-        for target in self._targets.values():
-            for node in target.object_nodes:
-                if isinstance(node, FileNode):
-                    node_id = get_short_id(node.path)
-                    if node_id not in written_nodes:
-                        label = node.path.name
-                        lines.append(
-                            f'  {node_id} [label="{label}", '
-                            f"shape=ellipse, fillcolor=wheat, style=filled];"
-                        )
-                        written_nodes.add(node_id)
-
-                    # Source dependencies
-                    for dep in node.explicit_deps:
-                        if isinstance(dep, FileNode):
-                            dep_id = get_short_id(dep.path)
-                            edges.append((dep_id, node_id))
-
-        lines.append("")
-        lines.append("  // Output files (libraries, programs)")
-        for target in self._targets.values():
-            # Skip interface targets (Install, etc.) - they're just copy operations
-            # and don't represent build dependencies
-            target_type_str = (
-                str(target.target_type) if target.target_type else "unknown"
-            )
-            if target_type_str == "interface":
-                continue
-
-            shape, color = get_node_style(target)
-            for node in target.output_nodes:
-                if isinstance(node, FileNode):
-                    node_id = get_short_id(node.path)
-                    if node_id not in written_nodes:
-                        label = node.path.name
-                        lines.append(
-                            f'  {node_id} [label="{label}", '
-                            f"{shape}, fillcolor={color}, style=filled];"
-                        )
-                        written_nodes.add(node_id)
-
-            # Edges: objects → outputs
-            for output in target.output_nodes:
-                if isinstance(output, FileNode):
-                    output_id = get_short_id(output.path)
-                    for obj in target.object_nodes:
-                        if isinstance(obj, FileNode):
-                            edges.append((get_short_id(obj.path), output_id))
-
-            # Edges: dependency libraries → this target's output
-            for output in target.output_nodes:
-                if isinstance(output, FileNode):
-                    output_id = get_short_id(output.path)
-                    for dep_target in target.dependencies:
-                        # Skip interface dependencies too
-                        dep_type_str = (
-                            str(dep_target.target_type)
-                            if dep_target.target_type
-                            else "unknown"
-                        )
-                        if dep_type_str == "interface":
-                            continue
-                        for dep_output in dep_target.output_nodes:
-                            if isinstance(dep_output, FileNode):
-                                edges.append((get_short_id(dep_output.path), output_id))
-
-        lines.append("")
-        lines.append("  // Edges")
-
-        # Write edges (deduplicated)
-        seen_edges: set[tuple[str, str]] = set()
-        for src, dst in edges:
-            if (src, dst) not in seen_edges:
-                lines.append(f"  {src} -> {dst};")
-                seen_edges.add((src, dst))
-
-        lines.append("}")
-
-        dot_str = "\n".join(lines)
-
-        if path:
-            path = Path(path)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(dot_str)
-            logger.info("Wrote dependency graph to %s", path)
-
-        return dot_str
-
     def print_targets(self) -> None:
         """Print a human-readable summary of all targets.
 
@@ -603,16 +401,26 @@ class Project:
     def _output_graphs_if_requested(self) -> None:
         """Output dependency graphs if requested via PCONS_GRAPH/PCONS_MERMAID env vars."""
         import os
+        import tempfile
 
         # DOT format graph
         graph_path = os.environ.get("PCONS_GRAPH")
         if graph_path:
-            dot_content = self.dump_graph()
+            from pcons.generators.dot import DotGenerator
+
             if graph_path == "-":
+                # Write to stdout
                 print("# DOT dependency graph")
-                print(dot_content)
+                gen = DotGenerator(output_filename="deps.dot")
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    gen.generate(self, Path(tmpdir))
+                    dot_content = (Path(tmpdir) / "deps.dot").read_text()
+                    print(dot_content)
             else:
-                Path(graph_path).write_text(dot_content)
+                # Write to file
+                output_path = Path(graph_path)
+                gen = DotGenerator(output_filename=output_path.name)
+                gen.generate(self, output_path.parent)
                 logger.info("Wrote DOT graph to %s", graph_path)
 
         # Mermaid format graph
@@ -624,9 +432,6 @@ class Project:
                 # Write to stdout
                 print("# Mermaid dependency graph")
                 gen = MermaidGenerator(output_filename="deps.mmd")
-                # Generate to a temp file, then print
-                import tempfile
-
                 with tempfile.TemporaryDirectory() as tmpdir:
                     gen.generate(self, Path(tmpdir))
                     mermaid_content = (Path(tmpdir) / "deps.mmd").read_text()
