@@ -22,7 +22,7 @@ from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.toolchains import find_c_toolchain  # noqa: E402
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 # Internal storage for CLI variables
 _cli_vars: dict[str, str] | None = None

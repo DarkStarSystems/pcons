@@ -7,11 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-01-20
+
 ### Added
 
 - **Auto-resolve in generators**: Generators now automatically call `project.resolve()` if the project hasn't been resolved yet. Users can still call `resolve()` explicitly (backward compatible), or simply omit it for simpler build scripts.
 - **New example `12_env_override`**: Demonstrates using `env.override()` to compile specific source files with different flags (extra defines, include paths).
 - **New example `13_subdirs`**: Demonstrates subdirectory builds where each subdir can be built standalone or as part of the parent project.
+- **DotGenerator for GraphViz output**: New `DotGenerator` class for dependency graph visualization in DOT format. Use `pcons generate --graph` or import `DotGenerator` directly.
+- **`all` phony target in ninja**: Generated ninja files now include an `all` target (standard Make convention). Default target is `all` unless user specifies defaults via `project.Default()`.
 
 ### Fixed
 
@@ -19,11 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Cloned environments now register with the project
   - `BuilderMethod` instances are rebound to reference the new environment
   - Ninja generator creates per-environment rules for all environments
+- **Command target dependencies now shown in graphs**: Both mermaid and dot generators now correctly show dependencies for `env.Command()` targets (previously showed outputs with no edges).
 
 ### Changed
 
 - **`03_variants` example improved**: Now uses a Python loop to build both debug and release variants, demonstrating the power of Python for build configuration.
 - **Example cleanups**: Removed verbose print statements from `05_multi_library`, `07_conan_example`, and `10_paths_with_spaces` examples.
+- **Removed `project.dump_graph()`**: Replaced by `DotGenerator` class for consistency with other generators.
 
 ## [0.2.2] - 2026-01-19
 
@@ -164,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/garyo/pcons/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/garyo/pcons/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/garyo/pcons/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/garyo/pcons/compare/v0.1.4...v0.2.0
