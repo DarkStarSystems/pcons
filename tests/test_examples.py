@@ -93,6 +93,108 @@ def adapt_command_for_windows(cmd: str) -> str:
     return cmd
 
 
+def parse_ninja_output(output: str) -> tuple[list[str], bool]:
+    """Parse ninja output to extract rebuilt targets.
+
+    Returns:
+        Tuple of (list of rebuilt target paths, is_no_work)
+    """
+    # Check for "ninja: no work to do."
+    is_no_work = "ninja: no work to do." in output
+
+    # Extract targets from lines like "[1/2] RULE target_path"
+    # The format is: [N/M] RULE_NAME target_path
+    rebuilt_targets: list[str] = []
+    for line in output.splitlines():
+        line = line.strip()
+        # Match lines starting with [N/M]
+        if line.startswith("[") and "]" in line:
+            # Extract everything after the bracket
+            rest = line.split("]", 1)[1].strip()
+            # Split into rule name and target path
+            parts = rest.split(maxsplit=1)
+            if len(parts) >= 2:
+                target_path = parts[1]
+                rebuilt_targets.append(target_path)
+
+    return rebuilt_targets, is_no_work
+
+
+def run_rebuild_test(
+    work_dir: Path,
+    build_dir: Path,
+    rebuild_config: dict[str, Any],
+) -> None:
+    """Run a single rebuild test scenario.
+
+    Args:
+        work_dir: Example directory
+        build_dir: Build output directory
+        rebuild_config: Dict with keys like 'description', 'touch', 'expect_rebuild',
+                       'expect_no_rebuild', 'expect_no_work'
+    """
+    description = rebuild_config.get("description", "unnamed rebuild test")
+
+    # 1. Touch file if 'touch' specified
+    touch_file = rebuild_config.get("touch")
+    if touch_file:
+        touch_path = work_dir / touch_file
+        if not touch_path.exists():
+            pytest.fail(
+                f"Rebuild test '{description}': touch file not found: {touch_file}"
+            )
+        # Update modification time
+        touch_path.touch()
+
+    # 2. Run ninja -C build_dir
+    result = subprocess.run(
+        ["ninja", "-C", str(build_dir)],
+        cwd=work_dir,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    if result.returncode != 0:
+        print(f"Ninja stdout:\n{result.stdout}")
+        print(f"Ninja stderr:\n{result.stderr}")
+        pytest.fail(
+            f"Rebuild test '{description}': ninja failed with code {result.returncode}"
+        )
+
+    # 3. Parse output with parse_ninja_output()
+    rebuilt_targets, is_no_work = parse_ninja_output(result.stdout)
+
+    # 4. Verify expectations
+    # If expect_no_work: verify no_work is True
+    if rebuild_config.get("expect_no_work"):
+        if not is_no_work:
+            pytest.fail(
+                f"Rebuild test '{description}': expected no work, "
+                f"but ninja rebuilt: {rebuilt_targets}"
+            )
+
+    # If expect_rebuild: verify each target was rebuilt (substring match)
+    expect_rebuild = rebuild_config.get("expect_rebuild", [])
+    for expected in expect_rebuild:
+        found = any(expected in target for target in rebuilt_targets)
+        if not found:
+            pytest.fail(
+                f"Rebuild test '{description}': expected '{expected}' to be rebuilt, "
+                f"but rebuilt targets were: {rebuilt_targets}"
+            )
+
+    # If expect_no_rebuild: verify each target was NOT rebuilt
+    expect_no_rebuild = rebuild_config.get("expect_no_rebuild", [])
+    for not_expected in expect_no_rebuild:
+        found = any(not_expected in target for target in rebuilt_targets)
+        if found:
+            pytest.fail(
+                f"Rebuild test '{description}': expected '{not_expected}' NOT to be rebuilt, "
+                f"but it was in rebuilt targets: {rebuilt_targets}"
+            )
+
+
 def discover_examples() -> list[Path]:
     """Discover all example directories that have a pcons-build.py and test.toml."""
     examples = []
@@ -355,6 +457,21 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
                     f"Expected '{expect_content}' in {expect_file}, "
                     f"got:\n{actual_content}"
                 )
+
+    # Run rebuild tests (only for "direct" invocation)
+    rebuild_tests = config.get("rebuild", [])
+    if rebuild_tests and invocation == "direct":
+        skip_config = config.get("skip", {})
+        # Check if rebuild tests should be skipped on Windows
+        if sys.platform == "win32" and skip_config.get("rebuild_on_windows"):
+            pass  # Skip rebuild tests on Windows
+        else:
+            # Make sure ninja is available for rebuild tests
+            if shutil.which("ninja") is None:
+                pytest.skip("ninja not available for rebuild tests")
+
+            for rebuild_config in rebuild_tests:
+                run_rebuild_test(work_dir, build_dir, rebuild_config)
 
 
 # Discover examples and create test parameters

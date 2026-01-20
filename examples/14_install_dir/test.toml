@@ -21,3 +21,13 @@ commands = [
 
 [skip]
 # Works on all platforms
+rebuild_on_windows = true
+
+[[rebuild]]
+description = "No rebuild when nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "Touching a source file triggers reinstall"
+touch = "assets/data.txt"
+expect_rebuild = [".stamps/build_dist_assets.stamp"]
