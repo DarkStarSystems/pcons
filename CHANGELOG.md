@@ -12,14 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`project.InstallDir()` for recursive directory installation**: Copies entire directory trees with proper incremental rebuild support using ninja's depfile mechanism. Stamp files stored in `build/.stamps/` to keep output directories clean.
-  - Usage: `project.InstallDir("build/dist", src_dir / "assets")`
+  - Usage: `project.InstallDir("dist", src_dir / "assets")` (paths relative to build_dir)
   - New `copytree` command in `pcons.util.commands` with `--depfile` and `--stamp` options
 - **`project.Command()` for API consistency**: Wrapper around `env.Command()` for users who prefer the project-centric API.
+- **`PathResolver` for consistent path handling**: New centralized path resolution ensures all builders handle output paths consistently:
+  - Target (output) paths: relative to `build_dir`
+  - Source (input) paths: relative to project root
+  - Absolute paths: pass through unchanged
+  - Warns when relative path starts with build_dir name (e.g., `"build/foo"`)
 - **Rebuild tests in example framework**: New `[[rebuild]]` sections in `test.toml` verify incremental build behavior:
   - `touch`: file to modify before rebuild
   - `expect_no_work`: verify ninja has nothing to do
   - `expect_rebuild` / `expect_no_rebuild`: verify specific targets
 - **New example `14_install_dir`**: Demonstrates `InstallDir` for copying directory trees.
+
+### Changed
+
+- **Tarfile/Zipfile output paths now relative to build_dir**: No longer need `build_dir /` prefix. Use `output="file.tar.gz"` instead of `output=build_dir / "file.tar.gz"`.
+- **Install/InstallDir destinations relative to build_dir**: Consistent with other builders.
 
 ## [0.2.3] - 2026-01-20
 
