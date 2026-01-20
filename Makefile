@@ -30,7 +30,7 @@ fmt:              ## Format code using ruff.
 lint:             ## Run ruff and ty linters.
 	uv run ruff check pcons/ tests/
 	uv run ruff format --check pcons/ tests/
-	uvx ty check pcons/
+	uvx ty check pcons/ examples/
 
 .PHONY: test
 test:             ## Run tests.

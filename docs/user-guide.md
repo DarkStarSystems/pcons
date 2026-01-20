@@ -1190,10 +1190,10 @@ project.Install("packages/", [docs_tar, release_zip])
 project.Default(docs_tar, release_zip)
 ```
 
-For a complete example, see `examples/hello/pcons-build.py` which creates source and binary tarballs with an `install` alias:
+For a complete example, see `examples/06_archive_install/pcons-build.py` which creates source and binary tarballs with an `install` alias:
 
 ```bash
-cd examples/hello
+cd examples/06_archive_install
 python pcons-build.py
 ninja -f build/build.ninja          # Build the program
 ninja -f build/build.ninja install  # Create and install tarballs to ./Installers

@@ -12,7 +12,7 @@ import os
 import sys
 from pathlib import Path
 
-from pcons.core.builder import CommandBuilder
+from pcons.core.builder import Builder, CommandBuilder
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator
 from pcons.tools.tool import BaseTool
@@ -42,7 +42,7 @@ class ConcatTool(BaseTool):
             "bundlecmd": "$concat.cmd $concat.flags $$in $$out",
         }
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {
             "Bundle": CommandBuilder(
                 "Bundle",
