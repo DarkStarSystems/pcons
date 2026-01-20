@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from pcons.core.node import FileNode, Node
+from pcons.core.paths import PathResolver
 from pcons.generators.generator import BaseGenerator
 from pcons.tools.toolchain import ToolchainContext
 
@@ -51,6 +52,7 @@ class NinjaGenerator(BaseGenerator):
         self._output_dir: Path | None = None  # Set during generate()
         self._project_root: Path | None = None  # Set during generate()
         self._topdir: str = ".."  # Relative path from output_dir to project root
+        self._path_resolver: PathResolver | None = None  # Set during generate()
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate build.ninja file.
@@ -67,6 +69,8 @@ class NinjaGenerator(BaseGenerator):
         self._rule_counter = 0
         self._output_dir = output_dir.resolve()
         self._project_root = project.root_dir.resolve()
+        # Store path_resolver from project if available
+        self._path_resolver = getattr(project, "_path_resolver", None)
         # Compute relative path from output_dir to project root
         try:
             self._topdir = str(
@@ -752,7 +756,15 @@ class NinjaGenerator(BaseGenerator):
         this returns 'my_program'.
 
         Always uses forward slashes for cross-platform compatibility.
+
+        Uses PathResolver if available for consistent path handling.
         """
+        # Use PathResolver if available
+        if self._path_resolver is not None:
+            normalized = self._path_resolver.make_build_relative(Path(path))
+            return str(normalized).replace("\\", "/")
+
+        # Fallback for tests without full project context
         if self._output_dir is None:
             return str(path).replace("\\", "/")
 
@@ -790,7 +802,22 @@ class NinjaGenerator(BaseGenerator):
         (e.g., path is outside project or on different drive on Windows).
 
         The caller is responsible for prepending $topdir if needed.
+
+        Uses PathResolver if available for consistent path handling.
         """
+        # Use PathResolver if available
+        if self._path_resolver is not None:
+            path_obj = Path(path)
+            # Make absolute if relative, so we can check if it's under project root
+            if not path_obj.is_absolute() and self._project_root is not None:
+                path_obj = self._project_root / path_obj
+            result = self._path_resolver.make_project_relative(path_obj.resolve())
+            # Check if result is absolute (meaning it couldn't be made relative)
+            if Path(result).is_absolute():
+                return None
+            return result
+
+        # Fallback for tests without full project context
         if self._project_root is None or self._output_dir is None:
             return None
 

@@ -312,16 +312,20 @@ class OutputNodeFactory:
             return
 
         build_dir = self.project.build_dir
+        path_resolver = self.project.path_resolver
 
         # Check for custom output name first
         if target.output_name:
-            lib_name = target.output_name
+            # User provided custom output - normalize it
+            lib_path = build_dir / path_resolver.normalize_target_path(
+                target.output_name
+            )
         elif toolchain := env._toolchain:
             lib_name = toolchain.get_static_library_name(target.name)
+            lib_path = build_dir / lib_name
         else:
             lib_name = f"lib{target.name}.a"  # Fallback
-
-        lib_path = build_dir / lib_name
+            lib_path = build_dir / lib_name
 
         lib_node = FileNode(lib_path, defined_at=get_caller_location())
         lib_node.depends(target.object_nodes)
@@ -365,12 +369,17 @@ class OutputNodeFactory:
             return
 
         build_dir = self.project.build_dir
+        path_resolver = self.project.path_resolver
 
         # Check for custom output name first
         if target.output_name:
-            lib_name = target.output_name
+            # User provided custom output - normalize it
+            lib_path = build_dir / path_resolver.normalize_target_path(
+                target.output_name
+            )
         elif toolchain := env._toolchain:
             lib_name = toolchain.get_shared_library_name(target.name)
+            lib_path = build_dir / lib_name
         else:
             # Fallback to platform-specific naming
             import sys
@@ -381,8 +390,7 @@ class OutputNodeFactory:
                 lib_name = f"{target.name}.dll"
             else:
                 lib_name = f"lib{target.name}.so"
-
-        lib_path = build_dir / lib_name
+            lib_path = build_dir / lib_name
 
         lib_node = FileNode(lib_path, defined_at=get_caller_location())
         lib_node.depends(target.object_nodes)
@@ -444,12 +452,17 @@ class OutputNodeFactory:
             return
 
         build_dir = self.project.build_dir
+        path_resolver = self.project.path_resolver
 
         # Check for custom output name first
         if target.output_name:
-            prog_name = target.output_name
+            # User provided custom output - normalize it
+            prog_path = build_dir / path_resolver.normalize_target_path(
+                target.output_name
+            )
         elif toolchain := env._toolchain:
             prog_name = toolchain.get_program_name(target.name)
+            prog_path = build_dir / prog_name
         else:
             # Fallback to platform-specific naming
             import sys
@@ -458,8 +471,7 @@ class OutputNodeFactory:
                 prog_name = f"{target.name}.exe"
             else:
                 prog_name = target.name
-
-        prog_path = build_dir / prog_name
+            prog_path = build_dir / prog_name
 
         prog_node = FileNode(prog_path, defined_at=get_caller_location())
         prog_node.depends(target.object_nodes)
@@ -601,6 +613,10 @@ class InstallNodeFactory:
         """
         import sys
 
+        # Normalize destination directory using PathResolver
+        path_resolver = self.project.path_resolver
+        dest_dir = path_resolver.normalize_target_path(dest_dir)
+
         # Use pcons helper for cross-platform copy (handles forward slashes on Windows)
         python_cmd = sys.executable.replace("\\", "/")
         copy_cmd = f"{python_cmd} -m pcons.util.commands copy"
@@ -660,6 +676,10 @@ class InstallNodeFactory:
                 location=target.defined_at,
             )
 
+        # Normalize destination path using PathResolver
+        path_resolver = self.project.path_resolver
+        dest = path_resolver.normalize_target_path(dest)
+
         # Use pcons helper for cross-platform copy (handles forward slashes on Windows)
         python_cmd = sys.executable.replace("\\", "/")
         copy_cmd = f"{python_cmd} -m pcons.util.commands copy"
@@ -707,6 +727,10 @@ class InstallNodeFactory:
                 f"InstallDir expects exactly one source directory, got {len(sources)}.",
                 location=target.defined_at,
             )
+
+        # Normalize destination directory using PathResolver
+        path_resolver = self.project.path_resolver
+        dest_dir = path_resolver.normalize_target_path(dest_dir)
 
         # Use pcons helper for cross-platform copytree
         python_cmd = sys.executable.replace("\\", "/")

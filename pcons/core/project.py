@@ -19,6 +19,7 @@ from pcons.core.graph import (
     topological_sort_targets,
 )
 from pcons.core.node import AliasNode, DirNode, FileNode, Node
+from pcons.core.paths import PathResolver
 from pcons.core.target import Target, TargetType
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -70,6 +71,7 @@ class Project:
         "_default_targets",
         "_config",
         "_resolved",
+        "_path_resolver",
         "defined_at",
     )
 
@@ -101,6 +103,7 @@ class Project:
         self._default_targets: list[Target] = []
         self._config = config
         self._resolved = False
+        self._path_resolver = PathResolver(self.root_dir, self.build_dir)
         self.defined_at = defined_at or get_caller_location()
 
         # Auto-register with global registry (for CLI access)
@@ -117,6 +120,11 @@ class Project:
     def config(self, value: Any) -> None:
         """Set the cached configuration."""
         self._config = value
+
+    @property
+    def path_resolver(self) -> PathResolver:
+        """Get the path resolver for this project."""
+        return self._path_resolver
 
     def Environment(
         self,
@@ -898,17 +906,8 @@ class Project:
                 sources=["docs/", "README.md"])
             project.Install("packages/", [docs])  # Works because it's a Target
         """
-        output_path = Path(output)
-
-        # Normalize output path to be relative to build_dir
-        # This ensures consistent behavior: users pass paths relative to build_dir
-        # (e.g., "dist/file.tar.gz") and we store them that way
-        if output_path.is_absolute():
-            try:
-                output_path = output_path.relative_to(self.build_dir)
-            except ValueError:
-                # Path is not under build_dir - keep as-is (external output)
-                pass
+        # Normalize output path using PathResolver
+        output_path = self._path_resolver.normalize_target_path(output)
 
         # Infer compression from extension if not specified
         if compression is None:
@@ -974,17 +973,8 @@ class Project:
                 output="dist/release.zip",
                 sources=["bin/", "lib/", "README.md"])
         """
-        output_path = Path(output)
-
-        # Normalize output path to be relative to build_dir
-        # This ensures consistent behavior: users pass paths relative to build_dir
-        # (e.g., "dist/file.zip") and we store them that way
-        if output_path.is_absolute():
-            try:
-                output_path = output_path.relative_to(self.build_dir)
-            except ValueError:
-                # Path is not under build_dir - keep as-is (external output)
-                pass
+        # Normalize output path using PathResolver
+        output_path = self._path_resolver.normalize_target_path(output)
 
         # Derive name from output if not specified
         if name is None:
