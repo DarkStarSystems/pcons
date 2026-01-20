@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-01-20
+
+### Added
+
+- **`project.InstallDir()` for recursive directory installation**: Copies entire directory trees with proper incremental rebuild support using ninja's depfile mechanism. Stamp files stored in `build/.stamps/` to keep output directories clean.
+  - Usage: `project.InstallDir("build/dist", src_dir / "assets")`
+  - New `copytree` command in `pcons.util.commands` with `--depfile` and `--stamp` options
+- **`project.Command()` for API consistency**: Wrapper around `env.Command()` for users who prefer the project-centric API.
+- **Rebuild tests in example framework**: New `[[rebuild]]` sections in `test.toml` verify incremental build behavior:
+  - `touch`: file to modify before rebuild
+  - `expect_no_work`: verify ninja has nothing to do
+  - `expect_rebuild` / `expect_no_rebuild`: verify specific targets
+- **New example `14_install_dir`**: Demonstrates `InstallDir` for copying directory trees.
+
 ## [0.2.3] - 2026-01-20
 
 ### Added
@@ -170,7 +184,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/garyo/pcons/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/garyo/pcons/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/garyo/pcons/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/garyo/pcons/compare/v0.2.0...v0.2.1
