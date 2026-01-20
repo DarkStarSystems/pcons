@@ -530,6 +530,45 @@ class Project:
         self.add_target(target)
         return target
 
+    def Command(
+        self,
+        name: str,
+        env: Env,
+        *,
+        target: str | Path | list[str | Path],
+        source: str | Path | list[str | Path] | None = None,
+        command: str | list[str] = "",
+    ) -> Target:
+        """Create a custom command target.
+
+        This is a convenience wrapper around env.Command() that follows
+        the target-centric API pattern (project.Program, project.StaticLibrary, etc.).
+
+        Args:
+            name: Target name for `ninja <name>`.
+            env: Environment to use (for variable substitution).
+            target: Output file(s) that the command produces.
+            source: Input file(s) that the command depends on.
+            command: The shell command to run. Supports variable substitution:
+                    - $SOURCE / $in: First source file
+                    - $SOURCES: All source files (space-separated)
+                    - $TARGET / $out: First target file
+                    - $TARGETS: All target files (space-separated)
+
+        Returns:
+            A new Target configured as a command.
+
+        Example:
+            gen_header = project.Command(
+                "gen-header",
+                env,
+                target=build_dir / "generated.h",
+                source=src_dir / "spec.yml",
+                command="python gen.py $in -o $out",
+            )
+        """
+        return env.Command(target=target, source=source, command=command, name=name)
+
     def HeaderOnlyLibrary(
         self,
         name: str,
