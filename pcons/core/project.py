@@ -781,6 +781,76 @@ class Project:
         self.add_target(install_target)
         return install_target
 
+    def InstallDir(
+        self,
+        dest_dir: Path | str,
+        source: Target | Node | Path | str,
+        *,
+        name: str | None = None,
+    ) -> Target:
+        """Install a directory tree to a destination.
+
+        Recursively copies an entire directory tree. The source can be a path
+        to a directory or a Target whose output is a directory (e.g., a bundle).
+
+        Uses ninja's depfile mechanism for incremental rebuilds: if any file
+        in the source directory changes, the copy is re-run.
+
+        Note: Source is resolved lazily during project.resolve(), so this
+        can be called before or after defining the source target.
+
+        Args:
+            dest_dir: Destination directory (the source tree is copied into this).
+            source: Source directory (Target, Node, Path, or string).
+            name: Optional name for the install target.
+
+        Returns:
+            A Target representing the install operation.
+
+        Example:
+            # Install a generated bundle
+            bundle = project.Command(
+                "bundle", env,
+                target="build/MyPlugin.bundle",
+                source=[plugin_lib, resources],
+                command="create-bundle.sh $SOURCES $TARGET"
+            )
+            project.InstallDir("dist", bundle)
+
+            # Install a static asset directory
+            project.InstallDir("build/assets", "src/assets")
+        """
+        dest_dir = Path(dest_dir)
+        target_name = name or f"install_dir_{dest_dir.name}"
+
+        # Handle duplicate target names by appending a suffix
+        base_name = target_name
+        counter = 1
+        while target_name in self._targets:
+            target_name = f"{base_name}_{counter}"
+            counter += 1
+        if target_name != base_name:
+            logger.warning(
+                "InstallDir target renamed from '%s' to '%s' to avoid conflict",
+                base_name,
+                target_name,
+            )
+
+        # Create the install target with pending source
+        # Source will be resolved during project.resolve()
+        install_target = Target(
+            target_name,
+            target_type=TargetType.INTERFACE,
+            defined_at=get_caller_location(),
+        )
+
+        # Store for lazy resolution
+        install_target._pending_sources = [source]
+        install_target._install_dir_dest = dest_dir
+
+        self.add_target(install_target)
+        return install_target
+
     def _name_from_output(self, output: str | Path, suffixes: list[str]) -> str:
         """Derive target name from output path by stripping archive suffixes.
 

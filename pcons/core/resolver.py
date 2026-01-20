@@ -685,6 +685,75 @@ class InstallNodeFactory:
         if dest not in self.project._nodes:
             self.project._nodes[dest] = dest_node
 
+    def create_install_dir_node(
+        self, target: Target, sources: list[FileNode], dest_dir: Path
+    ) -> None:
+        """Create copytree node for InstallDir target.
+
+        Args:
+            target: The InstallDir target.
+            sources: Resolved source file nodes (should have exactly one directory).
+            dest_dir: Destination directory path.
+        """
+        import sys
+
+        if not sources:
+            return
+
+        if len(sources) > 1:
+            from pcons.core.errors import BuilderError
+
+            raise BuilderError(
+                f"InstallDir expects exactly one source directory, got {len(sources)}.",
+                location=target.defined_at,
+            )
+
+        # Use pcons helper for cross-platform copytree
+        python_cmd = sys.executable.replace("\\", "/")
+        copytree_cmd = f"{python_cmd} -m pcons.util.commands copytree"
+
+        source_node = sources[0]
+        source_path = source_node.path
+
+        # Destination is dest_dir / source directory name
+        dest_path = dest_dir / source_path.name
+
+        # Put stamp files in a dedicated .stamps directory to avoid polluting output
+        # Use a unique name based on the destination path
+        stamps_dir = self.project.build_dir / ".stamps"
+        # Create a unique stamp name from the dest path (replace / with _)
+        stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
+        stamp_path = stamps_dir / stamp_name
+
+        # Create stamp node (this is what ninja tracks)
+        stamp_node = FileNode(stamp_path, defined_at=get_caller_location())
+        stamp_node.depends([source_node])
+
+        # Build the command with paths relative to build directory
+        # dest_path needs to be made relative to build_dir for ninja
+        try:
+            rel_dest = dest_path.relative_to(self.project.build_dir)
+        except ValueError:
+            # dest_path is not under build_dir, use as-is
+            rel_dest = dest_path
+
+        stamp_node._build_info = {
+            "tool": "copytree",
+            "command": copytree_cmd,
+            "command_var": "copytreecmd",
+            "sources": [source_node],
+            "copytree_cmd": f"{copytree_cmd} --depfile $out.d --stamp $out $in {rel_dest}",
+            "depfile": "$out.d",
+            "deps_style": "gcc",
+        }
+
+        # Add stamp node as output (but users should reference dest_path for the actual directory)
+        target._install_nodes = [stamp_node]
+        target.output_nodes.append(stamp_node)
+
+        if stamp_path not in self.project._nodes:
+            self.project._nodes[stamp_path] = stamp_node
+
 
 class Resolver:
     """Resolves targets: computes effective flags and creates nodes.
@@ -1017,6 +1086,11 @@ class Resolver:
             # This is an InstallAs target
             self._install_factory.create_install_as_node(
                 target, resolved_sources, target._install_as_dest
+            )
+        elif target._install_dir_dest is not None:
+            # This is an InstallDir target
+            self._install_factory.create_install_dir_node(
+                target, resolved_sources, target._install_dir_dest
             )
         elif target.target_type == "archive":
             # This is a Tarfile or Zipfile target

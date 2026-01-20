@@ -74,6 +74,7 @@ class BuildInfo(TypedDict, total=False):
 
     Install/copy:
         copy_cmd: Copy command template (e.g., "cp $in $out").
+        copytree_cmd: Copytree command template for directory installs.
 
     Archive builders (Tarfile, Zipfile):
         output: Output archive path (string).
@@ -106,6 +107,7 @@ class BuildInfo(TypedDict, total=False):
 
     # Install/copy
     copy_cmd: str
+    copytree_cmd: str
 
     # Archive builders
     output: str

@@ -188,6 +188,11 @@ class NinjaGenerator(BaseGenerator):
                 copy_cmd = build_info.get("copy_cmd", "cp $in $out")
                 command = copy_cmd + "$post_build"
                 description = "INSTALL $out"
+            # Special case for copytree command (from InstallDir)
+            elif tool_name == "copytree":
+                copytree_cmd = build_info.get("copytree_cmd", "cp -r $in $out")
+                command = copytree_cmd + "$post_build"
+                description = "INSTALLDIR $out"
             # Special case for lipo (universal binary creation on macOS)
             elif tool_name == "lipo":
                 command = "lipo -create -output $out $in"

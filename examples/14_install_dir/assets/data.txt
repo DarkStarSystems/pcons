@@ -1,0 +1,2 @@
+Sample data file.
+This demonstrates InstallDir copying a directory tree.

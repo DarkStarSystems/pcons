@@ -1,0 +1,23 @@
+# Test configuration for install_dir example
+# Demonstrates InstallDir for recursive directory copying
+
+[test]
+description = "InstallDir for recursive directory copying"
+
+# The stamp file is in .stamps/; actual files are in the directory
+expected_outputs = [
+    "build/.stamps/build_dist_assets.stamp",
+]
+
+[verify]
+# Verify the copied files exist and have correct content
+commands = [
+    { run = "test -f build/dist/assets/data.txt" },
+    { run = "test -f build/dist/assets/config.json" },
+    { run = "test -f build/dist/assets/subdir/nested.txt" },
+    { run = "cat build/dist/assets/data.txt", expect_stdout = "Sample data file" },
+    { run = "cat build/dist/assets/subdir/nested.txt", expect_stdout = "subdirectory" },
+]
+
+[skip]
+# Works on all platforms

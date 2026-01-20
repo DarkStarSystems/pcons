@@ -167,6 +167,7 @@ class Target:
         "_pending_sources",
         "_install_dest_dir",
         "_install_as_dest",
+        "_install_dir_dest",
         # Post-build commands:
         "_post_build_commands",
         # Auxiliary input files (e.g., .def files passed to linker on Windows):
@@ -224,6 +225,8 @@ class Target:
         self._install_dest_dir: Path | None = None
         # Destination path for InstallAs targets (full path including filename)
         self._install_as_dest: Path | None = None
+        # Destination directory for InstallDir targets (recursive directory copy)
+        self._install_dir_dest: Path | None = None
         # Post-build commands (shell commands run after target is built)
         self._post_build_commands: list[str] = []
         # Auxiliary input files (e.g., .def files passed to linker on Windows)
