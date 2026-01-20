@@ -196,6 +196,28 @@ Each environment has namespaced tool configurations:
 - `env.cxx` - C++ compiler settings
 - `env.link` - Linker settings
 
+### Path Conventions
+
+Pcons uses consistent path conventions throughout:
+
+- **Source paths** (inputs): Relative to the project root directory
+- **Target paths** (outputs): Relative to the build directory
+- **Absolute paths**: Pass through unchanged
+
+This means you don't need to prefix output paths with `build_dir`:
+
+```python
+# Good: paths are relative to build_dir
+project.Install("dist/lib", [mylib])
+project.Tarfile(env, output="packages/release.tar.gz", ...)
+project.InstallDir("dist", src_dir / "assets")
+
+# Not needed: build_dir prefix is implicit
+# project.Install(build_dir / "dist/lib", [mylib])  # Unnecessary
+```
+
+If you accidentally include the build directory name in a relative path (e.g., `"build/dist"`), pcons will warn you but keep the path as-is, in case you intentionally want a `build/` subdirectory inside the build directory.
+
 ### Toolchain
 
 A `Toolchain` is a coordinated set of tools (compiler, linker, archiver) that work together. Pcons automatically detects available C/C++ toolchains.
@@ -979,7 +1001,7 @@ pcons generate --graph=deps.dot      # DOT format
 
 ### Installing Files
 
-Copy files to destination directories:
+Copy files to destination directories (paths are relative to `build_dir`):
 
 ```python
 # Install library and headers
@@ -988,7 +1010,13 @@ project.Install("dist/include", header_nodes)
 
 # Install with rename
 project.InstallAs("bundle/plugin.ofx", plugin_lib)
+
+# Install an entire directory tree (recursive copy)
+# Copies src_dir/assets/* to build/dist/assets/*
+project.InstallDir("dist", src_dir / "assets")
 ```
+
+`InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run.
 
 ### Environment Cloning
 
