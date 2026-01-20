@@ -29,6 +29,7 @@ theme:
 nav:
   - Home: index.md
   - User Guide: user-guide.md
+  - Changelog: changelog.md
   - Architecture: architecture.md
   - Contributing: contributing.md
 
