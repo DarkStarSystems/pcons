@@ -14,7 +14,11 @@ class MockCTool(BaseTool):
         super().__init__("cc", language="c")
 
     def default_vars(self) -> dict[str, object]:
-        return {"cmd": "mock-cc", "flags": [], "objcmd": "mock-cc -c $in -o $out"}
+        return {
+            "cmd": "mock-cc",
+            "flags": [],
+            "objcmd": "mock-cc -c $SOURCE -o $TARGET",
+        }
 
     def builders(self) -> dict[str, object]:
         return {}
@@ -27,7 +31,11 @@ class MockCxxTool(BaseTool):
         super().__init__("cxx", language="cxx")
 
     def default_vars(self) -> dict[str, object]:
-        return {"cmd": "mock-cxx", "flags": [], "objcmd": "mock-cxx -c $in -o $out"}
+        return {
+            "cmd": "mock-cxx",
+            "flags": [],
+            "objcmd": "mock-cxx -c $SOURCE -o $TARGET",
+        }
 
     def builders(self) -> dict[str, object]:
         return {}
@@ -40,7 +48,11 @@ class MockCudaTool(BaseTool):
         super().__init__("cuda", language="cuda")
 
     def default_vars(self) -> dict[str, object]:
-        return {"cmd": "mock-nvcc", "flags": [], "objcmd": "mock-nvcc -c $in -o $out"}
+        return {
+            "cmd": "mock-nvcc",
+            "flags": [],
+            "objcmd": "mock-nvcc -c $SOURCE -o $TARGET",
+        }
 
     def builders(self) -> dict[str, object]:
         return {}

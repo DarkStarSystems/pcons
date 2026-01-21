@@ -80,7 +80,7 @@ class TestCommandBuilder:
 
         env = Environment()
         env.add_tool("cc")
-        env.cc.cmdline = "$cc.cmd -c -o $out $in"
+        env.cc.cmdline = "$cc.cmd -c -o $TARGET $SOURCE"
         env.cc.cmd = "gcc"
 
         result = builder(env, None, ["a.c", "b.c"])
@@ -101,7 +101,7 @@ class TestCommandBuilder:
 
         env = Environment()
         env.add_tool("link")
-        env.link.cmdline = "$link.cmd -o $out $in"
+        env.link.cmdline = "$link.cmd -o $TARGET $SOURCES"
         env.link.cmd = "gcc"
 
         result = builder(env, "app", ["a.o", "b.o"])

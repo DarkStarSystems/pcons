@@ -28,7 +28,7 @@ class TestResolverSingleTarget:
         # Set up environment with toolchain
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         # Create target using factory method
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
@@ -52,7 +52,7 @@ class TestResolverSingleTarget:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
@@ -84,7 +84,7 @@ class TestResolverSameSourceDifferentTargets:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         # Create two targets using the same source but with different private requirements
         target1 = project.StaticLibrary("lib1", env, sources=[str(src_file)])
@@ -132,7 +132,7 @@ class TestResolverTransitiveRequirements:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         # Create library with public requirements
         lib = project.StaticLibrary("mylib", env, sources=[str(lib_src)])
@@ -161,7 +161,7 @@ class TestResolverHeaderOnlyLibrary:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         # Create header-only library
         header_lib = project.HeaderOnlyLibrary(
@@ -201,7 +201,7 @@ class TestResolverObjectCaching:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         # Create two targets with identical effective requirements
         target1 = project.StaticLibrary("lib1", env, sources=[str(src_file)])
@@ -235,8 +235,8 @@ class TestResolverTargetTypes:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
-        env.cc.linkcmd = "gcc $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+        env.cc.linkcmd = "gcc $SOURCES -o $TARGET"
 
         target = project.Program("myapp", env, sources=[str(src_file)])
         project.resolve()
@@ -256,8 +256,8 @@ class TestResolverTargetTypes:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
-        env.cc.sharedcmd = "gcc -shared $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+        env.cc.sharedcmd = "gcc -shared $SOURCES -o $TARGET"
 
         target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
@@ -282,7 +282,7 @@ class TestResolverTargetTypes:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.ObjectLibrary("objs", env, sources=[str(src_file)])
         project.resolve()
@@ -302,7 +302,7 @@ class TestResolverLanguageDetection:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
@@ -317,7 +317,7 @@ class TestResolverLanguageDetection:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cxx")
-        env.cxx.objcmd = "g++ -c $in -o $out"
+        env.cxx.objcmd = "g++ -c $SOURCE -o $TARGET"
 
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
@@ -336,7 +336,7 @@ class TestResolverOutputName:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.SharedLibrary("plugin", env, sources=[str(src_file)])
         target.output_name = "plugin.ofx"  # Custom name with .ofx suffix
@@ -356,7 +356,7 @@ class TestResolverOutputName:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
         target.output_name = "custom_mylib.lib"  # Windows-style naming
@@ -374,7 +374,7 @@ class TestResolverOutputName:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.Program("myapp", env, sources=[str(src_file)])
         target.output_name = "custom_app.bin"
@@ -392,7 +392,7 @@ class TestResolverOutputName:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
         # output_name is None by default
@@ -446,7 +446,7 @@ class TestResolverSharedLibraryCompileFlags:
         gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
@@ -490,7 +490,7 @@ class TestResolverSharedLibraryCompileFlags:
         gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
@@ -534,7 +534,7 @@ class TestResolverSharedLibraryCompileFlags:
         gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
@@ -578,7 +578,7 @@ class TestResolverSharedLibraryCompileFlags:
         gcc_toolchain._configured = True
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.Program("myapp", env, sources=[str(src_file)])
         project.resolve()
@@ -639,7 +639,7 @@ class TestResolverToolAgnostic:
 
         # Add a fake latex tool
         env.add_tool("latex")
-        env.latex.objcmd = "pdflatex -output-directory $out_dir $in"
+        env.latex.objcmd = "pdflatex -output-directory $out_dir $SOURCE"
 
         # Create target
         target = project.StaticLibrary("document", env, sources=[str(tex_file)])
@@ -698,7 +698,7 @@ class TestResolverToolAgnostic:
         toolchain._configured = True
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         # Test static library naming
         lib = project.StaticLibrary("mylib", env, sources=[str(src_file)])
@@ -738,7 +738,7 @@ class TestResolverToolAgnostic:
         toolchain._configured = True
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         prog = project.Program("myapp", env, sources=[str(src_file)])
         project.resolve()

@@ -360,7 +360,7 @@ class TestFrameworkSubstitution:
             **{"in": "main.o"},
         )
 
-        # Should just have clang -o myapp main.o
+        # Should just have clang -o $out $in
         assert result == ["clang", "-o", "$out", "$in"]
         assert "-framework" not in result
         assert "-F" not in " ".join(result)

@@ -288,7 +288,7 @@ class TestMakefilePostBuild:
 
         # Create a mock environment with the link tool
         class MockLinkTool:
-            linkcmd = "gcc -o $out $in"
+            linkcmd = "gcc -o $TARGET $SOURCES"
 
         class MockEnv:
             link = MockLinkTool()

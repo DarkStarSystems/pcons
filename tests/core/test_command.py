@@ -15,15 +15,15 @@ class TestGenericCommandBuilder:
 
     def test_creation_with_string_command(self):
         """Builder can be created with a string command."""
-        builder = GenericCommandBuilder("echo hello > $out")
+        builder = GenericCommandBuilder("echo hello > $TARGET")
         assert builder.name == "Command"
         assert builder.tool_name == "command"
-        assert builder.command == "echo hello > $out"
+        assert builder.command == "echo hello > $TARGET"
 
     def test_creation_with_list_command(self):
         """Builder can be created with a list command."""
-        builder = GenericCommandBuilder(["python", "script.py", "$in", "$out"])
-        assert builder.command == "python script.py $in $out"
+        builder = GenericCommandBuilder(["python", "script.py", "$SOURCE", "$TARGET"])
+        assert builder.command == "python script.py $SOURCE $TARGET"
 
     def test_unique_rule_names(self):
         """Each builder gets a unique rule name."""
@@ -45,7 +45,7 @@ class TestGenericCommandBuilder:
 
     def test_creates_target_node(self):
         """Builder creates target node with proper dependencies."""
-        builder = GenericCommandBuilder("cp $in $out")
+        builder = GenericCommandBuilder("cp $SOURCE $TARGET")
         env = Environment()
 
         result = builder(env, "output.txt", ["input.txt"])
@@ -57,7 +57,7 @@ class TestGenericCommandBuilder:
 
     def test_target_depends_on_sources(self):
         """Target node depends on all sources."""
-        builder = GenericCommandBuilder("cat $in > $out")
+        builder = GenericCommandBuilder("cat $SOURCES > $TARGET")
         env = Environment()
 
         source1 = FileNode("a.txt")
@@ -70,7 +70,7 @@ class TestGenericCommandBuilder:
 
     def test_build_info_contains_command(self):
         """Target node contains build info with command."""
-        builder = GenericCommandBuilder("process $in > $out")
+        builder = GenericCommandBuilder("process $SOURCE > $TARGET")
         env = Environment()
 
         result = builder(env, "out.txt", ["in.txt"])
@@ -78,7 +78,7 @@ class TestGenericCommandBuilder:
 
         assert hasattr(target, "_build_info")
         assert target._build_info["tool"] == "command"
-        assert target._build_info["command"] == "process $in > $out"
+        assert target._build_info["command"] == "process $SOURCE > $TARGET"
         assert target._build_info["rule_name"] == builder.rule_name
 
 
@@ -94,7 +94,7 @@ class TestEnvironmentCommand:
         env = Environment()
 
         result = env.Command(
-            target="output.txt", source="input.txt", command="cp $in $out"
+            target="output.txt", source="input.txt", command="cp $SOURCE $TARGET"
         )
 
         # Returns Target, not list
@@ -111,7 +111,7 @@ class TestEnvironmentCommand:
         result = env.Command(
             target="combined.txt",
             source=["a.txt", "b.txt", "c.txt"],
-            command="cat $in > $out",
+            command="cat $SOURCES > $TARGET",
         )
 
         assert len(result.output_nodes) == 1
@@ -125,7 +125,7 @@ class TestEnvironmentCommand:
         result = env.Command(
             target=["output.h", "output.c"],
             source="input.y",
-            command="bison -d -o ${TARGETS[0]} $in",
+            command="bison -d -o ${TARGETS[0]} $SOURCE",
         )
 
         assert len(result.output_nodes) == 2
@@ -137,7 +137,9 @@ class TestEnvironmentCommand:
         """Command with no source dependencies."""
         env = Environment()
 
-        result = env.Command(target="timestamp.txt", source=None, command="date > $out")
+        result = env.Command(
+            target="timestamp.txt", source=None, command="date > $TARGET"
+        )
 
         assert len(result.output_nodes) == 1
         assert len(result.output_nodes[0].explicit_deps) == 0
@@ -149,7 +151,7 @@ class TestEnvironmentCommand:
         result = env.Command(
             target=Path("build/output.txt"),
             source=[Path("src/input.txt")],
-            command="process $in > $out",
+            command="process $SOURCE > $TARGET",
         )
 
         assert len(result.output_nodes) == 1
@@ -168,7 +170,7 @@ class TestEnvironmentCommand:
         env = Environment()
 
         result = env.Command(
-            target=["a.txt", "b.txt"], source="source.txt", command="split $in"
+            target=["a.txt", "b.txt"], source="source.txt", command="split $SOURCE"
         )
 
         from pcons.core.target import Target
@@ -206,7 +208,9 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command(target="out.txt", source="in.txt", command="process $in > $out")
+        env.Command(
+            target="out.txt", source="in.txt", command="process $SOURCE > $TARGET"
+        )
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -225,7 +229,9 @@ class TestGenericCommandNinja:
         project = Project("test", root_dir=tmp_path)
         env = project.Environment()
 
-        env.Command(target="output.txt", source="input.txt", command="cp $in $out")
+        env.Command(
+            target="output.txt", source="input.txt", command="cp $SOURCE $TARGET"
+        )
 
         gen = NinjaGenerator()
         gen.generate(project, tmp_path)
@@ -245,7 +251,7 @@ class TestGenericCommandNinja:
         env.Command(
             target="out.txt",
             source=["a.txt", "b.txt"],
-            command="cat $in > $out",
+            command="cat $SOURCES > $TARGET",
         )
 
         gen = NinjaGenerator()
@@ -265,7 +271,7 @@ class TestGenericCommandNinja:
         env = project.Environment()
 
         env.Command(
-            target=["out.c", "out.h"], source="grammar.y", command="bison -d $in"
+            target=["out.c", "out.h"], source="grammar.y", command="bison -d $SOURCE"
         )
 
         gen = NinjaGenerator()
