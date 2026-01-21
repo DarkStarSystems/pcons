@@ -289,6 +289,17 @@ class NinjaGenerator(BaseGenerator):
             cmd_template = self._get_standalone_tool_command(tool_name, command_var)
             if cmd_template:
                 command = cmd_template.replace("$$", "$")
+                # Apply context overrides for standalone tools
+                # Replace $tool.var patterns with actual values
+                if context_overrides:
+                    for key, val in context_overrides.items():
+                        pattern = f"${tool_name}.{key}"
+                        if isinstance(val, list):
+                            # List values become space-separated tokens
+                            val_str = " ".join(str(v) for v in val)
+                        else:
+                            val_str = str(val)
+                        command = command.replace(pattern, val_str)
 
         return command
 
