@@ -186,9 +186,12 @@ class NinjaGenerator(BaseGenerator):
         # All templates now use generator-agnostic $SOURCE/$TARGET variables
         command = self._convert_command_variables(command)
 
-        # Append $post_build placeholder if not already present
-        if "$post_build" not in command:
-            command = command.rstrip() + "$post_build"
+        # Append post-build commands directly to the command if needed
+        # This ensures targets with different post-build commands get different rules
+        sources = cast(list[Node], build_info.get("sources", []))
+        post_build_suffix = self._get_post_build_suffix(node, target, sources)
+        if post_build_suffix:
+            command = command.rstrip() + post_build_suffix
 
         # Create a unique rule key based on the command
         # This ensures identical commands share rules (deduplication)
@@ -233,6 +236,46 @@ class NinjaGenerator(BaseGenerator):
             self._rules[rule_key] = rule_name
 
         return self._rules[rule_key]
+
+    def _get_post_build_suffix(
+        self,
+        node: FileNode,
+        target: Target | None,
+        sources: list[Node],
+    ) -> str:
+        """Get post-build command suffix if this node needs it.
+
+        Returns ' && cmd1 && cmd2' if the node is an output node with post-build
+        commands, otherwise returns empty string.
+
+        Post-build commands are baked directly into the rule command, so targets
+        with different post-build commands get different rules (via command hash).
+        """
+        if target is None:
+            return ""
+
+        # Check if this is an output node (not an intermediate like .o files)
+        is_output_node = (
+            hasattr(target, "output_nodes") and node in target.output_nodes
+        ) or node in target.nodes
+
+        if not is_output_node:
+            return ""
+
+        post_build_cmds = getattr(target, "_post_build_commands", [])
+        if not post_build_cmds:
+            return ""
+
+        # Substitute $out and $in in each command
+        out_path = str(node.path)
+        in_paths = " ".join(str(s.path) for s in sources if isinstance(s, FileNode))
+        substituted_cmds = []
+        for cmd in post_build_cmds:
+            cmd = cmd.replace("$out", out_path)
+            cmd = cmd.replace("$in", in_paths)
+            substituted_cmds.append(cmd)
+
+        return " && " + " && ".join(substituted_cmds)
 
     def _expand_command_fallback(
         self,
@@ -401,7 +444,7 @@ class NinjaGenerator(BaseGenerator):
 
         tool_name = build_info.get("tool", "unknown")
         command_var = build_info.get("command_var", "cmdline")
-        sources: list[Node] = build_info.get("sources", [])
+        sources = cast(list[Node], build_info.get("sources", []))
 
         # Get the environment for this build (needed for per-env rule naming)
         # For target-centric builds, use target._env
@@ -436,9 +479,11 @@ class NinjaGenerator(BaseGenerator):
             # Convert $SOURCE/$TARGET to $in/$out for Ninja
             command = self._convert_command_variables(command)
 
-            # Ensure $post_build is included
-            if "$post_build" not in command:
-                command = command.rstrip() + "$post_build"
+            # Append post-build commands directly to the command if needed
+            # Must match _ensure_rule() logic for consistent rule naming
+            post_build_suffix = self._get_post_build_suffix(node, target, sources)
+            if post_build_suffix:
+                command = command.rstrip() + post_build_suffix
 
             # Hash the command to create a stable rule key
             import hashlib
@@ -538,11 +583,15 @@ class NinjaGenerator(BaseGenerator):
     ) -> None:
         """Write variables for a build statement.
 
-        For multi-output builds, also writes out_<name> variables for each output.
-        """
-        sources: list[Node] = build_info.get("sources", [])  # type: ignore[assignment]
+        Note: We don't write $in or $out - ninja sets these automatically
+        from the build statement's inputs and outputs.
 
-        # Standard variables - handle both source files and build outputs
+        For multi-output builds, writes out_<name> variables for each output.
+        For generic commands, writes source_N and target_N for indexed access.
+        """
+        sources = cast(list[Node], build_info.get("sources", []))
+
+        # Helper to format source paths
         def get_source_path(s: FileNode) -> str:
             # Check if this is a build output (has _build_info from resolver)
             if getattr(s, "_build_info", None) is not None or s.is_target:
@@ -559,10 +608,6 @@ class NinjaGenerator(BaseGenerator):
             return str(s.path)
 
         source_file_nodes = [s for s in sources if isinstance(s, FileNode)]
-        source_paths = " ".join(get_source_path(s) for s in source_file_nodes)
-        if source_paths:
-            f.write(f"  in = {source_paths}\n")
-        f.write(f"  out = {self._make_output_relative(node.path)}\n")
 
         # For generic commands with indexed access, write source_N and target_N
         # variables for each source and target
@@ -595,34 +640,6 @@ class NinjaGenerator(BaseGenerator):
                     # Escape for Ninja variable substitution
                     escaped_value = self._escape_for_ninja_variable(str(var_value))
                     f.write(f"  {var_name} = {escaped_value}\n")
-
-        # Write post-build commands if target has them
-        # Check if this is an output node (not an intermediate object file)
-        is_output_node = (
-            target is not None
-            and hasattr(target, "output_nodes")
-            and node in target.output_nodes
-        )
-        # Also check output nodes in target.nodes (for interface targets like Install)
-        if not is_output_node and target is not None:
-            is_output_node = node in target.nodes
-
-        if is_output_node and target is not None:
-            post_build_cmds = getattr(target, "_post_build_commands", [])
-            if post_build_cmds:
-                # Substitute $out and $in in each command
-                out_path = str(node.path)
-                in_paths = " ".join(
-                    str(s.path) for s in sources if isinstance(s, FileNode)
-                )
-                substituted_cmds = []
-                for cmd in post_build_cmds:
-                    cmd = cmd.replace("$out", out_path)
-                    cmd = cmd.replace("$in", in_paths)
-                    substituted_cmds.append(cmd)
-                # Chain commands with && and prepend with &&
-                post_build_str = " && " + " && ".join(substituted_cmds)
-                f.write(f"  post_build = {post_build_str}\n")
 
     def _write_aliases(self, f: TextIO, project: Project) -> None:
         """Write phony rules for aliases."""
