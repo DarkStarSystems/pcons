@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-01-21
+
+### Changed
+
+- **BREAKING: Generator-agnostic command templates**: Toolchain command templates now use `$$SOURCE`/`$$TARGET` instead of Ninja-specific `$$in`/`$$out`. Each generator converts to its native syntax:
+  - Ninja: `$in`/`$out`
+  - Makefile: actual paths
+  - Conventions: `$$SOURCE` (single input), `$$SOURCES` (multiple), `$$TARGET` (output), `$$TARGET.d` (depfile)
+
+- **BREAKING: ToolchainContext API changed**: `get_variables()` replaced with `get_env_overrides()`. Values are now set on the environment's tool namespace before command expansion, rather than written as per-build Ninja variables. Return type changed from `dict[str, list[str]]` to `dict[str, object]`.
+
+- **Command expansion moved to resolver**: Commands are now fully expanded at resolution time with all effective requirements baked in. Generators receive pre-expanded commands, simplifying generator implementation.
+
+- **Unified builder/tool architecture**: Install and Archive builders are now implemented as `StandaloneTool` subclasses (`InstallTool`, `ArchiveTool`). Tools provide command templates via `default_vars()`, builders reference them via `command_var`. Enables customization: `env.install.copycmd = ["cp", "$$SOURCE", "$$TARGET"]`.
+
+- **Shell quoting improvements**: Commands stored as token lists until final output. The `subst()` function handles shell-appropriate quoting based on target format (`shell="ninja"` or `shell="bash"`). Paths with spaces properly quoted.
+
+- **Standardized on `$SOURCE`/`$TARGET` in user commands**: User-facing commands (e.g., `env.Command()`) use SCons-style `$SOURCE`/`$TARGET` variables. Generators convert to native syntax.
+
+### Fixed
+
+- **Compile flags no longer passed to linker**: The resolver now correctly separates `extra_flags` (compile-only) from `ldflags` (link-only). Fixes MSVC builds where `/W4` was incorrectly passed to the linker.
+
+- **Windows platform suffixes in UnixToolchain**: `get_program_name()` and `get_shared_library_name()` now detect Windows and return `.exe`/`.dll` suffixes for GCC/MinGW builds.
+
+- **Standalone tool context overrides**: Install and Archive tools now correctly apply context overrides (like `$install.destdir`) even when no Environment is present.
+
+### Removed
+
+- **Dead code cleanup**: Removed ~100 lines of unused code from ninja.py:
+  - `_get_env_suffix()` - superseded by command hash-based rule naming
+  - `_get_rule_command()` - superseded by pre-expanded commands
+  - `_augment_command_with_effective_vars()` - values now baked into commands
+
+### Documentation
+
+- Updated ARCHITECTURE.md to reflect new `get_env_overrides()` pattern
+- Updated CLAUDE.md with correct ToolchainContext file location
+
 ## [0.2.4] - 2026-01-20
 
 ### Added
@@ -194,7 +233,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/garyo/pcons/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/garyo/pcons/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/garyo/pcons/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/garyo/pcons/compare/v0.2.1...v0.2.2
