@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, TextIO
 
 from pcons.core.node import FileNode, Node
 from pcons.generators.generator import BaseGenerator
-from pcons.tools.toolchain import ToolchainContext
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -322,9 +321,6 @@ class MakefileGenerator(BaseGenerator):
         # Expand the command template
         command = env.subst(command_template, shell="posix")
 
-        # Substitute effective requirements
-        command = self._substitute_effective_vars(command, build_info)
-
         # Substitute $in, $out with Make automatic variables
         command = self._substitute_make_vars(command, node, sources, build_info)
 
@@ -369,29 +365,6 @@ class MakefileGenerator(BaseGenerator):
 
         # Chain commands with &&
         return command + " && " + " && ".join(substituted_cmds)
-
-    def _substitute_effective_vars(
-        self, command: str, build_info: dict[str, object]
-    ) -> str:
-        """Substitute effective requirement placeholders in command.
-
-        Uses context.get_variables() to get toolchain-formatted values.
-        Each value is a list of tokens which are joined with shell quoting.
-        """
-        context = build_info.get("context")
-        if context is not None and isinstance(context, ToolchainContext):
-            variables = context.get_variables()
-            for var_name, var_value in variables.items():
-                placeholder = f"${var_name}"
-                if placeholder in command:
-                    # var_value is a list of tokens - quote each for shell and join
-                    quoted_value = self._quote_tokens_for_make(var_value)
-                    command = command.replace(placeholder, quoted_value)
-
-        # Clean up multiple spaces
-        command = re.sub(r"\s+", " ", command).strip()
-
-        return command
 
     def _quote_tokens_for_make(self, tokens: list[str]) -> str:
         """Quote and join tokens for use in Makefile shell commands.

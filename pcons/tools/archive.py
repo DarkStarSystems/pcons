@@ -211,13 +211,13 @@ class ArchiveNodeFactory:
             description = "ZIP $out"
 
         # Store build info referencing env.archive.tarcmd or env.archive.zipcmd
-        # The context provides variables via get_variables()
+        # The context provides env overrides for command expansion
         archive_node._build_info = {
             "tool": "archive",
             "command_var": command_var,
             "sources": sources,
             "description": description,
-            # Context provides variables for per-build substitution
+            # Context provides get_env_overrides() for template expansion
             "context": context,
             "env": env,
         }

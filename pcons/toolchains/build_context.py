@@ -6,9 +6,9 @@ for C/C++ compilation and linking. These classes contain tool-specific knowledge
 (prefixes like -I, -D, -L, -l for Unix or /I, /D, /LIBPATH: for MSVC).
 
 The context approach decouples the core from domain-specific concepts:
-- Core only knows about ToolchainContext.get_variables() -> dict[str, str]
+- Core only knows about ToolchainContext.get_env_overrides() -> dict[str, object]
 - Toolchains define what variables exist and how they're formatted
-- Generators write variables without knowing their semantics
+- Generators use these overrides to expand command templates
 """
 
 from __future__ import annotations
@@ -56,49 +56,6 @@ class CompileLinkContext:
     define_prefix: str = "-D"
     libdir_prefix: str = "-L"
     lib_prefix: str = "-l"
-
-    def get_variables(self) -> dict[str, list[str]]:
-        """Return variables for build statement.
-
-        Keys match placeholders in command templates:
-        - includes: Include flags (e.g., ["-I/path1", "-I/path2"])
-        - defines: Define flags (e.g., ["-DFOO", "-DBAR=1"])
-        - extra_flags: Additional compiler flags
-        - ldflags: Linker flags
-        - libs: Library flags (e.g., ["-lfoo", "-lbar"])
-        - libdirs: Library directory flags (e.g., ["-L/path1", "-L/path2"])
-
-        Values are lists of individual tokens. The generator is responsible
-        for joining them with appropriate quoting for the target format.
-        This ensures paths with spaces and defines with special characters
-        are handled correctly.
-
-        Returns:
-            Dictionary mapping variable names to lists of string tokens.
-        """
-        result: dict[str, list[str]] = {}
-
-        if self.includes:
-            result["includes"] = [
-                f"{self.include_prefix}{inc}" for inc in self.includes
-            ]
-
-        if self.defines:
-            result["defines"] = [f"{self.define_prefix}{d}" for d in self.defines]
-
-        if self.flags:
-            result["extra_flags"] = list(self.flags)
-
-        if self.link_flags:
-            result["ldflags"] = list(self.link_flags)
-
-        if self.libs:
-            result["libs"] = [f"{self.lib_prefix}{lib}" for lib in self.libs]
-
-        if self.libdirs:
-            result["libdirs"] = [f"{self.libdir_prefix}{d}" for d in self.libdirs]
-
-        return result
 
     def get_env_overrides(self) -> dict[str, object]:
         """Return values to set on env.<tool>.* before subst().
@@ -194,38 +151,31 @@ class MsvcCompileLinkContext(CompileLinkContext):
     libdir_prefix: str = "/LIBPATH:"
     lib_prefix: str = ""  # MSVC uses full library names (foo.lib)
 
-    def get_variables(self) -> dict[str, list[str]]:
-        """Return variables for MSVC build statement.
+    def get_env_overrides(self) -> dict[str, object]:
+        """Return values to set on env.<tool>.* before subst().
 
-        MSVC has some differences from Unix toolchains:
-        - Libraries are specified by full name (foo.lib), not -lfoo
-        - Library paths use /LIBPATH: prefix
-
-        Values are lists of individual tokens. The generator is responsible
-        for joining them with appropriate quoting for the target format.
+        MSVC-specific: libraries use full names (foo.lib) rather than -lfoo.
 
         Returns:
-            Dictionary mapping variable names to lists of string tokens.
+            Dictionary mapping variable names to values.
         """
-        result: dict[str, list[str]] = {}
+        from pcons.core.subst import ProjectPath
 
+        result: dict[str, object] = {}
+
+        # Compile-time settings
         if self.includes:
-            result["includes"] = [
-                f"{self.include_prefix}{inc}" for inc in self.includes
-            ]
-
+            result["includes"] = [ProjectPath(p) for p in self.includes]
         if self.defines:
-            result["defines"] = [f"{self.define_prefix}{d}" for d in self.defines]
-
+            result["defines"] = list(self.defines)
         if self.flags:
             result["extra_flags"] = list(self.flags)
 
-        if self.link_flags:
-            result["ldflags"] = list(self.link_flags)
-
+        # Link-time settings
+        if self.libdirs:
+            result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
         if self.libs:
             # MSVC uses full library names (kernel32.lib, not -lkernel32)
-            # If library doesn't have .lib suffix, add it
             formatted_libs = []
             for lib in self.libs:
                 if lib.endswith(".lib"):
@@ -233,9 +183,8 @@ class MsvcCompileLinkContext(CompileLinkContext):
                 else:
                     formatted_libs.append(f"{lib}.lib")
             result["libs"] = formatted_libs
-
-        if self.libdirs:
-            result["libdirs"] = [f"{self.libdir_prefix}{d}" for d in self.libdirs]
+        if self.link_flags:
+            result["ldflags"] = list(self.link_flags)
 
         return result
 

@@ -6,9 +6,9 @@ for archive creation. These classes compute effective archive settings from
 environment defaults and target-level overrides.
 
 The context approach decouples the core from archive-specific concepts:
-- Core only knows about ToolchainContext.get_variables() -> dict[str, list[str]]
+- Core only knows about ToolchainContext.get_env_overrides() -> dict[str, object]
 - ArchiveContext/InstallContext define what variables exist and their values
-- Generators write variables without knowing their semantics
+- Generators use these overrides to expand command templates
 """
 
 from __future__ import annotations
@@ -29,11 +29,6 @@ class ArchiveContext:
     The values are used to set environment variables before calling subst()
     to expand command templates.
 
-    Note: get_variables() returns an empty dict because archive/install
-    variables should be expanded by pcons subst() at generation time,
-    NOT written as per-build Ninja variables. This ensures consistent
-    behavior across all generators (Ninja, Makefile, etc.).
-
     Attributes:
         compression: Compression type for tar (None, "gzip", "bz2", "xz").
         basedir: Base directory for computing relative paths in archive.
@@ -44,20 +39,7 @@ class ArchiveContext:
     basedir: str = "."
     archive_type: str = "tar"
 
-    def get_variables(self) -> dict[str, list[str]]:
-        """Return variables for per-build statement.
-
-        Returns an empty dict because archive variables are expanded by
-        pcons subst() at generation time, not by Ninja per-build variables.
-        The generator uses get_env_overrides() to set values on the
-        environment before calling subst().
-
-        Returns:
-            Empty dictionary - no per-build variables needed.
-        """
-        return {}
-
-    def get_env_overrides(self) -> dict[str, str]:
+    def get_env_overrides(self) -> dict[str, str | list[str]]:
         """Return values to set on env.archive.* before subst().
 
         These values are set on the environment namespace (env.archive.*)
@@ -65,19 +47,20 @@ class ArchiveContext:
         expanded during subst().
 
         Returns:
-            Dictionary mapping variable names to string values.
+            Dictionary mapping variable names to values (strings or lists).
         """
-        result: dict[str, str] = {}
+        result: dict[str, str | list[str]] = {}
 
         # basedir is always set (defaults to ".")
         result["basedir"] = self.basedir
 
-        # compression_flag only for tar archives with compression
+        # compression_flag as list of tokens for proper shell handling
+        # When expanded, list becomes multiple tokens (--compression, gzip)
         if self.archive_type == "tar" and self.compression:
-            result["compression_flag"] = f"--compression {self.compression}"
+            result["compression_flag"] = ["--compression", self.compression]
         else:
-            # Empty string so the placeholder expands to nothing
-            result["compression_flag"] = ""
+            # Empty list so the placeholder expands to nothing
+            result["compression_flag"] = []
 
         return result
 
@@ -157,11 +140,6 @@ class InstallContext:
     The values are used to set environment variables before calling subst()
     to expand command templates.
 
-    Note: get_variables() returns an empty dict because install variables
-    should be expanded by pcons subst() at generation time, NOT written
-    as per-build Ninja variables. This ensures consistent behavior across
-    all generators (Ninja, Makefile, etc.).
-
     Attributes:
         destdir: Destination directory for InstallDir operations.
         install_type: Type of install ("copy" or "copytree").
@@ -169,19 +147,6 @@ class InstallContext:
 
     destdir: str = ""
     install_type: str = "copy"
-
-    def get_variables(self) -> dict[str, list[str]]:
-        """Return variables for per-build statement.
-
-        Returns an empty dict because install variables are expanded by
-        pcons subst() at generation time, not by Ninja per-build variables.
-        The generator uses get_env_overrides() to set values on the
-        environment before calling subst().
-
-        Returns:
-            Empty dictionary - no per-build variables needed.
-        """
-        return {}
 
     def get_env_overrides(self) -> dict[str, str]:
         """Return values to set on env.install.* before subst().

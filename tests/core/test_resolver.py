@@ -62,13 +62,14 @@ class TestResolverSingleTarget:
 
         assert build_info["tool"] == "cc"
         assert build_info["command_var"] == "objcmd"
-        # Build variables come from context.get_variables()
+        # Build context provides env overrides for template expansion
         assert "context" in build_info
         context = build_info["context"]
         assert context is not None
-        # Context provides variables for includes, defines, flags
-        variables = context.get_variables()
-        assert isinstance(variables, dict)
+        # Context provides get_env_overrides() for template expansion
+        assert hasattr(context, "get_env_overrides")
+        overrides = context.get_env_overrides()
+        assert isinstance(overrides, dict)
 
 
 class TestResolverSameSourceDifferentTargets:

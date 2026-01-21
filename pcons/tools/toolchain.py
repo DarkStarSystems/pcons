@@ -27,12 +27,17 @@ if TYPE_CHECKING:
 class ToolchainContext(Protocol):
     """Toolchain-specific build context.
 
-    Provides variables that fill placeholders in command templates.
+    Provides values that fill placeholders in command templates.
     The toolchain controls what variables exist and how they're formatted.
 
     This protocol allows toolchains to define domain-specific build contexts
     without polluting the core BuildInfo with C/C++ specific fields like
     effective_includes, effective_defines, etc.
+
+    The context provides get_env_overrides() which returns values to be set
+    on the environment's tool namespace before command template expansion.
+    This allows the resolver to expand commands with effective requirements
+    at generation time, rather than writing per-build Ninja variables.
 
     Example implementations:
     - CompileLinkContext: For C/C++ compilation and linking
@@ -40,19 +45,15 @@ class ToolchainContext(Protocol):
     - AssetBundleContext: For asset bundling (hypothetical)
     """
 
-    def get_variables(self) -> dict[str, list[str]]:
-        """Return variables for build statement.
+    def get_env_overrides(self) -> dict[str, object]:
+        """Return values to set on env.<tool>.* before command expansion.
 
-        Keys must match placeholders in the tool's command template.
-        Values are lists of individual tokens (flags, paths, etc.).
-        Shell escaping/quoting is handled by the generator based on target format.
-
-        This design ensures proper handling of paths with spaces, defines with
-        special characters, etc. The generator joins these with appropriate
-        quoting for the target (Ninja, Make, etc.).
+        These values are set on the environment's tool namespace so that
+        template expressions like ${prefix(cc.iprefix, cc.includes)} are
+        expanded during subst() with the effective requirements.
 
         Returns:
-            Dictionary mapping variable names to lists of string tokens.
+            Dictionary mapping variable names to values.
         """
         ...
 

@@ -333,6 +333,65 @@ class TestArchiveNinjaGeneration:
         assert "file1.txt" in content
         assert "file2.txt" in content
 
+    def test_basedir_with_spaces_is_quoted(self, tmp_path):
+        """Basedir with spaces must be properly quoted for shell execution."""
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # Create source file in directory with spaces
+        src_dir = tmp_path / "source files"
+        src_dir.mkdir()
+        src_file = src_dir / "data.txt"
+        src_file.write_text("test content")
+
+        # Create tarfile with basedir containing spaces
+        project.Tarfile(
+            env,
+            output="archive.tar.gz",
+            sources=[str(src_file)],
+            base_dir=str(src_dir),  # Path with spaces
+            name="space_test",
+        )
+
+        project.resolve()
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+
+        # The basedir path with spaces MUST be quoted for the shell
+        # Without quoting, "source files" becomes two separate arguments
+        # Look for the command - it should have proper quoting
+        # Either single quotes 'source files' or escaped "source\ files"
+        assert "source files" in content  # The path should appear
+        # The path must be quoted - check it's not just bare "source files"
+        # which would be split by the shell into two args
+        import re
+
+        # Find the command line in the rule (rule name includes hash)
+        rule_match = re.search(r"rule archive_tarcmd_\w+\s+command = (.+)", content)
+        assert rule_match, f"Should have archive rule in:\n{content}"
+        command = rule_match.group(1)
+
+        # The basedir path with space must be quoted for shell execution
+        # It should appear as 'source files' or "source files" or source\ files
+        # NOT as bare: --base-dir /path/to/source files (which would be wrong)
+        # Check that the pattern "--base-dir <path>source files" is properly quoted
+        basedir_match = re.search(r"--base-dir\s+(\S*source files\S*)", command)
+        assert basedir_match, (
+            f"Should have --base-dir with 'source files' in: {command}"
+        )
+        basedir_arg = basedir_match.group(1)
+
+        # The basedir argument must be quoted - not bare
+        # Bare would be: /path/to/source (then "files" as separate arg)
+        # Quoted would be: '/path/to/source files' or "/path/to/source files"
+        assert (
+            basedir_arg.startswith("'")
+            or basedir_arg.startswith('"')
+            or "\\ " in basedir_arg  # backslash-escaped space
+        ), f"Basedir with spaces not properly quoted: {basedir_arg}"
+
 
 class TestArchiveWithInstall:
     """Tests for archives used with Install."""

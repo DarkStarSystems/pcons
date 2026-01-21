@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.core.node import FileNode
 from pcons.generators.generator import BaseGenerator
-from pcons.tools.toolchain import ToolchainContext
+from pcons.toolchains.build_context import CompileLinkContext
 
 if TYPE_CHECKING:
     from pcons.core.project import Project
@@ -160,13 +160,13 @@ class CompileCommandsGenerator(BaseGenerator):
         # Add effective requirements from context
         if build_info:
             context = build_info.get("context")
-            if context is not None and isinstance(context, ToolchainContext):
-                # Use context.get_variables() for flags (returns list of tokens)
-                variables = context.get_variables()
-                # Append each token from the relevant variables
-                for var_name in ["includes", "defines", "extra_flags"]:
-                    tokens = variables.get(var_name, [])
-                    parts.extend(tokens)
+            if context is not None and isinstance(context, CompileLinkContext):
+                # Format flags using context's prefix attributes
+                for inc in context.includes:
+                    parts.append(f"{context.include_prefix}{inc}")
+                for define in context.defines:
+                    parts.append(f"{context.define_prefix}{define}")
+                parts.extend(context.flags)
 
         parts.extend(["-o", str(output.path), str(source.path)])
 

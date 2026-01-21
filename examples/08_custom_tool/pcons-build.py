@@ -37,9 +37,11 @@ class ConcatTool(BaseTool):
         # This handles forward slashes and spaces in paths on all platforms
         python_cmd = sys.executable.replace("\\", "/")
         return {
-            "cmd": f"{python_cmd} -m pcons.util.commands concat",
+            # Command as list of tokens for proper handling of spaces in paths
+            "cmd": [python_cmd, "-m", "pcons.util.commands", "concat"],
             "flags": [],
-            "bundlecmd": "$concat.cmd $concat.flags $$in $$out",
+            # Template expands $concat.cmd list into separate tokens
+            "bundlecmd": ["$concat.cmd", "$concat.flags", "$$in", "$$out"],
         }
 
     def builders(self) -> dict[str, Builder]:

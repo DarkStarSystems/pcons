@@ -740,9 +740,8 @@ class Resolver:
         but no 'command', this method:
         1. Gets the command template from env.<tool>.<command_var>
         2. If context has get_env_overrides(), sets those values on the tool
-        3. If context has get_variables(), formats those into extra vars
-        4. Calls env.subst() to expand the template
-        5. Stores the result in _build_info["command"]
+        3. Calls env.subst() to expand the template
+        4. Stores the result in _build_info["command"]
         """
 
         # Collect all nodes with _build_info from targets

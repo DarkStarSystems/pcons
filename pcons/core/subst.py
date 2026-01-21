@@ -598,14 +598,60 @@ def _quote_for_shell(s: str, shell: str) -> str:
         s: String to quote
         shell: Target shell ("bash", "cmd", "powershell", or "ninja")
 
-    For "ninja" shell, ninja variables like $in, $out are not quoted.
+    For "ninja" shell, ninja variables like $in, $out are not quoted,
+    but other arguments with spaces are quoted for shell execution.
     """
     if not s:
         return "''" if shell not in ("cmd", "ninja") else '""' if shell == "cmd" else ""
 
     if shell == "ninja":
-        # Ninja handles its own quoting, and $in/$out/$out.d etc. are ninja variables
-        # that should not be quoted. For ninja, we don't quote at all.
+        # Ninja commands are passed to the shell (sh on Unix, cmd on Windows).
+        # Use double quotes for cross-platform compatibility.
+        #
+        # IMPORTANT: Ninja's $in/$out variables expand to space-separated file lists.
+        # We CANNOT quote them because that would make multiple files into one argument.
+        # Paths with spaces in multi-file commands are a known limitation.
+        #
+        # Strategy:
+        # - Ninja variables ($in, $out, $topdir, etc.) → don't quote (ninja expands them)
+        # - Shell operators (>, |, &&) → don't quote
+        # - Path-like arguments with spaces (pcons-expanded) → quote with double quotes
+        # - Simple flags (--type, -c) → don't quote
+        import re
+
+        # Shell operators should not be quoted
+        shell_operators = {
+            ">",
+            ">>",
+            "<",
+            "<<",
+            "|",
+            "||",
+            "&&",
+            "&",
+            ";",
+            "2>",
+            "2>&1",
+            ">&2",
+            "2>>",
+        }
+        if s in shell_operators:
+            return s
+
+        # Ninja variables - don't quote, ninja will expand them
+        # This includes $in, $out, $topdir, $out.d, etc.
+        if re.match(r"^\$[a-zA-Z_][a-zA-Z0-9_.]*$", s):
+            return s
+
+        # Path-like arguments with spaces need quoting (for paths pcons expanded)
+        # Use double quotes for cross-platform compatibility
+        has_spaces = " " in s or "\t" in s
+        if has_spaces:
+            # Escape embedded double quotes
+            escaped = s.replace('"', '\\"')
+            return f'"{escaped}"'
+
+        # Everything else (flags, paths without spaces) - pass through
         return s
 
     if shell == "bash":

@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import re
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
@@ -559,8 +558,6 @@ class NinjaGenerator(BaseGenerator):
         """Write variables for a build statement.
 
         For multi-output builds, also writes out_<name> variables for each output.
-        For target-centric builds, writes variables from context.get_variables()
-        or falls back to effective_* fields for backward compatibility.
         """
         sources: list[Node] = build_info.get("sources", [])  # type: ignore[assignment]
 
@@ -607,44 +604,6 @@ class NinjaGenerator(BaseGenerator):
                     info_dict = cast(dict[str, Any], info)
                     out_path = self._make_output_relative(info_dict["path"])
                     f.write(f"  out_{name} = {out_path}\n")
-
-        # Write build variables from context (any object with get_variables())
-        # This supports ToolchainContext (compile/link), ArchiveContext, InstallContext
-        # Write context variables if the command has placeholders ($includes, etc.)
-        # or if the context doesn't use get_env_overrides (i.e., it's a CompileLinkContext)
-        context = build_info.get("context")
-        command_str = str(build_info.get("command", ""))
-        # Check if command has placeholders that need per-build variable expansion
-        has_placeholders = (
-            "$includes" in command_str
-            or "$defines" in command_str
-            or (context is not None and not hasattr(context, "get_env_overrides"))
-        )
-        if (
-            context is not None
-            and hasattr(context, "get_variables")
-            and has_placeholders
-        ):
-            # Use cast to satisfy type checker - we've verified the method exists
-            get_variables = cast(
-                "Callable[[], dict[str, list[str]]]", context.get_variables
-            )
-            variables: dict[str, list[str]] = get_variables()
-            for var_name, var_value in variables.items():
-                # var_value should be a list of tokens
-                if not isinstance(var_value, list):
-                    var_value = [str(var_value)] if var_value else []
-                if var_value:  # Only write non-empty values
-                    # For includes and libdirs, try to relativize paths
-                    if var_name in ("includes", "libdirs"):
-                        var_value = [
-                            self._relativize_flag_with_path(t) for t in var_value
-                        ]
-                    # Escape for Ninja variable substitution
-                    escaped_tokens = [
-                        self._escape_for_ninja_variable(token) for token in var_value
-                    ]
-                    f.write(f"  {var_name} = {' '.join(escaped_tokens)}\n")
 
         # Write custom per-build variables from build_info (legacy support)
         # Note: New code should use context objects instead

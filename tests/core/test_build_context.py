@@ -9,41 +9,62 @@ from pcons.toolchains.build_context import CompileLinkContext, MsvcCompileLinkCo
 
 
 class TestCompileLinkContext:
-    """Test CompileLinkContext returns properly structured lists."""
+    """Test CompileLinkContext get_env_overrides."""
 
-    def test_get_variables_returns_lists(self) -> None:
-        """Verify get_variables returns dict[str, list[str]]."""
+    def test_get_env_overrides_returns_dict(self) -> None:
+        """Verify get_env_overrides returns dict with expected keys."""
+        from typing import cast
+
+        from pcons.core.subst import ProjectPath
+
         ctx = CompileLinkContext(
             includes=["/usr/include", "/opt/local/include"],
             defines=["DEBUG", "VERSION=1"],
             flags=["-Wall", "-O2"],
         )
-        variables = ctx.get_variables()
+        overrides = ctx.get_env_overrides()
 
-        # All values should be lists
-        assert isinstance(variables["includes"], list)
-        assert isinstance(variables["defines"], list)
-        assert isinstance(variables["extra_flags"], list)
+        # Check that overrides contain the expected keys
+        assert "includes" in overrides
+        assert "defines" in overrides
+        assert "extra_flags" in overrides
 
-        # Check contents
-        assert variables["includes"] == ["-I/usr/include", "-I/opt/local/include"]
-        assert variables["defines"] == ["-DDEBUG", "-DVERSION=1"]
-        assert variables["extra_flags"] == ["-Wall", "-O2"]
+        # Includes should be wrapped in ProjectPath
+        includes = cast(list[ProjectPath], overrides["includes"])
+        assert len(includes) == 2
+        assert isinstance(includes[0], ProjectPath)
+        assert includes[0].path == "/usr/include"
+
+        # Defines are raw strings
+        assert overrides["defines"] == ["DEBUG", "VERSION=1"]
+
+        # Flags are raw strings
+        assert overrides["extra_flags"] == ["-Wall", "-O2"]
 
     def test_paths_with_spaces(self) -> None:
-        """Verify paths with spaces are preserved as separate tokens."""
+        """Verify paths with spaces are preserved in ProjectPath markers."""
+        from typing import cast
+
+        from pcons.core.subst import ProjectPath
+
         ctx = CompileLinkContext(
             includes=["/path/with spaces/include", "/another path/headers"],
             libdirs=["/lib path/with spaces"],
         )
-        variables = ctx.get_variables()
+        overrides = ctx.get_env_overrides()
 
-        # Each path becomes a single token (with prefix)
-        assert variables["includes"] == [
-            "-I/path/with spaces/include",
-            "-I/another path/headers",
-        ]
-        assert variables["libdirs"] == ["-L/lib path/with spaces"]
+        # Includes wrapped in ProjectPath
+        includes = cast(list[ProjectPath], overrides["includes"])
+        assert len(includes) == 2
+        assert isinstance(includes[0], ProjectPath)
+        assert includes[0].path == "/path/with spaces/include"
+        assert includes[1].path == "/another path/headers"
+
+        # Libdirs wrapped in ProjectPath
+        libdirs = cast(list[ProjectPath], overrides["libdirs"])
+        assert len(libdirs) == 1
+        assert isinstance(libdirs[0], ProjectPath)
+        assert libdirs[0].path == "/lib path/with spaces"
 
     def test_defines_with_spaces_in_values(self) -> None:
         """Verify defines with spaces in values are preserved."""
@@ -55,35 +76,50 @@ class TestCompileLinkContext:
                 "PATH=/some/path with spaces",
             ],
         )
-        variables = ctx.get_variables()
+        overrides = ctx.get_env_overrides()
 
-        # Each define becomes a single token
-        assert variables["defines"] == [
-            "-DSIMPLE",
-            "-DVERSION=1.0",
-            '-DMESSAGE="Hello World"',
-            "-DPATH=/some/path with spaces",
+        # Defines are raw strings (no prefix applied here - that's done during subst)
+        assert overrides["defines"] == [
+            "SIMPLE",
+            "VERSION=1.0",
+            'MESSAGE="Hello World"',
+            "PATH=/some/path with spaces",
         ]
 
 
 class TestMsvcCompileLinkContext:
     """Test MSVC-specific context formatting."""
 
-    def test_msvc_prefixes(self) -> None:
-        """Verify MSVC uses correct prefixes."""
+    def test_msvc_env_overrides(self) -> None:
+        """Verify MSVC get_env_overrides returns expected values."""
+        from typing import cast
+
+        from pcons.core.subst import ProjectPath
+
         ctx = MsvcCompileLinkContext(
             includes=["/path/with spaces"],
             defines=["DEBUG"],
             libdirs=["/lib path"],
             libs=["kernel32", "user32.lib"],
         )
-        variables = ctx.get_variables()
+        overrides = ctx.get_env_overrides()
 
-        assert variables["includes"] == ["/I/path/with spaces"]
-        assert variables["defines"] == ["/DDEBUG"]
-        assert variables["libdirs"] == ["/LIBPATH:/lib path"]
+        # Includes wrapped in ProjectPath
+        includes = cast(list[ProjectPath], overrides["includes"])
+        assert len(includes) == 1
+        assert isinstance(includes[0], ProjectPath)
+        assert includes[0].path == "/path/with spaces"
+
+        # Defines are raw strings
+        assert overrides["defines"] == ["DEBUG"]
+
+        # Libdirs wrapped in ProjectPath
+        libdirs = cast(list[ProjectPath], overrides["libdirs"])
+        assert len(libdirs) == 1
+        assert isinstance(libdirs[0], ProjectPath)
+
         # MSVC adds .lib suffix if missing
-        assert variables["libs"] == ["kernel32.lib", "user32.lib"]
+        assert overrides["libs"] == ["kernel32.lib", "user32.lib"]
 
 
 class TestNinjaQuoting:

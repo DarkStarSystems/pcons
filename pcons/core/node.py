@@ -59,9 +59,9 @@ class BuildInfo(TypedDict, total=False):
         description: Human-readable description for build output.
 
     Toolchain context:
-        context: ToolchainContext providing variables for build statements.
-                 Generators use context.get_variables() to get formatted
-                 build variables (includes, defines, flags, etc.).
+        context: ToolchainContext providing env overrides for command expansion.
+                 The resolver uses context.get_env_overrides() to set values
+                 on the environment before expanding command templates.
 
     Multi-output builds:
         outputs: Dict mapping output name to OutputInfo.
@@ -85,7 +85,7 @@ class BuildInfo(TypedDict, total=False):
     description: str  # Human-readable build description
 
     # Toolchain-provided context
-    # Generators use context.get_variables() for build variables
+    # Resolver uses context.get_env_overrides() for command expansion
     context: ToolchainContext | None
 
     # Multi-output builds

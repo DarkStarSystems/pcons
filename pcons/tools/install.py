@@ -321,7 +321,7 @@ class InstallNodeFactory:
         )
 
         # Store build info referencing env.install.copytreecmd
-        # The context provides variables via get_variables()
+        # The context provides env overrides for command expansion
         stamp_node._build_info = {
             "tool": "install",
             "command_var": "copytreecmd",
@@ -329,7 +329,7 @@ class InstallNodeFactory:
             "depfile": "$out.d",
             "deps_style": "gcc",
             "description": "INSTALLDIR $out",
-            # Context provides variables for per-build substitution
+            # Context provides get_env_overrides() for template expansion
             "context": context,
             "env": env,
         }
