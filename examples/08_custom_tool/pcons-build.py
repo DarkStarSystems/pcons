@@ -12,9 +12,8 @@ import os
 import sys
 from pathlib import Path
 
+from pcons import Generator, Project
 from pcons.core.builder import Builder, CommandBuilder
-from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
 from pcons.tools.tool import BaseTool
 
 # =============================================================================
@@ -83,8 +82,8 @@ env.concat.Bundle(
     ],
 )
 
-# Generate ninja build file
-generator = NinjaGenerator()
+# Generate build file
+generator = Generator()
 generator.generate(project, build_dir)
 
-print(f"Generated {build_dir / 'build.ninja'}")
+print(f"Generated {build_dir}")

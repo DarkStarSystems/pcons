@@ -10,7 +10,7 @@ Windows-only: requires MSVC toolchain.
 import os
 from pathlib import Path
 
-from pcons import NinjaGenerator, Project, find_c_toolchain
+from pcons import Generator, Project, find_c_toolchain
 
 # Directories
 build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
@@ -33,8 +33,8 @@ project.Default(app)
 # Resolve dependencies
 project.resolve()
 
-# Generate ninja build file
-generator = NinjaGenerator()
+# Generate build file
+generator = Generator()
 generator.generate(project, build_dir)
 
-print(f"Generated {build_dir / 'build.ninja'} using {toolchain.name} toolchain")
+print(f"Generated {build_dir} using {toolchain.name} toolchain")

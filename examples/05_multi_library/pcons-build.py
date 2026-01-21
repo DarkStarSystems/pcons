@@ -15,11 +15,9 @@ import os
 import sys
 from pathlib import Path
 
-from pcons.core.project import Project
+from pcons import Generator, Project, find_c_toolchain
 from pcons.generators.compile_commands import CompileCommandsGenerator
 from pcons.generators.mermaid import MermaidGenerator
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import find_c_toolchain
 
 # =============================================================================
 # Build Script
@@ -64,9 +62,9 @@ simulator.link(libphysics)  # Gets both libphysics and libmath includes
 # -----------------------------------------------------------------------------
 project.resolve()
 
-# Generate ninja build file
-ninja_gen = NinjaGenerator()
-ninja_gen.generate(project, build_dir)
+# Generate build file
+generator = Generator()
+generator.generate(project, build_dir)
 
 # Generate Mermaid dependency diagram
 mermaid_gen = MermaidGenerator(direction="LR")

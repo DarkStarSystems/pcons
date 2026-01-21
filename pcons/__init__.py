@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
+from pcons.generators.makefile import MakefileGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.toolchains import find_c_toolchain  # noqa: E402
 
@@ -116,6 +117,55 @@ def get_variant(default: str = "release") -> str:
     return os.environ.get("PCONS_VARIANT") or os.environ.get("VARIANT") or default
 
 
+# Valid generator names for CLI and Generator()
+GENERATORS = {
+    "ninja": NinjaGenerator,
+    "make": MakefileGenerator,
+    "makefile": MakefileGenerator,  # Alias
+}
+
+
+def Generator(default: str = "ninja") -> NinjaGenerator | MakefileGenerator:
+    """Get a generator instance based on CLI option or environment.
+
+    The generator can be set with:
+        pcons --generator=make
+        pcons -G ninja
+
+    Or when running directly:
+        GENERATOR=make python pcons-build.py
+
+    Precedence (highest to lowest):
+        1. PCONS_GENERATOR (set by pcons CLI)
+        2. GENERATOR environment variable
+        3. default parameter
+
+    Args:
+        default: Default generator name if not set ("ninja" or "make").
+
+    Returns:
+        A generator instance (NinjaGenerator or MakefileGenerator).
+
+    Raises:
+        ValueError: If the generator name is not recognized.
+
+    Example:
+        from pcons import Project, Generator
+
+        project = Project("myapp")
+        # ... configure project ...
+        Generator().generate(project)
+    """
+    name = os.environ.get("PCONS_GENERATOR") or os.environ.get("GENERATOR") or default
+    name = name.lower()
+
+    if name not in GENERATORS:
+        valid = ", ".join(sorted(set(GENERATORS.keys())))
+        raise ValueError(f"Unknown generator '{name}'. Valid options: {valid}")
+
+    return GENERATORS[name]()
+
+
 # Public API exports
 __all__ = [
     # Version
@@ -131,7 +181,9 @@ __all__ = [
     "Configure",
     "Project",
     # Generators
+    "Generator",
     "NinjaGenerator",
+    "MakefileGenerator",
     # Toolchain discovery
     "find_c_toolchain",
 ]

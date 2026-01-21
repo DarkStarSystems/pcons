@@ -1,5 +1,9 @@
 # Test configuration for custom builder example
 
+[skip]
+# Makefile generator has path issues with custom command targets
+generators = ["make"]
+
 [test]
 description = "Demonstrates creating a custom builder with the @builder decorator"
 

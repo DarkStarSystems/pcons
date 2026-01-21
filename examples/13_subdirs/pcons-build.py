@@ -31,9 +31,7 @@ import os
 import runpy
 from pathlib import Path
 
-from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import find_c_toolchain
+from pcons import Generator, Project, find_c_toolchain
 
 this_dir = Path(__file__).parent
 build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
@@ -56,5 +54,5 @@ app.link(libfoo)  # Gets libfoo's public.include_dirs automatically
 
 # Resolve and generate the ninja file
 project.resolve()
-NinjaGenerator().generate(project, build_dir)
-print(f"Generated {build_dir / 'build.ninja'}")
+Generator().generate(project, build_dir)
+print(f"Generated {build_dir}")

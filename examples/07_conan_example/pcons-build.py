@@ -20,7 +20,7 @@ Usage:
 import os
 from pathlib import Path
 
-from pcons import NinjaGenerator, Project, find_c_toolchain, get_variant
+from pcons import Generator, Project, find_c_toolchain, get_variant
 from pcons.configure.config import Configure
 from pcons.generators.compile_commands import CompileCommandsGenerator
 from pcons.packages.finders import ConanFinder
@@ -105,7 +105,7 @@ project.Default(hello)
 
 project.resolve()
 
-NinjaGenerator().generate(project, build_dir)
+Generator().generate(project, build_dir)
 CompileCommandsGenerator().generate(project, build_dir)
 
-print(f"Generated {build_dir / 'build.ninja'}")
+print(f"Generated {build_dir}")

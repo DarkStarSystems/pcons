@@ -15,9 +15,7 @@ to the Installers/ directory.
 import os
 from pathlib import Path
 
-from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import find_c_toolchain
+from pcons import Generator, Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
@@ -75,8 +73,8 @@ project.resolve()
 # Create alias after resolve() so output_nodes are populated
 project.Alias("install", install_target)
 
-# Generate ninja file
-generator = NinjaGenerator()
+# Generate build file
+generator = Generator()
 generator.generate(project, build_dir)
 
-print(f"Generated {build_dir / 'build.ninja'}")
+print(f"Generated {build_dir}")

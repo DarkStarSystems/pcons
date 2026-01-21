@@ -13,8 +13,7 @@ if any file in the source directory changes, the copy is re-run.
 import os
 from pathlib import Path
 
-from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
+from pcons import Generator, Project
 
 # =============================================================================
 # Build Script
@@ -38,8 +37,8 @@ project.Default(installed_assets)
 # Resolve all targets
 project.resolve()
 
-# Generate ninja file
-generator = NinjaGenerator()
+# Generate build file
+generator = Generator()
 generator.generate(project, build_dir)
 
-print(f"Generated {build_dir / 'build.ninja'}")
+print(f"Generated {build_dir}")

@@ -86,6 +86,7 @@ def run_script(
     build_dir: Path,
     variables: dict[str, str] | None = None,
     variant: str | None = None,
+    generator: str | None = None,
     reconfigure: bool = False,
     extra_env: dict[str, str] | None = None,
 ) -> tuple[int, list[Project]]:
@@ -99,6 +100,7 @@ def run_script(
         build_dir: Build directory to pass to the script.
         variables: Build variables to pass via PCONS_VARS.
         variant: Build variant to pass via PCONS_VARIANT.
+        generator: Generator to pass via PCONS_GENERATOR (ninja, make).
         reconfigure: If True, set PCONS_RECONFIGURE=1.
         extra_env: Additional environment variables to set.
 
@@ -123,6 +125,9 @@ def run_script(
     if variant:
         os.environ["PCONS_VARIANT"] = variant
 
+    if generator:
+        os.environ["PCONS_GENERATOR"] = generator
+
     if reconfigure:
         os.environ["PCONS_RECONFIGURE"] = "1"
 
@@ -136,6 +141,8 @@ def run_script(
         logger.debug("  PCONS_VARS=%s", os.environ["PCONS_VARS"])
     if variant:
         logger.debug("  PCONS_VARIANT=%s", variant)
+    if generator:
+        logger.debug("  PCONS_GENERATOR=%s", generator)
 
     # Save and modify sys.path and cwd for script imports
     old_cwd = os.getcwd()
@@ -173,6 +180,7 @@ def run_script(
             "PCONS_SOURCE_DIR",
             "PCONS_VARS",
             "PCONS_VARIANT",
+            "PCONS_GENERATOR",
             "PCONS_RECONFIGURE",
         ]:
             os.environ.pop(key, None)
@@ -291,8 +299,9 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
     # Create build directory if it doesn't exist
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get variant and reconfigure flags
+    # Get variant, generator, and reconfigure flags
     variant = getattr(args, "variant", None)
+    generator = getattr(args, "generator", None)
     reconfigure = getattr(args, "reconfigure", False)
     graph = getattr(args, "graph", None)
     mermaid = getattr(args, "mermaid", None)
@@ -310,6 +319,7 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
         build_dir,
         variables=variables,
         variant=variant,
+        generator=generator,
         reconfigure=reconfigure,
         extra_env=extra_env if extra_env else None,
     )
@@ -593,6 +603,13 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         "--variant",
         metavar="NAME",
         help="Build variant (debug, release, etc.)",
+    )
+    parser.add_argument(
+        "-G",
+        "--generator",
+        metavar="NAME",
+        choices=["ninja", "make", "makefile"],
+        help="Generator to use (ninja, make). Default: ninja",
     )
     parser.add_argument(
         "-C",

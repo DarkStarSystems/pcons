@@ -10,13 +10,13 @@ This demonstrates a subdir that works both:
 import os
 from pathlib import Path
 
-from pcons.core.project import Project
+from pcons import Generator, Project, find_c_toolchain
 from pcons.core.target import Target
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import find_c_toolchain
 
 
-def build_libfoo(project: Project | None = None, build_dir: Path | None = None) -> Target:
+def build_libfoo(
+    project: Project | None = None, build_dir: Path | None = None
+) -> Target:
     """Build libfoo, optionally as part of a parent project.
 
     Args:
@@ -48,10 +48,10 @@ def build_libfoo(project: Project | None = None, build_dir: Path | None = None) 
     libfoo.public.include_dirs.append(include_dir)
 
     if standalone:
-        # Resolve and generate ninja file when running standalone
+        # Resolve and generate build file when running standalone
         project.resolve()
-        NinjaGenerator().generate(project, build_dir)
-        print(f"Generated {build_dir / 'build.ninja'}")
+        Generator().generate(project, build_dir)
+        print(f"Generated {build_dir}")
 
     return libfoo
 

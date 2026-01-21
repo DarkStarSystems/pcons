@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pcons import get_var, get_variant
+from pcons import Generator, MakefileGenerator, NinjaGenerator, get_var, get_variant
 from pcons.cli import find_command_in_argv, find_script, parse_variables, setup_logging
 
 if TYPE_CHECKING:
@@ -119,6 +119,71 @@ class TestGetVar:
         monkeypatch.setenv("VARIANT", "debug")
 
         assert get_variant("default") == "release"
+
+
+class TestGenerator:
+    """Tests for Generator() function."""
+
+    def test_generator_default_is_ninja(self, monkeypatch) -> None:
+        """Test Generator() returns NinjaGenerator by default."""
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.delenv("GENERATOR", raising=False)
+
+        gen = Generator()
+        assert isinstance(gen, NinjaGenerator)
+
+    def test_generator_default_parameter(self, monkeypatch) -> None:
+        """Test Generator() uses default parameter when not set."""
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.delenv("GENERATOR", raising=False)
+
+        gen = Generator("make")
+        assert isinstance(gen, MakefileGenerator)
+
+    def test_generator_from_pcons_generator(self, monkeypatch) -> None:
+        """Test Generator() reads from PCONS_GENERATOR (CLI sets this)."""
+        monkeypatch.setenv("PCONS_GENERATOR", "make")
+        monkeypatch.delenv("GENERATOR", raising=False)
+
+        gen = Generator()
+        assert isinstance(gen, MakefileGenerator)
+
+    def test_generator_from_generator_env(self, monkeypatch) -> None:
+        """Test Generator() falls back to GENERATOR env var."""
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.setenv("GENERATOR", "make")
+
+        gen = Generator()
+        assert isinstance(gen, MakefileGenerator)
+
+    def test_generator_pcons_generator_takes_precedence(self, monkeypatch) -> None:
+        """Test PCONS_GENERATOR takes precedence over GENERATOR."""
+        monkeypatch.setenv("PCONS_GENERATOR", "ninja")
+        monkeypatch.setenv("GENERATOR", "make")
+
+        gen = Generator()
+        assert isinstance(gen, NinjaGenerator)
+
+    def test_generator_makefile_alias(self, monkeypatch) -> None:
+        """Test 'makefile' is an alias for 'make'."""
+        monkeypatch.setenv("PCONS_GENERATOR", "makefile")
+
+        gen = Generator()
+        assert isinstance(gen, MakefileGenerator)
+
+    def test_generator_case_insensitive(self, monkeypatch) -> None:
+        """Test generator names are case-insensitive."""
+        monkeypatch.setenv("PCONS_GENERATOR", "NINJA")
+
+        gen = Generator()
+        assert isinstance(gen, NinjaGenerator)
+
+    def test_generator_invalid_raises(self, monkeypatch) -> None:
+        """Test Generator() raises ValueError for unknown generator."""
+        monkeypatch.setenv("PCONS_GENERATOR", "unknown")
+
+        with pytest.raises(ValueError, match="Unknown generator 'unknown'"):
+            Generator()
 
 
 class TestParseVariables:

@@ -35,6 +35,9 @@ except ImportError:
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 IS_WINDOWS = platform.system().lower() == "windows"
 
+# Generators to test
+GENERATORS = ["ninja", "make"]
+
 
 def adapt_path_for_windows(path: str) -> str:
     """Adapt a Unix-style path for Windows.
@@ -284,7 +287,12 @@ def get_platform_value(
     return value
 
 
-def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -> None:
+def run_example(
+    example_dir: Path,
+    tmp_path: Path,
+    invocation: str = "direct",
+    generator: str = "ninja",
+) -> None:
     """Run a single example project.
 
     Args:
@@ -293,6 +301,9 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
         invocation: How to invoke the build script:
             - "direct": python pcons-build.py
             - "cli": python -m pcons
+        generator: Which generator to use:
+            - "ninja": Generate build.ninja
+            - "make": Generate Makefile
     """
     config = load_test_config(example_dir)
     test_config = config.get("test", {})
@@ -301,6 +312,12 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
     skip_reason = should_skip(config)
     if skip_reason:
         pytest.skip(skip_reason)
+
+    # Check if this generator should be skipped
+    skip_config = config.get("skip", {})
+    skip_generators = skip_config.get("generators", [])
+    if generator in [g.lower() for g in skip_generators]:
+        pytest.skip(f"Skipped for {generator} generator")
 
     # CLI invocation requires ninja (pcons CLI runs ninja after generation)
     # Skip CLI tests for examples that use custom build commands (e.g., make)
@@ -325,13 +342,20 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
         cmd = [sys.executable, "-m", "pcons"]
         cmd_desc = "pcons"
 
+    # Set up environment with generator choice
+    env = {
+        **os.environ,
+        "PCONS_BUILD_DIR": str(build_dir),
+        "PCONS_GENERATOR": generator,
+    }
+
     result = subprocess.run(
         cmd,
         cwd=work_dir,
         capture_output=True,
         text=True,
         timeout=60,
-        env={**os.environ, "PCONS_BUILD_DIR": str(build_dir)},
+        env=env,
     )
 
     if result.returncode != 0:
@@ -339,7 +363,7 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
         print(f"{cmd_desc} stderr:\n{result.stderr}")
         pytest.fail(f"{cmd_desc} failed with code {result.returncode}")
 
-    # Check for custom build command or use ninja default
+    # Check for custom build command or use appropriate build tool
     build_command = test_config.get("build_command")
 
     if build_command:
@@ -362,8 +386,8 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
             print(f"Build stdout:\n{result.stdout}")
             print(f"Build stderr:\n{result.stderr}")
             pytest.fail(f"Build command failed with code {result.returncode}")
-    else:
-        # Default: use ninja
+    elif generator == "ninja":
+        # Use ninja
         ninja_file = build_dir / "build.ninja"
         if not ninja_file.exists():
             pytest.fail(f"build.ninja not generated in {build_dir}")
@@ -372,7 +396,6 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
             pytest.skip("ninja not available")
 
         # Run ninja from the build directory using -C
-        # Paths in build.ninja are relative to the build dir
         result = subprocess.run(
             ["ninja", "-C", str(build_dir)],
             cwd=work_dir,
@@ -386,6 +409,29 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
             print(f"Ninja stderr:\n{result.stderr}")
             print(f"build.ninja contents:\n{ninja_file.read_text()}")
             pytest.fail(f"ninja failed with code {result.returncode}")
+    elif generator == "make":
+        # Use make
+        makefile = build_dir / "Makefile"
+        if not makefile.exists():
+            pytest.fail(f"Makefile not generated in {build_dir}")
+
+        if shutil.which("make") is None:
+            pytest.skip("make not available")
+
+        # Run make from the build directory using -C
+        result = subprocess.run(
+            ["make", "-C", str(build_dir)],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        if result.returncode != 0:
+            print(f"Make stdout:\n{result.stdout}")
+            print(f"Make stderr:\n{result.stderr}")
+            print(f"Makefile contents:\n{makefile.read_text()}")
+            pytest.fail(f"make failed with code {result.returncode}")
 
     # Check expected outputs exist (auto-adapts for Windows if no override)
     expected_outputs = get_platform_value(
@@ -458,9 +504,10 @@ def run_example(example_dir: Path, tmp_path: Path, invocation: str = "direct") -
                     f"got:\n{actual_content}"
                 )
 
-    # Run rebuild tests (only for "direct" invocation)
+    # Run rebuild tests (only for "direct" invocation with ninja generator)
+    # Rebuild tests rely on ninja's incremental build infrastructure
     rebuild_tests = config.get("rebuild", [])
-    if rebuild_tests and invocation == "direct":
+    if rebuild_tests and invocation == "direct" and generator == "ninja":
         skip_config = config.get("skip", {})
         # Check if rebuild tests should be skipped on Windows
         if sys.platform == "win32" and skip_config.get("rebuild_on_windows"):
@@ -481,20 +528,23 @@ EXAMPLES = discover_examples()
 INVOCATIONS = ["direct", "cli"]
 
 
+@pytest.mark.parametrize("generator", GENERATORS, ids=GENERATORS)
 @pytest.mark.parametrize("invocation", INVOCATIONS, ids=INVOCATIONS)
 @pytest.mark.parametrize(
     "example_dir",
     EXAMPLES,
     ids=[e.name for e in EXAMPLES],
 )
-def test_example(example_dir: Path, tmp_path: Path, invocation: str) -> None:
+def test_example(
+    example_dir: Path, tmp_path: Path, invocation: str, generator: str
+) -> None:
     """Run an example project end-to-end.
 
-    Tests both invocation methods:
-    - direct: python pcons-build.py
-    - cli: python -m pcons
+    Tests combinations of:
+    - Invocation methods: direct (python pcons-build.py), cli (python -m pcons)
+    - Generators: ninja (build.ninja), make (Makefile)
     """
-    run_example(example_dir, tmp_path, invocation)
+    run_example(example_dir, tmp_path, invocation, generator)
 
 
 # If no examples found, create a placeholder test

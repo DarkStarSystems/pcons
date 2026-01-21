@@ -13,9 +13,7 @@ For transitive dependencies between libraries, see 06_multi_library.
 import os
 from pathlib import Path
 
-from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import find_c_toolchain
+from pcons import Generator, Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
@@ -32,19 +30,21 @@ env = project.Environment(toolchain=toolchain)
 
 # Main program with multiple source files
 simulator = project.Program("simulator", env)
-simulator.add_sources([
-    src_dir / "math_lib.c",
-    src_dir / "physics_lib.c",
-    src_dir / "main.c",
-])
+simulator.add_sources(
+    [
+        src_dir / "math_lib.c",
+        src_dir / "physics_lib.c",
+        src_dir / "main.c",
+    ]
+)
 # All sources need access to headers in include/
 simulator.private.include_dirs.append(include_dir)
 
 # Resolve all targets
 project.resolve()
 
-# Generate ninja build file
-generator = NinjaGenerator()
+# Generate build file
+generator = Generator()
 generator.generate(project, build_dir)
 
-print(f"Generated {build_dir / 'build.ninja'}")
+print(f"Generated {build_dir}")

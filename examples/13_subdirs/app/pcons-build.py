@@ -10,9 +10,7 @@ import os
 import runpy
 from pathlib import Path
 
-from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import find_c_toolchain
+from pcons import Generator, Project, find_c_toolchain
 
 # Load libfoo's build script using runpy
 libfoo_script = Path(__file__).parent.parent / "libfoo" / "pcons-build.py"
@@ -51,10 +49,10 @@ def build_app(project: Project | None = None, build_dir: Path | None = None):
     app.link(libfoo)  # Gets libfoo's public.include_dirs automatically
 
     if standalone:
-        # Resolve and generate ninja file when running standalone
+        # Resolve and generate build file when running standalone
         project.resolve()
-        NinjaGenerator().generate(project, build_dir)
-        print(f"Generated {build_dir / 'build.ninja'}")
+        Generator().generate(project, build_dir)
+        print(f"Generated {build_dir}")
 
 
 if __name__ == "__main__":

@@ -12,9 +12,7 @@ This example demonstrates:
 import os
 from pathlib import Path
 
-from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains import find_c_toolchain
+from pcons import Generator, Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
@@ -46,5 +44,5 @@ for variant in ["debug", "release"]:
 
 # Resolve and generate
 project.resolve()
-NinjaGenerator().generate(project, build_dir)
-print(f"Generated {build_dir / 'build.ninja'}")
+Generator().generate(project, build_dir)
+print(f"Generated {build_dir}")
