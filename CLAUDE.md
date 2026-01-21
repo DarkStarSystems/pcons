@@ -49,7 +49,7 @@ Pre-commit hooks run ruff check, ruff format, and ty (type checking) automatical
 
 **Namespaced tools**: `env.cc.flags`, `env.cxx.cmd`, `env.link.libs` - no flat variable collisions.
 
-**ToolchainContext protocol**: Decouples core from C/C++ specifics. Implementations (CompileLinkContext, MsvcCompileLinkContext) format flags like `-I`, `/I`.
+**ToolchainContext protocol**: Decouples core from C/C++ specifics. Provides `get_env_overrides()` to set values on the environment before command expansion. Implementations (CompileLinkContext, MsvcCompileLinkContext) use toolchain-specific prefixes like `-I`, `/I`.
 
 See `ARCHITECTURE.md` for full design documentation.
 
@@ -95,7 +95,7 @@ pcons/
 | Add toolchain | `pcons/toolchains/` (see gcc.py as template) |
 | Change variable substitution | `pcons/core/subst.py` |
 | Modify target resolution | `pcons/core/resolver.py` |
-| Add compile/link flags | `pcons/core/build_context.py` (ToolchainContext) |
+| Add compile/link flags | `pcons/tools/toolchain.py` (ToolchainContext) |
 | Package management | `pcons/packages/finders/`, `pcons/packages/imported.py` |
 
 ## Testing

@@ -686,18 +686,18 @@ This makes build scripts declarative - the order of declarations doesn't matter.
 │  Generator reads node._build_info["context"]                            │
 │         │                                                                │
 │         ▼                                                                │
-│  context.get_variables()  ──► {"includes": ["-I/path1", "-I/path2"],    │
-│                                "defines": ["-DFOO", "-DBAR=1"],         │
-│                                "extra_flags": ["-Wall", "-O2"],         │
-│                                "ldflags": ["-L/lib", "-pthread"],       │
-│                                "libs": ["-lfoo", "-lbar"],              │
-│                                "libdirs": ["-L/path1", "-L/path2"]}     │
+│  context.get_env_overrides() ──► {"includes": ["/path1", "/path2"],     │
+│                                   "defines": ["FOO", "BAR=1"],          │
+│                                   "extra_flags": ["-Wall", "-O2"],      │
+│                                   "ldflags": ["-pthread"],              │
+│                                   "libs": ["foo", "bar"],               │
+│                                   "libdirs": ["/path1", "/path2"]}      │
 │         │                                                                │
 │         ▼                                                                │
-│  Generator escapes/quotes each token for target format                  │
+│  Resolver sets overrides on env.<tool>.* namespace                      │
 │         │                                                                │
 │         ▼                                                                │
-│  Generator writes variables to build file (per-build overrides)         │
+│  subst() expands command template with effective values                 │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -706,11 +706,12 @@ This makes build scripts declarative - the order of declarations doesn't matter.
 1. **ToolchainContext Protocol** - Defines a single method:
    ```python
    class ToolchainContext(Protocol):
-       def get_variables(self) -> dict[str, list[str]]:
-           """Return variables for build statement.
+       def get_env_overrides(self) -> dict[str, object]:
+           """Return values to set on env.<tool>.* before command expansion.
 
-           Keys match placeholders in command templates.
-           Values are lists of tokens - generators handle quoting.
+           These values are set on the environment's tool namespace so that
+           template expressions like ${prefix(cc.iprefix, cc.includes)} are
+           expanded during subst() with the effective requirements.
            """
            ...
    ```
@@ -732,9 +733,9 @@ This makes build scripts declarative - the order of declarations doesn't matter.
        libdir_prefix: str = "-L"
        lib_prefix: str = "-l"
 
-       def get_variables(self) -> dict[str, list[str]]:
-           # Returns lists: ["-I/path1", "-I/path2"], ["-DFOO", "-DBAR"], etc.
-           # Generators join with proper quoting for paths with spaces
+       def get_env_overrides(self) -> dict[str, object]:
+           # Returns unprefixed values - subst() applies prefixes via ${prefix(...)}
+           # Values: {"includes": ["/path1", "/path2"], "defines": ["FOO", "BAR"]}
            ...
    ```
 
@@ -750,29 +751,30 @@ This makes build scripts declarative - the order of declarations doesn't matter.
 
 **Variable substitution flow:**
 
-1. **Command templates** in toolchains include placeholders:
+1. **Command templates** in toolchains include placeholders and prefix functions:
    ```python
    # In LlvmCcTool
-   "objcmd": ["$cc.cmd", "$cc.flags", "-c", "-o", "$$out", "$$in"]
+   "objcmd": ["$cc.cmd", "$cc.flags", "${prefix($cc.iprefix, $cc.includes)}",
+              "${prefix($cc.dprefix, $cc.defines)}", "$cc.extra_flags",
+              "-c", "-o", "$$out", "$$in"]
    ```
 
-2. **Ninja generator** augments commands with effective requirement placeholders:
+2. **Resolver applies context overrides** before template expansion:
    ```python
-   # objcmd becomes:
-   command = "clang $flags $includes $defines $extra_flags -c -o $out $in"
+   # context.get_env_overrides() returns unprefixed values
+   overrides = {"includes": ["/path1", "/path2"], "defines": ["FOO", "BAR=1"]}
+   # Resolver sets these on env.cc.includes, env.cc.defines, etc.
    ```
 
-3. **Per-build variables** are written from context (with proper escaping):
+3. **subst() expands command** with effective values (prefix function applies toolchain prefixes):
    ```ninja
-   build obj/foo.o: cc_objcmd src/foo.c
-     includes = -I/usr/include -I/path$ with$ spaces/include
-     defines = -DDEBUG '-DMSG="Hello World"'
-     extra_flags = -Wall -O2
+   rule cc_objcmd
+     command = clang -I/path1 -I/path2 -DFOO -DBAR=1 -Wall -c -o $out $in
    ```
 
-   Note: Ninja escapes spaces as `$ ` (dollar-space). Generators call
-   `context.get_variables()` which returns lists, then escape/quote
-   each token appropriately for the target format.
+   Note: The `${prefix(...)}` function applies the toolchain's include/define prefixes
+   (e.g., `-I`, `-D` for GCC/LLVM or `/I`, `/D` for MSVC). Paths with spaces are
+   quoted appropriately for the target shell format.
 
 **Shell quoting and command formatting:**
 
@@ -828,33 +830,30 @@ command = env.subst(cmd_template, shell="ninja")
 command = env.subst(command_template, shell="posix")
 ```
 
-**Context variable quoting (per-build variables):**
+**Shell quoting during command expansion:**
 
-When generators write per-build variables from `context.get_variables()`, they apply
-format-specific quoting:
+When `subst()` expands command templates, it applies shell-appropriate quoting
+based on the target format (Ninja or POSIX shell):
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    context.get_variables()                               │
+│                    context.get_env_overrides()                           │
 │                                                                          │
-│   Returns: {"includes": ["-I/path", "-I/My Headers"],                   │
-│             "defines": ["-DFOO", '-DMSG="Hello World"']}                │
-│   (list of tokens - each is a single argument)                          │
+│   Returns: {"includes": ["/path", "/My Headers"],                       │
+│             "defines": ["FOO", 'MSG="Hello World"']}                    │
+│   (unprefixed values - prefix function applies toolchain prefixes)      │
 └─────────────────────────────────────────────────────────────────────────┘
                                 │
             ┌───────────────────┴───────────────────┐
             ▼                                       ▼
 ┌───────────────────────────┐           ┌───────────────────────────┐
-│      Ninja Generator      │           │    Makefile Generator     │
+│   env.subst(shell="ninja")│           │  env.subst(shell="posix") │
 │                           │           │                           │
-│ _escape_path() on each:   │           │ _quote_tokens_for_make(): │
-│ - space -> "$ "           │           │ - Paths with spaces get   │
-│ - colon -> "$:"           │           │   single-quoted           │
-│ - dollar -> "$$"          │           │ - $ -> $$ for Make        │
+│ Paths with spaces get     │           │ Paths with spaces get     │
+│ double-quoted for Ninja   │           │ single-quoted for shell   │
 │                           │           │                           │
 │ Output:                   │           │ Output:                   │
-│ includes = -I/path        │           │ '-I/My Headers'           │
-│            -I/My$ Headers │           │ '-DMSG="Hello World"'     │
+│ -I/path "-I/My Headers"   │           │ -I/path '-I/My Headers'   │
 └───────────────────────────┘           └───────────────────────────┘
 ```
 
@@ -864,10 +863,10 @@ across all output formats.
 
 **Why this design?**
 
-- **Core stays generic**: The core only sees `ToolchainContext.get_variables() -> dict[str, list[str]]`
-- **Toolchains control formatting**: GCC uses `-I`, MSVC uses `/I` - each toolchain handles its own conventions
-- **Generators handle quoting**: Each generator knows its target format (Ninja, Make, etc.) and applies appropriate escaping
-- **Paths with spaces work**: By keeping tokens as lists until final output, paths like `/My Projects/include` are properly quoted
+- **Core stays generic**: The core only sees `ToolchainContext.get_env_overrides() -> dict[str, object]`
+- **Toolchains control formatting**: GCC uses `-I`, MSVC uses `/I` - prefix functions in command templates use toolchain-specific prefixes
+- **subst() handles quoting**: The `subst()` function knows the target shell format and applies appropriate quoting
+- **Paths with spaces work**: By keeping tokens as lists and quoting during expansion, paths like `/My Projects/include` are properly handled
 - **Extensible**: A hypothetical LaTeX toolchain could define `DocumentContext` with completely different variables
 
 **Custom toolchains** can provide their own context classes:
@@ -880,7 +879,7 @@ class DocumentContext:
     output_format: str = "pdf"
     template: str | None = None
 
-    def get_variables(self) -> dict[str, list[str]]:
+    def get_env_overrides(self) -> dict[str, object]:
         result = {"format": [f"--from={self.input_format}", f"--to={self.output_format}"]}
         if self.template:
             result["template"] = [f"--template={self.template}"]

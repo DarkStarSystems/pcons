@@ -319,7 +319,7 @@ class MakefileGenerator(BaseGenerator):
             return f"@echo 'No command template: {tool_name}.{command_var}'"
 
         # Expand the command template
-        command = env.subst(command_template, shell="posix")
+        command = env.subst(command_template, shell="bash")
 
         # Substitute $in, $out with Make automatic variables
         command = self._substitute_make_vars(command, node, sources, build_info)

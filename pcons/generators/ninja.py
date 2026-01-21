@@ -16,7 +16,6 @@ from pcons.core.paths import PathResolver
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
-    from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.core.subst import CommandToken
@@ -238,28 +237,33 @@ class NinjaGenerator(BaseGenerator):
 
     def _expand_command_fallback(
         self,
-        node: FileNode,
+        _node: FileNode,
         build_info: dict[str, Any],
         env: Environment | None,
     ) -> str:
-        """Fallback command expansion when resolver hasn't pre-expanded.
+        """Fallback command expansion when build_info["command"] is not set.
 
-        Used for backward compatibility with tests and direct node creation.
+        This fallback exists for two cases:
+        1. Unit tests that manually create _build_info without using the resolver
+        2. Direct node creation without going through project.resolve()
+
+        In normal use, the resolver sets build_info["command"] with the
+        pre-expanded command, so this fallback is not triggered.
 
         Args:
-            node: The file node being built.
+            _node: The file node being built (unused, kept for API consistency).
             build_info: The node's build info.
-            env: The environment (may be None).
+            env: The environment (may be None for standalone tools).
 
         Returns:
-            Expanded command string.
+            Expanded command string, or a placeholder if no env/tool available.
         """
         tool_name = build_info.get("tool", "unknown")
         command_var = build_info.get("command_var", "cmdline")
         context = build_info.get("context")
 
         # Check for context overrides (archive/install tools)
-        context_overrides: dict[str, str] = {}
+        context_overrides: dict[str, Any] = {}
         if context is not None and hasattr(context, "get_env_overrides"):
             context_overrides = context.get_env_overrides()
 
@@ -278,12 +282,6 @@ class NinjaGenerator(BaseGenerator):
 
                     # Expand using subst
                     command = env.subst(cmd_template, shell="ninja")
-
-                    # For compile/link contexts, add effective vars
-                    if context is not None and not context_overrides:
-                        command = self._augment_command_with_effective_vars(
-                            command, command_var
-                        )
         else:
             # Try standalone tools
             cmd_template = self._get_standalone_tool_command(tool_name, command_var)
@@ -300,43 +298,6 @@ class NinjaGenerator(BaseGenerator):
                         else:
                             val_str = str(val)
                         command = command.replace(pattern, val_str)
-
-        return command
-
-    def _augment_command_with_effective_vars(
-        self, command: str, command_var: str
-    ) -> str:
-        """Augment a command with effective requirement variables.
-
-        Adds placeholders like $includes, $defines, $extra_flags that will
-        be filled in per-build based on the target's effective requirements.
-
-        NOTE: This method is for backward compatibility only. New code should
-        use the resolver's command expansion which bakes in these values.
-
-        Args:
-            command: The base command template.
-            command_var: The command variable name (objcmd, linkcmd, etc.)
-
-        Returns:
-            Command with effective requirement placeholders added.
-        """
-        # For compilation commands (objcmd), add includes, defines, extra_flags
-        if command_var == "objcmd":
-            # Insert before the output flag (usually -o or -c)
-            # We'll append them before the source file
-            # Format: cmd $flags $includes $defines $extra_flags -c $in -o $out
-            if "$in" in command:
-                command = command.replace("$in", "$includes $defines $extra_flags $in")
-        # For link commands (linkcmd, sharedcmd, progcmd), add ldflags, libdirs, libs
-        elif command_var in ("linkcmd", "sharedcmd", "progcmd"):
-            # Append link flags at the end
-            if "$out" in command:
-                # Add after the sources/objects
-                command = command.rstrip()
-                if not command.endswith("$libs"):
-                    command += " $ldflags $libdirs $libs"
-        # For archive commands (archivecmd), no changes needed
 
         return command
 
@@ -709,35 +670,6 @@ class NinjaGenerator(BaseGenerator):
         elif all_outputs:
             f.write("default all\n")
 
-    def _get_env_suffix(self, env: Environment | None) -> str:
-        """Generate a suffix for rule names that identifies the environment.
-
-        Uses the env name if available for readability, plus a unique id
-        to ensure different envs get different rules even with the same name.
-
-        Args:
-            env: The environment to generate a suffix for.
-
-        Returns:
-            A string suffix safe for use in ninja rule names.
-        """
-        import re
-
-        if env is None:
-            return "0"
-
-        parts = []
-        # Use env name if available
-        if env.name:
-            # Sanitize: only allow alphanumeric and underscore
-            sanitized = re.sub(r"[^a-zA-Z0-9_]", "_", env.name)
-            parts.append(sanitized)
-
-        # Always include id for uniqueness
-        parts.append(str(id(env)))
-
-        return "_".join(parts)
-
     def _escape_path(self, path: Path | str) -> str:
         """Escape a path for use in Ninja files.
 
@@ -1001,31 +933,6 @@ class NinjaGenerator(BaseGenerator):
         # Restore $topdir
         token = token.replace("\x00TOPDIR\x00", "$topdir")
         return token
-
-    def _get_rule_command(
-        self, env: Environment, builder: Builder, build_info: dict[str, object]
-    ) -> str:
-        """Get the command for a rule from the environment.
-
-        Expands the command template with environment variables.
-        """
-        tool_name = str(build_info.get("tool", "unknown"))
-        command_var = str(build_info.get("command_var", "cmdline"))
-
-        # Get command template from tool config
-        tool_config = getattr(env, tool_name, None)
-        if tool_config is None:
-            return f"echo 'Unknown tool: {tool_name}'"
-
-        command_template = getattr(tool_config, command_var, None)
-        if command_template is None:
-            return f"echo 'No command template: {tool_name}.{command_var}'"
-
-        # Expand variables using subst() with ninja shell
-        # Template can be a string or list of tokens
-        # Using shell="ninja" ensures $in, $out aren't quoted
-        # Note: $in and $out are left unexpanded for Ninja (they're $$in, $$out in templates)
-        return env.subst(command_template, shell="ninja")
 
     def _get_standalone_tool_command(
         self, tool_name: str, command_var: str
