@@ -102,6 +102,9 @@ class BuildInfo(TypedDict, total=False):
     # These are written as Ninja build-level variables
     variables: dict[str, str]
 
+    # Environment reference for tools that need it
+    env: Any  # Environment, but avoid circular import
+
     # Environment reference for command expansion
     env: Any  # Environment, but avoid circular import
 

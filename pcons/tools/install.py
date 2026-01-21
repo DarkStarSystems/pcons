@@ -20,10 +20,10 @@ from __future__ import annotations
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pcons.core.builder_registry import builder
-from pcons.core.node import FileNode
+from pcons.core.node import BuildInfo, FileNode
 from pcons.core.target import Target, TargetType
 from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
@@ -322,17 +322,20 @@ class InstallNodeFactory:
 
         # Store build info referencing env.install.copytreecmd
         # The context provides env overrides for command expansion
-        stamp_node._build_info = {
-            "tool": "install",
-            "command_var": "copytreecmd",
-            "sources": [source_node],
-            "depfile": "$out.d",
-            "deps_style": "gcc",
-            "description": "INSTALLDIR $out",
-            # Context provides get_env_overrides() for template expansion
-            "context": context,
-            "env": env,
-        }
+        stamp_node._build_info = cast(
+            BuildInfo,
+            {
+                "tool": "install",
+                "command_var": "copytreecmd",
+                "sources": [source_node],
+                "depfile": "$out.d",
+                "deps_style": "gcc",
+                "description": "INSTALLDIR $out",
+                # Context provides get_env_overrides() for template expansion
+                "context": context,
+                "env": env,
+            },
+        )
 
         # Add stamp node as output
         target._install_nodes = [stamp_node]

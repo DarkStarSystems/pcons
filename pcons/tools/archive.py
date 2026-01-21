@@ -19,10 +19,10 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pcons.core.builder_registry import builder
-from pcons.core.node import FileNode
+from pcons.core.node import BuildInfo, FileNode
 from pcons.core.target import Target, TargetType
 from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
@@ -212,15 +212,18 @@ class ArchiveNodeFactory:
 
         # Store build info referencing env.archive.tarcmd or env.archive.zipcmd
         # The context provides env overrides for command expansion
-        archive_node._build_info = {
-            "tool": "archive",
-            "command_var": command_var,
-            "sources": sources,
-            "description": description,
-            # Context provides get_env_overrides() for template expansion
-            "context": context,
-            "env": env,
-        }
+        archive_node._build_info = cast(
+            BuildInfo,
+            {
+                "tool": "archive",
+                "command_var": command_var,
+                "sources": sources,
+                "description": description,
+                # Context provides get_env_overrides() for template expansion
+                "context": context,
+                "env": env,
+            },
+        )
 
         # Add to target's output nodes
         target.output_nodes.append(archive_node)
