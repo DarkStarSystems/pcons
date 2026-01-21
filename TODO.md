@@ -1,0 +1,4 @@
+- Universal binaries, cross compilation
+- Frameworks on Mac
+- Don't deduplicate flags (??!): -Framework foo -Framework bar etc.
+- simple Command builder

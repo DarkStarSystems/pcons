@@ -20,15 +20,16 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from pcons.core.build_context import CompileLinkContext
+from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode
 from pcons.core.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
 )
+from pcons.toolchains.build_context import CompileLinkContext
 from pcons.util.source_location import get_caller_location
 
 logger = logging.getLogger(__name__)
@@ -38,21 +39,6 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
-
-
-# Legacy mapping from source suffix to (tool_name, language)
-# DEPRECATED: Use toolchain.get_source_handler() instead.
-# This is kept for backwards compatibility when no toolchain is available.
-SOURCE_SUFFIX_MAP: dict[str, tuple[str, str]] = {
-    ".c": ("cc", "c"),
-    ".cpp": ("cxx", "cxx"),
-    ".cxx": ("cxx", "cxx"),
-    ".cc": ("cxx", "cxx"),
-    ".c++": ("cxx", "cxx"),
-    ".C": ("cxx", "cxx"),
-    ".m": ("cc", "objc"),
-    ".mm": ("cxx", "objcxx"),
-}
 
 
 class ObjectNodeFactory:
@@ -78,7 +64,7 @@ class ObjectNodeFactory:
     def get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
         """Generate target-specific output path for an object file.
 
-        Format: build/obj.<target_name>/<source_stem>.<suffix>
+        Format: <build_dir>/obj.<target_name>/<source_stem>.<suffix>
 
         The "obj." prefix avoids naming conflicts between the object directory
         and the final output file (e.g., program named "hello" vs directory
@@ -119,7 +105,6 @@ class ObjectNodeFactory:
 
         This is the tool-agnostic way to determine how to compile a source.
         Checks all toolchains in order (primary first, then additional).
-        Falls back to the legacy SOURCE_SUFFIX_MAP if no toolchain handles it.
 
         Args:
             source: Source file path.
@@ -167,40 +152,6 @@ class ObjectNodeFactory:
                 return handler
         return None
 
-    def get_tool_for_source(
-        self, source: Path, env: Environment
-    ) -> tuple[str, str] | None:
-        """Return (tool_name, language) based on source suffix.
-
-        DEPRECATED: Use get_source_handler() for full handler info.
-        This method is kept for backwards compatibility.
-
-        Args:
-            source: Source file path.
-            env: Environment to check for tool availability.
-
-        Returns:
-            Tuple of (tool_name, language) or None if not recognized.
-        """
-        # Try toolchain first (tool-agnostic approach)
-        handler = self.get_source_handler(source, env)
-        if handler:
-            return (handler.tool_name, handler.language)
-
-        # Fallback to legacy hardcoded map
-        suffix = source.suffix.lower()
-        result = SOURCE_SUFFIX_MAP.get(suffix)
-        if result:
-            tool_name, language = result
-            if env.has_tool(tool_name):
-                logger.warning(
-                    "Using deprecated SOURCE_SUFFIX_MAP fallback for '%s' files. "
-                    "Consider configuring a toolchain that handles this suffix.",
-                    suffix,
-                )
-                return result
-        return None
-
     def create_object_node(
         self,
         target: Target,
@@ -222,24 +173,16 @@ class ObjectNodeFactory:
         Returns:
             FileNode for the object file, or None if source type not recognized.
         """
-        # Try to get a source handler from the toolchain (tool-agnostic)
+        # Get source handler from the toolchain (tool-agnostic)
         handler = self.get_source_handler(source.path, env)
-
-        # Fallback to legacy approach if no handler
         if handler is None:
-            tool_info = self.get_tool_for_source(source.path, env)
-            if tool_info is None:
-                return None
-            tool_name, language = tool_info
-            depfile: str | None = "$out.d"
-            deps_style: str | None = "gcc"
-            command_var: str = "objcmd"
-        else:
-            tool_name = handler.tool_name
-            language = handler.language
-            depfile = handler.depfile
-            deps_style = handler.deps_style
-            command_var = handler.command_var
+            return None
+
+        tool_name = handler.tool_name
+        language = handler.language
+        depfile = handler.depfile
+        deps_style = handler.deps_style
+        command_var = handler.command_var
 
         # Generate cache key: (source path, effective requirements hash)
         # Use resolved (absolute) path to avoid duplicate objects for same file
@@ -254,6 +197,12 @@ class ObjectNodeFactory:
         obj_path = self.get_object_path(target, source.path, env)
         obj_node = FileNode(obj_path, defined_at=get_caller_location())
         obj_node.depends([source])
+
+        # Propagate explicit dependencies from source to object as implicit deps.
+        # This allows generated headers (added via source.depends()) to trigger
+        # rebuilds without being explicit compiler inputs.
+        if source.explicit_deps:
+            obj_node.implicit_deps.extend(source.explicit_deps)
 
         # Create context object from effective requirements
         context = CompileLinkContext.from_effective_requirements(effective)
@@ -533,252 +482,6 @@ class OutputNodeFactory:
         return result
 
 
-class ArchiveNodeFactory:
-    """Factory for creating archive (tar/zip) output nodes.
-
-    Handles creation of nodes for Tarfile and Zipfile targets,
-    which bundle source files into archives.
-
-    Attributes:
-        project: The project being resolved.
-    """
-
-    def __init__(self, project: Project) -> None:
-        """Initialize the factory.
-
-        Args:
-            project: The project to resolve.
-        """
-        self.project = project
-
-    def create_archive_node(self, target: Target, sources: list[FileNode]) -> None:
-        """Create archive output node for a Tarfile or Zipfile target.
-
-        Args:
-            target: The archive target.
-            sources: Resolved source file nodes.
-        """
-        build_info = target._build_info
-        if build_info is None:
-            return
-
-        output_path = Path(build_info["output"])
-
-        # Create the archive output node
-        archive_node = FileNode(output_path, defined_at=get_caller_location())
-        archive_node.depends(sources)
-
-        # Copy build info to the node and add sources
-        archive_node._build_info = {
-            **build_info,
-            "sources": sources,
-        }
-
-        # Add to target's output nodes
-        target.output_nodes.append(archive_node)
-        target.nodes.append(archive_node)
-
-        # Register with project
-        if output_path not in self.project._nodes:
-            self.project._nodes[output_path] = archive_node
-
-
-class InstallNodeFactory:
-    """Factory for creating install/copy nodes.
-
-    Handles creation of nodes for Install and InstallAs targets,
-    which copy files to destination directories.
-
-    Attributes:
-        project: The project being resolved.
-    """
-
-    def __init__(self, project: Project) -> None:
-        """Initialize the factory.
-
-        Args:
-            project: The project to resolve.
-        """
-        self.project = project
-
-    def create_install_nodes(
-        self, target: Target, sources: list[FileNode], dest_dir: Path
-    ) -> None:
-        """Create copy nodes for Install target.
-
-        Args:
-            target: The Install target.
-            sources: Resolved source file nodes.
-            dest_dir: Destination directory.
-        """
-        import sys
-
-        # Normalize destination directory using PathResolver
-        path_resolver = self.project.path_resolver
-        dest_dir = path_resolver.normalize_target_path(dest_dir)
-
-        # Use pcons helper for cross-platform copy (handles forward slashes on Windows)
-        python_cmd = sys.executable.replace("\\", "/")
-        copy_cmd = f"{python_cmd} -m pcons.util.commands copy"
-
-        installed_nodes: list[FileNode] = []
-        for file_node in sources:
-            if not isinstance(file_node, FileNode):
-                continue
-
-            # Destination path
-            dest_path = dest_dir / file_node.path.name
-
-            # Create destination node
-            dest_node = FileNode(dest_path, defined_at=get_caller_location())
-            dest_node.depends([file_node])
-
-            # Store build info for the copy command
-            dest_node._build_info = {
-                "tool": "copy",
-                "command": copy_cmd,
-                "command_var": "copycmd",
-                "sources": [file_node],
-                "copy_cmd": f"{copy_cmd} $in $out",
-            }
-
-            installed_nodes.append(dest_node)
-
-            # Register the node with the project
-            if dest_path not in self.project._nodes:
-                self.project._nodes[dest_path] = dest_node
-
-        # Add installed files as output nodes (consistent with other builders)
-        target._install_nodes = installed_nodes
-        target.output_nodes.extend(installed_nodes)
-
-    def create_install_as_node(
-        self, target: Target, sources: list[FileNode], dest: Path
-    ) -> None:
-        """Create copy node for InstallAs target.
-
-        Args:
-            target: The InstallAs target.
-            sources: Resolved source file nodes (should have exactly one).
-            dest: Destination path (full path including filename).
-        """
-        import sys
-
-        if not sources:
-            return
-
-        if len(sources) > 1:
-            from pcons.core.errors import BuilderError
-
-            raise BuilderError(
-                f"InstallAs expects exactly one source, got {len(sources)}. "
-                f"Use Install() for multiple files.",
-                location=target.defined_at,
-            )
-
-        # Normalize destination path using PathResolver
-        path_resolver = self.project.path_resolver
-        dest = path_resolver.normalize_target_path(dest)
-
-        # Use pcons helper for cross-platform copy (handles forward slashes on Windows)
-        python_cmd = sys.executable.replace("\\", "/")
-        copy_cmd = f"{python_cmd} -m pcons.util.commands copy"
-
-        source_node = sources[0]
-
-        # Create destination node
-        dest_node = FileNode(dest, defined_at=get_caller_location())
-        dest_node.depends([source_node])
-
-        dest_node._build_info = {
-            "tool": "copy",
-            "command": copy_cmd,
-            "command_var": "copycmd",
-            "sources": [source_node],
-            "copy_cmd": f"{copy_cmd} $in $out",
-        }
-
-        # Add installed file as output node (consistent with other builders)
-        target._install_nodes = [dest_node]
-        target.output_nodes.append(dest_node)
-
-        if dest not in self.project._nodes:
-            self.project._nodes[dest] = dest_node
-
-    def create_install_dir_node(
-        self, target: Target, sources: list[FileNode], dest_dir: Path
-    ) -> None:
-        """Create copytree node for InstallDir target.
-
-        Args:
-            target: The InstallDir target.
-            sources: Resolved source file nodes (should have exactly one directory).
-            dest_dir: Destination directory path.
-        """
-        import sys
-
-        if not sources:
-            return
-
-        if len(sources) > 1:
-            from pcons.core.errors import BuilderError
-
-            raise BuilderError(
-                f"InstallDir expects exactly one source directory, got {len(sources)}.",
-                location=target.defined_at,
-            )
-
-        # Normalize destination directory using PathResolver
-        path_resolver = self.project.path_resolver
-        dest_dir = path_resolver.normalize_target_path(dest_dir)
-
-        # Use pcons helper for cross-platform copytree
-        python_cmd = sys.executable.replace("\\", "/")
-        copytree_cmd = f"{python_cmd} -m pcons.util.commands copytree"
-
-        source_node = sources[0]
-        source_path = source_node.path
-
-        # Destination is dest_dir / source directory name
-        dest_path = dest_dir / source_path.name
-
-        # Put stamp files in a dedicated .stamps directory to avoid polluting output
-        # Use a unique name based on the destination path
-        stamps_dir = self.project.build_dir / ".stamps"
-        # Create a unique stamp name from the dest path (replace / with _)
-        stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
-        stamp_path = stamps_dir / stamp_name
-
-        # Create stamp node (this is what ninja tracks)
-        stamp_node = FileNode(stamp_path, defined_at=get_caller_location())
-        stamp_node.depends([source_node])
-
-        # Build the command with paths relative to build directory
-        # dest_path needs to be made relative to build_dir for ninja
-        try:
-            rel_dest = dest_path.relative_to(self.project.build_dir)
-        except ValueError:
-            # dest_path is not under build_dir, use as-is
-            rel_dest = dest_path
-
-        stamp_node._build_info = {
-            "tool": "copytree",
-            "command": copytree_cmd,
-            "command_var": "copytreecmd",
-            "sources": [source_node],
-            "copytree_cmd": f"{copytree_cmd} --depfile $out.d --stamp $out $in {rel_dest}",
-            "depfile": "$out.d",
-            "deps_style": "gcc",
-        }
-
-        # Add stamp node as output (but users should reference dest_path for the actual directory)
-        target._install_nodes = [stamp_node]
-        target.output_nodes.append(stamp_node)
-
-        if stamp_path not in self.project._nodes:
-            self.project._nodes[stamp_path] = stamp_node
-
-
 class Resolver:
     """Resolves targets: computes effective flags and creates nodes.
 
@@ -786,16 +489,17 @@ class Resolver:
     computing effective requirements and creating the necessary nodes for
     compilation and linking.
 
-    The resolver delegates to specialized factory classes:
-    - ObjectNodeFactory: Creates and caches object nodes
+    Resolution is delegated to factory classes:
+    - ObjectNodeFactory: Creates and caches object nodes for compilation
     - OutputNodeFactory: Creates library and program output nodes
-    - InstallNodeFactory: Creates install/copy nodes
+    - Builder factories (from BuilderRegistry): Handle pending source resolution
+      for Install, Tarfile, and other registered builders
 
     Attributes:
         project: The project being resolved.
         _object_factory: Factory for creating object nodes.
         _output_factory: Factory for creating output nodes.
-        _install_factory: Factory for creating install nodes.
+        _builder_factories: Factory instances from registered builders.
     """
 
     def __init__(self, project: Project) -> None:
@@ -807,14 +511,14 @@ class Resolver:
         self.project = project
         self._object_factory = ObjectNodeFactory(project)
         self._output_factory = OutputNodeFactory(project)
-        self._install_factory = InstallNodeFactory(project)
-        self._archive_factory = ArchiveNodeFactory(project)
 
-    # Expose object cache for backwards compatibility
-    @property
-    def _object_cache(self) -> dict[tuple[Path, tuple], FileNode]:
-        """Object cache (delegated to ObjectNodeFactory)."""
-        return self._object_factory._object_cache
+        # Build factory dispatch table from BuilderRegistry
+        # This allows registered builders to provide custom resolution factories
+        # All built-in builders (Install, Tarfile, etc.) register their factories here
+        self._builder_factories: dict[str, Any] = {}
+        for name, registration in BuilderRegistry.all().items():
+            if registration.factory_class is not None:
+                self._builder_factories[name] = registration.factory_class(project)
 
     def resolve(self) -> None:
         """Resolve all targets in build order.
@@ -929,8 +633,7 @@ class Resolver:
     def _determine_language(self, target: Target, env: Environment) -> str | None:
         """Determine the primary language for a target based on its sources.
 
-        Uses all toolchains to determine language (tool-agnostic), falling back
-        to hardcoded suffixes if no toolchain handles the source.
+        Uses all toolchains to determine language (tool-agnostic).
 
         Args:
             target: The target to analyze.
@@ -944,39 +647,11 @@ class Resolver:
         for source in target.sources:
             if isinstance(source, FileNode):
                 # Try all toolchains (tool-agnostic)
-                handler_found = False
                 for toolchain in env.toolchains:
                     handler = toolchain.get_source_handler(source.path.suffix)
                     if handler:
                         languages.add(handler.language)
-                        handler_found = True
                         break  # First handler wins for this source
-
-                if handler_found:
-                    continue
-
-                # Fallback to hardcoded suffixes
-                suffix = source.path.suffix.lower()
-                if suffix in (".cpp", ".cxx", ".cc", ".c++", ".mm"):
-                    logger.warning(
-                        "Using deprecated hardcoded suffix fallback for '%s'. "
-                        "Consider configuring a toolchain that handles this suffix.",
-                        source.path.suffix,
-                    )
-                    languages.add("cxx")
-                elif source.path.suffix == ".C":  # Case-sensitive
-                    logger.warning(
-                        "Using deprecated hardcoded suffix fallback for '.C'. "
-                        "Consider configuring a toolchain that handles this suffix.",
-                    )
-                    languages.add("cxx")
-                elif suffix in (".c", ".m"):
-                    logger.warning(
-                        "Using deprecated hardcoded suffix fallback for '%s'. "
-                        "Consider configuring a toolchain that handles this suffix.",
-                        source.path.suffix,
-                    )
-                    languages.add("c")
 
         # Return highest priority language
         if "cxx" in languages or "objcxx" in languages:
@@ -984,73 +659,6 @@ class Resolver:
         if "c" in languages or "objc" in languages:
             return "c"
         return None
-
-    # Delegate methods to factories for backwards compatibility
-    def _get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
-        """Generate target-specific output path for an object file.
-
-        Delegated to ObjectNodeFactory.
-        """
-        return self._object_factory.get_object_path(target, source, env)
-
-    def _get_source_handler(
-        self, source: Path, env: Environment
-    ) -> SourceHandler | None:
-        """Get source handler from the environment's toolchain.
-
-        Delegated to ObjectNodeFactory.
-        """
-        return self._object_factory.get_source_handler(source, env)
-
-    def _get_tool_for_source(
-        self, source: Path, env: Environment
-    ) -> tuple[str, str] | None:
-        """Return (tool_name, language) based on source suffix.
-
-        Delegated to ObjectNodeFactory.
-        """
-        return self._object_factory.get_tool_for_source(source, env)
-
-    def _create_object_node(
-        self,
-        target: Target,
-        source: FileNode,
-        effective: EffectiveRequirements,
-        env: Environment,
-    ) -> FileNode | None:
-        """Create object file node with effective requirements in build_info.
-
-        Delegated to ObjectNodeFactory.
-        """
-        return self._object_factory.create_object_node(target, source, effective, env)
-
-    def _create_static_library_output(self, target: Target, env: Environment) -> None:
-        """Create static library output node.
-
-        Delegated to OutputNodeFactory.
-        """
-        self._output_factory.create_static_library_output(target, env)
-
-    def _create_shared_library_output(self, target: Target, env: Environment) -> None:
-        """Create shared library output node.
-
-        Delegated to OutputNodeFactory.
-        """
-        self._output_factory.create_shared_library_output(target, env)
-
-    def _create_program_output(self, target: Target, env: Environment) -> None:
-        """Create program output node.
-
-        Delegated to OutputNodeFactory.
-        """
-        self._output_factory.create_program_output(target, env)
-
-    def _collect_dependency_outputs(self, target: Target) -> list[FileNode]:
-        """Collect output nodes from all dependencies.
-
-        Delegated to OutputNodeFactory.
-        """
-        return self._output_factory._collect_dependency_outputs(target)
 
     def resolve_pending_sources(self) -> None:
         """Resolve _pending_sources for all targets that have them.
@@ -1068,10 +676,11 @@ class Resolver:
 
         Recursively ensures any source targets have their pending sources
         resolved first, then creates the appropriate nodes.
-        """
-        from pathlib import Path
 
-        from pcons.core.node import FileNode, Node
+        Uses factory dispatch via _builder_name from the BuilderRegistry.
+        All built-in builders (Install, InstallAs, InstallDir, Tarfile, Zipfile)
+        are registered there with their factory classes.
+        """
         from pcons.core.target import Target
 
         if target._pending_sources is None:
@@ -1082,62 +691,22 @@ class Resolver:
             if isinstance(source, Target) and source._pending_sources is not None:
                 self._resolve_target_pending_sources(source)
 
-        # Now collect resolved source files
-        resolved_sources: list[FileNode] = []
-        for source in target._pending_sources:
-            if isinstance(source, Target):
-                # Get output files from the now-resolved target
-                resolved_sources.extend(source.output_nodes)
-                # Also check nodes directly (for interface targets)
-                for node in source.nodes:
-                    if isinstance(node, FileNode) and node not in resolved_sources:
-                        resolved_sources.append(node)
-            elif isinstance(source, FileNode):
-                resolved_sources.append(source)
-            elif isinstance(source, Node):
-                # Skip non-file nodes
-                pass
-            elif isinstance(source, (Path, str)):
-                resolved_sources.append(self.project.node(source))
+        # Use factory dispatch via _builder_name
+        builder_name = target._builder_name
+        if builder_name is not None and builder_name in self._builder_factories:
+            factory = self._builder_factories[builder_name]
+            factory.resolve_pending(target)
+            target._pending_sources = None
+            return
 
-        # Create nodes based on target type
-        if target._install_dest_dir is not None:
-            # This is an Install target
-            self._install_factory.create_install_nodes(
-                target, resolved_sources, target._install_dest_dir
+        # No factory found - log a warning if there are pending sources
+        if target._pending_sources:
+            logger.warning(
+                "Target '%s' has pending sources but no factory registered for "
+                "builder '%s'. Sources will not be resolved.",
+                target.name,
+                builder_name,
             )
-        elif target._install_as_dest is not None:
-            # This is an InstallAs target
-            self._install_factory.create_install_as_node(
-                target, resolved_sources, target._install_as_dest
-            )
-        elif target._install_dir_dest is not None:
-            # This is an InstallDir target
-            self._install_factory.create_install_dir_node(
-                target, resolved_sources, target._install_dir_dest
-            )
-        elif target.target_type == "archive":
-            # This is a Tarfile or Zipfile target
-            self._archive_factory.create_archive_node(target, resolved_sources)
 
         # Mark as processed
         target._pending_sources = None
-
-    # Delegate methods to InstallNodeFactory for backwards compatibility
-    def _create_install_nodes(
-        self, target: Target, sources: list[FileNode], dest_dir: Path
-    ) -> None:
-        """Create copy nodes for Install target.
-
-        Delegated to InstallNodeFactory.
-        """
-        self._install_factory.create_install_nodes(target, sources, dest_dir)
-
-    def _create_install_as_node(
-        self, target: Target, sources: list[FileNode], dest: Path
-    ) -> None:
-        """Create copy node for InstallAs target.
-
-        Delegated to InstallNodeFactory.
-        """
-        self._install_factory.create_install_as_node(target, sources, dest)

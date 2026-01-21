@@ -217,22 +217,6 @@ def _get_primary_tool(target: Target, env: Environment) -> str | None:
                     tool_name: str = handler.tool_name
                     return tool_name
 
-    # Fallback to hardcoded suffixes for backwards compatibility
-    # Import the centralized suffix map from resolver
-    from pcons.core.resolver import SOURCE_SUFFIX_MAP
-
-    for source in target.sources:
-        if isinstance(source, FileNode):
-            suffix = source.path.suffix.lower()
-            if suffix in SOURCE_SUFFIX_MAP:
-                tool_name, _ = SOURCE_SUFFIX_MAP[suffix]
-                logger.warning(
-                    "Using deprecated SOURCE_SUFFIX_MAP fallback for '%s' files. "
-                    "Consider configuring a toolchain that handles this suffix.",
-                    suffix,
-                )
-                return tool_name
-
     # Default to C++ if available
     if env.has_tool("cxx"):
         return "cxx"

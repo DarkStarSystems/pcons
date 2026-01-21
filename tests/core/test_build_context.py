@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pcons.core.build_context import CompileLinkContext, MsvcCompileLinkContext
+from pcons.toolchains.build_context import CompileLinkContext, MsvcCompileLinkContext
 
 
 class TestCompileLinkContext:

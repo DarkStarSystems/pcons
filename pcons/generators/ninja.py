@@ -386,11 +386,7 @@ class NinjaGenerator(BaseGenerator):
     def _write_target_builds(
         self, f: TextIO, target: Target, project: Project, written_nodes: set[Path]
     ) -> None:
-        """Write build statements for a single target.
-
-        Uses _get_target_build_nodes() to handle both resolved (target-centric)
-        and legacy targets uniformly.
-        """
+        """Write build statements for a single target."""
         for node in self._get_target_build_nodes(target):
             if node.path not in written_nodes:
                 self._write_build_statement(f, node, target, project)
@@ -472,7 +468,6 @@ class NinjaGenerator(BaseGenerator):
         # For source files, we need to reference them from the build directory
         def get_dep_path(s: FileNode) -> str:
             # Check if this is a build output (has _build_info from resolver)
-            # or has a builder (legacy path)
             if getattr(s, "_build_info", None) is not None or s.is_target:
                 # Build output - make relative to build dir
                 return self._escape_output_path(s.path)
@@ -543,7 +538,6 @@ class NinjaGenerator(BaseGenerator):
         # Standard variables - handle both source files and build outputs
         def get_source_path(s: FileNode) -> str:
             # Check if this is a build output (has _build_info from resolver)
-            # or has a builder (legacy path)
             if getattr(s, "_build_info", None) is not None or s.is_target:
                 # Build output - make relative to build dir
                 return self._make_output_relative(s.path)
@@ -610,7 +604,7 @@ class NinjaGenerator(BaseGenerator):
             and hasattr(target, "output_nodes")
             and node in target.output_nodes
         )
-        # Also check for legacy path where output nodes are in target.nodes
+        # Also check output nodes in target.nodes (for interface targets like Install)
         if not is_output_node and target is not None:
             is_output_node = node in target.nodes
 
@@ -655,41 +649,21 @@ class NinjaGenerator(BaseGenerator):
 
         # Collect user-specified default targets
         for target in project.default_targets:
-            # For resolved targets, use output_nodes
-            if target.output_nodes:
-                for out_node in target.output_nodes:
-                    if isinstance(out_node, FileNode):
-                        user_defaults.append(self._escape_output_path(out_node.path))
-            # Fall back to nodes for legacy/unresolved targets
-            else:
-                for target_node in target.nodes:
-                    if isinstance(target_node, FileNode):
-                        user_defaults.append(self._escape_output_path(target_node.path))
+            for out_node in target.output_nodes:
+                if isinstance(out_node, FileNode):
+                    user_defaults.append(self._escape_output_path(out_node.path))
 
         # Collect all "final" outputs for 'all' target
-        # First, try resolved targets with output nodes
         for target in project.targets:
-            if getattr(target, "_resolved", False):
-                # Check if this is a "final" target (program or library)
-                if target.target_type in (
-                    "program",
-                    "shared_library",
-                    "static_library",
-                ):
-                    for node in target.output_nodes:
-                        if isinstance(node, FileNode):
-                            all_outputs.append(self._escape_output_path(node.path))
-
-        # If no resolved targets, use legacy path
-        if not all_outputs:
-            for env in project.environments:
-                for node in getattr(env, "_created_nodes", []):
-                    if isinstance(node, FileNode) and node.builder is not None:
-                        # Check if this is a "final" output (Program, SharedLibrary)
-                        build_info = getattr(node, "_build_info", {})
-                        tool = build_info.get("tool", "")
-                        if tool == "link":
-                            all_outputs.append(self._escape_output_path(node.path))
+            # Check if this is a "final" target (program or library)
+            if target.target_type in (
+                "program",
+                "shared_library",
+                "static_library",
+            ):
+                for node in target.output_nodes:
+                    if isinstance(node, FileNode):
+                        all_outputs.append(self._escape_output_path(node.path))
 
         # Include user defaults in all_outputs if not already present
         for ud in user_defaults:
@@ -756,37 +730,31 @@ class NinjaGenerator(BaseGenerator):
         this returns 'my_program'.
 
         Always uses forward slashes for cross-platform compatibility.
-
-        Uses PathResolver if available for consistent path handling.
         """
-        # Use PathResolver if available
-        if self._path_resolver is not None:
-            normalized = self._path_resolver.make_build_relative(Path(path))
-            return str(normalized).replace("\\", "/")
-
-        # Fallback for tests without full project context
-        if self._output_dir is None:
-            return str(path).replace("\\", "/")
-
         path_obj = Path(path)
 
         # Handle absolute paths
         if path_obj.is_absolute():
-            try:
-                return str(path_obj.relative_to(self._output_dir)).replace("\\", "/")
-            except ValueError:
-                # Path is not under output_dir - return as-is
-                return str(path).replace("\\", "/")
+            if self._output_dir is not None:
+                try:
+                    return str(path_obj.relative_to(self._output_dir)).replace(
+                        "\\", "/"
+                    )
+                except ValueError:
+                    # Path is not under output_dir - return as-is
+                    return str(path).replace("\\", "/")
+            return str(path).replace("\\", "/")
 
-        # Handle relative paths - try to strip the build dir prefix
+        # Handle relative paths - strip the build dir prefix if present
         # e.g., "build/my_program" when output_dir is "build"
-        build_dir_name = self._output_dir.name
-        parts = path_obj.parts
-        if parts and parts[0] == build_dir_name:
-            # Strip the build dir prefix
-            if len(parts) > 1:
-                return str(Path(*parts[1:])).replace("\\", "/")
-            return "."
+        if self._output_dir is not None:
+            build_dir_name = self._output_dir.name
+            parts = path_obj.parts
+            if parts and parts[0] == build_dir_name:
+                # Strip the build dir prefix
+                if len(parts) > 1:
+                    return str(Path(*parts[1:])).replace("\\", "/")
+                return "."
 
         return str(path).replace("\\", "/")
 

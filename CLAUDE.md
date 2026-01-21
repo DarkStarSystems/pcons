@@ -6,6 +6,7 @@ Designed for maintainability and extensibility.
 **Design philosophy**:
 1. Configuration, not execution. Python scripts describe what to build; Ninja handles execution.
 2. pcons core is completely tool-agnostic. It knows nothing about compilers or linkers; should be just as good at document preparation or game asset building or scientific dataflows. All tool-specific logic is in toolchains and tools.
+3. pcons core should know nothing about any commands or toolchains; all of those should be registered at startup; consider them as add-ons that happen to be built in.
 
 
 ## Critical Rules
@@ -134,11 +135,14 @@ To create a new release (e.g., `v0.3.0`):
      [0.3.0]: https://github.com/garyo/pcons/compare/v0.2.0...v0.3.0
      ```
 
-3. **Commit**:
+3. **Commit and push**:
    ```bash
    git add pcons/__init__.py CHANGELOG.md
    git commit -m "Bump version to v0.3.0"
+   git push
    ```
+
+4. Use gh to wait for the CI build to complete successfully. If it does:
 
 4. **Tag and push**:
    ```bash

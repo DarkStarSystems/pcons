@@ -321,7 +321,7 @@ class MakefileGenerator(BaseGenerator):
 
         # Check if this is an output node (not an intermediate object file)
         is_output_node = hasattr(target, "output_nodes") and node in target.output_nodes
-        # Also check for legacy path where output nodes are in target.nodes
+        # Also check output nodes in target.nodes (for interface targets like Install)
         if not is_output_node:
             is_output_node = node in target.nodes
 

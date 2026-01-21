@@ -15,6 +15,13 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | Target with usage requirements | Implemented | Public/private requirements |
 | Project container | Implemented | Full support |
 | Resolver (lazy node creation) | Implemented | Full support |
+| Builder Registry | Implemented | Extensible builder system |
+| **Builders** | | |
+| Program, StaticLibrary, SharedLibrary | Implemented | Compile/link builders |
+| Install, InstallAs, InstallDir | Implemented | File installation builders |
+| Tarfile, Zipfile | Implemented | Archive builders |
+| HeaderOnlyLibrary, ObjectLibrary | Implemented | Interface and object-only |
+| Command | Implemented | Custom shell commands |
 | **Configure Phase** | | |
 | Configure class | Partial | Basic program/toolchain finding |
 | Feature checks (compile tests) | Partial | Methods exist, need toolchain integration |
@@ -397,28 +404,117 @@ env_gcc = project.Environment(toolchain=gcc)
 env_llvm = project.Environment(toolchain=llvm)
 ```
 
-### Builder
+### Builder Registry and Extensible Builders
 > **Status: Implemented**
 
-A Builder creates target nodes from source nodes, using a specific Tool.
+All builders in pcons register through a unified `BuilderRegistry`. This ensures user-defined builders are on equal footing with built-ins - there's no special treatment for built-in builders like `Program` or `Install`.
+
+**Key components:**
+
+1. **BuilderRegistration** - Metadata for a registered builder:
+```python
+@dataclass
+class BuilderRegistration:
+    name: str                      # e.g., "Program", "Install"
+    create_target: Callable        # Function to create a Target
+    target_type: TargetType        # e.g., TargetType.PROGRAM
+    factory_class: type | None     # Optional NodeFactory for resolution
+    requires_env: bool             # Whether builder needs an Environment
+    description: str               # Human-readable description
+```
+
+2. **BuilderRegistry** - Global registry:
+```python
+class BuilderRegistry:
+    @classmethod
+    def register(cls, name, *, create_target, target_type, factory_class=None, ...): ...
+
+    @classmethod
+    def get(cls, name) -> BuilderRegistration | None: ...
+
+    @classmethod
+    def names(cls) -> list[str]: ...
+```
+
+3. **@builder decorator** - Easy registration:
+```python
+@builder("InstallSymlink", target_type=TargetType.INTERFACE)
+class InstallSymlinkBuilder:
+    @staticmethod
+    def create_target(project, dest, source, **kwargs):
+        target = Target(...)
+        target._builder_name = "InstallSymlink"
+        target._builder_data = {"dest": dest, "source": source}
+        project.add_target(target)
+        return target
+
+# Immediately available on any Project:
+project.InstallSymlink("dist/latest", app)
+```
+
+**How it works:**
+
+1. **Registration**: Builders register with `BuilderRegistry` at module load time (via `@builder` decorator)
+2. **Dynamic dispatch**: `Project.__getattr__` checks `BuilderRegistry` and returns a bound method
+3. **IDE support**: `Project.__dir__` includes registered builder names for auto-completion
+4. **Resolution**: Builders can provide a `factory_class` that handles target resolution
+
+**Built-in builders** (in `pcons/builders/`):
+- `compile.py`: Program, StaticLibrary, SharedLibrary, ObjectLibrary, HeaderOnlyLibrary, Command
+- `install.py`: Install, InstallAs, InstallDir
+- `archive.py`: Tarfile, Zipfile
+
+**Creating custom builders:**
 
 ```python
-class Builder:
-    name: str
-    tool: Tool
-    src_suffixes: list[str]      # What this builder accepts
-    target_suffixes: list[str]   # What this builder produces (can be multiple)
-    scanner: Scanner | None      # For implicit dependency discovery
+from pcons.core.builder_registry import builder
+from pcons.core.target import Target, TargetType
 
-    def __call__(self, env: Environment, target, sources, **kwargs) -> list[Node]:
-        """Create target nodes from source nodes."""
+@builder("CompileShaders", target_type=TargetType.COMMAND, requires_env=True)
+class ShaderBuilder:
+    @staticmethod
+    def create_target(project, env, *, output, sources, **kwargs):
+        target = Target(output, target_type=TargetType.COMMAND)
+        target._env = env
+        target._project = project
+        target._builder_name = "CompileShaders"
+        target._builder_data = {"output": output, "sources": sources}
+        # ... set up build info ...
+        project.add_target(target)
+        return target
+
+# Now available:
+project.CompileShaders(env, output="shaders.pak", sources=["*.glsl"])
+```
+
+**Expansion packs** - packages that add multiple builders:
+```python
+# pcons_gamedev/__init__.py
+def register(project=None):
+    # Import triggers @builder registration
+    from pcons_gamedev import shaders, assets
+```
+
+### NodeFactory Protocol
+
+Builders that need custom resolution logic can provide a `factory_class`:
+
+```python
+class NodeFactory(Protocol):
+    def __init__(self, project: Project) -> None:
+        """Initialize with project reference."""
         ...
 
-    @property
-    def language(self) -> str:
-        """Language this builder compiles (for link-time tool selection)."""
+    def resolve(self, target: Target, env: Environment | None) -> None:
+        """Resolve target in phase 1 (compilation)."""
+        ...
+
+    def resolve_pending(self, target: Target) -> None:
+        """Resolve pending sources in phase 2 (after outputs are populated)."""
         ...
 ```
+
+The Resolver builds a dispatch table from registered factories and uses it during resolution.
 
 ### Transitive Tool Requirements (Language Propagation)
 > **Status: Implemented**
@@ -988,14 +1084,20 @@ This is sufficient for most cases and much simpler. The tradeoff:
 - Debug mode shows full dependency chains
 
 ### Extensibility Points
-> **Status: Partial** - Plugin registration mechanism exists for toolchains. Scanner and generator registries planned.
+> **Status: Implemented** - Builder registry fully implemented. Toolchain, scanner, and generator registries also available.
 
-**Tools are plugins:**
+**Builders are plugins (fully implemented):**
 ```python
-@register_tool('my_tool')
-class MyTool(Tool):
-    name = 'my_tool'
-    ...
+from pcons.core.builder_registry import builder
+from pcons.core.target import TargetType
+
+@builder("MyBuilder", target_type=TargetType.COMMAND)
+class MyBuilder:
+    @staticmethod
+    def create_target(project, ...):
+        ...
+
+# Immediately available: project.MyBuilder(...)
 ```
 
 **Toolchains are plugins:**
@@ -1019,10 +1121,17 @@ class BazelGenerator(Generator):
     ...
 ```
 
+**Expansion packs** - third-party packages can add multiple builders and toolchains:
+```python
+# my_expansion/__init__.py
+def register():
+    from my_expansion import builders, toolchains  # triggers @builder registration
+```
+
 ---
 
 ## File Organization
-> **Note:** This shows the planned file organization. Files marked with status indicators show current implementation state.
+> **Note:** This shows the file organization with implementation status.
 
 ```
 pcons/
@@ -1034,11 +1143,18 @@ pcons/
 │   ├── node.py              # Node hierarchy ..................... [Implemented]
 │   ├── environment.py       # Environment with namespaced tools .. [Implemented]
 │   ├── builder.py           # Builder base class ................. [Implemented]
+│   ├── builder_registry.py  # Extensible builder registration .... [Implemented]
+│   ├── paths.py             # PathResolver for path handling ..... [Implemented]
 │   ├── scanner.py           # Scanner interface .................. [Partial]
 │   ├── target.py            # Target with usage requirements ..... [Implemented]
 │   ├── project.py           # Project container .................. [Implemented]
 │   ├── subst.py             # Variable substitution engine ....... [Implemented]
 │   └── build_context.py     # ToolchainContext implementations ... [Implemented]
+├── builders/
+│   ├── __init__.py          # Builder registration ............... [Implemented]
+│   ├── compile.py           # Program, Library builders .......... [Implemented]
+│   ├── install.py           # Install, InstallAs, InstallDir ..... [Implemented]
+│   └── archive.py           # Tarfile, Zipfile builders .......... [Implemented]
 ├── configure/
 │   ├── __init__.py
 │   ├── config.py            # Configure context and caching ...... [Implemented]

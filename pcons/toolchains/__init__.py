@@ -10,6 +10,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+# Build context classes for C/C++ toolchains
+from pcons.toolchains.build_context import (
+    CompileLinkContext,
+    MsvcCompileLinkContext,
+)
 from pcons.toolchains.clang_cl import (
     ClangClCCompiler,
     ClangClCxxCompiler,
@@ -124,6 +129,9 @@ __all__ = [
     "find_c_toolchain",
     "find_cuda_toolchain",
     "toolchain_registry",
+    # Build context classes
+    "CompileLinkContext",
+    "MsvcCompileLinkContext",
     # CUDA toolchain
     "CudaCompiler",
     "CudaToolchain",

@@ -3,6 +3,16 @@
 
 import pytest
 
+from pcons.toolchains.gcc import GccToolchain
+
+
+@pytest.fixture
+def gcc_toolchain():
+    """Create a pre-configured GCC toolchain for testing."""
+    toolchain = GccToolchain()
+    toolchain._configured = True
+    return toolchain
+
 
 @pytest.fixture
 def tmp_project(tmp_path):

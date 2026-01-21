@@ -633,8 +633,8 @@ class MsvcToolchain(BaseToolchain):
         Returns:
             A MsvcCompileLinkContext providing MSVC-formatted variables.
         """
-        from pcons.core.build_context import MsvcCompileLinkContext
         from pcons.core.requirements import compute_effective_requirements
+        from pcons.toolchains.build_context import MsvcCompileLinkContext
 
         # Compute effective requirements
         effective = compute_effective_requirements(target, env, for_compilation)

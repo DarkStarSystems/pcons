@@ -77,7 +77,7 @@ class TestNinjaMultiOutput:
         exp_node._build_info = {"primary_node": dll_node, "output_name": "export_file"}
         exp_node.builder = dll_node.builder
 
-        target.nodes.extend([dll_node, lib_node, exp_node])
+        target.output_nodes.extend([dll_node, lib_node, exp_node])
         target.sources.append(source_node)
         project.add_target(target)
 
@@ -134,7 +134,7 @@ class TestNinjaMultiOutput:
             src_suffixes=[".obj"],
         )
 
-        target.nodes.append(dll_node)
+        target.output_nodes.append(dll_node)
         project.add_target(target)
 
         gen = NinjaGenerator()
@@ -190,7 +190,7 @@ class TestNinjaMultiOutput:
         lib_node._build_info = {"primary_node": dll_node, "output_name": "import_lib"}
         lib_node.builder = dll_node.builder
 
-        target.nodes.extend([dll_node, lib_node])
+        target.output_nodes.extend([dll_node, lib_node])
         project.add_target(target)
 
         gen = NinjaGenerator()
@@ -234,7 +234,7 @@ class TestNinjaSingleOutput:
             target_suffixes=[".exe"],
         )
 
-        target.nodes.append(exe_node)
+        target.output_nodes.append(exe_node)
         project.add_target(target)
 
         gen = NinjaGenerator()

@@ -73,8 +73,7 @@ class BaseGenerator:
     def _get_target_build_nodes(self, target: Target) -> list[FileNode]:
         """Get all buildable file nodes from a target.
 
-        This is a helper method that handles both resolved (target-centric)
-        and legacy targets, extracting nodes that have build information.
+        This extracts nodes that have build information from resolved targets.
 
         Args:
             target: The target to get nodes from.
@@ -84,34 +83,20 @@ class BaseGenerator:
         """
         nodes: list[FileNode] = []
 
-        if getattr(target, "_resolved", False):
-            # Resolved target (target-centric model)
-            # Add object nodes and output nodes
-            for obj_node in target.object_nodes:
-                if isinstance(obj_node, FileNode):
-                    nodes.append(obj_node)
-            for out_node in target.output_nodes:
-                if isinstance(out_node, FileNode):
-                    nodes.append(out_node)
-            # For interface targets (like Install), also check target.nodes
-            if target.target_type == "interface":
-                for target_node in target.nodes:
-                    if isinstance(target_node, FileNode):
-                        has_build = (
-                            getattr(target_node, "_build_info", None) is not None
-                        )
-                        if has_build:
-                            nodes.append(target_node)
-        else:
-            # Legacy path: use target.nodes directly
+        # Add object nodes and output nodes
+        for obj_node in target.object_nodes:
+            if isinstance(obj_node, FileNode):
+                nodes.append(obj_node)
+        for out_node in target.output_nodes:
+            if isinstance(out_node, FileNode):
+                nodes.append(out_node)
+        # For interface targets (like Install), also check target.nodes
+        if target.target_type == "interface":
             for target_node in target.nodes:
-                # Check for builder or build_info (install nodes use build_info)
-                has_build = (
-                    target_node.builder is not None
-                    or getattr(target_node, "_build_info", None) is not None
-                )
-                if isinstance(target_node, FileNode) and has_build:
-                    nodes.append(target_node)
+                if isinstance(target_node, FileNode):
+                    has_build = getattr(target_node, "_build_info", None) is not None
+                    if has_build:
+                        nodes.append(target_node)
 
         return nodes
 

@@ -74,11 +74,11 @@ class TestTarfileBuilder:
         tar_plain = project.Tarfile(env, output="d.tar", sources=[], name="d")
         tgz = project.Tarfile(env, output="e.tgz", sources=[], name="e")
 
-        assert tar_gz._build_info["compression"] == "gzip"
-        assert tar_bz2._build_info["compression"] == "bz2"
-        assert tar_xz._build_info["compression"] == "xz"
-        assert tar_plain._build_info["compression"] is None
-        assert tgz._build_info["compression"] == "gzip"
+        assert tar_gz._builder_data["compression"] == "gzip"
+        assert tar_bz2._builder_data["compression"] == "bz2"
+        assert tar_xz._builder_data["compression"] == "xz"
+        assert tar_plain._builder_data["compression"] is None
+        assert tgz._builder_data["compression"] == "gzip"
 
     def test_tarfile_explicit_compression(self, tmp_path):
         """Explicit compression overrides inferred."""
@@ -94,7 +94,7 @@ class TestTarfileBuilder:
             name="override",
         )
 
-        assert tar._build_info["compression"] == "bz2"
+        assert tar._builder_data["compression"] == "bz2"
 
     def test_tarfile_base_dir(self, tmp_path):
         """Tarfile respects base_dir parameter."""
@@ -109,7 +109,7 @@ class TestTarfileBuilder:
             name="with_base",
         )
 
-        assert tar._build_info["base_dir"] == "src"
+        assert tar._builder_data["base_dir"] == "src"
 
     def test_tarfile_default_base_dir(self, tmp_path):
         """Tarfile uses '.' as default base_dir."""
@@ -120,7 +120,7 @@ class TestTarfileBuilder:
             env, output="archive.tar.gz", sources=[], name="default_base"
         )
 
-        assert tar._build_info["base_dir"] == "."
+        assert tar._builder_data["base_dir"] == "."
 
 
 class TestZipfileBuilder:
@@ -175,7 +175,7 @@ class TestZipfileBuilder:
             name="with_base",
         )
 
-        assert zf._build_info["base_dir"] == "src"
+        assert zf._builder_data["base_dir"] == "src"
 
 
 class TestArchiveNinjaGeneration:

@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Build context classes for toolchain-specific build information.
+"""Build context classes for C/C++ toolchains.
 
-This module provides context classes that implement the ToolchainContext protocol.
-These classes encapsulate toolchain-specific build information and provide
-formatted variables for use in command templates.
+This module provides context classes that implement the ToolchainContext protocol
+for C/C++ compilation and linking. These classes contain tool-specific knowledge
+(prefixes like -I, -D, -L, -l for Unix or /I, /D, /LIBPATH: for MSVC).
 
 The context approach decouples the core from domain-specific concepts:
 - Core only knows about ToolchainContext.get_variables() -> dict[str, str]
@@ -22,11 +22,11 @@ if TYPE_CHECKING:
 
 @dataclass
 class CompileLinkContext:
-    """Context for C/C++ compilation and linking.
+    """Context for Unix-style C/C++ compilation and linking.
 
-    This class implements the ToolchainContext protocol for C/C++ toolchains.
-    It holds all the information needed for compilation and linking, and
-    formats it into variables suitable for command templates.
+    This class implements the ToolchainContext protocol for Unix-style C/C++
+    toolchains (GCC, Clang). It holds all the information needed for compilation
+    and linking, and formats it into variables suitable for command templates.
 
     The formatting (prefixes like -I, -D, -L, -l) is done here rather than
     in the generator, allowing different toolchains to use different prefixes.
@@ -147,7 +147,7 @@ class CompileLinkContext:
 class MsvcCompileLinkContext(CompileLinkContext):
     """Context for MSVC compilation and linking.
 
-    Uses MSVC-specific prefixes for flags.
+    Uses MSVC-specific prefixes for flags (/I, /D, /LIBPATH:).
     """
 
     include_prefix: str = "/I"

@@ -46,7 +46,6 @@ class TargetType(StrEnum):
     COMMAND = "command"  # Generic command output
 
 
-# Re-export SourceSpec for backwards compatibility
 __all__ = ["SourceSpec", "TargetType", "UsageRequirements", "Target", "ImportedTarget"]
 
 
@@ -165,15 +164,15 @@ class Target:
         "output_name",
         # Lazy source resolution (for Install, etc.):
         "_pending_sources",
-        "_install_dest_dir",
-        "_install_as_dest",
-        "_install_dir_dest",
         # Post-build commands:
         "_post_build_commands",
         # Auxiliary input files (e.g., .def files passed to linker on Windows):
         "_auxiliary_inputs",
         # Build info for archive and command targets:
         "_build_info",
+        # Generic builder support (extensible builder architecture):
+        "_builder_name",  # Name of the builder that created this target
+        "_builder_data",  # Builder-specific data (replaces hardcoded _install_* fields)
     )
 
     def __init__(
@@ -221,12 +220,6 @@ class Target:
         # Lazy source resolution (for Install, etc.):
         # Sources that need resolution after main resolve phase
         self._pending_sources: list[Target | Node | Path | str] | None = None
-        # Destination directory for Install targets
-        self._install_dest_dir: Path | None = None
-        # Destination path for InstallAs targets (full path including filename)
-        self._install_as_dest: Path | None = None
-        # Destination directory for InstallDir targets (recursive directory copy)
-        self._install_dir_dest: Path | None = None
         # Post-build commands (shell commands run after target is built)
         self._post_build_commands: list[str] = []
         # Auxiliary input files (e.g., .def files passed to linker on Windows)
@@ -234,6 +227,9 @@ class Target:
         self._auxiliary_inputs: list[tuple[FileNode, str]] = []
         # Build info for archive and command targets
         self._build_info: dict[str, Any] | None = None
+        # Generic builder support (extensible builder architecture)
+        self._builder_name: str | None = None
+        self._builder_data: dict[str, Any] | None = None
 
     @property
     def sources(self) -> list[Node]:

@@ -74,8 +74,8 @@ class CompileCommandsGenerator(BaseGenerator):
         """Collect compile commands from a target."""
         commands: list[dict[str, Any]] = []
 
-        # Check object_nodes (new target-centric model) and nodes (legacy)
-        nodes_to_check = list(target.object_nodes) + list(target.nodes)
+        # Check object_nodes for compilation commands
+        nodes_to_check = list(target.object_nodes)
 
         for node in nodes_to_check:
             if not isinstance(node, FileNode):

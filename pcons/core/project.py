@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.environment import Environment as Env
 from pcons.core.graph import (
     collect_all_nodes,
@@ -20,7 +21,7 @@ from pcons.core.graph import (
 )
 from pcons.core.node import AliasNode, DirNode, FileNode, Node
 from pcons.core.paths import PathResolver
-from pcons.core.target import Target, TargetType
+from pcons.core.target import Target
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 logger = logging.getLogger(__name__)
@@ -451,92 +452,8 @@ class Project:
                 gen.generate(self, output_path.parent)
                 logger.info("Wrote Mermaid graph to %s", mermaid_path)
 
-    # Target factory methods for the target-centric build model
-
-    def StaticLibrary(
-        self,
-        name: str,
-        env: Env,
-        sources: list[str | Path | Node] | None = None,
-    ) -> Target:
-        """Create a static library target.
-
-        Args:
-            name: Target name (e.g., "mylib").
-            env: Environment to use for building.
-            sources: Source files for the library.
-
-        Returns:
-            A new Target configured as a static library.
-        """
-        target = Target(
-            name,
-            target_type=TargetType.STATIC_LIBRARY,
-            defined_at=get_caller_location(),
-        )
-        target._env = env
-        target._project = self
-        if sources:
-            source_nodes = self._normalize_sources(sources)
-            target.add_sources(source_nodes)
-        self.add_target(target)
-        return target
-
-    def SharedLibrary(
-        self,
-        name: str,
-        env: Env,
-        sources: list[str | Path | Node] | None = None,
-    ) -> Target:
-        """Create a shared library target.
-
-        Args:
-            name: Target name (e.g., "mylib").
-            env: Environment to use for building.
-            sources: Source files for the library.
-
-        Returns:
-            A new Target configured as a shared library.
-        """
-        target = Target(
-            name,
-            target_type=TargetType.SHARED_LIBRARY,
-            defined_at=get_caller_location(),
-        )
-        target._env = env
-        target._project = self
-        if sources:
-            source_nodes = self._normalize_sources(sources)
-            target.add_sources(source_nodes)
-        self.add_target(target)
-        return target
-
-    def Program(
-        self,
-        name: str,
-        env: Env,
-        sources: list[str | Path | Node] | None = None,
-    ) -> Target:
-        """Create a program (executable) target.
-
-        Args:
-            name: Target name (e.g., "myapp").
-            env: Environment to use for building.
-            sources: Source files for the program.
-
-        Returns:
-            A new Target configured as a program.
-        """
-        target = Target(
-            name, target_type=TargetType.PROGRAM, defined_at=get_caller_location()
-        )
-        target._env = env
-        target._project = self
-        if sources:
-            source_nodes = self._normalize_sources(sources)
-            target.add_sources(source_nodes)
-        self.add_target(target)
-        return target
+    # Command is kept as a wrapper since it delegates to env.Command()
+    # and doesn't fit the registry pattern well
 
     def Command(
         self,
@@ -577,433 +494,68 @@ class Project:
         """
         return env.Command(target=target, source=source, command=command, name=name)
 
-    def HeaderOnlyLibrary(
-        self,
-        name: str,
-        include_dirs: list[str | Path] | None = None,
-    ) -> Target:
-        """Create a header-only (interface) library target.
-
-        Header-only libraries have no sources to compile but can provide
-        usage requirements (include directories, defines, etc.) to
-        targets that link against them.
-
-        Args:
-            name: Target name (e.g., "my_headers").
-            include_dirs: Include directories to propagate to dependents.
-
-        Returns:
-            A new Target configured as an interface library.
-        """
-        target = Target(
-            name, target_type=TargetType.INTERFACE, defined_at=get_caller_location()
-        )
-        if include_dirs:
-            for inc_dir in include_dirs:
-                target.public.include_dirs.append(Path(inc_dir))
-        self.add_target(target)
-        return target
-
-    def ObjectLibrary(
-        self,
-        name: str,
-        env: Env,
-        sources: list[str | Path | Node] | None = None,
-    ) -> Target:
-        """Create an object library target (compiles but doesn't link).
-
-        Object libraries compile their sources to object files but don't
-        produce a final library or executable. Useful for compiling sources
-        that will be used by multiple targets.
-
-        Args:
-            name: Target name.
-            env: Environment to use for building.
-            sources: Source files to compile.
-
-        Returns:
-            A new Target configured as an object library.
-        """
-        target = Target(
-            name, target_type=TargetType.OBJECT, defined_at=get_caller_location()
-        )
-        target._env = env
-        target._project = self
-        if sources:
-            source_nodes = self._normalize_sources(sources)
-            target.add_sources(source_nodes)
-        self.add_target(target)
-        return target
-
-    def _normalize_sources(
-        self,
-        sources: list[str | Path | Node],
-    ) -> list[Node]:
-        """Convert source paths/strings to nodes.
-
-        Uses project's node() for deduplication.
-
-        Args:
-            sources: List of source files (strings, Paths, or Nodes).
-
-        Returns:
-            List of Node objects.
-        """
-        result: list[Node] = []
-        for src in sources:
-            if isinstance(src, Node):
-                result.append(src)
-            else:
-                result.append(self.node(src))
-        return result
-
-    def Install(
-        self,
-        dest_dir: Path | str,
-        sources: list[Target | Node | Path | str],
-        *,
-        name: str | None = None,
-    ) -> Target:
-        """Install files to a destination directory.
-
-        Creates copy operations for each source file to the destination
-        directory. The returned target depends on all the installed files.
-
-        Note: Sources are resolved lazily during project.resolve(), so this
-        can be called before or after defining the source targets.
-
-        Args:
-            dest_dir: Destination directory path.
-            sources: Files to install. Can be:
-                - Target: Installs the target's output files
-                - Node: Installs the node
-                - Path/str: Installs the file at that path
-            name: Optional name for the install target (default: "install_<dirname>")
-
-        Returns:
-            A Target representing the install operation.
-
-        Example:
-            # Install a library and headers
-            project.Install(
-                "dist/lib",
-                [mylib],  # Installs libmylib.a (or .so)
-            )
-            project.Install(
-                "dist/include",
-                project.Glob("include/*.h"),
-            )
-
-            # Bundle creation
-            bundle_dir = Path("build/MyPlugin.bundle/Contents/MacOS")
-            project.Install(bundle_dir, [plugin_lib])
-        """
-        dest_dir = Path(dest_dir)
-        target_name = name or f"install_{dest_dir.name}"
-
-        # Handle duplicate target names by appending a suffix
-        base_name = target_name
-        counter = 1
-        while target_name in self._targets:
-            target_name = f"{base_name}_{counter}"
-            counter += 1
-        if target_name != base_name:
-            logger.warning(
-                "Install target renamed from '%s' to '%s' to avoid conflict",
-                base_name,
-                target_name,
-            )
-
-        # Create the install target with pending sources
-        # Sources will be resolved during project.resolve()
-        install_target = Target(
-            target_name,
-            target_type=TargetType.INTERFACE,
-            defined_at=get_caller_location(),
-        )
-
-        # Store for lazy resolution
-        install_target._pending_sources = list(sources)
-        install_target._install_dest_dir = dest_dir
-
-        self.add_target(install_target)
-        return install_target
-
-    def InstallAs(
-        self,
-        dest: Path | str,
-        source: Target | Node | Path | str,
-        *,
-        name: str | None = None,
-    ) -> Target:
-        """Install a file to a specific destination path.
-
-        Unlike Install(), this copies a single file to an exact path,
-        allowing rename during installation.
-
-        Note: Source is resolved lazily during project.resolve(), so this
-        can be called before or after defining the source target.
-
-        Args:
-            dest: Full destination path (including filename).
-            source: Source file (Target, Node, Path, or string).
-            name: Optional name for the install target.
-
-        Returns:
-            A Target representing the install operation.
-
-        Example:
-            project.InstallAs(
-                bundle_dir / "markymark.ofx",
-                ofx_plugin,
-            )
-        """
-        dest = Path(dest)
-        target_name = name or f"install_{dest.name}"
-
-        # Handle duplicate target names by appending a suffix
-        base_name = target_name
-        counter = 1
-        while target_name in self._targets:
-            target_name = f"{base_name}_{counter}"
-            counter += 1
-        if target_name != base_name:
-            logger.warning(
-                "Install target renamed from '%s' to '%s' to avoid conflict",
-                base_name,
-                target_name,
-            )
-
-        # Create the install target with pending source
-        # Source will be resolved during project.resolve()
-        install_target = Target(
-            target_name,
-            target_type=TargetType.INTERFACE,
-            defined_at=get_caller_location(),
-        )
-
-        # Store for lazy resolution
-        install_target._pending_sources = [source]
-        install_target._install_as_dest = dest
-
-        self.add_target(install_target)
-        return install_target
-
-    def InstallDir(
-        self,
-        dest_dir: Path | str,
-        source: Target | Node | Path | str,
-        *,
-        name: str | None = None,
-    ) -> Target:
-        """Install a directory tree to a destination.
-
-        Recursively copies an entire directory tree. The source can be a path
-        to a directory or a Target whose output is a directory (e.g., a bundle).
-
-        Uses ninja's depfile mechanism for incremental rebuilds: if any file
-        in the source directory changes, the copy is re-run.
-
-        Note: Source is resolved lazily during project.resolve(), so this
-        can be called before or after defining the source target.
-
-        Args:
-            dest_dir: Destination directory (the source tree is copied into this).
-            source: Source directory (Target, Node, Path, or string).
-            name: Optional name for the install target.
-
-        Returns:
-            A Target representing the install operation.
-
-        Example:
-            # Install a generated bundle
-            bundle = project.Command(
-                "bundle", env,
-                target="build/MyPlugin.bundle",
-                source=[plugin_lib, resources],
-                command="create-bundle.sh $SOURCES $TARGET"
-            )
-            project.InstallDir("dist", bundle)
-
-            # Install a static asset directory
-            project.InstallDir("build/assets", "src/assets")
-        """
-        dest_dir = Path(dest_dir)
-        target_name = name or f"install_dir_{dest_dir.name}"
-
-        # Handle duplicate target names by appending a suffix
-        base_name = target_name
-        counter = 1
-        while target_name in self._targets:
-            target_name = f"{base_name}_{counter}"
-            counter += 1
-        if target_name != base_name:
-            logger.warning(
-                "InstallDir target renamed from '%s' to '%s' to avoid conflict",
-                base_name,
-                target_name,
-            )
-
-        # Create the install target with pending source
-        # Source will be resolved during project.resolve()
-        install_target = Target(
-            target_name,
-            target_type=TargetType.INTERFACE,
-            defined_at=get_caller_location(),
-        )
-
-        # Store for lazy resolution
-        install_target._pending_sources = [source]
-        install_target._install_dir_dest = dest_dir
-
-        self.add_target(install_target)
-        return install_target
-
-    def _name_from_output(self, output: str | Path, suffixes: list[str]) -> str:
-        """Derive target name from output path by stripping archive suffixes.
-
-        Args:
-            output: Output path (e.g., "dist/docs.tar.gz").
-            suffixes: List of suffixes to strip (e.g., [".tar.gz", ".tar"]).
-
-        Returns:
-            Derived name (e.g., "dist/docs").
-        """
-        name = str(output)
-        for suffix in suffixes:
-            if name.endswith(suffix):
-                name = name[: -len(suffix)]
-                break
-        return name
-
-    def Tarfile(
-        self,
-        env: Env,
-        *,
-        output: str | Path,
-        sources: list[str | Path | Node | Target] | None = None,
-        compression: str | None = None,
-        base_dir: str | Path | None = None,
-        name: str | None = None,
-    ) -> Target:
-        """Create a tar archive from source files/directories.
-
-        Args:
-            env: Environment for this build.
-            output: Output archive path (.tar, .tar.gz, .tar.bz2, .tar.xz).
-            sources: Input files, directories, and/or Targets.
-            compression: Compression type (None, "gzip", "bz2", "xz").
-                        If None, inferred from output extension.
-            base_dir: Base directory for archive paths (default: ".").
-            name: Optional target name for `ninja <name>`. Derived from output if not specified.
-
-        Returns:
-            Target representing the archive.
-
-        Example:
-            docs = project.Tarfile(env,
-                output="dist/docs.tar.gz",
-                sources=["docs/", "README.md"])
-            project.Install("packages/", [docs])  # Works because it's a Target
-        """
-        # Normalize output path using PathResolver
-        output_path = self._path_resolver.normalize_target_path(output)
-
-        # Infer compression from extension if not specified
-        if compression is None:
-            if str(output).endswith(".tar.gz") or str(output).endswith(".tgz"):
-                compression = "gzip"
-            elif str(output).endswith(".tar.bz2"):
-                compression = "bz2"
-            elif str(output).endswith(".tar.xz"):
-                compression = "xz"
-            # .tar gets no compression
-
-        # Derive name from output if not specified
-        if name is None:
-            name = self._name_from_output(
-                output, [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tar"]
-            )
-
-        target = Target(
-            name,
-            target_type=TargetType.ARCHIVE,
-            defined_at=get_caller_location(),
-        )
-        target._env = env
-        target._project = self
-
-        # Store sources for lazy resolution
-        target._pending_sources = list(sources) if sources else []
-
-        # Store build info for Ninja generator
-        target._build_info = {
-            "tool": "tarfile",
-            "output": str(output_path),
-            "compression": compression,
-            "base_dir": str(base_dir) if base_dir else ".",
-        }
-
-        self.add_target(target)
-        return target
-
-    def Zipfile(
-        self,
-        env: Env,
-        *,
-        output: str | Path,
-        sources: list[str | Path | Node | Target] | None = None,
-        base_dir: str | Path | None = None,
-        name: str | None = None,
-    ) -> Target:
-        """Create a zip archive from source files/directories.
-
-        Args:
-            env: Environment for this build.
-            output: Output archive path (.zip).
-            sources: Input files, directories, and/or Targets.
-            base_dir: Base directory for archive paths (default: ".").
-            name: Optional target name for `ninja <name>`. Derived from output if not specified.
-
-        Returns:
-            Target representing the archive.
-
-        Example:
-            release = project.Zipfile(env,
-                output="dist/release.zip",
-                sources=["bin/", "lib/", "README.md"])
-        """
-        # Normalize output path using PathResolver
-        output_path = self._path_resolver.normalize_target_path(output)
-
-        # Derive name from output if not specified
-        if name is None:
-            name = self._name_from_output(output, [".zip"])
-
-        target = Target(
-            name,
-            target_type=TargetType.ARCHIVE,
-            defined_at=get_caller_location(),
-        )
-        target._env = env
-        target._project = self
-
-        # Store sources for lazy resolution
-        target._pending_sources = list(sources) if sources else []
-
-        # Store build info for Ninja generator
-        target._build_info = {
-            "tool": "zipfile",
-            "output": str(output_path),
-            "base_dir": str(base_dir) if base_dir else ".",
-        }
-
-        self.add_target(target)
-        return target
-
     def __repr__(self) -> str:
         return (
             f"Project({self.name!r}, "
             f"targets={len(self._targets)}, "
             f"envs={len(self._environments)})"
         )
+
+    def __getattr__(self, name: str) -> Any:
+        """Dynamic attribute access for registered builders.
+
+        Allows registered builders to be called as methods on Project instances:
+            project.InstallSymlink(...)  # if InstallSymlink is registered
+
+        Args:
+            name: Attribute name to look up.
+
+        Returns:
+            A bound method that calls the builder's create_target function.
+
+        Raises:
+            AttributeError: If the attribute is not a registered builder.
+        """
+        # Check if it's a registered builder
+        registration = BuilderRegistry.get(name)
+        if registration is not None:
+            return self._make_builder_method(registration)
+
+        raise AttributeError(
+            f"'{type(self).__name__}' object has no attribute '{name}'"
+        )
+
+    def __dir__(self) -> list[str]:
+        """Include registered builder names in dir() output.
+
+        This enables IDE auto-completion for dynamically available builders.
+        """
+        # Get the default attributes
+        attrs = list(super().__dir__())
+        # Add registered builder names
+        attrs.extend(BuilderRegistry.names())
+        return attrs
+
+    def _make_builder_method(self, registration: Any) -> Any:
+        """Create a bound method for a registered builder.
+
+        The returned callable handles argument routing based on whether
+        the builder requires an environment.
+
+        Args:
+            registration: BuilderRegistration from the registry.
+
+        Returns:
+            A callable that creates targets using the builder.
+        """
+        create_target = registration.create_target
+
+        # Wrap to inject project as first argument
+        def builder_method(*args: Any, **kwargs: Any) -> Target:
+            return create_target(self, *args, **kwargs)
+
+        # Copy the docstring if available
+        if hasattr(create_target, "__doc__"):
+            builder_method.__doc__ = create_target.__doc__
+
+        return builder_method

@@ -1,0 +1,17 @@
+# Test configuration for custom builder example
+
+[test]
+description = "Demonstrates creating a custom builder with the @builder decorator"
+
+# Expected output files after build
+expected_outputs = [
+    "build/version.h",
+    "build/obj.demo/main.o",
+    "build/demo",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/demo", expect_stdout = "CustomBuilderDemo version 2.1.0" },
+]

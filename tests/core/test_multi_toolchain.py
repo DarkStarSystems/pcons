@@ -363,19 +363,3 @@ class TestBackwardsCompatibility:
         assert target._resolved
         assert len(target.object_nodes) == 1
         assert target.object_nodes[0]._build_info["tool"] == "cxx"
-
-    def test_no_toolchain_still_works(self, tmp_path):
-        """Verify environment without toolchain still works with manual setup."""
-        c_file = tmp_path / "main.c"
-        c_file.write_text("int main() { return 0; }")
-
-        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
-        env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
-
-        target = project.StaticLibrary("mylib", env, sources=[str(c_file)])
-        project.resolve()
-
-        assert target._resolved
-        assert len(target.object_nodes) == 1

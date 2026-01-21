@@ -17,10 +17,15 @@ if TYPE_CHECKING:
 
 # Re-export commonly used classes for convenient imports
 # These imports must be after __version__ is defined but we use noqa to allow it
+# Register built-in builders with the BuilderRegistry
+# This must happen after core imports but before any user code runs
+from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.toolchains import find_c_toolchain  # noqa: E402
+
+register_builtin_builders()
 
 __version__ = "0.2.4"
 

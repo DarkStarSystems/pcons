@@ -98,7 +98,7 @@ class TestMakefileBuildStatements:
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
-        target.nodes.append(output_node)
+        target.object_nodes.append(output_node)
         target.sources.append(source_node)
         project.add_target(target)
 
@@ -125,7 +125,7 @@ class TestMakefileBuildStatements:
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
-        target.nodes.append(output_node)
+        target.object_nodes.append(output_node)
         project.add_target(target)
 
         gen = MakefileGenerator()
@@ -150,7 +150,7 @@ class TestMakefileBuildStatements:
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
-        target.nodes.append(output_node)
+        target.object_nodes.append(output_node)
         project.add_target(target)
 
         gen = MakefileGenerator()
@@ -226,7 +226,7 @@ class TestMakefileDepfiles:
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
-        target.nodes.append(output_node)
+        target.object_nodes.append(output_node)
         project.add_target(target)
 
         gen = MakefileGenerator()
@@ -258,7 +258,7 @@ class TestMakefileImplicitDeps:
         # Add implicit dependency (e.g., from header scanner)
         output_node.implicit_deps.append(header_node)
 
-        target.nodes.append(output_node)
+        target.object_nodes.append(output_node)
         project.add_target(target)
 
         gen = MakefileGenerator()
@@ -297,7 +297,7 @@ class TestMakefilePostBuild:
                 return template
 
         target._env = MockEnv()
-        target.nodes.append(output_node)
+        target.object_nodes.append(output_node)
         target.output_nodes.append(output_node)
         target._post_build_commands = ["chmod +x $out", "echo 'Built $out'"]
         project.add_target(target)

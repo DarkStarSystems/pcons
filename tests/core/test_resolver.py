@@ -4,20 +4,7 @@
 from pathlib import Path
 
 from pcons.core.project import Project
-from pcons.core.resolver import SOURCE_SUFFIX_MAP, Resolver
-
-
-class TestSourceSuffixMap:
-    def test_c_suffix(self):
-        """Test that .c files map to C compiler."""
-        assert SOURCE_SUFFIX_MAP[".c"] == ("cc", "c")
-
-    def test_cpp_suffixes(self):
-        """Test that C++ suffixes map to C++ compiler."""
-        assert SOURCE_SUFFIX_MAP[".cpp"] == ("cxx", "cxx")
-        assert SOURCE_SUFFIX_MAP[".cxx"] == ("cxx", "cxx")
-        assert SOURCE_SUFFIX_MAP[".cc"] == ("cxx", "cxx")
-        assert SOURCE_SUFFIX_MAP[".c++"] == ("cxx", "cxx")
+from pcons.core.resolver import Resolver
 
 
 class TestResolverCreation:
@@ -27,11 +14,10 @@ class TestResolverCreation:
         resolver = Resolver(project)
 
         assert resolver.project is project
-        assert resolver._object_cache == {}
 
 
 class TestResolverSingleTarget:
-    def test_resolve_single_target(self, tmp_path):
+    def test_resolve_single_target(self, tmp_path, gcc_toolchain):
         """Test resolving a single target."""
         # Create a source file
         src_file = tmp_path / "main.c"
@@ -39,8 +25,8 @@ class TestResolverSingleTarget:
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
 
-        # Set up environment with minimal tool config
-        env = project.Environment()
+        # Set up environment with toolchain
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -58,13 +44,13 @@ class TestResolverSingleTarget:
             target.object_nodes[0].path == tmp_path / "build" / "obj.mylib" / "main.o"
         )
 
-    def test_resolve_sets_object_build_info(self, tmp_path):
+    def test_resolve_sets_object_build_info(self, tmp_path, gcc_toolchain):
         """Test that resolved objects have proper build_info."""
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -88,14 +74,14 @@ class TestResolverSingleTarget:
 class TestResolverSameSourceDifferentTargets:
     """Key test: same source compiles with different flags for different targets."""
 
-    def test_same_source_different_flags(self, tmp_path):
+    def test_same_source_different_flags(self, tmp_path, gcc_toolchain):
         """Test that same source can compile with different flags for different targets."""
         # Create a source file
         src_file = tmp_path / "common.c"
         src_file.write_text("void common() {}")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -134,7 +120,7 @@ class TestResolverSameSourceDifferentTargets:
 
 
 class TestResolverTransitiveRequirements:
-    def test_transitive_requirements_applied(self, tmp_path):
+    def test_transitive_requirements_applied(self, tmp_path, gcc_toolchain):
         """Test that transitive requirements are applied during resolution."""
         # Create source files
         lib_src = tmp_path / "lib.c"
@@ -143,7 +129,7 @@ class TestResolverTransitiveRequirements:
         app_src.write_text("int main() { return 0; }")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -166,13 +152,13 @@ class TestResolverTransitiveRequirements:
 
 
 class TestResolverHeaderOnlyLibrary:
-    def test_header_only_library(self, tmp_path):
+    def test_header_only_library(self, tmp_path, gcc_toolchain):
         """Test that header-only libraries propagate requirements but have no objects."""
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -206,13 +192,13 @@ class TestResolverHeaderOnlyLibrary:
 
 
 class TestResolverObjectCaching:
-    def test_object_caching_same_flags(self, tmp_path):
+    def test_object_caching_same_flags(self, tmp_path, gcc_toolchain):
         """Test that same source with same flags shares object node."""
         src_file = tmp_path / "common.c"
         src_file.write_text("void common() {}")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -238,7 +224,7 @@ class TestResolverObjectCaching:
 
 
 class TestResolverTargetTypes:
-    def test_program_target(self, tmp_path):
+    def test_program_target(self, tmp_path, gcc_toolchain):
         """Test resolving a program target."""
         import sys
 
@@ -246,7 +232,7 @@ class TestResolverTargetTypes:
         src_file.write_text("int main() { return 0; }")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
         env.cc.linkcmd = "gcc $in -o $out"
@@ -261,13 +247,13 @@ class TestResolverTargetTypes:
         expected_name = "myapp.exe" if sys.platform == "win32" else "myapp"
         assert target.output_nodes[0].path.name == expected_name
 
-    def test_shared_library_target(self, tmp_path):
+    def test_shared_library_target(self, tmp_path, gcc_toolchain):
         """Test resolving a shared library target."""
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
         env.cc.sharedcmd = "gcc -shared $in -o $out"
@@ -287,13 +273,13 @@ class TestResolverTargetTypes:
         else:
             assert target.output_nodes[0].path.name == "libmylib.so"
 
-    def test_object_library_target(self, tmp_path):
+    def test_object_library_target(self, tmp_path, gcc_toolchain):
         """Test resolving an object library target."""
         src_file = tmp_path / "obj.c"
         src_file.write_text("void obj_func() {}")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -307,13 +293,13 @@ class TestResolverTargetTypes:
 
 
 class TestResolverLanguageDetection:
-    def test_detect_c_language(self, tmp_path):
+    def test_detect_c_language(self, tmp_path, gcc_toolchain):
         """Test that C language is detected from .c files."""
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -322,13 +308,13 @@ class TestResolverLanguageDetection:
 
         assert "c" in target.required_languages
 
-    def test_detect_cxx_language(self, tmp_path):
+    def test_detect_cxx_language(self, tmp_path, gcc_toolchain):
         """Test that C++ language is detected from .cpp files."""
         src_file = tmp_path / "main.cpp"
         src_file.write_text("int main() { return 0; }")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cxx")
         env.cxx.objcmd = "g++ -c $in -o $out"
 
@@ -341,13 +327,13 @@ class TestResolverLanguageDetection:
 class TestResolverOutputName:
     """Tests for target.output_name custom output naming."""
 
-    def test_shared_library_output_name(self, tmp_path):
+    def test_shared_library_output_name(self, tmp_path, gcc_toolchain):
         """Test that output_name overrides shared library naming."""
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -361,13 +347,13 @@ class TestResolverOutputName:
         # Should use custom name, not platform default
         assert target.output_nodes[0].path.name == "plugin.ofx"
 
-    def test_static_library_output_name(self, tmp_path):
+    def test_static_library_output_name(self, tmp_path, gcc_toolchain):
         """Test that output_name overrides static library naming."""
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -379,13 +365,13 @@ class TestResolverOutputName:
         assert target._resolved
         assert target.output_nodes[0].path.name == "custom_mylib.lib"
 
-    def test_program_output_name(self, tmp_path):
+    def test_program_output_name(self, tmp_path, gcc_toolchain):
         """Test that output_name overrides program naming."""
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -397,13 +383,13 @@ class TestResolverOutputName:
         assert target._resolved
         assert target.output_nodes[0].path.name == "custom_app.bin"
 
-    def test_output_name_none_uses_default(self, tmp_path):
+    def test_output_name_none_uses_default(self, tmp_path, gcc_toolchain):
         """Test that None output_name uses default naming."""
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        env = project.Environment()
+        env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $in -o $out"
 
@@ -758,26 +744,3 @@ class TestResolverToolAgnostic:
 
         assert prog._resolved
         assert prog.output_nodes[0].path.name == "myapp.exe"
-
-    def test_fallback_without_toolchain(self, tmp_path):
-        """Test that resolver falls back to hardcoded values when no toolchain."""
-        src_file = tmp_path / "main.c"
-        src_file.write_text("int main() { return 0; }")
-
-        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-
-        # No toolchain
-        env = project.Environment()
-        env.add_tool("cc")
-        env.cc.objcmd = "gcc -c $in -o $out"
-
-        target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
-        project.resolve()
-
-        # Should still work with fallback values
-        assert target._resolved
-        assert len(target.object_nodes) == 1
-        # Default .o suffix
-        assert target.object_nodes[0].path.suffix == ".o"
-        # Default lib prefix
-        assert target.output_nodes[0].path.name == "libmylib.a"

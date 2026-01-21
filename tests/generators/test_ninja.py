@@ -69,8 +69,9 @@ class TestNinjaBuildStatements:
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
-        target.nodes.append(output_node)
-        target.sources.append(source_node)
+        # Use object_nodes for .o file outputs
+        target.object_nodes.append(output_node)
+        target._sources.append(source_node)
         project.add_target(target)
 
         gen = NinjaGenerator()
@@ -97,7 +98,8 @@ class TestNinjaBuildStatements:
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
-        target.nodes.append(output_node)
+        # Use object_nodes for .o file outputs
+        target.object_nodes.append(output_node)
         project.add_target(target)
 
         gen = NinjaGenerator()
@@ -114,7 +116,8 @@ class TestNinjaAliases:
 
         target = Target("mylib")
         lib_node = FileNode("build/libmy.a")
-        target.nodes.append(lib_node)
+        # Use output_nodes for final library outputs
+        target.output_nodes.append(lib_node)
         project.add_target(target)
 
         project.Alias("libs", target)
@@ -133,7 +136,8 @@ class TestNinjaDefaults:
 
         target = Target("app")
         app_node = FileNode("build/app")
-        target.nodes.append(app_node)
+        # Use output_nodes for final executable outputs
+        target.output_nodes.append(app_node)
         project.add_target(target)
 
         project.Default(target)
@@ -186,7 +190,8 @@ class TestNinjaPostBuild:
             "Program", "link", "progcmd", src_suffixes=[".o"], target_suffixes=[""]
         )
 
-        target.nodes.append(output_node)
+        # Use output_nodes for final program outputs
+        target.output_nodes.append(output_node)
         target.post_build("install_name_tool -add_rpath @loader_path $out")
         project.add_target(target)
 
@@ -219,7 +224,8 @@ class TestNinjaPostBuild:
             target_suffixes=[".so"],
         )
 
-        target.nodes.append(output_node)
+        # Use output_nodes for final library outputs
+        target.output_nodes.append(output_node)
         target.post_build("install_name_tool -add_rpath @loader_path $out")
         target.post_build("codesign --sign - $out")
         project.add_target(target)
@@ -250,7 +256,8 @@ class TestNinjaPostBuild:
             "Program", "link", "progcmd", src_suffixes=[".o"], target_suffixes=[""]
         )
 
-        target.nodes.append(output_node)
+        # Use output_nodes for final program outputs
+        target.output_nodes.append(output_node)
         target.post_build("echo Built $out from $in")
         project.add_target(target)
 
@@ -280,7 +287,8 @@ class TestNinjaPostBuild:
             "Program", "link", "progcmd", src_suffixes=[".o"], target_suffixes=[""]
         )
 
-        target.nodes.append(output_node)
+        # Use output_nodes for final program outputs
+        target.output_nodes.append(output_node)
         # No post_build() calls
         project.add_target(target)
 
@@ -317,7 +325,8 @@ class TestNinjaDepsDirectives:
             deps_style="gcc",
         )
 
-        target.nodes.append(output_node)
+        # Use object_nodes for .o file outputs
+        target.object_nodes.append(output_node)
         project.add_target(target)
 
         gen = NinjaGenerator()
@@ -350,7 +359,8 @@ class TestNinjaDepsDirectives:
             deps_style="msvc",
         )
 
-        target.nodes.append(output_node)
+        # Use object_nodes for .obj file outputs
+        target.object_nodes.append(output_node)
         project.add_target(target)
 
         gen = NinjaGenerator()
@@ -379,7 +389,8 @@ class TestNinjaDepsDirectives:
             "Program", "link", "progcmd", src_suffixes=[".o"], target_suffixes=[""]
         )
 
-        target.nodes.append(output_node)
+        # Use output_nodes for final program outputs
+        target.output_nodes.append(output_node)
         project.add_target(target)
 
         gen = NinjaGenerator()
