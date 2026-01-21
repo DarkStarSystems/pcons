@@ -8,7 +8,11 @@ This module provides:
 - InstallDir: Builder for recursively copying a directory tree
 
 Users can customize the copy commands via the tool namespace:
-    env.install.copycmd = "cp $in $out"  # Use system cp instead
+    env.install.copycmd = ["cp", "$$in", "$$out"]  # Use system cp
+
+Target-level overrides are supported for InstallDir:
+    install_dir = project.InstallDir("dist/", source_dir)
+    install_dir.destdir = "custom_dest"  # Override for this target
 """
 
 from __future__ import annotations
@@ -40,17 +44,18 @@ class InstallTool(StandaloneTool):
     command templates.
 
     Variables:
-        copycmd: Command template for single file copy.
-                 Default: python -m pcons.util.commands copy $in $out
-        copytreecmd: Command template for directory tree copy.
-                     Default: python -m pcons.util.commands copytree ...
+        copycmd: Command template for single file copy (list of tokens).
+                 Default: [python, -m, pcons.util.commands, copy, $$in, $$out]
+        copytreecmd: Command template for directory tree copy (list of tokens).
+                     Default: [python, -m, pcons.util.commands, copytree, ...]
+        destdir: Default destination directory for InstallDir.
 
     Example:
-        # Use system copy on Unix
-        env.install.copycmd = "cp $in $out"
+        # Use system copy on Unix (as list)
+        env.install.copycmd = ["cp", "$$in", "$$out"]
 
         # Use rsync for directory copies
-        env.install.copytreecmd = "rsync -a $in $destdir"
+        env.install.copytreecmd = ["rsync", "-a", "$$in", "$destdir"]
     """
 
     def __init__(self) -> None:
@@ -61,20 +66,38 @@ class InstallTool(StandaloneTool):
         """Return default command templates.
 
         Uses Python helper scripts for cross-platform compatibility.
+        Commands are lists of tokens for proper handling of paths with spaces.
         The $$ escaping preserves $ for ninja variable substitution.
+        Pcons variables ($destdir) are expanded via the context mechanism.
         """
-        # Use escaped $$ for ninja variables ($in, $out) since these
-        # get processed by env.subst() before going to ninja
         python_cmd = sys.executable.replace("\\", "/")
         return {
             # Simple file copy: copy $in $out
-            "copycmd": f"{python_cmd} -m pcons.util.commands copy $$in $$out",
+            "copycmd": [
+                python_cmd,
+                "-m",
+                "pcons.util.commands",
+                "copy",
+                "$$in",
+                "$$out",
+            ],
             # Directory tree copy with depfile support
-            # $destdir is a per-build variable set by InstallNodeFactory
-            "copytreecmd": (
-                f"{python_cmd} -m pcons.util.commands copytree "
-                "--depfile $$out.d --stamp $$out $$in $$destdir"
-            ),
+            # $$destdir becomes $destdir in the Ninja file, filled in by
+            # per-build variables from InstallContext
+            "copytreecmd": [
+                python_cmd,
+                "-m",
+                "pcons.util.commands",
+                "copytree",
+                "--depfile",
+                "$$out.d",
+                "--stamp",
+                "$$out",
+                "$$in",
+                "$$destdir",
+            ],
+            # Default destination directory (can be overridden per-target)
+            "destdir": "",
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -246,6 +269,8 @@ class InstallNodeFactory:
         self, target: Target, sources: list[FileNode], dest_dir: Path
     ) -> None:
         """Create copytree node for InstallDir target."""
+        from pcons.tools.archive_context import InstallContext
+
         if not sources:
             return
 
@@ -282,8 +307,14 @@ class InstallNodeFactory:
         except ValueError:
             rel_dest = dest_path
 
+        # Create context from target (merges env defaults with target overrides)
+        env = getattr(target, "_env", None)
+        context = InstallContext.from_target(
+            target, env, destdir=str(rel_dest).replace("\\", "/")
+        )
+
         # Store build info referencing env.install.copytreecmd
-        # The destdir variable is set per-build
+        # The context provides variables via get_variables()
         stamp_node._build_info = {
             "tool": "install",
             "command_var": "copytreecmd",
@@ -291,8 +322,8 @@ class InstallNodeFactory:
             "depfile": "$out.d",
             "deps_style": "gcc",
             "description": "INSTALLDIR $out",
-            # Per-build variables for this specific target
-            "variables": {"destdir": str(rel_dest).replace("\\", "/")},
+            # Context provides variables for per-build substitution
+            "context": context,
         }
 
         # Add stamp node as output

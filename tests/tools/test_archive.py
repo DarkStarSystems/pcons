@@ -178,6 +178,67 @@ class TestZipfileBuilder:
         assert zf._builder_data["base_dir"] == "src"
 
 
+class TestArchiveTargetProperties:
+    """Tests for ArchiveTarget properties (compression, basedir)."""
+
+    def test_tarfile_compression_property(self, tmp_path):
+        """ArchiveTarget.compression property allows override."""
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # Create tarfile with default compression inferred from extension
+        tar = project.Tarfile(env, output="archive.tar.gz", sources=[], name="test")
+        assert tar.compression == "gzip"  # Inferred from extension
+
+        # Override compression after creation
+        tar.compression = "xz"
+        assert tar.compression == "xz"
+
+    def test_tarfile_basedir_property(self, tmp_path):
+        """ArchiveTarget.basedir property allows override."""
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # Create tarfile with default basedir
+        tar = project.Tarfile(env, output="archive.tar.gz", sources=[], name="test")
+        assert tar.basedir == "."
+
+        # Override basedir after creation
+        tar.basedir = "custom/path"
+        assert tar.basedir == "custom/path"
+
+    def test_zipfile_basedir_property(self, tmp_path):
+        """Zipfile also supports basedir override."""
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        zf = project.Zipfile(env, output="archive.zip", sources=[], name="test")
+        assert zf.basedir == "."
+
+        zf.basedir = "src"
+        assert zf.basedir == "src"
+
+    def test_property_override_used_in_context(self, tmp_path):
+        """Property overrides are picked up by ArchiveContext."""
+        from pcons.tools.archive_context import ArchiveContext
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        tar = project.Tarfile(
+            env, output="archive.tar.gz", sources=[], name="test", base_dir="initial"
+        )
+
+        # Override after creation
+        tar.compression = "bz2"
+        tar.basedir = "overridden"
+
+        # Create context and verify it uses the overridden values
+        context = ArchiveContext.from_target(tar, env)
+        assert context.compression == "bz2"
+        assert context.basedir == "overridden"
+
+
 class TestArchiveNinjaGeneration:
     """Tests for Ninja generation of archive targets."""
 

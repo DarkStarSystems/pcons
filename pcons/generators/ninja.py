@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from pcons.core.node import FileNode, Node
 from pcons.core.paths import PathResolver
 from pcons.generators.generator import BaseGenerator
-from pcons.tools.toolchain import ToolchainContext
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
@@ -551,13 +551,20 @@ class NinjaGenerator(BaseGenerator):
                     out_path = self._make_output_relative(info_dict["path"])
                     f.write(f"  out_{name} = {out_path}\n")
 
-        # Write build variables from context (toolchain-specific formatting)
+        # Write build variables from context (any object with get_variables())
+        # This supports ToolchainContext (compile/link), ArchiveContext, InstallContext
         context = build_info.get("context")
-        if context is not None and isinstance(context, ToolchainContext):
-            variables = context.get_variables()
+        if context is not None and hasattr(context, "get_variables"):
+            # Use cast to satisfy type checker - we've verified the method exists
+            get_variables = cast(
+                "Callable[[], dict[str, list[str]]]", context.get_variables
+            )
+            variables: dict[str, list[str]] = get_variables()
             for var_name, var_value in variables.items():
+                # var_value should be a list of tokens
+                if not isinstance(var_value, list):
+                    var_value = [str(var_value)] if var_value else []
                 if var_value:  # Only write non-empty values
-                    # var_value is a list of tokens
                     # For includes and libdirs, try to relativize paths
                     if var_name in ("includes", "libdirs"):
                         var_value = [
@@ -569,7 +576,8 @@ class NinjaGenerator(BaseGenerator):
                     ]
                     f.write(f"  {var_name} = {' '.join(escaped_tokens)}\n")
 
-        # Write custom per-build variables from build_info (for Install, Archive, etc.)
+        # Write custom per-build variables from build_info (legacy support)
+        # Note: New code should use context objects instead
         custom_vars = build_info.get("variables")
         if custom_vars and isinstance(custom_vars, dict):
             for var_name, var_value in custom_vars.items():
@@ -910,6 +918,8 @@ class NinjaGenerator(BaseGenerator):
         Returns:
             Command template string, or None if not available.
         """
+        from pcons.core.subst import to_shell_command
+
         # Import standalone tools here to avoid circular imports
         if tool_name == "install":
             from pcons.tools.install import InstallTool
@@ -923,4 +933,14 @@ class NinjaGenerator(BaseGenerator):
             return None
 
         defaults = tool.default_vars()
-        return str(defaults.get(command_var, "")) or None
+        cmd_template = defaults.get(command_var)
+        if cmd_template is None:
+            return None
+
+        # Convert list templates to shell command string
+        # List templates are passed through as-is (tokens are already formatted)
+        if isinstance(cmd_template, list):
+            # Cast to list[str] for type checker - we know the template is a list of strings
+            return to_shell_command(cast(list[str], cmd_template), shell="ninja")
+
+        return str(cmd_template) or None

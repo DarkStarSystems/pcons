@@ -7,7 +7,12 @@ This module provides:
 - Zipfile: Builder for zip archives (.zip)
 
 Users can customize the archive commands via the tool namespace:
-    env.archive.tarcmd = "tar -cvf $out -C $basedir $in"  # Use system tar
+    env.archive.tarcmd = ["tar", "-cvf", "$$out", "-C", "$archive.basedir", "$$in"]
+
+Target-level overrides are supported:
+    tarfile = project.Tarfile(env, output="foo.tar.gz", sources=[...])
+    tarfile.compression = "xz"  # Override for this target
+    tarfile.basedir = "src"
 """
 
 from __future__ import annotations
@@ -35,17 +40,19 @@ class ArchiveTool(StandaloneTool):
     The Tarfile and Zipfile builders reference these command templates.
 
     Variables:
-        tarcmd: Command template for creating tar archives.
-                Default: python archive_helper.py --type tar ...
-        zipcmd: Command template for creating zip archives.
-                Default: python archive_helper.py --type zip ...
+        tarcmd: Command template for creating tar archives (list of tokens).
+                Default: [python, archive_helper.py, --type, tar, ...]
+        zipcmd: Command template for creating zip archives (list of tokens).
+                Default: [python, archive_helper.py, --type, zip, ...]
+        compression: Default compression type for tar (None, "gzip", "bz2", "xz").
+        basedir: Default base directory for archive paths.
 
     Example:
-        # Use system tar
-        env.archive.tarcmd = "tar -cvf $out -C $basedir $in"
+        # Use system tar (as list)
+        env.archive.tarcmd = ["tar", "-cvf", "$$out", "-C", "$archive.basedir", "$$in"]
 
-        # Use custom compression
-        env.archive.tarcmd = "tar -czvf $out -C $basedir $in"
+        # Set default compression
+        env.archive.compression = "gzip"
     """
 
     def __init__(self) -> None:
@@ -56,26 +63,47 @@ class ArchiveTool(StandaloneTool):
         """Return default command templates.
 
         Uses Python helper script for cross-platform compatibility.
+        Commands are lists of tokens for proper handling of paths with spaces.
         The $$ escaping preserves $ for ninja variable substitution.
+        Pcons variables ($archive.basedir, $archive.compression_flag) are
+        expanded via the context mechanism.
         """
         import pcons.util.archive_helper as archive_mod
 
-        # Use escaped $$ for ninja variables since these
-        # get processed by env.subst() before going to ninja
         python_cmd = sys.executable.replace("\\", "/")
         helper_path = str(Path(archive_mod.__file__)).replace("\\", "/")
 
         return {
-            # Tar command: $compression_flag and $basedir are per-build variables
-            "tarcmd": (
-                f"{python_cmd} {helper_path} --type tar "
-                "$$compression_flag --output $$out --base-dir $$basedir $$in"
-            ),
-            # Zip command: $basedir is a per-build variable
-            "zipcmd": (
-                f"{python_cmd} {helper_path} --type zip "
-                "--output $$out --base-dir $$basedir $$in"
-            ),
+            # Tar command: uses per-build variables for compression_flag and basedir
+            # $$compression_flag and $$basedir become $compression_flag and $basedir
+            # in the Ninja file, filled in by per-build variables from ArchiveContext
+            "tarcmd": [
+                python_cmd,
+                helper_path,
+                "--type",
+                "tar",
+                "$$compression_flag",
+                "--output",
+                "$$out",
+                "--base-dir",
+                "$$basedir",
+                "$$in",
+            ],
+            # Zip command: uses per-build variable for basedir
+            "zipcmd": [
+                python_cmd,
+                helper_path,
+                "--type",
+                "zip",
+                "--output",
+                "$$out",
+                "--base-dir",
+                "$$basedir",
+                "$$in",
+            ],
+            # Default settings (can be overridden in env or per-target)
+            "compression": None,
+            "basedir": ".",
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -156,28 +184,24 @@ class ArchiveNodeFactory:
 
     def _create_archive_node(self, target: Target, sources: list[FileNode]) -> None:
         """Create archive output node for a Tarfile or Zipfile target."""
+        from pcons.tools.archive_context import ArchiveContext
+
         build_data = target._builder_data
         if build_data is None:
             return
 
         output_path = Path(build_data["output"])
         tool = build_data["tool"]
-        base_dir = build_data.get("base_dir", ".")
 
         # Create the archive output node
         archive_node = FileNode(output_path, defined_at=get_caller_location())
         archive_node.depends(sources)
 
-        # Build per-build variables for the command template
-        variables: dict[str, str] = {"basedir": str(base_dir)}
+        # Create context from target (merges env defaults with target overrides)
+        env = getattr(target, "_env", None)
+        context = ArchiveContext.from_target(target, env)
 
         if tool == "tarfile":
-            compression = build_data.get("compression")
-            # compression_flag is a per-build variable
-            if compression:
-                variables["compression_flag"] = f"--compression {compression}"
-            else:
-                variables["compression_flag"] = ""
             command_var = "tarcmd"
             description = "TAR $out"
         else:  # zipfile
@@ -185,13 +209,14 @@ class ArchiveNodeFactory:
             description = "ZIP $out"
 
         # Store build info referencing env.archive.tarcmd or env.archive.zipcmd
+        # The context provides variables via get_variables()
         archive_node._build_info = {
             "tool": "archive",
             "command_var": command_var,
             "sources": sources,
             "description": description,
-            # Per-build variables for this specific target
-            "variables": variables,
+            # Context provides variables for per-build substitution
+            "context": context,
         }
 
         # Add to target's output nodes
@@ -201,6 +226,58 @@ class ArchiveNodeFactory:
         # Register with project
         if output_path not in self.project._nodes:
             self.project._nodes[output_path] = archive_node
+
+
+class ArchiveTarget(Target):
+    """Extended Target for archive builds with compression and basedir properties.
+
+    This subclass adds archive-specific properties that can override env defaults:
+    - compression: Compression type for tar archives (None, "gzip", "bz2", "xz")
+    - basedir: Base directory for computing relative paths in the archive
+
+    Example:
+        tarfile = project.Tarfile(env, output="foo.tar.gz", sources=[...])
+        tarfile.compression = "xz"  # Override for this target
+        tarfile.basedir = "src"     # Set base directory
+    """
+
+    # Use a simple dict to store extra properties since Target uses __slots__
+    # We can't add new slots in a subclass if parent has __slots__
+
+    @property
+    def compression(self) -> str | None:
+        """Get the compression type for this archive."""
+        # Check for override attribute first
+        override = object.__getattribute__(self, "__dict__").get(
+            "_compression_override"
+        )
+        if override is not None:
+            return override
+        # Fall back to builder_data
+        builder_data = getattr(self, "_builder_data", None) or {}
+        return builder_data.get("compression")
+
+    @compression.setter
+    def compression(self, value: str | None) -> None:
+        """Set the compression type for this archive (overrides env default)."""
+        # Store in __dict__ since we can't add slots
+        object.__getattribute__(self, "__dict__")["_compression_override"] = value
+
+    @property
+    def basedir(self) -> str:
+        """Get the base directory for this archive."""
+        # Check for override attribute first
+        override = object.__getattribute__(self, "__dict__").get("_basedir_override")
+        if override is not None:
+            return override
+        # Fall back to builder_data
+        builder_data = getattr(self, "_builder_data", None) or {}
+        return builder_data.get("base_dir", ".")
+
+    @basedir.setter
+    def basedir(self, value: str | Path) -> None:
+        """Set the base directory for this archive (overrides env default)."""
+        object.__getattribute__(self, "__dict__")["_basedir_override"] = str(value)
 
 
 @builder(
@@ -213,6 +290,11 @@ class TarfileBuilder:
     """Create a tar archive from source files/directories.
 
     Supports all common compression formats: .tar.gz, .tar.bz2, .tar.xz, .tgz, .tar
+
+    The returned ArchiveTarget supports property-based overrides:
+        tarfile = project.Tarfile(env, output="foo.tar.gz", sources=[...])
+        tarfile.compression = "xz"  # Override for this target
+        tarfile.basedir = "src"
     """
 
     @staticmethod
@@ -225,7 +307,7 @@ class TarfileBuilder:
         compression: str | None = None,
         base_dir: str | Path | None = None,
         name: str | None = None,
-    ) -> Target:
+    ) -> ArchiveTarget:
         """Create a Tarfile target.
 
         Args:
@@ -238,7 +320,7 @@ class TarfileBuilder:
             name: Optional target name.
 
         Returns:
-            Target representing the archive.
+            ArchiveTarget representing the archive, with settable properties.
         """
         # Normalize output path using PathResolver
         output_path = project.path_resolver.normalize_target_path(output)
@@ -260,7 +342,7 @@ class TarfileBuilder:
                 output, [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tar"]
             )
 
-        target = Target(
+        target = ArchiveTarget(
             name,
             target_type=TargetType.ARCHIVE,
             defined_at=get_caller_location(),
@@ -289,7 +371,12 @@ class TarfileBuilder:
     requires_env=True,
 )
 class ZipfileBuilder:
-    """Create a zip archive from source files/directories."""
+    """Create a zip archive from source files/directories.
+
+    The returned ArchiveTarget supports property-based overrides:
+        zipfile = project.Zipfile(env, output="foo.zip", sources=[...])
+        zipfile.basedir = "src"
+    """
 
     @staticmethod
     def create_target(
@@ -300,7 +387,7 @@ class ZipfileBuilder:
         sources: list[str | Path | FileNode | Target] | None = None,
         base_dir: str | Path | None = None,
         name: str | None = None,
-    ) -> Target:
+    ) -> ArchiveTarget:
         """Create a Zipfile target.
 
         Args:
@@ -312,7 +399,7 @@ class ZipfileBuilder:
             name: Optional target name.
 
         Returns:
-            Target representing the archive.
+            ArchiveTarget representing the archive, with settable properties.
         """
         # Normalize output path using PathResolver
         output_path = project.path_resolver.normalize_target_path(output)
@@ -321,7 +408,7 @@ class ZipfileBuilder:
         if name is None:
             name = _name_from_output(output, [".zip"])
 
-        target = Target(
+        target = ArchiveTarget(
             name,
             target_type=TargetType.ARCHIVE,
             defined_at=get_caller_location(),
