@@ -186,55 +186,21 @@ class NinjaGenerator(BaseGenerator):
             # Get the actual command from the environment or build_info
             command = f"echo 'No command for {rule_key}'"
 
-            # Special case for copy command (from Install) - check this BEFORE
-            # generic command since Install also sets a "command" field
-            if tool_name == "copy":
-                copy_cmd = build_info.get("copy_cmd", "cp $in $out")
-                command = copy_cmd + "$post_build"
-                description = "INSTALL $out"
-            # Special case for copytree command (from InstallDir)
-            elif tool_name == "copytree":
-                copytree_cmd = build_info.get("copytree_cmd", "cp -r $in $out")
-                command = copytree_cmd + "$post_build"
-                description = "INSTALLDIR $out"
-            # Special case for lipo (universal binary creation on macOS)
-            elif tool_name == "lipo":
-                command = "lipo -create -output $out $in"
-                description = "LIPO $out"
-            # Archive builders (Tarfile, Zipfile)
-            # Use sys.executable (Python that ran pcons) with the standalone helper script
-            elif tool_name == "tarfile":
-                import sys
-
-                import pcons.util.archive_helper as archive_mod
-
-                compression = build_info.get("compression")
-                base_dir = build_info.get("base_dir", ".")
-                compression_flag = f"--compression {compression}" if compression else ""
-                helper_path = Path(archive_mod.__file__)
-                command = (
-                    f"{sys.executable} {helper_path} --type tar "
-                    f"{compression_flag} --output $out --base-dir {base_dir} $in"
-                )
-                description = "TAR $out"
-            elif tool_name == "zipfile":
-                import sys
-
-                import pcons.util.archive_helper as archive_mod
-
-                base_dir = build_info.get("base_dir", ".")
-                helper_path = Path(archive_mod.__file__)
-                command = (
-                    f"{sys.executable} {helper_path} --type zip "
-                    f"--output $out --base-dir {base_dir} $in"
-                )
-                description = "ZIP $out"
-            # Check for generic command builder (has custom command in build_info)
-            elif custom_command:
-                # Generic command builder - use the command directly
+            # Check for command in build_info first (generic commands, install, archive)
+            # This covers: Install, InstallAs, InstallDir, Tarfile, Zipfile, lipo, and
+            # any custom builder that sets command/description in _build_info
+            if custom_command:
+                # Builder provided command directly - use it
                 # Convert $SOURCE, $TARGET etc. to Ninja $in, $out
                 command = self._convert_command_variables(custom_command)
-                description = "COMMAND $out"
+                # Append $post_build for post-build commands support
+                command = command.rstrip() + "$post_build"
+                # Use description from build_info if provided, otherwise default
+                custom_description = build_info.get("description")
+                if custom_description:
+                    description = str(custom_description)
+                else:
+                    description = "COMMAND $out"
             elif env is not None:
                 tool_config = getattr(env, tool_name, None)
                 if tool_config is not None:

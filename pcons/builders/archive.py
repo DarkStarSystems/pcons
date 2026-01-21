@@ -90,27 +90,47 @@ class ArchiveNodeFactory:
 
     def _create_archive_node(self, target: Target, sources: list[FileNode]) -> None:
         """Create archive output node for a Tarfile or Zipfile target."""
+        import sys
+
+        import pcons.util.archive_helper as archive_mod
+
         build_data = target._builder_data
         if build_data is None:
             return
 
         output_path = Path(build_data["output"])
+        tool = build_data["tool"]
+        base_dir = build_data.get("base_dir", ".")
 
         # Create the archive output node
         archive_node = FileNode(output_path, defined_at=get_caller_location())
         archive_node.depends(sources)
 
-        # Build the build_info for the generator
-        archive_node._build_info = {
-            "tool": build_data["tool"],
-            "output": str(output_path),
-            "sources": sources,
-            "base_dir": build_data.get("base_dir", "."),
-        }
+        # Build the full command - generators use this directly
+        python_cmd = sys.executable.replace("\\", "/")
+        helper_path = str(Path(archive_mod.__file__)).replace("\\", "/")
 
-        # Add compression for tarfiles
-        if "compression" in build_data:
-            archive_node._build_info["compression"] = build_data["compression"]
+        if tool == "tarfile":
+            compression = build_data.get("compression")
+            compression_flag = f"--compression {compression}" if compression else ""
+            command = (
+                f"{python_cmd} {helper_path} --type tar "
+                f"{compression_flag} --output $out --base-dir {base_dir} $in"
+            )
+            description = "TAR $out"
+        else:  # zipfile
+            command = (
+                f"{python_cmd} {helper_path} --type zip "
+                f"--output $out --base-dir {base_dir} $in"
+            )
+            description = "ZIP $out"
+
+        archive_node._build_info = {
+            "tool": tool,
+            "command": command,
+            "sources": sources,
+            "description": description,
+        }
 
         # Add to target's output nodes
         target.output_nodes.append(archive_node)

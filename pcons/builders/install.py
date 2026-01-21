@@ -126,12 +126,13 @@ class InstallNodeFactory:
             dest_node.depends([file_node])
 
             # Store build info for the copy command
+            # Use full command with $in/$out - generators use this directly
             dest_node._build_info = {
                 "tool": "copy",
-                "command": copy_cmd,
+                "command": f"{copy_cmd} $in $out",
                 "command_var": "copycmd",
                 "sources": [file_node],
-                "copy_cmd": f"{copy_cmd} $in $out",
+                "description": "INSTALL $out",
             }
 
             installed_nodes.append(dest_node)
@@ -174,12 +175,13 @@ class InstallNodeFactory:
         dest_node = FileNode(dest, defined_at=get_caller_location())
         dest_node.depends([source_node])
 
+        # Use full command with $in/$out - generators use this directly
         dest_node._build_info = {
             "tool": "copy",
-            "command": copy_cmd,
+            "command": f"{copy_cmd} $in $out",
             "command_var": "copycmd",
             "sources": [source_node],
-            "copy_cmd": f"{copy_cmd} $in $out",
+            "description": "INSTALL $out",
         }
 
         # Add installed file as output node
@@ -233,14 +235,15 @@ class InstallNodeFactory:
         except ValueError:
             rel_dest = dest_path
 
+        # Use full command - generators use this directly
         stamp_node._build_info = {
             "tool": "copytree",
-            "command": copytree_cmd,
+            "command": f"{copytree_cmd} --depfile $out.d --stamp $out $in {rel_dest}",
             "command_var": "copytreecmd",
             "sources": [source_node],
-            "copytree_cmd": f"{copytree_cmd} --depfile $out.d --stamp $out $in {rel_dest}",
             "depfile": "$out.d",
             "deps_style": "gcc",
+            "description": "INSTALLDIR $out",
         }
 
         # Add stamp node as output

@@ -285,19 +285,23 @@ class MakefileGenerator(BaseGenerator):
                     env = e
                     break
 
+        # Check for command in build_info first (generic commands, install, archive)
+        # This covers: Install, InstallAs, InstallDir, Tarfile, Zipfile, lipo, and
+        # any custom builder that sets command in _build_info
+        custom_command = build_info.get("command")
+        if custom_command:
+            # Builder provided command directly - use it
+            # Convert $SOURCE, $TARGET etc. to $in/$out
+            command = self._convert_command_variables(str(custom_command))
+            command = self._substitute_make_vars(command, node, sources, build_info)
+            return self._append_post_build(command, node, target, sources)
+
         if env is None:
             return f"@echo 'No environment for {node.path}'"
 
         # Get command template from tool config
         tool_config = getattr(env, tool_name, None)
         if tool_config is None:
-            # Check for special copy command
-            if tool_name == "copy":
-                copy_cmd = build_info.get("copy_cmd", "cp $in $out")
-                command = self._substitute_make_vars(
-                    copy_cmd, node, sources, build_info
-                )
-                return self._append_post_build(command, node, target, sources)
             return f"@echo 'Unknown tool: {tool_name}'"
 
         command_template = getattr(tool_config, command_var, None)
@@ -515,3 +519,36 @@ class MakefileGenerator(BaseGenerator):
         path_str = str(path)
         # Escape $ as $$
         return self.ESCAPE_DOLLAR.sub("$$", path_str)
+
+    def _convert_command_variables(self, command: str) -> str:
+        """Convert env.Command() variables to Make-compatible variables.
+
+        Converts SCons-style variables:
+        - $SOURCE, $SOURCES -> $in
+        - $TARGET, $TARGETS -> $out
+        - ${SOURCES[n]} -> indexed source (handled later)
+        - ${TARGETS[n]} -> indexed target (handled later)
+
+        Args:
+            command: The command template with SCons-style variables.
+
+        Returns:
+            Command with Make-compatible variables.
+        """
+        # Convert plural forms first (so they don't match singular)
+        command = command.replace("$SOURCES", "$in")
+        command = command.replace("$TARGETS", "$out")
+
+        # Convert singular forms
+        command = command.replace("$SOURCE", "$in")
+        command = command.replace("$TARGET", "$out")
+
+        # Handle indexed access ${SOURCES[n]} and ${TARGETS[n]}
+        # These need special handling - for now, expand to all sources/targets
+        # (Makefile doesn't have a direct equivalent for indexed access)
+        import re
+
+        command = re.sub(r"\$\{SOURCES\[\d+\]\}", "$in", command)
+        command = re.sub(r"\$\{TARGETS\[\d+\]\}", "$out", command)
+
+        return command

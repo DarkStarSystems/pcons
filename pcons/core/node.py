@@ -55,6 +55,8 @@ class BuildInfo(TypedDict, total=False):
         sources: List of source Node objects.
         depfile: Depfile path pattern for Ninja (e.g., "$out.d").
         deps_style: Dependency style for Ninja ("gcc" or "msvc").
+        command: Direct command to run (for generic/custom builders).
+        description: Human-readable description for build output.
 
     Toolchain context:
         context: ToolchainContext providing variables for build statements.
@@ -68,18 +70,8 @@ class BuildInfo(TypedDict, total=False):
         output_name: Name of this output (for secondary outputs).
 
     Generic command builder:
-        command: The shell command to run.
         rule_name: Custom rule name for Ninja.
         all_targets: List of all target nodes.
-
-    Install/copy:
-        copy_cmd: Copy command template (e.g., "cp $in $out").
-        copytree_cmd: Copytree command template for directory installs.
-
-    Archive builders (Tarfile, Zipfile):
-        output: Output archive path (string).
-        compression: Compression type for tar (e.g., "gz", "bz2", "xz").
-        base_dir: Base directory for archive paths.
     """
 
     # Common fields
@@ -89,6 +81,8 @@ class BuildInfo(TypedDict, total=False):
     sources: list[Any]  # list[Node], but avoid circular import
     depfile: str | None
     deps_style: str | None
+    command: str  # Direct command for generic/custom builders
+    description: str  # Human-readable build description
 
     # Toolchain-provided context
     # Generators use context.get_variables() for build variables
@@ -101,18 +95,8 @@ class BuildInfo(TypedDict, total=False):
     output_name: str
 
     # Generic command builder
-    command: str
     rule_name: str
     all_targets: list[Any]  # list[Node]
-
-    # Install/copy
-    copy_cmd: str
-    copytree_cmd: str
-
-    # Archive builders
-    output: str
-    compression: str | None
-    base_dir: str
 
 
 class Node(ABC):
