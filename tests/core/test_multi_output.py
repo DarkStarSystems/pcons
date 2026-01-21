@@ -183,7 +183,7 @@ class TestMultiOutputBuilder:
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
-        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$out $$in"
+        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$TARGET $$SOURCES"
 
         result = builder(env, "test.dll", ["a.obj", "b.obj"])
 
@@ -208,7 +208,7 @@ class TestMultiOutputBuilder:
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
-        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$out $$in"
+        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$TARGET $$SOURCES"
 
         result = builder(env, "build/mylib.dll", ["a.obj"])
 
@@ -232,7 +232,7 @@ class TestMultiOutputBuilder:
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
-        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$out $$in"
+        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$TARGET $$SOURCES"
 
         source = FileNode("a.obj")
         result = builder(env, "test.dll", [source])
@@ -255,7 +255,7 @@ class TestMultiOutputBuilder:
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
-        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$out $$in"
+        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$TARGET $$SOURCES"
 
         result = builder(env, "test.dll", ["a.obj"])
 
@@ -284,7 +284,7 @@ class TestMultiOutputBuilder:
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
-        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$out $$in"
+        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$TARGET $$SOURCES"
 
         result = builder(env, "test.dll", ["a.obj"])
         assert isinstance(result, OutputGroup)
@@ -309,7 +309,7 @@ class TestMultiOutputBuilder:
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
-        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$out $$in"
+        env.link.sharedcmd = "$link.cmd /DLL /OUT:$$TARGET $$SOURCES"
 
         result = builder(env, "test.dll", ["a.obj"])
 
@@ -338,7 +338,7 @@ class TestMultiOutputBuilderSingleSource:
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "cl.exe"
-        env.cc.objcmd = "$cc.cmd /c /Fo$$out $$in"
+        env.cc.objcmd = "$cc.cmd /c /Fo$$TARGET $$SOURCE"
 
         result = builder(env, None, ["a.c", "b.c"])
 

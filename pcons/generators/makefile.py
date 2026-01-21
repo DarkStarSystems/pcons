@@ -321,7 +321,8 @@ class MakefileGenerator(BaseGenerator):
         # Expand the command template
         command = env.subst(command_template, shell="bash")
 
-        # Substitute $in, $out with Make automatic variables
+        # Convert $SOURCE/$TARGET to $in/$out, then substitute with actual paths
+        command = self._convert_command_variables(command)
         command = self._substitute_make_vars(command, node, sources, build_info)
 
         # Append post-build commands if any
@@ -530,33 +531,43 @@ class MakefileGenerator(BaseGenerator):
         return result
 
     def _convert_command_variables(self, command: str) -> str:
-        """Convert env.Command() variables to Make-compatible variables.
+        """Convert generator-agnostic variables to Make-compatible variables.
 
-        Converts SCons-style variables:
+        Converts pcons template variables to intermediate $in/$out:
         - $SOURCE, $SOURCES -> $in
         - $TARGET, $TARGETS -> $out
+        - $TARGET.d -> $out.d (depfile pattern)
+        - $TARGET_xxx -> $out_xxx (multi-output pattern)
         - ${SOURCES[n]} -> indexed source (handled later)
         - ${TARGETS[n]} -> indexed target (handled later)
 
+        These intermediate variables are then substituted with actual paths
+        by _substitute_make_vars().
+
         Args:
-            command: The command template with SCons-style variables.
+            command: The command template with generator-agnostic variables.
 
         Returns:
             Command with Make-compatible variables.
         """
+        import re
+
         # Convert plural forms first (so they don't match singular)
         command = command.replace("$SOURCES", "$in")
         command = command.replace("$TARGETS", "$out")
 
         # Convert singular forms
         command = command.replace("$SOURCE", "$in")
+        # Handle $TARGET_xxx patterns before plain $TARGET (e.g., $TARGET_import_lib)
+        command = re.sub(r"\$TARGET_(\w+)", r"$out_\1", command)
+        # Handle $TARGET.d pattern for depfiles
+        command = command.replace("$TARGET.d", "$out.d")
+        # Convert plain $TARGET
         command = command.replace("$TARGET", "$out")
 
         # Handle indexed access ${SOURCES[n]} and ${TARGETS[n]}
         # These need special handling - for now, expand to all sources/targets
         # (Makefile doesn't have a direct equivalent for indexed access)
-        import re
-
         command = re.sub(r"\$\{SOURCES\[\d+\]\}", "$in", command)
         command = re.sub(r"\$\{TARGETS\[\d+\]\}", "$out", command)
 

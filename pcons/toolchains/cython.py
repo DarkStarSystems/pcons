@@ -77,8 +77,8 @@ class CythonTranspiler(BaseTool):
                 "$cython.cmd",
                 "$cython.flags",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -168,7 +168,7 @@ class CythonCCompiler(BaseTool):
             "includes": includes,
             "dprefix": "-D",
             "defines": [],
-            "depflags": ["-MD", "-MF", "$$out.d"],
+            "depflags": ["-MD", "-MF", "$$TARGET.d"],
             "objcmd": [
                 "$cycc.cmd",
                 "$cycc.flags",
@@ -177,8 +177,8 @@ class CythonCCompiler(BaseTool):
                 "$cycc.depflags",
                 "-c",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -286,8 +286,8 @@ class CythonLinker(BaseTool):
                 "$cylink.cmd",
                 "$cylink.flags",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCES",
                 "${prefix(cylink.Lprefix, cylink.libdirs)}",
                 "${prefix(cylink.lprefix, cylink.libs)}",
             ],

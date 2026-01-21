@@ -425,22 +425,22 @@ class TestToShellCommand:
         assert result == 'echo "hello world"'
 
 
-class TestNinjaVariables:
-    """Test $$ escaping for Ninja variables like $in, $out."""
+class TestGeneratorVariables:
+    """Test $$ escaping for generator variables like $SOURCE, $TARGET."""
 
     def test_dollar_dollar_becomes_dollar(self):
-        # $$out becomes $out (which Ninja then processes)
-        result = subst("-o $$out $$in", {})
-        assert result == ["-o", "$out", "$in"]
+        # $$TARGET becomes $TARGET (which generators then convert to native syntax)
+        result = subst("-o $$TARGET $$SOURCE", {})
+        assert result == ["-o", "$TARGET", "$SOURCE"]
 
     def test_in_list_template(self):
-        result = subst(["-o", "$$out", "$$in"], {})
-        assert result == ["-o", "$out", "$in"]
+        result = subst(["-o", "$$TARGET", "$$SOURCE"], {})
+        assert result == ["-o", "$TARGET", "$SOURCE"]
 
     def test_full_command_template(self):
         ns = {"cc": {"cmd": "gcc", "flags": ["-Wall"]}}
-        result = subst(["$cc.cmd", "$cc.flags", "-c", "-o", "$$out", "$$in"], ns)
-        assert result == ["gcc", "-Wall", "-c", "-o", "$out", "$in"]
+        result = subst(["$cc.cmd", "$cc.flags", "-c", "-o", "$$TARGET", "$$SOURCE"], ns)
+        assert result == ["gcc", "-Wall", "-c", "-o", "$TARGET", "$SOURCE"]
 
 
 class TestRealWorldPatterns:
@@ -455,7 +455,7 @@ class TestRealWorldPatterns:
                 "includes": ["/usr/include", "src"],
                 "dprefix": "-D",
                 "defines": ["DEBUG", "VERSION=1"],
-                "depflags": ["-MD", "-MF", "$$out.d"],
+                "depflags": ["-MD", "-MF", "$$TARGET.d"],
             }
         }
         result = subst(
@@ -467,8 +467,8 @@ class TestRealWorldPatterns:
                 "$cc.depflags",
                 "-c",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
             ns,
         )
@@ -482,11 +482,11 @@ class TestRealWorldPatterns:
             "-DVERSION=1",
             "-MD",
             "-MF",
-            "$out.d",
+            "$TARGET.d",
             "-c",
             "-o",
-            "$out",
-            "$in",
+            "$TARGET",
+            "$SOURCE",
         ]
 
     def test_linker_command(self):
@@ -505,8 +505,8 @@ class TestRealWorldPatterns:
                 "$link.cmd",
                 "$link.flags",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
             ],
@@ -515,8 +515,8 @@ class TestRealWorldPatterns:
         assert result == [
             "gcc",
             "-o",
-            "$out",
-            "$in",
+            "$TARGET",
+            "$SOURCES",
             "-L/usr/lib",
             "-lm",
             "-lpthread",
@@ -540,8 +540,8 @@ class TestRealWorldPatterns:
                 "${prefix(cc.iprefix, cc.includes)}",
                 "${prefix(cc.dprefix, cc.defines)}",
                 "/c",
-                "/Fo$$out",
-                "$$in",
+                "/Fo$$TARGET",
+                "$$SOURCE",
             ],
             ns,
         )
@@ -552,8 +552,8 @@ class TestRealWorldPatterns:
             "/Iinclude",
             "/DWIN32",
             "/c",
-            "/Fo$out",
-            "$in",
+            "/Fo$TARGET",
+            "$SOURCE",
         ]
 
 

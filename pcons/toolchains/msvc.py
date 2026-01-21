@@ -79,8 +79,8 @@ class MsvcCompiler(BaseTool):
                 "${prefix(cc.dprefix, cc.defines)}",
                 "$cc.depflags",
                 "/c",
-                "/Fo$$out",
-                "$$in",
+                "/Fo$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -139,7 +139,7 @@ class MsvcLibrarian(BaseTool):
         return {
             "cmd": "lib.exe",
             "flags": ["/nologo"],
-            "libcmd": ["$lib.cmd", "$lib.flags", "/OUT:$$out", "$$in"],
+            "libcmd": ["$lib.cmd", "$lib.flags", "/OUT:$$TARGET", "$$SOURCES"],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -189,8 +189,8 @@ class MsvcResourceCompiler(BaseTool):
                 "$rc.flags",
                 "${prefix(rc.iprefix, rc.includes)}",
                 "${prefix(rc.dprefix, rc.defines)}",
-                "/fo$$out",
-                "$$in",
+                "/fo$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -272,8 +272,8 @@ class MsvcAssembler(BaseTool):
                 "$ml.flags",
                 "${prefix(ml.iprefix, ml.includes)}",
                 "/c",
-                "/Fo$$out",
-                "$$in",
+                "/Fo$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -342,8 +342,8 @@ class MsvcLinker(BaseTool):
             "progcmd": [
                 "$link.cmd",
                 "$link.flags",
-                "/OUT:$$out",
-                "$$in",
+                "/OUT:$$TARGET",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -351,9 +351,9 @@ class MsvcLinker(BaseTool):
                 "$link.cmd",
                 "/DLL",
                 "$link.flags",
-                "/OUT:$$out",
-                "/IMPLIB:$$out_import_lib",
-                "$$in",
+                "/OUT:$$TARGET",
+                "/IMPLIB:$$TARGET_import_lib",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],

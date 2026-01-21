@@ -40,8 +40,8 @@ class TestMsvcCompiler:
         assert isinstance(objcmd, list)
         assert "$cc.cmd" in objcmd
         assert "/c" in objcmd
-        # Output uses $$out which becomes $out for ninja
-        assert "/Fo$$out" in objcmd
+        # Output uses $$TARGET which generators convert to native syntax
+        assert "/Fo$$TARGET" in objcmd
 
     def test_depflags(self):
         cc = MsvcCompiler()
@@ -60,7 +60,7 @@ class TestMsvcCompiler:
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "cl.exe"
-        env.cc.objcmd = ["cl.exe", "/c", "/Fo$$out", "$$in"]
+        env.cc.objcmd = ["cl.exe", "/c", "/Fo$$TARGET", "$$SOURCE"]
         result = obj_builder(env, "test.obj", ["test.c"])
         assert len(result) == 1
         target = result[0]
@@ -94,8 +94,8 @@ class TestMsvcLibrarian:
         # libcmd is now a list template
         libcmd = vars["libcmd"]
         assert isinstance(libcmd, list)
-        # Output uses $$out which becomes $out for ninja
-        assert "/OUT:$$out" in libcmd
+        # Output uses $$TARGET which becomes $out for ninja
+        assert "/OUT:$$TARGET" in libcmd
 
     def test_builders(self):
         lib = MsvcLibrarian()
@@ -126,8 +126,8 @@ class TestMsvcLinker:
         sharedcmd = vars["sharedcmd"]
         assert isinstance(progcmd, list)
         assert isinstance(sharedcmd, list)
-        # Output uses $$out which becomes $out for ninja
-        assert "/OUT:$$out" in progcmd
+        # Output uses $$TARGET which becomes $out for ninja
+        assert "/OUT:$$TARGET" in progcmd
         assert "/DLL" in sharedcmd
 
     def test_builders(self):
@@ -179,7 +179,7 @@ class TestMsvcLinker:
         env.add_tool("link")
         env.link.cmd = "link.exe"
         env.link.flags = ["/nologo"]
-        env.link.sharedcmd = ["$link.cmd", "/DLL", "/OUT:$$out", "$$in"]
+        env.link.sharedcmd = ["$link.cmd", "/DLL", "/OUT:$$TARGET", "$$SOURCES"]
 
         result = shared_builder(env, "build/mylib.dll", ["a.obj", "b.obj"])
 
@@ -266,8 +266,8 @@ class TestMsvcResourceCompiler:
         rccmd = vars["rccmd"]
         assert isinstance(rccmd, list)
         assert "$rc.cmd" in rccmd
-        # Output uses $$out which becomes $out for ninja
-        assert "/fo$$out" in rccmd
+        # Output uses $$TARGET which becomes $out for ninja
+        assert "/fo$$TARGET" in rccmd
 
     def test_builders(self):
         rc = MsvcResourceCompiler()
@@ -286,7 +286,7 @@ class TestMsvcResourceCompiler:
         env = Environment()
         env.add_tool("rc")
         env.rc.cmd = "rc.exe"
-        env.rc.rccmd = ["rc.exe", "/nologo", "/fo$$out", "$$in"]
+        env.rc.rccmd = ["rc.exe", "/nologo", "/fo$$TARGET", "$$SOURCE"]
 
         result = res_builder(env, "app.res", ["app.rc"])
         assert len(result) == 1
@@ -302,7 +302,7 @@ class TestMsvcResourceCompiler:
         env = Environment()
         env.add_tool("rc")
         env.rc.cmd = "rc.exe"
-        env.rc.rccmd = ["rc.exe", "/nologo", "/fo$$out", "$$in"]
+        env.rc.rccmd = ["rc.exe", "/nologo", "/fo$$TARGET", "$$SOURCE"]
 
         result = res_builder(env, "app.res", ["app.rc"])
         assert len(result) == 1

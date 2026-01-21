@@ -147,11 +147,11 @@ class TestNinjaQuoting:
             "${prefix(cc.iprefix, cc.includes)}",
             "${prefix(cc.dprefix, cc.defines)}",
             "-c",
-            "$$in",
+            "$$SOURCE",
             "-o",
-            "$$out",
+            "$$TARGET",
         ]
-        env.cc.progcmd = "gcc -o $$out $$in"
+        env.cc.progcmd = "gcc -o $$TARGET $$SOURCES"
 
         # Create source file
         source_dir = tmp_path / "src with spaces"
@@ -329,11 +329,11 @@ class TestEndToEndSpacesInPaths:
             "${prefix(cc.iprefix, cc.includes)}",
             "${prefix(cc.dprefix, cc.defines)}",
             "-c",
-            "$$in",
+            "$$SOURCE",
             "-o",
-            "$$out",
+            "$$TARGET",
         ]
-        env.cc.progcmd = "gcc -o $$out $$in"
+        env.cc.progcmd = "gcc -o $$TARGET $$SOURCES"
 
         # Build with all the space-containing paths
         prog = project.Program("my_program", env, sources=[str(source)])

@@ -489,7 +489,7 @@ class Project:
                 env,
                 target=build_dir / "generated.h",
                 source=src_dir / "spec.yml",
-                command="python gen.py $in -o $out",
+                command="python gen.py $SOURCE -o $TARGET",
             )
         """
         return env.Command(target=target, source=source, command=command, name=name)

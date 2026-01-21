@@ -30,7 +30,7 @@ class ClangCCompiler(BaseTool):
             "includes": [],
             "dprefix": "-D",
             "defines": [],
-            "depflags": ["-MD", "-MF", "$$out.d"],
+            "depflags": ["-MD", "-MF", "$$TARGET.d"],
             "objcmd": [
                 "$cc.cmd",
                 "$cc.flags",
@@ -39,8 +39,8 @@ class ClangCCompiler(BaseTool):
                 "$cc.depflags",
                 "-c",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -90,7 +90,7 @@ class ClangCxxCompiler(BaseTool):
             "includes": [],
             "dprefix": "-D",
             "defines": [],
-            "depflags": ["-MD", "-MF", "$$out.d"],
+            "depflags": ["-MD", "-MF", "$$TARGET.d"],
             "objcmd": [
                 "$cxx.cmd",
                 "$cxx.flags",
@@ -99,8 +99,8 @@ class ClangCxxCompiler(BaseTool):
                 "$cxx.depflags",
                 "-c",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -150,7 +150,7 @@ class LlvmArchiver(BaseTool):
         return {
             "cmd": ar_cmd,
             "flags": ["rcs"],
-            "libcmd": ["$ar.cmd", "$ar.flags", "$$out", "$$in"],
+            "libcmd": ["$ar.cmd", "$ar.flags", "$$TARGET", "$$SOURCES"],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -221,8 +221,8 @@ class LlvmLinker(BaseTool):
                 "$link.cmd",
                 "$link.flags",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
                 "${prefix(link.Fprefix, link.frameworkdirs)}",
@@ -233,8 +233,8 @@ class LlvmLinker(BaseTool):
                 shared_flag,
                 "$link.flags",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
                 "${prefix(link.Fprefix, link.frameworkdirs)}",
@@ -308,8 +308,8 @@ class MetalCompiler(BaseTool):
                 "${prefix(metal.iprefix, metal.includes)}",
                 "-c",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
         }
 

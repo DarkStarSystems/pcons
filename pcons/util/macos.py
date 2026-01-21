@@ -198,7 +198,7 @@ def create_universal_binary(
         env._project = project
 
     # Create the lipo command
-    # The command uses $SOURCES and $TARGET which are converted to Ninja's $in and $out
+    # The command uses $SOURCES and $TARGET (generator-agnostic variables)
     # Convert FileNodes to paths for the source argument
     source_paths: list[Path | str] = [node.path for node in input_nodes]
 

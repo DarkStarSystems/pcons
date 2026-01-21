@@ -311,8 +311,8 @@ class TestFrameworkSubstitution:
             "$link.cmd",
             "$link.flags",
             "-o",
-            "$$out",
-            "$$in",
+            "$$TARGET",
+            "$$SOURCES",
             "${prefix(link.Lprefix, link.libdirs)}",
             "${prefix(link.lprefix, link.libs)}",
             "${prefix(link.Fprefix, link.frameworkdirs)}",
@@ -321,8 +321,8 @@ class TestFrameworkSubstitution:
 
         result = env.subst_list(
             link.progcmd,
-            out="myapp",
-            **{"in": "main.o"},
+            TARGET="myapp",
+            SOURCES="main.o",
         )
 
         assert "clang" in result
@@ -348,19 +348,19 @@ class TestFrameworkSubstitution:
         link.progcmd = [
             "$link.cmd",
             "-o",
-            "$$out",
-            "$$in",
+            "$$TARGET",
+            "$$SOURCES",
             "${prefix(link.Fprefix, link.frameworkdirs)}",
             "${pairwise(link.fprefix, link.frameworks)}",
         ]
 
         result = env.subst_list(
             link.progcmd,
-            out="myapp",
-            **{"in": "main.o"},
+            TARGET="myapp",
+            SOURCES="main.o",
         )
 
-        # Should just have clang -o $out $in
-        assert result == ["clang", "-o", "$out", "$in"]
+        # Should just have clang -o $TARGET $SOURCES
+        assert result == ["clang", "-o", "$TARGET", "$SOURCES"]
         assert "-framework" not in result
         assert "-F" not in " ".join(result)

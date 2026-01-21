@@ -182,10 +182,9 @@ class NinjaGenerator(BaseGenerator):
         else:
             command = command_raw
 
-        # Convert $SOURCE/$TARGET to $in/$out for generic commands
-        # (GenericCommandBuilder stores the raw command with these variables)
-        if custom_rule_name:
-            command = self._convert_command_variables(command)
+        # Convert $SOURCE/$TARGET to $in/$out for Ninja
+        # All templates now use generator-agnostic $SOURCE/$TARGET variables
+        command = self._convert_command_variables(command)
 
         # Append $post_build placeholder if not already present
         if "$post_build" not in command:
@@ -302,16 +301,18 @@ class NinjaGenerator(BaseGenerator):
         return command
 
     def _convert_command_variables(self, command: str) -> str:
-        """Convert env.Command() variables to Ninja variables.
+        """Convert generator-agnostic variables to Ninja variables.
 
-        Converts SCons-style variables to Ninja-style:
+        Converts pcons template variables to Ninja-style:
         - $SOURCE, $SOURCES -> $in
         - $TARGET, $TARGETS -> $out
+        - $TARGET.d -> $out.d (depfile pattern)
+        - $TARGET_import_lib -> $out_import_lib (MSVC multi-output)
         - ${SOURCES[n]} -> indexed source (handled at build time)
         - ${TARGETS[n]} -> indexed target (handled at build time)
 
         Args:
-            command: The command template with SCons-style variables.
+            command: The command template with generator-agnostic variables.
 
         Returns:
             Command with Ninja-style variables.
@@ -324,6 +325,11 @@ class NinjaGenerator(BaseGenerator):
 
         # Convert singular forms
         command = command.replace("$SOURCE", "$in")
+        # Handle $TARGET_xxx patterns before plain $TARGET (e.g., $TARGET_import_lib)
+        command = re.sub(r"\$TARGET_(\w+)", r"$out_\1", command)
+        # Handle $TARGET.d pattern for depfiles
+        command = command.replace("$TARGET.d", "$out.d")
+        # Convert plain $TARGET
         command = command.replace("$TARGET", "$out")
 
         # Handle indexed access ${SOURCES[n]} and ${TARGETS[n]}
@@ -426,6 +432,9 @@ class NinjaGenerator(BaseGenerator):
                 command = to_shell_command(relativized_tokens, shell="ninja")
             else:
                 command = command_raw
+
+            # Convert $SOURCE/$TARGET to $in/$out for Ninja
+            command = self._convert_command_variables(command)
 
             # Ensure $post_build is included
             if "$post_build" not in command:

@@ -51,7 +51,7 @@ class ConcatTool(BaseTool):
             "header": "",  # Optional header text
             "footer": "",  # Optional footer text
             # Command template: cat all inputs and redirect to output
-            "bundlecmd": "$concat.cmd $concat.flags $$in > $$out",
+            "bundlecmd": "$concat.cmd $concat.flags $$SOURCES > $$TARGET",
         }
 
     def builders(self) -> dict[str, Builder]:

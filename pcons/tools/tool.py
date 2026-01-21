@@ -157,7 +157,7 @@ class StandaloneTool(BaseTool):
                 super().__init__("install")
 
             def default_vars(self) -> dict[str, object]:
-                return {"copycmd": "python -m pcons.util.commands copy $in $out"}
+                return {"copycmd": "python -m pcons.util.commands copy $SOURCE $TARGET"}
 
             def builders(self) -> dict[str, Builder]:
                 return {}  # Builders registered via @builder decorator

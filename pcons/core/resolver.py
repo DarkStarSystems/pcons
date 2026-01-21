@@ -17,8 +17,9 @@ The resolution logic is organized into focused factory classes:
 - InstallNodeFactory: Creates install/copy nodes for install targets
 
 Command expansion happens in the resolver so that generators receive
-fully-expanded commands with only $in/$out as placeholders. This ensures
-consistent command handling across all generators (Ninja, Makefile, etc.).
+fully-expanded commands with $SOURCE/$TARGET placeholders. Each generator
+then converts these to its native syntax (Ninja: $in/$out, Makefile: paths).
+This ensures consistent command handling across all generators.
 """
 
 from __future__ import annotations
@@ -733,8 +734,8 @@ class Resolver:
         """Expand command templates for all nodes with _build_info.
 
         This method is called at the end of resolution to expand all command
-        templates so generators receive fully-expanded commands with only
-        $in/$out as placeholders.
+        templates so generators receive fully-expanded commands with
+        $SOURCE/$TARGET as placeholders (converted by generators to native syntax).
 
         For each node with _build_info containing 'tool' and 'command_var'
         but no 'command', this method:
@@ -864,12 +865,14 @@ class Resolver:
                     # Set directly (includes, defines, libs, libdirs)
                     setattr(tool_config, key, val)
 
-        # Preserve ninja variables $in, $out as-is
-        # These are filled by the generator, not by pcons subst
+        # Preserve generator-agnostic variables $SOURCE, $TARGET as-is
+        # These are converted to generator-specific syntax by each generator
         # We use $$ escaping to preserve them through subst
         extra_vars: dict[str, str] = {}
-        extra_vars["in"] = "$$in"
-        extra_vars["out"] = "$$out"
+        extra_vars["SOURCE"] = "$$SOURCE"
+        extra_vars["SOURCES"] = "$$SOURCES"
+        extra_vars["TARGET"] = "$$TARGET"
+        extra_vars["TARGETS"] = "$$TARGETS"
 
         # Expand the command template to a list of tokens
         # Tokens stay separate for proper quoting - generator joins with shell quoting

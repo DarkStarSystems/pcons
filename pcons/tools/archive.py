@@ -7,7 +7,7 @@ This module provides:
 - Zipfile: Builder for zip archives (.zip)
 
 Users can customize the archive commands via the tool namespace:
-    env.archive.tarcmd = ["tar", "-cvf", "$$out", "-C", "$archive.basedir", "$$in"]
+    env.archive.tarcmd = ["tar", "-cvf", "$$TARGET", "-C", "$archive.basedir", "$$SOURCES"]
 
 Target-level overrides are supported:
     tarfile = project.Tarfile(env, output="foo.tar.gz", sources=[...])
@@ -49,7 +49,7 @@ class ArchiveTool(StandaloneTool):
 
     Example:
         # Use system tar (as list)
-        env.archive.tarcmd = ["tar", "-cvf", "$$out", "-C", "$archive.basedir", "$$in"]
+        env.archive.tarcmd = ["tar", "-cvf", "$$TARGET", "-C", "$archive.basedir", "$$SOURCES"]
 
         # Set default compression
         env.archive.compression = "gzip"
@@ -64,7 +64,8 @@ class ArchiveTool(StandaloneTool):
 
         Uses Python helper script for cross-platform compatibility.
         Commands are lists of tokens for proper handling of paths with spaces.
-        The $$ escaping preserves $ for ninja variable substitution ($in, $out).
+        The $$ escaping preserves $ for generator variable substitution.
+        $$SOURCE/$$TARGET become $in/$out for Ninja, actual paths for Makefile.
         Pcons variables ($archive.compression_flag, $archive.basedir) are
         expanded by pcons subst() at generation time, NOT by Ninja.
         """
@@ -76,7 +77,7 @@ class ArchiveTool(StandaloneTool):
         return {
             # Tar command: $archive.compression_flag and $archive.basedir are
             # expanded by pcons subst() at generation time.
-            # $$out and $$in become $out and $in for Ninja.
+            # $$TARGET and $$SOURCES become generator-appropriate variables.
             "tarcmd": [
                 python_cmd,
                 helper_path,
@@ -84,10 +85,10 @@ class ArchiveTool(StandaloneTool):
                 "tar",
                 "$archive.compression_flag",
                 "--output",
-                "$$out",
+                "$$TARGET",
                 "--base-dir",
                 "$archive.basedir",
-                "$$in",
+                "$$SOURCES",
             ],
             # Zip command: $archive.basedir is expanded by pcons at generation time
             "zipcmd": [
@@ -96,10 +97,10 @@ class ArchiveTool(StandaloneTool):
                 "--type",
                 "zip",
                 "--output",
-                "$$out",
+                "$$TARGET",
                 "--base-dir",
                 "$archive.basedir",
-                "$$in",
+                "$$SOURCES",
             ],
             # Default settings (can be overridden in env or per-target)
             "compression": None,

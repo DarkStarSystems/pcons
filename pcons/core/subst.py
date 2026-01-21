@@ -15,9 +15,14 @@ Supported syntax:
              ${pairwise(var, list)} (produces interleaved pairs)
 
 Command template forms:
-- String: "$cc.cmd $cc.flags -c -o $$out $$in" (auto-tokenized on whitespace)
-- List: ["$cc.cmd", "$cc.flags", "-c", "-o", "$$out", "$$in"] (explicit tokens)
+- String: "$cc.cmd $cc.flags -c -o $$TARGET $$SOURCE" (auto-tokenized on whitespace)
+- List: ["$cc.cmd", "$cc.flags", "-c", "-o", "$$TARGET", "$$SOURCE"] (explicit tokens)
 - MultiCmd: MultiCmd(["cmd1 args", "cmd2 args"]) (multiple commands)
+
+Generator-agnostic variables:
+- $$SOURCE / $$SOURCES: Input file(s), converted by generators to native syntax
+- $$TARGET / $$TARGETS: Output file(s), converted by generators to native syntax
+- $$TARGET.d: Depfile (converted to $out.d for Ninja)
 """
 
 from __future__ import annotations
@@ -50,8 +55,8 @@ class MultiCmd:
 
     Example:
         MultiCmd([
-            "mkdir -p $(dirname $$out)",
-            "$cc.cmd $cc.flags -c -o $$out $$in"
+            "mkdir -p $(dirname $$TARGET)",
+            "$cc.cmd $cc.flags -c -o $$TARGET $$SOURCE"
         ])
     """
 

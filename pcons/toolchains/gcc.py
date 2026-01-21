@@ -47,7 +47,7 @@ class GccCCompiler(BaseTool):
             "includes": [],
             "dprefix": "-D",
             "defines": [],
-            "depflags": ["-MD", "-MF", "$$out.d"],
+            "depflags": ["-MD", "-MF", "$$TARGET.d"],
             "objcmd": [
                 "$cc.cmd",
                 "$cc.flags",
@@ -56,8 +56,8 @@ class GccCCompiler(BaseTool):
                 "$cc.depflags",
                 "-c",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -122,7 +122,7 @@ class GccCxxCompiler(BaseTool):
             "includes": [],
             "dprefix": "-D",
             "defines": [],
-            "depflags": ["-MD", "-MF", "$$out.d"],
+            "depflags": ["-MD", "-MF", "$$TARGET.d"],
             "objcmd": [
                 "$cxx.cmd",
                 "$cxx.flags",
@@ -131,8 +131,8 @@ class GccCxxCompiler(BaseTool):
                 "$cxx.depflags",
                 "-c",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
         }
 
@@ -188,7 +188,7 @@ class GccArchiver(BaseTool):
         return {
             "cmd": "ar",
             "flags": ["rcs"],
-            "libcmd": ["$ar.cmd", "$ar.flags", "$$out", "$$in"],
+            "libcmd": ["$ar.cmd", "$ar.flags", "$$TARGET", "$$SOURCES"],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -259,8 +259,8 @@ class GccLinker(BaseTool):
                 "$link.cmd",
                 "$link.flags",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
                 "${prefix(link.Fprefix, link.frameworkdirs)}",
@@ -271,8 +271,8 @@ class GccLinker(BaseTool):
                 shared_flag,
                 "$link.flags",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
                 "${prefix(link.Fprefix, link.frameworkdirs)}",

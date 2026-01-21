@@ -48,7 +48,7 @@ class CudaCompiler(BaseTool):
             "dprefix": "-D",
             "defines": [],
             # nvcc generates .d files with --generate-dependencies
-            "depflags": ["-MD", "-MF", "$$out.d"],
+            "depflags": ["-MD", "-MF", "$$TARGET.d"],
             "objcmd": [
                 "$cuda.cmd",
                 "-c",
@@ -58,8 +58,8 @@ class CudaCompiler(BaseTool):
                 "${prefix(cuda.dprefix, cuda.defines)}",
                 "$cuda.depflags",
                 "-o",
-                "$$out",
-                "$$in",
+                "$$TARGET",
+                "$$SOURCE",
             ],
         }
 

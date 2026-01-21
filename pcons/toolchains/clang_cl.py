@@ -51,7 +51,7 @@ class ClangClCompiler(BaseTool):
                 "/nologo",
                 "/showIncludes",
                 "/c",
-                "/Fo$$out",
+                "/Fo$$TARGET",
                 "${prefix(cc.iprefix, cc.includes)}"
                 if self._language == "c"
                 else "${prefix(cxx.iprefix, cxx.includes)}",
@@ -59,7 +59,7 @@ class ClangClCompiler(BaseTool):
                 if self._language == "c"
                 else "${prefix(cxx.dprefix, cxx.defines)}",
                 "$cc.flags" if self._language == "c" else "$cxx.flags",
-                "$$in",
+                "$$SOURCE",
             ],
         }
 
@@ -123,11 +123,11 @@ class ClangClCxxCompiler(ClangClCompiler):
                 "/nologo",
                 "/showIncludes",
                 "/c",
-                "/Fo$$out",
+                "/Fo$$TARGET",
                 "${prefix(cxx.iprefix, cxx.includes)}",
                 "${prefix(cxx.dprefix, cxx.defines)}",
                 "$cxx.flags",
-                "$$in",
+                "$$SOURCE",
             ],
         }
 
@@ -142,7 +142,7 @@ class ClangClLibrarian(BaseTool):
         return {
             "cmd": "llvm-lib",
             "flags": ["/nologo"],
-            "libcmd": ["$lib.cmd", "$lib.flags", "/OUT:$$out", "$$in"],
+            "libcmd": ["$lib.cmd", "$lib.flags", "/OUT:$$TARGET", "$$SOURCES"],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -193,8 +193,8 @@ class ClangClLinker(BaseTool):
             "progcmd": [
                 "$link.cmd",
                 "$link.flags",
-                "/OUT:$$out",
-                "$$in",
+                "/OUT:$$TARGET",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -202,8 +202,8 @@ class ClangClLinker(BaseTool):
                 "$link.cmd",
                 "/DLL",
                 "$link.flags",
-                "/OUT:$$out",
-                "$$in",
+                "/OUT:$$TARGET",
+                "$$SOURCES",
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
