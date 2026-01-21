@@ -831,26 +831,35 @@ class Resolver:
         # and compile/link). Set those values on the tool namespace before subst().
         # This allows templates like ${prefix(cc.iprefix, cc.includes)} to expand
         # with the effective requirements.
+        #
+        # Determine if this is a compile command (objcmd) vs link command
+        is_compile_command = command_var == "objcmd"
+        is_link_command = command_var in ("progcmd", "sharedcmd", "linkcmd", "libcmd")
+
         if context is not None and hasattr(context, "get_env_overrides"):
             context_overrides = context.get_env_overrides()
             for key, val in context_overrides.items():
                 if key == "extra_flags":
-                    # Merge extra_flags into the tool's flags list
-                    # Templates use $cc.flags, not $cc.extra_flags
-                    existing_flags = getattr(tool_config, "flags", [])
-                    if isinstance(existing_flags, list):
-                        merged = list(existing_flags) + list(val)
-                    else:
-                        merged = list(val)
-                    tool_config.flags = merged
+                    # extra_flags are compile flags - only apply to compile commands
+                    if is_compile_command:
+                        # Merge extra_flags into the tool's flags list
+                        # Templates use $cc.flags, not $cc.extra_flags
+                        existing_flags = getattr(tool_config, "flags", [])
+                        if isinstance(existing_flags, list):
+                            merged = list(existing_flags) + list(val)
+                        else:
+                            merged = list(val)
+                        tool_config.flags = merged
                 elif key == "ldflags":
-                    # Merge ldflags into the link tool's flags list
-                    existing_flags = getattr(tool_config, "flags", [])
-                    if isinstance(existing_flags, list):
-                        merged = list(existing_flags) + list(val)
-                    else:
-                        merged = list(val)
-                    tool_config.flags = merged
+                    # ldflags are link flags - only apply to link commands
+                    if is_link_command:
+                        # Merge ldflags into the link tool's flags list
+                        existing_flags = getattr(tool_config, "flags", [])
+                        if isinstance(existing_flags, list):
+                            merged = list(existing_flags) + list(val)
+                        else:
+                            merged = list(val)
+                        tool_config.flags = merged
                 else:
                     # Set directly (includes, defines, libs, libdirs)
                     setattr(tool_config, key, val)
