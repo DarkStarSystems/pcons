@@ -52,6 +52,7 @@ class MakefileGenerator(BaseGenerator):
         self._directories: set[Path] = set()
         self._depfile_dirs: set[Path] = set()
         self._project_root: Path | None = None
+        self._build_dir: Path | None = None
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate Makefile.
@@ -67,6 +68,7 @@ class MakefileGenerator(BaseGenerator):
         self._directories = set()
         self._depfile_dirs = set()
         self._project_root = project.root_dir.resolve()
+        self._build_dir = output_dir
 
         with open(makefile_path, "w") as f:
             self._write_header(f, project)
@@ -138,7 +140,8 @@ class MakefileGenerator(BaseGenerator):
 
         f.write("# Directory creation\n")
         for directory in sorted(self._directories):
-            escaped = self._escape_path(directory)
+            # Directories need build_dir prefix stripped since make runs from build_dir
+            escaped = self._make_build_relative_path(directory)
             f.write(f"{escaped}:\n")
             f.write("\tmkdir -p $@\n")
             f.write("\n")
@@ -193,27 +196,28 @@ class MakefileGenerator(BaseGenerator):
         sources: list[Node] = build_info.get("sources", [])
 
         # Handle multi-output builds
+        # Output paths need build_dir prefix stripped since make runs from build_dir
         outputs_info = build_info.get("outputs")
         if outputs_info:
             # Multi-output build - list all outputs
             all_outputs = [
-                self._escape_path(info["path"]) for info in outputs_info.values()
+                self._make_build_relative_path(info["path"])
+                for info in outputs_info.values()
             ]
             output = " ".join(all_outputs)
         else:
-            output = self._escape_path(node.path)
+            output = self._make_build_relative_path(node.path)
 
         # Get source paths - use PathResolver for consistent handling
-        # Makefile can run from either project root or build directory (via make -C),
-        # so we use absolute paths for source files to work in both cases.
+        # Make runs from build directory (via make -C), so:
+        # - Build outputs: strip build_dir prefix
+        # - Source files: use absolute paths to work from any directory
         def get_source_path(s: FileNode) -> str:
-            # Check if this is a build output (has _build_info from resolver)
+            # Build outputs need build_dir prefix stripped
             if getattr(s, "_build_info", None) is not None or s.is_target:
-                # Build output - path already includes build_dir prefix
-                return self._escape_path(s.path)
+                return self._make_build_relative_path(s.path)
 
             # Source file - make absolute using project root
-            # This ensures the path works whether make runs from project root or build dir
             path_obj = s.path
             if not path_obj.is_absolute() and self._project_root is not None:
                 path_obj = self._project_root / path_obj
@@ -227,22 +231,24 @@ class MakefileGenerator(BaseGenerator):
             if isinstance(s, FileNode):
                 prereqs.append(get_source_path(s))
 
-        # Add explicit deps (e.g., libraries for linking)
+        # Add explicit deps (e.g., libraries for linking, generated headers)
+        # All paths are stripped of build_dir prefix since make runs from build_dir
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                prereqs.append(self._escape_path(dep.path))
+                prereqs.append(self._make_build_relative_path(dep.path))
 
         # Add implicit deps (e.g., headers discovered by scanners)
         for dep in node.implicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                prereqs.append(self._escape_path(dep.path))
+                prereqs.append(self._make_build_relative_path(dep.path))
 
         # Order-only prerequisites (directories)
+        # Directories need build_dir prefix stripped since make runs from build_dir
         order_only: list[str] = []
         output_dir = node.path.parent
         if output_dir != Path(".") and output_dir != Path(""):
-            order_only.append(self._escape_path(output_dir))
+            order_only.append(self._make_build_relative_path(output_dir))
 
         # Build the target line
         prereq_str = " ".join(prereqs)
@@ -318,8 +324,26 @@ class MakefileGenerator(BaseGenerator):
         if command_template is None:
             return f"@echo 'No command template: {tool_name}.{command_var}'"
 
-        # Expand the command template
-        command = env.subst(command_template, shell="bash")
+        # Expand the command template to get tokens (may include PathTokens)
+        # We use the raw subst() function to get tokens, not env.subst() which
+        # converts to string without proper path relativization for make.
+        from pcons.core.subst import subst as subst_fn
+        from pcons.core.subst import to_shell_command
+
+        # Check if env has _build_namespace (real Environment objects do,
+        # but mock objects in tests may not)
+        if hasattr(env, "_build_namespace"):
+            namespace = env._build_namespace()
+            tokens = subst_fn(command_template, namespace)
+
+            # Relativize PathTokens for make's execution context (make runs from build_dir)
+            relativized_tokens = self._process_path_tokens(tokens)
+
+            # Convert token list to shell command string
+            command = to_shell_command(relativized_tokens, shell="bash")
+        else:
+            # Fallback for mock objects or non-standard environments
+            command = env.subst(command_template, shell="bash")
 
         # Convert $SOURCE/$TARGET to $in/$out, then substitute with actual paths
         command = self._convert_command_variables(command)
@@ -413,18 +437,36 @@ class MakefileGenerator(BaseGenerator):
 
         We use explicit paths rather than $< and $@ because the sources
         may not match Make's automatic variable semantics exactly.
+
+        Note: Make runs from the build directory (via -C), so:
+        - Output paths use node.path directly (relative to build_dir)
+        - Source paths are made absolute to work from any directory
         """
-        # Get source paths
-        source_paths = " ".join(str(s.path) for s in sources if isinstance(s, FileNode))
+
+        # Get source paths - must match prerequisite handling in _write_build_rule
+        def get_source_path(s: FileNode) -> str:
+            # Build outputs - strip build_dir prefix since make runs from build_dir
+            if getattr(s, "_build_info", None) is not None or s.is_target:
+                return self._strip_build_dir_prefix(s.path)
+            # Source files - make absolute using project root
+            path_obj = s.path
+            if not path_obj.is_absolute() and self._project_root is not None:
+                path_obj = self._project_root / path_obj
+            return str(path_obj)
+
+        source_paths = " ".join(
+            get_source_path(s) for s in sources if isinstance(s, FileNode)
+        )
 
         # Substitute $in and $out
+        # $out uses node.path with build_dir prefix stripped (make runs from build_dir)
         command = command.replace("$in", source_paths)
-        command = command.replace("$out", str(node.path))
+        command = command.replace("$out", self._strip_build_dir_prefix(node.path))
 
-        # Handle depfile if present
+        # Handle depfile if present (also strip build_dir prefix)
         depfile = build_info.get("depfile")
-        if depfile:
-            command = command.replace("$out.d", str(depfile))
+        if depfile and isinstance(depfile, (str, Path)):
+            command = command.replace("$out.d", self._strip_build_dir_prefix(depfile))
 
         return command
 
@@ -435,8 +477,9 @@ class MakefileGenerator(BaseGenerator):
 
         f.write("# Aliases\n")
         for name, alias in project.aliases.items():
+            # Alias targets need build_dir prefix stripped since make runs from build_dir
             targets = " ".join(
-                self._escape_path(t.path)
+                self._make_build_relative_path(t.path)
                 for t in alias.targets
                 if isinstance(t, FileNode)
             )
@@ -449,15 +492,18 @@ class MakefileGenerator(BaseGenerator):
         defaults: list[str] = []
 
         # Add nodes from default targets
+        # Output paths need build_dir prefix stripped since make runs from build_dir
         for target in project.default_targets:
             if target.output_nodes:
                 for out_node in target.output_nodes:
                     if isinstance(out_node, FileNode):
-                        defaults.append(self._escape_path(out_node.path))
+                        defaults.append(self._make_build_relative_path(out_node.path))
             else:
                 for target_node in target.nodes:
                     if isinstance(target_node, FileNode):
-                        defaults.append(self._escape_path(target_node.path))
+                        defaults.append(
+                            self._make_build_relative_path(target_node.path)
+                        )
 
         # If no default targets, auto-detect
         if not defaults:
@@ -470,7 +516,9 @@ class MakefileGenerator(BaseGenerator):
                     ):
                         for node in target.output_nodes:
                             if isinstance(node, FileNode):
-                                defaults.append(self._escape_path(node.path))
+                                defaults.append(
+                                    self._make_build_relative_path(node.path)
+                                )
 
         if defaults:
             f.write("# Default target\n")
@@ -485,8 +533,9 @@ class MakefileGenerator(BaseGenerator):
 
         f.write("# Include dependency files (generated by compiler -MD flag)\n")
         # Include .d files from all directories that might have objects
+        # Directories need build_dir prefix stripped since make runs from build_dir
         for directory in sorted(self._directories):
-            f.write(f"-include {self._escape_path(directory)}/*.d\n")
+            f.write(f"-include {self._make_build_relative_path(directory)}/*.d\n")
         f.write("\n")
 
     def _write_clean_target(self, f: TextIO, output_dir: Path) -> None:
@@ -494,6 +543,29 @@ class MakefileGenerator(BaseGenerator):
         f.write("# Clean target\n")
         f.write("clean:\n")
         f.write(f"\trm -rf {self._escape_path(output_dir)}\n")
+
+    def _strip_build_dir_prefix(self, path: Path | str) -> str:
+        """Strip the build_dir prefix from a path.
+
+        Since make runs from the build directory (via -C), paths that have
+        the build_dir prefix need to have it stripped.
+
+        Args:
+            path: Path that may have build_dir prefix.
+
+        Returns:
+            Path as string with build_dir prefix stripped if present.
+        """
+        path_obj = Path(path)
+
+        if self._build_dir and not path_obj.is_absolute():
+            try:
+                rel = path_obj.relative_to(self._build_dir)
+                return str(rel)
+            except ValueError:
+                pass
+
+        return str(path_obj)
 
     def _escape_path(self, path: Path | str) -> str:
         """Escape a path for use in Makefiles.
@@ -505,30 +577,83 @@ class MakefileGenerator(BaseGenerator):
         # Escape $ as $$
         return self.ESCAPE_DOLLAR.sub("$$", path_str)
 
+    def _make_build_relative_path(self, path: Path | str) -> str:
+        """Convert a path to be relative to build_dir and escape it.
+
+        Since make runs from the build directory (via -C), output paths that
+        have the build_dir prefix need to have it stripped.
+
+        Args:
+            path: Path that may have build_dir prefix.
+
+        Returns:
+            Path escaped for Makefile, with build_dir prefix stripped if present.
+        """
+        path_str = self._strip_build_dir_prefix(path)
+        return self.ESCAPE_DOLLAR.sub("$$", path_str)
+
     def _process_path_tokens(self, tokens: list) -> list[str]:
         """Process PathToken objects in a command token list.
 
-        Since Makefile runs from the project root, paths relative to project
-        root don't need transformation. PathToken objects are converted to
-        their string representation (prefix + path).
+        Since make runs from the build directory (via -C), paths need to be
+        transformed:
+        - Build directory paths become "."
+        - Project-relative paths need to be made absolute
+
+        Uses PathToken.relativize() with _relativize_path_for_make().
 
         Args:
             tokens: List of command tokens (str or PathToken).
 
         Returns:
-            List of string tokens.
+            List of string tokens with paths relativized for make.
         """
         from pcons.core.subst import PathToken
 
         result: list[str] = []
         for token in tokens:
             if isinstance(token, PathToken):
-                # For Makefile, paths relative to project root stay as-is
-                # Just convert PathToken to string (prefix + path)
-                result.append(str(token))
+                # Use PathToken's relativize() with make path transformer
+                result.append(token.relativize(self._relativize_path_for_make))
             else:
                 result.append(str(token))
         return result
+
+    def _relativize_path_for_make(self, path: str) -> str:
+        """Transform a path for make's execution context.
+
+        Since make runs from the build directory (via -C), paths that reference
+        the build directory become ".", and project-relative paths need to be
+        made absolute (so they work from any directory).
+
+        Args:
+            path: Path string (project-root-relative or absolute).
+
+        Returns:
+            Transformed path suitable for make command.
+        """
+        from pathlib import Path as PathlibPath
+
+        path_obj = PathlibPath(path)
+
+        # Absolute paths stay unchanged
+        if path_obj.is_absolute():
+            return path
+
+        # Build directory becomes "."
+        if self._build_dir:
+            build_dir_str = str(self._build_dir)
+            if path == build_dir_str:
+                return "."
+            # Paths starting with build_dir/ should strip that prefix
+            if path.startswith(build_dir_str + "/"):
+                return path[len(build_dir_str) + 1 :]
+
+        # Project-relative paths need to be made absolute since make runs from build_dir
+        if self._project_root:
+            return str(self._project_root / path)
+
+        return path
 
     def _convert_command_variables(self, command: str) -> str:
         """Convert generator-agnostic variables to Make-compatible variables.
