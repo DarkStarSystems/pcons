@@ -211,7 +211,7 @@ class NinjaGenerator(BaseGenerator):
                 compression = build_info.get("compression")
                 base_dir = build_info.get("base_dir", ".")
                 compression_flag = f"--compression {compression}" if compression else ""
-                helper_path = Path(archive_mod.__file__)  # type: ignore[arg-type]
+                helper_path = Path(archive_mod.__file__)
                 command = (
                     f"{sys.executable} {helper_path} --type tar "
                     f"{compression_flag} --output $out --base-dir {base_dir} $in"
@@ -223,7 +223,7 @@ class NinjaGenerator(BaseGenerator):
                 import pcons.util.archive_helper as archive_mod
 
                 base_dir = build_info.get("base_dir", ".")
-                helper_path = Path(archive_mod.__file__)  # type: ignore[arg-type]
+                helper_path = Path(archive_mod.__file__)
                 command = (
                     f"{sys.executable} {helper_path} --type zip "
                     f"--output $out --base-dir {base_dir} $in"

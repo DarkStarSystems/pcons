@@ -52,6 +52,7 @@ class MakefileGenerator(BaseGenerator):
         super().__init__("makefile")
         self._directories: set[Path] = set()
         self._depfile_dirs: set[Path] = set()
+        self._project_root: Path | None = None
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate Makefile.
@@ -66,6 +67,7 @@ class MakefileGenerator(BaseGenerator):
         # Reset state for this generation
         self._directories = set()
         self._depfile_dirs = set()
+        self._project_root = project.root_dir.resolve()
 
         with open(makefile_path, "w") as f:
             self._write_header(f, project)
@@ -202,13 +204,21 @@ class MakefileGenerator(BaseGenerator):
         else:
             output = self._escape_path(node.path)
 
-        # Get source paths
+        # Get source paths - use PathResolver for consistent handling
+        # Makefile can run from either project root or build directory (via make -C),
+        # so we use absolute paths for source files to work in both cases.
         def get_source_path(s: FileNode) -> str:
-            if not s.path.is_absolute():
-                src_path = project.root_dir / s.path
-                if src_path.exists():
-                    return self._escape_path(src_path)
-            return self._escape_path(s.path)
+            # Check if this is a build output (has _build_info from resolver)
+            if getattr(s, "_build_info", None) is not None or s.is_target:
+                # Build output - path already includes build_dir prefix
+                return self._escape_path(s.path)
+
+            # Source file - make absolute using project root
+            # This ensures the path works whether make runs from project root or build dir
+            path_obj = s.path
+            if not path_obj.is_absolute() and self._project_root is not None:
+                path_obj = self._project_root / path_obj
+            return self._escape_path(path_obj)
 
         # Build list of prerequisites
         prereqs: list[str] = []
