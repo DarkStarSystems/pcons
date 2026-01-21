@@ -85,6 +85,10 @@ class Environment:
         if toolchain is not None:
             toolchain.setup(self)
 
+        # Always add standalone tools (install, archive)
+        # These are tool-agnostic and always available
+        self._setup_standalone_tools()
+
     # Private helper methods to reduce object.__getattribute__ verbosity
     def _get_tools(self) -> dict[str, ToolConfig]:
         """Get the internal tools dictionary."""
@@ -100,6 +104,19 @@ class Environment:
         """Get the internal created nodes list."""
         nodes: list[Any] = object.__getattribute__(self, "_created_nodes")
         return nodes
+
+    def _setup_standalone_tools(self) -> None:
+        """Set up standalone tools that are always available.
+
+        Standalone tools don't require toolchains or external program detection.
+        They provide builders for common operations like file installation and
+        archive creation.
+        """
+        from pcons.tools.archive import ArchiveTool
+        from pcons.tools.install import InstallTool
+
+        InstallTool().setup(self)
+        ArchiveTool().setup(self)
 
     def __getattr__(self, name: str) -> Any:
         """Get a tool namespace or cross-tool variable.

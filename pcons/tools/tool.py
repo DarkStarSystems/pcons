@@ -140,6 +140,39 @@ class BaseTool(ABC):
         return f"{self.__class__.__name__}({self.name!r})"
 
 
+class StandaloneTool(BaseTool):
+    """Tool that's always available without external program detection.
+
+    Standalone tools don't require toolchains or external program detection.
+    They are auto-registered with environments and provide builders for
+    common operations like file installation and archiving.
+
+    Unlike toolchain-provided tools (cc, cxx, etc.) which require detecting
+    compilers, standalone tools use Python's built-in capabilities or
+    cross-platform helper scripts.
+
+    Example:
+        class InstallTool(StandaloneTool):
+            def __init__(self) -> None:
+                super().__init__("install")
+
+            def default_vars(self) -> dict[str, object]:
+                return {"copycmd": "python -m pcons.util.commands copy $in $out"}
+
+            def builders(self) -> dict[str, Builder]:
+                return {}  # Builders registered via @builder decorator
+    """
+
+    def configure(self, config: object) -> ToolConfig | None:
+        """Standalone tools are always available.
+
+        Returns a valid ToolConfig since no external detection is needed.
+        """
+        from pcons.core.toolconfig import ToolConfig
+
+        return ToolConfig(self.name)
+
+
 class BuilderMethod:
     """A callable that invokes a builder with an environment.
 

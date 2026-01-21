@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: MIT
-"""Install builders for copying files to destinations.
+"""Install tool and builders for copying files to destinations.
 
-This module provides builders for file installation:
-- Install: Copy multiple files to a destination directory
-- InstallAs: Copy a single file to a specific destination path (with rename)
-- InstallDir: Recursively copy a directory tree
+This module provides:
+- InstallTool: Standalone tool with command templates (copycmd, copytreecmd)
+- Install: Builder for copying multiple files to a destination directory
+- InstallAs: Builder for copying a single file to a specific path (with rename)
+- InstallDir: Builder for recursively copying a directory tree
+
+Users can customize the copy commands via the tool namespace:
+    env.install.copycmd = "cp $in $out"  # Use system cp instead
 """
 
 from __future__ import annotations
@@ -17,13 +21,70 @@ from typing import TYPE_CHECKING
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode
 from pcons.core.target import Target, TargetType
+from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.project import Project
+
+
+class InstallTool(StandaloneTool):
+    """Tool for file and directory installation operations.
+
+    Provides cross-platform copy commands using Python helpers.
+    The Install, InstallAs, and InstallDir builders reference these
+    command templates.
+
+    Variables:
+        copycmd: Command template for single file copy.
+                 Default: python -m pcons.util.commands copy $in $out
+        copytreecmd: Command template for directory tree copy.
+                     Default: python -m pcons.util.commands copytree ...
+
+    Example:
+        # Use system copy on Unix
+        env.install.copycmd = "cp $in $out"
+
+        # Use rsync for directory copies
+        env.install.copytreecmd = "rsync -a $in $destdir"
+    """
+
+    def __init__(self) -> None:
+        """Initialize the install tool."""
+        super().__init__("install")
+
+    def default_vars(self) -> dict[str, object]:
+        """Return default command templates.
+
+        Uses Python helper scripts for cross-platform compatibility.
+        The $$ escaping preserves $ for ninja variable substitution.
+        """
+        # Use escaped $$ for ninja variables ($in, $out) since these
+        # get processed by env.subst() before going to ninja
+        python_cmd = sys.executable.replace("\\", "/")
+        return {
+            # Simple file copy: copy $in $out
+            "copycmd": f"{python_cmd} -m pcons.util.commands copy $$in $$out",
+            # Directory tree copy with depfile support
+            # $destdir is a per-build variable set by InstallNodeFactory
+            "copytreecmd": (
+                f"{python_cmd} -m pcons.util.commands copytree "
+                "--depfile $$out.d --stamp $$out $$in $$destdir"
+            ),
+        }
+
+    def builders(self) -> dict[str, Builder]:
+        """Return builders provided by this tool.
+
+        Returns empty dict - builders are registered via @builder decorator
+        below and accessed via project.Install() / project.InstallAs() /
+        project.InstallDir().
+        """
+        return {}
 
 
 class InstallNodeFactory:
@@ -109,10 +170,6 @@ class InstallNodeFactory:
         path_resolver = self.project.path_resolver
         dest_dir = path_resolver.normalize_target_path(dest_dir)
 
-        # Use pcons helper for cross-platform copy
-        python_cmd = sys.executable.replace("\\", "/")
-        copy_cmd = f"{python_cmd} -m pcons.util.commands copy"
-
         installed_nodes: list[FileNode] = []
         for file_node in sources:
             if not isinstance(file_node, FileNode):
@@ -125,11 +182,10 @@ class InstallNodeFactory:
             dest_node = FileNode(dest_path, defined_at=get_caller_location())
             dest_node.depends([file_node])
 
-            # Store build info for the copy command
-            # Use full command with $in/$out - generators use this directly
+            # Store build info referencing env.install.copycmd
+            # The command template comes from the install tool's default_vars
             dest_node._build_info = {
-                "tool": "copy",
-                "command": f"{copy_cmd} $in $out",
+                "tool": "install",
                 "command_var": "copycmd",
                 "sources": [file_node],
                 "description": "INSTALL $out",
@@ -165,20 +221,15 @@ class InstallNodeFactory:
         path_resolver = self.project.path_resolver
         dest = path_resolver.normalize_target_path(dest)
 
-        # Use pcons helper for cross-platform copy
-        python_cmd = sys.executable.replace("\\", "/")
-        copy_cmd = f"{python_cmd} -m pcons.util.commands copy"
-
         source_node = sources[0]
 
         # Create destination node
         dest_node = FileNode(dest, defined_at=get_caller_location())
         dest_node.depends([source_node])
 
-        # Use full command with $in/$out - generators use this directly
+        # Store build info referencing env.install.copycmd
         dest_node._build_info = {
-            "tool": "copy",
-            "command": f"{copy_cmd} $in $out",
+            "tool": "install",
             "command_var": "copycmd",
             "sources": [source_node],
             "description": "INSTALL $out",
@@ -210,10 +261,6 @@ class InstallNodeFactory:
         path_resolver = self.project.path_resolver
         dest_dir = path_resolver.normalize_target_path(dest_dir)
 
-        # Use pcons helper for cross-platform copytree
-        python_cmd = sys.executable.replace("\\", "/")
-        copytree_cmd = f"{python_cmd} -m pcons.util.commands copytree"
-
         source_node = sources[0]
         source_path = source_node.path
 
@@ -229,21 +276,23 @@ class InstallNodeFactory:
         stamp_node = FileNode(stamp_path, defined_at=get_caller_location())
         stamp_node.depends([source_node])
 
-        # Build the command with paths relative to build directory
+        # Build the destination path relative to build directory for the command
         try:
             rel_dest = dest_path.relative_to(self.project.build_dir)
         except ValueError:
             rel_dest = dest_path
 
-        # Use full command - generators use this directly
+        # Store build info referencing env.install.copytreecmd
+        # The destdir variable is set per-build
         stamp_node._build_info = {
-            "tool": "copytree",
-            "command": f"{copytree_cmd} --depfile $out.d --stamp $out $in {rel_dest}",
+            "tool": "install",
             "command_var": "copytreecmd",
             "sources": [source_node],
             "depfile": "$out.d",
             "deps_style": "gcc",
             "description": "INSTALLDIR $out",
+            # Per-build variables for this specific target
+            "variables": {"destdir": str(rel_dest).replace("\\", "/")},
         }
 
         # Add stamp node as output

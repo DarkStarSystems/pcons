@@ -7,8 +7,8 @@ the same system, ensuring user-defined builders are on equal footing with
 built-ins.
 
 Built-in builders:
-- Install, InstallAs, InstallDir: File installation builders
-- Tarfile, Zipfile: Archive builders
+- Install, InstallAs, InstallDir: File installation builders (pcons.tools.install)
+- Tarfile, Zipfile: Archive builders (pcons.tools.archive)
 - Program, StaticLibrary, SharedLibrary, ObjectLibrary: Compile/link builders
 - HeaderOnlyLibrary: Interface library builder
 - Command: Custom command builder
@@ -25,4 +25,7 @@ def register_builtin_builders() -> None:
     """
     # Import builder modules to trigger their registration
     # Each module uses the @builder decorator to register its builders
-    from pcons.builders import archive, compile, install  # noqa: F401
+    from pcons.builders import compile  # noqa: F401
+
+    # Install and Archive builders are now in pcons.tools (merged with tools)
+    from pcons.tools import archive, install  # noqa: F401

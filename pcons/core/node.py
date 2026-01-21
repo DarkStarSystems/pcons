@@ -98,6 +98,10 @@ class BuildInfo(TypedDict, total=False):
     rule_name: str
     all_targets: list[Any]  # list[Node]
 
+    # Per-build variables for standalone tools (Install, Archive)
+    # These are written as Ninja build-level variables
+    variables: dict[str, str]
+
 
 class Node(ABC):
     """Abstract base class for all nodes in the dependency graph.

@@ -203,12 +203,13 @@ class TestArchiveNinjaGeneration:
 
         content = (tmp_path / "build.ninja").read_text()
 
-        # Should have tarfile rule
-        assert "rule tarfile" in content
+        # Should have archive tool rule for tar
+        assert "rule archive_tarcmd" in content
         # Rule should use archive_helper script
         assert "archive_helper.py" in content
         assert "--type tar" in content
-        assert "--compression gzip" in content
+        # Compression flag should be in per-build variables
+        assert "compression_flag = --compression" in content
 
     def test_generates_zipfile_rule(self, tmp_path):
         """Ninja generator creates rule for zipfile."""
@@ -232,8 +233,8 @@ class TestArchiveNinjaGeneration:
 
         content = (tmp_path / "build.ninja").read_text()
 
-        # Should have zipfile rule
-        assert "rule zipfile" in content
+        # Should have archive tool rule for zip
+        assert "rule archive_zipcmd" in content
         # Rule should use archive_helper script
         assert "archive_helper.py" in content
         assert "--type zip" in content

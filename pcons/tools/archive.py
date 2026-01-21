@@ -1,24 +1,90 @@
 # SPDX-License-Identifier: MIT
-"""Archive builders for creating tar and zip files.
+"""Archive tool and builders for creating tar and zip archives.
 
-This module provides builders for archive creation:
-- Tarfile: Create tar archives (.tar, .tar.gz, .tar.bz2, .tar.xz)
-- Zipfile: Create zip archives (.zip)
+This module provides:
+- ArchiveTool: Standalone tool with command templates (tarcmd, zipcmd)
+- Tarfile: Builder for tar archives (.tar, .tar.gz, .tar.bz2, .tar.xz)
+- Zipfile: Builder for zip archives (.zip)
+
+Users can customize the archive commands via the tool namespace:
+    env.archive.tarcmd = "tar -cvf $out -C $basedir $in"  # Use system tar
 """
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode
 from pcons.core.target import Target, TargetType
+from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
+    from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.project import Project
+
+
+class ArchiveTool(StandaloneTool):
+    """Tool for archive creation operations.
+
+    Provides cross-platform archive commands using Python helpers.
+    The Tarfile and Zipfile builders reference these command templates.
+
+    Variables:
+        tarcmd: Command template for creating tar archives.
+                Default: python archive_helper.py --type tar ...
+        zipcmd: Command template for creating zip archives.
+                Default: python archive_helper.py --type zip ...
+
+    Example:
+        # Use system tar
+        env.archive.tarcmd = "tar -cvf $out -C $basedir $in"
+
+        # Use custom compression
+        env.archive.tarcmd = "tar -czvf $out -C $basedir $in"
+    """
+
+    def __init__(self) -> None:
+        """Initialize the archive tool."""
+        super().__init__("archive")
+
+    def default_vars(self) -> dict[str, object]:
+        """Return default command templates.
+
+        Uses Python helper script for cross-platform compatibility.
+        The $$ escaping preserves $ for ninja variable substitution.
+        """
+        import pcons.util.archive_helper as archive_mod
+
+        # Use escaped $$ for ninja variables since these
+        # get processed by env.subst() before going to ninja
+        python_cmd = sys.executable.replace("\\", "/")
+        helper_path = str(Path(archive_mod.__file__)).replace("\\", "/")
+
+        return {
+            # Tar command: $compression_flag and $basedir are per-build variables
+            "tarcmd": (
+                f"{python_cmd} {helper_path} --type tar "
+                "$$compression_flag --output $$out --base-dir $$basedir $$in"
+            ),
+            # Zip command: $basedir is a per-build variable
+            "zipcmd": (
+                f"{python_cmd} {helper_path} --type zip "
+                "--output $$out --base-dir $$basedir $$in"
+            ),
+        }
+
+    def builders(self) -> dict[str, Builder]:
+        """Return builders provided by this tool.
+
+        Returns empty dict - builders are registered via @builder decorator
+        below and accessed via project.Tarfile() / project.Zipfile().
+        """
+        return {}
 
 
 class ArchiveNodeFactory:
@@ -90,10 +156,6 @@ class ArchiveNodeFactory:
 
     def _create_archive_node(self, target: Target, sources: list[FileNode]) -> None:
         """Create archive output node for a Tarfile or Zipfile target."""
-        import sys
-
-        import pcons.util.archive_helper as archive_mod
-
         build_data = target._builder_data
         if build_data is None:
             return
@@ -106,30 +168,30 @@ class ArchiveNodeFactory:
         archive_node = FileNode(output_path, defined_at=get_caller_location())
         archive_node.depends(sources)
 
-        # Build the full command - generators use this directly
-        python_cmd = sys.executable.replace("\\", "/")
-        helper_path = str(Path(archive_mod.__file__)).replace("\\", "/")
+        # Build per-build variables for the command template
+        variables: dict[str, str] = {"basedir": str(base_dir)}
 
         if tool == "tarfile":
             compression = build_data.get("compression")
-            compression_flag = f"--compression {compression}" if compression else ""
-            command = (
-                f"{python_cmd} {helper_path} --type tar "
-                f"{compression_flag} --output $out --base-dir {base_dir} $in"
-            )
+            # compression_flag is a per-build variable
+            if compression:
+                variables["compression_flag"] = f"--compression {compression}"
+            else:
+                variables["compression_flag"] = ""
+            command_var = "tarcmd"
             description = "TAR $out"
         else:  # zipfile
-            command = (
-                f"{python_cmd} {helper_path} --type zip "
-                f"--output $out --base-dir {base_dir} $in"
-            )
+            command_var = "zipcmd"
             description = "ZIP $out"
 
+        # Store build info referencing env.archive.tarcmd or env.archive.zipcmd
         archive_node._build_info = {
-            "tool": tool,
-            "command": command,
+            "tool": "archive",
+            "command_var": command_var,
             "sources": sources,
             "description": description,
+            # Per-build variables for this specific target
+            "variables": variables,
         }
 
         # Add to target's output nodes

@@ -64,11 +64,11 @@ class TestInstall:
         # Should have nodes for each installed file
         assert len(install.output_nodes) == 2
 
-        # Each node should have build_info for copy
+        # Each node should have build_info for install tool
         for node in install.output_nodes:
             assert isinstance(node, FileNode)
             assert hasattr(node, "_build_info")
-            assert node._build_info["tool"] == "copy"
+            assert node._build_info["tool"] == "install"
 
     def test_install_node_paths(self, tmp_path):
         """Install creates correct destination paths after resolve."""
@@ -276,8 +276,8 @@ class TestInstallWithNinja:
 
         content = ninja_file.read_text()
 
-        # Should have a copy rule
-        assert "rule copy_copycmd" in content
+        # Should have an install_copycmd rule
+        assert "rule install_copycmd" in content
         # Should have INSTALL description
         assert "INSTALL" in content
         # Should have a build statement for the installed file

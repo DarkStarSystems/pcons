@@ -186,9 +186,8 @@ class NinjaGenerator(BaseGenerator):
             # Get the actual command from the environment or build_info
             command = f"echo 'No command for {rule_key}'"
 
-            # Check for command in build_info first (generic commands, install, archive)
-            # This covers: Install, InstallAs, InstallDir, Tarfile, Zipfile, lipo, and
-            # any custom builder that sets command/description in _build_info
+            # Check for command in build_info first (generic commands, lipo, and
+            # any custom builder that sets command/description in _build_info)
             if custom_command:
                 # Builder provided command directly - use it
                 # Convert $SOURCE, $TARGET etc. to Ninja $in, $out
@@ -226,6 +225,13 @@ class NinjaGenerator(BaseGenerator):
                         else:
                             # For non-effective builds, still add $post_build
                             command = command.rstrip() + "$post_build"
+            else:
+                # No environment available - try standalone tools for Install/Archive
+                cmd_template = self._get_standalone_tool_command(tool_name, command_var)
+                if cmd_template:
+                    # Standalone tool command - already has $$ escaping, convert to $
+                    command = cmd_template.replace("$$", "$")
+                    command = command.rstrip() + "$post_build"
 
             # Write the rule
             f.write(f"rule {rule_name}\n")
@@ -563,6 +569,15 @@ class NinjaGenerator(BaseGenerator):
                     ]
                     f.write(f"  {var_name} = {' '.join(escaped_tokens)}\n")
 
+        # Write custom per-build variables from build_info (for Install, Archive, etc.)
+        custom_vars = build_info.get("variables")
+        if custom_vars and isinstance(custom_vars, dict):
+            for var_name, var_value in custom_vars.items():
+                if var_value:  # Only write non-empty values
+                    # Escape for Ninja variable substitution
+                    escaped_value = self._escape_for_ninja_variable(str(var_value))
+                    f.write(f"  {var_name} = {escaped_value}\n")
+
         # Write post-build commands if target has them
         # Check if this is an output node (not an intermediate object file)
         is_output_node = (
@@ -878,3 +893,34 @@ class NinjaGenerator(BaseGenerator):
         # Using shell="ninja" ensures $in, $out aren't quoted
         # Note: $in and $out are left unexpanded for Ninja (they're $$in, $$out in templates)
         return env.subst(command_template, shell="ninja")
+
+    def _get_standalone_tool_command(
+        self, tool_name: str, command_var: str
+    ) -> str | None:
+        """Get command template from a standalone tool.
+
+        Used when no environment is available (e.g., Install targets without
+        an associated env). Instantiates the standalone tool to get its
+        default command template.
+
+        Args:
+            tool_name: Tool name (e.g., "install", "archive").
+            command_var: Command variable name (e.g., "copycmd", "tarcmd").
+
+        Returns:
+            Command template string, or None if not available.
+        """
+        # Import standalone tools here to avoid circular imports
+        if tool_name == "install":
+            from pcons.tools.install import InstallTool
+
+            tool = InstallTool()
+        elif tool_name == "archive":
+            from pcons.tools.archive import ArchiveTool
+
+            tool = ArchiveTool()
+        else:
+            return None
+
+        defaults = tool.default_vars()
+        return str(defaults.get(command_var, "")) or None
