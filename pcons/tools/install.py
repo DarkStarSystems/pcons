@@ -67,8 +67,9 @@ class InstallTool(StandaloneTool):
 
         Uses Python helper scripts for cross-platform compatibility.
         Commands are lists of tokens for proper handling of paths with spaces.
-        The $$ escaping preserves $ for ninja variable substitution.
-        Pcons variables ($destdir) are expanded via the context mechanism.
+        The $$ escaping preserves $ for ninja variable substitution ($in, $out).
+        Pcons variables ($install.destdir) are expanded by pcons subst()
+        at generation time, NOT by Ninja.
         """
         python_cmd = sys.executable.replace("\\", "/")
         return {
@@ -82,8 +83,8 @@ class InstallTool(StandaloneTool):
                 "$$out",
             ],
             # Directory tree copy with depfile support
-            # $$destdir becomes $destdir in the Ninja file, filled in by
-            # per-build variables from InstallContext
+            # $install.destdir is expanded by pcons subst() at generation time
+            # $$out and $$in become $out and $in for Ninja
             "copytreecmd": [
                 python_cmd,
                 "-m",
@@ -94,7 +95,7 @@ class InstallTool(StandaloneTool):
                 "--stamp",
                 "$$out",
                 "$$in",
-                "$$destdir",
+                "$install.destdir",
             ],
             # Default destination directory (can be overridden per-target)
             "destdir": "",
@@ -207,11 +208,14 @@ class InstallNodeFactory:
 
             # Store build info referencing env.install.copycmd
             # The command template comes from the install tool's default_vars
+            # Get env from target if available
+            env = getattr(target, "_env", None)
             dest_node._build_info = {
                 "tool": "install",
                 "command_var": "copycmd",
                 "sources": [file_node],
                 "description": "INSTALL $out",
+                "env": env,
             }
 
             installed_nodes.append(dest_node)
@@ -251,11 +255,14 @@ class InstallNodeFactory:
         dest_node.depends([source_node])
 
         # Store build info referencing env.install.copycmd
+        # Get env from target if available
+        env = getattr(target, "_env", None)
         dest_node._build_info = {
             "tool": "install",
             "command_var": "copycmd",
             "sources": [source_node],
             "description": "INSTALL $out",
+            "env": env,
         }
 
         # Add installed file as output node
@@ -324,6 +331,7 @@ class InstallNodeFactory:
             "description": "INSTALLDIR $out",
             # Context provides variables for per-build substitution
             "context": context,
+            "env": env,
         }
 
         # Add stamp node as output

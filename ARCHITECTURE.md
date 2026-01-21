@@ -149,12 +149,20 @@ env = project.Environment(toolchain=config.cxx)
 # ... define builds ...
 ```
 
-### Phase 3: Generate
+### Phase 3: Resolve
+
+The resolver takes the build description, and:
+1. Propagates build flags (public includes, link flags etc.) from dependencies forward to their targets
+2. Resolves the build into actual Nodes per each source/target file
+3. Substitutes variables in each Target command(s), producing the final commands to execute for that target
+
+### Phase 4: Generate
 > **Status: Partial** - Ninja generator fully implemented. compile_commands.json and Mermaid diagram generators available. Makefile and IDE generators planned.
 
 1. Generator traverses the dependency graph
-2. Build rules are emitted (e.g., `build.ninja`)
-3. Auxiliary files generated (`compile_commands.json`, IDE projects)
+2. Adjust paths as needed for the generator (e.g. Ninja target paths are specified relative to build dir)
+2. Emits build rules and definitions into e.g. `build.ninja` or `Makefile`
+3. Generates auxiliary files (`compile_commands.json`, IDE projects)
 
 **Output:** Build files ready for execution
 
@@ -268,6 +276,7 @@ env.fortran.flags   # Fortran compiler flags
 env.link.flags      # Linker flags
 env.ar.flags        # Archiver flags
 env.protoc.flags    # Protobuf compiler flags
+env.tarfile.compression # Compression for building a tar file (e.g. "gzip")
 ```
 
 **Cross-tool variables** live at the environment level:
@@ -289,7 +298,7 @@ env.cc.include_flags = ['-I$inc' for inc in env.cc.includes]
 env.cc.define_flags = ['-D$d' for d in env.cc.defines]
 
 # Command line template - references other variables
-env.cc.cmdline = '$cc.cmd $cc.flags $cc.include_flags $cc.define_flags -c -o $out $in'
+env.cc.cmdline = ['$cc.cmd', '$cc.flags', '$cc.include_flags', '$cc.define_flags', '-c', '-o', '$out', '$in']
 
 # Expansion happens recursively:
 # 1. $cc.cmdline expands, revealing $cc.cmd, $cc.flags, etc.
@@ -309,8 +318,8 @@ env.cc.cmdline = '$cc.cmd $cc.flags $cc.include_flags $cc.define_flags -c -o $ou
 **Special variables** (set by builders at expansion time):
 - `$in` - input file(s)
 - `$out` - output file(s)
-- `$first_in` - first input file
-- `$first_out` - first output file
+- `$in[0]` - first input file
+- `$out[0]` - first output file
 
 ### Tool
 > **Status: Implemented** - Base Tool class and protocol defined. GCC toolchain implemented with C/C++ tools.

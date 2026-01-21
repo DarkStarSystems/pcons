@@ -64,9 +64,9 @@ class ArchiveTool(StandaloneTool):
 
         Uses Python helper script for cross-platform compatibility.
         Commands are lists of tokens for proper handling of paths with spaces.
-        The $$ escaping preserves $ for ninja variable substitution.
-        Pcons variables ($archive.basedir, $archive.compression_flag) are
-        expanded via the context mechanism.
+        The $$ escaping preserves $ for ninja variable substitution ($in, $out).
+        Pcons variables ($archive.compression_flag, $archive.basedir) are
+        expanded by pcons subst() at generation time, NOT by Ninja.
         """
         import pcons.util.archive_helper as archive_mod
 
@@ -74,22 +74,22 @@ class ArchiveTool(StandaloneTool):
         helper_path = str(Path(archive_mod.__file__)).replace("\\", "/")
 
         return {
-            # Tar command: uses per-build variables for compression_flag and basedir
-            # $$compression_flag and $$basedir become $compression_flag and $basedir
-            # in the Ninja file, filled in by per-build variables from ArchiveContext
+            # Tar command: $archive.compression_flag and $archive.basedir are
+            # expanded by pcons subst() at generation time.
+            # $$out and $$in become $out and $in for Ninja.
             "tarcmd": [
                 python_cmd,
                 helper_path,
                 "--type",
                 "tar",
-                "$$compression_flag",
+                "$archive.compression_flag",
                 "--output",
                 "$$out",
                 "--base-dir",
-                "$$basedir",
+                "$archive.basedir",
                 "$$in",
             ],
-            # Zip command: uses per-build variable for basedir
+            # Zip command: $archive.basedir is expanded by pcons at generation time
             "zipcmd": [
                 python_cmd,
                 helper_path,
@@ -98,12 +98,14 @@ class ArchiveTool(StandaloneTool):
                 "--output",
                 "$$out",
                 "--base-dir",
-                "$$basedir",
+                "$archive.basedir",
                 "$$in",
             ],
             # Default settings (can be overridden in env or per-target)
             "compression": None,
             "basedir": ".",
+            # Computed variables - set by ArchiveContext before subst()
+            "compression_flag": "",
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -217,6 +219,7 @@ class ArchiveNodeFactory:
             "description": description,
             # Context provides variables for per-build substitution
             "context": context,
+            "env": env,
         }
 
         # Add to target's output nodes

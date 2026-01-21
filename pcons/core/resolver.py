@@ -6,6 +6,7 @@ The Resolver is responsible for:
 2. Creating object nodes for source files with the effective flags
 3. Creating output nodes (libraries, programs) with proper dependencies
 4. Object file caching (same source + same flags = shared object)
+5. Expanding command templates to fully-resolved commands
 
 The resolver is designed to be tool-agnostic: it delegates source handling
 to the toolchain rather than having hardcoded knowledge about file types.
@@ -14,6 +15,10 @@ The resolution logic is organized into focused factory classes:
 - ObjectNodeFactory: Creates and caches object nodes for source files
 - OutputNodeFactory: Creates library and program output nodes
 - InstallNodeFactory: Creates install/copy nodes for install targets
+
+Command expansion happens in the resolver so that generators receive
+fully-expanded commands with only $in/$out as placeholders. This ensures
+consistent command handling across all generators (Ninja, Makefile, etc.).
 """
 
 from __future__ import annotations
@@ -209,6 +214,7 @@ class ObjectNodeFactory:
 
         # Store build info for the generator
         # Use handler's depfile/deps_style (from toolchain, not hardcoded)
+        # Store env reference so command expansion can access tool configuration
         obj_node._build_info = {
             "tool": tool_name,
             "command_var": command_var,
@@ -217,6 +223,7 @@ class ObjectNodeFactory:
             "depfile": depfile,
             "deps_style": deps_style,
             "context": context,
+            "env": env,
         }
 
         # Cache the object node
@@ -297,6 +304,7 @@ class OutputNodeFactory:
             "command_var": "libcmd",
             "sources": target.object_nodes,
             "context": context,
+            "env": env,
         }
 
         target.output_nodes.append(lib_node)
@@ -380,6 +388,7 @@ class OutputNodeFactory:
             "language": link_language,
             "sources": target.object_nodes,
             "context": context,
+            "env": env,
         }
 
         target.output_nodes.append(lib_node)
@@ -461,6 +470,7 @@ class OutputNodeFactory:
             "language": link_language,
             "sources": target.object_nodes,
             "context": context,
+            "env": env,
         }
 
         target.output_nodes.append(prog_node)
@@ -524,11 +534,15 @@ class Resolver:
         """Resolve all targets in build order.
 
         Processes targets in dependency order, ensuring all dependencies
-        are resolved before their dependents.
+        are resolved before their dependents. After all targets are resolved,
+        expands command templates so generators receive fully-expanded commands.
         """
         for target in self._targets_in_build_order():
             if not target._resolved:
                 self._resolve_target(target)
+
+        # Expand command templates for all nodes
+        self._expand_node_commands()
 
     def _targets_in_build_order(self) -> list[Target]:
         """Get targets in the order they should be resolved.
@@ -665,11 +679,15 @@ class Resolver:
 
         Called after main resolution so output_nodes are populated.
         This handles Install, InstallAs, and similar targets that need
-        to reference outputs from other targets.
+        to reference outputs from other targets. After resolving all
+        pending sources, expands command templates for any new nodes.
         """
         for target in self._targets_in_build_order():
             if target._pending_sources is not None:
                 self._resolve_target_pending_sources(target)
+
+        # Expand command templates for any new nodes created during pending resolution
+        self._expand_node_commands()
 
     def _resolve_target_pending_sources(self, target: Target) -> None:
         """Resolve pending sources for a single target.
@@ -710,3 +728,160 @@ class Resolver:
 
         # Mark as processed
         target._pending_sources = None
+
+    def _expand_node_commands(self) -> None:
+        """Expand command templates for all nodes with _build_info.
+
+        This method is called at the end of resolution to expand all command
+        templates so generators receive fully-expanded commands with only
+        $in/$out as placeholders.
+
+        For each node with _build_info containing 'tool' and 'command_var'
+        but no 'command', this method:
+        1. Gets the command template from env.<tool>.<command_var>
+        2. If context has get_env_overrides(), sets those values on the tool
+        3. If context has get_variables(), formats those into extra vars
+        4. Calls env.subst() to expand the template
+        5. Stores the result in _build_info["command"]
+        """
+
+        # Collect all nodes with _build_info from targets
+        nodes_to_expand: list[FileNode] = []
+
+        for target in self.project.targets:
+            # Collect object nodes
+            for node in target.object_nodes:
+                if isinstance(node, FileNode) and hasattr(node, "_build_info"):
+                    nodes_to_expand.append(node)
+            # Collect output nodes
+            for node in target.output_nodes:
+                if isinstance(node, FileNode) and hasattr(node, "_build_info"):
+                    nodes_to_expand.append(node)
+            # Collect other nodes
+            for node in target.nodes:
+                if isinstance(node, FileNode) and hasattr(node, "_build_info"):
+                    if node not in nodes_to_expand:
+                        nodes_to_expand.append(node)
+
+        # Also check nodes tracked in environments
+        for env in self.project.environments:
+            for node in getattr(env, "_created_nodes", []):
+                if isinstance(node, FileNode) and hasattr(node, "_build_info"):
+                    if node not in nodes_to_expand:
+                        nodes_to_expand.append(node)
+
+        # Expand commands for each node
+        for node in nodes_to_expand:
+            self._expand_single_node_command(node)
+
+    def _expand_single_node_command(self, node: FileNode) -> None:
+        """Expand command template for a single node.
+
+        Args:
+            node: FileNode with _build_info to expand.
+        """
+        from pcons.core.environment import Environment
+
+        build_info = getattr(node, "_build_info", None)
+        if build_info is None:
+            return
+
+        # Skip if already has expanded command
+        if "command" in build_info:
+            return
+
+        # Get required fields
+        tool_name = build_info.get("tool")
+        command_var = build_info.get("command_var")
+        if tool_name is None or command_var is None:
+            return
+
+        # Get env from build_info
+        env = build_info.get("env")
+        if env is None or not isinstance(env, Environment):
+            logger.debug(
+                "Node %s has no env in _build_info, skipping command expansion",
+                node.path,
+            )
+            return
+
+        # Get context if present
+        context = build_info.get("context")
+
+        # Get the command template from the environment
+        tool_config = getattr(env, tool_name, None)
+        if tool_config is None:
+            logger.warning(
+                "Tool '%s' not found in environment for node %s",
+                tool_name,
+                node.path,
+            )
+            return
+
+        cmd_template = getattr(tool_config, command_var, None)
+        if cmd_template is None:
+            logger.warning(
+                "Command template '%s.%s' not found for node %s",
+                tool_name,
+                command_var,
+                node.path,
+            )
+            return
+
+        # Check if context has get_env_overrides() - for all contexts (archive/install
+        # and compile/link). Set those values on the tool namespace before subst().
+        # This allows templates like ${prefix(cc.iprefix, cc.includes)} to expand
+        # with the effective requirements.
+        if context is not None and hasattr(context, "get_env_overrides"):
+            context_overrides = context.get_env_overrides()
+            for key, val in context_overrides.items():
+                if key == "extra_flags":
+                    # Merge extra_flags into the tool's flags list
+                    # Templates use $cc.flags, not $cc.extra_flags
+                    existing_flags = getattr(tool_config, "flags", [])
+                    if isinstance(existing_flags, list):
+                        merged = list(existing_flags) + list(val)
+                    else:
+                        merged = list(val)
+                    tool_config.flags = merged
+                elif key == "ldflags":
+                    # Merge ldflags into the link tool's flags list
+                    existing_flags = getattr(tool_config, "flags", [])
+                    if isinstance(existing_flags, list):
+                        merged = list(existing_flags) + list(val)
+                    else:
+                        merged = list(val)
+                    tool_config.flags = merged
+                else:
+                    # Set directly (includes, defines, libs, libdirs)
+                    setattr(tool_config, key, val)
+
+        # Preserve ninja variables $in, $out as-is
+        # These are filled by the generator, not by pcons subst
+        # We use $$ escaping to preserve them through subst
+        extra_vars: dict[str, str] = {}
+        extra_vars["in"] = "$$in"
+        extra_vars["out"] = "$$out"
+
+        # Expand the command template to a list of tokens
+        # Tokens stay separate for proper quoting - generator joins with shell quoting
+        # If substitution fails due to missing variables (e.g., custom toolchain vars),
+        # leave the command unexpanded for the generator's fallback logic
+        from pcons.core.errors import MissingVariableError
+
+        try:
+            command_tokens = env.subst_list(cmd_template, **extra_vars)
+        except MissingVariableError as e:
+            logger.debug(
+                "Command expansion failed for node %s: %s. "
+                "Generator will use fallback expansion.",
+                node.path,
+                e,
+            )
+            return  # Don't set command, let generator handle it
+
+        # Store expanded command tokens in build_info
+        # All context variables (includes, defines, flags, libs, etc.) are now
+        # fully expanded into the token list via get_env_overrides()
+        # Generator will join tokens with shell-appropriate quoting
+        build_info["command"] = command_tokens

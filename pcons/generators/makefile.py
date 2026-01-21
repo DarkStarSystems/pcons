@@ -291,8 +291,16 @@ class MakefileGenerator(BaseGenerator):
         custom_command = build_info.get("command")
         if custom_command:
             # Builder provided command directly - use it
-            # Convert $SOURCE, $TARGET etc. to $in/$out
-            command = self._convert_command_variables(str(custom_command))
+            # Command can be a list of tokens or a string
+            if isinstance(custom_command, list):
+                # Convert token list to shell command with proper quoting
+                from pcons.core.subst import to_shell_command
+
+                command = to_shell_command(custom_command, shell="bash")
+            else:
+                command = str(custom_command)
+            # Convert $SOURCE, $TARGET etc. to make variables
+            command = self._convert_command_variables(command)
             command = self._substitute_make_vars(command, node, sources, build_info)
             return self._append_post_build(command, node, target, sources)
 

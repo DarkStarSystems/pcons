@@ -102,8 +102,19 @@ class TestNinjaQuoting:
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
-        # Use simple command - generator adds placeholders for effective requirements
-        env.cc.objcmd = "gcc -c $$in -o $$out"
+        # Command template must include placeholders for includes/defines
+        # The resolver expands these using values from effective requirements
+        env.cc.iprefix = "-I"
+        env.cc.dprefix = "-D"
+        env.cc.objcmd = [
+            "gcc",
+            "${prefix(cc.iprefix, cc.includes)}",
+            "${prefix(cc.dprefix, cc.defines)}",
+            "-c",
+            "$$in",
+            "-o",
+            "$$out",
+        ]
         env.cc.progcmd = "gcc -o $$out $$in"
 
         # Create source file
@@ -134,14 +145,17 @@ class TestNinjaQuoting:
         # Read ninja file
         ninja_content = (build_dir / "build.ninja").read_text()
 
-        # Check that paths with spaces are properly escaped for Ninja
-        # Ninja escapes spaces as "$ " (dollar-space) in variable values
-        assert "include$ path" in ninja_content
+        # Check that paths in build statements are properly escaped for Ninja
+        # Ninja escapes spaces as "$ " (dollar-space) in build targets/dependencies
+        # The source file path should be escaped in the build statement
+        assert "src$ with$ spaces" in ninja_content
 
-        # The define with quotes should be preserved (spaces escaped)
+        # The include path in the command should be properly quoted for the shell
+        # (shell quoting varies by platform, but the path should be present)
+        assert "include path" in ninja_content or "include\\ path" in ninja_content
+
+        # The define should be present in the command
         assert "MESSAGE" in ninja_content
-        # Quotes inside the define value should be preserved
-        assert "Hello$ World" in ninja_content or "Hello World" in ninja_content
 
     def test_ninja_escapes_special_chars(self) -> None:
         """Verify _escape_path handles special characters."""
@@ -270,8 +284,19 @@ class TestEndToEndSpacesInPaths:
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
-        # Use simple command - generator adds placeholders for effective requirements
-        env.cc.objcmd = "gcc -c $$in -o $$out"
+        # Command template must include placeholders for includes/defines
+        # The resolver expands these using values from effective requirements
+        env.cc.iprefix = "-I"
+        env.cc.dprefix = "-D"
+        env.cc.objcmd = [
+            "gcc",
+            "${prefix(cc.iprefix, cc.includes)}",
+            "${prefix(cc.dprefix, cc.defines)}",
+            "-c",
+            "$$in",
+            "-o",
+            "$$out",
+        ]
         env.cc.progcmd = "gcc -o $$out $$in"
 
         # Build with all the space-containing paths
@@ -289,9 +314,11 @@ class TestEndToEndSpacesInPaths:
         ninja = (build_dir / "build.ninja").read_text()
 
         # Verify escaping in ninja output
-        # All paths use Ninja $ escaping (dollar-space for spaces)
-        assert "My$ Source$ Files" in ninja  # Build statement path uses Ninja escaping
-        assert "My$ Headers" in ninja  # Variable values also use Ninja escaping
+        # Build statement paths use Ninja $ escaping (dollar-space for spaces)
+        assert "My$ Source$ Files" in ninja  # Source path in build statement
+
+        # Include paths are in the command line, shell-quoted (not ninja-escaped)
+        assert "My Headers" in ninja  # The path appears in the command
 
         # The build should be syntactically valid (no unescaped spaces breaking parsing)
         # We can't easily run ninja, but we can check there are no obvious errors

@@ -81,7 +81,7 @@ class BuildInfo(TypedDict, total=False):
     sources: list[Any]  # list[Node], but avoid circular import
     depfile: str | None
     deps_style: str | None
-    command: str  # Direct command for generic/custom builders
+    command: str | list[str]  # Command as string or list of tokens
     description: str  # Human-readable build description
 
     # Toolchain-provided context
@@ -101,6 +101,13 @@ class BuildInfo(TypedDict, total=False):
     # Per-build variables for standalone tools (Install, Archive)
     # These are written as Ninja build-level variables
     variables: dict[str, str]
+
+    # Environment reference for command expansion
+    env: Any  # Environment, but avoid circular import
+
+    # Environment reference for command expansion
+    # Used by resolver to expand command templates
+    env: Any  # Environment, but avoid circular import
 
 
 class Node(ABC):

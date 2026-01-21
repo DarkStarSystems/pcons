@@ -146,92 +146,74 @@ class NinjaGenerator(BaseGenerator):
     ) -> str:
         """Ensure a rule exists for this node's builder, return rule name.
 
-        For target-centric builds, the rule command may include placeholders
-        for effective requirements ($includes, $defines, $extra_flags, etc.)
-        that are filled in via per-build variables.
+        Commands are now fully expanded by the resolver. The generator uses
+        the pre-expanded command from _build_info["command"] and deduplicates
+        rules based on command hash.
+
+        For nodes without a pre-expanded command (e.g., tests that manually
+        create build_info), falls back to the old expansion logic.
         """
         build_info = getattr(node, "_build_info", None)
         if build_info is None:
             return "phony"
 
-        # Get command template from build info
+        # Get basic info from build_info
         tool_name = build_info.get("tool", "unknown")
         command_var = build_info.get("command_var", "cmdline")
 
-        # Check if this is a target-centric build (has effective requirements)
-        has_effective_reqs = build_info.get("context") is not None
-
-        # Check if this is a generic command (has custom rule_name and command)
+        # Check if this is a generic command (has custom rule_name)
         custom_rule_name = build_info.get("rule_name")
-        custom_command = build_info.get("command")
 
-        # Create a unique key for this rule based on tool, command var, and env
-        # Each env gets its own rule so env-specific settings (frameworks, libs, etc.)
-        # are correctly baked into the rule via template expansion.
+        # Get the pre-expanded command from build_info (set by resolver)
+        # Command can be a list of tokens or a string
+        command_raw = build_info.get("command")
+
+        # If no pre-expanded command, fall back to old expansion logic
+        # (for backward compatibility with tests and direct node creation)
+        if command_raw is None:
+            command = self._expand_command_fallback(node, build_info, env)
+        elif isinstance(command_raw, list):
+            # Relativize path flags in tokens for ninja execution
+            # (ninja runs from build dir, paths are project-root-relative)
+            relativized_tokens = self._relativize_command_tokens(command_raw)
+            # Convert token list to shell command string with ninja quoting
+            from pcons.core.subst import to_shell_command
+
+            command = to_shell_command(relativized_tokens, shell="ninja")
+        else:
+            command = command_raw
+
+        # Convert $SOURCE/$TARGET to $in/$out for generic commands
+        # (GenericCommandBuilder stores the raw command with these variables)
         if custom_rule_name:
-            # Generic command builder uses custom rule name
+            command = self._convert_command_variables(command)
+
+        # Append $post_build placeholder if not already present
+        if "$post_build" not in command:
+            command = command.rstrip() + "$post_build"
+
+        # Create a unique rule key based on the command
+        # This ensures identical commands share rules (deduplication)
+        if custom_rule_name:
             rule_key = custom_rule_name
         else:
-            rule_key = f"{tool_name}_{command_var}"
-            if env is not None:
-                # Always include env identity so each env gets its own rule
-                # This allows env.override() settings to work correctly
-                env_suffix = self._get_env_suffix(env)
-                rule_key += f"_{env_suffix}"
+            # Hash the command to create a stable rule key
+            # Include tool and command_var for readability
+            import hashlib
+
+            cmd_hash = hashlib.md5(command.encode()).hexdigest()[:8]
+            rule_key = f"{tool_name}_{command_var}_{cmd_hash}"
 
         if rule_key not in self._rules:
             rule_name = rule_key
             description = f"{tool_name.upper()} $out"
 
-            # Get the actual command from the environment or build_info
-            command = f"echo 'No command for {rule_key}'"
-
-            # Check for command in build_info first (generic commands, lipo, and
-            # any custom builder that sets command/description in _build_info)
-            if custom_command:
-                # Builder provided command directly - use it
-                # Convert $SOURCE, $TARGET etc. to Ninja $in, $out
-                command = self._convert_command_variables(custom_command)
-                # Append $post_build for post-build commands support
-                command = command.rstrip() + "$post_build"
-                # Use description from build_info if provided, otherwise default
-                custom_description = build_info.get("description")
-                if custom_description:
-                    description = str(custom_description)
-                else:
-                    description = "COMMAND $out"
-            elif env is not None:
-                tool_config = getattr(env, tool_name, None)
-                if tool_config is not None:
-                    cmd_template = getattr(tool_config, command_var, None)
-                    if cmd_template:
-                        # Expand tool variables using subst() with ninja shell
-                        # Template can be a string or list of tokens
-                        # Using shell="ninja" ensures $in, $out aren't quoted
-                        # Ninja variables like $in, $out are escaped as $$in, $$out
-                        # in the toolchain defaults, and become $in, $out after subst
-                        #
-                        # Since each env gets its own rule, env-specific settings
-                        # (frameworks, libs, etc.) are correctly baked into this
-                        # env's rule via normal template expansion.
-                        command = env.subst(cmd_template, shell="ninja")
-
-                        # For target-centric builds, append effective requirement
-                        # placeholders that will be filled per-build
-                        if has_effective_reqs:
-                            command = self._augment_command_with_effective_vars(
-                                command, command_var
-                            )
-                        else:
-                            # For non-effective builds, still add $post_build
-                            command = command.rstrip() + "$post_build"
-            else:
-                # No environment available - try standalone tools for Install/Archive
-                cmd_template = self._get_standalone_tool_command(tool_name, command_var)
-                if cmd_template:
-                    # Standalone tool command - already has $$ escaping, convert to $
-                    command = cmd_template.replace("$$", "$")
-                    command = command.rstrip() + "$post_build"
+            # Use description from build_info if provided
+            custom_description = build_info.get("description")
+            if custom_description:
+                description = str(custom_description)
+            elif custom_rule_name:
+                description = "COMMAND $out"
 
             # Write the rule
             f.write(f"rule {rule_name}\n")
@@ -254,6 +236,62 @@ class NinjaGenerator(BaseGenerator):
 
         return self._rules[rule_key]
 
+    def _expand_command_fallback(
+        self,
+        node: FileNode,
+        build_info: dict[str, Any],
+        env: Environment | None,
+    ) -> str:
+        """Fallback command expansion when resolver hasn't pre-expanded.
+
+        Used for backward compatibility with tests and direct node creation.
+
+        Args:
+            node: The file node being built.
+            build_info: The node's build info.
+            env: The environment (may be None).
+
+        Returns:
+            Expanded command string.
+        """
+        tool_name = build_info.get("tool", "unknown")
+        command_var = build_info.get("command_var", "cmdline")
+        context = build_info.get("context")
+
+        # Check for context overrides (archive/install tools)
+        context_overrides: dict[str, str] = {}
+        if context is not None and hasattr(context, "get_env_overrides"):
+            context_overrides = context.get_env_overrides()
+
+        # Default command
+        command = f"echo 'No command for {tool_name}_{command_var}'"
+
+        if env is not None:
+            tool_config = getattr(env, tool_name, None)
+            if tool_config is not None:
+                cmd_template = getattr(tool_config, command_var, None)
+                if cmd_template:
+                    # Set context overrides on tool config
+                    if context_overrides:
+                        for key, val in context_overrides.items():
+                            setattr(tool_config, key, val)
+
+                    # Expand using subst
+                    command = env.subst(cmd_template, shell="ninja")
+
+                    # For compile/link contexts, add effective vars
+                    if context is not None and not context_overrides:
+                        command = self._augment_command_with_effective_vars(
+                            command, command_var
+                        )
+        else:
+            # Try standalone tools
+            cmd_template = self._get_standalone_tool_command(tool_name, command_var)
+            if cmd_template:
+                command = cmd_template.replace("$$", "$")
+
+        return command
+
     def _augment_command_with_effective_vars(
         self, command: str, command_var: str
     ) -> str:
@@ -261,6 +299,9 @@ class NinjaGenerator(BaseGenerator):
 
         Adds placeholders like $includes, $defines, $extra_flags that will
         be filled in per-build based on the target's effective requirements.
+
+        NOTE: This method is for backward compatibility only. New code should
+        use the resolver's command expansion which bakes in these values.
 
         Args:
             command: The base command template.
@@ -285,10 +326,6 @@ class NinjaGenerator(BaseGenerator):
                 if not command.endswith("$libs"):
                     command += " $ldflags $libdirs $libs"
         # For archive commands (archivecmd), no changes needed
-
-        # For all commands, append $post_build placeholder for post-build commands
-        # This will be empty unless a target has post_build commands
-        command = command.rstrip() + "$post_build"
 
         return command
 
@@ -403,11 +440,30 @@ class NinjaGenerator(BaseGenerator):
             rule_name = custom_rule_name
         else:
             # Rule name must match _ensure_rule() logic
-            rule_name = f"{tool_name}_{command_var}"
-            if env is not None:
-                # Each env gets its own rule
-                env_suffix = self._get_env_suffix(env)
-                rule_name += f"_{env_suffix}"
+            # Use the pre-expanded command to create a hash-based rule key
+            command_raw = build_info.get("command")
+            if command_raw is None:
+                # Fallback expansion - use same logic as _ensure_rule
+                command = self._expand_command_fallback(node, build_info, env)
+            elif isinstance(command_raw, list):
+                # Relativize path flags in tokens for ninja execution
+                relativized_tokens = self._relativize_command_tokens(command_raw)
+                # Convert token list to shell command string with ninja quoting
+                from pcons.core.subst import to_shell_command
+
+                command = to_shell_command(relativized_tokens, shell="ninja")
+            else:
+                command = command_raw
+
+            # Ensure $post_build is included
+            if "$post_build" not in command:
+                command = command.rstrip() + "$post_build"
+
+            # Hash the command to create a stable rule key
+            import hashlib
+
+            cmd_hash = hashlib.md5(command.encode()).hexdigest()[:8]
+            rule_name = f"{tool_name}_{command_var}_{cmd_hash}"
 
         # Handle multi-output builds from generic commands
         all_targets = build_info.get("all_targets")
@@ -553,8 +609,21 @@ class NinjaGenerator(BaseGenerator):
 
         # Write build variables from context (any object with get_variables())
         # This supports ToolchainContext (compile/link), ArchiveContext, InstallContext
+        # Write context variables if the command has placeholders ($includes, etc.)
+        # or if the context doesn't use get_env_overrides (i.e., it's a CompileLinkContext)
         context = build_info.get("context")
-        if context is not None and hasattr(context, "get_variables"):
+        command_str = str(build_info.get("command", ""))
+        # Check if command has placeholders that need per-build variable expansion
+        has_placeholders = (
+            "$includes" in command_str
+            or "$defines" in command_str
+            or (context is not None and not hasattr(context, "get_env_overrides"))
+        )
+        if (
+            context is not None
+            and hasattr(context, "get_variables")
+            and has_placeholders
+        ):
             # Use cast to satisfy type checker - we've verified the method exists
             get_variables = cast(
                 "Callable[[], dict[str, list[str]]]", context.get_variables
@@ -807,6 +876,27 @@ class NinjaGenerator(BaseGenerator):
             return rel
         return path
 
+    def _is_build_dir_path(self, path: str) -> bool:
+        """Check if a path refers to the build directory.
+
+        Args:
+            path: Path string (can be relative or absolute).
+
+        Returns:
+            True if the path resolves to the build directory.
+        """
+        if self._output_dir is None:
+            return False
+        path_obj = Path(path)
+        if not path_obj.is_absolute():
+            # Make relative path absolute from project root
+            if self._project_root:
+                path_obj = self._project_root / path_obj
+        try:
+            return path_obj.resolve() == self._output_dir
+        except (OSError, ValueError):
+            return False
+
     def _relativize_flag_with_path(self, token: str) -> str:
         """Relativize a compiler flag that contains a path.
 
@@ -816,6 +906,9 @@ class NinjaGenerator(BaseGenerator):
         - -L/path/to/lib -> -L$topdir/relative/path
         - /LIBPATH:/path -> /LIBPATH:$topdir/relative/path (MSVC)
 
+        Special case: if path equals the build directory, returns prefix + "."
+        since ninja runs from the build directory.
+
         Returns the token unchanged if it's not a path flag or can't be relativized.
         """
         # Common Unix-style flags with path
@@ -823,6 +916,9 @@ class NinjaGenerator(BaseGenerator):
             if token.startswith(prefix):
                 path = token[len(prefix) :]
                 if path:  # Has a path after the prefix
+                    # Special case: path equals build directory -> use "."
+                    if self._is_build_dir_path(path):
+                        return f"{prefix}."
                     rel = self._make_source_relative(path)
                     if rel is not None:
                         return f"{prefix}$topdir/{rel}"
@@ -832,6 +928,9 @@ class NinjaGenerator(BaseGenerator):
         if token.startswith("/I"):
             path = token[2:]
             if path:
+                # Special case: path equals build directory -> use "."
+                if self._is_build_dir_path(path):
+                    return "/I."
                 rel = self._make_source_relative(path)
                 if rel is not None:
                     return f"/I$topdir/{rel}"
@@ -841,12 +940,29 @@ class NinjaGenerator(BaseGenerator):
             prefix = token[:9]  # Preserve original case
             path = token[9:]
             if path:
+                # Special case: path equals build directory -> use "."
+                if self._is_build_dir_path(path):
+                    return f"{prefix}."
                 rel = self._make_source_relative(path)
                 if rel is not None:
                     return f"{prefix}$topdir/{rel}"
             return token
 
         return token
+
+    def _relativize_command_tokens(self, tokens: list[str]) -> list[str]:
+        """Relativize path flags in command tokens for ninja execution.
+
+        Since ninja runs from the build directory, paths in flags like -I and -L
+        need to be converted from project-root-relative to build-dir-relative.
+
+        Args:
+            tokens: List of command tokens.
+
+        Returns:
+            List of tokens with path flags relativized.
+        """
+        return [self._relativize_flag_with_path(t) for t in tokens]
 
     def _escape_for_ninja_variable(self, token: str) -> str:
         """Escape a token for use in a Ninja variable value.

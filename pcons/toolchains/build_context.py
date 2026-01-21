@@ -100,6 +100,37 @@ class CompileLinkContext:
 
         return result
 
+    def get_env_overrides(self) -> dict[str, object]:
+        """Return values to set on env.<tool>.* before subst().
+
+        These values are set on the environment's tool namespace so that
+        template expressions like ${prefix(cc.iprefix, cc.includes)} are
+        expanded during subst() with the effective requirements.
+
+        Returns:
+            Dictionary mapping variable names to values.
+            Lists are returned as-is for the prefix() function to process.
+        """
+        result: dict[str, object] = {}
+
+        # Compile-time settings (raw values - prefix() will format them)
+        if self.includes:
+            result["includes"] = list(self.includes)
+        if self.defines:
+            result["defines"] = list(self.defines)
+        if self.flags:
+            result["extra_flags"] = list(self.flags)
+
+        # Link-time settings (raw values - prefix() will format them)
+        if self.libdirs:
+            result["libdirs"] = list(self.libdirs)
+        if self.libs:
+            result["libs"] = list(self.libs)
+        if self.link_flags:
+            result["ldflags"] = list(self.link_flags)
+
+        return result
+
     @classmethod
     def from_effective_requirements(
         cls, effective: EffectiveRequirements
