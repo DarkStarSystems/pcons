@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import platform
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from pcons.core.errors import (
     CircularReferenceError,
@@ -57,6 +57,102 @@ class MultiCmd:
 
     commands: list[str | list[str]]
     join: str = "&&"
+
+
+# =============================================================================
+# PathToken for marking path-containing command tokens
+# =============================================================================
+
+
+@dataclass
+class PathToken:
+    """A command token containing a path that needs generator-specific relativization.
+
+    This class marks tokens that contain paths (like include directories or library
+    paths) so that generators can apply appropriate relativization without needing
+    to parse flag prefixes with regex.
+
+    The context creates PathToken objects for path values, and generators call
+    relativize() with their path transformation function.
+
+    Attributes:
+        prefix: The flag prefix (e.g., "-I", "-L", "/LIBPATH:").
+        path: The path value (relative to project root or absolute).
+        path_type: Type of path for relativization:
+            - "project": Relative to project root (use $topdir in ninja)
+            - "build": Relative to build directory (use "." in ninja)
+            - "absolute": Leave unchanged
+
+    Example:
+        # Context creates:
+        token = PathToken("-I", "src/include", "project")
+
+        # Generator relativizes:
+        def ninja_relativize(path):
+            return f"$topdir/{path}"
+        result = token.relativize(ninja_relativize)  # "-I$topdir/src/include"
+    """
+
+    prefix: str
+    path: str
+    path_type: str = "project"  # "project", "build", or "absolute"
+
+    def relativize(self, relativizer: Callable[[str], str]) -> str:
+        """Apply a relativization function and return the complete token.
+
+        Args:
+            relativizer: Function that transforms the path for the target generator.
+                        Receives the raw path, returns the relativized path.
+
+        Returns:
+            The complete token: prefix + relativized path.
+        """
+        return self.prefix + relativizer(self.path)
+
+    def __str__(self) -> str:
+        """Fallback string representation (no relativization)."""
+        return self.prefix + self.path
+
+
+# Type alias for command tokens (can be string or PathToken)
+CommandToken = str | PathToken
+
+
+@dataclass
+class ProjectPath:
+    """Marker for a path relative to project root.
+
+    Used by contexts to mark include/lib paths that need relativization
+    for the target generator. The prefix() function converts these to
+    PathToken objects with path_type="project".
+
+    Example:
+        context.get_env_overrides() returns:
+            {"includes": [ProjectPath("src/include"), ProjectPath("lib/headers")]}
+
+        prefix() converts to:
+            [PathToken("-I", "src/include", "project"), ...]
+    """
+
+    path: str
+
+
+@dataclass
+class BuildPath:
+    """Marker for a path relative to build directory.
+
+    Used for paths that are within the build output directory.
+    The prefix() function converts these to PathToken with path_type="build".
+
+    Example:
+        context.get_env_overrides() returns:
+            {"includes": [BuildPath("generated")]}
+
+        prefix() converts to:
+            [PathToken("-I", "generated", "build"), ...]
+    """
+
+    path: str
 
 
 # =============================================================================
@@ -161,7 +257,7 @@ def subst(
     namespace: Namespace | dict[str, Any],
     *,
     location: SourceLocation | None = None,
-) -> list[str] | list[list[str]]:
+) -> list[CommandToken] | list[list[CommandToken]]:
     """Expand variables in a template, returning structured token list.
 
     Args:
@@ -170,8 +266,12 @@ def subst(
         location: Source location for error messages
 
     Returns:
-        Single command: list[str] - flat list of tokens
-        MultiCmd: list[list[str]] - list of commands, each a list of tokens
+        Single command: list[CommandToken] - flat list of tokens (str or PathToken)
+        MultiCmd: list[list[CommandToken]] - list of commands, each a token list
+
+    PathToken objects are created when path markers (ProjectPath, BuildPath)
+    are used with the prefix() function. Generators should process these
+    with appropriate relativization before converting to shell commands.
     """
     # Convert dict to Namespace if needed
     ns = namespace if isinstance(namespace, Namespace) else Namespace(namespace)
@@ -186,15 +286,21 @@ def _subst_command(
     template: str | list,
     namespace: Namespace,
     location: SourceLocation | None,
-) -> list[str]:
-    """Substitute a single command template, returning token list."""
+) -> list[CommandToken]:
+    """Substitute a single command template, returning token list.
+
+    Returns list of CommandToken (str or PathToken). PathToken objects
+    are created when path markers (ProjectPath, BuildPath) are used with
+    prefix() function, allowing generators to apply relativization.
+    """
     tokens = template.split() if isinstance(template, str) else list(template)
 
-    result: list[str] = []
+    result: list[CommandToken] = []
     for token in tokens:
         expanded = _expand_token(token, namespace, set(), location)
         if isinstance(expanded, list):
-            result.extend(expanded)
+            # expanded is list[CommandToken] here
+            result.extend(cast(list[CommandToken], expanded))
         else:
             result.append(expanded)
 
@@ -206,8 +312,8 @@ def _expand_token(
     namespace: Namespace,
     expanding: set[str],
     location: SourceLocation | None,
-) -> str | list[str]:
-    """Expand a single token. Returns string or list if token expands to multiple."""
+) -> CommandToken | list[CommandToken]:
+    """Expand a single token. Returns string/PathToken or list if token expands to multiple."""
     stripped = token.strip()
 
     # Check for function call: ${func(args)}
@@ -227,18 +333,22 @@ def _expand_token(
 
         if isinstance(value, list):
             # List variable as entire token -> multiple tokens
-            result = []
+            var_result: list[CommandToken] = []
             for v in value:
-                sv = str(v)
-                if "$" in sv:
-                    exp = _expand_token(sv, namespace, expanding, location)
-                    if isinstance(exp, list):
-                        result.extend(exp)
-                    else:
-                        result.append(exp)
+                # Preserve PathToken and other marker objects
+                if isinstance(v, (PathToken, ProjectPath, BuildPath)):
+                    var_result.append(v if isinstance(v, PathToken) else str(v))
                 else:
-                    result.append(sv)
-            return result
+                    sv = str(v)
+                    if "$" in sv:
+                        exp = _expand_token(sv, namespace, expanding, location)
+                        if isinstance(exp, list):
+                            var_result.extend(cast(list[CommandToken], exp))
+                        else:
+                            var_result.append(exp)
+                    else:
+                        var_result.append(sv)
+            return var_result
 
         str_value = str(value)
         if "$" in str_value:
@@ -252,13 +362,13 @@ def _expand_token(
             return _DOLLAR_SENTINEL
 
         if match.group(2):  # Function call
-            result = _call_function(
+            func_result = _call_function(
                 match.group(2), match.group(3), namespace, expanding, location
             )
             return (
-                " ".join(str(x) for x in result)
-                if isinstance(result, list)
-                else str(result)
+                " ".join(str(x) for x in func_result)
+                if isinstance(func_result, list)
+                else str(func_result)
             )
 
         var_name = match.group(4) or match.group(5)
@@ -273,7 +383,7 @@ def _expand_token(
         return str(value)
 
     subst_result: str = _TOKEN_PATTERN.sub(replace_match, token)
-    final_result: str | list[str] = subst_result
+    final_result: CommandToken | list[CommandToken] = subst_result
 
     if "$" in subst_result and subst_result != token:
         final_result = _expand_token(subst_result, namespace, expanding, location)
@@ -282,7 +392,15 @@ def _expand_token(
     if isinstance(final_result, str):
         final_result = final_result.replace(_DOLLAR_SENTINEL, "$")
     elif isinstance(final_result, list):
-        final_result = [s.replace(_DOLLAR_SENTINEL, "$") for s in final_result]
+        # Process list, replacing sentinel in string tokens
+        processed: list[CommandToken] = []
+        for s in final_result:
+            if isinstance(s, str):
+                processed.append(s.replace(_DOLLAR_SENTINEL, "$"))
+            else:
+                # s is PathToken here
+                processed.append(cast(PathToken, s))
+        final_result = processed
 
     return final_result
 
@@ -310,8 +428,13 @@ def _call_function(
     namespace: Namespace,
     expanding: set[str],
     location: SourceLocation | None,
-) -> list[str]:
-    """Call a substitution function. Always returns a list."""
+) -> list[CommandToken]:
+    """Call a substitution function. Always returns a list.
+
+    Returns list of CommandToken (str or PathToken). PathToken is returned
+    when the input contains ProjectPath or BuildPath markers, allowing
+    generators to apply appropriate path relativization.
+    """
     args = [a.strip() for a in _ARG_SPLIT.split(args_str) if a.strip()]
 
     if func_name == "prefix":
@@ -322,7 +445,15 @@ def _call_function(
         prefix = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
-        return [prefix + str(item) for item in items]
+        result: list[CommandToken] = []
+        for item in items:
+            if isinstance(item, ProjectPath):
+                result.append(PathToken(prefix, item.path, "project"))
+            elif isinstance(item, BuildPath):
+                result.append(PathToken(prefix, item.path, "build"))
+            else:
+                result.append(prefix + str(item))
+        return result
 
     elif func_name == "suffix":
         if len(args) != 2:
@@ -332,7 +463,8 @@ def _call_function(
         items = _resolve_arg(args[0], namespace, expanding, location)
         suffix = str(_resolve_arg(args[1], namespace, expanding, location))
         items = items if isinstance(items, list) else [items]
-        return [str(item) + suffix for item in items]
+        suffix_result: list[CommandToken] = [str(item) + suffix for item in items]
+        return suffix_result
 
     elif func_name == "wrap":
         if len(args) != 3:
@@ -343,7 +475,10 @@ def _call_function(
         items = _resolve_arg(args[1], namespace, expanding, location)
         suffix = str(_resolve_arg(args[2], namespace, expanding, location))
         items = items if isinstance(items, list) else [items]
-        return [prefix + str(item) + suffix for item in items]
+        wrap_result: list[CommandToken] = [
+            prefix + str(item) + suffix for item in items
+        ]
+        return wrap_result
 
     elif func_name == "join":
         if len(args) != 2:
@@ -353,7 +488,8 @@ def _call_function(
         sep = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
-        return [sep.join(str(item) for item in items)]
+        join_result: list[CommandToken] = [sep.join(str(item) for item in items)]
+        return join_result
 
     elif func_name == "pairwise":
         # Produces pairs: pairwise("-framework", ["A", "B"]) -> ["-framework", "A", "-framework", "B"]
@@ -365,11 +501,11 @@ def _call_function(
         prefix = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
-        result: list[str] = []
+        pairwise_result: list[CommandToken] = []
         for item in items:
-            result.append(prefix)
-            result.append(str(item))
-        return result
+            pairwise_result.append(prefix)
+            pairwise_result.append(str(item))
+        return pairwise_result
 
     else:
         raise SubstitutionError(f"Unknown function: {func_name}", location)
@@ -406,31 +542,41 @@ def _resolve_arg(
 
 
 def to_shell_command(
-    tokens: list[str] | list[list[str]],
+    tokens: Sequence[CommandToken] | Sequence[Sequence[CommandToken]],
     shell: str = "auto",
     multi_join: str = " && ",
 ) -> str:
     """Convert token list to shell command string with proper quoting.
 
     Args:
-        tokens: From subst() - single command or list of commands
-        shell: "auto", "bash", "cmd", or "powershell"
+        tokens: From subst() - single command or list of commands.
+                Can contain PathToken objects which will be converted via str().
+        shell: "auto", "bash", "cmd", "powershell", or "ninja"
         multi_join: Separator for multiple commands
+
+    Note: Generators should process PathToken objects with their relativizer
+    before calling this function. If PathToken objects remain, they are
+    converted via str() (prefix + path, no relativization).
     """
     if shell == "auto":
         shell = "cmd" if platform.system() == "Windows" else "bash"
 
-    # Multiple commands?
-    if tokens and isinstance(tokens[0], list):
+    # Multiple commands? Check if first element is a sequence (list)
+    # but not a string or PathToken
+    if tokens and isinstance(tokens[0], (list, tuple)):
+        # tokens is Sequence[Sequence[CommandToken]] - multiple commands
         commands = []
         for cmd_tokens in tokens:
-            # cmd_tokens is a list[str] here, convert to list[Any] for _flatten
-            quoted = [_quote_for_shell(t, shell) for t in _flatten(list(cmd_tokens))]
-            commands.append(" ".join(quoted))
+            # cmd_tokens is a Sequence[CommandToken]
+            if isinstance(cmd_tokens, (list, tuple)):
+                flat_tokens = _flatten(list(cmd_tokens))
+                quoted = [_quote_for_shell(t, shell) for t in flat_tokens]
+                commands.append(" ".join(quoted))
         return multi_join.join(commands)
     else:
-        # tokens is list[str] here, convert to list[Any] for _flatten
-        quoted = [_quote_for_shell(t, shell) for t in _flatten(list(tokens))]
+        # tokens is Sequence[CommandToken] - single command
+        flat_tokens = _flatten(list(tokens))
+        quoted = [_quote_for_shell(t, shell) for t in flat_tokens]
         return " ".join(quoted)
 
 

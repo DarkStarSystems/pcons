@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.project import Project
+    from pcons.core.subst import CommandToken
     from pcons.core.target import Target
 
 
@@ -950,19 +951,57 @@ class NinjaGenerator(BaseGenerator):
 
         return token
 
-    def _relativize_command_tokens(self, tokens: list[str]) -> list[str]:
-        """Relativize path flags in command tokens for ninja execution.
+    def _relativize_command_tokens(
+        self, tokens: list[str] | list[CommandToken]
+    ) -> list[str]:
+        """Relativize path tokens in command for ninja execution.
 
-        Since ninja runs from the build directory, paths in flags like -I and -L
-        need to be converted from project-root-relative to build-dir-relative.
+        Processes PathToken objects using their relativize() method with
+        ninja-appropriate path transformation. For regular strings, falls
+        back to pattern-based detection of path flags.
 
         Args:
-            tokens: List of command tokens.
+            tokens: List of command tokens (str or PathToken).
 
         Returns:
-            List of tokens with path flags relativized.
+            List of string tokens with paths relativized for ninja.
         """
-        return [self._relativize_flag_with_path(t) for t in tokens]
+        from pcons.core.subst import PathToken
+
+        result: list[str] = []
+        for token in tokens:
+            if isinstance(token, PathToken):
+                # Use PathToken's relativize() with ninja path transformer
+                result.append(token.relativize(self._relativize_path_for_ninja))
+            else:
+                # Fall back to pattern-based detection for plain strings
+                result.append(self._relativize_flag_with_path(str(token)))
+        return result
+
+    def _relativize_path_for_ninja(self, path: str) -> str:
+        """Transform a path for ninja execution context.
+
+        Since ninja runs from the build directory, paths relative to project
+        root need to be prefixed with $topdir. Paths that equal the build
+        directory become ".".
+
+        Args:
+            path: Path string (project-root-relative or absolute).
+
+        Returns:
+            Transformed path suitable for ninja command.
+        """
+        # Special case: path equals build directory -> use "."
+        if self._is_build_dir_path(path):
+            return "."
+
+        # Try to make relative to project root with $topdir
+        rel = self._make_source_relative(path)
+        if rel is not None:
+            return f"$topdir/{rel}"
+
+        # Fall back to original path (external/absolute paths)
+        return path
 
     def _escape_for_ninja_variable(self, token: str) -> str:
         """Escape a token for use in a Ninja variable value.

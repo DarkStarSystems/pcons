@@ -107,23 +107,31 @@ class CompileLinkContext:
         template expressions like ${prefix(cc.iprefix, cc.includes)} are
         expanded during subst() with the effective requirements.
 
+        Path values (includes, libdirs) are wrapped in ProjectPath markers
+        so that the prefix() function creates PathToken objects. This allows
+        generators to apply appropriate path relativization.
+
         Returns:
             Dictionary mapping variable names to values.
             Lists are returned as-is for the prefix() function to process.
         """
+        from pcons.core.subst import ProjectPath
+
         result: dict[str, object] = {}
 
-        # Compile-time settings (raw values - prefix() will format them)
+        # Compile-time settings
+        # Wrap include paths in ProjectPath for generator-specific relativization
         if self.includes:
-            result["includes"] = list(self.includes)
+            result["includes"] = [ProjectPath(p) for p in self.includes]
         if self.defines:
             result["defines"] = list(self.defines)
         if self.flags:
             result["extra_flags"] = list(self.flags)
 
-        # Link-time settings (raw values - prefix() will format them)
+        # Link-time settings
+        # Wrap library paths in ProjectPath for generator-specific relativization
         if self.libdirs:
-            result["libdirs"] = list(self.libdirs)
+            result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
         if self.libs:
             result["libs"] = list(self.libs)
         if self.link_flags:

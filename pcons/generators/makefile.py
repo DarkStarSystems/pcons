@@ -293,10 +293,13 @@ class MakefileGenerator(BaseGenerator):
             # Builder provided command directly - use it
             # Command can be a list of tokens or a string
             if isinstance(custom_command, list):
+                # Process PathToken objects (Makefile runs from project root,
+                # so paths relative to project root don't need transformation)
+                processed_tokens = self._process_path_tokens(custom_command)
                 # Convert token list to shell command with proper quoting
                 from pcons.core.subst import to_shell_command
 
-                command = to_shell_command(custom_command, shell="bash")
+                command = to_shell_command(processed_tokens, shell="bash")
             else:
                 command = str(custom_command)
             # Convert $SOURCE, $TARGET etc. to make variables
@@ -527,6 +530,31 @@ class MakefileGenerator(BaseGenerator):
         path_str = str(path)
         # Escape $ as $$
         return self.ESCAPE_DOLLAR.sub("$$", path_str)
+
+    def _process_path_tokens(self, tokens: list) -> list[str]:
+        """Process PathToken objects in a command token list.
+
+        Since Makefile runs from the project root, paths relative to project
+        root don't need transformation. PathToken objects are converted to
+        their string representation (prefix + path).
+
+        Args:
+            tokens: List of command tokens (str or PathToken).
+
+        Returns:
+            List of string tokens.
+        """
+        from pcons.core.subst import PathToken
+
+        result: list[str] = []
+        for token in tokens:
+            if isinstance(token, PathToken):
+                # For Makefile, paths relative to project root stay as-is
+                # Just convert PathToken to string (prefix + path)
+                result.append(str(token))
+            else:
+                result.append(str(token))
+        return result
 
     def _convert_command_variables(self, command: str) -> str:
         """Convert env.Command() variables to Make-compatible variables.
