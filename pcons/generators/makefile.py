@@ -329,8 +329,38 @@ class MakefileGenerator(BaseGenerator):
                 command = self._substitute_make_vars(command, node, sources, build_info)
             return self._append_post_build(command, node, target, sources)
 
+        # Get context overrides if available
+        context = build_info.get("context")
+        context_overrides: dict[str, object] = {}
+        if context is not None and hasattr(context, "get_env_overrides"):
+            context_overrides = context.get_env_overrides()
+
         if env is None:
-            return f"@echo 'No environment for {node.path}'"
+            # Try standalone tools (install, archive) when no environment is available
+            cmd_template = self._get_standalone_tool_command(tool_name, command_var)
+            if cmd_template is None:
+                return f"@echo 'No environment for {node.path}'"
+
+            # Process the command template
+            from pcons.core.subst import to_shell_command
+
+            # Process PathToken objects
+            processed_tokens = self._process_path_tokens(cmd_template)
+
+            # Apply context overrides for standalone tools
+            if context_overrides:
+                processed_tokens = self._apply_context_overrides(
+                    processed_tokens, tool_name, context_overrides
+                )
+
+            # Expand $SOURCES/$TARGET tokens
+            expanded_tokens = self._expand_source_target_tokens(
+                processed_tokens, node, sources, build_info
+            )
+
+            # Convert to shell command
+            command = to_shell_command(expanded_tokens, shell="bash")
+            return self._append_post_build(command, node, target, sources)
 
         # Get command template from tool config
         tool_config = getattr(env, tool_name, None)
@@ -903,3 +933,71 @@ class MakefileGenerator(BaseGenerator):
         command = re.sub(r"\$\{TARGETS\[\d+\]\}", "$out", command)
 
         return command
+
+    def _get_standalone_tool_command(
+        self, tool_name: str, command_var: str
+    ) -> list[str] | None:
+        """Get command template from a standalone tool.
+
+        Used when no environment is available (e.g., Install targets without
+        an associated env). Instantiates the standalone tool to get its
+        default command template.
+
+        Args:
+            tool_name: Tool name (e.g., "install", "archive").
+            command_var: Command variable name (e.g., "copycmd", "tarcmd").
+
+        Returns:
+            Command template as list of tokens, or None if not available.
+        """
+        # Import standalone tools here to avoid circular imports
+        if tool_name == "install":
+            from pcons.tools.install import InstallTool
+
+            tool = InstallTool()
+        elif tool_name == "archive":
+            from pcons.tools.archive import ArchiveTool
+
+            tool = ArchiveTool()
+        else:
+            return None
+
+        defaults = tool.default_vars()
+        cmd_template = defaults.get(command_var)
+        if cmd_template is None:
+            return None
+
+        # Return as list of string tokens
+        if isinstance(cmd_template, list):
+            return [str(t) for t in cmd_template]
+
+        return [str(cmd_template)]
+
+    def _apply_context_overrides(
+        self, tokens: list[str], tool_name: str, context_overrides: dict[str, object]
+    ) -> list[str]:
+        """Apply context overrides to command tokens.
+
+        Replaces $tool.var patterns with actual values from context overrides.
+
+        Args:
+            tokens: List of command tokens.
+            tool_name: Tool name for pattern matching.
+            context_overrides: Dict of override values.
+
+        Returns:
+            Modified token list with overrides applied.
+        """
+        result: list[str] = []
+        for token in tokens:
+            modified = token
+            for key, val in context_overrides.items():
+                pattern = f"${tool_name}.{key}"
+                if pattern in modified:
+                    if isinstance(val, list):
+                        val_str = " ".join(str(v) for v in val)
+                    else:
+                        val_str = str(val)
+                    modified = modified.replace(pattern, val_str)
+            result.append(modified)
+        return result
