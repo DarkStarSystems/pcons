@@ -704,6 +704,7 @@ class MakefileGenerator(BaseGenerator):
         - $SOURCES, $SOURCE -> all input files (sources + explicit_deps)
         - $TARGET, $TARGETS -> output file
         - $TARGET.d -> depfile path
+        - Embedded variables like /Fo$TARGET -> /Fo<actual_path>
 
         Args:
             tokens: Command tokens after path relativization.
@@ -756,6 +757,28 @@ class MakefileGenerator(BaseGenerator):
                 result.append(out_path)
             elif token == "$TARGET.d":
                 result.append(depfile_path if depfile_path else token)
+            elif "$TARGET" in token or "$SOURCE" in token:
+                # Handle embedded variables like /Fo$TARGET or -MF$TARGET.d
+                # These are single tokens with variables inside
+                expanded = token
+                # Order matters: $TARGET.d before $TARGET, $TARGETS before $TARGET
+                # $SOURCES before $SOURCE
+                if "$TARGET.d" in expanded:
+                    expanded = expanded.replace(
+                        "$TARGET.d", depfile_path if depfile_path else "$TARGET.d"
+                    )
+                if "$TARGETS" in expanded:
+                    expanded = expanded.replace("$TARGETS", out_path)
+                if "$TARGET" in expanded:
+                    expanded = expanded.replace("$TARGET", out_path)
+                if "$SOURCES" in expanded:
+                    # For embedded $SOURCES, join with space (unusual case)
+                    expanded = expanded.replace("$SOURCES", " ".join(in_paths))
+                if "$SOURCE" in expanded:
+                    # For embedded $SOURCE, use first source
+                    first_source = in_paths[0] if in_paths else ""
+                    expanded = expanded.replace("$SOURCE", first_source)
+                result.append(expanded)
             else:
                 result.append(token)
 
