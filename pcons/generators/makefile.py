@@ -301,15 +301,23 @@ class MakefileGenerator(BaseGenerator):
                 # Process PathToken objects (Makefile runs from project root,
                 # so paths relative to project root don't need transformation)
                 processed_tokens = self._process_path_tokens(custom_command)
+
+                # Expand $SOURCES/$TARGET tokens to actual file paths at token level.
+                # This must happen BEFORE to_shell_command() so each path is a separate
+                # token and gets quoted individually (not as one space-separated string).
+                expanded_tokens = self._expand_source_target_tokens(
+                    processed_tokens, node, sources, build_info
+                )
+
                 # Convert token list to shell command with proper quoting
                 from pcons.core.subst import to_shell_command
 
-                command = to_shell_command(processed_tokens, shell="bash")
+                command = to_shell_command(expanded_tokens, shell="bash")
             else:
+                # String command - use old substitution approach
                 command = str(custom_command)
-            # Convert $SOURCE, $TARGET etc. to make variables
-            command = self._convert_command_variables(command)
-            command = self._substitute_make_vars(command, node, sources, build_info)
+                command = self._convert_command_variables(command)
+                command = self._substitute_make_vars(command, node, sources, build_info)
             return self._append_post_build(command, node, target, sources)
 
         if env is None:
@@ -339,15 +347,21 @@ class MakefileGenerator(BaseGenerator):
             # Relativize PathTokens for make's execution context (make runs from build_dir)
             relativized_tokens = self._process_path_tokens(tokens)
 
+            # Expand $SOURCES/$TARGET tokens to actual file paths at token level.
+            # This must happen BEFORE to_shell_command() so each path is a separate
+            # token and gets quoted individually (not as one space-separated string).
+            expanded_tokens = self._expand_source_target_tokens(
+                relativized_tokens, node, sources, build_info
+            )
+
             # Convert token list to shell command string
-            command = to_shell_command(relativized_tokens, shell="bash")
+            command = to_shell_command(expanded_tokens, shell="bash")
         else:
             # Fallback for mock objects or non-standard environments
             command = env.subst(command_template, shell="bash")
-
-        # Convert $SOURCE/$TARGET to $in/$out, then substitute with actual paths
-        command = self._convert_command_variables(command)
-        command = self._substitute_make_vars(command, node, sources, build_info)
+            # For fallback, still need to substitute variables
+            command = self._convert_command_variables(command)
+            command = self._substitute_make_vars(command, node, sources, build_info)
 
         # Append post-build commands if any
         command = self._append_post_build(command, node, target, sources)
@@ -441,6 +455,10 @@ class MakefileGenerator(BaseGenerator):
         Note: Make runs from the build directory (via -C), so:
         - Output paths use node.path directly (relative to build_dir)
         - Source paths are made absolute to work from any directory
+
+        $in includes both sources (from build_info) and explicit_deps (e.g.,
+        libraries for linking). This matches ninja's behavior where $in is
+        ALL explicit dependencies in the build statement.
         """
 
         # Get source paths - must match prerequisite handling in _write_build_rule
@@ -454,9 +472,22 @@ class MakefileGenerator(BaseGenerator):
                 path_obj = self._project_root / path_obj
             return str(path_obj)
 
-        source_paths = " ".join(
-            get_source_path(s) for s in sources if isinstance(s, FileNode)
-        )
+        # Build $in from sources AND explicit_deps (e.g., libraries)
+        # This matches ninja's behavior where $in includes all explicit deps
+        in_paths: list[str] = []
+
+        # Add sources first
+        for s in sources:
+            if isinstance(s, FileNode):
+                in_paths.append(get_source_path(s))
+
+        # Add explicit deps that aren't already in sources (e.g., libraries)
+        source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
+        for dep in node.explicit_deps:
+            if isinstance(dep, FileNode) and dep.path not in source_paths_set:
+                in_paths.append(get_source_path(dep))
+
+        source_paths = " ".join(in_paths)
 
         # Substitute $in and $out
         # $out uses node.path with build_dir prefix stripped (make runs from build_dir)
@@ -654,6 +685,81 @@ class MakefileGenerator(BaseGenerator):
             return str(self._project_root / path)
 
         return path
+
+    def _expand_source_target_tokens(
+        self,
+        tokens: list[str],
+        node: FileNode,
+        sources: list[Node],
+        build_info: dict[str, object],
+    ) -> list[str]:
+        """Expand $SOURCES/$TARGET tokens to actual file paths at the token level.
+
+        This expands pcons template variables to actual paths BEFORE shell quoting,
+        so each path becomes a separate token that gets quoted individually.
+        This is critical for commands like linkers where $SOURCES expands to
+        multiple files.
+
+        Handles:
+        - $SOURCES, $SOURCE -> all input files (sources + explicit_deps)
+        - $TARGET, $TARGETS -> output file
+        - $TARGET.d -> depfile path
+
+        Args:
+            tokens: Command tokens after path relativization.
+            node: The output node being built.
+            sources: Source nodes from build_info.
+            build_info: Build info dict (for depfile).
+
+        Returns:
+            Expanded token list with $SOURCES/etc replaced by actual paths.
+        """
+
+        # Helper to get a source path for make's execution context
+        def get_source_path(s: FileNode) -> str:
+            # Build outputs - strip build_dir prefix since make runs from build_dir
+            if getattr(s, "_build_info", None) is not None or s.is_target:
+                return self._strip_build_dir_prefix(s.path)
+            # Source files - make absolute using project root
+            path_obj = s.path
+            if not path_obj.is_absolute() and self._project_root is not None:
+                path_obj = self._project_root / path_obj
+            return str(path_obj)
+
+        # Build list of all input paths (sources + explicit_deps)
+        in_paths: list[str] = []
+        for s in sources:
+            if isinstance(s, FileNode):
+                in_paths.append(get_source_path(s))
+        # Add explicit deps (e.g., libraries) that aren't already in sources
+        source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
+        for dep in node.explicit_deps:
+            if isinstance(dep, FileNode) and dep.path not in source_paths_set:
+                in_paths.append(get_source_path(dep))
+
+        # Output path (single path)
+        out_path = self._strip_build_dir_prefix(node.path)
+
+        # Depfile path if present
+        depfile = build_info.get("depfile")
+        depfile_path = ""
+        if depfile and isinstance(depfile, (str, Path)):
+            depfile_path = self._strip_build_dir_prefix(depfile)
+
+        # Expand tokens
+        result: list[str] = []
+        for token in tokens:
+            if token in ("$SOURCES", "$SOURCE"):
+                # Expand to multiple path tokens (one per file)
+                result.extend(in_paths)
+            elif token in ("$TARGET", "$TARGETS"):
+                result.append(out_path)
+            elif token == "$TARGET.d":
+                result.append(depfile_path if depfile_path else token)
+            else:
+                result.append(token)
+
+        return result
 
     def _convert_command_variables(self, command: str) -> str:
         """Convert generator-agnostic variables to Make-compatible variables.
