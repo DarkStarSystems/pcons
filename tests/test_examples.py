@@ -485,6 +485,10 @@ def run_example(
         if IS_WINDOWS and not has_platform_override:
             run_cmd = adapt_command_for_windows(run_cmd)
 
+        # Adapt ninja commands to make when using make generator
+        if generator == "make" and run_cmd.startswith("ninja "):
+            run_cmd = "make " + run_cmd[6:]  # Replace "ninja " with "make "
+
         # Resolve command path relative to work_dir
         cmd_path = work_dir / run_cmd.split()[0]  # Check first word as path
         if cmd_path.exists():

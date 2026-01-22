@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pcons.core.node import FileNode, Node
+from pcons.core.subst import PathToken, TargetPath
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
@@ -320,7 +321,7 @@ class CommandBuilder(BaseBuilder):
         target_suffixes: list[str] | None = None,
         language: str | None = None,
         single_source: bool = False,
-        depfile: str | None = None,
+        depfile: TargetPath | None = None,
         deps_style: str | None = None,
     ) -> None:
         """Initialize a command builder.
@@ -335,7 +336,8 @@ class CommandBuilder(BaseBuilder):
             language: Language for linker selection.
             single_source: If True, create one target per source.
                           If False, all sources go to one target.
-            depfile: Depfile path pattern for Ninja (e.g., "$out.d").
+            depfile: Depfile specification - TargetPath(suffix=".d") for depfile
+                    path derived from target output, or None.
             deps_style: Dependency style for Ninja ("gcc" or "msvc").
         """
         super().__init__(
@@ -395,6 +397,16 @@ class CommandBuilder(BaseBuilder):
         node.depends(sources)
         node.builder = self
 
+        # Resolve depfile: convert TargetPath to PathToken with actual target path
+        depfile: PathToken | None = None
+        if self._depfile is not None:
+            depfile = PathToken(
+                prefix=self._depfile.prefix,
+                path=str(target),
+                path_type="build",
+                suffix=self._depfile.suffix,
+            )
+
         # Store build info for generator
         # These will be used by the generator to create ninja rules
         node._build_info = {
@@ -402,7 +414,7 @@ class CommandBuilder(BaseBuilder):
             "command_var": self._command_var,
             "language": self._language,
             "sources": sources,
-            "depfile": self._depfile,
+            "depfile": depfile,
             "deps_style": self._deps_style,
         }
 
@@ -439,7 +451,7 @@ class MultiOutputBuilder(CommandBuilder):
         src_suffixes: list[str] | None = None,
         language: str | None = None,
         single_source: bool = False,
-        depfile: str | None = None,
+        depfile: TargetPath | None = None,
         deps_style: str | None = None,
     ) -> None:
         """Initialize a multi-output builder.
@@ -452,7 +464,8 @@ class MultiOutputBuilder(CommandBuilder):
             src_suffixes: Accepted input suffixes.
             language: Language for linker selection.
             single_source: If True, create one target per source.
-            depfile: Depfile path pattern for Ninja (e.g., "$out.d").
+            depfile: Depfile specification - TargetPath(suffix=".d") for depfile
+                    path derived from target output, or None.
             deps_style: Dependency style for Ninja ("gcc" or "msvc").
         """
         # Primary output determines target_suffixes

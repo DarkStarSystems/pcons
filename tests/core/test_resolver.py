@@ -673,8 +673,12 @@ class TestResolverToolAgnostic:
                 return True
 
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
+                from pcons.core.subst import TargetPath
+
                 if suffix.lower() == ".c":
-                    return SourceHandler("cc", "c", ".obj", "$out.d", "gcc")
+                    return SourceHandler(
+                        "cc", "c", ".obj", TargetPath(suffix=".d"), "gcc"
+                    )
                 return None
 
             def get_object_suffix(self) -> str:
@@ -722,8 +726,12 @@ class TestResolverToolAgnostic:
                 return True
 
             def get_source_handler(self, suffix: str) -> SourceHandler | None:
+                from pcons.core.subst import TargetPath
+
                 if suffix.lower() == ".c":
-                    return SourceHandler("cc", "c", ".o", "$out.d", "gcc")
+                    return SourceHandler(
+                        "cc", "c", ".o", TargetPath(suffix=".d"), "gcc"
+                    )
                 return None
 
             def get_program_name(self, name: str) -> str:

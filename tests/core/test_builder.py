@@ -220,6 +220,8 @@ class TestCommandBuilder:
 
 class TestCommandBuilderDepfile:
     def test_depfile_and_deps_style_stored(self):
+        from pcons.core.subst import PathToken, TargetPath
+
         builder = CommandBuilder(
             "Object",
             "cc",
@@ -228,7 +230,7 @@ class TestCommandBuilderDepfile:
             target_suffixes=[".o"],
             language="c",
             single_source=True,
-            depfile="$out.d",
+            depfile=TargetPath(suffix=".d"),
             deps_style="gcc",
         )
 
@@ -240,7 +242,10 @@ class TestCommandBuilderDepfile:
         target = result[0]
 
         info = target._build_info
-        assert info["depfile"] == "$out.d"
+        # depfile is resolved to PathToken with the target path
+        assert isinstance(info["depfile"], PathToken)
+        assert info["depfile"].suffix == ".d"
+        assert info["depfile"].path == "foo.o"
         assert info["deps_style"] == "gcc"
 
     def test_msvc_deps_style_no_depfile(self):

@@ -121,9 +121,14 @@ class MakefileGenerator(BaseGenerator):
                     self._directories.add(parent)
                 # Track depfile directories
                 build_info = getattr(node, "_build_info", None) or {}
-                if build_info.get("depfile"):
-                    depfile = Path(build_info["depfile"])
-                    self._depfile_dirs.add(depfile.parent)
+                depfile = build_info.get("depfile")
+                if depfile:
+                    from pcons.core.subst import PathToken
+
+                    if isinstance(depfile, PathToken):
+                        # PathToken: construct path from path + suffix
+                        depfile_path = Path(depfile.path + depfile.suffix)
+                        self._depfile_dirs.add(depfile_path.parent)
 
         # Collect from environment-tracked nodes
         for env in project.environments:
@@ -278,10 +283,14 @@ class MakefileGenerator(BaseGenerator):
         tool_name = build_info.get("tool", "unknown")
         command_var = build_info.get("command_var", "cmdline")
 
-        # Get the environment from target
+        # Get the environment from target or build_info
         env: Environment | None = None
         if target is not None:
             env = getattr(target, "_env", None)
+
+        if env is None:
+            # Check if env is stored in build_info (e.g., Install nodes)
+            env = build_info.get("env")
 
         if env is None:
             # Try to find from project environments
@@ -496,8 +505,15 @@ class MakefileGenerator(BaseGenerator):
 
         # Handle depfile if present (also strip build_dir prefix)
         depfile = build_info.get("depfile")
-        if depfile and isinstance(depfile, (str, Path)):
-            command = command.replace("$out.d", self._strip_build_dir_prefix(depfile))
+        if depfile:
+            from pcons.core.subst import PathToken
+
+            if isinstance(depfile, PathToken):
+                # PathToken: construct actual depfile path from path + suffix
+                depfile_actual = depfile.path + depfile.suffix
+                command = command.replace(
+                    "$out.d", self._strip_build_dir_prefix(depfile_actual)
+                )
 
         return command
 
@@ -741,36 +757,56 @@ class MakefileGenerator(BaseGenerator):
         # Output path (single path)
         out_path = self._strip_build_dir_prefix(node.path)
 
-        # Depfile path if present
+        # Depfile path - get from build_info (PathToken with suffix)
         depfile = build_info.get("depfile")
         depfile_path = ""
-        if depfile and isinstance(depfile, (str, Path)):
-            depfile_path = self._strip_build_dir_prefix(depfile)
+        if depfile:
+            from pcons.core.subst import PathToken
+
+            if isinstance(depfile, PathToken):
+                # PathToken: construct actual depfile path from path + suffix
+                # Path is relative to build dir, strip that prefix
+                depfile_path = self._strip_build_dir_prefix(
+                    depfile.path + depfile.suffix
+                )
 
         # Expand tokens
+        # Handle both pcons-style ($SOURCE/$TARGET) and ninja-style ($in/$out)
         result: list[str] = []
         for token in tokens:
-            if token in ("$SOURCES", "$SOURCE"):
+            if token in ("$SOURCES", "$SOURCE", "$in"):
                 # Expand to multiple path tokens (one per file)
                 result.extend(in_paths)
-            elif token in ("$TARGET", "$TARGETS"):
+            elif token in ("$TARGET", "$TARGETS", "$out"):
                 result.append(out_path)
-            elif token == "$TARGET.d":
+            elif token in ("$TARGET.d", "$out.d"):
                 result.append(depfile_path if depfile_path else token)
-            elif "$TARGET" in token or "$SOURCE" in token:
+            elif (
+                "$TARGET" in token
+                or "$SOURCE" in token
+                or "$in" in token
+                or "$out" in token
+            ):
                 # Handle embedded variables like /Fo$TARGET or -MF$TARGET.d
                 # These are single tokens with variables inside
+                # Also handles ninja-style $in/$out embedded in tokens
                 expanded = token
-                # Order matters: $TARGET.d before $TARGET, $TARGETS before $TARGET
-                # $SOURCES before $SOURCE
+                # Order matters: $TARGET.d/$out.d before $TARGET/$out,
+                # $TARGETS before $TARGET, $SOURCES before $SOURCE
                 if "$TARGET.d" in expanded:
                     expanded = expanded.replace(
                         "$TARGET.d", depfile_path if depfile_path else "$TARGET.d"
+                    )
+                if "$out.d" in expanded:
+                    expanded = expanded.replace(
+                        "$out.d", depfile_path if depfile_path else "$out.d"
                     )
                 if "$TARGETS" in expanded:
                     expanded = expanded.replace("$TARGETS", out_path)
                 if "$TARGET" in expanded:
                     expanded = expanded.replace("$TARGET", out_path)
+                if "$out" in expanded:
+                    expanded = expanded.replace("$out", out_path)
                 if "$SOURCES" in expanded:
                     # For embedded $SOURCES, join with space (unusual case)
                     expanded = expanded.replace("$SOURCES", " ".join(in_paths))
@@ -778,6 +814,9 @@ class MakefileGenerator(BaseGenerator):
                     # For embedded $SOURCE, use first source
                     first_source = in_paths[0] if in_paths else ""
                     expanded = expanded.replace("$SOURCE", first_source)
+                if "$in" in expanded:
+                    # For embedded $in, join with space (unusual case)
+                    expanded = expanded.replace("$in", " ".join(in_paths))
                 result.append(expanded)
             else:
                 result.append(token)

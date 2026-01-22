@@ -22,7 +22,9 @@ Command template forms:
 Generator-agnostic variables:
 - $$SOURCE / $$SOURCES: Input file(s), converted by generators to native syntax
 - $$TARGET / $$TARGETS: Output file(s), converted by generators to native syntax
-- $$TARGET.d: Depfile (converted to $out.d for Ninja)
+- $$TARGET.d: In command templates (e.g., depflags), expanded to actual depfile path
+
+Depfile paths in build_info use PathToken with suffix=".d" for type-safe handling.
 """
 
 from __future__ import annotations
@@ -69,7 +71,7 @@ class MultiCmd:
 # =============================================================================
 
 
-@dataclass
+@dataclass(frozen=True)
 class PathToken:
     """A command token containing a path that needs generator-specific relativization.
 
@@ -87,6 +89,7 @@ class PathToken:
             - "project": Relative to project root (use $topdir in ninja)
             - "build": Relative to build directory (use "." in ninja)
             - "absolute": Leave unchanged
+        suffix: Optional suffix to append after the path (e.g., ".d" for depfiles).
 
     Example:
         # Context creates:
@@ -96,11 +99,16 @@ class PathToken:
         def ninja_relativize(path):
             return f"$topdir/{path}"
         result = token.relativize(ninja_relativize)  # "-I$topdir/src/include"
+
+        # With suffix (for depfiles):
+        depfile = PathToken("", "build/obj/hello.o", "build", ".d")
+        result = depfile.relativize(lambda p: p)  # "build/obj/hello.o.d"
     """
 
-    prefix: str
-    path: str
+    prefix: str = ""
+    path: str = ""
     path_type: str = "project"  # "project", "build", or "absolute"
+    suffix: str = ""
 
     def relativize(self, relativizer: Callable[[str], str]) -> str:
         """Apply a relativization function and return the complete token.
@@ -110,13 +118,13 @@ class PathToken:
                         Receives the raw path, returns the relativized path.
 
         Returns:
-            The complete token: prefix + relativized path.
+            The complete token: prefix + relativized path + suffix.
         """
-        return self.prefix + relativizer(self.path)
+        return self.prefix + relativizer(self.path) + self.suffix
 
     def __str__(self) -> str:
         """Fallback string representation (no relativization)."""
-        return self.prefix + self.path
+        return self.prefix + self.path + self.suffix
 
 
 # Type alias for command tokens (can be string or PathToken)
@@ -158,6 +166,55 @@ class BuildPath:
     """
 
     path: str
+
+
+@dataclass(frozen=True)
+class TargetPath:
+    """Marker for target output path, resolved during resolve phase.
+
+    This marker is used in SourceHandler.depfile to indicate a path derived
+    from the target output. During resolution, it's converted to a PathToken
+    with the actual target path.
+
+    Attributes:
+        suffix: Suffix to append (e.g., ".d" for depfiles).
+        prefix: Optional prefix (e.g., "-MF" for MSVC-style depfile flags).
+
+    Example:
+        # In toolchain's get_source_handler():
+        SourceHandler("cc", "c", ".o", TargetPath(suffix=".d"), "gcc")
+
+        # During resolution, for target "build/obj/hello.o":
+        # TargetPath(suffix=".d") -> PathToken("", "build/obj/hello.o", "build", ".d")
+    """
+
+    suffix: str = ""
+    prefix: str = ""
+
+
+@dataclass(frozen=True)
+class SourcePath:
+    """Marker for source input path, resolved during resolve phase.
+
+    This marker is used in command templates to reference source files.
+    During resolution, it's converted to a PathToken with the actual source path.
+
+    Attributes:
+        index: Which source file (0 = first/only, for multi-source commands).
+        suffix: Optional suffix to append.
+        prefix: Optional prefix.
+
+    Example:
+        # In a command template:
+        ["gcc", "-c", SourcePath(), "-o", TargetPath()]
+
+        # During resolution:
+        # SourcePath() -> PathToken("", "src/hello.c", "project")
+    """
+
+    index: int = 0
+    suffix: str = ""
+    prefix: str = ""
 
 
 # =============================================================================

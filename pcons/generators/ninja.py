@@ -229,7 +229,13 @@ class NinjaGenerator(BaseGenerator):
                 f.write("  deps = msvc\n")
             elif deps_style == "gcc":
                 if depfile:
-                    f.write(f"  depfile = {depfile}\n")
+                    # depfile is a PathToken - use suffix to create $out.d pattern
+                    # Ninja uses $out (the output variable) + suffix
+                    from pcons.core.subst import PathToken
+
+                    if isinstance(depfile, PathToken):
+                        depfile_ninja = f"$out{depfile.suffix}"
+                        f.write(f"  depfile = {depfile_ninja}\n")
                 f.write("  deps = gcc\n")
 
             f.write("\n")

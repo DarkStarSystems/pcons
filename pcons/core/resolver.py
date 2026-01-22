@@ -35,6 +35,7 @@ from pcons.core.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
 )
+from pcons.core.subst import PathToken, TargetPath
 from pcons.toolchains.build_context import CompileLinkContext
 from pcons.util.source_location import get_caller_location
 
@@ -135,6 +136,34 @@ class ObjectNodeFactory:
                     )
         return None
 
+    def _resolve_depfile(
+        self, depfile_spec: TargetPath | None, target_path: Path
+    ) -> PathToken | None:
+        """Resolve depfile specification to a PathToken.
+
+        Converts TargetPath markers to PathToken with the actual target path.
+
+        Args:
+            depfile_spec: The depfile specification from SourceHandler.
+                - TargetPath(suffix=".d"): Convert to PathToken
+                - None: No depfile
+            target_path: The actual target output path.
+
+        Returns:
+            PathToken for TargetPath, None for None.
+        """
+        if depfile_spec is None:
+            return None
+
+        # Convert TargetPath to PathToken with actual target path
+        # The depfile path is the target path with the suffix appended
+        return PathToken(
+            prefix=depfile_spec.prefix,
+            path=str(target_path),
+            path_type="build",  # Depfiles are in the build directory
+            suffix=depfile_spec.suffix,
+        )
+
     def get_auxiliary_input_handler(
         self, source: Path, env: Environment
     ) -> AuxiliaryInputHandler | None:
@@ -186,7 +215,6 @@ class ObjectNodeFactory:
 
         tool_name = handler.tool_name
         language = handler.language
-        depfile = handler.depfile
         deps_style = handler.deps_style
         command_var = handler.command_var
 
@@ -203,6 +231,9 @@ class ObjectNodeFactory:
         obj_path = self.get_object_path(target, source.path, env)
         obj_node = FileNode(obj_path, defined_at=get_caller_location())
         obj_node.depends([source])
+
+        # Resolve depfile: convert TargetPath to PathToken with actual target path
+        depfile = self._resolve_depfile(handler.depfile, obj_path)
 
         # Propagate explicit dependencies from source to object as implicit deps.
         # This allows generated headers (added via source.depends()) to trigger

@@ -45,6 +45,8 @@ class ClangCCompiler(BaseTool):
         }
 
     def builders(self) -> dict[str, Builder]:
+        from pcons.core.subst import TargetPath
+
         platform = get_platform()
         return {
             "Object": CommandBuilder(
@@ -55,7 +57,7 @@ class ClangCCompiler(BaseTool):
                 target_suffixes=[platform.object_suffix],
                 language="c",
                 single_source=True,
-                depfile="$out.d",
+                depfile=TargetPath(suffix=".d"),
                 deps_style="gcc",
             ),
         }
@@ -105,6 +107,8 @@ class ClangCxxCompiler(BaseTool):
         }
 
     def builders(self) -> dict[str, Builder]:
+        from pcons.core.subst import TargetPath
+
         platform = get_platform()
         return {
             "Object": CommandBuilder(
@@ -115,7 +119,7 @@ class ClangCxxCompiler(BaseTool):
                 target_suffixes=[platform.object_suffix],
                 language="cxx",
                 single_source=True,
-                depfile="$out.d",
+                depfile=TargetPath(suffix=".d"),
                 deps_style="gcc",
             ),
         }

@@ -22,6 +22,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
+    from pcons.core.subst import PathToken
     from pcons.tools.toolchain import ToolchainContext
 
 
@@ -79,7 +80,7 @@ class BuildInfo(TypedDict, total=False):
     command_var: str
     language: str | None
     sources: list[Any]  # list[Node], but avoid circular import
-    depfile: str | None
+    depfile: PathToken | None  # PathToken with suffix for depfile path
     deps_style: str | None
     command: str | list[str]  # Command as string or list of tokens
     description: str  # Human-readable build description

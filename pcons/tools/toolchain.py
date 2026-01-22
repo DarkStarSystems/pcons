@@ -12,6 +12,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from pcons.core.subst import TargetPath
+
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.target import Target
@@ -74,7 +76,9 @@ class SourceHandler:
         tool_name: Name of the tool to use (e.g., "cc", "cxx", "latex").
         language: Language of the source (e.g., "c", "cxx", "latex").
         object_suffix: Suffix for compiled objects (e.g., ".o", ".obj", ".aux").
-        depfile: Dependency file template (e.g., "$out.d") or None.
+        depfile: Dependency file specification:
+            - TargetPath(suffix=".d"): Depfile path derived from target output
+            - None: No dependency tracking
         deps_style: Dependency file style (e.g., "gcc", "msvc") or None.
         command_var: Name of the command variable (e.g., "objcmd", "rccmd").
                      Defaults to "objcmd" for backwards compatibility.
@@ -83,7 +87,7 @@ class SourceHandler:
     tool_name: str
     language: str
     object_suffix: str
-    depfile: str | None = None
+    depfile: TargetPath | None = None
     deps_style: str | None = None
     command_var: str = "objcmd"
 

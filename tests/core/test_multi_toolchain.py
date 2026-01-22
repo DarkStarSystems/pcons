@@ -72,11 +72,13 @@ class MockCToolchain(BaseToolchain):
         return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
+        from pcons.core.subst import TargetPath
+
         suffix_lower = suffix.lower()
         if suffix_lower == ".c":
-            return SourceHandler("cc", "c", ".o", "$out.d", "gcc")
+            return SourceHandler("cc", "c", ".o", TargetPath(suffix=".d"), "gcc")
         if suffix_lower in (".cpp", ".cxx", ".cc"):
-            return SourceHandler("cxx", "cxx", ".o", "$out.d", "gcc")
+            return SourceHandler("cxx", "cxx", ".o", TargetPath(suffix=".d"), "gcc")
         return None
 
     def get_auxiliary_input_handler(self, suffix: str):
@@ -97,8 +99,10 @@ class MockCudaToolchain(BaseToolchain):
         return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
+        from pcons.core.subst import TargetPath
+
         if suffix.lower() == ".cu":
-            return SourceHandler("cuda", "cuda", ".o", "$out.d", "gcc")
+            return SourceHandler("cuda", "cuda", ".o", TargetPath(suffix=".d"), "gcc")
         return None
 
     def get_auxiliary_input_handler(self, suffix: str):

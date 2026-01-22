@@ -29,6 +29,7 @@ import logging
 import shutil
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.subst import TargetPath
 from pcons.tools.cuda import CudaCompiler
 from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_registry
 
@@ -68,7 +69,8 @@ class CudaToolchain(BaseToolchain):
         """Return handler for CUDA source files."""
         suffix_lower = suffix.lower()
         if suffix_lower == ".cu":
-            return SourceHandler("cuda", "cuda", ".o", "$out.d", "gcc")
+            # Use TargetPath for depfile - resolved to PathToken during resolution
+            return SourceHandler("cuda", "cuda", ".o", TargetPath(suffix=".d"), "gcc")
         return None
 
     def get_object_suffix(self) -> str:

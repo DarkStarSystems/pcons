@@ -16,6 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
+from pcons.core.subst import TargetPath
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
@@ -93,25 +94,28 @@ class UnixToolchain(BaseToolchain):
         """
         from pcons.tools.toolchain import SourceHandler
 
+        # Use TargetPath for depfile - resolved to PathToken during resolution
+        depfile = TargetPath(suffix=".d")
+
         suffix_lower = suffix.lower()
         if suffix_lower == ".c":
-            return SourceHandler("cc", "c", ".o", "$out.d", "gcc")
+            return SourceHandler("cc", "c", ".o", depfile, "gcc")
         if suffix_lower in (".cpp", ".cxx", ".cc", ".c++"):
-            return SourceHandler("cxx", "cxx", ".o", "$out.d", "gcc")
+            return SourceHandler("cxx", "cxx", ".o", depfile, "gcc")
         # Handle case-sensitive .C (C++ on Unix)
         if suffix == ".C":
-            return SourceHandler("cxx", "cxx", ".o", "$out.d", "gcc")
+            return SourceHandler("cxx", "cxx", ".o", depfile, "gcc")
         # Objective-C
         if suffix_lower == ".m":
-            return SourceHandler("cc", "objc", ".o", "$out.d", "gcc")
+            return SourceHandler("cc", "objc", ".o", depfile, "gcc")
         if suffix_lower == ".mm":
-            return SourceHandler("cxx", "objcxx", ".o", "$out.d", "gcc")
+            return SourceHandler("cxx", "objcxx", ".o", depfile, "gcc")
         # Assembly files - GCC/Clang handles .s (preprocessed) and .S (needs preprocessing)
         # Both are processed by the C compiler which invokes the assembler
         # Check .S (uppercase) first since .S.lower() == ".s"
         if suffix == ".S":
             # .S files need C preprocessing, so they can have dependencies
-            return SourceHandler("cc", "asm-cpp", ".o", "$out.d", "gcc")
+            return SourceHandler("cc", "asm-cpp", ".o", depfile, "gcc")
         if suffix_lower == ".s":
             # .s files are already preprocessed assembly, no dependency tracking
             return SourceHandler("cc", "asm", ".o", None, None)

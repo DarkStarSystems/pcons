@@ -308,6 +308,8 @@ class TestNinjaDepsDirectives:
     def test_gcc_deps_style_emits_depfile_and_deps(self, tmp_path):
         project = Project("test", root_dir=tmp_path)
 
+        from pcons.core.subst import PathToken, TargetPath
+
         target = Target("app")
         output_node = FileNode("build/app.o")
         source_node = FileNode("src/main.c")
@@ -316,7 +318,7 @@ class TestNinjaDepsDirectives:
             "command_var": "objcmd",
             "language": "c",
             "sources": [source_node],
-            "depfile": "$out.d",
+            "depfile": PathToken(path="build/app.o", path_type="build", suffix=".d"),
             "deps_style": "gcc",
         }
         output_node.builder = CommandBuilder(
@@ -325,7 +327,7 @@ class TestNinjaDepsDirectives:
             "objcmd",
             src_suffixes=[".c"],
             target_suffixes=[".o"],
-            depfile="$out.d",
+            depfile=TargetPath(suffix=".d"),
             deps_style="gcc",
         )
 

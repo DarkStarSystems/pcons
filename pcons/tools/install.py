@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, cast
 
 from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode
+from pcons.core.subst import PathToken
 from pcons.core.target import Target, TargetType
 from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
@@ -187,6 +188,24 @@ class InstallNodeFactory:
 
         return resolved
 
+    def _get_install_env(self, target: Target) -> Environment | None:
+        """Get an environment that has the install tool.
+
+        First tries to get env from target, then falls back to finding
+        an environment from the project that has the install tool set up.
+        """
+        # Try target's env first
+        env = getattr(target, "_env", None)
+        if env is not None:
+            return env
+
+        # Fall back to project environments
+        for e in self.project.environments:
+            if hasattr(e, "install"):
+                return e
+
+        return None
+
     def _create_install_nodes(
         self, target: Target, sources: list[FileNode], dest_dir: Path
     ) -> None:
@@ -194,6 +213,9 @@ class InstallNodeFactory:
         # Normalize destination directory using PathResolver
         path_resolver = self.project.path_resolver
         dest_dir = path_resolver.normalize_target_path(dest_dir)
+
+        # Get environment with install tool
+        env = self._get_install_env(target)
 
         installed_nodes: list[FileNode] = []
         for file_node in sources:
@@ -209,8 +231,6 @@ class InstallNodeFactory:
 
             # Store build info referencing env.install.copycmd
             # The command template comes from the install tool's default_vars
-            # Get env from target if available
-            env = getattr(target, "_env", None)
             dest_node._build_info = {
                 "tool": "install",
                 "command_var": "copycmd",
@@ -256,8 +276,7 @@ class InstallNodeFactory:
         dest_node.depends([source_node])
 
         # Store build info referencing env.install.copycmd
-        # Get env from target if available
-        env = getattr(target, "_env", None)
+        env = self._get_install_env(target)
         dest_node._build_info = {
             "tool": "install",
             "command_var": "copycmd",
@@ -316,20 +335,23 @@ class InstallNodeFactory:
             rel_dest = dest_path
 
         # Create context from target (merges env defaults with target overrides)
-        env = getattr(target, "_env", None)
+        env = self._get_install_env(target)
         context = InstallContext.from_target(
             target, env, destdir=str(rel_dest).replace("\\", "/")
         )
 
         # Store build info referencing env.install.copytreecmd
         # The context provides env overrides for command expansion
+        # Depfile is PathToken with the stamp path + ".d" suffix
         stamp_node._build_info = cast(
             BuildInfo,
             {
                 "tool": "install",
                 "command_var": "copytreecmd",
                 "sources": [source_node],
-                "depfile": "$out.d",
+                "depfile": PathToken(
+                    path=str(stamp_path), path_type="build", suffix=".d"
+                ),
                 "deps_style": "gcc",
                 "description": "INSTALLDIR $out",
                 # Context provides get_env_overrides() for template expansion

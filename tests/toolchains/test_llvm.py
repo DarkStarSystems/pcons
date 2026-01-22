@@ -128,13 +128,15 @@ class TestLlvmSourceHandlers:
 
     def test_source_handler_c(self):
         """Test that .c files are handled correctly."""
+        from pcons.core.subst import TargetPath
+
         tc = LlvmToolchain()
         handler = tc.get_source_handler(".c")
         assert handler is not None
         assert handler.tool_name == "cc"
         assert handler.language == "c"
         assert handler.object_suffix == ".o"
-        assert handler.depfile == "$out.d"
+        assert handler.depfile == TargetPath(suffix=".d")
         assert handler.deps_style == "gcc"
 
     def test_source_handler_cpp(self):
@@ -159,6 +161,8 @@ class TestLlvmSourceHandlers:
 
     def test_source_handler_S_uppercase(self):
         """Test that .S (uppercase) files are handled as assembly needing preprocessing."""
+        from pcons.core.subst import TargetPath
+
         tc = LlvmToolchain()
         handler = tc.get_source_handler(".S")
         assert handler is not None
@@ -166,7 +170,7 @@ class TestLlvmSourceHandlers:
         assert handler.language == "asm-cpp"
         assert handler.object_suffix == ".o"
         # Assembly needing preprocessing has gcc-style dependency tracking
-        assert handler.depfile == "$out.d"
+        assert handler.depfile == TargetPath(suffix=".d")
         assert handler.deps_style == "gcc"
 
     def test_source_handler_metal_on_macos(self, monkeypatch):
