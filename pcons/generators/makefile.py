@@ -344,8 +344,12 @@ class MakefileGenerator(BaseGenerator):
             # Process the command template
             from pcons.core.subst import to_shell_command
 
+            # Reduce $$ to $ (these are pcons escape sequences for generator variables)
+            # $$SOURCE becomes $SOURCE, $$TARGET becomes $TARGET
+            reduced_template = [t.replace("$$", "$") for t in cmd_template]
+
             # Process PathToken objects
-            processed_tokens = self._process_path_tokens(cmd_template)
+            processed_tokens = self._process_path_tokens(reduced_template)
 
             # Apply context overrides for standalone tools
             if context_overrides:
