@@ -552,7 +552,7 @@ class MakefileGenerator(BaseGenerator):
                             self._make_build_relative_path(target_node.path)
                         )
 
-        # If no default targets, auto-detect
+        # If no default targets, auto-detect from registered targets
         if not defaults:
             for target in project.targets:
                 if getattr(target, "_resolved", False):
@@ -567,11 +567,49 @@ class MakefileGenerator(BaseGenerator):
                                     self._make_build_relative_path(node.path)
                                 )
 
+        # If still no defaults, find "final" nodes from environment-created nodes
+        # (nodes with builders that aren't dependencies of other nodes)
+        if not defaults:
+            defaults = self._find_final_nodes(project)
+
         if defaults:
             f.write("# Default target\n")
             f.write(f"all: {' '.join(defaults)}\n")
             f.write(".DEFAULT_GOAL := all\n")
             f.write("\n")
+
+    def _find_final_nodes(self, project: Project) -> list[str]:
+        """Find nodes that are 'final' outputs (nothing depends on them).
+
+        This handles cases where examples create nodes directly via
+        env.cc.Object() / env.link.Program() without registering targets.
+
+        Returns:
+            List of relative paths for final output nodes.
+        """
+        # Collect all nodes with builders (outputs, not sources)
+        output_nodes: set[Path] = set()
+        # Collect all nodes that are dependencies of something
+        dependency_nodes: set[Path] = set()
+
+        for env in project.environments:
+            for node in getattr(env, "_created_nodes", []):
+                if isinstance(node, FileNode) and node.builder is not None:
+                    output_nodes.add(node.path)
+                    # Track what this node depends on
+                    build_info = getattr(node, "_build_info", None) or {}
+                    for source in build_info.get("sources", []):
+                        if isinstance(source, FileNode):
+                            dependency_nodes.add(source.path)
+                    for dep in node.explicit_deps:
+                        if isinstance(dep, FileNode):
+                            dependency_nodes.add(dep.path)
+
+        # Final nodes are outputs that aren't dependencies of other nodes
+        final_nodes = output_nodes - dependency_nodes
+
+        # Return relative paths
+        return [self._make_build_relative_path(path) for path in sorted(final_nodes)]
 
     def _write_depfile_includes(self, f: TextIO) -> None:
         """Write includes for dependency files."""
