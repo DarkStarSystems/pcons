@@ -244,6 +244,31 @@ def should_skip(config: dict[str, Any]) -> str | None:
     return None
 
 
+def adapt_outputs_for_generator(outputs: list[str], generator: str) -> list[str]:
+    """Adapt expected outputs for the generator being used.
+
+    When testing with make generator, build.ninja should become Makefile.
+
+    Args:
+        outputs: List of expected output paths.
+        generator: Generator being used ("ninja" or "make").
+
+    Returns:
+        List of adapted output paths.
+    """
+    if generator == "ninja":
+        return outputs
+
+    result = []
+    for output in outputs:
+        if output == "build/build.ninja" or output.endswith("/build.ninja"):
+            # Replace build.ninja with Makefile for make generator
+            result.append(output.replace("build.ninja", "Makefile"))
+        else:
+            result.append(output)
+    return result
+
+
 def get_platform_value(
     config: dict[str, Any],
     key: str,
@@ -437,6 +462,8 @@ def run_example(
     expected_outputs = get_platform_value(
         test_config, "expected_outputs", [], adapt_for_windows=True
     )
+    # Adapt expected outputs for the generator being used
+    expected_outputs = adapt_outputs_for_generator(expected_outputs, generator)
     for output in expected_outputs:
         output_path = work_dir / output
         if not output_path.exists():
