@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-01-22
+
+### Changed
+
+- **BREAKING: Typed path markers replace string escaping**: Command templates now use typed `SourcePath()` and `TargetPath()` marker objects instead of string patterns like `$$SOURCE`/`$$TARGET`. This provides type-safe path handling and eliminates fragile string manipulation.
+  - All toolchains (GCC, LLVM) migrated to use markers
+  - All standalone tools (install, archive, cuda) migrated to use markers
+  - Generators convert markers to appropriate syntax: Ninja uses `$in`/`$out`, Makefile uses actual paths
+  - Custom tools should now use markers in command templates (see `test_external_tool.py` for example)
+
+- **Unified command expansion path**: Removed the dual mechanism where some tools used string patterns and others used markers. All tools now follow the same flow: markers → resolver → generators.
+
+### Fixed
+
+- **CommandBuilder now stores env in _build_info**: Fixes command expansion for nodes created via `env.cc.Object()` and similar APIs. Previously commands weren't expanded because the resolver couldn't find the environment.
+
+- **Standalone tool commands properly converted**: `_get_standalone_tool_command()` now calls `_relativize_command_tokens()` to convert markers to Ninja variables.
+
+- **Makefile generator handles markers in context overrides**: `_apply_context_overrides()` now properly passes through marker objects instead of trying to do string replacement on them.
+
+### Removed
+
+- **`_convert_command_variables()` from Ninja generator**: String-based `$SOURCE`/`$TARGET` conversion is no longer needed since all tools use typed markers.
+
 ## [0.3.0] - 2026-01-21
 
 ### Changed
@@ -233,7 +257,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/garyo/pcons/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/garyo/pcons/compare/v0.2.4...v0.3.0
 [0.2.4]: https://github.com/garyo/pcons/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/garyo/pcons/compare/v0.2.2...v0.2.3

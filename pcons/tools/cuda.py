@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
+from pcons.core.subst import SourcePath, TargetPath
 from pcons.tools.tool import BaseTool
 
 if TYPE_CHECKING:
@@ -48,7 +49,7 @@ class CudaCompiler(BaseTool):
             "dprefix": "-D",
             "defines": [],
             # nvcc generates .d files with --generate-dependencies
-            "depflags": ["-MD", "-MF", "$$TARGET.d"],
+            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
             "objcmd": [
                 "$cuda.cmd",
                 "-c",
@@ -58,14 +59,12 @@ class CudaCompiler(BaseTool):
                 "${prefix(cuda.dprefix, cuda.defines)}",
                 "$cuda.depflags",
                 "-o",
-                "$$TARGET",
-                "$$SOURCE",
+                TargetPath(),
+                SourcePath(),
             ],
         }
 
     def builders(self) -> dict[str, Builder]:
-        from pcons.core.subst import TargetPath
-
         platform = get_platform()
         return {
             "Object": CommandBuilder(

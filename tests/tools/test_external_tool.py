@@ -17,6 +17,7 @@ import pytest
 
 from pcons.core.builder import CommandBuilder
 from pcons.core.environment import Environment
+from pcons.core.subst import SourcePath, TargetPath
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain
 
@@ -51,7 +52,14 @@ class ConcatTool(BaseTool):
             "header": "",  # Optional header text
             "footer": "",  # Optional footer text
             # Command template: cat all inputs and redirect to output
-            "bundlecmd": "$concat.cmd $concat.flags $$SOURCES > $$TARGET",
+            # Uses typed markers (SourcePath/TargetPath) instead of string patterns
+            "bundlecmd": [
+                "$concat.cmd",
+                "$concat.flags",
+                SourcePath(),
+                ">",
+                TargetPath(),
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:

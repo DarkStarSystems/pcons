@@ -344,12 +344,8 @@ class MakefileGenerator(BaseGenerator):
             # Process the command template
             from pcons.core.subst import to_shell_command
 
-            # Reduce $$ to $ (these are pcons escape sequences for generator variables)
-            # $$SOURCE becomes $SOURCE, $$TARGET becomes $TARGET
-            reduced_template = [t.replace("$$", "$") for t in cmd_template]
-
-            # Process PathToken objects
-            processed_tokens = self._process_path_tokens(reduced_template)
+            # Process PathToken and SourcePath/TargetPath objects
+            processed_tokens = self._process_path_tokens(cmd_template)
 
             # Apply context overrides for standalone tools
             if context_overrides:
@@ -357,7 +353,7 @@ class MakefileGenerator(BaseGenerator):
                     processed_tokens, tool_name, context_overrides
                 )
 
-            # Expand $SOURCES/$TARGET tokens
+            # Expand SourcePath/TargetPath markers to actual paths
             expanded_tokens = self._expand_source_target_tokens(
                 processed_tokens, node, sources, build_info
             )
@@ -711,7 +707,7 @@ class MakefileGenerator(BaseGenerator):
         path_str = self._strip_build_dir_prefix(path)
         return self.ESCAPE_DOLLAR.sub("$$", path_str)
 
-    def _process_path_tokens(self, tokens: list) -> list[str]:
+    def _process_path_tokens(self, tokens: list) -> list:
         """Process PathToken objects in a command token list.
 
         Since make runs from the build directory (via -C), paths need to be
@@ -719,19 +715,25 @@ class MakefileGenerator(BaseGenerator):
         - Build directory paths become "."
         - Project-relative paths need to be made absolute
 
+        SourcePath/TargetPath markers are passed through unchanged for
+        _expand_source_target_tokens() to handle (it has access to node/sources).
+
         Uses PathToken.relativize() with _relativize_path_for_make().
 
         Args:
-            tokens: List of command tokens (str or PathToken).
+            tokens: List of command tokens (str, PathToken, SourcePath, TargetPath).
 
         Returns:
-            List of string tokens with paths relativized for make.
+            List of tokens with PathTokens relativized; SourcePath/TargetPath preserved.
         """
-        from pcons.core.subst import PathToken
+        from pcons.core.subst import PathToken, SourcePath, TargetPath
 
-        result: list[str] = []
+        result: list = []
         for token in tokens:
-            if isinstance(token, PathToken):
+            if isinstance(token, (SourcePath, TargetPath)):
+                # Pass through for _expand_source_target_tokens() to handle
+                result.append(token)
+            elif isinstance(token, PathToken):
                 # Use PathToken's relativize() with make path transformer
                 result.append(token.relativize(self._relativize_path_for_make))
             else:
@@ -776,12 +778,12 @@ class MakefileGenerator(BaseGenerator):
 
     def _expand_source_target_tokens(
         self,
-        tokens: list[str],
+        tokens: list,
         node: FileNode,
         sources: list[Node],
         build_info: dict[str, object],
     ) -> list[str]:
-        """Expand $SOURCES/$TARGET tokens to actual file paths at the token level.
+        """Expand source/target tokens to actual file paths at the token level.
 
         This expands pcons template variables to actual paths BEFORE shell quoting,
         so each path becomes a separate token that gets quoted individually.
@@ -789,20 +791,23 @@ class MakefileGenerator(BaseGenerator):
         multiple files.
 
         Handles:
-        - $SOURCES, $SOURCE -> all input files (sources + explicit_deps)
-        - $TARGET, $TARGETS -> output file
-        - $TARGET.d -> depfile path
+        - SourcePath markers -> all input files (sources + explicit_deps)
+        - TargetPath markers -> output file (with optional suffix like ".d")
+        - $SOURCES, $SOURCE -> all input files (legacy string support)
+        - $TARGET, $TARGETS -> output file (legacy string support)
+        - $TARGET.d -> depfile path (legacy string support)
         - Embedded variables like /Fo$TARGET -> /Fo<actual_path>
 
         Args:
-            tokens: Command tokens after path relativization.
+            tokens: Command tokens (str, SourcePath, or TargetPath).
             node: The output node being built.
             sources: Source nodes from build_info.
             build_info: Build info dict (for depfile).
 
         Returns:
-            Expanded token list with $SOURCES/etc replaced by actual paths.
+            Expanded token list with sources/targets replaced by actual paths.
         """
+        from pcons.core.subst import SourcePath, TargetPath
 
         # Helper to get a source path for make's execution context
         def get_source_path(s: FileNode) -> str:
@@ -842,56 +847,100 @@ class MakefileGenerator(BaseGenerator):
                     depfile.path + depfile.suffix
                 )
 
+        # Get all target paths for multi-output commands
+        all_targets = build_info.get("all_targets")
+        out_paths: list[str] = []
+        if all_targets and isinstance(all_targets, list):
+            for t in all_targets:
+                path = getattr(t, "path", None)
+                if path is not None:
+                    out_paths.append(self._strip_build_dir_prefix(path))
+        if not out_paths:
+            out_paths = [out_path]
+
         # Expand tokens
-        # Handle both pcons-style ($SOURCE/$TARGET) and ninja-style ($in/$out)
+        # Handle typed markers (SourcePath/TargetPath) first, then string patterns
         result: list[str] = []
         for token in tokens:
-            if token in ("$SOURCES", "$SOURCE", "$in"):
-                # Expand to multiple path tokens (one per file)
-                result.extend(in_paths)
-            elif token in ("$TARGET", "$TARGETS", "$out"):
-                result.append(out_path)
-            elif token in ("$TARGET.d", "$out.d"):
-                result.append(depfile_path if depfile_path else token)
-            elif (
-                "$TARGET" in token
-                or "$SOURCE" in token
-                or "$in" in token
-                or "$out" in token
-            ):
-                # Handle embedded variables like /Fo$TARGET or -MF$TARGET.d
-                # These are single tokens with variables inside
-                # Also handles ninja-style $in/$out embedded in tokens
-                expanded = token
-                # Order matters: $TARGET.d/$out.d before $TARGET/$out,
-                # $TARGETS before $TARGET, $SOURCES before $SOURCE
-                if "$TARGET.d" in expanded:
-                    expanded = expanded.replace(
-                        "$TARGET.d", depfile_path if depfile_path else "$TARGET.d"
-                    )
-                if "$out.d" in expanded:
-                    expanded = expanded.replace(
-                        "$out.d", depfile_path if depfile_path else "$out.d"
-                    )
-                if "$TARGETS" in expanded:
-                    expanded = expanded.replace("$TARGETS", out_path)
-                if "$TARGET" in expanded:
-                    expanded = expanded.replace("$TARGET", out_path)
-                if "$out" in expanded:
-                    expanded = expanded.replace("$out", out_path)
-                if "$SOURCES" in expanded:
-                    # For embedded $SOURCES, join with space (unusual case)
-                    expanded = expanded.replace("$SOURCES", " ".join(in_paths))
-                if "$SOURCE" in expanded:
-                    # For embedded $SOURCE, use first source
-                    first_source = in_paths[0] if in_paths else ""
-                    expanded = expanded.replace("$SOURCE", first_source)
-                if "$in" in expanded:
-                    # For embedded $in, join with space (unusual case)
-                    expanded = expanded.replace("$in", " ".join(in_paths))
-                result.append(expanded)
+            # Handle typed marker objects (clean path)
+            if isinstance(token, SourcePath):
+                # Indexed access or all sources
+                if token.index > 0 or any(
+                    isinstance(t, SourcePath) and t.index > 0 for t in tokens
+                ):
+                    # Indexed access: use specific source
+                    if token.index < len(in_paths):
+                        result.append(in_paths[token.index])
+                    elif in_paths:
+                        result.append(in_paths[0])
+                else:
+                    # Non-indexed: expand to all input paths
+                    result.extend(in_paths)
+            elif isinstance(token, TargetPath):
+                # Indexed access or single output
+                suffix = token.suffix if token.suffix else ""
+                if token.index > 0 or any(
+                    isinstance(t, TargetPath) and t.index > 0 for t in tokens
+                ):
+                    # Indexed access: use specific target
+                    if token.index < len(out_paths):
+                        result.append(out_paths[token.index] + suffix)
+                    else:
+                        result.append(out_path + suffix)
+                else:
+                    # Non-indexed: use primary output
+                    result.append(out_path + suffix)
+            # Handle string patterns (legacy support)
+            elif isinstance(token, str):
+                if token in ("$SOURCES", "$SOURCE", "$in"):
+                    # Expand to multiple path tokens (one per file)
+                    result.extend(in_paths)
+                elif token in ("$TARGET", "$TARGETS", "$out"):
+                    result.append(out_path)
+                elif token in ("$TARGET.d", "$out.d"):
+                    result.append(depfile_path if depfile_path else token)
+                elif (
+                    "$TARGET" in token
+                    or "$SOURCE" in token
+                    or "$in" in token
+                    or "$out" in token
+                ):
+                    # Handle embedded variables like /Fo$TARGET or -MF$TARGET.d
+                    # These are single tokens with variables inside
+                    # Also handles ninja-style $in/$out embedded in tokens
+                    expanded = token
+                    # Order matters: $TARGET.d/$out.d before $TARGET/$out,
+                    # $TARGETS before $TARGET, $SOURCES before $SOURCE
+                    if "$TARGET.d" in expanded:
+                        expanded = expanded.replace(
+                            "$TARGET.d", depfile_path if depfile_path else "$TARGET.d"
+                        )
+                    if "$out.d" in expanded:
+                        expanded = expanded.replace(
+                            "$out.d", depfile_path if depfile_path else "$out.d"
+                        )
+                    if "$TARGETS" in expanded:
+                        expanded = expanded.replace("$TARGETS", out_path)
+                    if "$TARGET" in expanded:
+                        expanded = expanded.replace("$TARGET", out_path)
+                    if "$out" in expanded:
+                        expanded = expanded.replace("$out", out_path)
+                    if "$SOURCES" in expanded:
+                        # For embedded $SOURCES, join with space (unusual case)
+                        expanded = expanded.replace("$SOURCES", " ".join(in_paths))
+                    if "$SOURCE" in expanded:
+                        # For embedded $SOURCE, use first source
+                        first_source = in_paths[0] if in_paths else ""
+                        expanded = expanded.replace("$SOURCE", first_source)
+                    if "$in" in expanded:
+                        # For embedded $in, join with space (unusual case)
+                        expanded = expanded.replace("$in", " ".join(in_paths))
+                    result.append(expanded)
+                else:
+                    result.append(token)
             else:
-                result.append(token)
+                # Unknown type - convert to string
+                result.append(str(token))
 
         return result
 
@@ -940,7 +989,7 @@ class MakefileGenerator(BaseGenerator):
 
     def _get_standalone_tool_command(
         self, tool_name: str, command_var: str
-    ) -> list[str] | None:
+    ) -> list | None:
         """Get command template from a standalone tool.
 
         Used when no environment is available (e.g., Install targets without
@@ -952,7 +1001,8 @@ class MakefileGenerator(BaseGenerator):
             command_var: Command variable name (e.g., "copycmd", "tarcmd").
 
         Returns:
-            Command template as list of tokens, or None if not available.
+            Command template as list of tokens (may include SourcePath/TargetPath
+            markers), or None if not available.
         """
         # Import standalone tools here to avoid circular imports
         if tool_name == "install":
@@ -971,11 +1021,11 @@ class MakefileGenerator(BaseGenerator):
         if cmd_template is None:
             return None
 
-        # Return as list of string tokens
+        # Return as list, preserving SourcePath/TargetPath markers
         if isinstance(cmd_template, list):
-            return [str(t) for t in cmd_template]
+            return list(cmd_template)
 
-        return [str(cmd_template)]
+        return [cmd_template]
 
     def _apply_context_overrides(
         self, tokens: list[str], tool_name: str, context_overrides: dict[str, object]
@@ -992,9 +1042,16 @@ class MakefileGenerator(BaseGenerator):
         Returns:
             Modified token list with overrides applied.
         """
+        from pcons.core.subst import SourcePath, TargetPath
+
         result: list[str] = []
         for token in tokens:
-            modified = token
+            # Pass through marker objects without modification
+            if isinstance(token, (SourcePath, TargetPath)):
+                result.append(token)
+                continue
+
+            modified = str(token)
             for key, val in context_overrides.items():
                 pattern = f"${tool_name}.{key}"
                 if pattern in modified:

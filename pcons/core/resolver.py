@@ -896,14 +896,16 @@ class Resolver:
                     # Set directly (includes, defines, libs, libdirs)
                     setattr(tool_config, key, val)
 
-        # Preserve generator-agnostic variables $SOURCE, $TARGET as-is
-        # These are converted to generator-specific syntax by each generator
-        # We use $$ escaping to preserve them through subst
-        extra_vars: dict[str, str] = {}
-        extra_vars["SOURCE"] = "$$SOURCE"
-        extra_vars["SOURCES"] = "$$SOURCES"
-        extra_vars["TARGET"] = "$$TARGET"
-        extra_vars["TARGETS"] = "$$TARGETS"
+        # Use typed marker objects for generator-agnostic path references
+        # SourcePath/TargetPath are preserved through subst() and converted
+        # to generator-specific syntax by each generator (e.g., $in/$out for Ninja)
+        from pcons.core.subst import SourcePath
+
+        extra_vars: dict[str, object] = {}
+        extra_vars["SOURCE"] = SourcePath()
+        extra_vars["SOURCES"] = SourcePath()  # Generator handles single vs. multiple
+        extra_vars["TARGET"] = TargetPath()
+        extra_vars["TARGETS"] = TargetPath()  # Generator handles single vs. multiple
 
         # Expand the command template to a list of tokens
         # Tokens stay separate for proper quoting - generator joins with shell quoting

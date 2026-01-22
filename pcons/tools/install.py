@@ -8,7 +8,7 @@ This module provides:
 - InstallDir: Builder for recursively copying a directory tree
 
 Users can customize the copy commands via the tool namespace:
-    env.install.copycmd = ["cp", "$$SOURCE", "$$TARGET"]  # Use system cp
+    env.install.copycmd = ["cp", SourcePath(), TargetPath()]  # Use system cp
 
 Target-level overrides are supported for InstallDir:
     install_dir = project.InstallDir("dist/", source_dir)
@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, cast
 
 from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode
-from pcons.core.subst import PathToken
+from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target, TargetType
 from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
@@ -68,10 +68,8 @@ class InstallTool(StandaloneTool):
 
         Uses Python helper scripts for cross-platform compatibility.
         Commands are lists of tokens for proper handling of paths with spaces.
-        The $$ escaping preserves $ for generator variable substitution.
-        $$SOURCE/$$TARGET become $in/$out for Ninja, actual paths for Makefile.
-        Pcons variables ($install.destdir) are expanded by pcons subst()
-        at generation time, NOT by Ninja.
+        SourcePath/TargetPath markers are converted by generators to appropriate
+        syntax ($in/$out for Ninja, actual paths for Makefile).
         """
         python_cmd = sys.executable.replace("\\", "/")
         return {
@@ -81,22 +79,21 @@ class InstallTool(StandaloneTool):
                 "-m",
                 "pcons.util.commands",
                 "copy",
-                "$$SOURCE",
-                "$$TARGET",
+                SourcePath(),
+                TargetPath(),
             ],
             # Directory tree copy with depfile support
             # $install.destdir is expanded by pcons subst() at generation time
-            # $$TARGET and $$SOURCE become generator-appropriate variables
             "copytreecmd": [
                 python_cmd,
                 "-m",
                 "pcons.util.commands",
                 "copytree",
                 "--depfile",
-                "$$TARGET.d",
+                TargetPath(suffix=".d"),
                 "--stamp",
-                "$$TARGET",
-                "$$SOURCE",
+                TargetPath(),
+                SourcePath(),
                 "$install.destdir",
             ],
             # Default destination directory (can be overridden per-target)

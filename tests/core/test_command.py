@@ -15,15 +15,21 @@ class TestGenericCommandBuilder:
 
     def test_creation_with_string_command(self):
         """Builder can be created with a string command."""
+        from pcons.core.subst import TargetPath
+
         builder = GenericCommandBuilder("echo hello > $TARGET")
         assert builder.name == "Command"
         assert builder.tool_name == "command"
-        assert builder.command == "echo hello > $TARGET"
+        # Command is tokenized with $TARGET converted to TargetPath()
+        assert builder.command == ["echo", "hello", ">", TargetPath()]
 
     def test_creation_with_list_command(self):
         """Builder can be created with a list command."""
+        from pcons.core.subst import SourcePath, TargetPath
+
         builder = GenericCommandBuilder(["python", "script.py", "$SOURCE", "$TARGET"])
-        assert builder.command == "python script.py $SOURCE $TARGET"
+        # $SOURCE and $TARGET are converted to typed markers
+        assert builder.command == ["python", "script.py", SourcePath(), TargetPath()]
 
     def test_unique_rule_names(self):
         """Each builder gets a unique rule name."""
@@ -70,6 +76,8 @@ class TestGenericCommandBuilder:
 
     def test_build_info_contains_command(self):
         """Target node contains build info with command."""
+        from pcons.core.subst import SourcePath, TargetPath
+
         builder = GenericCommandBuilder("process $SOURCE > $TARGET")
         env = Environment()
 
@@ -78,7 +86,13 @@ class TestGenericCommandBuilder:
 
         assert hasattr(target, "_build_info")
         assert target._build_info["tool"] == "command"
-        assert target._build_info["command"] == "process $SOURCE > $TARGET"
+        # Command is tokenized list with markers
+        assert target._build_info["command"] == [
+            "process",
+            SourcePath(),
+            ">",
+            TargetPath(),
+        ]
         assert target._build_info["rule_name"] == builder.rule_name
 
 
@@ -385,73 +399,3 @@ class TestGenericCommandNinja:
         # Should have indexed target variables
         assert "target_0 = " in content
         assert "target_1 = " in content
-
-
-class TestCommandVariableConversion:
-    """Tests for _convert_command_variables helper."""
-
-    def test_convert_source(self):
-        """Converts $SOURCE to $in."""
-        from pcons.generators.ninja import NinjaGenerator
-
-        gen = NinjaGenerator()
-        result = gen._convert_command_variables("process $SOURCE")
-        assert result == "process $in"
-
-    def test_convert_target(self):
-        """Converts $TARGET to $out."""
-        from pcons.generators.ninja import NinjaGenerator
-
-        gen = NinjaGenerator()
-        result = gen._convert_command_variables("process > $TARGET")
-        assert result == "process > $out"
-
-    def test_convert_sources(self):
-        """Converts $SOURCES to $in."""
-        from pcons.generators.ninja import NinjaGenerator
-
-        gen = NinjaGenerator()
-        result = gen._convert_command_variables("cat $SOURCES")
-        assert result == "cat $in"
-
-    def test_convert_targets(self):
-        """Converts $TARGETS to $out."""
-        from pcons.generators.ninja import NinjaGenerator
-
-        gen = NinjaGenerator()
-        result = gen._convert_command_variables("touch $TARGETS")
-        assert result == "touch $out"
-
-    def test_convert_indexed_source(self):
-        """Converts ${SOURCES[n]} to $source_n."""
-        from pcons.generators.ninja import NinjaGenerator
-
-        gen = NinjaGenerator()
-        result = gen._convert_command_variables("diff ${SOURCES[0]} ${SOURCES[1]}")
-        assert result == "diff $source_0 $source_1"
-
-    def test_convert_indexed_target(self):
-        """Converts ${TARGETS[n]} to $target_n."""
-        from pcons.generators.ninja import NinjaGenerator
-
-        gen = NinjaGenerator()
-        result = gen._convert_command_variables("gen ${TARGETS[0]} ${TARGETS[1]}")
-        assert result == "gen $target_0 $target_1"
-
-    def test_convert_mixed(self):
-        """Converts mixed variables."""
-        from pcons.generators.ninja import NinjaGenerator
-
-        gen = NinjaGenerator()
-        result = gen._convert_command_variables(
-            "process ${SOURCES[0]} $SOURCE $TARGET ${TARGETS[1]}"
-        )
-        assert result == "process $source_0 $in $out $target_1"
-
-    def test_preserves_other_variables(self):
-        """Preserves other $ variables."""
-        from pcons.generators.ninja import NinjaGenerator
-
-        gen = NinjaGenerator()
-        result = gen._convert_command_variables("echo $HOME $SOURCE > $TARGET")
-        assert result == "echo $HOME $in > $out"

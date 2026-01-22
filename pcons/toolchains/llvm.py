@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 
@@ -30,7 +31,7 @@ class ClangCCompiler(BaseTool):
             "includes": [],
             "dprefix": "-D",
             "defines": [],
-            "depflags": ["-MD", "-MF", "$$TARGET.d"],
+            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
             "objcmd": [
                 "$cc.cmd",
                 "$cc.flags",
@@ -39,14 +40,12 @@ class ClangCCompiler(BaseTool):
                 "$cc.depflags",
                 "-c",
                 "-o",
-                "$$TARGET",
-                "$$SOURCE",
+                TargetPath(),
+                SourcePath(),
             ],
         }
 
     def builders(self) -> dict[str, Builder]:
-        from pcons.core.subst import TargetPath
-
         platform = get_platform()
         return {
             "Object": CommandBuilder(
@@ -92,7 +91,7 @@ class ClangCxxCompiler(BaseTool):
             "includes": [],
             "dprefix": "-D",
             "defines": [],
-            "depflags": ["-MD", "-MF", "$$TARGET.d"],
+            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
             "objcmd": [
                 "$cxx.cmd",
                 "$cxx.flags",
@@ -101,14 +100,12 @@ class ClangCxxCompiler(BaseTool):
                 "$cxx.depflags",
                 "-c",
                 "-o",
-                "$$TARGET",
-                "$$SOURCE",
+                TargetPath(),
+                SourcePath(),
             ],
         }
 
     def builders(self) -> dict[str, Builder]:
-        from pcons.core.subst import TargetPath
-
         platform = get_platform()
         return {
             "Object": CommandBuilder(
@@ -154,7 +151,7 @@ class LlvmArchiver(BaseTool):
         return {
             "cmd": ar_cmd,
             "flags": ["rcs"],
-            "libcmd": ["$ar.cmd", "$ar.flags", "$$TARGET", "$$SOURCES"],
+            "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -225,8 +222,8 @@ class LlvmLinker(BaseTool):
                 "$link.cmd",
                 "$link.flags",
                 "-o",
-                "$$TARGET",
-                "$$SOURCES",
+                TargetPath(),
+                SourcePath(),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
                 "${prefix(link.Fprefix, link.frameworkdirs)}",
@@ -237,8 +234,8 @@ class LlvmLinker(BaseTool):
                 shared_flag,
                 "$link.flags",
                 "-o",
-                "$$TARGET",
-                "$$SOURCES",
+                TargetPath(),
+                SourcePath(),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
                 "${prefix(link.Fprefix, link.frameworkdirs)}",
@@ -312,8 +309,8 @@ class MetalCompiler(BaseTool):
                 "${prefix(metal.iprefix, metal.includes)}",
                 "-c",
                 "-o",
-                "$$TARGET",
-                "$$SOURCE",
+                TargetPath(),
+                SourcePath(),
             ],
         }
 

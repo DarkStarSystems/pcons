@@ -127,10 +127,6 @@ class PathToken:
         return self.prefix + self.path + self.suffix
 
 
-# Type alias for command tokens (can be string or PathToken)
-CommandToken = str | PathToken
-
-
 @dataclass
 class ProjectPath:
     """Marker for a path relative to project root.
@@ -177,6 +173,7 @@ class TargetPath:
     with the actual target path.
 
     Attributes:
+        index: Which target file (0 = first/only, for multi-output commands).
         suffix: Suffix to append (e.g., ".d" for depfiles).
         prefix: Optional prefix (e.g., "-MF" for MSVC-style depfile flags).
 
@@ -188,6 +185,7 @@ class TargetPath:
         # TargetPath(suffix=".d") -> PathToken("", "build/obj/hello.o", "build", ".d")
     """
 
+    index: int = 0
     suffix: str = ""
     prefix: str = ""
 
@@ -215,6 +213,11 @@ class SourcePath:
     index: int = 0
     suffix: str = ""
     prefix: str = ""
+
+
+# Type alias for command tokens (can be string, PathToken, or marker objects)
+# SourcePath/TargetPath markers are preserved through subst() for generators to handle
+CommandToken = str | PathToken | SourcePath | TargetPath
 
 
 # =============================================================================
@@ -354,17 +357,27 @@ def _subst_command(
     Returns list of CommandToken (str or PathToken). PathToken objects
     are created when path markers (ProjectPath, BuildPath) are used with
     prefix() function, allowing generators to apply relativization.
+
+    SourcePath and TargetPath marker objects in the template are preserved
+    as-is, allowing generators to convert them to appropriate syntax.
     """
     tokens = template.split() if isinstance(template, str) else list(template)
 
     result: list[CommandToken] = []
     for token in tokens:
-        expanded = _expand_token(token, namespace, set(), location)
-        if isinstance(expanded, list):
-            # expanded is list[CommandToken] here
-            result.extend(cast(list[CommandToken], expanded))
+        # Preserve marker objects through substitution
+        if isinstance(token, (SourcePath, TargetPath, PathToken)):
+            result.append(token)
+        elif isinstance(token, str):
+            expanded = _expand_token(token, namespace, set(), location)
+            if isinstance(expanded, list):
+                # expanded is list[CommandToken] here
+                result.extend(cast(list[CommandToken], expanded))
+            else:
+                result.append(expanded)
         else:
-            result.append(expanded)
+            # Unknown type - convert to string
+            result.append(str(token))
 
     return result
 
@@ -397,9 +410,11 @@ def _expand_token(
             # List variable as entire token -> multiple tokens
             var_result: list[CommandToken] = []
             for v in value:
-                # Preserve PathToken and other marker objects
-                if isinstance(v, (PathToken, ProjectPath, BuildPath)):
-                    var_result.append(v if isinstance(v, PathToken) else str(v))
+                # Preserve marker objects through substitution
+                if isinstance(v, (PathToken, SourcePath, TargetPath)):
+                    var_result.append(v)
+                elif isinstance(v, (ProjectPath, BuildPath)):
+                    var_result.append(str(v))
                 else:
                     sv = str(v)
                     if "$" in sv:
@@ -411,6 +426,10 @@ def _expand_token(
                     else:
                         var_result.append(sv)
             return var_result
+
+        # Preserve marker objects (SourcePath, TargetPath, PathToken) directly
+        if isinstance(value, (PathToken, SourcePath, TargetPath)):
+            return value
 
         str_value = str(value)
         if "$" in str_value:

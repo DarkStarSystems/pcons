@@ -182,10 +182,6 @@ class NinjaGenerator(BaseGenerator):
         else:
             command = command_raw
 
-        # Convert $SOURCE/$TARGET to $in/$out for Ninja
-        # All templates now use generator-agnostic $SOURCE/$TARGET variables
-        command = self._convert_command_variables(command)
-
         # Append post-build commands directly to the command if needed
         # This ensures targets with different post-build commands get different rules
         sources = cast(list[Node], build_info.get("sources", []))
@@ -349,54 +345,6 @@ class NinjaGenerator(BaseGenerator):
 
         return command
 
-    def _convert_command_variables(self, command: str) -> str:
-        """Convert generator-agnostic variables to Ninja variables.
-
-        Converts pcons template variables to Ninja-style:
-        - $SOURCE, $SOURCES -> $in
-        - $TARGET, $TARGETS -> $out
-        - $TARGET.d -> $out.d (depfile pattern)
-        - $TARGET_import_lib -> $out_import_lib (MSVC multi-output)
-        - ${SOURCES[n]} -> indexed source (handled at build time)
-        - ${TARGETS[n]} -> indexed target (handled at build time)
-
-        Args:
-            command: The command template with generator-agnostic variables.
-
-        Returns:
-            Command with Ninja-style variables.
-        """
-        import re
-
-        # Convert plural forms first (so they don't match singular)
-        command = command.replace("$SOURCES", "$in")
-        command = command.replace("$TARGETS", "$out")
-
-        # Convert singular forms
-        command = command.replace("$SOURCE", "$in")
-        # Handle $TARGET_xxx patterns before plain $TARGET (e.g., $TARGET_import_lib)
-        command = re.sub(r"\$TARGET_(\w+)", r"$out_\1", command)
-        # Handle $TARGET.d pattern for depfiles
-        command = command.replace("$TARGET.d", "$out.d")
-        # Convert plain $TARGET
-        command = command.replace("$TARGET", "$out")
-
-        # Handle indexed access ${SOURCES[n]} and ${TARGETS[n]}
-        # These need special handling - we'll convert to per-build variables
-        # that will be filled in by _write_build_variables
-        def replace_indexed_source(match: re.Match[str]) -> str:
-            index = match.group(1)
-            return f"$source_{index}"
-
-        def replace_indexed_target(match: re.Match[str]) -> str:
-            index = match.group(1)
-            return f"$target_{index}"
-
-        command = re.sub(r"\$\{SOURCES\[(\d+)\]\}", replace_indexed_source, command)
-        command = re.sub(r"\$\{TARGETS\[(\d+)\]\}", replace_indexed_target, command)
-
-        return command
-
     def _write_builds(self, f: TextIO, project: Project) -> None:
         """Write build statements for all targets."""
         f.write("# Build statements\n")
@@ -481,9 +429,6 @@ class NinjaGenerator(BaseGenerator):
                 command = to_shell_command(relativized_tokens, shell="ninja")
             else:
                 command = command_raw
-
-            # Convert $SOURCE/$TARGET to $in/$out for Ninja
-            command = self._convert_command_variables(command)
 
             # Append post-build commands directly to the command if needed
             # Must match _ensure_rule() logic for consistent rule naming
@@ -891,20 +836,50 @@ class NinjaGenerator(BaseGenerator):
         """Relativize path tokens in command for ninja execution.
 
         Processes PathToken objects using their relativize() method with
-        ninja-appropriate path transformation. For regular strings, falls
+        ninja-appropriate path transformation. Converts SourcePath/TargetPath
+        markers to Ninja's $in/$out variables. For regular strings, falls
         back to pattern-based detection of path flags.
 
         Args:
-            tokens: List of command tokens (str or PathToken).
+            tokens: List of command tokens (str, PathToken, SourcePath, TargetPath).
 
         Returns:
             List of string tokens with paths relativized for ninja.
         """
-        from pcons.core.subst import PathToken
+        from pcons.core.subst import PathToken, SourcePath, TargetPath
 
         result: list[str] = []
         for token in tokens:
-            if isinstance(token, PathToken):
+            if isinstance(token, SourcePath):
+                # Convert SourcePath marker to Ninja's $in or $source_N variable
+                # index=0 with no other indexed sources uses $in for simplicity
+                if token.index > 0:
+                    result.append(f"$source_{token.index}")
+                else:
+                    # Check if there are any indexed sources in the token list
+                    has_indexed = any(
+                        isinstance(t, SourcePath) and t.index > 0 for t in tokens
+                    )
+                    if has_indexed:
+                        result.append("$source_0")
+                    else:
+                        result.append("$in")
+            elif isinstance(token, TargetPath):
+                # Convert TargetPath marker to Ninja's $out or $target_N variable
+                # Handle suffix (e.g., ".d" for depfiles)
+                suffix = token.suffix if token.suffix else ""
+                if token.index > 0:
+                    result.append(f"$target_{token.index}{suffix}")
+                else:
+                    # Check if there are any indexed targets in the token list
+                    has_indexed = any(
+                        isinstance(t, TargetPath) and t.index > 0 for t in tokens
+                    )
+                    if has_indexed:
+                        result.append(f"$target_0{suffix}")
+                    else:
+                        result.append(f"$out{suffix}")
+            elif isinstance(token, PathToken):
                 # Use PathToken's relativize() with ninja path transformer
                 result.append(token.relativize(self._relativize_path_for_ninja))
             else:
@@ -1002,9 +977,16 @@ class NinjaGenerator(BaseGenerator):
             return None
 
         # Convert list templates to shell command string
-        # List templates are passed through as-is (tokens are already formatted)
+        # List templates may contain SourcePath/TargetPath markers that need
+        # to be converted to Ninja's $in/$out variables
         if isinstance(cmd_template, list):
-            # Cast to list[str] for type checker - we know the template is a list of strings
-            return to_shell_command(cast(list[str], cmd_template), shell="ninja")
+            # Relativize path tokens and convert markers to Ninja variables
+            # Cast to list[CommandToken] - type checker doesn't narrow from isinstance
+            from pcons.core.subst import CommandToken
+
+            relativized = self._relativize_command_tokens(
+                cast(list[CommandToken], cmd_template)
+            )
+            return to_shell_command(relativized, shell="ninja")
 
         return str(cmd_template) or None

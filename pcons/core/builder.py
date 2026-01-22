@@ -416,6 +416,7 @@ class CommandBuilder(BaseBuilder):
             "sources": sources,
             "depfile": depfile,
             "deps_style": self._deps_style,
+            "env": env,
         }
 
         return node
@@ -576,6 +577,7 @@ class MultiOutputBuilder(CommandBuilder):
             "all_output_nodes": nodes,
             "depfile": self._depfile,
             "deps_style": self._deps_style,
+            "env": env,
         }
 
         # Secondary nodes reference the primary for build info
@@ -641,16 +643,57 @@ class GenericCommandBuilder(BaseBuilder):
             language=None,
         )
 
-        # Store the command as a list for consistency
-        if isinstance(command, str):
-            self._command = command
-        else:
-            self._command = " ".join(command)
+        # Convert command to tokenized list with SourcePath/TargetPath markers
+        self._command = self._tokenize_command(command)
         self._rule_name = rule_name
 
+    def _tokenize_command(self, command: str | list[str]) -> list:
+        """Convert command string to tokenized list with typed markers.
+
+        Converts $SOURCE/$TARGET patterns to SourcePath()/TargetPath() markers.
+        Also handles indexed patterns like ${SOURCES[0]} and ${TARGETS[0]}.
+        """
+        import re
+
+        from pcons.core.subst import SourcePath, TargetPath
+
+        # Convert to token list
+        if isinstance(command, str):
+            tokens = command.split()
+        else:
+            tokens = list(command)
+
+        # Patterns for indexed access
+        indexed_source_pattern = re.compile(r"^\$\{SOURCES\[(\d+)\]\}$")
+        indexed_target_pattern = re.compile(r"^\$\{TARGETS\[(\d+)\]\}$")
+
+        # Replace string patterns with typed markers
+        result: list = []
+        for token in tokens:
+            if token in ("$SOURCE", "$SOURCES"):
+                result.append(SourcePath())
+            elif token in ("$TARGET", "$TARGETS"):
+                result.append(TargetPath())
+            elif match := indexed_source_pattern.match(token):
+                # ${SOURCES[n]} -> SourcePath(index=n)
+                index = int(match.group(1))
+                result.append(SourcePath(index=index))
+            elif match := indexed_target_pattern.match(token):
+                # ${TARGETS[n]} -> TargetPath(index=n)
+                index = int(match.group(1))
+                result.append(TargetPath(index=index))
+            elif "$SOURCE" in token or "$TARGET" in token:
+                # Token has embedded variables - keep as string for generator to handle
+                # This covers cases like /Fo$TARGET or -MF$TARGET.d
+                result.append(token)
+            else:
+                result.append(token)
+
+        return result
+
     @property
-    def command(self) -> str:
-        """The command template."""
+    def command(self) -> list:
+        """The command template as a tokenized list."""
         return self._command
 
     @property

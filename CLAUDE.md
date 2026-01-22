@@ -1,13 +1,14 @@
 # Pcons - Python Build System
 
 An open source Python-based build system that generates Ninja (or Make) build files. Zero install, tool-agnostic core.
-Designed for maintainability and extensibility.
+Designed for simplicity, maintainability and extensibility.
 
 **Design philosophy**:
 1. Configuration, not execution. Python scripts describe what to build; Ninja handles execution.
 2. pcons core is completely tool-agnostic. It knows nothing about compilers or linkers; should be just as good at document preparation or game asset building or scientific dataflows. All tool-specific logic is in toolchains and tools.
 3. pcons core should know nothing about any commands or toolchains; all of those should be registered at startup; consider them as add-ons that happen to be built in.
-
+4. Always think about creating the simplest overall architecture, not just solving the problem of the moment. If you see a problem, that's an opportunity to think about simplifying the big picture. Look for "code smells" and aggressively eliminate them.
+5. Always try to find the cleanest solution. As of now, we have almost no real users, so back compatibility is not important. Developing a clean, usable system is top priority.
 
 ## Critical Rules
 
