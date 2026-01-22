@@ -261,7 +261,13 @@ def adapt_outputs_for_generator(outputs: list[str], generator: str) -> list[str]
 
     result = []
     for output in outputs:
-        if output == "build/build.ninja" or output.endswith("/build.ninja"):
+        # Check for build.ninja with both forward and backslash paths (Windows compat)
+        if (
+            output == "build/build.ninja"
+            or output == "build\\build.ninja"
+            or output.endswith("/build.ninja")
+            or output.endswith("\\build.ninja")
+        ):
             # Replace build.ninja with Makefile for make generator
             result.append(output.replace("build.ninja", "Makefile"))
         else:
