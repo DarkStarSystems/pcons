@@ -853,32 +853,35 @@ class NinjaGenerator(BaseGenerator):
             if isinstance(token, SourcePath):
                 # Convert SourcePath marker to Ninja's $in or $source_N variable
                 # index=0 with no other indexed sources uses $in for simplicity
+                prefix = token.prefix if token.prefix else ""
+                suffix = token.suffix if token.suffix else ""
                 if token.index > 0:
-                    result.append(f"$source_{token.index}")
+                    result.append(f"{prefix}$source_{token.index}{suffix}")
                 else:
                     # Check if there are any indexed sources in the token list
                     has_indexed = any(
                         isinstance(t, SourcePath) and t.index > 0 for t in tokens
                     )
                     if has_indexed:
-                        result.append("$source_0")
+                        result.append(f"{prefix}$source_0{suffix}")
                     else:
-                        result.append("$in")
+                        result.append(f"{prefix}$in{suffix}")
             elif isinstance(token, TargetPath):
                 # Convert TargetPath marker to Ninja's $out or $target_N variable
-                # Handle suffix (e.g., ".d" for depfiles)
+                # Handle prefix (e.g., "/Fo" for MSVC) and suffix (e.g., ".d" for depfiles)
+                prefix = token.prefix if token.prefix else ""
                 suffix = token.suffix if token.suffix else ""
                 if token.index > 0:
-                    result.append(f"$target_{token.index}{suffix}")
+                    result.append(f"{prefix}$target_{token.index}{suffix}")
                 else:
                     # Check if there are any indexed targets in the token list
                     has_indexed = any(
                         isinstance(t, TargetPath) and t.index > 0 for t in tokens
                     )
                     if has_indexed:
-                        result.append(f"$target_0{suffix}")
+                        result.append(f"{prefix}$target_0{suffix}")
                     else:
-                        result.append(f"$out{suffix}")
+                        result.append(f"{prefix}$out{suffix}")
             elif isinstance(token, PathToken):
                 # Use PathToken's relativize() with ninja path transformer
                 result.append(token.relativize(self._relativize_path_for_ninja))

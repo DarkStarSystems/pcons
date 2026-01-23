@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
+from pcons.core.subst import SourcePath, TargetPath
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain
 
@@ -77,8 +78,8 @@ class CythonTranspiler(BaseTool):
                 "$cython.cmd",
                 "$cython.flags",
                 "-o",
-                "$$TARGET",
-                "$$SOURCE",
+                TargetPath(),
+                SourcePath(),
             ],
         }
 
@@ -168,7 +169,7 @@ class CythonCCompiler(BaseTool):
             "includes": includes,
             "dprefix": "-D",
             "defines": [],
-            "depflags": ["-MD", "-MF", "$$TARGET.d"],
+            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
             "objcmd": [
                 "$cycc.cmd",
                 "$cycc.flags",
@@ -177,14 +178,12 @@ class CythonCCompiler(BaseTool):
                 "$cycc.depflags",
                 "-c",
                 "-o",
-                "$$TARGET",
-                "$$SOURCE",
+                TargetPath(),
+                SourcePath(),
             ],
         }
 
     def builders(self) -> dict[str, Builder]:
-        from pcons.core.subst import TargetPath
-
         platform = get_platform()
         return {
             "Object": CommandBuilder(
@@ -288,8 +287,8 @@ class CythonLinker(BaseTool):
                 "$cylink.cmd",
                 "$cylink.flags",
                 "-o",
-                "$$TARGET",
-                "$$SOURCES",
+                TargetPath(),
+                SourcePath(),
                 "${prefix(cylink.Lprefix, cylink.libdirs)}",
                 "${prefix(cylink.lprefix, cylink.libs)}",
             ],

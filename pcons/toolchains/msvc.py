@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.subst import SourcePath, TargetPath
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain, ToolchainContext
 
@@ -79,8 +80,8 @@ class MsvcCompiler(BaseTool):
                 "${prefix(cc.dprefix, cc.defines)}",
                 "$cc.depflags",
                 "/c",
-                "/Fo$$TARGET",
-                "$$SOURCE",
+                TargetPath(prefix="/Fo"),
+                SourcePath(),
             ],
         }
 
@@ -139,7 +140,12 @@ class MsvcLibrarian(BaseTool):
         return {
             "cmd": "lib.exe",
             "flags": ["/nologo"],
-            "libcmd": ["$lib.cmd", "$lib.flags", "/OUT:$$TARGET", "$$SOURCES"],
+            "libcmd": [
+                "$lib.cmd",
+                "$lib.flags",
+                TargetPath(prefix="/OUT:"),
+                SourcePath(),
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -189,8 +195,8 @@ class MsvcResourceCompiler(BaseTool):
                 "$rc.flags",
                 "${prefix(rc.iprefix, rc.includes)}",
                 "${prefix(rc.dprefix, rc.defines)}",
-                "/fo$$TARGET",
-                "$$SOURCE",
+                TargetPath(prefix="/fo"),
+                SourcePath(),
             ],
         }
 
@@ -272,8 +278,8 @@ class MsvcAssembler(BaseTool):
                 "$ml.flags",
                 "${prefix(ml.iprefix, ml.includes)}",
                 "/c",
-                "/Fo$$TARGET",
-                "$$SOURCE",
+                TargetPath(prefix="/Fo"),
+                SourcePath(),
             ],
         }
 
@@ -342,8 +348,8 @@ class MsvcLinker(BaseTool):
             "progcmd": [
                 "$link.cmd",
                 "$link.flags",
-                "/OUT:$$TARGET",
-                "$$SOURCES",
+                TargetPath(prefix="/OUT:"),
+                SourcePath(),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
@@ -351,9 +357,9 @@ class MsvcLinker(BaseTool):
                 "$link.cmd",
                 "/DLL",
                 "$link.flags",
-                "/OUT:$$TARGET",
-                "/IMPLIB:$$TARGET_import_lib",
-                "$$SOURCES",
+                TargetPath(prefix="/OUT:"),
+                TargetPath(prefix="/IMPLIB:", index=1),
+                SourcePath(),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
             ],
