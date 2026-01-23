@@ -21,11 +21,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger("pcons")
 
 
-def setup_logging(verbose: bool = False, debug: bool = False) -> None:
-    """Configure logging based on verbosity level."""
-    if debug:
+def setup_logging(verbose: bool = False, debug: str | None = None) -> None:
+    """Configure logging based on verbosity level.
+
+    Args:
+        verbose: Enable INFO level logging.
+        debug: Enable DEBUG level logging for specific subsystems.
+               Comma-separated list: "resolve,subst,env,configure,generate,deps,all"
+               Can also be set via PCONS_DEBUG environment variable.
+    """
+    import os
+
+    from pcons.core.debug import init_debug
+
+    # Check CLI arg first, then environment variable
+    debug_spec = debug or os.environ.get("PCONS_DEBUG")
+
+    if debug_spec:
         level = logging.DEBUG
         fmt = "%(levelname)s: %(name)s: %(message)s"
+        init_debug(debug_spec)
     elif verbose:
         level = logging.INFO
         fmt = "%(levelname)s: %(message)s"
@@ -33,7 +48,9 @@ def setup_logging(verbose: bool = False, debug: bool = False) -> None:
         level = logging.WARNING
         fmt = "%(levelname)s: %(message)s"
 
-    logging.basicConfig(level=level, format=fmt)
+    # Force reconfiguration even if basicConfig was already called
+    # This is needed because debug mode may be set after logging is initialized
+    logging.basicConfig(level=level, format=fmt, force=True)
 
 
 def find_script(name: str, search_dir: Path | None = None) -> Path | None:
@@ -555,7 +572,13 @@ print(f"Generated {build_dir / 'build.ninja'}")
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add common arguments to a parser."""
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-    parser.add_argument("--debug", action="store_true", help="Debug output")
+    parser.add_argument(
+        "--debug",
+        type=str,
+        metavar="SUBSYSTEMS",
+        help="Enable debug tracing for subsystems (comma-separated): "
+        "configure,resolve,generate,subst,env,deps,all",
+    )
     parser.add_argument(
         "-B", "--build-dir", default="build", help="Build directory (default: build)"
     )
@@ -578,6 +601,7 @@ def find_command_in_argv(argv: list[str]) -> str | None:
         "--jobs",
         "--graph",
         "--mermaid",
+        "--debug",
     }
     i = 0
     while i < len(argv):

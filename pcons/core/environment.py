@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.debug import trace, trace_value
 from pcons.core.subst import Namespace, subst, to_shell_command
 from pcons.core.toolconfig import ToolConfig
 from pcons.util.source_location import SourceLocation, get_caller_location
@@ -80,6 +81,11 @@ class Environment:
         self._created_nodes: list[Any] = []  # Nodes created by builders
         self._name = name
         self.defined_at = defined_at or get_caller_location()
+
+        trace("env", "Creating environment: %s", name or "(unnamed)")
+        trace_value("env", "defined_at", self.defined_at)
+        if toolchain:
+            trace_value("env", "toolchain", toolchain.name)
 
         # Initialize tools from toolchain if provided
         if toolchain is not None:
@@ -450,6 +456,7 @@ class Environment:
             env.set_variant("debug")
             env.set_variant("release", extra_flags=["-march=native"])
         """
+        trace("env", "Setting variant: %s", name)
         all_toolchains = self.toolchains
         if all_toolchains:
             for toolchain in all_toolchains:
@@ -771,6 +778,41 @@ class Environment:
             self._project.add_target(cmd_target)
 
         return cmd_target
+
+    def __str__(self) -> str:
+        """User-friendly string representation for debugging."""
+        name = object.__getattribute__(self, "_name")
+        lines = [f"Environment: {name or '(unnamed)'}"]
+
+        defined_at = object.__getattribute__(self, "defined_at")
+        if defined_at:
+            lines.append(f"  Defined at: {defined_at}")
+
+        toolchain = object.__getattribute__(self, "_toolchain")
+        if toolchain:
+            lines.append(f"  Toolchain: {toolchain.name}")
+
+        vars_dict = self._get_vars()
+        if "variant" in vars_dict:
+            lines.append(f"  Variant: {vars_dict['variant']}")
+        if "build_dir" in vars_dict:
+            lines.append(f"  Build dir: {vars_dict['build_dir']}")
+
+        # Show key tool settings
+        tools = self._get_tools()
+        for tool_name in ["cc", "cxx", "link"]:
+            if tool_name in tools:
+                tool = tools[tool_name]
+                cmd = tool.get("cmd", "?")
+                flags = tool.get("flags", [])
+                if cmd or flags:
+                    flags_preview = flags[:3] if isinstance(flags, list) else []
+                    suffix = "..." if isinstance(flags, list) and len(flags) > 3 else ""
+                    lines.append(
+                        f"  {tool_name}: cmd={cmd}, flags={flags_preview}{suffix}"
+                    )
+
+        return "\n".join(lines)
 
     def __repr__(self) -> str:
         tools = self._get_tools()

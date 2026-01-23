@@ -23,6 +23,7 @@ from pcons.util.source_location import get_caller_location
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
+    from pcons.util.source_location import SourceLocation
 
 
 @builder("Program", target_type=TargetType.PROGRAM, requires_env=True)
@@ -35,6 +36,7 @@ class ProgramBuilder:
         name: str,
         env: Environment,
         sources: list[str | Path | Node] | None = None,
+        defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a Program target.
 
@@ -43,12 +45,15 @@ class ProgramBuilder:
             name: Target name (e.g., "myapp").
             env: Environment to use for building.
             sources: Source files for the program.
+            defined_at: Source location where this was defined (auto-captured).
 
         Returns:
             A new Target configured as a program.
         """
         target = Target(
-            name, target_type=TargetType.PROGRAM, defined_at=get_caller_location()
+            name,
+            target_type=TargetType.PROGRAM,
+            defined_at=defined_at or get_caller_location(),
         )
         target._env = env
         target._project = project
@@ -72,6 +77,7 @@ class StaticLibraryBuilder:
         name: str,
         env: Environment,
         sources: list[str | Path | Node] | None = None,
+        defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a StaticLibrary target.
 
@@ -80,6 +86,7 @@ class StaticLibraryBuilder:
             name: Target name (e.g., "mylib").
             env: Environment to use for building.
             sources: Source files for the library.
+            defined_at: Source location where this was defined (auto-captured).
 
         Returns:
             A new Target configured as a static library.
@@ -87,7 +94,7 @@ class StaticLibraryBuilder:
         target = Target(
             name,
             target_type=TargetType.STATIC_LIBRARY,
-            defined_at=get_caller_location(),
+            defined_at=defined_at or get_caller_location(),
         )
         target._env = env
         target._project = project
@@ -111,6 +118,7 @@ class SharedLibraryBuilder:
         name: str,
         env: Environment,
         sources: list[str | Path | Node] | None = None,
+        defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a SharedLibrary target.
 
@@ -119,6 +127,7 @@ class SharedLibraryBuilder:
             name: Target name (e.g., "mylib").
             env: Environment to use for building.
             sources: Source files for the library.
+            defined_at: Source location where this was defined (auto-captured).
 
         Returns:
             A new Target configured as a shared library.
@@ -126,7 +135,7 @@ class SharedLibraryBuilder:
         target = Target(
             name,
             target_type=TargetType.SHARED_LIBRARY,
-            defined_at=get_caller_location(),
+            defined_at=defined_at or get_caller_location(),
         )
         target._env = env
         target._project = project
@@ -150,6 +159,7 @@ class ObjectLibraryBuilder:
         name: str,
         env: Environment,
         sources: list[str | Path | Node] | None = None,
+        defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create an ObjectLibrary target.
 
@@ -158,12 +168,15 @@ class ObjectLibraryBuilder:
             name: Target name.
             env: Environment to use for building.
             sources: Source files to compile.
+            defined_at: Source location where this was defined (auto-captured).
 
         Returns:
             A new Target configured as an object library.
         """
         target = Target(
-            name, target_type=TargetType.OBJECT, defined_at=get_caller_location()
+            name,
+            target_type=TargetType.OBJECT,
+            defined_at=defined_at or get_caller_location(),
         )
         target._env = env
         target._project = project
@@ -186,6 +199,7 @@ class HeaderOnlyLibraryBuilder:
         project: Project,
         name: str,
         include_dirs: list[str | Path] | None = None,
+        defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a HeaderOnlyLibrary target.
 
@@ -193,12 +207,15 @@ class HeaderOnlyLibraryBuilder:
             project: The project to add the target to.
             name: Target name (e.g., "my_headers").
             include_dirs: Include directories to propagate to dependents.
+            defined_at: Source location where this was defined (auto-captured).
 
         Returns:
             A new Target configured as an interface library.
         """
         target = Target(
-            name, target_type=TargetType.INTERFACE, defined_at=get_caller_location()
+            name,
+            target_type=TargetType.INTERFACE,
+            defined_at=defined_at or get_caller_location(),
         )
         target._builder_name = "HeaderOnlyLibrary"
 

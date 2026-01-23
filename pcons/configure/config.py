@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
+from pcons.core.debug import trace, trace_value
 
 if TYPE_CHECKING:
     from pcons.tools.toolchain import Toolchain
@@ -158,12 +159,15 @@ class Configure:
         Raises:
             FileNotFoundError: If required and not found.
         """
+        trace("configure", "Finding program: %s", name)
+
         # Check cache first
         cache_key = f"program:{name}"
         if cache_key in self._cache:
             cached = self._cache[cache_key]
             path = Path(cached["path"])
             if path.exists():
+                trace("configure", "  Found in cache: %s", path)
                 return ProgramInfo(path=path, version=cached.get("version"))
 
         # Search for the program
@@ -204,6 +208,8 @@ class Configure:
 
         info = ProgramInfo(path=found_path, version=version)
         self._programs[name] = info
+        trace("configure", "  Found: %s", found_path)
+        trace_value("configure", "version", version)
         return info
 
     def _which(self, name: str) -> Path | None:

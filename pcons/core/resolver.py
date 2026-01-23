@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.builder_registry import BuilderRegistry
+from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode
 from pcons.core.requirements import (
@@ -569,12 +570,17 @@ class Resolver:
         are resolved before their dependents. After all targets are resolved,
         expands command templates so generators receive fully-expanded commands.
         """
+        trace("resolve", "Starting resolution phase")
+        trace_value("resolve", "total_targets", len(self.project.targets))
+
         for target in self._targets_in_build_order():
             if not target._resolved:
                 self._resolve_target(target)
 
         # Expand command templates for all nodes
+        trace("resolve", "Starting command expansion")
         self._expand_node_commands()
+        trace("resolve", "Resolution complete")
 
     def _targets_in_build_order(self) -> list[Target]:
         """Get targets in the order they should be resolved.
@@ -601,19 +607,37 @@ class Resolver:
         if target._resolved:
             return
 
+        trace("resolve", "Resolving target: %s", target.name)
+
         # Get environment for this target
         env = target._env
         if env is None:
             # No environment set - this target can't be resolved
             # (might be an imported target or interface-only)
             if target.target_type == "interface":
+                trace("resolve", "  Skipping interface target (no env)")
                 target._resolved = True
                 return
             # For other types without env, skip silently
+            trace("resolve", "  Skipping target without env")
             return
+
+        if is_enabled("resolve"):
+            trace_value("resolve", "defined_at", target.defined_at)
+            trace_value("resolve", "type", target.target_type)
+            trace_value("resolve", "sources", [str(s.name) for s in target.sources])
+            trace_value(
+                "resolve", "dependencies", [d.name for d in target.dependencies]
+            )
 
         # Compute effective requirements for compilation
         effective = compute_effective_requirements(target, env, for_compilation=True)
+
+        if is_enabled("resolve"):
+            trace("resolve", "  Effective requirements:")
+            trace_value("resolve", "includes", [str(p) for p in effective.includes])
+            trace_value("resolve", "defines", effective.defines)
+            trace_value("resolve", "compile_flags", effective.compile_flags)
 
         # Get additional compile flags for this target type from the toolchain
         # (e.g., -fPIC for shared libraries on Linux)
@@ -637,6 +661,7 @@ class Resolver:
         auxiliary_inputs: list[tuple[FileNode, str]] = []  # (file_node, flag)
 
         # Create object nodes for each source (delegated to factory)
+        trace("resolve", "  Creating object nodes for %d sources", len(target.sources))
         for source in target.sources:
             if isinstance(source, FileNode):
                 # Check if this is an auxiliary input file
@@ -647,6 +672,7 @@ class Resolver:
                     # This is an auxiliary input - generate the flag
                     flag = aux_handler.flag_template.replace("$file", str(source.path))
                     auxiliary_inputs.append((source, flag))
+                    trace("resolve", "    %s -> auxiliary input", source.path)
                     continue
 
                 # Normal source file - create object node
@@ -655,11 +681,13 @@ class Resolver:
                 )
                 if obj_node:
                     target.object_nodes.append(obj_node)
+                    trace("resolve", "    %s -> %s", source.path, obj_node.path)
 
         # Store auxiliary inputs on the target for use by output factories
         target._auxiliary_inputs = auxiliary_inputs
 
         # Create output node(s) based on target type (delegated to factory)
+        trace("resolve", "  Creating output for type: %s", target.target_type)
         if target.target_type == "static_library":
             self._output_factory.create_static_library_output(target, env)
         elif target.target_type == "shared_library":
@@ -673,6 +701,9 @@ class Resolver:
             # Object-only targets: output_nodes are the object files
             target.output_nodes = list(target.object_nodes)
             target.nodes = list(target.object_nodes)
+
+        if target.output_nodes:
+            trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
 
         target._resolved = True
 
@@ -827,6 +858,10 @@ class Resolver:
         if tool_name is None or command_var is None:
             return
 
+        trace("subst", "Expanding command for node: %s", node.path)
+        trace_value("subst", "tool", tool_name)
+        trace_value("subst", "command_var", command_var)
+
         # Get env from build_info
         env = build_info.get("env")
         if env is None or not isinstance(env, Environment):
@@ -870,6 +905,10 @@ class Resolver:
 
         if context is not None and hasattr(context, "get_env_overrides"):
             context_overrides = context.get_env_overrides()
+            if is_enabled("subst") and context_overrides:
+                trace("subst", "  Context overrides:")
+                for k, v in context_overrides.items():
+                    trace_value("subst", k, v)
             for key, val in context_overrides.items():
                 if key == "extra_flags":
                     # extra_flags are compile flags - only apply to compile commands
@@ -929,3 +968,8 @@ class Resolver:
         # fully expanded into the token list via get_env_overrides()
         # Generator will join tokens with shell-appropriate quoting
         build_info["command"] = command_tokens
+        trace(
+            "subst",
+            "  Expanded command: %s",
+            command_tokens[:10] if len(command_tokens) > 10 else command_tokens,
+        )

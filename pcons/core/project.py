@@ -494,6 +494,20 @@ class Project:
         """
         return env.Command(target=target, source=source, command=command, name=name)
 
+    def __str__(self) -> str:
+        """User-friendly string representation for debugging."""
+        lines = [f"Project: {self.name}"]
+        lines.append(f"  Root: {self.root_dir}")
+        lines.append(f"  Build: {self.build_dir}")
+        lines.append(f"  Targets: {len(self._targets)}")
+        for target in list(self._targets.values())[:5]:
+            target_type = target.target_type.name if target.target_type else "unknown"
+            lines.append(f"    - {target.name} ({target_type})")
+        if len(self._targets) > 5:
+            lines.append(f"    ... and {len(self._targets) - 5} more")
+        lines.append(f"  Environments: {len(self._environments)}")
+        return "\n".join(lines)
+
     def __repr__(self) -> str:
         return (
             f"Project({self.name!r}, "
@@ -550,8 +564,17 @@ class Project:
         """
         create_target = registration.create_target
 
-        # Wrap to inject project as first argument
+        # Check if create_target accepts defined_at parameter
+        import inspect
+
+        sig = inspect.signature(create_target)
+        accepts_defined_at = "defined_at" in sig.parameters
+
+        # Wrap to inject project as first argument and capture caller location
         def builder_method(*args: Any, **kwargs: Any) -> Target:
+            # Capture source location if builder accepts it
+            if accepts_defined_at and "defined_at" not in kwargs:
+                kwargs["defined_at"] = get_caller_location()
             return create_target(self, *args, **kwargs)
 
         # Copy the docstring if available

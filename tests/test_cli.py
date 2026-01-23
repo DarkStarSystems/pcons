@@ -47,15 +47,15 @@ class TestSetupLogging:
     def test_setup_logging_normal(self) -> None:
         """Test normal logging setup."""
         # Just ensure it doesn't crash
-        setup_logging(verbose=False, debug=False)
+        setup_logging(verbose=False, debug=None)
 
     def test_setup_logging_verbose(self) -> None:
         """Test verbose logging setup."""
-        setup_logging(verbose=True, debug=False)
+        setup_logging(verbose=True, debug=None)
 
     def test_setup_logging_debug(self) -> None:
-        """Test debug logging setup."""
-        setup_logging(verbose=False, debug=True)
+        """Test debug logging setup with subsystem specification."""
+        setup_logging(verbose=False, debug="resolve,subst")
 
 
 class TestGetVar:
@@ -246,7 +246,9 @@ class TestFindCommandInArgv:
     def test_find_command_after_options(self) -> None:
         """Test finding command after flag options."""
         assert find_command_in_argv(["-v", "build"]) == "build"
-        assert find_command_in_argv(["--verbose", "--debug", "generate"]) == "generate"
+        assert find_command_in_argv(["--verbose", "generate"]) == "generate"
+        # --debug now takes a value, so use = syntax
+        assert find_command_in_argv(["--debug=resolve", "generate"]) == "generate"
 
     def test_find_command_after_option_with_value(self) -> None:
         """Test finding command after options that take values."""

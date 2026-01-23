@@ -9,6 +9,7 @@ Designed for simplicity, maintainability and extensibility.
 3. pcons core should know nothing about any commands or toolchains; all of those should be registered at startup; consider them as add-ons that happen to be built in.
 4. Always think about creating the simplest overall architecture, not just solving the problem of the moment. If you see a problem, that's an opportunity to think about simplifying the big picture. Look for "code smells" and aggressively eliminate them.
 5. Always try to find the cleanest solution. As of now, we have almost no real users, so back compatibility is not important. Developing a clean, usable system is top priority.
+6. This is 100% cross-platform software. Must work equally well on Linux, Windows and Mac. When fixing one OS, consider all.
 
 ## Critical Rules
 

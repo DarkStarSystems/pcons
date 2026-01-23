@@ -218,6 +218,16 @@ class FileNode(Node):
         """The file extension (e.g., '.cpp', '.o')."""
         return self.path.suffix
 
+    def __str__(self) -> str:
+        """User-friendly string representation for debugging."""
+        parts = [f"FileNode: {self.path}"]
+        if self.defined_at:
+            parts.append(f" (defined at {self.defined_at})")
+        if self._build_info:
+            tool = self._build_info.get("tool", "?")
+            parts.append(f" [built by {tool}]")
+        return "".join(parts)
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, FileNode):
             return NotImplemented
@@ -286,6 +296,15 @@ class DirNode(Node):
             node: A file node that belongs to this directory.
         """
         self.members.append(node)
+
+    def __str__(self) -> str:
+        """User-friendly string representation for debugging."""
+        parts = [f"DirNode: {self.path}"]
+        if self.defined_at:
+            parts.append(f" (defined at {self.defined_at})")
+        if self.members:
+            parts.append(f" [{len(self.members)} members]")
+        return "".join(parts)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, DirNode):

@@ -35,6 +35,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, cast
 
+from pcons.core.debug import is_enabled, trace
 from pcons.core.errors import (
     CircularReferenceError,
     MissingVariableError,
@@ -494,11 +495,22 @@ def _lookup_var(
 ) -> Any:
     """Look up variable, checking for cycles."""
     if var_name in expanding:
+        trace(
+            "subst", "  CYCLE DETECTED: %s", " -> ".join(expanding) + " -> " + var_name
+        )
         raise CircularReferenceError(list(expanding) + [var_name], location)
 
     value = namespace.get(var_name, _MISSING)
     if value is _MISSING:
+        trace("subst", "  Variable not found: %s", var_name)
         raise MissingVariableError(var_name, location)
+
+    if is_enabled("subst"):
+        # Truncate long values for readability
+        val_str = str(value)
+        if len(val_str) > 80:
+            val_str = val_str[:77] + "..."
+        trace("subst", "  Lookup %s = %s", var_name, val_str)
 
     return value
 
@@ -517,6 +529,7 @@ def _call_function(
     generators to apply appropriate path relativization.
     """
     args = [a.strip() for a in _ARG_SPLIT.split(args_str) if a.strip()]
+    trace("subst", "  Function call: %s(%s)", func_name, args_str)
 
     if func_name == "prefix":
         if len(args) != 2:

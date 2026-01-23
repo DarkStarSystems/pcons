@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
+from pcons.core.debug import trace, trace_value
 from pcons.core.node import FileNode, Node
 from pcons.core.paths import PathResolver
 from pcons.generators.generator import BaseGenerator
@@ -60,6 +61,9 @@ class NinjaGenerator(BaseGenerator):
             project: Configured project to generate for.
             output_dir: Directory to write build.ninja to.
         """
+        trace("generate", "Generating ninja files to: %s", output_dir)
+        trace_value("generate", "targets", len(project.targets))
+
         output_dir.mkdir(parents=True, exist_ok=True)
         ninja_file = output_dir / "build.ninja"
 

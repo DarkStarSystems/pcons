@@ -512,6 +512,29 @@ class Target:
         _collect(self)
         return result
 
+    def __str__(self) -> str:
+        """User-friendly string representation for debugging."""
+        lines = [f"Target: {self.name}"]
+        if self.target_type:
+            lines.append(f"  Type: {self.target_type.name}")
+        if self.defined_at:
+            lines.append(f"  Defined at: {self.defined_at}")
+        if self._sources:
+            lines.append(f"  Sources: {len(self._sources)} files")
+            for src in self._sources[:5]:  # Show first 5
+                lines.append(f"    - {src.name}")
+            if len(self._sources) > 5:
+                lines.append(f"    ... and {len(self._sources) - 5} more")
+        if self.output_nodes:
+            lines.append(f"  Outputs: {[str(n.path) for n in self.output_nodes]}")
+        if self.dependencies:
+            lines.append(f"  Dependencies: {[d.name for d in self.dependencies]}")
+        if self.public.include_dirs:
+            lines.append(f"  Public includes: {self.public.include_dirs}")
+        if self.public.defines:
+            lines.append(f"  Public defines: {self.public.defines}")
+        return "\n".join(lines)
+
     def __repr__(self) -> str:
         deps = ", ".join(d.name for d in self.dependencies)
         return f"Target({self.name!r}, deps=[{deps}])"
