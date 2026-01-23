@@ -22,5 +22,8 @@ commands = [
 
 [skip]
 # Works on all platforms with a C compiler
-# Uses ninja-specific commands, so skip xcode
+# Xcode generator now supports Install/Archive targets (creates PBXAggregateTarget
+# with shell script phases), but verify commands use 'ninja -C build install'
+# which doesn't have an xcode equivalent in the test harness.
+# Manual testing: xcodebuild -project build/*.xcodeproj -target install_Installers
 generators = ["xcode"]

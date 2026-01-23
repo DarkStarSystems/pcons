@@ -22,7 +22,10 @@ commands = [
 [skip]
 # Works on all platforms
 rebuild_on_windows = true
-# InstallDir doesn't work with Xcode
+# Xcode generator now supports InstallDir targets (creates PBXAggregateTarget
+# with cp -R script phase), but the expected_outputs reference ninja stamp files.
+# The rebuild tests are also ninja-specific.
+# Manual testing: xcodebuild -project build/*.xcodeproj -configuration Release
 generators = ["xcode"]
 
 [[rebuild]]

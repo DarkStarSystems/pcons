@@ -39,7 +39,8 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | compile_commands.json | Implemented | For IDE integration |
 | Mermaid diagram generator | Implemented | For visualization |
 | Makefile generator | Implemented | For environments without Ninja |
-| IDE generators (VSCode, Xcode) | Planned | Not yet implemented |
+| Xcode generator | Implemented | macOS, limited custom command support |
+| VSCode generator | Planned | Not yet implemented |
 | **Package Management** | | |
 | PackageDescription | Implemented | TOML format |
 | ImportedTarget | Implemented | Wraps external deps |
@@ -977,13 +978,47 @@ class Generator(Protocol):
 - `CompileCommandsGenerator`: For IDE/tooling integration - **Implemented**
 - `MermaidGenerator`: For dependency graph visualization - **Implemented**
 - `MakefileGenerator`: For environments without Ninja - **Implemented**
-- `VSCodeGenerator`, `XcodeGenerator`: IDE project files - **Planned**
+- `XcodeGenerator`: Xcode project files - **Implemented** (with limitations, see below)
+- `VSCodeGenerator`: VSCode project files - **Planned**
 
 **Generator responsibilities:**
 - Translate Nodes and Builders into build rules
 - Handle platform-specific details (path separators, response files on Windows)
 - Emit depfile rules for incremental builds
 - Properly handle directory semantics (order-only vs real deps)
+
+#### Xcode Generator Limitations
+
+The Xcode generator creates `.xcodeproj` bundles that can be opened in Xcode or built
+with `xcodebuild`. However, Xcode has a fundamentally different build model than
+Ninja/Make, which imposes some limitations:
+
+**Supported:**
+- Program, StaticLibrary, SharedLibrary targets (native `PBXNativeTarget`)
+- Install, InstallAs, InstallDir targets (via `PBXAggregateTarget` with shell scripts)
+- Tarfile, Zipfile targets (via `PBXAggregateTarget` with shell scripts)
+- Target dependencies (including implicit dependencies from Install/Archive sources)
+- Compile flags, defines, include paths, link flags
+- Debug/Release configurations
+
+**Not Supported:**
+- **Source generators / custom commands with dependency tracking**: Xcode's
+  `PBXShellScriptBuildPhase` doesn't support ninja-style depfiles, so commands that
+  generate source files won't trigger rebuilds when their dependencies change.
+- **Fine-grained incremental builds for script phases**: Xcode's script phases use
+  input/output file lists, not depfiles, so incremental rebuild detection is limited.
+- **Aliases**: Xcode doesn't have a direct equivalent to ninja aliases. Use explicit
+  target names or create aggregate targets manually.
+- **ObjectLibrary**: Not directly representable in Xcode's target model.
+
+**Path handling differences:**
+- Xcode puts built products in `Release/` or `Debug/` subdirectories
+- The generator handles path translation for shell scripts automatically
+- Source files use paths relative to the project root (via `$topdir` variable)
+
+**Testing note:** The Xcode generator works for building, but automated tests in
+`test_examples.py` use ninja-specific commands (e.g., `ninja -C build install`) that
+don't have direct xcode equivalents in the test harness.
 
 ### Project
 > **Status: Implemented**

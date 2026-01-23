@@ -3,6 +3,25 @@
 
 Generates .xcodeproj bundles from a configured pcons Project.
 The generated project is fully buildable with xcodebuild.
+
+Supported:
+    - Program, StaticLibrary, SharedLibrary (PBXNativeTarget)
+    - Install, InstallAs, InstallDir (PBXAggregateTarget with shell scripts)
+    - Tarfile, Zipfile (PBXAggregateTarget with shell scripts)
+    - Target dependencies, compile flags, defines, include paths
+    - Debug/Release configurations
+
+Limitations:
+    - Source generators / custom commands with dependency tracking are not
+      supported. Xcode's PBXShellScriptBuildPhase doesn't support depfiles,
+      so commands that generate source files won't trigger proper rebuilds.
+    - ObjectLibrary is not directly representable in Xcode's target model.
+    - Aliases don't have a direct Xcode equivalent.
+
+Path handling:
+    - Xcode puts built products in Release/ or Debug/ subdirectories
+    - Shell scripts run from the build directory (where .xcodeproj lives)
+    - Source files use "../" paths to reach the project root
 """
 
 from __future__ import annotations
@@ -27,6 +46,9 @@ PRODUCT_TYPE_MAP = {
     "static_library": "com.apple.product-type.library.static",
     "shared_library": "com.apple.product-type.library.dynamic",
 }
+
+# Target types that should be created as PBXAggregateTarget
+AGGREGATE_TARGET_TYPES = {"interface", "archive"}
 
 # Map product types to explicit file types
 EXPLICIT_FILE_TYPE_MAP = {
@@ -63,6 +85,7 @@ class XcodeGenerator(BaseGenerator):
         self._xcode_project: XcodeProject | None = None
         self._output_dir: Path | None = None
         self._project_root: Path | None = None
+        self._pcons_project: Project | None = None  # Reference to pcons project
         self._target_ids: dict[str, str] = {}  # pcons target name -> Xcode target id
         self._objects: dict[str, dict[str, Any]] = {}
         self._main_group_id: str = ""
@@ -81,6 +104,7 @@ class XcodeGenerator(BaseGenerator):
 
         self._output_dir = output_dir.resolve()
         self._project_root = project.root_dir.resolve()
+        self._pcons_project = project
         self._target_ids = {}
         self._objects = {}
 
@@ -256,8 +280,14 @@ class XcodeGenerator(BaseGenerator):
         Returns:
             The target ID, or None if target should be skipped.
         """
-        # Skip interface and object targets
-        if target.target_type in ("interface", "object", None):
+        target_type_str = str(target.target_type) if target.target_type else None
+
+        # Handle aggregate targets (interface, archive) - Install, InstallDir, Tarfile, etc.
+        if target_type_str in AGGREGATE_TARGET_TYPES:
+            return self._create_aggregate_target(target, objects)
+
+        # Skip object-only targets
+        if target.target_type in ("object", None):
             return None
 
         product_type = PRODUCT_TYPE_MAP.get(str(target.target_type))
@@ -356,6 +386,356 @@ class XcodeGenerator(BaseGenerator):
         }
 
         return target_id
+
+    def _create_aggregate_target(
+        self, target: Target, objects: dict[str, dict[str, Any]]
+    ) -> str | None:
+        """Create PBXAggregateTarget for interface/archive targets.
+
+        Aggregate targets are used for Install, InstallDir, Tarfile, Zipfile
+        builders. They run shell script phases instead of compilation.
+
+        Args:
+            target: The pcons target.
+            objects: The objects dictionary to add to.
+
+        Returns:
+            The target ID, or None if target has no output nodes.
+        """
+        # Skip targets without output nodes (unresolved)
+        if not target.output_nodes:
+            return None
+
+        # Generate IDs
+        target_id = _generate_id()
+        target_config_list_id = _generate_id()
+        target_debug_config_id = _generate_id()
+        target_release_config_id = _generate_id()
+
+        # Target-level build configurations
+        objects[target_debug_config_id] = {
+            "isa": "XCBuildConfiguration",
+            "buildSettings": {},
+            "name": "Debug",
+        }
+
+        objects[target_release_config_id] = {
+            "isa": "XCBuildConfiguration",
+            "buildSettings": {},
+            "name": "Release",
+        }
+
+        objects[target_config_list_id] = {
+            "isa": "XCConfigurationList",
+            "buildConfigurations": [target_debug_config_id, target_release_config_id],
+            "defaultConfigurationIsVisible": "0",
+            "defaultConfigurationName": "Release",
+        }
+
+        # Create run script build phase(s) based on builder type
+        build_phases = self._create_script_phases_for_target(target, objects)
+
+        # PBXAggregateTarget
+        objects[target_id] = {
+            "isa": "PBXAggregateTarget",
+            "buildConfigurationList": target_config_list_id,
+            "buildPhases": build_phases,
+            "dependencies": [],
+            "name": target.name,
+            "productName": target.name,
+        }
+
+        return target_id
+
+    def _create_script_phases_for_target(
+        self, target: Target, objects: dict[str, dict[str, Any]]
+    ) -> list[str]:
+        """Create run script build phases for an aggregate target.
+
+        Args:
+            target: The pcons target.
+            objects: The objects dictionary to add to.
+
+        Returns:
+            List of phase IDs.
+        """
+        phases: list[str] = []
+        builder_name = getattr(target, "_builder_name", None)
+
+        if builder_name in ("Install", "InstallAs"):
+            phases.extend(self._create_install_script_phases(target, objects))
+        elif builder_name == "InstallDir":
+            phases.extend(self._create_install_dir_script_phases(target, objects))
+        elif builder_name in ("Tarfile", "Zipfile"):
+            phases.extend(self._create_archive_script_phases(target, objects))
+
+        return phases
+
+    def _create_install_script_phases(
+        self, target: Target, objects: dict[str, dict[str, Any]]
+    ) -> list[str]:
+        """Create copy script phases for Install/InstallAs targets.
+
+        Uses native `cp` command for simple file copying.
+
+        Args:
+            target: The install target.
+            objects: The objects dictionary to add to.
+
+        Returns:
+            List of phase IDs.
+        """
+        phases: list[str] = []
+
+        # Get the install nodes from the target
+        install_nodes = getattr(target, "_install_nodes", [])
+        if not install_nodes:
+            install_nodes = target.output_nodes
+
+        for node in install_nodes:
+            if not hasattr(node, "_build_info"):
+                continue
+
+            build_info = node._build_info
+            sources = build_info.get("sources", [])
+            if not sources:
+                continue
+
+            # Get source and destination paths
+            # Both source (may be a built archive) and dest are in build dir
+            source_node = sources[0]
+            source_path = self._get_xcode_source_path(source_node.path)
+            dest_path = self._make_build_output_path(node.path)
+
+            # Create the script - ensure parent directory exists
+            script = (
+                f'mkdir -p "$(dirname "{dest_path}")"\ncp "{source_path}" "{dest_path}"'
+            )
+
+            phase_id = self._add_run_script_phase(
+                objects,
+                script=script,
+                name=f"Install {node.path.name}",
+                input_paths=[str(source_path)],
+                output_paths=[str(dest_path)],
+            )
+            phases.append(phase_id)
+
+        return phases
+
+    def _create_install_dir_script_phases(
+        self, target: Target, objects: dict[str, dict[str, Any]]
+    ) -> list[str]:
+        """Create cp -R script phases for InstallDir targets.
+
+        Uses native `cp -R` command for recursive directory copying.
+
+        Args:
+            target: The install dir target.
+            objects: The objects dictionary to add to.
+
+        Returns:
+            List of phase IDs.
+        """
+        phases: list[str] = []
+        builder_data = getattr(target, "_builder_data", None) or {}
+        dest_dir = Path(builder_data.get("dest_dir", ""))
+
+        # Get the source from pending_sources or resolved sources
+        sources = getattr(target, "_pending_sources", None) or []
+        if not sources and target.output_nodes:
+            # Get source from first output node's build_info
+            node = target.output_nodes[0]
+            if hasattr(node, "_build_info"):
+                sources = node._build_info.get("sources", [])
+
+        # Convert dest_dir to build output path (relative to build dir)
+        dest_dir_str = self._make_build_output_path(dest_dir)
+
+        for source in sources:
+            if hasattr(source, "path"):
+                source_path = str(self._make_relative_path(source.path))
+                source_name = source.path.name
+            elif isinstance(source, (str, Path)):
+                source_path = str(self._make_relative_path(Path(source)))
+                source_name = Path(source).name
+            else:
+                continue
+
+            # Destination is dest_dir / source directory name
+            dest_path = f"{dest_dir_str}/{source_name}"
+
+            # Create the script
+            script = f'mkdir -p "{dest_dir_str}"\ncp -R "{source_path}" "{dest_path}"'
+
+            phase_id = self._add_run_script_phase(
+                objects,
+                script=script,
+                name=f"Install directory {source_name}",
+                input_paths=[source_path],
+                output_paths=[dest_path],
+            )
+            phases.append(phase_id)
+
+        return phases
+
+    def _get_xcode_source_path(self, source_path: Path) -> str:
+        """Get the correct path for a source in Xcode shell scripts.
+
+        For regular source files: returns path relative to xcodeproj location.
+        For native Xcode products (programs, libraries): returns Release/<name>
+        since Xcode puts built products in the Release directory.
+        For aggregate target outputs (archives, installed files): returns path
+        relative to build dir (where xcodebuild runs scripts).
+
+        Args:
+            source_path: The source file path.
+
+        Returns:
+            Path string suitable for use in Xcode shell scripts.
+        """
+        if self._pcons_project is None:
+            return str(self._make_relative_path(source_path))
+
+        # Native Xcode target types that put outputs in Release/Debug directories
+        native_target_types = {"program", "static_library", "shared_library"}
+        # Aggregate target types whose outputs stay directly in build dir
+        aggregate_target_types = {"interface", "archive"}
+
+        # Check if this path is an output from another target
+        for other_target in self._pcons_project.targets:
+            target_type = (
+                str(other_target.target_type) if other_target.target_type else None
+            )
+
+            for output in other_target.output_nodes:
+                if hasattr(output, "path"):
+                    # Compare paths (handle relative vs absolute)
+                    is_match = False
+                    try:
+                        is_match = output.path.resolve() == source_path.resolve()
+                    except (OSError, ValueError):
+                        is_match = output.path == source_path
+
+                    if is_match:
+                        if target_type in native_target_types:
+                            # Native built product - use Release/<filename>
+                            return f"Release/{source_path.name}"
+                        elif target_type in aggregate_target_types:
+                            # Aggregate target output - use build output path
+                            return self._make_build_output_path(source_path)
+
+        # Not a target output - use standard relative path for source files
+        return str(self._make_relative_path(source_path))
+
+    def _create_archive_script_phases(
+        self, target: Target, objects: dict[str, dict[str, Any]]
+    ) -> list[str]:
+        """Create tar/zip script phases for Archive targets.
+
+        Uses native `tar` and `zip` commands.
+
+        Args:
+            target: The archive target.
+            objects: The objects dictionary to add to.
+
+        Returns:
+            List of phase IDs.
+        """
+        phases: list[str] = []
+        builder_data = getattr(target, "_builder_data", None) or {}
+        builder_name = getattr(target, "_builder_name", None)
+        output_path = Path(builder_data.get("output", ""))
+        compression = builder_data.get("compression")
+        base_dir = builder_data.get("base_dir", ".")
+
+        # Collect source paths from output nodes
+        source_paths: list[str] = []
+        if target.output_nodes:
+            node = target.output_nodes[0]
+            if hasattr(node, "_build_info"):
+                for source in node._build_info.get("sources", []):
+                    if hasattr(source, "path"):
+                        # Use helper to get correct path for Xcode
+                        xcode_path = self._get_xcode_source_path(source.path)
+                        source_paths.append(xcode_path)
+
+        if not source_paths:
+            return phases
+
+        # Make output path relative to build dir (where xcodebuild runs scripts)
+        output_rel = self._make_build_output_path(output_path)
+
+        # Build the archive command
+        if builder_name == "Tarfile":
+            # Determine tar flags based on compression
+            if compression == "gzip":
+                tar_flags = "-czf"
+            elif compression == "bz2":
+                tar_flags = "-cjf"
+            elif compression == "xz":
+                tar_flags = "-cJf"
+            else:
+                tar_flags = "-cf"
+
+            sources_str = " ".join(f'"{s}"' for s in source_paths)
+            if base_dir and base_dir != ".":
+                script = f'mkdir -p "$(dirname "{output_rel}")"\ncd "{base_dir}" && tar {tar_flags} "{output_rel}" {sources_str}'
+            else:
+                script = f'mkdir -p "$(dirname "{output_rel}")"\ntar {tar_flags} "{output_rel}" {sources_str}'
+        else:  # Zipfile
+            sources_str = " ".join(f'"{s}"' for s in source_paths)
+            if base_dir and base_dir != ".":
+                script = f'mkdir -p "$(dirname "{output_rel}")"\ncd "{base_dir}" && zip -r "{output_rel}" {sources_str}'
+            else:
+                script = f'mkdir -p "$(dirname "{output_rel}")"\nzip -r "{output_rel}" {sources_str}'
+
+        phase_id = self._add_run_script_phase(
+            objects,
+            script=script,
+            name=f"Create {output_path.name}",
+            input_paths=source_paths,
+            output_paths=[str(output_rel)],
+        )
+        phases.append(phase_id)
+
+        return phases
+
+    def _add_run_script_phase(
+        self,
+        objects: dict[str, dict[str, Any]],
+        script: str,
+        name: str = "Run Script",
+        input_paths: list[str] | None = None,
+        output_paths: list[str] | None = None,
+    ) -> str:
+        """Add a PBXShellScriptBuildPhase.
+
+        Args:
+            objects: The objects dictionary to add to.
+            script: The shell script to run.
+            name: Name of the build phase.
+            input_paths: Input file paths for incremental builds.
+            output_paths: Output file paths for incremental builds.
+
+        Returns:
+            The phase ID.
+        """
+        phase_id = _generate_id()
+
+        objects[phase_id] = {
+            "isa": "PBXShellScriptBuildPhase",
+            "buildActionMask": "2147483647",
+            "files": [],
+            "inputPaths": input_paths or [],
+            "outputPaths": output_paths or [],
+            "runOnlyForDeploymentPostprocessing": "0",
+            "shellPath": "/bin/sh",
+            "shellScript": script,
+            "name": name,
+        }
+
+        return phase_id
 
     def _add_sources_to_target(self, target: Target) -> None:
         """Add source files to an Xcode target using pbxproj's add_file.
@@ -506,6 +886,10 @@ class XcodeGenerator(BaseGenerator):
     def _setup_dependencies(self, target: Target) -> None:
         """Set up target dependencies in Xcode project.
 
+        For native targets, this sets up explicit dependencies.
+        For aggregate targets (Install, Archive), this also adds dependencies
+        on targets that produced the source files.
+
         Args:
             target: The pcons target.
         """
@@ -520,7 +904,16 @@ class XcodeGenerator(BaseGenerator):
         if xcode_target is None:
             return
 
-        for dep in target.dependencies:
+        # Collect dependencies from explicit target.dependencies
+        dep_targets = list(target.dependencies)
+
+        # For aggregate targets, also add implicit dependencies from source files
+        target_type_str = str(target.target_type) if target.target_type else None
+        if target_type_str in AGGREGATE_TARGET_TYPES:
+            # Find targets that produced our source files
+            dep_targets.extend(self._find_source_target_deps(target))
+
+        for dep in dep_targets:
             if dep.name not in self._target_ids:
                 continue
 
@@ -557,6 +950,111 @@ class XcodeGenerator(BaseGenerator):
             if "dependencies" not in xcode_target:
                 xcode_target["dependencies"] = []
             xcode_target["dependencies"].append(dep_id)
+
+    def _find_source_target_deps(self, target: Target) -> list[Target]:
+        """Find targets that produced the source files for an aggregate target.
+
+        For Install/Archive targets, source files may come from other targets
+        (e.g., installing a built executable). This method finds those source
+        targets so we can create proper Xcode target dependencies.
+
+        Args:
+            target: The aggregate target.
+
+        Returns:
+            List of targets that produced source files.
+        """
+        dep_targets: list[Target] = []
+        seen_names: set[str] = set()
+
+        # Get project for looking up other targets
+        # Use generator's project reference since target._project may be None
+        project = self._pcons_project
+        if project is None:
+            return dep_targets
+
+        # Build a map of output paths to targets for efficient lookup
+        # Resolve paths to handle relative vs absolute comparisons
+        output_to_target: dict[Path, Target] = {}
+        for other_target in project.targets:
+            if other_target.name == target.name:
+                continue
+            for output in other_target.output_nodes:
+                if hasattr(output, "path"):
+                    # Try to resolve path, fallback to original if resolution fails
+                    try:
+                        resolved = output.path.resolve()
+                    except (OSError, ValueError):
+                        resolved = output.path
+                    output_to_target[resolved] = other_target
+
+        # Check output nodes for source files
+        for node in target.output_nodes:
+            if not hasattr(node, "_build_info"):
+                continue
+
+            build_info = node._build_info
+            if build_info is None:
+                continue
+
+            sources = build_info.get("sources", [])
+            for source in sources:
+                if not hasattr(source, "path"):
+                    continue
+
+                # Resolve source path for comparison
+                try:
+                    source_resolved = source.path.resolve()
+                except (OSError, ValueError):
+                    source_resolved = source.path
+
+                # Look up the target that produced this source
+                if source_resolved in output_to_target:
+                    dep = output_to_target[source_resolved]
+                    if dep.name not in seen_names:
+                        dep_targets.append(dep)
+                        seen_names.add(dep.name)
+
+        return dep_targets
+
+    def _make_build_output_path(self, path: Path) -> str:
+        """Make a path for a build output file in Xcode shell scripts.
+
+        Build outputs are files in the build directory. Xcode runs shell scripts
+        from the build directory, so these paths should be relative to build_dir.
+
+        If the path doesn't include the build_dir prefix (e.g., just "file.tar.gz"),
+        it's already relative to build_dir and can be used as-is.
+
+        Args:
+            path: The output file path (may or may not include build_dir prefix).
+
+        Returns:
+            Path string suitable for use in Xcode shell scripts.
+        """
+        if self._output_dir is None:
+            return str(path)
+
+        # If path is absolute under build_dir, make it relative to build_dir
+        if path.is_absolute():
+            try:
+                return str(path.relative_to(self._output_dir))
+            except ValueError:
+                pass
+
+        # If path already doesn't include build_dir prefix, use as-is
+        # This is the common case for pcons target paths
+        path_str = str(path)
+
+        # Check if it starts with the build_dir name (and remove it if so)
+        if self._pcons_project is not None:
+            build_dir_name = str(self._pcons_project.build_dir)
+            if path_str.startswith(build_dir_name + "/"):
+                return path_str[len(build_dir_name) + 1 :]
+            if path_str.startswith(build_dir_name + "\\"):
+                return path_str[len(build_dir_name) + 1 :]
+
+        return path_str
 
     def _make_relative_path(self, path: Path) -> Path:
         """Make a path relative to the xcodeproj location.
