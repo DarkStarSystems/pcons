@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Debug/trace system for build script debugging**: New `--debug=<subsystems>` CLI flag or `PCONS_DEBUG` environment variable enables selective tracing. Available subsystems: `configure`, `resolve`, `generate`, `subst`, `env`, `deps`, `all`.
+  - New `pcons/core/debug.py` module with `trace()`, `trace_value()`, `is_enabled()` functions
+  - Enhanced `__str__` methods on Target, Environment, FileNode, Project for readable debug output
+  - Source location tracking (`defined_at`) shown in debug output
+  - Usage: `pcons --debug=resolve,subst` or `PCONS_DEBUG=all pcons`
+
 - **Xcode project generator**: New `-G xcode` option generates native `.xcodeproj` bundles that can be built with `xcodebuild` or opened in Xcode IDE.
   - Supports Program, StaticLibrary, and SharedLibrary targets
   - Maps pcons include dirs, defines, and compile flags to Xcode build settings
