@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Xcode project generator**: New `-G xcode` option generates native `.xcodeproj` bundles that can be built with `xcodebuild` or opened in Xcode IDE.
+  - Supports Program, StaticLibrary, and SharedLibrary targets
+  - Maps pcons include dirs, defines, and compile flags to Xcode build settings
+  - Handles target dependencies between libraries and executables
+  - Generates both Debug and Release configurations
+  - Uses `pbxproj` library for robust project file generation
+
+- **Multi-generator build support in CLI**: The `pcons build` command now auto-detects which generator was used and runs the appropriate build tool:
+  - `build.ninja` → runs `ninja`
+  - `Makefile` → runs `make`
+  - `*.xcodeproj` → runs `xcodebuild`
+
+- **Variant support for xcodebuild**: The `--variant` flag is passed to xcodebuild as `-configuration`, mapping variant names to Xcode configurations (e.g., `--variant debug` → `-configuration Debug`).
+
 ## [0.4.0] - 2026-01-22
 
 ### Changed
