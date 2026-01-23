@@ -5,23 +5,23 @@
 # This prevents committing code that fails CI lint checks
 
 echo "Running ruff check..."
-uv run ruff check pcons/ tests/
+uv run ruff check pcons/ tests/ examples/
 if [ $? -ne 0 ]; then
     echo ""
-    echo "Lint check failed. Run 'uv run ruff check --fix pcons/ tests/' to fix."
+    echo "Lint check failed. Run 'uv run ruff check --fix pcons/ tests/ examples/' to fix."
     exit 1
 fi
 
 echo "Running ruff format check..."
-uv run ruff format --check pcons/ tests/
+uv run ruff format --check pcons/ tests/ examples/
 if [ $? -ne 0 ]; then
     echo ""
-    echo "Format check failed. Run 'uv run ruff format pcons/ tests/' to fix."
+    echo "Format check failed. Run 'uv run ruff format pcons/ tests/ examples/' to fix."
     exit 1
 fi
 
 echo "Running ty typecheck..."
-uvx ty check pcons/
+uvx ty check pcons/ examples/
 if [ $? -ne 0 ]; then
     echo ""
     echo "Type check failed. Fix the type errors above before committing."

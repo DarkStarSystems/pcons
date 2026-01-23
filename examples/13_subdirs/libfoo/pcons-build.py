@@ -39,6 +39,8 @@ def build_libfoo(
     if standalone:
         project = Project("libfoo", build_dir=build_dir)
 
+    assert project is not None  # For type checker - always true after above
+
     toolchain = find_c_toolchain()
     env = project.Environment(toolchain=toolchain)
 

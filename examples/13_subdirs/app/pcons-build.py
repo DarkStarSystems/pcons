@@ -37,6 +37,8 @@ def build_app(project: Project | None = None, build_dir: Path | None = None):
     if standalone:
         project = Project("app", build_dir=build_dir)
 
+    assert project is not None  # For type checker - always true after above
+
     # Build libfoo first to get its library target
     libfoo = build_libfoo(project, build_dir)
 
