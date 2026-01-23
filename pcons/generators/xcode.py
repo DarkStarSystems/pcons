@@ -153,6 +153,8 @@ class XcodeGenerator(BaseGenerator):
                 self._target_ids[target.name] = target_id
 
         # Project-level build configurations
+        # SYMROOT = "." ensures build products go directly in build dir,
+        # not in build/build/ (xcodebuild defaults SYMROOT to "build")
         objects[proj_debug_config_id] = {
             "isa": "XCBuildConfiguration",
             "buildSettings": {
@@ -163,6 +165,7 @@ class XcodeGenerator(BaseGenerator):
                 "GCC_OPTIMIZATION_LEVEL": "0",
                 "MACOSX_DEPLOYMENT_TARGET": "13.0",
                 "SDKROOT": "macosx",
+                "SYMROOT": ".",
             },
             "name": "Debug",
         }
@@ -176,6 +179,7 @@ class XcodeGenerator(BaseGenerator):
                 "GCC_OPTIMIZATION_LEVEL": "s",
                 "MACOSX_DEPLOYMENT_TARGET": "13.0",
                 "SDKROOT": "macosx",
+                "SYMROOT": ".",
             },
             "name": "Release",
         }

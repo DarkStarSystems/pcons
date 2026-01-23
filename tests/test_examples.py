@@ -289,7 +289,7 @@ def adapt_outputs_for_generator(
                 )
         elif generator == "xcode":
             # For xcode, handle different output paths
-            # xcodebuild puts outputs in build/build/Release/ when the xcodeproj
+            # xcodebuild puts outputs in build/Release/ when the xcodeproj
             # is in build/ and xcodebuild runs from the project root
             import re
 
@@ -298,7 +298,7 @@ def adapt_outputs_for_generator(
             if output.endswith(".o") or "/obj." in output or "\\obj." in output:
                 continue
 
-            # Map final products from build/<name> to build/build/Release/<name>
+            # Map final products from build/<name> to build/Release/<name>
             # Handle paths like build/hello, build/debug/variant_demo, etc.
             # Match: build/<something> where <something> has no extension
             match = re.match(r"^build/([^/]+)$", output)
@@ -306,7 +306,7 @@ def adapt_outputs_for_generator(
                 product_name = match.group(1)
                 # Skip if it has a file extension (like .a, .dylib)
                 if "." not in product_name:
-                    result.append(f"build/build/Release/{product_name}")
+                    result.append(f"build/Release/{product_name}")
                     continue
 
             # Handle build/<subdir>/<name> patterns (like build/debug/variant_demo)
@@ -315,14 +315,14 @@ def adapt_outputs_for_generator(
                 subdir, product_name = match.groups()
                 # Skip if subdir looks like an obj directory or has extension
                 if not subdir.startswith("obj") and "." not in product_name:
-                    result.append(f"build/build/Release/{product_name}")
+                    result.append(f"build/Release/{product_name}")
                     continue
 
             # For libraries, map to xcode output location
             if output.endswith(".a") or output.endswith(".dylib"):
                 # Extract just the filename and put in Release folder
                 filename = output.rsplit("/", 1)[-1]
-                result.append(f"build/build/Release/{filename}")
+                result.append(f"build/Release/{filename}")
                 continue
 
             # Keep other paths as-is
@@ -587,8 +587,8 @@ def run_example(
             run_cmd = "make " + run_cmd[6:]  # Replace "ninja " with "make "
 
         # Adapt executable paths for xcode generator
-        # Map ./build/<exe> to ./build/build/Release/<exe>
-        # xcodebuild puts outputs in build/build/Release/ when the xcodeproj
+        # Map ./build/<exe> to ./build/Release/<exe>
+        # xcodebuild puts outputs in build/Release/ when the xcodeproj
         # is in build/ and xcodebuild runs from the project root
         if generator == "xcode":
             import re
@@ -601,7 +601,7 @@ def run_example(
                 args = match.group(3) or ""
                 # Only adapt if no extension (likely an executable)
                 if "." not in exe_name:
-                    run_cmd = f"{prefix}build/build/Release/{exe_name}{args}"
+                    run_cmd = f"{prefix}build/Release/{exe_name}{args}"
 
             # Handle build/<subdir>/<name> patterns (like build/debug/variant_demo)
             match = re.match(r"^(\./)?build/([^/]+)/([^/\s]+)(\s.*)?$", run_cmd)
@@ -612,7 +612,7 @@ def run_example(
                 args = match.group(4) or ""
                 # Only adapt if it's not an obj directory and no extension
                 if not subdir.startswith("obj") and "." not in exe_name:
-                    run_cmd = f"{prefix}build/build/Release/{exe_name}{args}"
+                    run_cmd = f"{prefix}build/Release/{exe_name}{args}"
 
         # Resolve command path relative to work_dir
         cmd_path = work_dir / run_cmd.split()[0]  # Check first word as path
