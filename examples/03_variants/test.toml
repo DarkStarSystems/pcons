@@ -23,3 +23,5 @@ commands = [
 
 [skip]
 # Works on all platforms with a C compiler
+# Xcode uses its own Debug/Release configuration system, not compatible with pcons variants
+generators = ["xcode"]

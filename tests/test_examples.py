@@ -251,7 +251,10 @@ def adapt_outputs_for_generator(
     """Adapt expected outputs for the generator being used.
 
     When testing with make generator, build.ninja should become Makefile.
-    When testing with xcode generator, build.ninja becomes <project>.xcodeproj.
+    When testing with xcode generator:
+    - build.ninja becomes <project>.xcodeproj
+    - Object files in obj.*/ are skipped (xcode manages intermediates internally)
+    - Final products are mapped to build/Build/Products/Release/
 
     Args:
         outputs: List of expected output paths.
@@ -284,6 +287,46 @@ def adapt_outputs_for_generator(
                 result.append(
                     output.replace("build.ninja", f"{xcodeproj_name}/project.pbxproj")
                 )
+        elif generator == "xcode":
+            # For xcode, handle different output paths
+            # xcodebuild puts outputs in build/build/Release/ when the xcodeproj
+            # is in build/ and xcodebuild runs from the project root
+            import re
+
+            # Skip object files - xcode manages intermediates internally
+            # Match patterns like build/obj.*/file.o or build/*/file.o
+            if output.endswith(".o") or "/obj." in output or "\\obj." in output:
+                continue
+
+            # Map final products from build/<name> to build/build/Release/<name>
+            # Handle paths like build/hello, build/debug/variant_demo, etc.
+            # Match: build/<something> where <something> has no extension
+            match = re.match(r"^build/([^/]+)$", output)
+            if match:
+                product_name = match.group(1)
+                # Skip if it has a file extension (like .a, .dylib)
+                if "." not in product_name:
+                    result.append(f"build/build/Release/{product_name}")
+                    continue
+
+            # Handle build/<subdir>/<name> patterns (like build/debug/variant_demo)
+            match = re.match(r"^build/([^/]+)/([^/]+)$", output)
+            if match:
+                subdir, product_name = match.groups()
+                # Skip if subdir looks like an obj directory or has extension
+                if not subdir.startswith("obj") and "." not in product_name:
+                    result.append(f"build/build/Release/{product_name}")
+                    continue
+
+            # For libraries, map to xcode output location
+            if output.endswith(".a") or output.endswith(".dylib"):
+                # Extract just the filename and put in Release folder
+                filename = output.rsplit("/", 1)[-1]
+                result.append(f"build/build/Release/{filename}")
+                continue
+
+            # Keep other paths as-is
+            result.append(output)
         else:
             result.append(output)
     return result
@@ -542,6 +585,34 @@ def run_example(
         # Adapt ninja commands to make when using make generator
         if generator == "make" and run_cmd.startswith("ninja "):
             run_cmd = "make " + run_cmd[6:]  # Replace "ninja " with "make "
+
+        # Adapt executable paths for xcode generator
+        # Map ./build/<exe> to ./build/build/Release/<exe>
+        # xcodebuild puts outputs in build/build/Release/ when the xcodeproj
+        # is in build/ and xcodebuild runs from the project root
+        if generator == "xcode":
+            import re
+
+            # Match ./build/<name> or build/<name> where <name> has no extension
+            match = re.match(r"^(\./)?build/([^/\s]+)(\s.*)?$", run_cmd)
+            if match:
+                prefix = match.group(1) or ""
+                exe_name = match.group(2)
+                args = match.group(3) or ""
+                # Only adapt if no extension (likely an executable)
+                if "." not in exe_name:
+                    run_cmd = f"{prefix}build/build/Release/{exe_name}{args}"
+
+            # Handle build/<subdir>/<name> patterns (like build/debug/variant_demo)
+            match = re.match(r"^(\./)?build/([^/]+)/([^/\s]+)(\s.*)?$", run_cmd)
+            if match:
+                prefix = match.group(1) or ""
+                subdir = match.group(2)
+                exe_name = match.group(3)
+                args = match.group(4) or ""
+                # Only adapt if it's not an obj directory and no extension
+                if not subdir.startswith("obj") and "." not in exe_name:
+                    run_cmd = f"{prefix}build/build/Release/{exe_name}{args}"
 
         # Resolve command path relative to work_dir
         cmd_path = work_dir / run_cmd.split()[0]  # Check first word as path

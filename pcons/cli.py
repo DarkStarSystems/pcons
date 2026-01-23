@@ -259,6 +259,108 @@ def run_ninja(
         return 1
 
 
+def run_xcodebuild(
+    build_dir: Path,
+    targets: list[str] | None = None,
+    jobs: int | None = None,
+    verbose: bool = False,
+) -> int:
+    """Run xcodebuild in the build directory.
+
+    Args:
+        build_dir: Build directory containing the .xcodeproj.
+        targets: Specific targets to build (mapped to -target).
+        jobs: Number of parallel jobs.
+        verbose: Enable verbose output.
+
+    Returns:
+        Exit code from xcodebuild.
+    """
+    # Find the .xcodeproj
+    xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
+    if not xcodeproj_files:
+        logger.error("No .xcodeproj found in %s", build_dir)
+        return 1
+
+    xcodeproj = xcodeproj_files[0]
+
+    # Find xcodebuild
+    xcodebuild = shutil.which("xcodebuild")
+    if xcodebuild is None:
+        logger.error("xcodebuild not found in PATH")
+        logger.info("xcodebuild is only available on macOS with Xcode installed")
+        return 1
+
+    # Build xcodebuild command
+    cmd = [xcodebuild, "-project", str(xcodeproj), "-configuration", "Release"]
+
+    if jobs:
+        cmd.extend(["-jobs", str(jobs)])
+
+    if targets:
+        for target in targets:
+            cmd.extend(["-target", target])
+
+    if not verbose:
+        cmd.append("-quiet")
+
+    logger.info("Running: %s", " ".join(cmd))
+
+    try:
+        result = subprocess.run(cmd)
+        return result.returncode
+    except OSError as e:
+        logger.error("Failed to run xcodebuild: %s", e)
+        return 1
+
+
+def run_make(
+    build_dir: Path,
+    targets: list[str] | None = None,
+    jobs: int | None = None,
+    verbose: bool = False,  # noqa: ARG001 - kept for API consistency
+) -> int:
+    """Run make in the build directory.
+
+    Args:
+        build_dir: Build directory containing Makefile.
+        targets: Specific targets to build.
+        jobs: Number of parallel jobs.
+        verbose: Enable verbose output (not used for make).
+
+    Returns:
+        Exit code from make.
+    """
+    makefile = build_dir / "Makefile"
+    if not makefile.exists():
+        logger.error("No Makefile found in %s", build_dir)
+        return 1
+
+    # Find make
+    make = shutil.which("make")
+    if make is None:
+        logger.error("make not found in PATH")
+        return 1
+
+    # Build make command
+    cmd = [make, "-C", str(build_dir)]
+
+    if jobs:
+        cmd.extend(["-j", str(jobs)])
+
+    if targets:
+        cmd.extend(targets)
+
+    logger.info("Running: %s", " ".join(cmd))
+
+    try:
+        result = subprocess.run(cmd)
+        return result.returncode
+    except OSError as e:
+        logger.error("Failed to run make: %s", e)
+        return 1
+
+
 def cmd_default(args: argparse.Namespace) -> int:
     """Default command: generate and build.
 
@@ -364,9 +466,10 @@ def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
 
 
 def cmd_build(args: argparse.Namespace) -> int:
-    """Build targets using ninja.
+    """Build targets using the appropriate build tool.
 
-    This command runs ninja in the build directory.
+    This command detects which generator was used (ninja, make, xcode)
+    and runs the corresponding build tool.
     """
     setup_logging(args.verbose, args.debug)
 
@@ -380,12 +483,24 @@ def cmd_build(args: argparse.Namespace) -> int:
         _, remaining = parse_variables(extra)
         targets = remaining if remaining else None
 
-    return run_ninja(
-        build_dir,
-        targets=targets,
-        jobs=getattr(args, "jobs", None),
-        verbose=args.verbose,
-    )
+    jobs = getattr(args, "jobs", None)
+    verbose = args.verbose
+
+    # Detect which generator was used and run the appropriate build tool
+    ninja_file = build_dir / "build.ninja"
+    makefile = build_dir / "Makefile"
+    xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
+
+    if ninja_file.exists():
+        return run_ninja(build_dir, targets=targets, jobs=jobs, verbose=verbose)
+    elif makefile.exists():
+        return run_make(build_dir, targets=targets, jobs=jobs, verbose=verbose)
+    elif xcodeproj_files:
+        return run_xcodebuild(build_dir, targets=targets, jobs=jobs, verbose=verbose)
+    else:
+        logger.error("No build files found in %s", build_dir)
+        logger.info("Run 'pcons generate' first to create build files")
+        return 1
 
 
 def cmd_clean(args: argparse.Namespace) -> int:
@@ -632,8 +747,8 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         "-G",
         "--generator",
         metavar="NAME",
-        choices=["ninja", "make", "makefile"],
-        help="Generator to use (ninja, make). Default: ninja",
+        choices=["ninja", "make", "makefile", "xcode"],
+        help="Generator to use (ninja, make, xcode). Default: ninja",
     )
     parser.add_argument(
         "-C",

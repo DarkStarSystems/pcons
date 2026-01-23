@@ -483,8 +483,8 @@ print("hello")
         assert result.returncode != 0
         assert "No pcons-build.py found" in result.stderr
 
-    def test_pcons_build_no_ninja(self, tmp_path: Path) -> None:
-        """Test pcons build without build.ninja."""
+    def test_pcons_build_no_build_files(self, tmp_path: Path) -> None:
+        """Test pcons build without any build files (ninja, make, or xcode)."""
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "build"],
             capture_output=True,
@@ -492,7 +492,7 @@ print("hello")
             cwd=tmp_path,
         )
         assert result.returncode != 0
-        assert "No build.ninja found" in result.stderr
+        assert "No build files found" in result.stderr
 
     def test_pcons_clean_no_ninja(self, tmp_path: Path) -> None:
         """Test pcons clean without build.ninja (should succeed)."""

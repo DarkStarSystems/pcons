@@ -23,3 +23,5 @@ commands = [
 platforms = ["windows"]
 # Requires gcc and make to be installed
 requires = ["gcc", "make"]
+# This example specifically tests Makefile generation, not xcode
+generators = ["xcode"]
