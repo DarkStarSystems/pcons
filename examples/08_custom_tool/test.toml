@@ -19,3 +19,5 @@ commands = [
 
 [skip]
 # Works on all platforms now
+# Custom tools don't translate to Xcode build rules
+generators = ["xcode"]

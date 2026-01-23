@@ -36,7 +36,8 @@ EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 IS_WINDOWS = platform.system().lower() == "windows"
 
 # Generators to test
-GENERATORS = ["ninja", "make"]
+# xcode generator works on all platforms but xcodebuild only runs on macOS
+GENERATORS = ["ninja", "make", "xcode"]
 
 
 def adapt_path_for_windows(path: str) -> str:
@@ -244,14 +245,18 @@ def should_skip(config: dict[str, Any]) -> str | None:
     return None
 
 
-def adapt_outputs_for_generator(outputs: list[str], generator: str) -> list[str]:
+def adapt_outputs_for_generator(
+    outputs: list[str], generator: str, project_name: str = ""
+) -> list[str]:
     """Adapt expected outputs for the generator being used.
 
     When testing with make generator, build.ninja should become Makefile.
+    When testing with xcode generator, build.ninja becomes <project>.xcodeproj.
 
     Args:
         outputs: List of expected output paths.
-        generator: Generator being used ("ninja" or "make").
+        generator: Generator being used ("ninja", "make", or "xcode").
+        project_name: Project name for xcode generator output.
 
     Returns:
         List of adapted output paths.
@@ -262,14 +267,23 @@ def adapt_outputs_for_generator(outputs: list[str], generator: str) -> list[str]
     result = []
     for output in outputs:
         # Check for build.ninja with both forward and backslash paths (Windows compat)
-        if (
+        is_build_ninja = (
             output == "build/build.ninja"
             or output == "build\\build.ninja"
             or output.endswith("/build.ninja")
             or output.endswith("\\build.ninja")
-        ):
-            # Replace build.ninja with Makefile for make generator
-            result.append(output.replace("build.ninja", "Makefile"))
+        )
+        if is_build_ninja:
+            if generator == "make":
+                result.append(output.replace("build.ninja", "Makefile"))
+            elif generator == "xcode":
+                # For xcode, replace build.ninja with project.xcodeproj/project.pbxproj
+                xcodeproj_name = (
+                    f"{project_name}.xcodeproj" if project_name else "project.xcodeproj"
+                )
+                result.append(
+                    output.replace("build.ninja", f"{xcodeproj_name}/project.pbxproj")
+                )
         else:
             result.append(output)
     return result
@@ -463,13 +477,47 @@ def run_example(
             print(f"Make stderr:\n{result.stderr}")
             print(f"Makefile contents:\n{makefile.read_text()}")
             pytest.fail(f"make failed with code {result.returncode}")
+    elif generator == "xcode":
+        # Use xcodebuild (macOS only)
+        # Find the .xcodeproj in the build directory
+        xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
+        if not xcodeproj_files:
+            pytest.fail(f"No .xcodeproj generated in {build_dir}")
+
+        xcodeproj = xcodeproj_files[0]
+
+        if shutil.which("xcodebuild") is None:
+            pytest.skip("xcodebuild not available (macOS only)")
+
+        # Run xcodebuild
+        result = subprocess.run(
+            ["xcodebuild", "-project", str(xcodeproj), "-configuration", "Release"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=180,  # xcodebuild can be slow
+        )
+
+        if result.returncode != 0:
+            print(f"xcodebuild stdout:\n{result.stdout}")
+            print(f"xcodebuild stderr:\n{result.stderr}")
+            pytest.fail(f"xcodebuild failed with code {result.returncode}")
 
     # Check expected outputs exist (auto-adapts for Windows if no override)
     expected_outputs = get_platform_value(
         test_config, "expected_outputs", [], adapt_for_windows=True
     )
     # Adapt expected outputs for the generator being used
-    expected_outputs = adapt_outputs_for_generator(expected_outputs, generator)
+    # For xcode, get project name from any generated .xcodeproj
+    project_name = ""
+    if generator == "xcode":
+        xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
+        if xcodeproj_files:
+            # Extract name from "foo.xcodeproj" -> "foo"
+            project_name = xcodeproj_files[0].stem
+    expected_outputs = adapt_outputs_for_generator(
+        expected_outputs, generator, project_name
+    )
     for output in expected_outputs:
         output_path = work_dir / output
         if not output_path.exists():

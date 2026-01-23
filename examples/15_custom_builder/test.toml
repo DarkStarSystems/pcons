@@ -15,3 +15,7 @@ expected_outputs = [
 commands = [
     { run = "./build/demo", expect_stdout = "CustomBuilderDemo version 2.1.0" },
 ]
+
+[skip]
+# Custom builders (code generation) don't work with Xcode
+generators = ["xcode"]

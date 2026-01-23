@@ -17,3 +17,5 @@ commands = [
 
 [skip]
 # Works on all platforms with a C compiler
+# Xcode builds to different paths
+generators = ["xcode"]

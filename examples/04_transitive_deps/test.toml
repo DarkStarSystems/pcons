@@ -24,3 +24,5 @@ commands = [
 
 [skip]
 # Works on all platforms with a C compiler
+# Xcode builds to different output paths, so skip xcode testing
+generators = ["xcode"]

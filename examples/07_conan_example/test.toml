@@ -12,3 +12,5 @@ run = "./build/hello_fmt"
 [skip]
 # Skip on Windows - MSVC/Conan integration requires VS Developer environment
 platforms = ["windows"]
+# Conan external dependencies don't translate well to Xcode
+generators = ["xcode"]

@@ -22,3 +22,5 @@ commands = [
 
 [skip]
 # Works on all platforms with a C compiler
+# Uses ninja-specific commands, so skip xcode
+generators = ["xcode"]

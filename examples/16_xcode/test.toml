@@ -22,3 +22,5 @@ commands = [
 [skip]
 # Only run on macOS since Xcode is macOS-specific
 platforms = ["linux", "windows"]
+# This example is specifically for testing the xcode generator
+generators = ["ninja", "make"]
