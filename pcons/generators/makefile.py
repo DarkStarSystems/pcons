@@ -864,32 +864,36 @@ class MakefileGenerator(BaseGenerator):
         for token in tokens:
             # Handle typed marker objects (clean path)
             if isinstance(token, SourcePath):
+                prefix = token.prefix if token.prefix else ""
+                suffix = token.suffix if token.suffix else ""
                 # Indexed access or all sources
                 if token.index > 0 or any(
                     isinstance(t, SourcePath) and t.index > 0 for t in tokens
                 ):
                     # Indexed access: use specific source
                     if token.index < len(in_paths):
-                        result.append(in_paths[token.index])
+                        result.append(f"{prefix}{in_paths[token.index]}{suffix}")
                     elif in_paths:
-                        result.append(in_paths[0])
+                        result.append(f"{prefix}{in_paths[0]}{suffix}")
                 else:
                     # Non-indexed: expand to all input paths
-                    result.extend(in_paths)
+                    for p in in_paths:
+                        result.append(f"{prefix}{p}{suffix}")
             elif isinstance(token, TargetPath):
                 # Indexed access or single output
+                prefix = token.prefix if token.prefix else ""
                 suffix = token.suffix if token.suffix else ""
                 if token.index > 0 or any(
                     isinstance(t, TargetPath) and t.index > 0 for t in tokens
                 ):
                     # Indexed access: use specific target
                     if token.index < len(out_paths):
-                        result.append(out_paths[token.index] + suffix)
+                        result.append(f"{prefix}{out_paths[token.index]}{suffix}")
                     else:
-                        result.append(out_path + suffix)
+                        result.append(f"{prefix}{out_path}{suffix}")
                 else:
                     # Non-indexed: use primary output
-                    result.append(out_path + suffix)
+                    result.append(f"{prefix}{out_path}{suffix}")
             # Handle string patterns (legacy support)
             elif isinstance(token, str):
                 if token in ("$SOURCES", "$SOURCE", "$in"):
