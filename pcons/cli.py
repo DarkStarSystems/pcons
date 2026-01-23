@@ -264,6 +264,7 @@ def run_xcodebuild(
     targets: list[str] | None = None,
     jobs: int | None = None,
     verbose: bool = False,
+    configuration: str | None = None,
 ) -> int:
     """Run xcodebuild in the build directory.
 
@@ -272,6 +273,7 @@ def run_xcodebuild(
         targets: Specific targets to build (mapped to -target).
         jobs: Number of parallel jobs.
         verbose: Enable verbose output.
+        configuration: Build configuration (Debug, Release). Defaults to Release.
 
     Returns:
         Exit code from xcodebuild.
@@ -291,8 +293,15 @@ def run_xcodebuild(
         logger.info("xcodebuild is only available on macOS with Xcode installed")
         return 1
 
+    # Map variant to Xcode configuration (capitalize first letter)
+    # Default to Release if not specified
+    if configuration:
+        xcode_config = configuration.capitalize()
+    else:
+        xcode_config = "Release"
+
     # Build xcodebuild command
-    cmd = [xcodebuild, "-project", str(xcodeproj), "-configuration", "Release"]
+    cmd = [xcodebuild, "-project", str(xcodeproj), "-configuration", xcode_config]
 
     if jobs:
         cmd.extend(["-jobs", str(jobs)])
@@ -485,6 +494,7 @@ def cmd_build(args: argparse.Namespace) -> int:
 
     jobs = getattr(args, "jobs", None)
     verbose = args.verbose
+    variant = getattr(args, "variant", None)
 
     # Detect which generator was used and run the appropriate build tool
     ninja_file = build_dir / "build.ninja"
@@ -496,7 +506,13 @@ def cmd_build(args: argparse.Namespace) -> int:
     elif makefile.exists():
         return run_make(build_dir, targets=targets, jobs=jobs, verbose=verbose)
     elif xcodeproj_files:
-        return run_xcodebuild(build_dir, targets=targets, jobs=jobs, verbose=verbose)
+        return run_xcodebuild(
+            build_dir,
+            targets=targets,
+            jobs=jobs,
+            verbose=verbose,
+            configuration=variant,
+        )
     else:
         logger.error("No build files found in %s", build_dir)
         logger.info("Run 'pcons generate' first to create build files")
