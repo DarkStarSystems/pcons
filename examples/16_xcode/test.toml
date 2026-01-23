@@ -1,0 +1,24 @@
+# Test configuration for the Xcode generator example
+
+[test]
+description = "Demonstrates Xcode project generation (macOS only)"
+
+# Use xcode generator instead of ninja
+generator = "xcode"
+
+# Files that should exist after generation
+# Note: Xcode projects are bundles (directories)
+expected_outputs = [
+    "build/hello_xcode.xcodeproj/project.pbxproj",
+]
+
+[verify]
+# Verify the generated project.pbxproj contains expected content
+commands = [
+    { run = "grep -q 'PBXNativeTarget' build/hello_xcode.xcodeproj/project.pbxproj", expect_exit_code = 0 },
+    { run = "grep -q 'hello' build/hello_xcode.xcodeproj/project.pbxproj", expect_exit_code = 0 },
+]
+
+[skip]
+# Only run on macOS since Xcode is macOS-specific
+platforms = ["linux", "windows"]

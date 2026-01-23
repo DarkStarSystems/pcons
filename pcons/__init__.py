@@ -24,6 +24,7 @@ from pcons.configure.config import Configure  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
+from pcons.generators.xcode import XcodeGenerator  # noqa: E402
 from pcons.toolchains import find_c_toolchain  # noqa: E402
 
 register_builtin_builders()
@@ -122,15 +123,19 @@ GENERATORS = {
     "ninja": NinjaGenerator,
     "make": MakefileGenerator,
     "makefile": MakefileGenerator,  # Alias
+    "xcode": XcodeGenerator,
 }
 
 
-def Generator(default: str = "ninja") -> NinjaGenerator | MakefileGenerator:
+def Generator(
+    default: str = "ninja",
+) -> NinjaGenerator | MakefileGenerator | XcodeGenerator:
     """Get a generator instance based on CLI option or environment.
 
     The generator can be set with:
         pcons --generator=make
         pcons -G ninja
+        pcons -G xcode
 
     Or when running directly:
         GENERATOR=make python pcons-build.py
@@ -141,10 +146,10 @@ def Generator(default: str = "ninja") -> NinjaGenerator | MakefileGenerator:
         3. default parameter
 
     Args:
-        default: Default generator name if not set ("ninja" or "make").
+        default: Default generator name if not set ("ninja", "make", or "xcode").
 
     Returns:
-        A generator instance (NinjaGenerator or MakefileGenerator).
+        A generator instance (NinjaGenerator, MakefileGenerator, or XcodeGenerator).
 
     Raises:
         ValueError: If the generator name is not recognized.
@@ -184,6 +189,7 @@ __all__ = [
     "Generator",
     "NinjaGenerator",
     "MakefileGenerator",
+    "XcodeGenerator",
     # Toolchain discovery
     "find_c_toolchain",
 ]

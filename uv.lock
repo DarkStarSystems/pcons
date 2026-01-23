@@ -221,6 +221,12 @@ toml = [
 ]
 
 [[package]]
+name = "docopt"
+version = "0.6.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a2/55/8f8cab2afd404cf578136ef2cc5dfb50baa1761b68c9da1fb1e4eed343c9/docopt-0.6.2.tar.gz", hash = "sha256:49b3a825280bd66b3aa83585ef59c4a8c82f2c8a522dbe754a8bc8d08c85c491", size = 25901, upload-time = "2014-06-16T11:18:57.406Z" }
+
+[[package]]
 name = "ghp-import"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -535,6 +541,15 @@ wheels = [
 ]
 
 [[package]]
+name = "openstep-parser"
+version = "2.0.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/b1/b4/2bcf55ea6cb537cd2efa3fdc66f6ac0f569f027b1edcc613ac37cd369e32/openstep_parser-2.0.3.tar.gz", hash = "sha256:bf7763599de5fc67bde55f6394d036fc5f8090deeead42948c8e6209a6033689", size = 4113, upload-time = "2025-10-10T13:42:26.491Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b5/29/c8212e5b3f7e0f164b425e19f0b58780751d744773805dc35c5b16487a30/openstep_parser-2.0.3-py3-none-any.whl", hash = "sha256:f219954501e92ced2d3589781201786a930e9a8738128f193b4a425bbee517be", size = 4963, upload-time = "2025-10-10T13:42:25.62Z" },
+]
+
+[[package]]
 name = "packaging"
 version = "25.0"
 source = { registry = "https://pypi.org/simple" }
@@ -562,9 +577,23 @@ wheels = [
 ]
 
 [[package]]
+name = "pbxproj"
+version = "4.3.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "docopt" },
+    { name = "openstep-parser" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/36/a0/f988cfdd5d16630fc9e126271ea81d777fda356f86431b6ede65bfb0016b/pbxproj-4.3.2.tar.gz", hash = "sha256:6ce7e306ee0d733c9cf67817bedd29f614ec28eec0afe79b4ed1ed8a4e11e075", size = 26480, upload-time = "2025-10-10T15:13:24.564Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/87/c3/eb8b1305c73fab49b7e28c5bfbb565e0c57228ebf1ced55f08457062b6ae/pbxproj-4.3.2-py3-none-any.whl", hash = "sha256:18086c673853bb3fb765a3944093709f3c9b831cd466c1e7c926d0594b65d592", size = 40613, upload-time = "2025-10-10T15:13:23.777Z" },
+]
+
+[[package]]
 name = "pcons"
 source = { editable = "." }
 dependencies = [
+    { name = "pbxproj" },
     { name = "tomli-w" },
 ]
 
@@ -593,6 +622,7 @@ requires-dist = [
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.0" },
+    { name = "pbxproj", specifier = ">=3.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },

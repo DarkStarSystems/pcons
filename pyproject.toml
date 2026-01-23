@@ -23,6 +23,7 @@ classifiers = [
 dependencies = [
     "tomli>=2.0;python_version<'3.11'",  # TOML parsing (built-in in 3.11+)
     "tomli-w>=1.0",  # TOML writing
+    "pbxproj>=3.0.0",  # Xcode project file manipulation
 ]
 
 [project.optional-dependencies]

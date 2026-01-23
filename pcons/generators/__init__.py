@@ -7,6 +7,7 @@ from pcons.generators.generator import BaseGenerator, Generator
 from pcons.generators.makefile import MakefileGenerator
 from pcons.generators.mermaid import MermaidGenerator
 from pcons.generators.ninja import NinjaGenerator
+from pcons.generators.xcode import XcodeGenerator
 
 __all__ = [
     "BaseGenerator",
@@ -16,4 +17,5 @@ __all__ = [
     "MakefileGenerator",
     "MermaidGenerator",
     "NinjaGenerator",
+    "XcodeGenerator",
 ]
