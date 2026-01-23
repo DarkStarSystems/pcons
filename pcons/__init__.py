@@ -29,7 +29,7 @@ from pcons.toolchains import find_c_toolchain  # noqa: E402
 
 register_builtin_builders()
 
-__version__ = "0.4.0"
+__version__ = "0.4.1"
 
 # Internal storage for CLI variables
 _cli_vars: dict[str, str] | None = None
