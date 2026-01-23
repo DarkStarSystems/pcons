@@ -22,3 +22,5 @@ commands = [
 platforms = ["linux", "darwin"]
 # Requires MSVC (cl.exe) to be installed
 requires = ["cl.exe"]
+# Windows resources don't work with Xcode
+generators = ["xcode"]
