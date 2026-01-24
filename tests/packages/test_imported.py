@@ -116,3 +116,76 @@ class TestImportedTarget:
         repr_str = repr(target)
         assert "test" in repr_str
         assert "1.0" in repr_str
+
+    def test_public_requirements_populated(self) -> None:
+        """Test that public requirements are populated from package."""
+        pkg = PackageDescription(
+            name="test",
+            include_dirs=["/opt/test/include"],
+            library_dirs=["/opt/test/lib"],
+            libraries=["testlib"],
+            defines=["TEST_DEFINE"],
+            compile_flags=["-DEXTRA_FLAG"],
+            link_flags=["-Wl,-rpath,/opt/test/lib"],
+        )
+
+        target = ImportedTarget.from_package(pkg)
+
+        # Verify public requirements are populated
+        assert Path("/opt/test/include") in target.public.include_dirs
+        assert "TEST_DEFINE" in target.public.defines
+        assert "-DEXTRA_FLAG" in target.public.compile_flags
+        assert "testlib" in target.public.link_libs
+        assert "-L/opt/test/lib" in target.public.link_flags
+        assert "-Wl,-rpath,/opt/test/lib" in target.public.link_flags
+
+    def test_public_requirements_frameworks_macos(self) -> None:
+        """Test that macOS framework flags are populated in public requirements."""
+        pkg = PackageDescription(
+            name="CoreFoundation",
+            framework_dirs=["/System/Library/Frameworks"],
+            frameworks=["CoreFoundation", "Security"],
+        )
+
+        target = ImportedTarget.from_package(pkg)
+
+        # Verify framework flags are in public.link_flags
+        assert "-F" in target.public.link_flags
+        assert "/System/Library/Frameworks" in target.public.link_flags
+        assert "-framework" in target.public.link_flags
+        assert "CoreFoundation" in target.public.link_flags
+        assert "Security" in target.public.link_flags
+
+    def test_public_requirements_with_components(self) -> None:
+        """Test public requirements include merged component data."""
+        pkg = PackageDescription(
+            name="boost",
+            include_dirs=["/usr/include/boost"],
+            libraries=["boost_system"],
+            components={
+                "filesystem": ComponentDescription(
+                    name="filesystem",
+                    libraries=["boost_filesystem"],
+                    defines=["BOOST_FILESYSTEM"],
+                ),
+            },
+        )
+
+        target = ImportedTarget.from_package(pkg, components=["filesystem"])
+
+        # Verify both base and component requirements are in public
+        assert Path("/usr/include/boost") in target.public.include_dirs
+        assert "boost_system" in target.public.link_libs
+        assert "boost_filesystem" in target.public.link_libs
+        assert "BOOST_FILESYSTEM" in target.public.defines
+
+    def test_empty_package_no_public_requirements(self) -> None:
+        """Test that empty package results in empty public requirements."""
+        pkg = PackageDescription(name="empty")
+        target = ImportedTarget.from_package(pkg)
+
+        assert target.public.include_dirs == []
+        assert target.public.defines == []
+        assert target.public.compile_flags == []
+        assert target.public.link_libs == []
+        assert target.public.link_flags == []
