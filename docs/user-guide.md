@@ -147,6 +147,28 @@ pcons init               # Create a template pcons-build.py
 
 Understanding these core concepts will help you write effective pcons build scripts.
 
+### Build Script Lifecycle
+
+Every pcons build script (`pcons-build.py`) follows three phases:
+
+1. **Configure** - Set up toolchains, environments, and build options
+2. **Describe** - Create targets and define their sources/dependencies
+3. **Generate** - Resolve dependencies and write build files
+
+Your script must explicitly call `project.resolve()` and a generator at the end:
+
+```python
+# ... define targets ...
+
+# REQUIRED: Resolve all dependencies (computes effective requirements)
+project.resolve()
+
+# REQUIRED: Generate build files
+NinjaGenerator().generate(project, build_dir)
+```
+
+The `pcons` CLI executes your script but does NOT automatically call resolve/generate - your script controls when and how this happens. This gives you flexibility for conditional generation or multiple generators.
+
 ### Project
 
 A `Project` is the top-level container for your build. It holds all environments, targets, and nodes.
@@ -277,7 +299,7 @@ app.link(lib)
 
 ### Nodes
 
-Nodes represent files in the dependency graph. You rarely create them directly; instead, use `project.node()` for deduplication:
+Nodes represent files in the dependency graph. Use `project.node()` to get or create a node:
 
 ```python
 # Create or get a node for a file
@@ -287,6 +309,22 @@ src_node = project.node("src/main.cpp")
 # - Path to the file
 # - Builder that creates it (if any)
 # - Dependencies
+```
+
+**When to use `project.node()` vs raw paths:**
+
+Most pcons APIs accept raw paths (strings or `Path` objects) and convert them to nodes internally. You only need `project.node()` when:
+
+```python
+# Usually NOT needed - these are equivalent:
+project.Install("dist", ["file.txt"])           # Path string - works fine
+project.Install("dist", [Path("file.txt")])     # Path object - works fine
+project.Install("dist", [project.node("file.txt")])  # Explicit node - also works
+
+# Needed when you want to add explicit dependencies to a source file:
+header = project.node("generated.h")
+header.depends([generator_target])  # Now generated.h depends on generator
+app.add_sources(["main.cpp"])       # main.cpp will rebuild when generated.h changes
 ```
 
 ### Builders
@@ -311,6 +349,40 @@ When you run `pcons build`, Ninja uses this graph to:
 1. Check timestamps on all files
 2. Rebuild only files whose dependencies changed
 3. Execute builds in parallel where possible
+
+### Default and Alias Targets
+
+**Default targets** are built when you run `ninja` with no arguments:
+
+```python
+# Set default targets - these build when you run just "ninja"
+project.Default(app)
+project.Default(lib, app)  # Can specify multiple
+
+# Running "ninja" builds defaults; "ninja all" also builds defaults
+```
+
+**Aliases** create named phony targets for convenient building:
+
+```python
+# Create an alias - builds with "ninja install"
+project.Alias("install", [installed_lib, installed_headers])
+
+# Create an alias for tests
+project.Alias("test", [test_runner])
+
+# Now you can run:
+#   ninja install    # Build and install
+#   ninja test       # Build and run tests
+```
+
+Aliases are Ninja phony targets - they don't produce files but depend on other targets. Target names (like `"myapp"` in `project.Program("myapp", env)`) are also usable with Ninja:
+
+```bash
+ninja myapp      # Build just the myapp target
+ninja libfoo     # Build just libfoo
+ninja install    # Build the install alias
+```
 
 ---
 
@@ -526,8 +598,20 @@ libplugin = project.SharedLibrary("plugin", env)
 libplugin.add_sources([src_dir / "plugin.c"])
 libplugin.public.include_dirs.append(include_dir)
 
-# Optional: customize output name
+# Optional: customize output name (overrides platform defaults)
 libplugin.output_name = "myplugin.so"  # Override default libplugin.so
+
+# Output naming defaults (can be overridden with output_name):
+#   SharedLibrary "foo":
+#     Linux:   libfoo.so
+#     macOS:   libfoo.dylib
+#     Windows: foo.dll
+#   StaticLibrary "foo":
+#     Linux/macOS: libfoo.a
+#     Windows:     foo.lib
+#   Program "foo":
+#     Linux/macOS: foo
+#     Windows:     foo.exe
 
 # Create program that uses the library
 app = project.Program("host", env)
@@ -1022,13 +1106,13 @@ project.InstallDir("dist", src_dir / "assets")
 
 ### Environment Cloning
 
-Create variant environments:
+Create variant environments by cloning:
 
 ```python
 # Base environment
 env = project.Environment(toolchain=toolchain)
 
-# Clone for profiling
+# Clone for profiling - gets a COPY of all settings
 profile_env = env.clone()
 profile_env.cxx.flags.extend(["-pg", "-fno-omit-frame-pointer"])
 
@@ -1036,6 +1120,13 @@ profile_env.cxx.flags.extend(["-pg", "-fno-omit-frame-pointer"])
 app_release = project.Program("app", env)
 app_profile = project.Program("app_profile", profile_env)
 ```
+
+**Key points about environments:**
+
+- Each `project.Environment()` call creates a fresh environment with toolchain defaults
+- `env.clone()` creates a deep copy - changes to the clone don't affect the original
+- Environments don't share state - there's no "base" environment that accumulates
+- If you see duplicate flags, check if you're accidentally adding flags multiple times in your script
 
 ### Temporary Environment Overrides
 
@@ -1115,6 +1206,44 @@ env.Command("output.txt", "input.txt", "echo $$HOME > $TARGET")
 ```
 
 The command runs during the build phase, and Ninja tracks dependencies so the command only re-runs when sources change.
+
+**Multiple commands:** Chain commands with shell operators:
+
+```python
+# Run multiple steps with && (stops on first failure)
+env.Command(
+    target="output.txt",
+    source="input.txt",
+    command="step1 $SOURCE -o temp.txt && step2 temp.txt -o $TARGET"
+)
+```
+
+### Post-Build Commands
+
+Add commands that run after a target is built using `target.post_build()`:
+
+```python
+plugin = project.SharedLibrary("myplugin", env, sources=["plugin.cpp"])
+
+# Add rpath for macOS plugin loading
+plugin.post_build("install_name_tool -add_rpath @loader_path $out")
+
+# Code sign the output
+plugin.post_build("codesign --sign - $out")
+```
+
+**Variable substitution in post_build:**
+
+| Variable | Description |
+|----------|-------------|
+| `$out` | The primary output file path |
+| `$in` | The input files (space-separated) |
+
+Commands run in the order they are added. The fluent API allows chaining:
+
+```python
+plugin.post_build("cmd1 $out").post_build("cmd2 $out")
+```
 
 ### Archive Builders (Tarfile and Zipfile)
 

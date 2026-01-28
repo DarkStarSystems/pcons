@@ -119,12 +119,17 @@ class TestToolConfigNamespace:
         assert d == {"cmd": "gcc", "flags": ["-Wall"]}
 
     def test_as_namespace(self):
-        tc = ToolConfig("cc", cmd="gcc")
+        tc = ToolConfig("cc", cmd="gcc", flags=["-Wall"])
         ns = tc.as_namespace()
         assert ns["cmd"] == "gcc"
-        # as_namespace returns the internal dict (not a copy)
+        assert ns["flags"] == ["-Wall"]
+        # as_namespace returns a copy to prevent accidental mutation
+        # during variable substitution
         ns["cmd"] = "clang"
-        assert tc.cmd == "clang"
+        ns["flags"].append("-O2")
+        # Original should be unchanged
+        assert tc.cmd == "gcc"
+        assert tc.flags == ["-Wall"]
 
     def test_repr(self):
         tc = ToolConfig("cc", cmd="gcc")

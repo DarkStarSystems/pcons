@@ -69,6 +69,11 @@ class UnixToolchain(BaseToolchain):
             "-isysroot",
             "-iquote",
             "-idirafter",
+            # Force-include headers
+            "-include",
+            "-imacros",
+            # Language specification
+            "-x",
             # Xlinker passthrough
             "-Xlinker",
             "-Xpreprocessor",

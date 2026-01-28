@@ -3,6 +3,7 @@
 
 from pcons.core.flags import (
     DEFAULT_SEPARATED_ARG_FLAGS,
+    FlagPair,
     deduplicate_flags,
     get_separated_arg_flags_from_toolchains,
     is_separated_arg_flag,
@@ -393,3 +394,172 @@ class TestGetSeparatedArgFlagsFromToolchains:
         result = get_separated_arg_flags_from_toolchains([toolchain])
         assert "/link" in result
         assert "-target" in result
+
+
+class TestFlagPair:
+    """Tests for FlagPair class."""
+
+    def test_creation(self):
+        """Test FlagPair creation."""
+        fp = FlagPair("-include", "header.h")
+        assert fp.flag == "-include"
+        assert fp.argument == "header.h"
+
+    def test_iteration(self):
+        """Test FlagPair iteration."""
+        fp = FlagPair("-include", "header.h")
+        items = list(fp)
+        assert items == ["-include", "header.h"]
+
+    def test_unpacking(self):
+        """Test FlagPair unpacking."""
+        fp = FlagPair("-include", "header.h")
+        flag, arg = fp
+        assert flag == "-include"
+        assert arg == "header.h"
+
+    def test_immutability(self):
+        """Test FlagPair is immutable (frozen dataclass)."""
+        fp = FlagPair("-include", "header.h")
+        import pytest
+
+        with pytest.raises(AttributeError):
+            fp.flag = "-other"  # type: ignore[misc]
+
+    def test_equality(self):
+        """Test FlagPair equality."""
+        fp1 = FlagPair("-include", "header.h")
+        fp2 = FlagPair("-include", "header.h")
+        fp3 = FlagPair("-include", "other.h")
+        assert fp1 == fp2
+        assert fp1 != fp3
+
+    def test_hashable(self):
+        """Test FlagPair is hashable (can be used in sets)."""
+        fp1 = FlagPair("-include", "header.h")
+        fp2 = FlagPair("-include", "header.h")
+        fp3 = FlagPair("-include", "other.h")
+        s = {fp1, fp2, fp3}
+        assert len(s) == 2
+
+
+class TestFlagPairDeduplication:
+    """Tests for FlagPair handling in deduplicate_flags."""
+
+    def test_flag_pair_basic_dedup(self):
+        """Test that duplicate FlagPairs are removed."""
+        flags = [
+            FlagPair("-custom", "val1"),
+            "-Wall",
+            FlagPair("-custom", "val1"),  # duplicate
+        ]
+        result = deduplicate_flags(flags)
+        assert result == ["-custom", "val1", "-Wall"]
+
+    def test_flag_pair_different_values_kept(self):
+        """Test that FlagPairs with different values are kept."""
+        flags = [
+            FlagPair("-custom", "val1"),
+            FlagPair("-custom", "val2"),
+        ]
+        result = deduplicate_flags(flags)
+        assert result == ["-custom", "val1", "-custom", "val2"]
+
+    def test_flag_pair_mixed_with_strings(self):
+        """Test FlagPair mixed with string flags."""
+        flags = [
+            "-Wall",
+            FlagPair("-include", "header.h"),
+            "-O2",
+            FlagPair("-include", "other.h"),
+        ]
+        result = deduplicate_flags(flags)
+        assert result == ["-Wall", "-include", "header.h", "-O2", "-include", "other.h"]
+
+    def test_flag_pair_expanded_to_strings(self):
+        """Test that FlagPairs are expanded to strings in output."""
+        flags = [FlagPair("-include", "header.h")]
+        result = deduplicate_flags(flags)
+        assert result == ["-include", "header.h"]
+        assert all(isinstance(f, str) for f in result)
+
+
+class TestFlagPairMerge:
+    """Tests for FlagPair handling in merge_flags."""
+
+    def test_merge_flag_pair_into_empty(self):
+        """Test merging FlagPair into empty list."""
+        existing: list[str] = []
+        merge_flags(existing, [FlagPair("-include", "header.h")])
+        assert existing == ["-include", "header.h"]
+
+    def test_merge_flag_pair_no_duplicate(self):
+        """Test FlagPair doesn't duplicate existing pair."""
+        existing: list[str] = ["-include", "header.h"]
+        merge_flags(
+            existing,
+            [FlagPair("-include", "header.h")],
+            frozenset(["-include"]),
+        )
+        assert existing == ["-include", "header.h"]
+
+    def test_merge_flag_pair_adds_new(self):
+        """Test FlagPair adds new pair."""
+        existing: list[str] = ["-include", "header1.h"]
+        merge_flags(
+            existing,
+            [FlagPair("-include", "header2.h")],
+            frozenset(["-include"]),
+        )
+        assert existing == ["-include", "header1.h", "-include", "header2.h"]
+
+
+class TestIncludeFlagPairs:
+    """Tests for -include flag handling (the original bug)."""
+
+    def test_include_flags_with_separated_arg_flags(self):
+        """Test that -include flags are properly deduplicated as pairs."""
+        # This is the original bug: -include was being deduplicated incorrectly
+        # because it wasn't in SEPARATED_ARG_FLAGS
+        separated = frozenset(["-include"])
+        flags = ["-include", "header1.h", "-include", "header2.h"]
+        result = deduplicate_flags(flags, separated)
+        assert result == ["-include", "header1.h", "-include", "header2.h"]
+
+    def test_include_flags_duplicate_removed(self):
+        """Test that duplicate -include pairs are removed."""
+        separated = frozenset(["-include"])
+        flags = [
+            "-include",
+            "header1.h",
+            "-include",
+            "header2.h",
+            "-include",
+            "header1.h",
+        ]
+        result = deduplicate_flags(flags, separated)
+        assert result == ["-include", "header1.h", "-include", "header2.h"]
+
+    def test_include_in_unix_separated_flags(self):
+        """Test that -include is now in Unix toolchain's SEPARATED_ARG_FLAGS."""
+        from pcons.toolchains.unix import UnixToolchain
+
+        assert "-include" in UnixToolchain.SEPARATED_ARG_FLAGS
+        assert "-imacros" in UnixToolchain.SEPARATED_ARG_FLAGS
+        assert "-x" in UnixToolchain.SEPARATED_ARG_FLAGS
+
+    def test_gcc_toolchain_has_include(self):
+        """Test that GCC toolchain has -include flag."""
+        from pcons.toolchains.gcc import GccToolchain
+
+        toolchain = GccToolchain()
+        flags = toolchain.get_separated_arg_flags()
+        assert "-include" in flags
+
+    def test_llvm_toolchain_has_include(self):
+        """Test that LLVM toolchain has -include flag."""
+        from pcons.toolchains.llvm import LlvmToolchain
+
+        toolchain = LlvmToolchain()
+        flags = toolchain.get_separated_arg_flags()
+        assert "-include" in flags

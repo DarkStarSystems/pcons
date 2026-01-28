@@ -105,11 +105,21 @@ class ToolConfig:
     def as_namespace(self) -> dict[str, Any]:
         """Return as a namespace dict for substitution.
 
-        This returns the raw dict reference for efficient use
-        with the substitution system.
+        Returns a shallow copy of the variables dict with deep copies of
+        mutable values (lists, dicts) to prevent accidental mutation of
+        the original tool configuration during variable substitution.
         """
         vars_dict: dict[str, Any] = object.__getattribute__(self, "_vars")
-        return vars_dict
+        # Return a copy with deep-copied mutable values to prevent mutation
+        result: dict[str, Any] = {}
+        for key, value in vars_dict.items():
+            if isinstance(value, list):
+                result[key] = list(value)
+            elif isinstance(value, dict):
+                result[key] = dict(value)
+            else:
+                result[key] = value
+        return result
 
     def clone(self) -> ToolConfig:
         """Create a deep copy of this tool configuration."""

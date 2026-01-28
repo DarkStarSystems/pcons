@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 # This must happen after core imports but before any user code runs
 from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
+from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
@@ -29,7 +30,7 @@ from pcons.toolchains import find_c_toolchain  # noqa: E402
 
 register_builtin_builders()
 
-__version__ = "0.4.2"
+__version__ = "0.4.3"
 
 # Internal storage for CLI variables
 _cli_vars: dict[str, str] | None = None
@@ -184,6 +185,7 @@ __all__ = [
     "_clear_registered_projects",
     # Core classes
     "Configure",
+    "FlagPair",
     "Project",
     # Generators
     "Generator",

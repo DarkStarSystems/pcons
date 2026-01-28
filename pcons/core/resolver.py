@@ -931,26 +931,16 @@ class Resolver:
                 if key == "extra_flags":
                     # extra_flags are compile flags - only apply to compile commands
                     if is_compile_command:
-                        # Merge extra_flags into the tool's flags list
+                        # Use extra_flags directly - they already include base env flags
+                        # via compute_effective_requirements(). No merging needed.
                         # Templates use $cc.flags, not $cc.extra_flags
-                        existing_flags = getattr(tool_config, "flags", [])
-                        if isinstance(existing_flags, list):
-                            merged = list(existing_flags) + list(val)
-                        else:
-                            merged = list(val)
-                        # Store as namespaced key for subst() lookup
-                        tool_overrides[f"{tool_name}.flags"] = merged
+                        tool_overrides[f"{tool_name}.flags"] = list(val)
                 elif key == "ldflags":
                     # ldflags are link flags - only apply to link commands
                     if is_link_command:
-                        # Merge ldflags into the link tool's flags list
-                        existing_flags = getattr(tool_config, "flags", [])
-                        if isinstance(existing_flags, list):
-                            merged = list(existing_flags) + list(val)
-                        else:
-                            merged = list(val)
-                        # Store as namespaced key for subst() lookup
-                        tool_overrides[f"{tool_name}.flags"] = merged
+                        # Use ldflags directly - they already include base env flags
+                        # via compute_effective_requirements(). No merging needed.
+                        tool_overrides[f"{tool_name}.flags"] = list(val)
                 elif key == "linker_cmd":
                     # linker_cmd overrides link.cmd (e.g., clang++ for C++ linking)
                     if is_link_command:

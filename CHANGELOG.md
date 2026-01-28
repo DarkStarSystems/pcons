@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-01-28
+
+### Added
+
+- **`FlagPair` marker class for explicit flag+argument pairs**: New `FlagPair` class allows users to explicitly mark flag+argument pairs that should be kept together during deduplication, even for custom flags not in the toolchain's `SEPARATED_ARG_FLAGS` list.
+  - Usage: `env.cxx.flags.append(FlagPair("-custom-flag", "value"))`
+  - Immutable, hashable, and iterable (can be unpacked: `flag, arg = FlagPair(...)`)
+  - Exported from top-level `pcons` module
+
+### Fixed
+
+- **Flag pair deduplication for `-include` and similar flags**: Flags like `-include`, `-imacros`, and `-x` that take separate arguments are now properly handled during deduplication. Previously, `-include header1.h -include header2.h` would incorrectly deduplicate to `-include header1.h header2.h`. Added `-include`, `-imacros`, and `-x` to `SEPARATED_ARG_FLAGS` in Unix toolchains.
+
+- **ToolConfig.as_namespace() mutation bug**: The `as_namespace()` method now returns copies of mutable values (lists, dicts) instead of references to the original. This prevents accidental mutation of tool configuration during variable substitution, which was causing flag accumulation bugs.
+
+- **Resolver no longer double-merges flags**: The resolver now uses `extra_flags` and `ldflags` directly instead of merging them with existing tool flags. These values already include base environment flags via `compute_effective_requirements()`, so merging was duplicating flags.
+
+### Documentation
+
+- User guide: Added "Build Script Lifecycle" section explaining the three phases (configure, describe, generate)
+- User guide: Clarified when to use `project.node()` vs raw paths
+- User guide: Added "Default and Alias Targets" section with examples
+- User guide: Added output naming defaults table for libraries and programs
+- User guide: Improved environment cloning documentation
+- User guide: Added examples for multiple commands and post-build commands
+
 ## [0.4.2] - 2026-01-28
 
 ### Fixed
@@ -297,7 +323,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.4.3...HEAD
+[0.4.3]: https://github.com/garyo/pcons/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/garyo/pcons/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/garyo/pcons/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/garyo/pcons/compare/v0.3.0...v0.4.0
