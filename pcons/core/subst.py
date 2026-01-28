@@ -10,7 +10,7 @@ Key design principles:
 Supported syntax:
 - Simple variables: $VAR or ${VAR}
 - Namespaced variables: $tool.var or ${tool.var}
-- Escaped dollars: $$ becomes literal $
+- Escaped dollars: $$ becomes literal $ (useful for shell variables like $$ORIGIN in rpath)
 - Functions: ${prefix(var, list)}, ${suffix(list, var)}, ${wrap(p, list, s)},
              ${pairwise(var, list)} (produces interleaved pairs)
 
