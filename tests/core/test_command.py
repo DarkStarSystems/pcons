@@ -84,16 +84,17 @@ class TestGenericCommandBuilder:
         result = builder(env, "out.txt", ["in.txt"])
         target = result[0]
 
-        assert hasattr(target, "_build_info")
-        assert target._build_info["tool"] == "command"
+        assert isinstance(target, FileNode)
+        assert target._build_info is not None
+        assert target._build_info.get("tool") == "command"
         # Command is tokenized list with markers
-        assert target._build_info["command"] == [
+        assert target._build_info.get("command") == [
             "process",
             SourcePath(),
             ">",
             TargetPath(),
         ]
-        assert target._build_info["rule_name"] == builder.rule_name
+        assert target._build_info.get("rule_name") == builder.rule_name
 
 
 class TestEnvironmentCommand:

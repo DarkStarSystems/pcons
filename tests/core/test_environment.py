@@ -80,8 +80,8 @@ class TestEnvironmentTools:
     def test_tool_takes_precedence_over_var(self):
         env = Environment()
         env.cc = "variable_value"  # Set as variable
-        env.add_tool("cc")  # Now add tool
-        env.cc.cmd = "gcc"
+        tool_config = env.add_tool("cc")  # Now add tool
+        tool_config.cmd = "gcc"
         # Tool should take precedence
         assert isinstance(env.cc, ToolConfig)
 

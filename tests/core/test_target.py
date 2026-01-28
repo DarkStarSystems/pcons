@@ -3,6 +3,7 @@
 
 from pathlib import Path
 
+from pcons.core.node import FileNode
 from pcons.core.target import ImportedTarget, Target, UsageRequirements
 
 
@@ -264,7 +265,7 @@ class TestFluentAPI:
 
         assert len(target.sources) == 2
         # Verify paths are resolved correctly
-        paths = [n.path for n in target.sources]
+        paths = [n.path for n in target.sources if isinstance(n, FileNode)]
         assert src_dir / "main.c" in paths
         assert src_dir / "util.c" in paths
 

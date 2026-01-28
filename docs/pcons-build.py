@@ -18,7 +18,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from pcons.core.builder import CommandBuilder
+from pcons.core.builder import Builder, CommandBuilder
 from pcons.core.project import Project
 from pcons.generators.ninja import NinjaGenerator
 from pcons.tools.tool import BaseTool
@@ -55,7 +55,7 @@ class GitInfoTool(BaseTool):
             ),
         }
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {
             "VersionFile": CommandBuilder(
                 "VersionFile",
@@ -95,7 +95,7 @@ class PandocTool(BaseTool):
             ),
         }
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {
             "Html": CommandBuilder(
                 "Html",
@@ -134,7 +134,7 @@ class InsertFooterTool(BaseTool):
             ),
         }
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {
             "Insert": CommandBuilder(
                 "Insert",

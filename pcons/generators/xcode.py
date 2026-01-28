@@ -497,6 +497,8 @@ class XcodeGenerator(BaseGenerator):
                 continue
 
             build_info = node._build_info
+            if build_info is None:
+                continue
             sources = build_info.get("sources", [])
             if not sources:
                 continue
@@ -546,7 +548,7 @@ class XcodeGenerator(BaseGenerator):
         if not sources and target.output_nodes:
             # Get source from first output node's build_info
             node = target.output_nodes[0]
-            if hasattr(node, "_build_info"):
+            if hasattr(node, "_build_info") and node._build_info is not None:
                 sources = node._build_info.get("sources", [])
 
         # Convert dest_dir to build output path (relative to build dir)
@@ -653,7 +655,7 @@ class XcodeGenerator(BaseGenerator):
         source_paths: list[str] = []
         if target.output_nodes:
             node = target.output_nodes[0]
-            if hasattr(node, "_build_info"):
+            if hasattr(node, "_build_info") and node._build_info is not None:
                 for source in node._build_info.get("sources", []):
                     if hasattr(source, "path"):
                         # Use helper to get correct path for Xcode
@@ -737,6 +739,24 @@ class XcodeGenerator(BaseGenerator):
 
         return phase_id
 
+    # Source file extensions that Xcode can compile
+    _XCODE_COMPILABLE_EXTENSIONS = frozenset(
+        [
+            ".c",
+            ".cc",
+            ".cpp",
+            ".cxx",
+            ".c++",  # C/C++
+            ".m",
+            ".mm",  # Objective-C/C++
+            ".swift",  # Swift
+            ".s",
+            ".S",
+            ".asm",  # Assembly
+            ".metal",  # Metal shaders
+        ]
+    )
+
     def _add_sources_to_target(self, target: Target) -> None:
         """Add source files to an Xcode target using pbxproj's add_file.
 
@@ -756,6 +776,12 @@ class XcodeGenerator(BaseGenerator):
             if hasattr(source, "path"):
                 # Cast to Path since we know it has path attribute (FileNode)
                 src_path: Path = source.path  # type: ignore[attr-defined]
+
+                # Skip pre-compiled objects and unrecognized files
+                # These are passed through to the linker but aren't sources to compile
+                if src_path.suffix.lower() not in self._XCODE_COMPILABLE_EXTENSIONS:
+                    continue
+
                 source_path = self._make_relative_path(src_path)
                 file_options = FileOptions(create_build_files=True)
                 self._xcode_project.add_file(

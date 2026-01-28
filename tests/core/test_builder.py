@@ -108,6 +108,7 @@ class TestCommandBuilder:
 
         # Should create one target with multiple sources
         assert len(result) == 1
+        assert isinstance(result[0], FileNode)
         assert result[0].path == Path("app")
 
     def test_default_target_path(self):
@@ -129,6 +130,7 @@ class TestCommandBuilder:
 
         # Default target should be in build_dir with .o suffix
         assert len(result) == 1
+        assert isinstance(result[0], FileNode)
         assert result[0].path == Path("out/foo.o")
 
     def test_explicit_target_path(self):
@@ -148,6 +150,7 @@ class TestCommandBuilder:
         result = builder(env, "custom/output.o", ["foo.c"])
 
         assert len(result) == 1
+        assert isinstance(result[0], FileNode)
         assert result[0].path == Path("custom/output.o")
 
     def test_target_has_dependencies(self):
@@ -211,7 +214,8 @@ class TestCommandBuilder:
         target = result[0]
 
         # Check build info is stored
-        assert hasattr(target, "_build_info")
+        assert isinstance(target, FileNode)
+        assert target._build_info is not None
         info = target._build_info
         assert info["tool"] == "cc"
         assert info["command_var"] == "cmdline"
@@ -241,6 +245,8 @@ class TestCommandBuilderDepfile:
         result = builder(env, "foo.o", ["foo.c"])
         target = result[0]
 
+        assert isinstance(target, FileNode)
+        assert target._build_info is not None
         info = target._build_info
         # depfile is resolved to PathToken with the target path
         assert isinstance(info["depfile"], PathToken)
@@ -267,6 +273,8 @@ class TestCommandBuilderDepfile:
         result = builder(env, "foo.obj", ["foo.c"])
         target = result[0]
 
+        assert isinstance(target, FileNode)
+        assert target._build_info is not None
         info = target._build_info
         assert info["depfile"] is None
         assert info["deps_style"] == "msvc"
@@ -288,6 +296,8 @@ class TestCommandBuilderDepfile:
         result = builder(env, "app", ["a.o", "b.o"])
         target = result[0]
 
+        assert isinstance(target, FileNode)
+        assert target._build_info is not None
         info = target._build_info
         assert info["depfile"] is None
         assert info["deps_style"] is None

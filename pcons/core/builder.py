@@ -13,7 +13,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import PathToken, TargetPath
@@ -722,8 +722,8 @@ class GenericCommandBuilder(BaseBuilder):
         """Create target nodes for the command."""
         defined_at = kwargs.get("defined_at") or get_caller_location()
 
-        # Create target nodes
-        result: list[Node] = []
+        # Create target nodes (all FileNode, tracked for type safety)
+        result: list[FileNode] = []
         for target in targets:
             node = FileNode(target, defined_at=defined_at)
             node.depends(sources)
@@ -753,4 +753,4 @@ class GenericCommandBuilder(BaseBuilder):
                     "output_name": str(secondary.path),
                 }
 
-        return result
+        return cast(list[Node], result)

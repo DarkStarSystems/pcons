@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for multi-toolchain support."""
 
+from pcons.core.builder import Builder
 from pcons.core.environment import Environment
 from pcons.core.project import Project
 from pcons.tools.tool import BaseTool
@@ -20,7 +21,7 @@ class MockCTool(BaseTool):
             "objcmd": "mock-cc -c $SOURCE -o $TARGET",
         }
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {}
 
 
@@ -37,7 +38,7 @@ class MockCxxTool(BaseTool):
             "objcmd": "mock-cxx -c $SOURCE -o $TARGET",
         }
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {}
 
 
@@ -54,7 +55,7 @@ class MockCudaTool(BaseTool):
             "objcmd": "mock-nvcc -c $SOURCE -o $TARGET",
         }
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {}
 
 

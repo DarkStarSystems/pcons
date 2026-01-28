@@ -1,8 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.tools.toolchain."""
 
+from pcons.core.builder import Builder
 from pcons.core.environment import Environment
-from pcons.tools.tool import BaseTool
+from pcons.tools.tool import BaseTool, Tool
 from pcons.tools.toolchain import BaseToolchain, Toolchain
 
 
@@ -13,7 +14,7 @@ class MockCTool(BaseTool):
     def default_vars(self) -> dict[str, object]:
         return {"cmd": "mock-cc", "flags": []}
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {}
 
 
@@ -24,7 +25,7 @@ class MockCxxTool(BaseTool):
     def default_vars(self) -> dict[str, object]:
         return {"cmd": "mock-cxx", "flags": []}
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {}
 
 
@@ -33,7 +34,7 @@ class MockToolchain(BaseToolchain):
         super().__init__("mock")
 
     def _configure_tools(self, config: object) -> bool:
-        self._tools = {
+        self._tools: dict[str, Tool] = {
             "cc": MockCTool(),
             "cxx": MockCxxTool(),
         }
@@ -53,14 +54,14 @@ class TestBaseToolchain:
 
     def test_configure(self):
         tc = MockToolchain()
-        result = tc.configure(None)  # type: ignore
+        result = tc.configure(None)
         assert result is True
         assert "cc" in tc.tools
         assert "cxx" in tc.tools
 
     def test_setup(self):
         tc = MockToolchain()
-        tc.configure(None)  # type: ignore
+        tc.configure(None)
 
         env = Environment()
         tc.setup(env)

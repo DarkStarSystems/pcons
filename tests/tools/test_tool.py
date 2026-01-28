@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.tools.tool."""
 
-from pcons.core.builder import CommandBuilder
+from pcons.core.builder import Builder, CommandBuilder
 from pcons.core.environment import Environment
 from pcons.tools.tool import BaseTool, BuilderMethod, Tool
 
@@ -18,7 +18,7 @@ class MockTool(BaseTool):
             "flags": [],
         }
 
-    def builders(self) -> dict[str, object]:
+    def builders(self) -> dict[str, Builder]:
         return {
             "Compile": CommandBuilder(
                 "Compile",

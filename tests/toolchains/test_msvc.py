@@ -6,6 +6,7 @@ from pathlib import Path
 from pcons.configure.platform import get_platform
 from pcons.core.builder import MultiOutputBuilder, OutputGroup
 from pcons.core.environment import Environment
+from pcons.core.node import FileNode
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.msvc import (
     MsvcAssembler,
@@ -65,7 +66,8 @@ class TestMsvcCompiler:
         result = obj_builder(env, "test.obj", ["test.c"])
         assert len(result) == 1
         target = result[0]
-        assert hasattr(target, "_build_info")
+        assert isinstance(target, FileNode)
+        assert target._build_info is not None
         assert target._build_info.get("deps_style") == "msvc"
         # MSVC doesn't use a depfile (uses stdout)
         assert target._build_info.get("depfile") is None
@@ -297,6 +299,7 @@ class TestMsvcResourceCompiler:
         result = res_builder(env, "app.res", ["app.rc"])
         assert len(result) == 1
         target = result[0]
+        assert isinstance(target, FileNode)
         assert target.path == Path("app.res")
 
     def test_resource_builder_no_depfile(self):
@@ -313,6 +316,8 @@ class TestMsvcResourceCompiler:
         result = res_builder(env, "app.res", ["app.rc"])
         assert len(result) == 1
         target = result[0]
+        assert isinstance(target, FileNode)
+        assert target._build_info is not None
         # No depfile for resource files
         assert target._build_info.get("depfile") is None
         assert target._build_info.get("deps_style") is None
