@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-01-28
+
+### Added
+
+- **Add-on/Plugin module system**: New extensible module system for creating reusable domain-specific add-ons.
+  - **Module discovery**: Auto-loads modules from `PCONS_MODULES_PATH`, `~/.pcons/modules/`, and `./pcons_modules/`
+  - **`pcons.modules` namespace**: Access loaded modules via `from pcons.modules import mymodule`
+  - **`--modules-path` CLI option**: Specify additional module search paths
+  - **Module API convention**: Modules can define `__pcons_module__` metadata and `register()` function
+
+- **`pcons.contrib` package**: Built-in helper modules for common tasks:
+  - **`pcons.contrib.bundle`**: macOS bundle and flat bundle creation helpers
+    - `generate_info_plist()` - Generate Info.plist content
+    - `create_macos_bundle()` - Create macOS .bundle structure
+    - `create_flat_bundle()` - Create flat directory bundles (Windows/Linux)
+    - `get_arch_subdir()` - Get architecture subdirectory names (e.g., "MacOS-x86-64")
+  - **`pcons.contrib.platform`**: Platform detection utilities
+    - `is_macos()`, `is_linux()`, `is_windows()` - Platform checks
+    - `get_shared_lib_extension()`, `format_shared_lib_name()` - Library naming
+    - `get_arch()` - Get current architecture
+
+### Documentation
+
+- User guide: Added comprehensive "Add-on Modules" section with examples
+- Architecture doc: Added Module System section with implementation details
+
 ## [0.4.3] - 2026-01-28
 
 ### Added
@@ -323,7 +349,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/garyo/pcons/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/garyo/pcons/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/garyo/pcons/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/garyo/pcons/compare/v0.4.0...v0.4.1

@@ -1808,6 +1808,156 @@ Import from `pcons.util.macos`.
 
 ---
 
+## Add-on Modules
+
+Pcons provides an add-on/plugin system for creating reusable modules that handle domain-specific tasks like plugin bundle creation, SDK configuration, or custom package discovery.
+
+### Module Search Paths
+
+Pcons automatically discovers and loads modules from these locations (in priority order):
+
+1. **`PCONS_MODULES_PATH`** - Environment variable (colon/semicolon-separated paths)
+2. **`~/.pcons/modules/`** - User's global modules
+3. **`./pcons_modules/`** - Project-local modules
+
+You can also specify additional paths via the CLI:
+
+```bash
+pcons --modules-path=/path/to/modules
+```
+
+### Using Modules
+
+Loaded modules are accessible via the `pcons.modules` namespace:
+
+```python
+from pcons.modules import mymodule
+
+# Or access all loaded modules
+import pcons.modules
+print(dir(pcons.modules))  # ['mymodule', ...]
+```
+
+### Creating a Module
+
+Create a Python file in one of the search paths. Modules follow a simple convention:
+
+```python
+# ~/.pcons/modules/ofx.py
+"""OFX plugin support for pcons."""
+
+__pcons_module__ = {
+    "name": "ofx",
+    "version": "1.0.0",
+    "description": "OFX plugin bundle creation",
+}
+
+def setup_env(env, platform=None):
+    """Configure environment for OFX plugin building."""
+    env.cxx.includes.extend([
+        "openfx/include",
+        "openfx/Examples/include",
+    ])
+    if platform and not platform.is_windows:
+        env.cxx.flags.append("-fvisibility=hidden")
+
+def create_bundle(project, env, plugin_name, sources, *, build_dir, version="1.0.0"):
+    """Create OFX plugin bundle with proper structure."""
+    from pcons.contrib import bundle
+
+    bundle_name = f"{plugin_name}.ofx.bundle"
+    bundle_dir = build_dir / bundle_name
+
+    plugin = project.SharedLibrary(plugin_name, env)
+    plugin.output_name = f"{plugin_name}.ofx"
+    plugin.add_sources(sources)
+
+    # Install to bundle
+    arch_dir = bundle_dir / "Contents" / bundle.get_arch_subdir("darwin", "arm64")
+    project.Install(arch_dir, [plugin])
+
+    return plugin
+
+def register():
+    """Optional: Register custom builders at load time."""
+    # This is called automatically when the module loads
+    pass
+```
+
+Then use it in your build script:
+
+```python
+# pcons-build.py
+from pcons import Project, find_c_toolchain, Generator
+from pcons.modules import ofx  # Auto-loaded!
+
+project = Project("myplugin")
+toolchain = find_c_toolchain()
+env = project.Environment(toolchain=toolchain)
+
+ofx.setup_env(env)
+plugin = ofx.create_bundle(
+    project, env, "myplugin",
+    sources=["src/plugin.cpp"],
+    build_dir=project.build_dir,
+)
+
+project.resolve()
+Generator().generate(project)
+```
+
+### Contrib Modules
+
+Pcons includes built-in helper modules in `pcons.contrib`:
+
+```python
+from pcons.contrib import bundle, platform
+
+# Bundle creation helpers
+plist = bundle.generate_info_plist("MyPlugin", "1.0.0", bundle_type="BNDL")
+bundle.create_macos_bundle(project, env, plugin, bundle_dir="build/MyPlugin.bundle")
+bundle.create_flat_bundle(project, env, plugin, bundle_dir="build/MyPlugin")
+arch_dir = bundle.get_arch_subdir("darwin", "arm64")  # "MacOS-arm-64"
+
+# Platform utilities
+if platform.is_macos():
+    ext = platform.get_shared_lib_extension()  # ".dylib"
+    name = platform.format_shared_lib_name("foo")  # "libfoo.dylib"
+```
+
+### Module API Reference
+
+| Function/Attribute | Description |
+|-------------------|-------------|
+| `__pcons_module__` | Optional dict with module metadata (name, version, description) |
+| `register()` | Optional function called at load time to register builders |
+| `setup_env(env, ...)` | Convention: Configure an environment for the module's domain |
+
+| `pcons.modules` Function | Description |
+|-------------------------|-------------|
+| `load_modules(extra_paths)` | Load modules from search paths |
+| `get_module(name)` | Get a loaded module by name |
+| `list_modules()` | List names of all loaded modules |
+| `get_search_paths()` | Get the module search paths |
+| `clear_modules()` | Clear all loaded modules (for testing) |
+
+| `pcons.contrib.bundle` Function | Description |
+|--------------------------------|-------------|
+| `generate_info_plist(name, version, ...)` | Generate macOS Info.plist content |
+| `create_macos_bundle(...)` | Create macOS .bundle structure |
+| `create_flat_bundle(...)` | Create flat directory bundle |
+| `get_arch_subdir(platform, arch)` | Get architecture subdirectory name |
+
+| `pcons.contrib.platform` Function | Description |
+|----------------------------------|-------------|
+| `is_macos()`, `is_linux()`, `is_windows()` | Platform checks |
+| `get_platform_name()` | Get platform name ("darwin", "linux", "win32") |
+| `get_arch()` | Get current architecture ("x86_64", "arm64", etc.) |
+| `get_shared_lib_extension()` | Get shared lib extension (".dylib", ".so", ".dll") |
+| `format_shared_lib_name(name)` | Format as shared lib filename |
+
+---
+
 ## Further Reading
 
 - [Architecture Document](architecture.md) - Design details and implementation status

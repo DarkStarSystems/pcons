@@ -49,6 +49,10 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | Conan finder | Implemented | Conan 2.x with PkgConfigDeps |
 | vcpkg finder | Planned | Not yet implemented |
 | pcons-fetch tool | Implemented | CMake/autotools support |
+| **Module System** | | |
+| Module discovery | Implemented | Auto-load from search paths |
+| pcons.modules namespace | Implemented | Access loaded modules |
+| pcons.contrib package | Implemented | Bundle/platform helpers |
 | **Scanners** | | |
 | Scanner interface | Implemented | Protocol defined |
 | C/C++ header scanner | Planned | Relies on depfiles |
@@ -1171,6 +1175,53 @@ def register():
     from my_expansion import builders, toolchains  # triggers @builder registration
 ```
 
+### Module/Add-on System
+> **Status: Implemented**
+
+Pcons provides an add-on/plugin system for creating reusable modules that handle domain-specific tasks (plugin bundles, SDK configuration, custom package discovery).
+
+**Module discovery:**
+Modules are automatically discovered from these locations (in priority order):
+1. `PCONS_MODULES_PATH` environment variable
+2. `~/.pcons/modules/` - User's global modules
+3. `./pcons_modules/` - Project-local modules
+
+```python
+# ~/.pcons/modules/ofx.py
+"""OFX plugin support."""
+
+__pcons_module__ = {
+    "name": "ofx",
+    "version": "1.0.0",
+}
+
+def setup_env(env):
+    env.cxx.flags.append("-fvisibility=hidden")
+
+def register():
+    """Called automatically at load time."""
+    pass
+```
+
+**Module access:**
+```python
+# In pcons-build.py
+from pcons.modules import ofx
+ofx.setup_env(env)
+```
+
+**Contrib modules:** Generic helpers ship with pcons in `pcons.contrib`:
+- `pcons.contrib.bundle` - macOS bundle and flat bundle creation helpers
+- `pcons.contrib.platform` - Platform detection utilities
+
+```python
+from pcons.contrib import bundle, platform
+
+plist = bundle.generate_info_plist("MyPlugin", "1.0.0")
+if platform.is_macos():
+    bundle.create_macos_bundle(project, env, plugin, bundle_dir="...")
+```
+
 ---
 
 ## File Organization
@@ -1181,6 +1232,11 @@ pcons/
 ├── __init__.py
 ├── __main__.py              # CLI entry point .................... [Implemented]
 ├── cli.py                   # Command-line interface ............. [Implemented]
+├── modules.py               # Module discovery and loading ....... [Implemented]
+├── contrib/
+│   ├── __init__.py          # Contrib package init ............... [Implemented]
+│   ├── bundle.py            # Bundle creation helpers ............ [Implemented]
+│   └── platform.py          # Platform detection utilities ....... [Implemented]
 ├── core/
 │   ├── __init__.py
 │   ├── node.py              # Node hierarchy ..................... [Implemented]

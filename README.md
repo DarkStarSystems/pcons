@@ -17,6 +17,7 @@ Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), 
 - **Python is the language**: No custom DSL—build scripts are real Python with full IDE support
 - **Language-agnostic**: Build C++, Rust, LaTeX, protobuf, or anything else
 - **Explicit over implicit**: Dependencies are discoverable and traceable
+- **Extensible**: Add-on modules for domain-specific tasks (plugin bundles, SDK configuration, etc.)
 
 ## Status
 

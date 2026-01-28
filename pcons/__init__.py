@@ -30,7 +30,10 @@ from pcons.toolchains import find_c_toolchain  # noqa: E402
 
 register_builtin_builders()
 
-__version__ = "0.4.3"
+# Import modules namespace to make pcons.modules accessible
+from pcons import modules as modules  # noqa: E402, F401
+
+__version__ = "0.5.0"
 
 # Internal storage for CLI variables
 _cli_vars: dict[str, str] | None = None
@@ -194,4 +197,6 @@ __all__ = [
     "XcodeGenerator",
     # Toolchain discovery
     "find_c_toolchain",
+    # Module system
+    "modules",
 ]

@@ -376,6 +376,9 @@ def cmd_default(args: argparse.Namespace) -> int:
     This is what runs when you just type 'pcons' with no subcommand.
     Equivalent to: pcons generate && pcons build
     """
+    # Load user modules before running build script
+    load_user_modules(args)
+
     # First, generate
     result, project = cmd_generate(args)
     if result != 0:
@@ -470,6 +473,8 @@ def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
 
     Used as the handler for the 'generate' subcommand.
     """
+    # Load user modules before running build script
+    load_user_modules(args)
     exit_code, _ = cmd_generate(args)
     return exit_code
 
@@ -713,6 +718,28 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-B", "--build-dir", default="build", help="Build directory (default: build)"
     )
+    parser.add_argument(
+        "--modules-path",
+        type=str,
+        metavar="PATHS",
+        help="Additional paths to search for pcons modules (colon/semicolon-separated)",
+    )
+
+
+def load_user_modules(args: argparse.Namespace) -> None:
+    """Load user modules from search paths.
+
+    Args:
+        args: Parsed command-line arguments.
+    """
+    from pcons import modules
+
+    extra_paths: list[Path | str] | None = None
+    modules_path = getattr(args, "modules_path", None)
+    if modules_path:
+        extra_paths = modules_path.split(os.pathsep)
+
+    modules.load_modules(extra_paths)
 
 
 def find_command_in_argv(argv: list[str]) -> str | None:
@@ -733,6 +760,7 @@ def find_command_in_argv(argv: list[str]) -> str | None:
         "--graph",
         "--mermaid",
         "--debug",
+        "--modules-path",
     }
     i = 0
     while i < len(argv):
