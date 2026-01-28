@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-01-28
+
+### Fixed
+
+- **Flag accumulation bug**: Context flags (includes, defines, compile_flags) were being appended to the shared tool_config, causing flags to accumulate exponentially across multiple source files in a target. Now uses temporary overrides passed via extra_vars to avoid mutating shared state.
+
+- **C++ linker selection**: C++ programs and shared libraries now correctly use the C++ compiler (clang++/g++) as the linker instead of the C compiler (clang/gcc). This ensures proper C++ runtime linkage. The logic is in the toolchain layer (CompileLinkContext) to keep the core tool-agnostic.
+
+- **InstallAs validation**: `InstallAs()` now raises a clear `BuilderError` when passed a list or tuple, directing users to use `Install()` for multiple files. Previously it would silently fail.
+
+### Documentation
+
+- Added practical example for `$$` escaping in subst.py docstring (useful for `$ORIGIN` in rpath)
+- User guide: Documented `$$` for literal dollar signs with rpath example
+- User guide: Clarified that `Install()` takes a list while `InstallAs()` takes a single source
+
 ## [0.4.1] - 2026-01-23
 
 ### Added
@@ -281,7 +297,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/garyo/pcons/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/garyo/pcons/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/garyo/pcons/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/garyo/pcons/compare/v0.2.4...v0.3.0
