@@ -452,7 +452,20 @@ class InstallAsBuilder:
 
         Returns:
             A Target representing the install operation.
+
+        Raises:
+            BuilderError: If source is a list (use Install() for multiple files).
         """
+        # Validate source is not a list - common user error
+        if isinstance(source, (list, tuple)):
+            from pcons.core.errors import BuilderError
+
+            raise BuilderError(
+                "InstallAs() takes a single source, not a list. "
+                "Use Install() for multiple files.",
+                location=get_caller_location(),
+            )
+
         dest = Path(dest)
         target_name = name or f"install_{dest.name}"
 

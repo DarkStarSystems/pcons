@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pcons.core.environment import Environment
     from pcons.core.requirements import EffectiveRequirements
 
 
@@ -38,6 +39,7 @@ class CompileLinkContext:
         link_flags: Linker flags.
         libs: Libraries to link (without -l prefix).
         libdirs: Library search directories (without -L prefix).
+        linker_cmd: Override for link.cmd (e.g., "clang++" for C++ linking).
         include_prefix: Prefix for include directories (default: "-I").
         define_prefix: Prefix for preprocessor definitions (default: "-D").
         libdir_prefix: Prefix for library directories (default: "-L").
@@ -50,6 +52,7 @@ class CompileLinkContext:
     link_flags: list[str] = field(default_factory=list)
     libs: list[str] = field(default_factory=list)
     libdirs: list[str] = field(default_factory=list)
+    linker_cmd: str | None = None  # Override for link.cmd (e.g., "clang++" for C++)
 
     # Prefixes - allow toolchains to customize (e.g., MSVC uses /I, /D, /LIBPATH:)
     include_prefix: str = "-I"
@@ -94,11 +97,18 @@ class CompileLinkContext:
         if self.link_flags:
             result["ldflags"] = list(self.link_flags)
 
+        # Linker command override (e.g., "clang++" for C++ linking)
+        if self.linker_cmd:
+            result["linker_cmd"] = self.linker_cmd
+
         return result
 
     @classmethod
     def from_effective_requirements(
-        cls, effective: EffectiveRequirements
+        cls,
+        effective: EffectiveRequirements,
+        language: str | None = None,
+        env: Environment | None = None,
     ) -> CompileLinkContext:
         """Create a CompileLinkContext from EffectiveRequirements.
 
@@ -107,10 +117,24 @@ class CompileLinkContext:
 
         Args:
             effective: The computed effective requirements.
+            language: The link language (e.g., "c", "cxx"). If "cxx" and env
+                has a "cxx" tool, the linker_cmd will be set to env.cxx.cmd
+                to ensure proper C++ runtime linkage.
+            env: The build environment, used to look up the C++ compiler
+                command when linking C++ code.
 
         Returns:
             A CompileLinkContext populated from the requirements.
         """
+        # Determine linker command override for C++ linking
+        # C++ code needs the C++ compiler (clang++/g++) as linker to properly
+        # link the C++ runtime library
+        linker_cmd = None
+        if language == "cxx" and env is not None and env.has_tool("cxx"):
+            cxx_cmd = getattr(env.cxx, "cmd", None)
+            if cxx_cmd:
+                linker_cmd = cxx_cmd
+
         return cls(
             includes=[str(p) for p in effective.includes],
             defines=list(effective.defines),
@@ -118,6 +142,7 @@ class CompileLinkContext:
             link_flags=list(effective.link_flags),
             libs=list(effective.link_libs),
             libdirs=[str(p) for p in effective.link_dirs],
+            linker_cmd=linker_cmd,
         )
 
     def as_hashable_tuple(self) -> tuple:
@@ -136,6 +161,7 @@ class CompileLinkContext:
             tuple(self.link_flags),
             tuple(self.libs),
             tuple(self.libdirs),
+            self.linker_cmd,
         )
 
 
@@ -186,11 +212,18 @@ class MsvcCompileLinkContext(CompileLinkContext):
         if self.link_flags:
             result["ldflags"] = list(self.link_flags)
 
+        # Linker command override (e.g., "cl" for C++ linking with MSVC)
+        if self.linker_cmd:
+            result["linker_cmd"] = self.linker_cmd
+
         return result
 
     @classmethod
     def from_effective_requirements(
-        cls, effective: EffectiveRequirements
+        cls,
+        effective: EffectiveRequirements,
+        language: str | None = None,
+        env: Environment | None = None,
     ) -> MsvcCompileLinkContext:
         """Create a MsvcCompileLinkContext from EffectiveRequirements.
 
@@ -199,10 +232,23 @@ class MsvcCompileLinkContext(CompileLinkContext):
 
         Args:
             effective: The computed effective requirements.
+            language: The link language (e.g., "c", "cxx"). If "cxx" and env
+                has a "cxx" tool, the linker_cmd will be set to env.cxx.cmd.
+            env: The build environment, used to look up the C++ compiler
+                command when linking C++ code.
 
         Returns:
             A MsvcCompileLinkContext populated from the requirements.
         """
+        # Determine linker command override for C++ linking
+        # MSVC uses the same cl.exe for both C and C++, but we still support
+        # the override mechanism for consistency
+        linker_cmd = None
+        if language == "cxx" and env is not None and env.has_tool("cxx"):
+            cxx_cmd = getattr(env.cxx, "cmd", None)
+            if cxx_cmd:
+                linker_cmd = cxx_cmd
+
         return cls(
             includes=[str(p) for p in effective.includes],
             defines=list(effective.defines),
@@ -210,4 +256,5 @@ class MsvcCompileLinkContext(CompileLinkContext):
             link_flags=list(effective.link_flags),
             libs=list(effective.link_libs),
             libdirs=[str(p) for p in effective.link_dirs],
+            linker_cmd=linker_cmd,
         )

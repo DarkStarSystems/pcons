@@ -403,3 +403,58 @@ class TestInstallOrderIndependence:
         # Should have the install node
         assert len(install.output_nodes) == 1
         assert install.output_nodes[0].path == tmp_path / "include" / "generated.h"
+
+
+class TestInstallAsValidation:
+    """Tests for InstallAs input validation (Bug #3 fix)."""
+
+    def test_install_as_rejects_list(self, tmp_path):
+        """InstallAs raises BuilderError when passed a list."""
+        from pcons.core.errors import BuilderError
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src1 = tmp_path / "file1.txt"
+        src2 = tmp_path / "file2.txt"
+        src1.touch()
+        src2.touch()
+
+        # Should raise BuilderError when passing a list
+        with pytest.raises(BuilderError) as exc_info:
+            project.InstallAs(tmp_path / "dest" / "file.txt", [src1, src2])
+
+        # Check error message
+        assert "InstallAs() takes a single source" in str(exc_info.value)
+        assert "Install()" in str(exc_info.value)
+
+    def test_install_as_rejects_tuple(self, tmp_path):
+        """InstallAs raises BuilderError when passed a tuple."""
+        from pcons.core.errors import BuilderError
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src1 = tmp_path / "file1.txt"
+        src2 = tmp_path / "file2.txt"
+        src1.touch()
+        src2.touch()
+
+        # Should raise BuilderError when passing a tuple
+        with pytest.raises(BuilderError) as exc_info:
+            project.InstallAs(tmp_path / "dest" / "file.txt", (src1, src2))
+
+        assert "InstallAs() takes a single source" in str(exc_info.value)
+
+    def test_install_as_accepts_single_source(self, tmp_path):
+        """InstallAs works correctly with a single source."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src = tmp_path / "file.txt"
+        src.touch()
+
+        # Should work with a single source
+        install = project.InstallAs(tmp_path / "dest" / "renamed.txt", src)
+
+        project.resolve()
+
+        assert len(install.output_nodes) == 1
+        assert install.output_nodes[0].path == tmp_path / "dest" / "renamed.txt"

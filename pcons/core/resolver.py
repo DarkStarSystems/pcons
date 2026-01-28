@@ -207,12 +207,15 @@ class ObjectNodeFactory:
             env: Build environment.
 
         Returns:
-            FileNode for the object file, or None if source type not recognized.
+            FileNode for the object file, or the source directly if not compilable
+            (e.g., pre-compiled .o files, linker scripts).
         """
         # Get source handler from the toolchain (tool-agnostic)
         handler = self.get_source_handler(source.path, env)
         if handler is None:
-            return None
+            # No handler = not a compilable source
+            # Pass through directly (e.g., pre-compiled .o files, linker scripts)
+            return source
 
         tool_name = handler.tool_name
         language = handler.language
@@ -406,14 +409,17 @@ class OutputNodeFactory:
         for _, flag in auxiliary_inputs:
             link_flags.append(flag)
 
+        # Determine linker language - we use 'link' tool for linking
+        # but track the language so toolchain context can set appropriate linker
+        link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
+
         # Create context object from effective requirements
         # We need to update link_flags in effective_link before creating context
+        # Pass language and env so the context can determine the appropriate linker
         effective_link.link_flags = link_flags
-        context = CompileLinkContext.from_effective_requirements(effective_link)
-
-        # Determine linker language - we use 'link' tool for linking
-        # but track the language for description purposes
-        link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
+        context = CompileLinkContext.from_effective_requirements(
+            effective_link, language=link_language, env=env
+        )
 
         lib_node._build_info = {
             "tool": "link",
@@ -488,14 +494,17 @@ class OutputNodeFactory:
         for _, flag in auxiliary_inputs:
             link_flags.append(flag)
 
+        # Determine linker language - we use 'link' tool for linking
+        # but track the language so toolchain context can set appropriate linker
+        link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
+
         # Create context object from effective requirements
         # We need to update link_flags in effective_link before creating context
+        # Pass language and env so the context can determine the appropriate linker
         effective_link.link_flags = link_flags
-        context = CompileLinkContext.from_effective_requirements(effective_link)
-
-        # Determine linker tool based on language - we use 'link' tool
-        # but track the language for description purposes
-        link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
+        context = CompileLinkContext.from_effective_requirements(
+            effective_link, language=link_language, env=env
+        )
 
         prog_node._build_info = {
             "tool": "link",
@@ -895,13 +904,22 @@ class Resolver:
             return
 
         # Check if context has get_env_overrides() - for all contexts (archive/install
-        # and compile/link). Set those values on the tool namespace before subst().
+        # and compile/link). Build tool-specific overrides as extra_vars for subst().
         # This allows templates like ${prefix(cc.iprefix, cc.includes)} to expand
         # with the effective requirements.
+        #
+        # IMPORTANT: We must NOT mutate the shared tool_config, as that would cause
+        # flags to accumulate across multiple source files in the same target.
+        # Instead, we build a dictionary of namespaced overrides that get passed
+        # to subst_list() via extra_vars.
         #
         # Determine if this is a compile command (objcmd) vs link command
         is_compile_command = command_var == "objcmd"
         is_link_command = command_var in ("progcmd", "sharedcmd", "linkcmd", "libcmd")
+
+        # Build tool-specific overrides as a dictionary for subst()
+        # These will be passed as extra_vars and take precedence over tool_config
+        tool_overrides: dict[str, object] = {}
 
         if context is not None and hasattr(context, "get_env_overrides"):
             context_overrides = context.get_env_overrides()
@@ -920,7 +938,8 @@ class Resolver:
                             merged = list(existing_flags) + list(val)
                         else:
                             merged = list(val)
-                        tool_config.flags = merged
+                        # Store as namespaced key for subst() lookup
+                        tool_overrides[f"{tool_name}.flags"] = merged
                 elif key == "ldflags":
                     # ldflags are link flags - only apply to link commands
                     if is_link_command:
@@ -930,10 +949,15 @@ class Resolver:
                             merged = list(existing_flags) + list(val)
                         else:
                             merged = list(val)
-                        tool_config.flags = merged
+                        # Store as namespaced key for subst() lookup
+                        tool_overrides[f"{tool_name}.flags"] = merged
+                elif key == "linker_cmd":
+                    # linker_cmd overrides link.cmd (e.g., clang++ for C++ linking)
+                    if is_link_command:
+                        tool_overrides[f"{tool_name}.cmd"] = val
                 else:
-                    # Set directly (includes, defines, libs, libdirs)
-                    setattr(tool_config, key, val)
+                    # Set as namespaced key (includes, defines, libs, libdirs)
+                    tool_overrides[f"{tool_name}.{key}"] = val
 
         # Use typed marker objects for generator-agnostic path references
         # SourcePath/TargetPath are preserved through subst() and converted
@@ -945,6 +969,10 @@ class Resolver:
         extra_vars["SOURCES"] = SourcePath()  # Generator handles single vs. multiple
         extra_vars["TARGET"] = TargetPath()
         extra_vars["TARGETS"] = TargetPath()  # Generator handles single vs. multiple
+
+        # Add tool-specific overrides from context (includes, defines, flags, libs, etc.)
+        # These take precedence over tool_config values in namespace lookup
+        extra_vars.update(tool_overrides)
 
         # Expand the command template to a list of tokens
         # Tokens stay separate for proper quoting - generator joins with shell quoting

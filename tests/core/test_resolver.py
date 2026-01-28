@@ -753,3 +753,265 @@ class TestResolverToolAgnostic:
 
         assert prog._resolved
         assert prog.output_nodes[0].path.name == "myapp.exe"
+
+
+class TestResolverPrecompiledObjects:
+    """Tests for passing pre-compiled objects and unrecognized files as sources."""
+
+    def test_precompiled_object_as_source(self, tmp_path, gcc_toolchain):
+        """Pre-compiled .o files are included in linking."""
+        from pcons.core.node import FileNode
+
+        # Create source file
+        main_src = tmp_path / "main.c"
+        main_src.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        # Create a pre-compiled object node (simulating output from env.cc.Object())
+        helper_obj = FileNode(tmp_path / "build" / "helper.o")
+
+        # Create program with both a source file and the pre-compiled object
+        prog = project.Program("myapp", env)
+        prog.add_sources([str(main_src), helper_obj])
+
+        project.resolve()
+
+        assert prog._resolved
+        # Should have 2 object nodes: main.o (compiled by Program) and helper.o (passed through)
+        assert len(prog.object_nodes) == 2
+
+        # Check that both objects are present
+        obj_paths = [str(obj.path) for obj in prog.object_nodes]
+        assert any("main.o" in p for p in obj_paths)
+        assert any("helper.o" in p for p in obj_paths)
+
+    def test_unrecognized_file_passed_through(self, tmp_path, gcc_toolchain):
+        """Files without source handlers pass through directly to linker."""
+        from pcons.core.node import FileNode
+
+        main_src = tmp_path / "main.c"
+        main_src.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        # Create a FileNode for an object file directly (simulating external object)
+        external_obj = FileNode(tmp_path / "external.o")
+
+        # Pass both source and object to Program
+        prog = project.Program("myapp", env)
+        prog.add_sources([str(main_src), external_obj])
+
+        project.resolve()
+
+        assert prog._resolved
+        # Should have 2 object nodes
+        assert len(prog.object_nodes) == 2
+
+        # The external.o should be passed through unchanged
+        obj_paths = [obj.path for obj in prog.object_nodes]
+        assert tmp_path / "external.o" in obj_paths
+
+    def test_linker_script_passed_through(self, tmp_path, gcc_toolchain):
+        """Linker scripts (.ld) and other unrecognized files pass through."""
+        from pcons.core.node import FileNode
+
+        main_src = tmp_path / "main.c"
+        main_src.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        # Create a linker script node
+        linker_script = FileNode(tmp_path / "custom.ld")
+
+        prog = project.Program("myapp", env)
+        prog.add_sources([str(main_src), linker_script])
+
+        project.resolve()
+
+        assert prog._resolved
+        # Should have 2 object nodes (main.o and the linker script)
+        assert len(prog.object_nodes) == 2
+
+        obj_paths = [obj.path for obj in prog.object_nodes]
+        assert tmp_path / "custom.ld" in obj_paths
+
+    def test_mixed_sources_and_objects(self, tmp_path, gcc_toolchain):
+        """Mix of .c sources and .o objects all end up in object_nodes."""
+        from pcons.core.node import FileNode
+
+        # Create multiple source files
+        src1 = tmp_path / "main.c"
+        src1.write_text("int main() { return 0; }")
+        src2 = tmp_path / "util.c"
+        src2.write_text("void util() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        # Pre-compiled objects
+        obj1 = FileNode(tmp_path / "lib1.o")
+        obj2 = FileNode(tmp_path / "lib2.o")
+
+        prog = project.Program("myapp", env)
+        prog.add_sources([str(src1), obj1, str(src2), obj2])
+
+        project.resolve()
+
+        assert prog._resolved
+        # 2 compiled from .c sources + 2 passed through .o files = 4 total
+        assert len(prog.object_nodes) == 4
+
+
+class TestResolverFlagAccumulation:
+    """Test that flags don't accumulate across source files (Bug #2 fix)."""
+
+    def test_no_flag_accumulation_multiple_sources(self, tmp_path, gcc_toolchain):
+        """Test that context flags don't accumulate across multiple source files."""
+        # Create multiple source files
+        src1 = tmp_path / "file1.c"
+        src1.write_text("void func1() {}")
+        src2 = tmp_path / "file2.c"
+        src2.write_text("void func2() {}")
+        src3 = tmp_path / "file3.c"
+        src3.write_text("void func3() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+
+        # Add a define to check for accumulation
+        target = project.SharedLibrary(
+            "mylib", env, sources=[str(src1), str(src2), str(src3)]
+        )
+        target.private.defines.append("TEST_DEFINE")
+
+        project.resolve()
+
+        assert target._resolved
+        assert len(target.object_nodes) == 3
+
+        # Check that each object node has the same defines - no accumulation
+        for obj_node in target.object_nodes:
+            context = obj_node._build_info["context"]
+            # Should have exactly one occurrence of TEST_DEFINE
+            assert context.defines.count("TEST_DEFINE") == 1
+
+    def test_no_flag_accumulation_with_compile_flags(self, tmp_path, gcc_toolchain):
+        """Test that compile flags don't accumulate across source files."""
+        src1 = tmp_path / "a.c"
+        src1.write_text("void a() {}")
+        src2 = tmp_path / "b.c"
+        src2.write_text("void b() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+
+        target = project.SharedLibrary("mylib", env, sources=[str(src1), str(src2)])
+        target.private.compile_flags.append("-Wall")
+
+        project.resolve()
+
+        # Check that each object has -Wall exactly once in context.flags
+        for obj_node in target.object_nodes:
+            context = obj_node._build_info["context"]
+            # The flag should appear exactly once
+            wall_count = context.flags.count("-Wall")
+            assert wall_count == 1, f"Expected 1 occurrence of -Wall, got {wall_count}"
+
+
+class TestResolverCxxLinker:
+    """Test that C++ code uses C++ linker (Bug #1 fix)."""
+
+    def test_cxx_program_uses_cxx_linker(self, tmp_path, gcc_toolchain):
+        """Test that C++ program gets linker_cmd override to use clang++/g++."""
+        src_file = tmp_path / "main.cpp"
+        src_file.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cxx")
+        env.cxx.cmd = "g++"  # Set C++ compiler command
+
+        target = project.Program("myapp", env, sources=[str(src_file)])
+        project.resolve()
+
+        assert target._resolved
+        assert len(target.output_nodes) == 1
+
+        # Check that the output node has linker_cmd override
+        output_node = target.output_nodes[0]
+        context = output_node._build_info["context"]
+        assert context.linker_cmd == "g++", (
+            f"Expected linker_cmd='g++', got '{context.linker_cmd}'"
+        )
+
+    def test_cxx_shared_library_uses_cxx_linker(self, tmp_path, gcc_toolchain):
+        """Test that C++ shared library gets linker_cmd override."""
+        src_file = tmp_path / "lib.cpp"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cxx")
+        env.cxx.cmd = "clang++"
+
+        target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
+        project.resolve()
+
+        assert target._resolved
+        output_node = target.output_nodes[0]
+        context = output_node._build_info["context"]
+        assert context.linker_cmd == "clang++"
+
+    def test_c_program_no_linker_override(self, tmp_path, gcc_toolchain):
+        """Test that pure C program doesn't get linker_cmd override."""
+        src_file = tmp_path / "main.c"
+        src_file.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+
+        target = project.Program("myapp", env, sources=[str(src_file)])
+        project.resolve()
+
+        assert target._resolved
+        output_node = target.output_nodes[0]
+        context = output_node._build_info["context"]
+        # C code should not have linker_cmd override
+        assert context.linker_cmd is None
+
+    def test_mixed_c_cxx_uses_cxx_linker(self, tmp_path, gcc_toolchain):
+        """Test that mixed C/C++ program uses C++ linker."""
+        c_file = tmp_path / "util.c"
+        c_file.write_text("void util() {}")
+        cpp_file = tmp_path / "main.cpp"
+        cpp_file.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.add_tool("cxx")
+        env.cxx.cmd = "g++"
+
+        target = project.Program("myapp", env, sources=[str(c_file), str(cpp_file)])
+        project.resolve()
+
+        assert target._resolved
+        output_node = target.output_nodes[0]
+        context = output_node._build_info["context"]
+        # Mixed C/C++ should use C++ linker
+        assert context.linker_cmd == "g++"
