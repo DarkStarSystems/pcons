@@ -1004,17 +1004,19 @@ pcons generate --graph=deps.dot      # DOT format
 Copy files to destination directories (paths are relative to `build_dir`):
 
 ```python
-# Install library and headers
+# Install library and headers (Install takes a list of sources)
 project.Install("dist/lib", [mylib])
 project.Install("dist/include", header_nodes)
 
-# Install with rename
+# Install with rename (InstallAs takes a single source, not a list)
 project.InstallAs("bundle/plugin.ofx", plugin_lib)
 
 # Install an entire directory tree (recursive copy)
 # Copies src_dir/assets/* to build/dist/assets/*
 project.InstallDir("dist", src_dir / "assets")
 ```
+
+**Note:** `Install()` accepts a list of sources and copies each to the destination directory. `InstallAs()` takes exactly one source and copies it to the specified path (with optional rename). If you need to install multiple files with renaming, use multiple `InstallAs()` calls.
 
 `InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run.
 
@@ -1100,6 +1102,17 @@ env.Command(
 | `$TARGETS` | All target files (space-separated) |
 | `${SOURCES[n]}` | Indexed source access (0-based) |
 | `${TARGETS[n]}` | Indexed target access (0-based) |
+| `$$` | Literal `$` (escaped) |
+
+Use `$$` to include a literal dollar sign in commands. This is useful for shell variables that should be expanded at build time rather than generation time:
+
+```python
+# Set rpath to $ORIGIN for portable shared libraries
+env.link.flags.append("-Wl,-rpath,'$$ORIGIN'")
+
+# Use shell environment variables
+env.Command("output.txt", "input.txt", "echo $$HOME > $TARGET")
+```
 
 The command runs during the build phase, and Ninja tracks dependencies so the command only re-runs when sources change.
 
