@@ -427,7 +427,8 @@ class MakefileGenerator(BaseGenerator):
         if not is_output_node:
             return command
 
-        post_build_cmds = getattr(target, "_post_build_commands", [])
+        builder_data = getattr(target, "_builder_data", {}) or {}
+        post_build_cmds = builder_data.get("post_build_commands", [])
         if not post_build_cmds:
             return command
 

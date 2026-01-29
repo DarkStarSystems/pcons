@@ -148,7 +148,7 @@ class ArchiveNodeFactory:
         if target._builder_name not in ("Tarfile", "Zipfile"):
             return
 
-        if target._builder_data is None:
+        if not target._builder_data:
             return
 
         # Resolve pending sources to FileNodes

@@ -348,11 +348,9 @@ class TestPostBuild:
 
         target.post_build("install_name_tool -add_rpath @loader_path $out")
 
-        assert len(target._post_build_commands) == 1
-        assert (
-            target._post_build_commands[0]
-            == "install_name_tool -add_rpath @loader_path $out"
-        )
+        post_build_cmds = target._builder_data.get("post_build_commands", [])
+        assert len(post_build_cmds) == 1
+        assert post_build_cmds[0] == "install_name_tool -add_rpath @loader_path $out"
 
     def test_post_build_fluent_returns_self(self):
         """post_build() returns self for chaining."""
@@ -370,16 +368,14 @@ class TestPostBuild:
         target.post_build("install_name_tool -change /old/path @rpath/lib.dylib $out")
         target.post_build("codesign --sign - $out")
 
-        assert len(target._post_build_commands) == 3
+        post_build_cmds = target._builder_data.get("post_build_commands", [])
+        assert len(post_build_cmds) == 3
+        assert post_build_cmds[0] == "install_name_tool -add_rpath @loader_path $out"
         assert (
-            target._post_build_commands[0]
-            == "install_name_tool -add_rpath @loader_path $out"
-        )
-        assert (
-            target._post_build_commands[1]
+            post_build_cmds[1]
             == "install_name_tool -change /old/path @rpath/lib.dylib $out"
         )
-        assert target._post_build_commands[2] == "codesign --sign - $out"
+        assert post_build_cmds[2] == "codesign --sign - $out"
 
     def test_post_build_chain_with_other_methods(self, tmp_path):
         """post_build() can be chained with other fluent methods."""
@@ -395,11 +391,13 @@ class TestPostBuild:
 
         assert result is target
         assert len(target.sources) == 1
-        assert len(target._post_build_commands) == 1
+        post_build_cmds = target._builder_data.get("post_build_commands", [])
+        assert len(post_build_cmds) == 1
         assert "DEBUG" in target.private.defines
 
     def test_post_build_empty_by_default(self):
         """Target has no post_build commands by default."""
         target = Target("app")
 
-        assert target._post_build_commands == []
+        post_build_cmds = target._builder_data.get("post_build_commands", [])
+        assert post_build_cmds == []

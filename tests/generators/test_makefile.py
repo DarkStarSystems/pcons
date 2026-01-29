@@ -299,7 +299,10 @@ class TestMakefilePostBuild:
         target._env = MockEnv()
         target.object_nodes.append(output_node)
         target.output_nodes.append(output_node)
-        target._post_build_commands = ["chmod +x $out", "echo 'Built $out'"]
+        target._builder_data["post_build_commands"] = [
+            "chmod +x $out",
+            "echo 'Built $out'",
+        ]
         project.add_target(target)
         project._resolved = True  # Skip auto-resolve since we set up nodes manually
 

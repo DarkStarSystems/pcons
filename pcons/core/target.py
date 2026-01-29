@@ -8,7 +8,6 @@ and carries "usage requirements" that propagate to consumers (CMake-style).
 from __future__ import annotations
 
 import logging
-import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -164,15 +163,15 @@ class Target:
         "output_name",
         # Lazy source resolution (for Install, etc.):
         "_pending_sources",
-        # Post-build commands:
-        "_post_build_commands",
-        # Auxiliary input files (e.g., .def files passed to linker on Windows):
-        "_auxiliary_inputs",
         # Build info for archive and command targets:
         "_build_info",
         # Generic builder support (extensible builder architecture):
         "_builder_name",  # Name of the builder that created this target
-        "_builder_data",  # Builder-specific data (replaces hardcoded _install_* fields)
+        # Builder-specific data dict. Contains:
+        #   - "post_build_commands": list[str] - Shell commands run after target is built
+        #   - "auxiliary_inputs": list[tuple[FileNode, str]] - Files passed to linker with flags
+        #   - Other builder-specific data (dest_dir, compression, etc.)
+        "_builder_data",
     )
 
     def __init__(
@@ -220,16 +219,13 @@ class Target:
         # Lazy source resolution (for Install, etc.):
         # Sources that need resolution after main resolve phase
         self._pending_sources: list[Target | Node | Path | str] | None = None
-        # Post-build commands (shell commands run after target is built)
-        self._post_build_commands: list[str] = []
-        # Auxiliary input files (e.g., .def files passed to linker on Windows)
-        # Each entry is (FileNode, flag_string) where flag_string is the tool flag
-        self._auxiliary_inputs: list[tuple[FileNode, str]] = []
         # Build info for archive and command targets
         self._build_info: dict[str, Any] | None = None
         # Generic builder support (extensible builder architecture)
         self._builder_name: str | None = None
-        self._builder_data: dict[str, Any] | None = None
+        # Builder-specific data dict, initialized to empty dict (not None)
+        # Contains: post_build_commands, auxiliary_inputs, and builder-specific data
+        self._builder_data: dict[str, Any] = {}
 
     @property
     def sources(self) -> list[Node]:
@@ -254,17 +250,20 @@ class Target:
 
     @sources.setter
     def sources(self, value: list[Node]) -> None:
-        """Set the sources list with a warning about direct assignment.
+        """Raise an error on direct assignment to sources.
 
-        Direct assignment replaces all sources. Use add_source() or add_sources()
-        for the fluent API.
+        Direct assignment to .sources is not allowed. Use add_source() or
+        add_sources() instead. This ensures consistent source management
+        and proper handling of Target sources (which need deferred resolution).
+
+        Raises:
+            AttributeError: Always, with guidance on proper methods to use.
         """
-        warnings.warn(
-            f"Direct assignment to {self.name}.sources replaces all sources. "
-            "Consider using add_source() or add_sources() instead.",
-            stacklevel=2,
+        raise AttributeError(
+            f"Cannot assign directly to {self.name}.sources. "
+            f"Use add_source() or add_sources() instead. "
+            f"Example: target.add_sources({value!r})"
         )
-        self._sources = value
 
     def link(self, *targets: Target) -> Target:
         """Add targets as dependencies (fluent API).
@@ -479,7 +478,9 @@ class Target:
             plugin.post_build("install_name_tool -add_rpath @loader_path $out")
             plugin.post_build("codesign --sign - $out")
         """
-        self._post_build_commands.append(command)
+        if "post_build_commands" not in self._builder_data:
+            self._builder_data["post_build_commands"] = []
+        self._builder_data["post_build_commands"].append(command)
         return self
 
     def collect_usage_requirements(self) -> UsageRequirements:

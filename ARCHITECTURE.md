@@ -935,7 +935,7 @@ project.Install("dist/", [lib, archive, generated])
 ### Scanner
 > **Status: Partial** - Scanner protocol defined. Build-time depfiles work via Ninja. Configure-time scanning not yet implemented.
 
-A Scanner discovers implicit dependencies.
+A Scanner discovers implicit dependencies (e.g., C/C++ header includes).
 
 ```python
 class Scanner(Protocol):
@@ -949,6 +949,19 @@ class Scanner(Protocol):
         ...
 ```
 
+**Current Status Note:**
+
+Configure-time scanning (parsing source files during the generate phase to extract
+dependencies) is **not yet implemented** and is deferred. For C/C++ projects, this is
+not a problem because modern compilers support depfile generation, which is more
+accurate and doesn't require pcons to understand the preprocessor.
+
+**Why configure-time scanning is deferred:**
+- Build-time depfiles are more accurate (compiler knows all includes, macros, etc.)
+- Implementing a correct C/C++ scanner requires handling preprocessor conditionals
+- Most tools that pcons targets already support depfile generation
+- Adding a scanner for a language can be done later without breaking existing builds
+
 **Scanning strategies:**
 
 1. **Build-time depfiles** (preferred): Compiler generates deps during build
@@ -958,10 +971,12 @@ class Scanner(Protocol):
      deps = gcc
      command = gcc -MD -MF $out.d -c -o $out $in
    ```
+   This is what pcons uses for C/C++ via toolchain SourceHandler.depfile settings.
 
-2. **Configure-time scanning**: Parse sources during generate phase
-   - Used when tool doesn't support depfiles
-   - Results embedded in build graph
+2. **Configure-time scanning** (not yet implemented): Parse sources during generate phase
+   - Would be used when tool doesn't support depfiles
+   - Results would be embedded in build graph
+   - Example use case: custom template languages, document includes
 
 ### Generator
 > **Status: Implemented** - Ninja and Makefile generators fully implemented. CompileCommandsGenerator and MermaidGenerator available. IDE generators planned.
@@ -1224,6 +1239,85 @@ if platform.is_macos():
 
 ---
 
+## Platform-Specific Features
+
+### Windows Manifest Support
+> **Status: Implemented** - Located in `pcons/contrib/windows/manifest.py`
+
+Windows applications require SxS manifests for proper DPI awareness, visual styles,
+UAC elevation, and assembly dependencies. Pcons provides helpers to generate these
+manifests and embed them in executables.
+
+```python
+from pcons.contrib.windows import manifest
+
+# Create application manifest with common settings
+app_manifest = manifest.create_app_manifest(
+    project, env,
+    output="app.manifest",
+    dpi_aware="PerMonitorV2",     # Windows 10+ DPI awareness
+    visual_styles=True,           # Modern UI controls
+    uac_level="asInvoker",        # Run without elevation
+    supported_os=["win10", "win81", "win7"],
+)
+
+# Add to program sources - automatically embedded by MSVC linker
+app = project.Program("myapp", env)
+app.add_sources(["main.c", app_manifest])
+```
+
+For private DLL assemblies:
+```python
+# Create assembly manifest for DLL collection
+assembly = manifest.create_assembly_manifest(
+    project, env,
+    name="MyApp.Libraries",
+    version="1.0.0.0",
+    dlls=[mylib, helper_lib],
+)
+```
+
+### Installer Generation
+> **Status: Implemented** - Located in `pcons/contrib/installers/`
+
+Pcons provides platform-specific installer generation helpers:
+
+**macOS** (`pcons/contrib/installers/macos.py`):
+- `create_component_pkg()`: Simple .pkg with pkgbuild
+- `create_pkg()`: Full product archive with productbuild (UI customization, license)
+- `create_dmg()`: Disk image with optional /Applications symlink
+
+```python
+from pcons.contrib.installers import macos
+
+# Create a .pkg installer
+pkg = macos.create_pkg(
+    project, env,
+    name="MyApp",
+    version="1.0.0",
+    identifier="com.example.myapp",
+    sources=[app],
+    install_location="/Applications",
+    welcome=Path("installer/welcome.rtf"),
+)
+
+# Create a drag-and-drop .dmg
+dmg = macos.create_dmg(
+    project, env,
+    name="MyApp",
+    sources=[app_bundle],
+    applications_symlink=True,
+)
+```
+
+**Windows** (`pcons/contrib/installers/windows.py`):
+- `create_msix()`: Modern MSIX package for Windows 10+
+
+Staging directories (`.pkg_staging/`, `.dmg_staging/`, `.msix_staging/`) are
+validated to ensure they don't conflict with user build outputs.
+
+---
+
 ## File Organization
 > **Note:** This shows the file organization with implementation status.
 
@@ -1236,7 +1330,13 @@ pcons/
 ├── contrib/
 │   ├── __init__.py          # Contrib package init ............... [Implemented]
 │   ├── bundle.py            # Bundle creation helpers ............ [Implemented]
-│   └── platform.py          # Platform detection utilities ....... [Implemented]
+│   ├── platform.py          # Platform detection utilities ....... [Implemented]
+│   ├── installers/          # Platform installer generation
+│   │   ├── __init__.py
+│   │   ├── macos.py         # .pkg and .dmg creation ............ [Implemented]
+│   │   └── windows.py       # MSIX package creation .............. [Implemented]
+│   └── windows/
+│       └── manifest.py      # Windows SxS manifest generation .... [Implemented]
 ├── core/
 │   ├── __init__.py
 │   ├── node.py              # Node hierarchy ..................... [Implemented]

@@ -139,7 +139,7 @@ class InstallNodeFactory:
         This is called after main resolution when output_nodes are populated,
         allowing Install targets to reference outputs from other targets.
         """
-        if target._builder_data is None:
+        if not target._builder_data:
             return
 
         builder_name = target._builder_name

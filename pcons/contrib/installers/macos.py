@@ -49,6 +49,59 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
 
 
+# Reserved staging directory prefixes for installer generation.
+# These are used in the build directory and should not conflict with user outputs.
+_RESERVED_STAGING_PREFIXES = frozenset(
+    {".pkg_staging", ".dmg_staging", ".msix_staging"}
+)
+
+
+def _validate_staging_path(project: Project, staging_prefix: str) -> None:
+    """Validate that the staging path doesn't conflict with user build outputs.
+
+    Checks that no existing targets or nodes in the project have paths that would
+    conflict with the staging directory. This prevents accidental overwrites and
+    ensures installer staging is isolated from user outputs.
+
+    Args:
+        project: The project to check for conflicts.
+        staging_prefix: The staging directory prefix (e.g., ".pkg_staging").
+
+    Raises:
+        ValueError: If a conflict is detected with existing build outputs.
+    """
+    staging_path = project.build_dir / staging_prefix
+
+    # Check for conflicts with existing targets' output nodes
+    for target in project.targets:
+        for node in target.output_nodes:
+            node_path = node.path
+            try:
+                # Check if node path would be under or conflict with staging
+                node_path.relative_to(staging_path)
+                raise ValueError(
+                    f"Installer staging path '{staging_path}' conflicts with "
+                    f"target '{target.name}' output: {node_path}. "
+                    f"Rename the target's output or use a different build directory."
+                )
+            except ValueError:
+                # Not under staging path - this is expected
+                pass
+
+    # Check for conflicts with existing nodes in project
+    for node_path in project._nodes:
+        try:
+            node_path.relative_to(staging_path)
+            raise ValueError(
+                f"Installer staging path '{staging_path}' conflicts with "
+                f"existing build node: {node_path}. "
+                f"This may indicate a naming conflict in your build configuration."
+            )
+        except ValueError:
+            # Not under staging path - this is expected
+            pass
+
+
 def create_component_pkg(
     project: Project,
     env: Environment,
@@ -87,6 +140,7 @@ def create_component_pkg(
 
     Raises:
         ToolNotFoundError: If pkgbuild is not found.
+        ValueError: If staging path conflicts with existing build outputs.
     """
     check_tool("pkgbuild", "Install Xcode Command Line Tools: xcode-select --install")
 
@@ -94,6 +148,9 @@ def create_component_pkg(
         output = Path(f"{identifier}-{version}.pkg")
     else:
         output = Path(output)
+
+    # Validate staging path doesn't conflict with user outputs
+    _validate_staging_path(project, ".pkg_staging")
 
     # Stage files to a temporary directory
     staging_rel = Path(".pkg_staging") / identifier / "payload"
@@ -186,6 +243,7 @@ def create_pkg(
 
     Raises:
         ToolNotFoundError: If pkgbuild or productbuild is not found.
+        ValueError: If staging path conflicts with existing build outputs.
     """
     check_tool("pkgbuild", "Install Xcode Command Line Tools: xcode-select --install")
     check_tool(
@@ -200,6 +258,9 @@ def create_pkg(
         output = Path(output)
 
     title = title or name
+
+    # Validate staging path doesn't conflict with user outputs
+    _validate_staging_path(project, ".pkg_staging")
 
     # Set up staging directories
     staging_base_rel = Path(".pkg_staging") / name
@@ -372,6 +433,7 @@ def create_dmg(
 
     Raises:
         ToolNotFoundError: If hdiutil is not found.
+        ValueError: If staging path conflicts with existing build outputs.
     """
     check_tool("hdiutil", "hdiutil should be available on macOS")
 
@@ -380,6 +442,9 @@ def create_dmg(
         output = Path(f"{name}.dmg")
     else:
         output = Path(output)
+
+    # Validate staging path doesn't conflict with user outputs
+    _validate_staging_path(project, ".dmg_staging")
 
     # Stage files to a temporary directory
     staging_rel = Path(".dmg_staging") / name

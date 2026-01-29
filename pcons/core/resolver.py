@@ -1,25 +1,53 @@
 # SPDX-License-Identifier: MIT
 """Target resolution system for target-centric builds.
 
-The Resolver is responsible for:
-1. Computing effective requirements for each target
-2. Creating object nodes for source files with the effective flags
-3. Creating output nodes (libraries, programs) with proper dependencies
-4. Object file caching (same source + same flags = shared object)
-5. Expanding command templates to fully-resolved commands
+Resolution Overview
+-------------------
+The Resolver transforms high-level Target descriptions into concrete build nodes
+that generators can emit. This happens in three distinct phases:
 
-The resolver is designed to be tool-agnostic: it delegates source handling
-to the toolchain rather than having hardcoded knowledge about file types.
+**Phase 1: Main Resolution** (resolve() -> _resolve_target())
+    For each target in dependency order:
+    1. Compute effective requirements by merging target's own requirements with
+       public requirements from all dependencies (transitive).
+    2. Query toolchain for source handlers to determine how each source file
+       should be compiled (tool-agnostic - no hardcoded C/C++ knowledge).
+    3. Create object nodes for compilable sources, linking them to their commands.
+    4. Create output nodes (library/program) with proper dependencies on objects.
+
+**Phase 2: Pending Source Resolution** (resolve_pending_sources())
+    Some targets (Install, Tarfile, etc.) reference other targets' outputs.
+    Since output_nodes aren't populated until Phase 1 completes, these targets
+    store their sources as "pending" and resolve them in this phase.
+
+**Phase 3: Command Expansion** (_expand_node_commands())
+    After all nodes are created, expand command templates by:
+    1. Getting the command template from env.<tool>.<command_var>
+    2. Applying context overrides (includes, defines, flags) from ToolchainContext
+    3. Calling env.subst_list() to expand variables
+    4. Storing fully-expanded command tokens in node._build_info["command"]
+
+Key Design Decisions
+--------------------
+- **Tool-agnostic**: The resolver asks toolchains how to handle sources rather
+  than having hardcoded knowledge of file extensions or compile commands.
+
+- **Object caching**: Same source + same effective requirements = shared object.
+  This avoids duplicate compilations when multiple targets share a source file
+  with identical compile flags.
+
+- **Factory pattern**: Resolution logic is split into focused factories:
+  - ObjectNodeFactory: Object file creation and caching
+  - OutputNodeFactory: Library and program output creation
+  - Builder factories (from BuilderRegistry): Pending source resolution
+
+- **Lazy resolution**: Targets are just descriptions until resolve() is called.
+  This allows customization (output_name, flags) after target creation.
 
 The resolution logic is organized into focused factory classes:
 - ObjectNodeFactory: Creates and caches object nodes for source files
 - OutputNodeFactory: Creates library and program output nodes
-- InstallNodeFactory: Creates install/copy nodes for install targets
-
-Command expansion happens in the resolver so that generators receive
-fully-expanded commands with $SOURCE/$TARGET placeholders. Each generator
-then converts these to its native syntax (Ninja: $in/$out, Makefile: paths).
-This ensures consistent command handling across all generators.
+- InstallNodeFactory (in pcons/tools/install.py): Creates install/copy nodes
 """
 
 from __future__ import annotations
@@ -52,8 +80,35 @@ if TYPE_CHECKING:
 class ObjectNodeFactory:
     """Factory for creating and caching object file nodes.
 
-    Handles object node creation with caching to avoid duplicate compilations
-    when the same source is compiled with the same effective requirements.
+    Object Node Caching Strategy
+    ----------------------------
+    When multiple targets share a source file with identical effective requirements,
+    the same object file can be reused. The cache key is:
+
+        (source_path.resolve(), effective_requirements.as_hashable_tuple())
+
+    For example, if lib_a and lib_b both compile "common.cpp" with the same includes
+    and defines, only one object file is created. This is safe because:
+    - Effective requirements fully determine the compile command
+    - The source path is resolved to absolute to avoid path aliasing
+
+    However, if lib_a adds "-DDEBUG" and lib_b does not, they get separate objects
+    because their effective requirements differ.
+
+    Tool-Agnostic Source Handling
+    -----------------------------
+    The factory queries the toolchain to determine how to compile each source:
+
+        handler = toolchain.get_source_handler(source.path.suffix)
+
+    If a handler is returned, it provides:
+    - tool_name: Which tool to use (e.g., "cc", "cxx")
+    - language: For linker selection (e.g., "c", "cxx", "cuda")
+    - object_suffix: Output suffix (e.g., ".o", ".obj")
+    - depfile: How to track header dependencies
+    - command_var: Which command template to use (e.g., "objcmd")
+
+    If no handler is found, the source passes through as-is (pre-compiled .o files).
 
     Attributes:
         project: The project being resolved.
@@ -140,18 +195,33 @@ class ObjectNodeFactory:
     def _resolve_depfile(
         self, depfile_spec: TargetPath | None, target_path: Path
     ) -> PathToken | None:
-        """Resolve depfile specification to a PathToken.
+        """Resolve depfile specification to a concrete PathToken.
 
-        Converts TargetPath markers to PathToken with the actual target path.
+        Dependency files (depfiles) are used by build systems like Ninja to track
+        implicit dependencies discovered during compilation (typically C/C++ header
+        includes). The compiler generates a depfile alongside the object file, and
+        the build system uses it for incremental rebuilds.
+
+        This method converts a TargetPath marker (which represents "the depfile path
+        relative to the target") into a concrete PathToken that generators can use.
+
+        Example flow:
+            1. SourceHandler specifies: depfile=TargetPath(suffix=".d")
+            2. Target path is: build/obj.hello/main.o
+            3. This method returns: PathToken(path="build/obj.hello/main.o", suffix=".d")
+            4. Generator writes: depfile = build/obj.hello/main.o.d
+
+        The depfile location is always derived from the target path to ensure it's
+        in the build directory and properly associated with the object file.
 
         Args:
             depfile_spec: The depfile specification from SourceHandler.
-                - TargetPath(suffix=".d"): Convert to PathToken
-                - None: No depfile
-            target_path: The actual target output path.
+                - TargetPath(suffix=".d"): Depfile is target path + ".d" suffix
+                - None: No depfile (tool doesn't support dependency tracking)
+            target_path: The actual target output path (object file).
 
         Returns:
-            PathToken for TargetPath, None for None.
+            PathToken with concrete path for TargetPath input, None for None input.
         """
         if depfile_spec is None:
             return None
@@ -394,7 +464,8 @@ class OutputNodeFactory:
             lib_node.depends(dep_libs)
 
         # Add auxiliary input files as dependencies
-        auxiliary_inputs = getattr(target, "_auxiliary_inputs", [])
+        builder_data = getattr(target, "_builder_data", {}) or {}
+        auxiliary_inputs = builder_data.get("auxiliary_inputs", [])
         if auxiliary_inputs:
             linker_input_nodes = [node for node, _ in auxiliary_inputs]
             lib_node.depends(linker_input_nodes)
@@ -479,7 +550,8 @@ class OutputNodeFactory:
             prog_node.depends(dep_libs)
 
         # Add auxiliary input files as dependencies
-        auxiliary_inputs = getattr(target, "_auxiliary_inputs", [])
+        builder_data_prog = getattr(target, "_builder_data", {}) or {}
+        auxiliary_inputs = builder_data_prog.get("auxiliary_inputs", [])
         if auxiliary_inputs:
             linker_input_nodes = [node for node, _ in auxiliary_inputs]
             prog_node.depends(linker_input_nodes)
@@ -763,7 +835,8 @@ class Resolver:
                     trace("resolve", "    %s -> %s", source.path, obj_node.path)
 
         # Store auxiliary inputs on the target for use by output factories
-        target._auxiliary_inputs = auxiliary_inputs
+        if auxiliary_inputs:
+            target._builder_data["auxiliary_inputs"] = auxiliary_inputs
 
         # Create output node(s) based on target type (delegated to factory)
         trace("resolve", "  Creating output for type: %s", target.target_type)
@@ -789,14 +862,19 @@ class Resolver:
     def _determine_language(self, target: Target, env: Environment) -> str | None:
         """Determine the primary language for a target based on its sources.
 
-        Uses all toolchains to determine language (tool-agnostic).
+        Uses toolchains to determine language in a tool-agnostic way:
+        1. Queries each toolchain's source handlers to identify languages
+        2. Uses the toolchain's language_priority to select the strongest language
+
+        This keeps the core tool-agnostic - no hardcoded knowledge of C/C++.
+        The toolchain defines what languages it handles and their priorities.
 
         Args:
             target: The target to analyze.
             env: Environment containing the toolchain(s).
 
         Returns:
-            Language name ('c', 'cxx', etc.) or None.
+            Language name (e.g., 'c', 'cxx', 'cuda') or None if no sources.
         """
         languages: set[str] = set()
 
@@ -809,12 +887,28 @@ class Resolver:
                         languages.add(handler.language)
                         break  # First handler wins for this source
 
-        # Return highest priority language
-        if "cxx" in languages or "objcxx" in languages:
-            return "cxx"
-        if "c" in languages or "objc" in languages:
-            return "c"
-        return None
+        if not languages:
+            return None
+
+        # Use the primary toolchain's language_priority to determine strongest language
+        # This delegates the priority decision to the toolchain, keeping core tool-agnostic
+        primary_toolchain = env._toolchain
+        if primary_toolchain is None:
+            # No toolchain - return any language we found
+            return next(iter(languages))
+
+        # Find highest priority language according to toolchain
+        priority = getattr(primary_toolchain, "language_priority", {})
+        max_priority = -1
+        max_lang: str | None = None
+
+        for lang in languages:
+            p = priority.get(lang, 0)
+            if p > max_priority:
+                max_priority = p
+                max_lang = lang
+
+        return max_lang
 
     def resolve_pending_sources(self) -> None:
         """Resolve _pending_sources for all targets that have them.
