@@ -1888,90 +1888,115 @@ cuda_toolchain = find_cuda_toolchain()
 
 ## Feature Detection
 
-Pcons provides a configuration system for detecting compiler capabilities, headers, and types. This is useful for generating config headers or conditionally enabling features.
+Pcons provides a two-part configuration system for detecting compiler capabilities and generating config headers. The two parts have distinct roles:
 
-### Configure and ToolChecks
+- **`ToolChecks`** — does the real work: compiles test programs to probe for flags, headers, types, functions, and macros. Stores results through `Configure`.
+- **`Configure`** — manages caching (persists results to `build/pcons_config.json` so subsequent runs are fast), accumulates `#define` entries, and generates `config.h`.
+
+### ToolChecks: Probing the Compiler
+
+`ToolChecks` compiles small test programs with your actual compiler to detect what's available. It needs both a `Configure` (for caching) and an `Environment` (to know which compiler to run).
 
 ```python
+from pathlib import Path
 from pcons.configure.config import Configure
 from pcons.configure.checks import ToolChecks
 
-# Create configuration context
 config = Configure(build_dir=Path("build"))
-
-# Create environment with toolchain
 env = project.Environment(toolchain=toolchain)
 
-# Create checker for the C compiler
+# Create a checker for the C compiler
 checks = ToolChecks(config, env, "cc")
 
 # Check if a compiler flag is supported
 if checks.check_flag("-Wall").success:
     env.cc.flags.append("-Wall")
 
+if checks.check_flag("-std=c++20").success:
+    env.cxx.flags.append("-std=c++20")
+
 # Check if a header exists
 if checks.check_header("sys/mman.h").success:
     env.cc.defines.append("HAVE_MMAN_H")
 
-# Check if a type exists (optionally with headers)
+# Check if a type exists (optionally specifying which headers to include)
 if checks.check_type("size_t", headers=["stddef.h"]).success:
     pass
 
-# Get the size of a type
-int_size = checks.check_type_size("int")  # Returns 4 on most systems
+# Get the size of a type (uses compile-time assertion, no need to run)
+int_size = checks.check_type_size("int")    # Returns 4 on most systems
 ptr_size = checks.check_type_size("void*")  # 8 on 64-bit, 4 on 32-bit
+
+# Check if a function is available (compiles + links)
+if checks.check_function("pthread_create", headers=["pthread.h"], libs=["pthread"]).success:
+    env.link.libs.append("pthread")
+
+# Read a predefined compiler macro
+gcc_ver = checks.check_define("__GNUC__")  # e.g. "14"
 ```
 
-### Caching
-
-Check results are automatically cached in the build directory. Subsequent runs with the same compiler and flags will use cached results, making configuration fast:
+All results are automatically cached through `Configure`. On the first run, each check compiles a test program; on subsequent runs, cached results are returned instantly:
 
 ```python
-# First run - compiles test programs
 result1 = checks.check_flag("-Wall")
-assert result1.cached is False
+assert result1.cached is False    # First run: compiled a test
 
-# Second run - uses cache
 result2 = checks.check_flag("-Wall")
-assert result2.cached is True
+assert result2.cached is True     # Second run: from cache
+```
+
+The cache key includes the compiler path, so switching compilers invalidates the relevant entries automatically.
+
+### Configure: Caching, Defines, and Config Headers
+
+`Configure` serves as the shared state between checks and the config header generator. You can also use it directly to define values, find programs, or record features you know about without needing a compiler check:
+
+```python
+config = Configure(build_dir=Path("build"))
+
+# Find a program in PATH (result is cached)
+ninja = config.find_program("ninja")
+if ninja:
+    print(f"Found ninja {ninja.version} at {ninja.path}")
+
+# Manually define values for the config header
+config.define("VERSION_MAJOR", 1)
+config.define("VERSION_MINOR", 2)
+config.define("VERSION_STRING", "1.2.0")
+config.define("HAVE_FEATURE_A")
+
+# Mark a feature as absent
+config.undefine("MISSING_FEATURE")
+
+# Save cache for next run
+config.save()
 ```
 
 ### Generating Config Headers
 
-Use `Configure` to detect features and generate a `config.h` file:
+After running checks and defining values, generate a `config.h` with `write_config_header()`. This collects all the `#define` entries accumulated by both `ToolChecks` (via `config.set()`) and direct `config.define()` calls:
 
 ```python
-from pathlib import Path
-from pcons.configure.config import Configure
+# Run checks — results are recorded in config
+checks = ToolChecks(config, env, "cc")
+if checks.check_header("sys/mman.h").success:
+    config.define("HAVE_SYS_MMAN_H")
 
-config = Configure(build_dir=Path("build"))
-
-# Define features
-config.define("HAVE_FEATURE_A")
 config.define("VERSION_MAJOR", 1)
-config.define("VERSION_MINOR", 2)
 config.define("VERSION_STRING", "1.2.0")
-
-# Conditionally define based on checks
-if config.check_header("sys/mman.h"):
-    pass  # HAVE_SYS_MMAN_H is automatically defined
-
-# Check and record type sizes
-config.check_sizeof("int")    # Defines SIZEOF_INT
-config.check_sizeof("void*")  # Defines SIZEOF_VOIDP
-
-# Mark missing features
+config.check_sizeof("int")     # Defines SIZEOF_INT
+config.check_sizeof("void*")   # Defines SIZEOF_VOIDP
 config.undefine("MISSING_FEATURE")
 
-# Generate the header file
+# Generate the header
 config.write_config_header(
     Path("build/config.h"),
-    guard="MY_CONFIG_H",           # Custom include guard
-    include_platform=True,         # Add PCONS_OS_* and PCONS_ARCH_* defines
+    guard="MY_CONFIG_H",
+    include_platform=True,      # Add PCONS_OS_* and PCONS_ARCH_* defines
 )
 ```
 
-This generates a header like:
+This generates:
 
 ```c
 #ifndef MY_CONFIG_H
@@ -1981,17 +2006,22 @@ This generates a header like:
 #define PCONS_OS_MACOS 1
 #define PCONS_ARCH_ARM64 1
 
-/* Feature detection */
-#define HAVE_FEATURE_A 1
-#define VERSION_MAJOR 1
-#define VERSION_MINOR 2
-#define VERSION_STRING "1.2.0"
+/* Feature and header checks */
+#define HAVE_SYS_MMAN_H 1
+
+/* Type sizes */
 #define SIZEOF_INT 4
 #define SIZEOF_VOIDP 8
+
+/* Custom definitions */
+#define VERSION_MAJOR 1
+#define VERSION_STRING "1.2.0"
 /* #undef MISSING_FEATURE */
 
 #endif /* MY_CONFIG_H */
 ```
+
+Note: `config.check_sizeof()` uses Python's `ctypes` to determine sizes on the host machine. For cross-compilation where host and target sizes differ, use `ToolChecks.check_type_size()` instead — it compiles a test program with the target compiler.
 
 ---
 
