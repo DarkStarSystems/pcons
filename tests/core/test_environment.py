@@ -258,6 +258,122 @@ class TestEnvironmentOverride:
             assert temp_env is not env
 
 
+class TestCompilerCache:
+    """Tests for use_compiler_cache()."""
+
+    def test_auto_detect_skips_when_not_found(self) -> None:
+        """Auto-detect should be a no-op when no cache tool is found."""
+        env = Environment()
+        cc = env.add_tool("cc")
+        cc.set("cmd", "gcc")
+        cxx = env.add_tool("cxx")
+        cxx.set("cmd", "g++")
+
+        # This should not raise; if neither ccache nor sccache is
+        # installed, it logs a warning and returns.
+        env.use_compiler_cache()
+        # cmd might or might not be wrapped depending on the test machine
+
+    def test_explicit_tool_wraps_commands(self) -> None:
+        """Explicit tool name should wrap cc and cxx commands."""
+        import shutil
+
+        env = Environment()
+        cc = env.add_tool("cc")
+        cc.set("cmd", "gcc")
+        cxx = env.add_tool("cxx")
+        cxx.set("cmd", "g++")
+
+        # Only test if a cache tool is available
+        tool = None
+        for candidate in ("ccache", "sccache"):
+            if shutil.which(candidate):
+                tool = candidate
+                break
+
+        if tool is None:
+            pytest.skip("No compiler cache tool available")
+
+        env.use_compiler_cache(tool)
+
+        assert env.cc.cmd.startswith(tool)
+        assert env.cxx.cmd.startswith(tool)
+        # Original command should still be there
+        assert "gcc" in env.cc.cmd
+        assert "g++" in env.cxx.cmd
+
+    def test_no_double_wrapping(self) -> None:
+        """Should not double-wrap if already prefixed."""
+        import shutil
+
+        tool = None
+        for candidate in ("ccache", "sccache"):
+            if shutil.which(candidate):
+                tool = candidate
+                break
+
+        if tool is None:
+            pytest.skip("No compiler cache tool available")
+
+        env = Environment()
+        cc = env.add_tool("cc")
+        cc.set("cmd", f"{tool} gcc")
+
+        env.use_compiler_cache(tool)
+
+        # Should not be double-wrapped
+        assert env.cc.cmd == f"{tool} gcc"
+
+    def test_skips_tools_not_present(self) -> None:
+        """Should skip tools that don't exist."""
+        import shutil
+
+        tool = None
+        for candidate in ("ccache", "sccache"):
+            if shutil.which(candidate):
+                tool = candidate
+                break
+
+        if tool is None:
+            pytest.skip("No compiler cache tool available")
+
+        env = Environment()
+        cc = env.add_tool("cc")
+        cc.set("cmd", "gcc")
+        # No cxx tool
+
+        env.use_compiler_cache(tool)
+        assert env.cc.cmd.startswith(tool)
+
+    def test_unknown_tool_warns(self) -> None:
+        """Unknown tool name should warn and not modify."""
+        env = Environment()
+        cc = env.add_tool("cc")
+        cc.set("cmd", "gcc")
+
+        env.use_compiler_cache("nonexistent-cache-tool")
+        assert env.cc.cmd == "gcc"
+
+    def test_missing_explicit_tool_warns(self) -> None:
+        """Explicit tool not in PATH should warn and not modify."""
+        import shutil
+
+        env = Environment()
+        cc = env.add_tool("cc")
+        cc.set("cmd", "gcc")
+
+        # Use a tool name that's valid but not installed
+        if shutil.which("ccache") is None:
+            env.use_compiler_cache("ccache")
+            assert env.cc.cmd == "gcc"
+        elif shutil.which("sccache") is None:
+            env.use_compiler_cache("sccache")
+            assert env.cc.cmd == "gcc"
+        else:
+            # Both installed, skip this test
+            pytest.skip("Both ccache and sccache installed")
+
+
 class TestEnvironmentRepr:
     def test_repr(self):
         env = Environment()

@@ -193,5 +193,30 @@ class ToolNotFoundError(ConfigureError):
         super().__init__(msg, location)
 
 
+class PackageNotFoundError(ConfigureError):
+    """Required package was not found by any finder.
+
+    Attributes:
+        package_name: Name of the package.
+        version: Version requirement that was requested.
+    """
+
+    def __init__(
+        self,
+        package_name: str,
+        version: str | None = None,
+        location: SourceLocation | None = None,
+    ) -> None:
+        self.package_name = package_name
+        self.version_req = version
+
+        msg = f"package not found: {package_name}"
+        if version:
+            msg += f" (version {version})"
+        msg += "\n  Tip: Ensure the package is installed and discoverable by pkg-config or system paths."
+
+        super().__init__(msg, location)
+
+
 class BuilderError(PconsError):
     """Error in a builder definition or invocation."""

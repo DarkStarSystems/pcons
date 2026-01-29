@@ -357,6 +357,30 @@ class Toolchain(Protocol):
         """
         ...
 
+    def apply_preset(self, env: Environment, name: str) -> None:
+        """Apply a named flag preset to the environment.
+
+        Presets provide commonly-used flag combinations (warnings, sanitize,
+        profile, lto, hardened). Each toolchain defines its own flags.
+
+        Args:
+            env: Environment to configure.
+            name: Preset name.
+        """
+        ...
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross-compilation preset to the environment.
+
+        Cross-compilation presets configure sysroot, target triple,
+        architecture flags, and SDK paths.
+
+        Args:
+            env: Environment to configure.
+            preset: A CrossPreset dataclass instance.
+        """
+        ...
+
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
         ...
@@ -531,6 +555,64 @@ class BaseToolchain(ABC):
         """
         # Store target architecture name on environment
         env.target_arch = arch
+
+    def apply_preset(self, env: Environment, name: str) -> None:  # noqa: B027
+        """Apply a named flag preset to the environment.
+
+        Default implementation does nothing. Subclasses override this
+        to implement toolchain-specific preset handling.
+
+        Args:
+            env: Environment to configure.
+            name: Preset name (e.g., "warnings", "sanitize").
+        """
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross-compilation preset to the environment.
+
+        Default implementation applies generic CrossPreset fields.
+        Subclasses override this for toolchain-specific handling.
+
+        Args:
+            env: Environment to configure.
+            preset: A CrossPreset dataclass instance.
+        """
+        # Apply architecture if specified
+        if hasattr(preset, "arch") and preset.arch:
+            self.apply_target_arch(env, preset.arch)
+
+        # Apply sysroot to cc, cxx, link
+        if hasattr(preset, "sysroot") and preset.sysroot:
+            sysroot_flag = f"--sysroot={preset.sysroot}"
+            for tool_name in ("cc", "cxx"):
+                if env.has_tool(tool_name):
+                    tool = getattr(env, tool_name)
+                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                        tool.flags.append(sysroot_flag)
+            if env.has_tool("link"):
+                if isinstance(env.link.flags, list):
+                    env.link.flags.append(sysroot_flag)
+
+        # Apply extra compile flags
+        if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
+            for tool_name in ("cc", "cxx"):
+                if env.has_tool(tool_name):
+                    tool = getattr(env, tool_name)
+                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                        tool.flags.extend(preset.extra_compile_flags)
+
+        # Apply extra link flags
+        if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
+            if env.has_tool("link"):
+                if isinstance(env.link.flags, list):
+                    env.link.flags.extend(preset.extra_link_flags)
+
+        # Override CC/CXX commands from env_vars
+        if hasattr(preset, "env_vars") and preset.env_vars:
+            for var_name, value in preset.env_vars.items():
+                tool_name = var_name.lower()
+                if tool_name in ("cc", "cxx") and env.has_tool(tool_name):
+                    getattr(env, tool_name).cmd = value
 
     def get_linker_for_languages(self, languages: set[str]) -> str:
         """Determine which tool should link based on languages used.

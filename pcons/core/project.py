@@ -73,6 +73,8 @@ class Project:
         "_config",
         "_resolved",
         "_path_resolver",
+        "_found_packages",
+        "_package_finder_chain",
         "defined_at",
     )
 
@@ -105,6 +107,8 @@ class Project:
         self._config = config
         self._resolved = False
         self._path_resolver = PathResolver(self.root_dir, self.build_dir)
+        self._found_packages: dict[tuple[str, str | None, tuple[str, ...]], Target] = {}
+        self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
         self.defined_at = defined_at or get_caller_location()
 
         # Auto-register with global registry (for CLI access)
@@ -451,6 +455,108 @@ class Project:
                 gen = MermaidGenerator(output_filename=output_path.name)
                 gen.generate(self, output_path.parent)
                 logger.info("Wrote Mermaid graph to %s", mermaid_path)
+
+    # =========================================================================
+    # Package Discovery
+    # =========================================================================
+
+    def find_package(
+        self,
+        name: str,
+        *,
+        version: str | None = None,
+        components: list[str] | None = None,
+        required: bool = True,
+    ) -> Target | None:
+        """Find an external package and return it as an ImportedTarget.
+
+        Searches for the package using the configured finder chain
+        (default: PkgConfigFinder → SystemFinder). Results are cached
+        so repeated calls with the same arguments return the same target.
+
+        The returned target can be used as a dependency via target.link()
+        or applied directly to an environment via env.use().
+
+        Args:
+            name: Package name (e.g., "zlib", "openssl").
+            version: Optional version requirement (e.g., ">=3.0").
+            components: Optional list of package components.
+            required: If True (default), raises PackageNotFoundError when
+                     the package is not found. If False, returns None.
+
+        Returns:
+            An ImportedTarget representing the package, or None if not
+            found and required=False.
+
+        Raises:
+            PackageNotFoundError: If the package is not found and required=True.
+
+        Example:
+            zlib = project.find_package("zlib")
+            openssl = project.find_package("openssl", version=">=3.0")
+            boost = project.find_package("boost", components=["filesystem"])
+
+            app.link(zlib)
+            env.use(openssl)
+        """
+        cache_key = (name, version, tuple(components or []))
+        if cache_key in self._found_packages:
+            return self._found_packages[cache_key]
+
+        if self._package_finder_chain is None:
+            from pcons.packages.finders import (
+                FinderChain,
+                PkgConfigFinder,
+                SystemFinder,
+            )
+
+            self._package_finder_chain = FinderChain(
+                [PkgConfigFinder(), SystemFinder()]
+            )
+
+        pkg = self._package_finder_chain.find(name, version, components)
+        if pkg is None:
+            if required:
+                from pcons.core.errors import PackageNotFoundError
+
+                raise PackageNotFoundError(name, version)
+            return None
+
+        from pcons.packages.imported import ImportedTarget
+
+        target = ImportedTarget.from_package(pkg, components=components)
+        target._project = self
+        self.add_target(target)
+        self._found_packages[cache_key] = target
+        return target
+
+    def add_package_finder(self, finder: Any) -> None:
+        """Add a package finder to the front of the search chain.
+
+        Custom finders are tried before the default finders (PkgConfig,
+        System). Use this to add Conan, vcpkg, or custom finders.
+
+        Args:
+            finder: A BaseFinder instance.
+
+        Example:
+            from pcons.packages.finders import ConanFinder
+
+            project.add_package_finder(ConanFinder(config, conanfile="conanfile.txt"))
+            zlib = project.find_package("zlib")  # Tries Conan first
+        """
+        if self._package_finder_chain is None:
+            from pcons.packages.finders import (
+                FinderChain,
+                PkgConfigFinder,
+                SystemFinder,
+            )
+
+            self._package_finder_chain = FinderChain(
+                [finder, PkgConfigFinder(), SystemFinder()]
+            )
+        else:
+            self._package_finder_chain._finders.insert(0, finder)
 
     # Command is kept as a wrapper since it delegates to env.Command()
     # and doesn't fit the registry pattern well

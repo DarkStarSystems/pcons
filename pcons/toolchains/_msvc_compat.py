@@ -34,6 +34,27 @@ class MsvcCompatibleToolchain(BaseToolchain):
     cross-compilation flags or tool configuration.
     """
 
+    # Named flag presets for common development workflows (MSVC-compatible).
+    MSVC_PRESETS: dict[str, dict[str, list[str]]] = {
+        "warnings": {
+            "compile_flags": ["/W4", "/WX"],
+        },
+        "sanitize": {
+            "compile_flags": ["/fsanitize=address"],
+        },
+        "profile": {
+            "link_flags": ["/PROFILE"],
+        },
+        "lto": {
+            "compile_flags": ["/GL"],
+            "link_flags": ["/LTCG"],
+        },
+        "hardened": {
+            "compile_flags": ["/GS", "/guard:cf"],
+            "link_flags": ["/DYNAMICBASE", "/NXCOMPAT", "/guard:cf"],
+        },
+    }
+
     # Architecture to MSVC machine type mapping (shared by MSVC and clang-cl)
     MSVC_MACHINE_MAP: dict[str, str] = {
         "x64": "X64",
@@ -156,6 +177,64 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """
         super().apply_target_arch(env, arch, **kwargs)
         self._apply_machine_flags(env, arch)
+
+    def apply_preset(self, env: Environment, name: str) -> None:
+        """Apply a named flag preset with MSVC-style flags.
+
+        Args:
+            env: Environment to modify.
+            name: Preset name (warnings, sanitize, profile, lto, hardened).
+        """
+        preset = self.MSVC_PRESETS.get(name)
+        if preset is None:
+            logger.warning("Unknown preset '%s' for MSVC toolchain", name)
+            return
+
+        compile_flags = preset.get("compile_flags", [])
+        link_flags = preset.get("link_flags", [])
+
+        for tool_name in ("cc", "cxx"):
+            if env.has_tool(tool_name):
+                tool = getattr(env, tool_name)
+                if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                    tool.flags.extend(compile_flags)
+
+        if env.has_tool("link") and link_flags:
+            if isinstance(env.link.flags, list):
+                env.link.flags.extend(link_flags)
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross-compilation preset with MSVC-style flags.
+
+        Applies /MACHINE:xxx flags via the architecture, then delegates
+        to BaseToolchain for generic fields.
+
+        Args:
+            env: Environment to modify.
+            preset: A CrossPreset dataclass instance.
+        """
+        # For MSVC, apply machine flags via architecture
+        if hasattr(preset, "arch") and preset.arch:
+            self._apply_machine_flags(env, preset.arch)
+
+        # Apply extra compile/link flags and env_vars from base
+        if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
+            for tool_name in ("cc", "cxx"):
+                if env.has_tool(tool_name):
+                    tool = getattr(env, tool_name)
+                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                        tool.flags.extend(preset.extra_compile_flags)
+
+        if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
+            if env.has_tool("link"):
+                if isinstance(env.link.flags, list):
+                    env.link.flags.extend(preset.extra_link_flags)
+
+        if hasattr(preset, "env_vars") and preset.env_vars:
+            for var_name, value in preset.env_vars.items():
+                tool_name = var_name.lower()
+                if tool_name in ("cc", "cxx") and env.has_tool(tool_name):
+                    getattr(env, tool_name).cmd = value
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply build variant (debug, release, etc.) with MSVC-style flags.

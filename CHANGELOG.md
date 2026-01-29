@@ -7,7 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-01-29
+
 ### Added
+
+- **Compiler cache wrapping**: New `env.use_compiler_cache()` method wraps compile commands with ccache or sccache.
+  - Auto-detects available cache tool (tries sccache, then ccache)
+  - Explicit tool selection: `env.use_compiler_cache("ccache")`
+  - Only wraps cc/cxx commands, never linker/archiver
+  - Warns about ccache + MSVC incompatibility (use sccache instead)
+
+- **Semantic presets**: New `env.apply_preset()` for common flag combinations.
+  - `"warnings"`: All warnings + warnings-as-errors (`-Wall -Wextra -Wpedantic -Werror` / `/W4 /WX`)
+  - `"sanitize"`: Address + undefined behavior sanitizers
+  - `"profile"`: Profiling support (`-pg` / `/PROFILE`)
+  - `"lto"`: Link-time optimization (`-flto` / `/GL` + `/LTCG`)
+  - `"hardened"`: Security hardening flags (stack protector, FORTIFY_SOURCE, RELRO, etc.)
+  - Toolchain-specific: Unix and MSVC each define their own flags
+
+- **Cross-compilation presets**: New `env.apply_cross_preset()` for common cross-compilation targets.
+  - `android(ndk, arch, api)`: Android NDK cross-compilation
+  - `ios(arch, min_version, sdk)`: iOS cross-compilation
+  - `wasm(emsdk)`: WebAssembly via Emscripten
+  - `linux_cross(triple, sysroot)`: Generic Linux cross-compilation
+  - `CrossPreset` dataclass for custom presets
+  - Toolchains handle --target, --sysroot, /MACHINE flags automatically
+
+- **`project.find_package()`**: One-liner to find and use external packages.
+  - Searches using FinderChain (PkgConfig → System by default)
+  - Returns ImportedTarget for use as dependency or with `env.use()`
+  - Caches results for repeated lookups
+  - `required=False` for optional dependencies
+  - `project.add_package_finder()` to prepend custom finders (Conan, vcpkg)
 
 - **Windows SxS manifest support**: Support for Windows Side-by-Side (SxS) manifests
   - **`.manifest` as source**: Add `.manifest` files to Program/SharedLibrary sources; automatically passed to linker via `/MANIFESTINPUT:`
@@ -374,7 +405,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/garyo/pcons/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/garyo/pcons/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/garyo/pcons/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/garyo/pcons/compare/v0.4.1...v0.4.2

@@ -735,9 +735,91 @@ uvx pcons --variant=debug
 ./build/debug/myapp
 ```
 
+### Semantic Presets
+
+In addition to build variants (debug/release), pcons provides **presets** for common development workflows. Presets are orthogonal to variants — you can combine them freely.
+
+```python
+# Apply warning flags (all warnings + warnings-as-errors)
+env.apply_preset("warnings")
+
+# Apply address/undefined behavior sanitizers
+env.apply_preset("sanitize")
+
+# Enable profiling
+env.apply_preset("profile")
+
+# Enable link-time optimization
+env.apply_preset("lto")
+
+# Enable security hardening flags
+env.apply_preset("hardened")
+```
+
+Presets are toolchain-specific — each toolchain produces the appropriate flags:
+
+| Preset | Unix (GCC/LLVM) | MSVC |
+|--------|----------------|------|
+| `warnings` | `-Wall -Wextra -Wpedantic -Werror` | `/W4 /WX` |
+| `sanitize` | `-fsanitize=address,undefined -fno-omit-frame-pointer` | `/fsanitize=address` |
+| `profile` | `-pg -g` (compile+link) | `/PROFILE` (linker) |
+| `lto` | `-flto` (compile+link) | `/GL` (compile) + `/LTCG` (link) |
+| `hardened` | `-fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE` + `-pie -Wl,-z,relro,-z,now` | `/GS /guard:cf` + `/DYNAMICBASE /NXCOMPAT /guard:cf` |
+
+Combine presets with variants for a complete configuration:
+
+```python
+env.set_variant("release")
+env.apply_preset("warnings")
+env.apply_preset("lto")
+```
+
 ---
 
 ## Working with External Dependencies
+
+### Finding Packages with `project.find_package()`
+
+The simplest way to use an external package is `project.find_package()`. It searches for the package using available finders (pkg-config, system paths) and returns an `ImportedTarget` that you can link against or apply to an environment.
+
+```python
+from pcons import Project, find_c_toolchain, NinjaGenerator
+
+toolchain = find_c_toolchain()
+project = Project("myapp", build_dir="build")
+env = project.Environment(toolchain=toolchain)
+
+# Find packages (raises PackageNotFoundError if not found)
+zlib = project.find_package("zlib")
+openssl = project.find_package("openssl", version=">=3.0")
+
+# Find with components
+boost = project.find_package("boost", components=["filesystem", "system"])
+
+# Optional dependency — returns None if not found
+optional = project.find_package("optional-dep", required=False)
+
+# Use as a dependency (public requirements auto-propagate)
+app = project.Program("myapp", env, sources=["main.cpp"])
+app.link(zlib)
+
+# Or apply directly to an environment
+env.use(openssl)
+```
+
+By default, `find_package()` tries PkgConfigFinder first, then SystemFinder. You can prepend custom finders:
+
+```python
+from pcons.packages.finders import ConanFinder
+
+# Add a Conan finder — it will be tried first
+project.add_package_finder(ConanFinder(config, conanfile="conanfile.txt"))
+
+# Now find_package() tries: Conan → PkgConfig → System
+fmt = project.find_package("fmt")
+```
+
+Results are cached: calling `find_package("zlib")` twice returns the same target.
 
 ### Using pkg-config
 
@@ -1493,6 +1575,98 @@ The `create_universal_binary()` function:
 
 This works for static libraries, dynamic libraries, and executables.
 
+### Cross-Compilation Presets
+
+For cross-compiling to other platforms, pcons provides ready-made presets that configure sysroot, target triple, architecture flags, and SDK paths.
+
+```python
+from pcons.toolchains.presets import android, ios, wasm, linux_cross
+
+# Android NDK
+env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a"))
+
+# iOS
+env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
+
+# iOS Simulator
+env.apply_cross_preset(ios(arch="x86_64"))
+
+# WebAssembly via Emscripten
+env.apply_cross_preset(wasm(emsdk="~/emsdk"))
+# Or if emcc is already in PATH:
+env.apply_cross_preset(wasm())
+
+# Generic Linux cross-compilation
+env.apply_cross_preset(linux_cross(
+    triple="aarch64-linux-gnu",
+    sysroot="/opt/aarch64-sysroot",
+))
+```
+
+#### Available Factory Functions
+
+| Factory | Key Arguments | Description |
+|---------|--------------|-------------|
+| `android(ndk, arch, api)` | `arch`: arm64-v8a, armeabi-v7a, x86_64, x86; `api`: minimum API level (default 21) | Android NDK cross-compilation |
+| `ios(arch, min_version, sdk)` | `arch`: arm64 or x86_64 (simulator); `min_version`: deployment target | iOS cross-compilation |
+| `wasm(emsdk)` | `emsdk`: path to Emscripten SDK (optional if emcc in PATH) | WebAssembly via Emscripten |
+| `linux_cross(triple, sysroot)` | `triple`: GCC/Clang target triple; `sysroot`: target sysroot path | Generic Linux cross-compilation |
+
+#### Custom Cross-Compilation Presets
+
+For targets not covered by the built-in factories, create a `CrossPreset` directly:
+
+```python
+from pcons.toolchains.presets import CrossPreset
+
+# Custom embedded target
+preset = CrossPreset(
+    name="riscv-bare",
+    arch="riscv64",
+    triple="riscv64-unknown-elf",
+    sysroot="/opt/riscv/sysroot",
+    extra_compile_flags=("-march=rv64gc", "-mabi=lp64d"),
+    extra_link_flags=("-nostdlib",),
+    env_vars={
+        "CC": "/opt/riscv/bin/riscv64-unknown-elf-gcc",
+        "CXX": "/opt/riscv/bin/riscv64-unknown-elf-g++",
+    },
+)
+env.apply_cross_preset(preset)
+```
+
+The `CrossPreset` fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `str` | Human-readable name |
+| `arch` | `str` | Target architecture |
+| `triple` | `str \| None` | Compiler target triple (used with `--target` on Clang) |
+| `sysroot` | `str \| None` | Path to target sysroot (`--sysroot`) |
+| `sdk_path` | `str \| None` | Path to SDK root |
+| `extra_compile_flags` | `tuple[str, ...]` | Additional compile flags |
+| `extra_link_flags` | `tuple[str, ...]` | Additional link flags |
+| `env_vars` | `dict[str, str]` | CC/CXX command overrides |
+
+### Compiler Cache
+
+Speed up rebuilds by wrapping compile commands with [ccache](https://ccache.dev/) or [sccache](https://github.com/mozilla/sccache):
+
+```python
+# Auto-detect: tries sccache first, then ccache
+env.use_compiler_cache()
+
+# Explicit choice
+env.use_compiler_cache("ccache")
+env.use_compiler_cache("sccache")
+```
+
+This prepends the cache tool to the `cc` and `cxx` commands. Only compile commands are wrapped — the linker and archiver are left unchanged. If the requested tool isn't in PATH, a warning is logged and no changes are made.
+
+Notes:
+- On MSVC (`cl.exe`), only sccache works. If you request ccache with an MSVC toolchain, pcons warns and does nothing.
+- Commands are never double-wrapped: calling `use_compiler_cache()` when commands are already wrapped is a no-op.
+
 ### Multiple Toolchains
 
 Pcons supports combining multiple toolchains in a single environment. This is useful for projects that mix languages, such as C++ with CUDA, or C++ with Cython.
@@ -1731,6 +1905,8 @@ This generates a header like:
 | `project.Alias(name, *targets)` | Create a named alias |
 | `project.resolve()` | Resolve all dependencies |
 | `project.node(path)` | Get/create a file node |
+| `project.find_package(name, ...)` | Find external package (returns ImportedTarget) |
+| `project.add_package_finder(finder)` | Prepend a custom package finder |
 
 ### Target Methods
 
@@ -1750,6 +1926,9 @@ This generates a header like:
 |--------|-------------|
 | `env.set_variant(name)` | Set debug/release variant |
 | `env.set_target_arch(arch)` | Set target CPU architecture |
+| `env.apply_preset(name)` | Apply flag preset (warnings, sanitize, profile, lto, hardened) |
+| `env.apply_cross_preset(preset)` | Apply cross-compilation preset |
+| `env.use_compiler_cache(tool=None)` | Wrap compilers with ccache/sccache |
 | `env.use(package)` | Apply package settings |
 | `env.clone()` | Create a copy |
 | `env.override(**kwargs)` | Context manager for temporary overrides |

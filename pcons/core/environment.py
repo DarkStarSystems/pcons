@@ -7,6 +7,7 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -22,6 +23,8 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.tools.toolchain import Toolchain
+
+logger = logging.getLogger(__name__)
 
 
 class Environment:
@@ -502,6 +505,107 @@ class Environment:
         else:
             # No toolchains - just set the target arch name
             self.target_arch = arch
+
+    def use_compiler_cache(self, tool: str | None = None) -> None:
+        """Wrap compile commands with a compiler cache tool.
+
+        Prepends ccache or sccache to the cc and cxx commands. Only wraps
+        compile tools, never the linker or archiver.
+
+        Args:
+            tool: "ccache", "sccache", or None for auto-detect.
+                  Auto-detect tries sccache first, then ccache.
+        """
+        import shutil
+
+        if tool is None:
+            for candidate in ("sccache", "ccache"):
+                if shutil.which(candidate):
+                    tool = candidate
+                    break
+            if tool is None:
+                logger.warning("No compiler cache found (tried sccache, ccache)")
+                return
+
+        if tool not in ("ccache", "sccache"):
+            logger.warning("Unknown compiler cache tool '%s'", tool)
+            return
+
+        if not shutil.which(tool):
+            logger.warning("Compiler cache '%s' not found in PATH", tool)
+            return
+
+        # Warn about ccache + MSVC incompatibility
+        if tool == "ccache":
+            for tool_name in ("cc", "cxx"):
+                if self.has_tool(tool_name):
+                    t = getattr(self, tool_name)
+                    cmd = t.get("cmd", "")
+                    if isinstance(cmd, str) and ("cl.exe" in cmd or cmd.endswith("cl")):
+                        logger.warning(
+                            "ccache does not support MSVC cl.exe; use sccache instead"
+                        )
+                        return
+
+        for tool_name in ("cc", "cxx"):
+            if self.has_tool(tool_name):
+                t = getattr(self, tool_name)
+                cmd = t.get("cmd", "")
+                if isinstance(cmd, str) and cmd and not cmd.startswith(tool):
+                    t.cmd = f"{tool} {cmd}"
+
+    def apply_preset(self, name: str) -> None:
+        """Apply a named flag preset to this environment.
+
+        Presets provide commonly-used flag combinations for development
+        workflows. Each toolchain defines its own flags for each preset.
+
+        Available presets:
+            warnings: All warnings + warnings-as-errors
+            sanitize: Address + undefined behavior sanitizers
+            profile: Profiling support
+            lto: Link-time optimization
+            hardened: Security hardening flags
+
+        Args:
+            name: Preset name.
+
+        Example:
+            env.apply_preset("warnings")
+            env.apply_preset("sanitize")
+        """
+        all_toolchains = self.toolchains
+        if all_toolchains:
+            for toolchain in all_toolchains:
+                toolchain.apply_preset(self, name)
+        else:
+            logger.warning("No toolchains configured; cannot apply preset '%s'", name)
+
+    def apply_cross_preset(self, preset: Any) -> None:
+        """Apply a cross-compilation preset to this environment.
+
+        Cross-compilation presets configure sysroot, target triple,
+        architecture flags, and SDK paths for building on a different
+        platform.
+
+        Args:
+            preset: A CrossPreset dataclass instance.
+
+        Example:
+            from pcons.toolchains.presets import android, ios
+
+            env.apply_cross_preset(android(ndk="~/android-ndk"))
+            env.apply_cross_preset(ios(arch="arm64"))
+        """
+        all_toolchains = self.toolchains
+        if all_toolchains:
+            for toolchain in all_toolchains:
+                toolchain.apply_cross_preset(self, preset)
+        else:
+            logger.warning(
+                "No toolchains configured; cannot apply cross-preset '%s'",
+                preset.name if hasattr(preset, "name") else preset,
+            )
 
     def Glob(self, pattern: str) -> list[FileNode]:
         """Find files matching a glob pattern.

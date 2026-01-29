@@ -39,6 +39,37 @@ class UnixToolchain(BaseToolchain):
     - Override get_source_handler() if they handle additional file types
     """
 
+    # Named flag presets for common development workflows.
+    # Keys are preset names; values map tool categories to flag lists.
+    UNIX_PRESETS: dict[str, dict[str, list[str]]] = {
+        "warnings": {
+            "compile_flags": ["-Wall", "-Wextra", "-Wpedantic", "-Werror"],
+        },
+        "sanitize": {
+            "compile_flags": [
+                "-fsanitize=address,undefined",
+                "-fno-omit-frame-pointer",
+            ],
+            "link_flags": ["-fsanitize=address,undefined"],
+        },
+        "profile": {
+            "compile_flags": ["-pg", "-g"],
+            "link_flags": ["-pg"],
+        },
+        "lto": {
+            "compile_flags": ["-flto"],
+            "link_flags": ["-flto"],
+        },
+        "hardened": {
+            "compile_flags": [
+                "-fstack-protector-strong",
+                "-D_FORTIFY_SOURCE=2",
+                "-fPIE",
+            ],
+            "link_flags": ["-pie", "-Wl,-z,relro,-z,now"],
+        },
+    }
+
     # Flags that take their argument as a separate token (e.g., "-F path" not "-Fpath")
     # These are common GCC/Unix compiler/linker flags where the argument must be
     # a separate element. Both GCC and Clang share these flags.
@@ -218,6 +249,54 @@ class UnixToolchain(BaseToolchain):
             if env.has_tool("link"):
                 if isinstance(env.link.flags, list):
                     env.link.flags.extend(arch_flags)
+
+    def apply_preset(self, env: Environment, name: str) -> None:
+        """Apply a named flag preset.
+
+        Args:
+            env: Environment to modify.
+            name: Preset name (warnings, sanitize, profile, lto, hardened).
+        """
+        preset = self.UNIX_PRESETS.get(name)
+        if preset is None:
+            logger.warning("Unknown preset '%s' for Unix toolchain", name)
+            return
+
+        compile_flags = preset.get("compile_flags", [])
+        link_flags = preset.get("link_flags", [])
+
+        for tool_name in ("cc", "cxx"):
+            if env.has_tool(tool_name):
+                tool = getattr(env, tool_name)
+                if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                    tool.flags.extend(compile_flags)
+
+        if env.has_tool("link") and link_flags:
+            if isinstance(env.link.flags, list):
+                env.link.flags.extend(link_flags)
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross-compilation preset.
+
+        Handles --target triple (Clang only) and --sysroot flags,
+        then delegates to BaseToolchain for generic fields.
+
+        Args:
+            env: Environment to modify.
+            preset: A CrossPreset dataclass instance.
+        """
+        # Apply target triple (Clang/LLVM only — GCC uses different
+        # toolchain binaries rather than --target flag)
+        if hasattr(preset, "triple") and preset.triple:
+            target_flag = f"--target={preset.triple}"
+            for tool_name in ("cc", "cxx"):
+                if env.has_tool(tool_name):
+                    tool = getattr(env, tool_name)
+                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
+                        tool.flags.append(target_flag)
+
+        # Delegate to base for sysroot, extra flags, env_vars, arch
+        super().apply_cross_preset(env, preset)
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply build variant (debug, release, etc.).
