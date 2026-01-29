@@ -7,7 +7,7 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -658,7 +658,7 @@ class Environment:
         self,
         *,
         target: str | Path | list[str | Path],
-        source: str | Path | list[str | Path] | None = None,
+        source: Target | str | Path | Sequence[Target | str | Path] | None = None,
         command: str | list[str] = "",
         name: str | None = None,
     ) -> Target:
@@ -674,8 +674,8 @@ class Environment:
 
         Args:
             target: Output file(s) that the command produces.
-            source: Input file(s) that the command depends on. Can be None
-                   if the command doesn't depend on any files.
+            source: Input file(s) that the command depends on. Can be Targets
+                   (whose output files become sources), paths, or None.
             command: The shell command to run. Supports variable substitution:
                     - $SOURCE: First source file
                     - $SOURCES: All source files (space-separated)
@@ -711,12 +711,21 @@ class Environment:
                 command="date > $TARGET"
             )
 
+            # Use another target's output as source
+            app = project.Program("app", env, sources=["main.cpp"])
+            pkg = env.Command(
+                target="app.pkg",
+                source=[app],
+                command="pkgbuild --root $SOURCE $TARGET"
+            )
+
             # Can be passed to Install() since it's a Target
             project.Install("dist/", [generated])
         """
         from pcons.core.builder import GenericCommandBuilder
         from pcons.core.node import FileNode
-        from pcons.core.target import Target, TargetType
+        from pcons.core.target import Target as TargetClass
+        from pcons.core.target import TargetType
 
         # Normalize target to list
         if isinstance(target, (str, Path)):
@@ -728,35 +737,42 @@ class Environment:
         if name is None:
             name = targets[0].stem
 
-        # Normalize source to list
-        # Type annotation uses Node to match _normalize_sources signature
-        sources: list[str | Path | Node]
-        if source is None:
-            sources = []
-        elif isinstance(source, (str, Path)):
-            sources = [source]
-        else:
-            sources = list(source)
+        # Normalize source to list, separating Targets from immediate sources
+        immediate_sources: list[str | Path | Node] = []
+        target_sources: list[TargetClass] = []
+
+        if source is not None:
+            source_list = (
+                [source]
+                if isinstance(source, (str, Path, TargetClass))
+                else list(source)
+            )
+            for src in source_list:
+                if isinstance(src, TargetClass):
+                    target_sources.append(src)
+                else:
+                    immediate_sources.append(src)
 
         # Create the builder
         builder = GenericCommandBuilder(command)
 
-        # Build the targets - always use _build directly with explicit targets
+        # Build the targets with immediate sources
         nodes = builder._build(
             self,
             targets,
-            builder._normalize_sources(sources),
+            builder._normalize_sources(immediate_sources),
             defined_at=get_caller_location(),
         )
 
         # Create Target object
-        cmd_target = Target(
+        cmd_target = TargetClass(
             name,
             target_type=TargetType.COMMAND,
             defined_at=get_caller_location(),
         )
         cmd_target._env = self
         cmd_target._project = self._project
+        cmd_target._builder_name = "Command"
 
         # Register nodes with the environment and add to target
         for node in nodes:
@@ -764,6 +780,14 @@ class Environment:
                 self.register_node(node)
                 cmd_target.output_nodes.append(node)
                 cmd_target.nodes.append(node)
+
+        # Handle Target sources - store for deferred resolution
+        if target_sources:
+            cmd_target._pending_sources = list(target_sources)
+            # Add as dependencies to ensure correct build order
+            for src_target in target_sources:
+                if src_target not in cmd_target.dependencies:
+                    cmd_target.dependencies.append(src_target)
 
         # Register target with project if available
         if self._project is not None:

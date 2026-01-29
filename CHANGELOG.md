@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Platform-specific installer generation**: New `pcons.contrib.installers` package for creating native installers
+  - **macOS**: `create_pkg()` for .pkg installers, `create_dmg()` for disk images, `create_component_pkg()` for simple packages
+  - **Windows**: `create_msix()` for MSIX packages (requires Windows SDK)
+  - Auto-detects bundle vs non-bundle sources for proper macOS component plist handling
+  - Signing helpers: `sign_pkg()`, `notarize_cmd()` for macOS code signing
+
+- **CLI `uvx ninja` fallback**: When `ninja` isn't in PATH but `uvx` is available, `pcons build` and `pcons clean` automatically use `uvx ninja`
+
+- **Targets as sources**: Targets can now be used as sources for `Install()`, `Command()`, and other builders. The target's outputs are resolved at build time, enabling auto-generated source files.
+
+- **Test framework `build_targets` support**: Example tests can now specify platform-specific build targets via `build_targets_darwin`, `build_targets_windows`, etc.
+
+### Fixed
+
+- **macOS pkgbuild for non-bundle files**: Component plists are now only generated for .app bundles, fixing pkgbuild errors for CLI tools and libraries
+
 ## [0.5.0] - 2026-01-28
 
 ### Added

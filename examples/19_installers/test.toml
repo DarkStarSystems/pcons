@@ -1,0 +1,39 @@
+# Test configuration for the installers example
+
+[test]
+description = "Demonstrates platform-specific installer creation (.pkg/.dmg on macOS, .msix on Windows)"
+
+# macOS: expect the program and installers
+expected_outputs_darwin = [
+    "build/obj.hello/main.o",
+    "build/hello",
+    "build/HelloApp-1.0.0.pkg",
+    "build/HelloApp.dmg",
+]
+
+# Windows: expect the MSIX installer to be built
+expected_outputs_windows = [
+    "build/obj.hello/main.obj",
+    "build/hello.exe",
+    "build/HelloApp-1.0.0.0.msix",
+]
+
+# Linux: just the program (no installer support yet)
+expected_outputs_linux = [
+    "build/obj.hello/main.o",
+    "build/hello",
+]
+
+# Build the 'installers' target on macOS and Windows
+build_targets_darwin = ["installers"]
+build_targets_windows = ["installers"]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/hello", expect_stdout = "Hello from pcons installer example!" },
+]
+
+[skip]
+# Skip xcode generator - installer Command targets aren't supported in xcode projects
+generators = ["xcode"]

@@ -534,6 +534,73 @@ class OutputNodeFactory:
         return result
 
 
+class CommandNodeFactory:
+    """Factory for resolving Command target pending sources.
+
+    Command targets (created by env.Command) may have Target sources
+    that need to be resolved to their output nodes. This factory handles
+    that resolution by adding the source targets' output nodes as
+    dependencies to the command's output nodes.
+
+    Attributes:
+        project: The project being resolved.
+    """
+
+    def __init__(self, project: Project) -> None:
+        """Initialize the factory.
+
+        Args:
+            project: The project to resolve.
+        """
+        self.project = project
+
+    def resolve(
+        self,
+        target: Target,  # noqa: ARG002
+        env: Environment | None,  # noqa: ARG002
+    ) -> None:
+        """Resolve is not needed for Command targets.
+
+        Command targets already have their output_nodes populated by
+        GenericCommandBuilder. This method is a no-op.
+        """
+        pass
+
+    def resolve_pending(self, target: Target) -> None:
+        """Resolve pending Target sources for a Command target.
+
+        Adds the output nodes from each source Target as dependencies
+        to the command's output nodes. Also updates the _build_info
+        to include the additional source files.
+        """
+        from pcons.core.target import Target as TargetClass
+
+        if target._pending_sources is None:
+            return
+
+        # Collect output nodes from source Targets
+        additional_sources: list[FileNode] = []
+        for source in target._pending_sources:
+            if isinstance(source, TargetClass):
+                additional_sources.extend(source.output_nodes)
+
+        if not additional_sources:
+            return
+
+        # Add as dependencies to command's output nodes
+        for node in target.output_nodes:
+            node.depends(additional_sources)
+
+        # Update _build_info to include additional sources
+        if target.output_nodes:
+            primary = target.output_nodes[0]
+            if hasattr(primary, "_build_info") and primary._build_info:
+                existing_sources = primary._build_info.get("sources", [])
+                primary._build_info["sources"] = (
+                    list(existing_sources) + additional_sources
+                )
+
+
 class Resolver:
     """Resolves targets: computes effective flags and creates nodes.
 
@@ -571,6 +638,9 @@ class Resolver:
         for name, registration in BuilderRegistry.all().items():
             if registration.factory_class is not None:
                 self._builder_factories[name] = registration.factory_class(project)
+
+        # Register Command factory (env.Command doesn't use builder registry)
+        self._builder_factories["Command"] = CommandNodeFactory(project)
 
     def resolve(self) -> None:
         """Resolve all targets in build order.

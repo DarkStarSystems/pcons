@@ -400,3 +400,197 @@ class TestGenericCommandNinja:
         # Should have indexed target variables
         assert "target_0 = " in content
         assert "target_1 = " in content
+
+
+class TestTargetAsSources:
+    """Tests for using Targets as sources in builders."""
+
+    def test_add_source_accepts_target(self, tmp_path):
+        """Target.add_source() accepts another Target."""
+        from pcons.core.project import Project
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # Create a command target that generates code
+        generated = env.Command(
+            target="generated.cpp",
+            source="generator.y",
+            command="yacc -o $TARGET $SOURCE",
+        )
+
+        # Create a program target that uses the generated source
+        program = project.Program("myapp", env)
+        program.add_source(generated)
+
+        # The generated target should be in pending sources
+        assert program._pending_sources is not None
+        assert generated in program._pending_sources
+
+        # The generated target should also be a dependency
+        assert generated in program.dependencies
+
+    def test_add_sources_accepts_targets(self, tmp_path):
+        """Target.add_sources() accepts Targets mixed with paths."""
+        from pcons.core.project import Project
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # Create command targets
+        gen1 = env.Command(target="gen1.cpp", source="gen1.y", command="cmd1")
+        gen2 = env.Command(target="gen2.cpp", source="gen2.y", command="cmd2")
+
+        # Create a program with mixed sources
+        program = project.Program("myapp", env)
+        program.add_sources([gen1, "main.cpp", gen2])
+
+        # Both generated targets should be in pending sources
+        assert program._pending_sources is not None
+        assert gen1 in program._pending_sources
+        assert gen2 in program._pending_sources
+
+        # main.cpp should be in _sources
+        source_paths = [s.path for s in program._sources]
+        assert Path("main.cpp") in source_paths
+
+    def test_command_accepts_target_source(self, tmp_path):
+        """env.Command() accepts Target as source."""
+        from pcons.core.project import Project
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # First command produces output
+        step1 = env.Command(
+            target="intermediate.txt",
+            source="input.txt",
+            command="process1 $SOURCE > $TARGET",
+        )
+
+        # Second command uses first's output
+        step2 = env.Command(
+            target="final.txt",
+            source=[step1],
+            command="process2 $SOURCE > $TARGET",
+        )
+
+        # step2 should have step1 in pending sources
+        assert step2._pending_sources is not None
+        assert step1 in step2._pending_sources
+
+        # step2 should depend on step1
+        assert step1 in step2.dependencies
+
+    def test_command_with_mixed_sources(self, tmp_path):
+        """env.Command() accepts mix of Targets and paths."""
+        from pcons.core.project import Project
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # First command
+        gen = env.Command(target="gen.h", source="gen.y", command="cmd")
+
+        # Second command with mixed sources
+        result = env.Command(
+            target="out.txt",
+            source=[gen, "config.h", "version.txt"],
+            command="combine $SOURCES > $TARGET",
+        )
+
+        # Target source should be in pending sources
+        assert result._pending_sources is not None
+        assert gen in result._pending_sources
+
+        # Path sources should be in output_nodes' explicit_deps
+        output_node = result.output_nodes[0]
+        source_paths = [d.path for d in output_node.explicit_deps]
+        assert Path("config.h") in source_paths
+        assert Path("version.txt") in source_paths
+
+    def test_resolved_target_sources(self, tmp_path):
+        """Target.sources includes resolved Target outputs before pending sources cleared."""
+        from pcons.core.project import Project
+        from pcons.core.target import Target, TargetType
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # Create a command target that generates code
+        # (Command targets are resolved immediately - output_nodes are populated)
+        generated = env.Command(
+            target="generated.cpp",
+            source="gen.y",
+            command="echo generated > $TARGET",
+        )
+
+        # Verify the generated target has output_nodes
+        assert len(generated.output_nodes) == 1
+        assert generated.output_nodes[0].path == Path("generated.cpp")
+
+        # Create a target that uses the generated source
+        consumer = Target("consumer", target_type=TargetType.PROGRAM)
+        consumer._project = project
+        consumer.add_source("main.cpp")
+        consumer.add_source(generated)
+
+        # Before anything, _sources has main.cpp, _pending_sources has generated
+        assert len(consumer._sources) == 1
+        assert consumer._pending_sources is not None
+        assert generated in consumer._pending_sources
+
+        # The sources property should include both because generated has output_nodes
+        all_sources = consumer.sources
+        source_paths = [s.path for s in all_sources]
+        assert Path("main.cpp") in source_paths
+        assert Path("generated.cpp") in source_paths
+
+    def test_command_pending_resolution(self, tmp_path):
+        """Command target's pending sources are resolved correctly."""
+        from pcons.core.project import Project
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("test", root_dir=tmp_path)
+        env = project.Environment()
+
+        # Create source file
+        (tmp_path / "input.txt").write_text("input")
+
+        # First command produces output
+        step1 = env.Command(
+            target="intermediate.txt",
+            source="input.txt",
+            command="step1 $SOURCE > $TARGET",
+        )
+
+        # Second command uses first's output
+        step2 = env.Command(
+            target="final.txt",
+            source=[step1],
+            command="step2 $SOURCE > $TARGET",
+        )
+
+        # Verify step2 has step1 in pending sources
+        assert step2._pending_sources is not None
+        assert step1 in step2._pending_sources
+
+        # Resolve the project
+        project.resolve()
+
+        # After resolution, step2's output nodes should depend on step1's output
+        final_node = step2.output_nodes[0]
+        intermediate_node = step1.output_nodes[0]
+
+        # Check that intermediate_node is in final_node's dependencies
+        assert intermediate_node in final_node.explicit_deps
+
+        # Generate and verify ninja output
+        gen = NinjaGenerator()
+        gen.generate(project, tmp_path)
+
+        content = (tmp_path / "build.ninja").read_text()
+
+        # Both targets should be in the ninja file
+        assert "intermediate.txt" in content
+        assert "final.txt" in content

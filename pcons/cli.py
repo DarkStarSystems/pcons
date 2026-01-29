@@ -230,15 +230,27 @@ def run_ninja(
         logger.info("Run 'pcons generate' first to create build files")
         return 1
 
-    # Find ninja
+    # Find ninja - try direct path first, then uvx
     ninja = shutil.which("ninja")
+    use_uvx = False
     if ninja is None:
-        logger.error("ninja not found in PATH")
-        logger.info("Install ninja: https://ninja-build.org/")
-        return 1
+        # Try uvx as fallback
+        uvx = shutil.which("uvx")
+        if uvx is not None:
+            ninja = uvx
+            use_uvx = True
+            logger.info("ninja not in PATH, using 'uvx ninja'")
+        else:
+            logger.error("ninja not found in PATH")
+            logger.info("Install ninja: https://ninja-build.org/")
+            logger.info("Or install uv and run with 'uvx ninja'")
+            return 1
 
     # Build ninja command
-    cmd = [ninja, "-C", str(build_dir)]
+    if use_uvx:
+        cmd = [ninja, "ninja", "-C", str(build_dir)]
+    else:
+        cmd = [ninja, "-C", str(build_dir)]
 
     if jobs:
         cmd.extend(["-j", str(jobs)])
@@ -552,11 +564,20 @@ def cmd_clean(args: argparse.Namespace) -> int:
         return 0
 
     ninja = shutil.which("ninja")
+    use_uvx = False
     if ninja is None:
-        logger.error("ninja not found in PATH")
-        return 1
+        uvx = shutil.which("uvx")
+        if uvx is not None:
+            ninja = uvx
+            use_uvx = True
+        else:
+            logger.error("ninja not found in PATH")
+            return 1
 
-    cmd = [ninja, "-C", str(build_dir), "-t", "clean"]
+    if use_uvx:
+        cmd = [ninja, "ninja", "-C", str(build_dir), "-t", "clean"]
+    else:
+        cmd = [ninja, "-C", str(build_dir), "-t", "clean"]
     logger.info("Running: %s", " ".join(cmd))
 
     try:

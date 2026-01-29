@@ -78,7 +78,7 @@ class TestNinjaMultiOutput:
         exp_node.builder = dll_node.builder
 
         target.output_nodes.extend([dll_node, lib_node, exp_node])
-        target.sources.append(source_node)
+        target.add_source(source_node)
         project.add_target(target)
 
         gen = NinjaGenerator()

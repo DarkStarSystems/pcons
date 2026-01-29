@@ -99,7 +99,7 @@ class TestMakefileBuildStatements:
         )
 
         target.object_nodes.append(output_node)
-        target.sources.append(source_node)
+        target.add_source(source_node)
         project.add_target(target)
 
         gen = MakefileGenerator()

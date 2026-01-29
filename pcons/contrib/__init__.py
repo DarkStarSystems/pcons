@@ -9,8 +9,12 @@ Usage:
     from pcons.contrib import bundle
     bundle.create_macos_bundle(project, env, plugin, ...)
 
+    from pcons.contrib.installers import macos
+    macos.create_pkg(project, env, name="MyApp", ...)
+
 Available modules:
     - bundle: Generic bundle creation helpers for macOS and flat bundles
+    - installers: Platform-native installer creation (macOS .pkg/.dmg, etc.)
     - platform: Platform detection utilities
 """
 

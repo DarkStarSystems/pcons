@@ -233,8 +233,24 @@ class Target:
 
     @property
     def sources(self) -> list[Node]:
-        """Get the list of source nodes for this target."""
-        return self._sources
+        """Get the list of source nodes for this target.
+
+        This includes both immediate sources (_sources) and resolved
+        Target sources from _pending_sources. Target sources are only
+        included after those Targets have been resolved (output_nodes populated).
+
+        Note: This returns a new list. Use add_source() or add_sources() to
+        modify the source list.
+        """
+        result = list(self._sources)
+
+        # Add output_nodes from any resolved Target sources
+        if self._pending_sources:
+            for source in self._pending_sources:
+                if isinstance(source, Target) and source.output_nodes:
+                    result.extend(source.output_nodes)
+
+        return result
 
     @sources.setter
     def sources(self, value: list[Node]) -> None:
@@ -269,45 +285,75 @@ class Target:
         self._collected_requirements = None
         return self
 
-    def add_source(self, source: Node | Path | str) -> Target:
+    def add_source(self, source: Target | Node | Path | str) -> Target:
         """Add a source to this target (fluent API).
 
         Args:
-            source: Source file (Node, Path, or string path).
+            source: Source file (Target, Node, Path, or string path).
+                   If a Target is passed, its output files become sources
+                   after that Target is resolved.
 
         Returns:
             self for method chaining.
+
+        Example:
+            # Add a generated source file
+            generated = env.Command(target="gen.cpp", source="gen.y", command="...")
+            program.add_source(generated)
         """
-        node = self._to_node(source)
-        self._sources.append(node)
+        if isinstance(source, Target):
+            # Store Target sources for deferred resolution
+            if self._pending_sources is None:
+                self._pending_sources = []
+            self._pending_sources.append(source)
+            # Add as dependency to ensure correct build order
+            if source not in self.dependencies:
+                self.dependencies.append(source)
+        else:
+            node = self._to_node(source)
+            self._sources.append(node)
         return self
 
     def add_sources(
         self,
-        sources: Sequence[Node | Path | str],
+        sources: Sequence[Target | Node | Path | str],
         *,
         base: Path | str | None = None,
     ) -> Target:
         """Add multiple sources to this target (fluent API).
 
         Args:
-            sources: Source files (Nodes, Paths, or string paths).
-            base: Optional base directory for relative paths.
+            sources: Source files (Targets, Nodes, Paths, or string paths).
+                    If Targets are included, their output files become sources
+                    after those Targets are resolved.
+            base: Optional base directory for relative paths (only applies
+                  to Path and string sources, not Targets).
 
         Returns:
             self for method chaining.
 
         Example:
-            target.add_sources(["main.cpp", "util.cpp"], base=src_dir)
+            # Mix regular and generated sources
+            generated = env.Command(target="gen.cpp", source="gen.y", command="...")
+            target.add_sources([generated, "main.cpp", "util.cpp"], base=src_dir)
         """
         base_path = Path(base) if base else None
         for source in sources:
-            if base_path and isinstance(source, (str, Path)):
-                path = Path(source)
-                if not path.is_absolute():
-                    source = base_path / path
-            node = self._to_node(source)
-            self._sources.append(node)
+            if isinstance(source, Target):
+                # Store Target sources for deferred resolution
+                if self._pending_sources is None:
+                    self._pending_sources = []
+                self._pending_sources.append(source)
+                # Add as dependency to ensure correct build order
+                if source not in self.dependencies:
+                    self.dependencies.append(source)
+            else:
+                if base_path and isinstance(source, (str, Path)):
+                    path = Path(source)
+                    if not path.is_absolute():
+                        source = base_path / path
+                node = self._to_node(source)
+                self._sources.append(node)
         return self
 
     def _to_node(self, source: Node | Path | str) -> Node:

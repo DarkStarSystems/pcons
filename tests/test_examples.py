@@ -483,9 +483,13 @@ def run_example(
         if shutil.which("ninja") is None:
             pytest.skip("ninja not available")
 
+        # Get build targets (if specified)
+        build_targets = get_platform_value(test_config, "build_targets", [])
+
         # Run ninja from the build directory using -C
+        ninja_cmd = ["ninja", "-C", str(build_dir)] + build_targets
         result = subprocess.run(
-            ["ninja", "-C", str(build_dir)],
+            ninja_cmd,
             cwd=work_dir,
             capture_output=True,
             text=True,
@@ -506,9 +510,13 @@ def run_example(
         if shutil.which("make") is None:
             pytest.skip("make not available")
 
+        # Get build targets (if specified)
+        build_targets = get_platform_value(test_config, "build_targets", [])
+
         # Run make from the build directory using -C
+        make_cmd = ["make", "-C", str(build_dir)] + build_targets
         result = subprocess.run(
-            ["make", "-C", str(build_dir)],
+            make_cmd,
             cwd=work_dir,
             capture_output=True,
             text=True,

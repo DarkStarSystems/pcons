@@ -172,7 +172,7 @@ class TestProjectValidation:
         source_file.write_text("int main() { return 0; }")
 
         target = Target("app")
-        target.sources.append(FileNode(source_file))
+        target.add_source(FileNode(source_file))
         project.add_target(target)
 
         errors = project.validate()
@@ -181,7 +181,7 @@ class TestProjectValidation:
     def test_detect_missing_source(self, tmp_path):
         project = Project("myproject", root_dir=tmp_path)
         target = Target("app")
-        target.sources.append(FileNode("nonexistent.c"))
+        target.add_source(FileNode("nonexistent.c"))
         project.add_target(target)
 
         errors = project.validate()
@@ -221,11 +221,11 @@ class TestProjectAllNodes:
         project = Project("myproject")
 
         lib = Target("lib")
-        lib.sources.append(FileNode("lib.c"))
+        lib.add_source(FileNode("lib.c"))
         lib.nodes.append(FileNode("lib.o"))
 
         app = Target("app")
-        app.sources.append(FileNode("main.c"))
+        app.add_source(FileNode("main.c"))
         app.nodes.append(FileNode("app"))
         app.link(lib)
 
