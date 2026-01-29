@@ -102,13 +102,17 @@ class GenerateVersionBuilder:
         # Use a triple-quoted Python string to avoid escaping issues.
         # The content is base64-encoded to avoid any shell/Python quoting problems.
         import base64
+        import sys
 
         header_content = _create_version_header_content(app_name, version)
         encoded = base64.b64encode(header_content.encode()).decode()
 
+        # Use sys.executable to get the Python interpreter path (works on all platforms)
+        python_cmd = sys.executable.replace("\\", "/")  # Use forward slashes for ninja
+
         output_node._build_info = {
             "tool": "generate_version",
-            "command": f"python3 -c \"import base64; open(__import__('sys').argv[1], 'w').write(base64.b64decode('{encoded}').decode())\" $out",
+            "command": f"\"{python_cmd}\" -c \"import base64; open(__import__('sys').argv[1], 'w').write(base64.b64decode('{encoded}').decode())\" $out",
         }
 
         # Register the node and add to target

@@ -1,0 +1,27 @@
+# Test configuration for static library linked into shared library
+# Tests the pattern: static lib -> shared lib -> executable
+
+[test]
+description = "Tests linking a static library into a shared library"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/demo",
+]
+
+[verify]
+# Run the built program and check output
+# core_value() returns 42, wrapper multiplies by 2 = 84
+# Need to set library path since the shared lib is in ./build/
+commands = [
+    { run = "DYLD_LIBRARY_PATH=./build LD_LIBRARY_PATH=./build ./build/demo", expect_stdout = "Value from wrapper: 84" },
+]
+
+# Windows version - shared libraries (.dll) are found in PATH or same directory
+commands_windows = [
+    { run = "build\\demo.exe", expect_stdout = "Value from wrapper: 84" },
+]
+
+[skip]
+# Xcode builds to different output paths
+generators = ["xcode"]

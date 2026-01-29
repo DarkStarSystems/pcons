@@ -20,9 +20,7 @@ commands = [
 [skip]
 # Only run on Windows - requires MSVC toolchain and rc.exe
 platforms = ["linux", "darwin"]
-# Requires MSVC (cl.exe) or clang-cl AND rc.exe (resource compiler from Windows SDK)
-# Note: rc.exe must be in PATH (typically set by vcvarsall.bat)
+# Requires MSVC (cl.exe) or clang-cl to be installed
 requires_any = ["cl.exe", "clang-cl.exe"]
-requires = ["rc.exe"]
 # Windows resources don't work with Xcode or Make generator
 generators = ["xcode", "make"]

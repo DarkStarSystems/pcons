@@ -1,0 +1,25 @@
+# Test configuration for the object_sources example
+# This tests passing pre-compiled objects as sources to Program()
+
+[test]
+description = "Demonstrates using separately compiled objects as Program sources"
+
+# Files that should exist after the build
+# The helper.o is compiled separately via env.cc.Object()
+# main.o is compiled by Program's normal resolution
+expected_outputs = [
+    "build/helper.o",
+    "build/obj.demo/main.o",
+    "build/demo",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/demo", expect_stdout = "Value from helper: 42" },
+]
+
+[skip]
+# Works on all platforms with a C compiler
+# Xcode generator doesn't support pre-compiled object files in sources yet
+generators = ["xcode"]

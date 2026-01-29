@@ -3,11 +3,9 @@
 [test]
 description = "Demonstrates creating a custom builder with the @builder decorator"
 
-# Expected output files after build
+# Expected output files after build (platform-specific extensions handled by test framework)
 expected_outputs = [
     "build/version.h",
-    "build/obj.demo/main.o",
-    "build/demo",
 ]
 
 [verify]

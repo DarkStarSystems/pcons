@@ -65,6 +65,7 @@ from pcons.core.requirements import (
     compute_effective_requirements,
 )
 from pcons.core.subst import PathToken, TargetPath
+from pcons.core.target import TargetType
 from pcons.toolchains.build_context import CompileLinkContext
 from pcons.util.source_location import get_caller_location
 
@@ -638,15 +639,43 @@ class OutputNodeFactory:
     def _collect_dependency_outputs(self, target: Target) -> list[FileNode]:
         """Collect output nodes from all dependencies.
 
+        For SharedLibrary dependencies on Windows, returns the import library
+        (.lib) instead of the DLL (.dll) since that's what the linker needs.
+
         Args:
             target: The target whose dependencies to collect.
 
         Returns:
             List of FileNode outputs from dependencies.
         """
+        import sys
+
         result: list[FileNode] = []
         for dep in target.transitive_dependencies():
-            result.extend(dep.output_nodes)
+            for node in dep.output_nodes:
+                # On Windows, SharedLibrary produces both .dll and .lib (import library)
+                # For linking, we need the import library, not the DLL
+                if (
+                    sys.platform == "win32"
+                    and dep.target_type == TargetType.SHARED_LIBRARY
+                ):
+                    build_info = getattr(node, "_build_info", {})
+                    outputs = build_info.get("outputs", {})
+                    import_lib_info = outputs.get("import_lib")
+                    if import_lib_info and "path" in import_lib_info:
+                        # Create or find the import library node
+                        import_lib_path = import_lib_info["path"]
+                        if import_lib_path in self.project._nodes:
+                            result.append(self.project._nodes[import_lib_path])
+                        else:
+                            # Create the import lib node
+                            import_lib_node = FileNode(
+                                import_lib_path, defined_at=node.defined_at
+                            )
+                            self.project._nodes[import_lib_path] = import_lib_node
+                            result.append(import_lib_node)
+                        continue
+                result.append(node)
         return result
 
 
