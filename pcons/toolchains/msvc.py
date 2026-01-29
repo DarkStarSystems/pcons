@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, Any
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.tools.tool import BaseTool
-from pcons.tools.toolchain import BaseToolchain, ToolchainContext
+from pcons.tools.toolchain import ToolchainContext
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +23,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.target import Target
     from pcons.core.toolconfig import ToolConfig
-    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
 
 def _find_vswhere() -> Path | None:
@@ -405,105 +405,14 @@ class MsvcLinker(BaseTool):
         return ToolConfig("link", cmd=str(link.path))
 
 
-class MsvcToolchain(BaseToolchain):
-    """Microsoft Visual C++ toolchain (Windows only)."""
+class MsvcToolchain(MsvcCompatibleToolchain):
+    """Microsoft Visual C++ toolchain (Windows only).
 
-    # Flags that take their argument as a separate token for MSVC.
-    # MSVC generally uses /FLAG:value syntax, so there are fewer separated arg flags.
-    SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
-        [
-            # Linker passthrough (when invoking cl.exe which calls link.exe)
-            "/link",
-        ]
-    )
+    Inherits common MSVC-compatible functionality from MsvcCompatibleToolchain.
+    """
 
     def __init__(self) -> None:
         super().__init__("msvc")
-
-    # =========================================================================
-    # Source Handler Methods
-    # =========================================================================
-
-    def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Return handler for source file suffix, or None if not handled."""
-        from pcons.tools.toolchain import SourceHandler
-
-        suffix_lower = suffix.lower()
-        if suffix_lower == ".c":
-            return SourceHandler("cc", "c", ".obj", None, "msvc")
-        if suffix_lower in (".cpp", ".cxx", ".cc"):
-            return SourceHandler("cxx", "cxx", ".obj", None, "msvc")
-        if suffix_lower == ".rc":
-            # Resource files compile to .res and have no depfile
-            return SourceHandler("rc", "resource", ".res", None, None, "rccmd")
-        if suffix_lower == ".asm":
-            # MASM assembly files - compiled with ml64.exe (x64) or ml.exe (x86)
-            return SourceHandler("ml", "asm", ".obj", None, None, "asmcmd")
-        return None
-
-    def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
-        """Return handler for auxiliary input files."""
-        from pcons.tools.toolchain import AuxiliaryInputHandler
-
-        suffix_lower = suffix.lower()
-        if suffix_lower == ".def":
-            return AuxiliaryInputHandler(".def", "/DEF:$file")
-        if suffix_lower == ".manifest":
-            # MSVC linker requires /MANIFEST:EMBED when using /MANIFESTINPUT
-            return AuxiliaryInputHandler(
-                ".manifest",
-                "/MANIFESTINPUT:$file",
-                extra_flags=["/MANIFEST:EMBED"],
-            )
-        return None
-
-    def get_object_suffix(self) -> str:
-        """Return the object file suffix for MSVC toolchain."""
-        return ".obj"
-
-    def get_archiver_tool_name(self) -> str:
-        """Return the name of the archiver tool for MSVC toolchain."""
-        return "lib"
-
-    def get_static_library_name(self, name: str) -> str:
-        """Return filename for a static library (Windows-style)."""
-        return f"{name}.lib"
-
-    def get_shared_library_name(self, name: str) -> str:
-        """Return filename for a shared library (DLL)."""
-        return f"{name}.dll"
-
-    def get_program_name(self, name: str) -> str:
-        """Return filename for a program (with .exe suffix)."""
-        return f"{name}.exe"
-
-    def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
-        """Return additional compile flags needed for the target type.
-
-        MSVC does not need special compile flags for shared libraries.
-        DLL exports are typically handled via __declspec(dllexport) in code
-        or via module definition files (.def), not compiler flags.
-
-        Args:
-            target_type: The target type (e.g., "shared_library", "static_library").
-
-        Returns:
-            List of additional compile flags (empty for MSVC).
-        """
-        # MSVC doesn't need special compile flags like -fPIC.
-        # DLL export/import is handled via:
-        # - __declspec(dllexport) / __declspec(dllimport) in source code
-        # - Module definition files (.def)
-        # - /EXPORT linker flag (not a compile flag)
-        return []
-
-    def get_separated_arg_flags(self) -> frozenset[str]:
-        """Return flags that take their argument as a separate token.
-
-        Returns:
-            A frozenset of MSVC flags that take separate arguments.
-        """
-        return self.SEPARATED_ARG_FLAGS
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
@@ -544,88 +453,19 @@ class MsvcToolchain(BaseToolchain):
         }
         return True
 
-    # Architecture to MSVC machine type mapping
-    MSVC_ARCH_MAP: dict[str, str] = {
-        "x64": "X64",
-        "x86": "X86",
-        "arm64": "ARM64",
-        "arm64ec": "ARM64EC",
-        # Common aliases
-        "amd64": "X64",
-        "x86_64": "X64",
-        "i386": "X86",
-        "i686": "X86",
-        "aarch64": "ARM64",
-    }
-
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        """Apply target architecture flags for MSVC.
-
-        Adds the /MACHINE:xxx flag to the linker. Note that for full
-        cross-compilation support, you may also need to run vcvarsall.bat
-        with the appropriate architecture argument, or use a cross-toolset.
-
-        Supported architectures:
-        - x64 (or amd64, x86_64): 64-bit Intel/AMD
-        - x86 (or i386, i686): 32-bit Intel/AMD
-        - arm64 (or aarch64): 64-bit ARM
-        - arm64ec: ARM64EC emulation compatible
-
-        Args:
-            env: Environment to modify.
-            arch: Architecture name.
-            **kwargs: Toolchain-specific options (unused).
-        """
-        super().apply_target_arch(env, arch, **kwargs)
-        machine = self.MSVC_ARCH_MAP.get(arch.lower(), arch.upper())
-
-        # MSVC linker uses /MACHINE:xxx
-        if env.has_tool("link"):
-            if isinstance(env.link.flags, list):
-                env.link.flags.append(f"/MACHINE:{machine}")
-
-        # MSVC librarian also uses /MACHINE:xxx
-        if env.has_tool("lib"):
-            if isinstance(env.lib.flags, list):
-                env.lib.flags.append(f"/MACHINE:{machine}")
-
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply build variant with MSVC flags."""
+        """Apply build variant with MSVC flags.
+
+        Extends base class to add /DEBUG linker flag for debug variants.
+        """
+        # Base class handles compile flags and defines
         super().apply_variant(env, variant, **kwargs)
 
-        compile_flags: list[str] = []
-        defines: list[str] = []
-        link_flags: list[str] = []
-
+        # MSVC also needs /DEBUG linker flag for debug variants
         variant_lower = variant.lower()
-        if variant_lower == "debug":
-            compile_flags = ["/Od", "/Zi"]
-            defines = ["DEBUG", "_DEBUG"]
-            link_flags = ["/DEBUG"]
-        elif variant_lower == "release":
-            compile_flags = ["/O2"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "relwithdebinfo":
-            compile_flags = ["/O2", "/Zi"]
-            defines = ["NDEBUG"]
-            link_flags = ["/DEBUG"]
-        elif variant_lower == "minsizerel":
-            compile_flags = ["/O1"]
-            defines = ["NDEBUG"]
-        else:
-            logger.warning("Unknown variant '%s', no flags applied", variant)
-
-        for tool_name in ("cc", "cxx"):
-            if env.has_tool(tool_name):
-                tool = getattr(env, tool_name)
-                if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                    tool.flags.extend(compile_flags)
-                if hasattr(tool, "defines") and isinstance(tool.defines, list):
-                    tool.defines.extend(defines)
-
-        if env.has_tool("link") and link_flags:
-            if isinstance(env.link.flags, list):
-                env.link.flags.extend(link_flags)
+        if variant_lower in ("debug", "relwithdebinfo"):
+            if env.has_tool("link") and isinstance(env.link.flags, list):
+                env.link.flags.append("/DEBUG")
 
     def create_build_context(
         self,

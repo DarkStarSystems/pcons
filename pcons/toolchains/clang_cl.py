@@ -15,9 +15,9 @@ from typing import TYPE_CHECKING, Any
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.msvc import MsvcAssembler
 from pcons.tools.tool import BaseTool
-from pcons.tools.toolchain import BaseToolchain
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,6 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
-    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
 
 class ClangClCompiler(BaseTool):
@@ -209,6 +208,7 @@ class ClangClLinker(BaseTool):
                 "/DLL",
                 "$link.flags",
                 TargetPath(prefix="/OUT:"),
+                TargetPath(prefix="/IMPLIB:", index=1),
                 SourcePath(),
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "$link.libs",
@@ -257,16 +257,15 @@ class ClangClLinker(BaseTool):
         return ToolConfig("link", cmd=str(link.path))
 
 
-class ClangClToolchain(BaseToolchain):
+class ClangClToolchain(MsvcCompatibleToolchain):
     """Clang-CL toolchain for Windows development.
 
     Uses clang-cl with MSVC-compatible flags, producing binaries
-    compatible with the MSVC ecosystem.
+    compatible with the MSVC ecosystem. Inherits common MSVC-compatible
+    functionality from MsvcCompatibleToolchain.
     """
 
-    # Flags that take their argument as a separate token for Clang-CL.
-    # Clang-CL uses MSVC-style /FLAG:value syntax for most flags,
-    # but also supports some GCC-style flags when needed.
+    # Clang-CL supports additional GCC-style flags beyond the base MSVC set
     SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
         [
             # MSVC-style linker passthrough
@@ -280,75 +279,6 @@ class ClangClToolchain(BaseToolchain):
 
     def __init__(self) -> None:
         super().__init__("clang-cl")
-
-    def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Return handler for source file suffix."""
-        from pcons.tools.toolchain import SourceHandler
-
-        suffix_lower = suffix.lower()
-        if suffix_lower == ".c":
-            return SourceHandler("cc", "c", ".obj", None, "msvc")
-        if suffix_lower in (".cpp", ".cxx", ".cc", ".c++"):
-            return SourceHandler("cxx", "cxx", ".obj", None, "msvc")
-        if suffix == ".C":
-            return SourceHandler("cxx", "cxx", ".obj", None, "msvc")
-        if suffix_lower == ".asm":
-            # MASM assembly files - compiled with ml64.exe (x64) or ml.exe (x86)
-            # Uses the same assembler as MSVC
-            return SourceHandler("ml", "asm", ".obj", None, None, "asmcmd")
-        return None
-
-    def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
-        """Return handler for auxiliary input files."""
-        from pcons.tools.toolchain import AuxiliaryInputHandler
-
-        # Clang-CL/lld-link uses the same linker flags as MSVC
-        suffix_lower = suffix.lower()
-        if suffix_lower == ".def":
-            return AuxiliaryInputHandler(".def", "/DEF:$file")
-        if suffix_lower == ".manifest":
-            # lld-link requires /manifest:embed when using /MANIFESTINPUT
-            return AuxiliaryInputHandler(
-                ".manifest",
-                "/MANIFESTINPUT:$file",
-                extra_flags=["/manifest:embed"],
-            )
-        return None
-
-    def get_object_suffix(self) -> str:
-        """Return the object file suffix for clang-cl."""
-        return ".obj"
-
-    def get_archiver_tool_name(self) -> str:
-        """Return the archiver tool name (uses lib like MSVC)."""
-        return "lib"
-
-    def get_static_library_name(self, name: str) -> str:
-        """Return filename for a static library (Windows-style)."""
-        return f"{name}.lib"
-
-    def get_shared_library_name(self, name: str) -> str:
-        """Return filename for a shared library (DLL)."""
-        return f"{name}.dll"
-
-    def get_program_name(self, name: str) -> str:
-        """Return filename for a program (with .exe suffix)."""
-        return f"{name}.exe"
-
-    def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
-        """Return additional compile flags for target type.
-
-        Clang-CL doesn't need special flags like -fPIC on Windows.
-        """
-        return []
-
-    def get_separated_arg_flags(self) -> frozenset[str]:
-        """Return flags that take their argument as a separate token.
-
-        Returns:
-            A frozenset of Clang-CL flags that take separate arguments.
-        """
-        return self.SEPARATED_ARG_FLAGS
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
@@ -393,94 +323,29 @@ class ClangClToolchain(BaseToolchain):
         "aarch64": "aarch64-pc-windows-msvc",
     }
 
-    # Architecture to MSVC machine type mapping (for linker)
-    MSVC_MACHINE_MAP: dict[str, str] = {
-        "x64": "X64",
-        "x86": "X86",
-        "arm64": "ARM64",
-        "amd64": "X64",
-        "x86_64": "X64",
-        "i386": "X86",
-        "i686": "X86",
-        "aarch64": "ARM64",
-    }
-
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
         """Apply target architecture flags for Clang-CL.
 
-        Adds --target flag to compilers for cross-compilation and
-        /MACHINE:xxx to the linker.
+        Extends base class to add --target flag for cross-compilation.
+        Base class handles /MACHINE:xxx for linker and librarian.
 
         Supported architectures:
         - x64 (or amd64, x86_64): 64-bit Intel/AMD
         - x86 (or i386, i686): 32-bit Intel/AMD
         - arm64 (or aarch64): 64-bit ARM
-
-        Args:
-            env: Environment to modify.
-            arch: Architecture name.
-            **kwargs: Toolchain-specific options (unused).
         """
+        # Base class adds /MACHINE:xxx flags
         super().apply_target_arch(env, arch, **kwargs)
-        arch_lower = arch.lower()
 
-        # Add --target flag to compilers
-        target_triple = self.CLANG_CL_TARGET_MAP.get(arch_lower)
+        # Clang-CL also supports --target for cross-compilation
+        target_triple = self.CLANG_CL_TARGET_MAP.get(arch.lower())
         if target_triple:
-            target_flag = [f"--target={target_triple}"]
+            target_flag = f"--target={target_triple}"
             for tool_name in ("cc", "cxx"):
                 if env.has_tool(tool_name):
                     tool = getattr(env, tool_name)
                     if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                        tool.flags.extend(target_flag)
-
-        # Add /MACHINE:xxx to linker (lld-link or link.exe)
-        machine = self.MSVC_MACHINE_MAP.get(arch_lower, arch.upper())
-        if env.has_tool("link"):
-            if isinstance(env.link.flags, list):
-                env.link.flags.append(f"/MACHINE:{machine}")
-
-        # Add /MACHINE:xxx to librarian
-        if env.has_tool("lib"):
-            if isinstance(env.lib.flags, list):
-                env.lib.flags.append(f"/MACHINE:{machine}")
-
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply build variant (debug, release, etc.)."""
-        super().apply_variant(env, variant, **kwargs)
-
-        compile_flags: list[str] = []
-        defines: list[str] = []
-
-        variant_lower = variant.lower()
-        if variant_lower == "debug":
-            compile_flags = ["/Od", "/Zi"]
-            defines = ["DEBUG", "_DEBUG"]
-        elif variant_lower == "release":
-            compile_flags = ["/O2"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "relwithdebinfo":
-            compile_flags = ["/O2", "/Zi"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "minsizerel":
-            compile_flags = ["/O1"]
-            defines = ["NDEBUG"]
-        else:
-            logger.warning("Unknown variant '%s', no flags applied", variant)
-
-        # Add extra flags/defines from kwargs
-        extra_flags = kwargs.get("extra_flags", [])
-        extra_defines = kwargs.get("extra_defines", [])
-        compile_flags.extend(extra_flags)
-        defines.extend(extra_defines)
-
-        for tool_name in ("cc", "cxx"):
-            if env.has_tool(tool_name):
-                tool = getattr(env, tool_name)
-                if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                    tool.flags.extend(compile_flags)
-                if hasattr(tool, "defines") and isinstance(tool.defines, list):
-                    tool.defines.extend(defines)
+                        tool.flags.append(target_flag)
 
 
 # =============================================================================
