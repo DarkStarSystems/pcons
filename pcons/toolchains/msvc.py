@@ -449,7 +449,12 @@ class MsvcToolchain(BaseToolchain):
         if suffix_lower == ".def":
             return AuxiliaryInputHandler(".def", "/DEF:$file")
         if suffix_lower == ".manifest":
-            return AuxiliaryInputHandler(".manifest", "/MANIFESTINPUT:$file")
+            # MSVC linker requires /MANIFEST:EMBED when using /MANIFESTINPUT
+            return AuxiliaryInputHandler(
+                ".manifest",
+                "/MANIFESTINPUT:$file",
+                extra_flags=["/MANIFEST:EMBED"],
+            )
         return None
 
     def get_object_suffix(self) -> str:
