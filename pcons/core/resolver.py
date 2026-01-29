@@ -517,6 +517,18 @@ class OutputNodeFactory:
             "env": env,
         }
 
+        # For MSVC/clang-cl, also set up outputs dict for multi-output builds
+        # MSVC SharedLibrary produces both .dll and .lib (import library)
+        import sys
+
+        if sys.platform == "win32":
+            # Generate import library path (.lib file)
+            import_lib_path = lib_path.with_suffix(".lib")
+            lib_node._build_info["outputs"] = {
+                "primary": {"path": lib_path, "suffix": lib_path.suffix},
+                "import_lib": {"path": import_lib_path, "suffix": ".lib"},
+            }
+
         target.output_nodes.append(lib_node)
         target.nodes.append(lib_node)
         env.register_node(lib_node)
