@@ -578,14 +578,17 @@ class NinjaGenerator(BaseGenerator):
                 f.write(f"  target_{i} = {self._make_output_relative(tgt.path)}\n")
 
         # For multi-output builds, write out_<name> for each output
+        # Also write target_N for indexed access (used by TargetPath(index=N) in commands)
         outputs_info = build_info.get("outputs")
         if outputs_info and isinstance(outputs_info, dict):
-            for name, info in outputs_info.items():
+            for i, (name, info) in enumerate(outputs_info.items()):
                 # Write out_<name> variable for each output
                 if isinstance(info, dict):
                     info_dict = cast(dict[str, Any], info)
                     out_path = self._make_output_relative(info_dict["path"])
                     f.write(f"  out_{name} = {out_path}\n")
+                    # Also write target_N for indexed access
+                    f.write(f"  target_{i} = {out_path}\n")
 
         # Write custom per-build variables from build_info (legacy support)
         # Note: New code should use context objects instead

@@ -1,13 +1,13 @@
 # Test configuration for subdirs example
 
 [test]
-# Build the complete project
-build_targets = ["app/subdirs_demo"]
+# Build the complete project (no build_targets means build all defaults)
 
 [test.expected_output]
 # Check that all expected files are built
+# The object files are in obj.<target_name>/ directories
 files = [
-    "libfoo/foo.o",
-    "app/main.o",
-    "app/subdirs_demo",
+    "obj.foo/foo.o",
+    "obj.subdirs_demo/main.o",
+    "subdirs_demo",
 ]
