@@ -28,40 +28,36 @@ Pcons is a Python-based build system that generates [Ninja](https://ninja-build.
 
 ## Quick Start
 
-### Prerequisites
-
-Before using pcons, ensure you have:
-
-1. **uv** - The fast Python package manager ([install guide](https://docs.astral.sh/uv/getting-started/installation/))
-2. **A C/C++ compiler** for C/C++ projects like the one in this user guide.
-  - One of:
-    - Clang/LLVM (macOS, Linux)
-    - Clang-CL (Windows - MSVC-compatible Clang)
-    - GCC (Linux)
-    - MSVC (Windows)
-  For other types of projects like building docs, swig, or game assets, pcons can use your own tools.
-3. **Ninja** - The build executor ([install guide](https://ninja-build.org/))
-You don't really need to install ninja because pcons will use `uvx ninja` when needed.
-
 ### Installing Pcons
+
+#### Using `uv`
+
+`uv` is a fast modern python package and project manager. Install it from [here](https://github.com/astral-sh/uv). Highly recommended, and it's a simple quick install.
 
 You can run pcons directly from PyPI with `uvx` (no installation required):
 
 ```bash
-uvx pcons
+uvx pcons ...
 ```
 
 Or add it to your project:
 
 ```bash
 uv add pcons
+pcons ...
 ```
 
 Or install globally:
 
 ```bash
 uv tool install pcons
+pcons ...
 ```
+
+#### With `pipx` or python
+
+pcons is on PyPI, so if you have pipx, just `pipx install pcons`. With plain python, you can install pcons globally using `python -mpip install pcons` or use a venv if desired.
+
 
 ### Your First Build: Hello World
 
@@ -82,17 +78,13 @@ int main() {
 
 ```python
 #!/usr/bin/env python3
-from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator
-
-# Find an available C/C++ toolchain (clang, gcc, or msvc)
-toolchain = find_c_toolchain()
+from pcons import Project, find_c_toolchain, Generator
 
 # Create project with build directory
 project = Project("hello", build_dir="build")
 
-# Create an environment with the toolchain
-env = project.Environment(toolchain=toolchain)
+# Create an environment with the system default C/C++ toolchain
+env = project.Environment(toolchain=find_c_toolchain())
 
 # Create a program target
 hello = project.Program("hello", env)
@@ -102,10 +94,7 @@ hello.add_sources(["hello.cpp"])
 project.Default(hello)
 
 # Resolve dependencies and generate build files
-project.resolve()
-NinjaGenerator().generate(project, "build")
-
-print(f"Generated build/build.ninja")
+Generator().generate(project, "build")
 ```
 
 **3. Generate and build**:
@@ -118,7 +107,7 @@ uvx pcons
 pcons
 ```
 
-This runs your `pcons-build.py` to generate `build/build.ninja`, then invokes Ninja to compile your program.
+This runs your `pcons-build.py` to generate `build/build.ninja`, then invokes Ninja to compile your program. If you don't have ninja installed, pcons will try to invoke it via `uvx ninja`.
 
 **4. Run your program**:
 
@@ -155,16 +144,17 @@ Every pcons build script (`pcons-build.py`) follows three phases:
 2. **Describe** - Create targets and define their sources/dependencies
 3. **Generate** - Resolve dependencies and write build files
 
-Your script must explicitly call `project.resolve()` and a generator at the end:
+Your script must call a generator at the end:
 
 ```python
 # ... define targets ...
 
-# REQUIRED: Resolve all dependencies (computes effective requirements)
+# OPTIONAL: Resolve all dependencies (computes effective requirements)
+# Generators will resolve the project if it's not already resolved.
 project.resolve()
 
-# REQUIRED: Generate build files
-NinjaGenerator().generate(project, build_dir)
+# REQUIRED: Generate build files (Ninja is the default generator, but Makefile and Xcode generators are also included)
+Generator().generate(project, build_dir)
 ```
 
 The `pcons` CLI executes your script but does NOT automatically call resolve/generate - your script controls when and how this happens. This gives you flexibility for conditional generation or multiple generators.
@@ -250,7 +240,7 @@ from pcons import find_c_toolchain
 # Auto-detect the best available toolchain
 # Uses platform-appropriate defaults:
 #   Windows: clang-cl, msvc, llvm, gcc
-#   Unix:    llvm, gcc
+#   Unix/Mac: llvm, gcc
 toolchain = find_c_toolchain()
 
 # Or specify a preference order
@@ -414,8 +404,7 @@ int main(void) {
 **pcons-build.py:**
 ```python
 #!/usr/bin/env python3
-from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons import Project, find_c_toolchain, Generator
 
 # Setup
 toolchain = find_c_toolchain()
@@ -429,8 +418,7 @@ hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 # Generate
 project.Default(hello)
-project.resolve()
-NinjaGenerator().generate(project, "build")
+Generator().generate(project, "build")
 ```
 
 **Build and run:**
@@ -496,7 +484,7 @@ int main(void) {
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons import Project, find_c_toolchain, Generator
 
 # Directories
 src_dir = Path(__file__).parent / "src"
@@ -520,8 +508,7 @@ calculator.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 # Generate
 project.Default(calculator)
-project.resolve()
-NinjaGenerator().generate(project, "build")
+Generator().generate(project, "build")
 ```
 
 ### Static Library
@@ -543,7 +530,7 @@ project/
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons import Project, find_c_toolchain, Generator
 
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
@@ -568,8 +555,7 @@ app.add_sources([src_dir / "main.c"])
 app.link(libmath)  # Gets libmath's public includes automatically!
 
 project.Default(app)
-project.resolve()
-NinjaGenerator().generate(project, "build")
+Generator().generate(project, "build")
 ```
 
 Key points:
@@ -584,7 +570,7 @@ Create a shared library (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows).
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons import Project, find_c_toolchain, Generator
 
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
@@ -619,8 +605,7 @@ app.add_sources([src_dir / "main.c"])
 app.link(libplugin)
 
 project.Default(app, libplugin)
-project.resolve()
-NinjaGenerator().generate(project, "build")
+Generator().generate(project, "build")
 ```
 
 ### Project with Subdirectories
@@ -644,7 +629,7 @@ project/
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons import Project, find_c_toolchain, Generator
 from pcons.generators.compile_commands import CompileCommandsGenerator
 
 project_dir = Path(__file__).parent
@@ -674,10 +659,9 @@ simulator.link(libphysics)  # Gets BOTH physics and math includes!
 
 # Set defaults and generate
 project.Default(simulator)
-project.resolve()
 
 # Generate build files
-NinjaGenerator().generate(project, build_dir)
+Generator().generate(project, build_dir)
 
 # Generate compile_commands.json for IDE integration
 CompileCommandsGenerator().generate(project, build_dir)
@@ -694,7 +678,7 @@ Use `set_variant()` to switch between debug and release builds.
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator, get_variant
+from pcons import Project, find_c_toolchain, Generator, get_variant
 
 # Get variant from command line: pcons --variant=debug
 # Defaults to "release"
@@ -717,8 +701,7 @@ app = project.Program("myapp", env)
 app.add_sources(["main.c"])
 
 project.Default(app)
-project.resolve()
-NinjaGenerator().generate(project, build_dir)
+Generator().generate(project, build_dir)
 
 print(f"Variant: {variant}")
 print(f"Build dir: {build_dir}")
@@ -783,7 +766,7 @@ env.apply_preset("lto")
 The simplest way to use an external package is `project.find_package()`. It searches for the package using available finders (pkg-config, system paths) and returns an `ImportedTarget` that you can link against or apply to an environment.
 
 ```python
-from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons import Project, find_c_toolchain, Generator
 
 toolchain = find_c_toolchain()
 project = Project("myapp", build_dir="build")
@@ -861,7 +844,7 @@ PkgConfigDeps
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator, get_variant
+from pcons import Project, find_c_toolchain, Generator, get_variant
 from pcons.configure.config import Configure
 from pcons.packages.finders import ConanFinder
 
@@ -907,8 +890,7 @@ hello = project.Program("hello_fmt", env)
 hello.add_sources([project_dir / "src" / "main.cpp"])
 
 project.Default(hello)
-project.resolve()
-NinjaGenerator().generate(project, build_dir)
+Generator().generate(project, build_dir)
 ```
 
 ### The env.use() Helper
@@ -1105,8 +1087,6 @@ Pcons generates `compile_commands.json` for IDE integration:
 ```python
 from pcons.generators.compile_commands import CompileCommandsGenerator
 
-project.resolve()
-
 # Generate compile_commands.json
 CompileCommandsGenerator().generate(project, build_dir)
 ```
@@ -1128,8 +1108,6 @@ Generate a traditional Makefile instead of Ninja build files:
 ```python
 from pcons.generators.makefile import MakefileGenerator
 
-project.resolve()
-
 # Generate Makefile
 MakefileGenerator().generate(project, build_dir)
 # Creates build/Makefile
@@ -1149,8 +1127,6 @@ Generate dependency graphs:
 
 ```python
 from pcons.generators.mermaid import MermaidGenerator
-
-project.resolve()
 
 # Generate Mermaid diagram
 MermaidGenerator().generate(project, build_dir)
@@ -1451,6 +1427,177 @@ ninja -f build/build.ninja          # Build the program
 ninja -f build/build.ninja install  # Create and install tarballs to ./Installers
 ```
 
+### Platform Installers
+
+Pcons includes helpers for creating native installers on macOS and Windows. These live in `pcons.contrib.installers` and integrate into the build graph just like any other target — Ninja handles incremental rebuilds automatically.
+
+#### macOS: `.pkg` Installers
+
+Create standard macOS installer packages using `pkgbuild` and `productbuild` (requires Xcode Command Line Tools).
+
+**Simple component package** (wraps `pkgbuild`):
+
+```python
+from pcons.contrib.installers import macos
+
+pkg = macos.create_component_pkg(
+    project, env,
+    identifier="com.example.myapp",
+    version="1.0.0",
+    sources=[app],
+    install_location="/usr/local/bin",
+)
+```
+
+**Full-featured installer** with welcome screen, license, and branding (wraps `productbuild`):
+
+```python
+pkg = macos.create_pkg(
+    project, env,
+    name="MyApp",
+    version="1.0.0",
+    identifier="com.example.myapp",
+    sources=[app],
+    install_location="/usr/local/bin",
+    min_os_version="10.13",
+    welcome=Path("installer/welcome.rtf"),
+    license=Path("LICENSE.rtf"),
+    readme=Path("installer/readme.html"),
+)
+```
+
+**Key `create_pkg()` parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `name` | Application/package name |
+| `version` | Package version string |
+| `identifier` | Bundle identifier (e.g., `"com.example.myapp"`) |
+| `sources` | List of Targets, FileNodes, or paths to package |
+| `install_location` | Where files are installed (default: `"/Applications"`) |
+| `min_os_version` | Minimum macOS version (e.g., `"10.13"`) |
+| `welcome`, `readme`, `license`, `conclusion` | Installer UI pages (`.rtf` or `.html`) |
+| `background` | Background image for the installer |
+| `scripts_dir` | Directory with `preinstall`/`postinstall` scripts |
+| `sign_identity` | Code signing identity |
+
+#### macOS: `.dmg` Disk Images
+
+Create compressed disk images with `hdiutil`:
+
+```python
+dmg = macos.create_dmg(
+    project, env,
+    name="MyApp",
+    sources=[app],
+    applications_symlink=True,  # Add /Applications symlink for drag-install
+)
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `name` | Application name (used as volume name) |
+| `sources` | Files to include in the disk image |
+| `volume_name` | Custom volume name (defaults to `name`) |
+| `format` | `"UDZO"` (zlib, default), `"UDBZ"` (bzip2), `"ULFO"` (lzfse), `"UDRO"` (uncompressed) |
+| `applications_symlink` | Add `/Applications` symlink for drag-and-drop install (default: `True`) |
+
+#### macOS: Signing and Notarization
+
+Helper functions return commands you can use with `env.Command()` or run externally:
+
+```python
+# Sign with Developer ID
+sign_cmd = macos.sign_pkg(
+    Path("build/MyApp-1.0.0.pkg"),
+    identity="Developer ID Installer: My Company",
+)
+
+# Notarize for distribution
+notarize_cmd = macos.notarize_cmd(
+    Path("build/MyApp-1.0.0.pkg"),
+    apple_id="dev@example.com",
+    team_id="TEAM123",
+    password_keychain_item="notarize-profile",
+)
+```
+
+#### Windows: `.msix` Packages
+
+Create modern Windows MSIX packages using `MakeAppx.exe` (requires Windows SDK):
+
+```python
+from pcons.contrib.installers import windows
+
+msix = windows.create_msix(
+    project, env,
+    name="MyApp",
+    version="1.0.0.0",
+    publisher="CN=Example Corp",
+    sources=[app],
+    display_name="My Application",
+    description="A great application",
+    executable="myapp.exe",
+)
+```
+
+| Parameter | Description |
+|-----------|-------------|
+| `name` | Package name (alphanumeric, no spaces) |
+| `version` | Version in `X.Y.Z.W` format |
+| `publisher` | Publisher identity (e.g., `"CN=Example Corp"`) |
+| `sources` | Files to package |
+| `executable` | Main executable name (defaults to first source) |
+| `display_name` | User-visible name |
+| `description` | Package description |
+| `processor_architecture` | `"x64"`, `"x86"`, or `"arm64"` (default: `"x64"`) |
+| `sign_cert` | Path to `.pfx` certificate for signing |
+| `sign_password` | Certificate password |
+
+#### Complete Platform-Conditional Example
+
+```python
+from pcons.contrib import platform
+
+installer_targets = []
+
+if platform.is_macos():
+    from pcons.contrib.installers import macos
+
+    pkg = macos.create_pkg(
+        project, env,
+        name="MyApp", version="1.0.0",
+        identifier="com.example.myapp",
+        sources=[app],
+        install_location="/usr/local/bin",
+    )
+    dmg = macos.create_dmg(project, env, name="MyApp", sources=[app])
+    installer_targets.extend([pkg, dmg])
+
+elif platform.is_windows():
+    from pcons.contrib.installers import windows
+
+    msix = windows.create_msix(
+        project, env,
+        name="MyApp", version="1.0.0.0",
+        publisher="CN=Example Corp",
+        sources=[app],
+    )
+    installer_targets.append(msix)
+
+if installer_targets:
+    project.Alias("installers", *installer_targets)
+```
+
+Build with:
+
+```bash
+pcons                # Build the application
+ninja -C build installers  # Build installer packages
+```
+
+For a complete working example, see `examples/19_installers/`.
+
 ### macOS Framework Linking
 
 On macOS, link against system frameworks using `env.Framework()`:
@@ -1491,7 +1638,7 @@ Pcons supports building for multiple CPU architectures, which is useful for:
 Use `env.set_target_arch()` to configure an environment for a specific architecture:
 
 ```python
-from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons import Project, find_c_toolchain, Generator
 
 project = Project("mylib")
 toolchain = find_c_toolchain()
@@ -1535,7 +1682,7 @@ To create a universal binary that runs on both Intel and Apple Silicon Macs, bui
 
 ```python
 from pathlib import Path
-from pcons import Project, find_c_toolchain, NinjaGenerator
+from pcons import Project, find_c_toolchain, Generator
 from pcons.util.macos import create_universal_binary
 
 project = Project("mylib")
@@ -1564,8 +1711,7 @@ lib_universal = create_universal_binary(
 )
 
 project.Default(lib_universal)
-project.resolve()
-NinjaGenerator().generate(project, "build")
+Generator().generate(project, "build")
 ```
 
 The `create_universal_binary()` function:
@@ -1697,7 +1843,6 @@ app.add_sources([
     "kernel.cu",      # Compiled with CUDA nvcc
 ])
 
-project.resolve()
 ```
 
 #### How Source Routing Works
@@ -1954,7 +2099,8 @@ This generates a header like:
 
 | Class | Description |
 |-------|-------------|
-| `NinjaGenerator` | Generate Ninja build files (default) |
+| `Generator` | Generate build files using default generator (specified by cmdline, env, or default: Ninja) |
+| `NinjaGenerator` | Generate Ninja build files |
 | `MakefileGenerator` | Generate traditional Makefiles |
 | `CompileCommandsGenerator` | Generate compile_commands.json for IDEs |
 | `MermaidGenerator` | Generate Mermaid dependency diagrams |
@@ -2081,7 +2227,6 @@ plugin = ofx.create_bundle(
     build_dir=project.build_dir,
 )
 
-project.resolve()
 Generator().generate(project)
 ```
 
