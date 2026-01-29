@@ -155,9 +155,6 @@ class TestSystemFinder:
         result = finder.find("zlib")
         assert result is None
 
-    @pytest.mark.skipif(
-        sys.platform == "win32", reason="System paths differ on Windows"
-    )
     def test_find_with_header_and_lib(self, tmp_path: Path) -> None:
         """Test finding a package with header and library present."""
         include_dir = tmp_path / "include"
@@ -165,9 +162,15 @@ class TestSystemFinder:
         include_dir.mkdir()
         lib_dir.mkdir()
 
-        # Create fake zlib.h and libz.a
+        # Create fake zlib.h with platform-appropriate library file
         (include_dir / "zlib.h").write_text('#define ZLIB_VERSION "1.2.13"\n')
-        (lib_dir / "libz.a").write_text("")
+        if sys.platform == "win32":
+            lib_name = "z.lib"
+        elif sys.platform == "darwin":
+            lib_name = "libz.dylib"
+        else:
+            lib_name = "libz.a"
+        (lib_dir / lib_name).write_text("")
 
         finder = SystemFinder(
             include_paths=[include_dir],
@@ -182,12 +185,8 @@ class TestSystemFinder:
         assert "z" in result.libraries
         assert result.found_by == "system"
 
-    @pytest.mark.skipif(
-        sys.platform == "win32", reason="System paths differ on Windows"
-    )
     def test_extract_version_from_header(self, tmp_path: Path) -> None:
         """Test extracting version from header."""
-
         include_dir = tmp_path / "include"
         lib_dir = tmp_path / "lib"
         include_dir.mkdir()
@@ -197,8 +196,10 @@ class TestSystemFinder:
         (include_dir / "zlib.h").write_text(
             '#define ZLIB_VERSION "1.2.13"\nint compress();\n'
         )
-        # Use platform-appropriate library suffix
-        if sys.platform == "darwin":
+        # Use platform-appropriate library name
+        if sys.platform == "win32":
+            lib_name = "z.lib"
+        elif sys.platform == "darwin":
             lib_name = "libz.dylib"
         else:
             lib_name = "libz.so"

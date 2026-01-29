@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -15,6 +16,22 @@ from pcons.cli import find_command_in_argv, find_script, parse_variables, setup_
 
 if TYPE_CHECKING:
     pass
+
+
+def _has_c_compiler() -> bool:
+    """Check if any C compiler is available."""
+    # Unix-style compilers
+    if shutil.which("clang") or shutil.which("gcc") or shutil.which("cc"):
+        return True
+    # Windows compilers
+    if sys.platform == "win32":
+        if (
+            shutil.which("cl.exe")
+            or shutil.which("clang-cl.exe")
+            or shutil.which("clang-cl")
+        ):
+            return True
+    return False
 
 
 class TestFindScript:
@@ -373,10 +390,8 @@ class TestCLICommands:
 
     def test_pcons_init_template_runs(self, tmp_path: Path) -> None:
         """Test that the init template can actually run and generate ninja."""
-        import shutil
-
         # Skip if no C compiler available
-        if shutil.which("clang") is None and shutil.which("gcc") is None:
+        if not _has_c_compiler():
             pytest.skip("no C compiler found")
 
         result = subprocess.run(
@@ -630,14 +645,12 @@ class TestIntegration:
 
     def test_full_build_cycle(self, tmp_path: Path) -> None:
         """Test a complete build cycle with a simple C program."""
-        import shutil
-
         # Skip if ninja not available
         if shutil.which("ninja") is None:
             pytest.skip("ninja not found")
 
-        # Skip if clang not available
-        if shutil.which("clang") is None and shutil.which("gcc") is None:
+        # Skip if no C compiler available
+        if not _has_c_compiler():
             pytest.skip("no C compiler found")
 
         # Create a simple C source file

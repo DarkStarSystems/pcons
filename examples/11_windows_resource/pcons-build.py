@@ -19,8 +19,8 @@ src_dir = Path(__file__).parent / "src"
 # Create project
 project = Project("resource_example", build_dir=build_dir)
 
-# Find C toolchain - prefer MSVC on Windows for resource file support
-toolchain = find_c_toolchain(prefer=["msvc", "gcc", "llvm"])
+# Find C toolchain - prefer MSVC or clang-cl on Windows for resource file support
+toolchain = find_c_toolchain(prefer=["msvc", "clang-cl", "gcc", "llvm"])
 env = project.Environment(toolchain=toolchain)
 
 # Create program with C source and Windows resource file

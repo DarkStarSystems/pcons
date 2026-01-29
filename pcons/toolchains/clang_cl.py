@@ -16,7 +16,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
-from pcons.toolchains.msvc import MsvcAssembler
+from pcons.toolchains.msvc import MsvcAssembler, MsvcResourceCompiler
 from pcons.tools.tool import BaseTool
 
 logger = logging.getLogger(__name__)
@@ -304,10 +304,20 @@ class ClangClToolchain(MsvcCompatibleToolchain):
         if link.configure(config) is None:
             return False
 
+        rc = MsvcResourceCompiler()
+        rc.configure(config)  # Optional - not required for toolchain to work
+
         ml = MsvcAssembler()
         ml.configure(config)  # Optional - not required for toolchain to work
 
-        self._tools = {"cc": cc, "cxx": cxx, "lib": lib, "link": link, "ml": ml}
+        self._tools = {
+            "cc": cc,
+            "cxx": cxx,
+            "lib": lib,
+            "link": link,
+            "rc": rc,
+            "ml": ml,
+        }
         return True
 
     # Architecture to Clang target triple mapping for Windows
@@ -363,6 +373,7 @@ toolchain_registry.register(
         ClangClCxxCompiler,
         ClangClLibrarian,
         ClangClLinker,
+        MsvcResourceCompiler,
         MsvcAssembler,
     ],
     category="c",
