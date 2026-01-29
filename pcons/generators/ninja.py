@@ -628,9 +628,19 @@ class NinjaGenerator(BaseGenerator):
                 if isinstance(out_node, FileNode):
                     user_defaults.append(self._escape_output_path(out_node.path))
 
-        # Collect all "final" outputs for 'all' target
+        # Collect all target outputs for 'all' target
         for target in project.targets:
-            # Check if this is a "final" target (program or library)
+            for node in target.output_nodes:
+                if isinstance(node, FileNode):
+                    all_outputs.append(self._escape_output_path(node.path))
+
+        if all_outputs:
+            # Create 'all' phony target — builds every target in the project
+            f.write(f"build all: phony {' '.join(all_outputs)}\n")
+
+        # Collect programs and libraries for implicit default
+        prog_lib_outputs: list[str] = []
+        for target in project.targets:
             if target.target_type in (
                 "program",
                 "shared_library",
@@ -638,20 +648,13 @@ class NinjaGenerator(BaseGenerator):
             ):
                 for node in target.output_nodes:
                     if isinstance(node, FileNode):
-                        all_outputs.append(self._escape_output_path(node.path))
+                        prog_lib_outputs.append(self._escape_output_path(node.path))
 
-        # Include user defaults in all_outputs if not already present
-        for ud in user_defaults:
-            if ud not in all_outputs:
-                all_outputs.append(ud)
-
-        if all_outputs:
-            # Create 'all' phony target (standard convention from Make)
-            f.write(f"build all: phony {' '.join(all_outputs)}\n")
-
-        # Set default: user-specified targets if any, otherwise 'all'
+        # Set default: user-specified targets, or programs & libraries
         if user_defaults:
             f.write(f"default {' '.join(user_defaults)}\n")
+        elif prog_lib_outputs:
+            f.write(f"default {' '.join(prog_lib_outputs)}\n")
         elif all_outputs:
             f.write("default all\n")
 

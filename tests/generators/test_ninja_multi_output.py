@@ -203,8 +203,12 @@ class TestNinjaMultiOutput:
         build_lines = [
             line for line in content.split("\n") if line.startswith("build ")
         ]
-        # Filter out mkdir statements
-        non_mkdir_builds = [line for line in build_lines if ": mkdir" not in line]
+        # Filter out mkdir statements and phony targets (e.g., 'all')
+        non_mkdir_builds = [
+            line
+            for line in build_lines
+            if ": mkdir" not in line and ": phony" not in line
+        ]
         # Should have just one build statement (for the multi-output)
         assert len(non_mkdir_builds) == 1
 

@@ -566,25 +566,39 @@ class MakefileGenerator(BaseGenerator):
         f.write("\n")
 
     def _write_default_target(self, f: TextIO, project: Project) -> None:
-        """Write the default target."""
-        defaults: list[str] = []
+        """Write the default and 'all' targets."""
+        user_defaults: list[str] = []
 
-        # Add nodes from default targets
-        # Output paths need build_dir prefix stripped since make runs from build_dir
+        # Add nodes from user-specified default targets
         for target in project.default_targets:
             if target.output_nodes:
                 for out_node in target.output_nodes:
                     if isinstance(out_node, FileNode):
-                        defaults.append(self._make_build_relative_path(out_node.path))
+                        user_defaults.append(
+                            self._make_build_relative_path(out_node.path)
+                        )
             else:
                 for target_node in target.nodes:
                     if isinstance(target_node, FileNode):
-                        defaults.append(
+                        user_defaults.append(
                             self._make_build_relative_path(target_node.path)
                         )
 
-        # If no default targets, auto-detect from registered targets
-        if not defaults:
+        # Collect all target outputs for 'all'
+        all_outputs: list[str] = []
+        for target in project.targets:
+            if getattr(target, "_resolved", False):
+                for node in target.output_nodes:
+                    if isinstance(node, FileNode):
+                        all_outputs.append(self._make_build_relative_path(node.path))
+
+        # If no resolved targets, find final nodes from env-created nodes
+        if not all_outputs:
+            all_outputs = self._find_final_nodes(project)
+
+        # Collect programs and libraries for implicit default
+        prog_lib_outputs: list[str] = []
+        if not user_defaults:
             for target in project.targets:
                 if getattr(target, "_resolved", False):
                     if target.target_type in (
@@ -594,20 +608,24 @@ class MakefileGenerator(BaseGenerator):
                     ):
                         for node in target.output_nodes:
                             if isinstance(node, FileNode):
-                                defaults.append(
+                                prog_lib_outputs.append(
                                     self._make_build_relative_path(node.path)
                                 )
 
-        # If still no defaults, find "final" nodes from environment-created nodes
-        # (nodes with builders that aren't dependencies of other nodes)
-        if not defaults:
-            defaults = self._find_final_nodes(project)
+        # Write targets
+        f.write("# Default target\n")
 
+        # Determine what 'make' with no args builds
+        defaults = user_defaults or prog_lib_outputs or all_outputs
         if defaults:
-            f.write("# Default target\n")
-            f.write(f"all: {' '.join(defaults)}\n")
-            f.write(".DEFAULT_GOAL := all\n")
-            f.write("\n")
+            f.write(f"default: {' '.join(defaults)}\n")
+            f.write(".DEFAULT_GOAL := default\n")
+
+        # 'make all' builds every target in the project
+        if all_outputs:
+            f.write(f"all: {' '.join(all_outputs)}\n")
+
+        f.write("\n")
 
     def _find_final_nodes(self, project: Project) -> list[str]:
         """Find nodes that are 'final' outputs (nothing depends on them).

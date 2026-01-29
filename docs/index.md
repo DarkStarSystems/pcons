@@ -9,7 +9,7 @@ A Python-based build system that generates [Ninja](https://ninja-build.org/) bui
 
 ## Quick Start
 
-**1. Create `src/hello.c`:**
+**1. Create `hello.c`:**
 
 ```c
 #include <stdio.h>
@@ -19,14 +19,13 @@ int main() { printf("Hello, world!\n"); return 0; }
 **2. Create `pcons-build.py`:**
 
 ```python
-from pcons import Project, NinjaGenerator, find_c_toolchain
+from pcons import Project, Generator, find_c_toolchain
 
-project = Project("hello")
+project = Project("hello", build_dir="build")
 env = project.Environment(toolchain=find_c_toolchain())
-env.link.Program("build/hello", env.cc.Object("build/hello.o", "src/hello.c"))
 
-project.resolve()
-NinjaGenerator().generate(project, "build")
+hello = project.Program("hello", env, sources=["hello.c"])
+Generator().generate(project)
 ```
 
 **3. Build and run:**
@@ -37,6 +36,8 @@ uvx pcons
 ```
 
 That's it. No installation, no configuration files, no build directory setup.
+
+Instead of uv, you can use `pipx` or just `python -mpip install pcons` to install.
 
 ## Next Steps
 

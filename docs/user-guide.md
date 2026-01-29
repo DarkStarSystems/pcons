@@ -348,9 +348,11 @@ When you run `pcons build`, Ninja uses this graph to:
 # Set default targets - these build when you run just "ninja"
 project.Default(app)
 project.Default(lib, app)  # Can specify multiple
-
-# Running "ninja" builds defaults; "ninja all" also builds defaults
 ```
+
+If you don't call `project.Default()`, all programs and libraries (static and shared) in the project are built by default. This is usually what you want for simple projects. Use `Default()` when you want to build only a subset by default — for example, to exclude test programs or optional tools from the default build.
+
+`ninja all` (or `make all`) builds every target in the project, including custom commands, installers, and archives.
 
 **Aliases** create named phony targets for convenient building:
 
@@ -2315,5 +2317,5 @@ if platform.is_macos():
 ## Further Reading
 
 - [Architecture Document](architecture.md) - Design details and implementation status
-- [Example Projects](https://github.com/garyo/pcons/tree/main/examples) - Working examples to learn from
+- [Example Projects](https://github.com/DarkStarSystems/pcons/tree/main/examples) - Working examples to learn from
 - [Contributing Guide](contributing.md) - How to contribute to pcons
