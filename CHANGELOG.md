@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Windows SxS manifest support**: Support for Windows Side-by-Side (SxS) manifests
+  - **`.manifest` as source**: Add `.manifest` files to Program/SharedLibrary sources; automatically passed to linker via `/MANIFESTINPUT:`
+  - **`pcons.contrib.windows.manifest`**: Helper module for generating manifests:
+    - `create_app_manifest()`: Generate application manifests with DPI awareness, visual styles, UAC settings, and assembly dependencies
+    - `create_assembly_manifest()`: Generate assembly manifests for private DLL assemblies
+  - Works with both MSVC and clang-cl toolchains
+
 - **Platform-specific installer generation**: New `pcons.contrib.installers` package for creating native installers
   - **macOS**: `create_pkg()` for .pkg installers, `create_dmg()` for disk images, `create_component_pkg()` for simple packages
   - **Windows**: `create_msix()` for MSIX packages (requires Windows SDK)

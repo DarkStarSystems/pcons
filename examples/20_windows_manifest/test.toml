@@ -1,0 +1,28 @@
+# Test configuration for the Windows manifest example
+
+[test]
+description = "Demonstrates Windows SxS manifest support with DPI awareness"
+
+# Files that should exist after the build
+# Note: manifest files are generated and embedded
+expected_outputs = [
+    "build/obj.myapp/main.obj",
+    "build/myapp.exe",
+    "build/MyLib.dll",
+    "build/ManifestExample.MyLib.manifest",
+    "build/app.manifest",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/myapp.exe", expect_stdout = "Hello from Windows manifest example!" },
+]
+
+[skip]
+# Only run on Windows - requires MSVC or clang-cl toolchain
+platforms = ["linux", "darwin"]
+# Requires MSVC (cl.exe) or clang-cl to be installed
+requires = ["cl.exe"]
+# Windows manifests don't work with Xcode
+generators = ["xcode"]

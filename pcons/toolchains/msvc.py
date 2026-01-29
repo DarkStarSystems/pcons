@@ -445,8 +445,11 @@ class MsvcToolchain(BaseToolchain):
         """Return handler for auxiliary input files."""
         from pcons.tools.toolchain import AuxiliaryInputHandler
 
-        if suffix.lower() == ".def":
+        suffix_lower = suffix.lower()
+        if suffix_lower == ".def":
             return AuxiliaryInputHandler(".def", "/DEF:$file")
+        if suffix_lower == ".manifest":
+            return AuxiliaryInputHandler(".manifest", "/MANIFESTINPUT:$file")
         return None
 
     def get_object_suffix(self) -> str:

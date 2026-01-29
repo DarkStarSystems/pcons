@@ -442,3 +442,19 @@ class TestMsvcAuxiliaryInputHandler:
         tc = MsvcToolchain()
         handler = tc.get_auxiliary_input_handler(".xyz")
         assert handler is None
+
+    def test_auxiliary_input_handler_manifest(self):
+        """Test that .manifest files are recognized as auxiliary inputs."""
+        tc = MsvcToolchain()
+        handler = tc.get_auxiliary_input_handler(".manifest")
+        assert handler is not None
+        assert handler.suffix == ".manifest"
+        assert handler.flag_template == "/MANIFESTINPUT:$file"
+        assert handler.tool == "link"
+
+    def test_auxiliary_input_handler_manifest_case_insensitive(self):
+        """Test that .MANIFEST files are also recognized (case insensitive)."""
+        tc = MsvcToolchain()
+        handler = tc.get_auxiliary_input_handler(".MANIFEST")
+        assert handler is not None
+        assert handler.suffix == ".manifest"
