@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from pcons.core.node import FileNode, Node
 from pcons.generators.generator import BaseGenerator
@@ -849,13 +849,23 @@ class MakefileGenerator(BaseGenerator):
                 )
 
         # Get all target paths for multi-output commands
+        # Check both all_targets (generic commands) and outputs dict (MultiOutputBuilder)
         all_targets = build_info.get("all_targets")
+        outputs_info = build_info.get("outputs")
         out_paths: list[str] = []
         if all_targets and isinstance(all_targets, list):
+            # Generic command with multiple output nodes
             for t in all_targets:
                 path = getattr(t, "path", None)
                 if path is not None:
                     out_paths.append(self._strip_build_dir_prefix(path))
+        elif outputs_info and isinstance(outputs_info, dict):
+            # MultiOutputBuilder with outputs dict (e.g., SharedLibrary on Windows)
+            # Outputs are ordered by insertion order in dict
+            for _name, info in outputs_info.items():
+                if isinstance(info, dict) and "path" in info:
+                    info_dict = cast(dict[str, Any], info)
+                    out_paths.append(self._strip_build_dir_prefix(info_dict["path"]))
         if not out_paths:
             out_paths = [out_path]
 
