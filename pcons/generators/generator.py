@@ -31,12 +31,12 @@ class Generator(Protocol):
         """Generator name (e.g., 'ninja', 'make', 'compile_commands')."""
         ...
 
-    def generate(self, project: Project, output_dir: Path) -> None:
+    def generate(self, project: Project, output_dir: Path | None = None) -> None:
         """Generate build files for a project.
 
         Args:
             project: The configured project to generate for.
-            output_dir: Directory to write output files to.
+            output_dir: Directory to write output files to (default: project.build_dir).
         """
         ...
 
@@ -56,12 +56,18 @@ class BaseGenerator:
     def name(self) -> str:
         return self._name
 
-    def generate(self, project: Project, output_dir: Path) -> None:
+    def generate(self, project: Project, output_dir: Path | None = None) -> None:
         """Generate build files.
 
         Auto-resolves the project if not already resolved, then
         calls _generate_impl() which subclasses must implement.
+
+        Args:
+            project: The configured project to generate for.
+            output_dir: Directory to write output files to (default: project.build_dir).
         """
+        if output_dir is None:
+            output_dir = project.build_dir
         if not project._resolved:
             project.resolve()
         self._generate_impl(project, output_dir)
