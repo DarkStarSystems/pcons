@@ -169,7 +169,8 @@ class Target:
         "_builder_name",  # Name of the builder that created this target
         # Builder-specific data dict. Contains:
         #   - "post_build_commands": list[str] - Shell commands run after target is built
-        #   - "auxiliary_inputs": list[tuple[FileNode, str]] - Files passed to linker with flags
+        #   - "auxiliary_inputs": list[tuple[FileNode, str, AuxiliaryInputHandler]]
+        #       Files passed to linker with flags and handler info
         #   - Other builder-specific data (dest_dir, compression, etc.)
         "_builder_data",
     )

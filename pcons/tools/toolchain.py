@@ -105,11 +105,14 @@ class AuxiliaryInputHandler:
         flag_template: Flag template for the downstream tool. Use $file for
                       the file path. Example: "/DEF:$file"
         tool: Which downstream tool receives this file (e.g., "link", "bibtex")
+        extra_flags: Additional flags to add (once, not per-file). Useful for
+                    flags like "/manifest:embed" that should accompany the handler.
     """
 
     suffix: str
     flag_template: str
     tool: str = "link"
+    extra_flags: list[str] | None = None
 
 
 # =============================================================================

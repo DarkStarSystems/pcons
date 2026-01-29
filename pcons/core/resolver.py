@@ -458,17 +458,26 @@ class OutputNodeFactory:
         lib_node = FileNode(lib_path, defined_at=get_caller_location())
         lib_node.depends(target.object_nodes)
 
-        # Add dependency output nodes from linked targets
-        dep_libs = self._collect_dependency_outputs(target)
-        if dep_libs:
-            lib_node.depends(dep_libs)
-
-        # Add auxiliary input files as dependencies
+        # Get auxiliary input files first so we can filter them from dep_libs
         builder_data = getattr(target, "_builder_data", {}) or {}
         auxiliary_inputs = builder_data.get("auxiliary_inputs", [])
+        auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
+
+        # Add dependency output nodes from linked targets
+        # Filter out auxiliary inputs to avoid duplicates (they're added separately)
+        dep_libs = self._collect_dependency_outputs(target)
+        if dep_libs:
+            # Filter out any nodes that are auxiliary inputs
+            dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
+            if dep_libs:
+                lib_node.depends(dep_libs)
+
+        # Add auxiliary input files as implicit dependencies
+        # These are dependencies for build ordering but NOT passed as linker inputs
+        # (they're passed via their specific flags like /MANIFESTINPUT:)
         if auxiliary_inputs:
-            linker_input_nodes = [node for node, _ in auxiliary_inputs]
-            lib_node.depends(linker_input_nodes)
+            linker_input_nodes = [node for node, _, _ in auxiliary_inputs]
+            lib_node.implicit_deps.extend(linker_input_nodes)
 
         # Compute effective link requirements
         effective_link = compute_effective_requirements(
@@ -476,9 +485,16 @@ class OutputNodeFactory:
         )
 
         # Add auxiliary input flags to link flags
+        # Also add extra_flags from handlers (once per handler type)
         link_flags = list(effective_link.link_flags)
-        for _, flag in auxiliary_inputs:
+        seen_handlers: set[str] = (
+            set()
+        )  # Track handlers by suffix to add extra_flags once
+        for _, flag, handler in auxiliary_inputs:
             link_flags.append(flag)
+            if handler.extra_flags and handler.suffix not in seen_handlers:
+                link_flags.extend(handler.extra_flags)
+                seen_handlers.add(handler.suffix)
 
         # Determine linker language - we use 'link' tool for linking
         # but track the language so toolchain context can set appropriate linker
@@ -544,17 +560,26 @@ class OutputNodeFactory:
         prog_node = FileNode(prog_path, defined_at=get_caller_location())
         prog_node.depends(target.object_nodes)
 
-        # Add dependency output nodes from linked targets
-        dep_libs = self._collect_dependency_outputs(target)
-        if dep_libs:
-            prog_node.depends(dep_libs)
-
-        # Add auxiliary input files as dependencies
+        # Get auxiliary input files first so we can filter them from dep_libs
         builder_data_prog = getattr(target, "_builder_data", {}) or {}
         auxiliary_inputs = builder_data_prog.get("auxiliary_inputs", [])
+        auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
+
+        # Add dependency output nodes from linked targets
+        # Filter out auxiliary inputs to avoid duplicates (they're added separately)
+        dep_libs = self._collect_dependency_outputs(target)
+        if dep_libs:
+            # Filter out any nodes that are auxiliary inputs
+            dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
+            if dep_libs:
+                prog_node.depends(dep_libs)
+
+        # Add auxiliary input files as implicit dependencies
+        # These are dependencies for build ordering but NOT passed as linker inputs
+        # (they're passed via their specific flags like /MANIFESTINPUT:)
         if auxiliary_inputs:
-            linker_input_nodes = [node for node, _ in auxiliary_inputs]
-            prog_node.depends(linker_input_nodes)
+            linker_input_nodes = [node for node, _, _ in auxiliary_inputs]
+            prog_node.implicit_deps.extend(linker_input_nodes)
 
         # Compute effective link requirements
         effective_link = compute_effective_requirements(
@@ -562,9 +587,16 @@ class OutputNodeFactory:
         )
 
         # Add auxiliary input flags to link flags
+        # Also add extra_flags from handlers (once per handler type)
         link_flags = list(effective_link.link_flags)
-        for _, flag in auxiliary_inputs:
+        seen_handlers: set[str] = (
+            set()
+        )  # Track handlers by suffix to add extra_flags once
+        for _, flag, handler in auxiliary_inputs:
             link_flags.append(flag)
+            if handler.extra_flags and handler.suffix not in seen_handlers:
+                link_flags.extend(handler.extra_flags)
+                seen_handlers.add(handler.suffix)
 
         # Determine linker language - we use 'link' tool for linking
         # but track the language so toolchain context can set appropriate linker
@@ -809,7 +841,8 @@ class Resolver:
 
         # Separate sources into compilable sources and auxiliary inputs
         # Auxiliary inputs are files like .def that are passed directly to a downstream tool
-        auxiliary_inputs: list[tuple[FileNode, str]] = []  # (file_node, flag)
+        # AuxiliaryInputHandler is imported at module level under TYPE_CHECKING
+        auxiliary_inputs: list[tuple[FileNode, str, AuxiliaryInputHandler]] = []
 
         # Create object nodes for each source (delegated to factory)
         trace("resolve", "  Creating object nodes for %d sources", len(target.sources))
@@ -822,7 +855,7 @@ class Resolver:
                 if aux_handler is not None:
                     # This is an auxiliary input - generate the flag
                     flag = aux_handler.flag_template.replace("$file", str(source.path))
-                    auxiliary_inputs.append((source, flag))
+                    auxiliary_inputs.append((source, flag, aux_handler))
                     trace("resolve", "    %s -> auxiliary input", source.path)
                     continue
 

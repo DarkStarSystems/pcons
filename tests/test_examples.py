@@ -236,11 +236,17 @@ def should_skip(config: dict[str, Any]) -> str | None:
     if current_platform in [p.lower() for p in skip_platforms]:
         return f"Skipped on {current_platform}"
 
-    # Check required tools
+    # Check required tools (all must be present)
     requires = skip_config.get("requires", [])
     for tool in requires:
         if shutil.which(tool) is None:
             return f"Required tool '{tool}' not found"
+
+    # Check requires_any (at least one must be present)
+    requires_any = skip_config.get("requires_any", [])
+    if requires_any:
+        if not any(shutil.which(tool) is not None for tool in requires_any):
+            return f"None of required tools found: {', '.join(requires_any)}"
 
     return None
 

@@ -307,7 +307,12 @@ class ClangClToolchain(BaseToolchain):
         if suffix_lower == ".def":
             return AuxiliaryInputHandler(".def", "/DEF:$file")
         if suffix_lower == ".manifest":
-            return AuxiliaryInputHandler(".manifest", "/MANIFESTINPUT:$file")
+            # lld-link requires /manifest:embed when using /MANIFESTINPUT
+            return AuxiliaryInputHandler(
+                ".manifest",
+                "/MANIFESTINPUT:$file",
+                extra_flags=["/manifest:embed"],
+            )
         return None
 
     def get_object_suffix(self) -> str:
