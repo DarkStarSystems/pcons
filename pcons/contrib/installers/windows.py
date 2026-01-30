@@ -104,7 +104,9 @@ def create_msix(
         name: Package name (alphanumeric, no spaces).
         version: Package version (X.Y.Z.W format recommended).
         publisher: Publisher identity (e.g., "CN=Example Corp").
-        sources: Files to include in the package (Targets or paths).
+        sources: Files or directories to include (Targets or paths).
+            Directory sources are automatically detected and copied with
+            depfile tracking after resolve().
         executable: Name of the main executable (e.g., "myapp.exe").
             If not specified, defaults to first source file's name.
         output: Output .msix path. Defaults to build/<name>-<version>.msix.
@@ -160,7 +162,7 @@ def create_msix(
     staging_rel = Path(".msix_staging") / name
     manifest_rel = staging_rel / "AppxManifest.xml"
 
-    # Stage source files
+    # Stage source files (Install auto-detects directory sources after resolve)
     stage_target = project.Install(staging_rel, sources)
 
     # Generate AppxManifest.xml (use relative path for target)

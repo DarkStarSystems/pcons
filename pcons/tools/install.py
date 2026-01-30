@@ -203,10 +203,32 @@ class InstallNodeFactory:
 
         return None
 
+    def _has_child_nodes(self, path: Path) -> bool:
+        """Check if any project nodes are children of the given path.
+
+        After resolve, the node graph is populated with all output nodes.
+        If any node's path is a descendant of the given path, then the
+        path represents a directory.  This avoids filesystem checks.
+        """
+        for node_path in self.project._nodes:
+            if node_path != path:
+                try:
+                    node_path.relative_to(path)
+                    return True
+                except ValueError:
+                    continue
+        return False
+
     def _create_install_nodes(
         self, target: Target, sources: list[FileNode], dest_dir: Path
     ) -> None:
-        """Create copy nodes for Install target."""
+        """Create copy nodes for Install target.
+
+        For each source, checks whether the source represents a directory
+        (by examining the project node graph for child nodes).  Directory
+        sources are handled with copytreecmd (depfile + stamp), while file
+        sources use copycmd.
+        """
         # Normalize destination directory using PathResolver
         path_resolver = self.project.path_resolver
         dest_dir = path_resolver.normalize_target_path(dest_dir)
@@ -217,6 +239,13 @@ class InstallNodeFactory:
         installed_nodes: list[FileNode] = []
         for file_node in sources:
             if not isinstance(file_node, FileNode):
+                continue
+
+            # Check if this source is a directory by examining the node graph
+            if self._has_child_nodes(file_node.path):
+                self._create_install_dir_node_for(
+                    target, file_node, dest_dir, env, installed_nodes
+                )
                 continue
 
             # Destination path
@@ -245,6 +274,64 @@ class InstallNodeFactory:
         # Add installed files as output nodes
         target._install_nodes = installed_nodes
         target.output_nodes.extend(installed_nodes)
+
+    def _create_install_dir_node_for(
+        self,
+        target: Target,
+        source_node: FileNode,
+        dest_dir: Path,
+        env: Environment | None,
+        installed_nodes: list[FileNode],
+    ) -> None:
+        """Create a copytree node for a directory source within Install.
+
+        This is used when _create_install_nodes detects that a source is
+        a directory (has child nodes in the project graph).  Uses the same
+        copytreecmd + depfile/stamp mechanism as InstallDir.
+        """
+        from pcons.tools.archive_context import InstallContext
+
+        source_path = source_node.path
+        dest_path = dest_dir / source_path.name
+
+        # Stamp file for ninja tracking
+        stamps_dir = self.project.build_dir / ".stamps"
+        stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
+        stamp_path = stamps_dir / stamp_name
+
+        stamp_node = FileNode(stamp_path, defined_at=get_caller_location())
+        stamp_node.depends([source_node])
+
+        # Build destination path relative to build directory
+        try:
+            rel_dest = dest_path.relative_to(self.project.build_dir)
+        except ValueError:
+            rel_dest = dest_path
+
+        context = InstallContext.from_target(
+            target, env, destdir=str(rel_dest).replace("\\", "/")
+        )
+
+        stamp_node._build_info = cast(
+            BuildInfo,
+            {
+                "tool": "install",
+                "command_var": "copytreecmd",
+                "sources": [source_node],
+                "depfile": PathToken(
+                    path=str(stamp_path), path_type="build", suffix=".d"
+                ),
+                "deps_style": "gcc",
+                "description": "INSTALLDIR $out",
+                "context": context,
+                "env": env,
+            },
+        )
+
+        installed_nodes.append(stamp_node)
+
+        if stamp_path not in self.project._nodes:
+            self.project._nodes[stamp_path] = stamp_node
 
     def _create_install_as_node(
         self, target: Target, sources: list[FileNode], dest: Path

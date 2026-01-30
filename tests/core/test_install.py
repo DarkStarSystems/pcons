@@ -458,3 +458,81 @@ class TestInstallAsValidation:
 
         assert len(install.output_nodes) == 1
         assert install.output_nodes[0].path == tmp_path / "dest" / "renamed.txt"
+
+
+class TestInstallDirectoryAutoDetection:
+    """Tests for Install auto-detecting directory sources via node graph."""
+
+    def test_install_detects_directory_source(self, tmp_path):
+        """Install uses copytreecmd when source has child nodes in the graph."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        project.Environment()
+
+        # Simulate a bundle directory: create a file target whose output
+        # is inside a directory path, then Install that directory path.
+        bundle_dir = tmp_path / "build" / "my.bundle"
+        inner_file = bundle_dir / "Contents" / "plugin.so"
+
+        # Register the inner file as a node (simulating another target's output)
+        project.node(inner_file)
+
+        # Install the bundle directory
+        install = project.Install("dist", [bundle_dir])
+
+        project.resolve()
+
+        # The Install builder should detect that bundle_dir has child nodes
+        # and use copytreecmd (stamp-based) instead of copycmd
+        assert len(install.output_nodes) == 1
+        node = install.output_nodes[0]
+        assert node._build_info is not None
+        assert node._build_info["command_var"] == "copytreecmd"
+        # Output should be a stamp file
+        assert ".stamp" in str(node.path)
+
+    def test_install_file_source_uses_copycmd(self, tmp_path):
+        """Install uses copycmd for regular file sources (no child nodes)."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src_file = tmp_path / "file.txt"
+        src_file.touch()
+
+        install = project.Install("dist", [src_file])
+
+        project.resolve()
+
+        assert len(install.output_nodes) == 1
+        node = install.output_nodes[0]
+        assert node._build_info is not None
+        assert node._build_info["command_var"] == "copycmd"
+
+    def test_install_mixed_file_and_directory(self, tmp_path):
+        """Install handles mix of files and directories correctly."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        # A regular file
+        src_file = tmp_path / "readme.txt"
+        src_file.touch()
+
+        # A directory with registered child nodes
+        bundle_dir = tmp_path / "build" / "app.bundle"
+        project.node(bundle_dir / "Contents" / "main")
+
+        install = project.Install("dist", [src_file, bundle_dir])
+
+        project.resolve()
+
+        assert len(install.output_nodes) == 2
+
+        # Find which is which by checking command_var
+        file_nodes = [
+            n for n in install.output_nodes if n._build_info["command_var"] == "copycmd"
+        ]
+        dir_nodes = [
+            n
+            for n in install.output_nodes
+            if n._build_info["command_var"] == "copytreecmd"
+        ]
+
+        assert len(file_nodes) == 1
+        assert len(dir_nodes) == 1

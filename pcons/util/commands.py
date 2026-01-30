@@ -18,10 +18,16 @@ from pathlib import Path
 
 
 def copy(src: str, dest: str) -> None:
-    """Copy a file, creating parent directories as needed."""
+    """Copy a file or directory, creating parent directories as needed."""
+    src_path = Path(src)
     dest_path = Path(dest)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(src, dest)
+    if src_path.is_dir():
+        if dest_path.exists():
+            shutil.rmtree(dest_path)
+        shutil.copytree(src_path, dest_path)
+    else:
+        shutil.copy2(src, dest)
 
 
 def concat(sources: list[str], dest: str) -> None:

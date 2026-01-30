@@ -192,6 +192,34 @@ class TestMacOSInstallers:
         assert pkg is not None
         assert "com_test_app" in pkg.name
 
+    def test_create_pkg_with_directory_source(self, tmp_path: Path) -> None:
+        """Test PKG creation with a directory source (auto-detected)."""
+        from pcons.contrib.installers import macos
+
+        # Create a bundle directory
+        bundle_dir = tmp_path / "MyApp.bundle"
+        bundle_dir.mkdir()
+        (bundle_dir / "Contents").mkdir()
+        (bundle_dir / "Contents" / "Info.plist").write_text("<plist/>")
+
+        # Create project
+        project = Project("test_pkg_dirs", build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        # Pass directory as a regular source — Install auto-detects it
+        pkg = macos.create_pkg(
+            project,
+            env,
+            name="TestApp",
+            version="1.0.0",
+            identifier="com.test.app",
+            sources=[bundle_dir],
+            install_location="/Library/Bundles",
+        )
+
+        assert pkg is not None
+        assert pkg.name == "pkg_TestApp"
+
     def test_sign_pkg_command(self, tmp_path: Path) -> None:
         """Test that sign_pkg returns correct command."""
         from pcons.contrib.installers import macos

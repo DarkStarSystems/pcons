@@ -127,7 +127,9 @@ def create_component_pkg(
         env: Configured environment.
         identifier: Bundle identifier (e.g., "com.example.myapp").
         version: Package version string.
-        sources: Files to include in the package (Targets or paths).
+        sources: Files or directories to include (Targets or paths).
+            Directory sources are automatically detected and copied with
+            depfile tracking after resolve().
         install_location: Where files install (e.g., "/Applications").
         output: Output .pkg path. Defaults to build/<identifier>-<version>.pkg.
         scripts_dir: Directory containing preinstall/postinstall scripts.
@@ -156,7 +158,7 @@ def create_component_pkg(
     staging_rel = Path(".pkg_staging") / identifier / "payload"
     staging_dir = project.build_dir / staging_rel
 
-    # Install stages the files - handles Targets automatically
+    # Stage source files (Install auto-detects directory sources after resolve)
     stage_target = project.Install(staging_rel, sources)
 
     # Build pkgbuild command
@@ -185,7 +187,6 @@ def create_component_pkg(
 
     pkgbuild_args.append(str(output))
 
-    # Pass stage_target directly - env.Command handles Target sources
     return env.Command(
         target=output,
         source=[stage_target],
@@ -225,7 +226,9 @@ def create_pkg(
         name: Application/package name.
         version: Package version string.
         identifier: Bundle identifier (e.g., "com.example.myapp").
-        sources: Files to include in the package (Targets or paths).
+        sources: Files or directories to include (Targets or paths).
+            Directory sources are automatically detected and copied with
+            depfile tracking after resolve().
         install_location: Where files install (e.g., "/Applications").
         output: Output .pkg path. Defaults to build/<name>-<version>.pkg.
         title: Installer title. Defaults to name.
@@ -271,7 +274,7 @@ def create_pkg(
     resources_rel = staging_base_rel / "resources"
     resources_dir = project.build_dir / resources_rel
 
-    # Stage source files
+    # Stage source files (Install auto-detects directory sources after resolve)
     stage_target = project.Install(payload_rel, sources)
 
     # Check if any source is a .app bundle (needs component plist)
@@ -418,7 +421,9 @@ def create_dmg(
         project: Pcons project.
         env: Configured environment.
         name: Application name (used for volume name and output).
-        sources: Files to include in the disk image (Targets or paths).
+        sources: Files or directories to include (Targets or paths).
+            Directory sources are automatically detected and copied with
+            depfile tracking after resolve().
         volume_name: Volume name. Defaults to name.
         output: Output .dmg path. Defaults to build/<name>.dmg.
         format: DMG format:
@@ -450,7 +455,7 @@ def create_dmg(
     staging_rel = Path(".dmg_staging") / name
     staging_dir = project.build_dir / staging_rel
 
-    # Install stages the files - handles Targets automatically
+    # Stage source files (Install auto-detects directory sources after resolve)
     stage_target = project.Install(staging_rel, sources)
 
     # Build hdiutil command (with optional symlink creation)
@@ -473,7 +478,6 @@ def create_dmg(
             f'-srcfolder "{staging_dir}" -format {format} -ov "{output}"',
         ]
 
-    # Pass stage_target directly - env.Command handles Target sources
     return env.Command(
         target=output,
         source=[stage_target],
