@@ -1,3 +1,4 @@
 # Documentation dependencies for ReadTheDocs
 mkdocs>=1.5
 mkdocs-material>=9.0
+mkdocs-macros-plugin>=1.0
