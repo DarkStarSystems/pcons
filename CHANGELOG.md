@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-01-30
+
 ### Added
 
 - **`pcons info --targets`**: New CLI option to list all build targets grouped by type. Shows aliases first, then targets organized by type (program, shared_library, etc.) with their output paths.
@@ -437,7 +439,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/DarkStarSystems/pcons/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/DarkStarSystems/pcons/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/DarkStarSystems/pcons/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/DarkStarSystems/pcons/compare/v0.4.3...v0.5.0
