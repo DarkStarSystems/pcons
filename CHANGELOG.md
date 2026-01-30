@@ -10,10 +10,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`pcons info --targets`**: New CLI option to list all build targets grouped by type. Shows aliases first, then targets organized by type (program, shared_library, etc.) with their output paths.
+- **Auto-detect directory sources in Install builder**: `project.Install()` now automatically detects when a source is a directory (by checking the node graph for child nodes) and uses `copytreecmd` with depfile/stamp tracking instead of `copycmd`. This fixes `IsADirectoryError` when passing bundle directories through Install (e.g., from `create_pkg` sources).
+
+### Changed
+
+- **`Generator.generate()` no longer takes `output_dir` parameter**: The generator always uses `project.build_dir` as the output directory. Callers that were passing `output_dir` should remove the argument.
+- **Improved `build_dir` prefix warning**: `normalize_target_path()` now provides clearer warnings when target paths start with the build directory name, explaining the double-prefix issue and suggesting the correct path. Accepts an optional `target_name` for better diagnostics.
 
 ### Fixed
 
-- **Install directory detection with absolute build_dir**: Fixed `_has_child_nodes` failing to detect directory sources when `project.build_dir` is an absolute path. Node paths were stored as relative but the source path was absolute, so the comparison always failed. Both sides are now normalized before comparison.
+- **Install directory detection**: Fixed `_has_child_nodes` failing to detect directory sources. Source paths passed as `project.build_dir / subdir / ...` include the build_dir prefix (e.g., `build/ofx-debug/bundle`), but node paths in `project._nodes` are build-dir-relative (e.g., `ofx-debug/bundle/Contents/...`). The build_dir prefix is now stripped before comparison, fixing both absolute and relative build_dir cases.
 - **Graph generators: path-based labels**: Mermaid and DOT graph node labels now show full relative paths (e.g., `obj.floss2/floss-core.o`) instead of just filenames, disambiguating same-named files across targets.
 - **Graph generators: directory containment edges**: Install target outputs inside a bundle directory now have edges drawn to that directory node, completing the dependency chain from sources through to installers.
 

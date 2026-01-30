@@ -210,11 +210,21 @@ class InstallNodeFactory:
         If any node's path is a descendant of the given path, then the
         path represents a directory.  This avoids filesystem checks.
 
-        Both the input path and node paths are canonicalized to a consistent
-        form (relative to project root) before comparison.
+        Both the input path and node paths are normalized to build-dir-relative
+        form before comparison, since sources passed as
+        ``project.build_dir / subdir / ...`` include the build_dir prefix
+        while node paths in ``project._nodes`` are build-dir-relative.
         """
+        # Strip build_dir prefix if present so the check path matches
+        # the build-dir-relative node paths stored in project._nodes.
+        build_dir_name = self.project.build_dir.name
+        parts = path.parts
+        if parts and parts[0] == build_dir_name:
+            check_path = Path(*parts[1:])
+        else:
+            check_path = path
         canonicalize = self.project.path_resolver.canonicalize
-        check_path = canonicalize(path)
+        check_path = canonicalize(check_path)
         for node_path in self.project._nodes:
             canonical = canonicalize(node_path)
             if canonical != check_path:
