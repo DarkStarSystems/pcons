@@ -9,7 +9,7 @@ Pcons welcomes contributions from the community.
 1. On GitHub, click the `Fork` button to create your own fork
 2. Clone your fork: `git clone git@github.com:YOUR_USERNAME/pcons.git`
 3. Enter the directory: `cd pcons`
-4. Add upstream remote: `git remote add upstream https://github.com/garyo/pcons`
+4. Add upstream remote: `git remote add upstream https://github.com/DarkStarSystems/pcons`
 
 ## Setting Up the Development Environment
 

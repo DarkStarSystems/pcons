@@ -43,10 +43,10 @@ pcons = "pcons.cli:main"
 pcons-fetch = "pcons.packages.fetch.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/garyo/pcons"
-Repository = "https://github.com/garyo/pcons"
+Homepage = "https://github.com/DarkStarSystems/pcons"
+Repository = "https://github.com/DarkStarSystems/pcons"
 Documentation = "https://pcons.readthedocs.io/"
-Issues = "https://github.com/garyo/pcons/issues"
+Issues = "https://github.com/DarkStarSystems/pcons/issues"
 
 [build-system]
 requires = ["hatchling"]

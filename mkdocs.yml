@@ -1,8 +1,8 @@
 site_name: pcons
 site_description: A Python-based build system that generates Ninja files
 site_url: https://pcons.readthedocs.io/
-repo_url: https://github.com/garyo/pcons
-repo_name: garyo/pcons
+repo_url: https://github.com/DarkStarSystems/pcons
+repo_name: DarkStarSystems/pcons
 
 theme:
   name: material
@@ -51,4 +51,6 @@ plugins:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/garyo/pcons
+      link: https://github.com/DarkStarSystems/pcons
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/pcons/

@@ -1,12 +1,14 @@
 # Pcons
 
-A modern Python-based build system that generates Ninja (or Makefile) build files.
+A modern Python-based build system. Builds anything that requires a repeatable workflow using a dependency graph. Works with Ninja (or Makefile) to do the builds.
 
-[![CI](https://github.com/garyo/pcons/actions/workflows/main.yml/badge.svg)](https://github.com/garyo/pcons/actions/workflows/main.yml)
+[![CI](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml/badge.svg)](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml)
+[![PyPI](https://img.shields.io/pypi/v/pcons)](https://pypi.org/project/pcons/)
+[![Python](https://img.shields.io/pypi/pyversions/pcons)](https://pypi.org/project/pcons/)
 
 ## Overview
 
-Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), taking the best ideas from each:
+Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), taking a few of the best ideas from each:
 
 - **From SCons**: Environments, Tools, dependency tracking, Python as the configuration language
 - **From CMake**: Generator architecture (configure once, build fast), usage requirements that propagate through dependencies
@@ -18,6 +20,12 @@ Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), 
 - **Language-agnostic**: Build C++, Rust, LaTeX, protobuf, or anything else
 - **Explicit over implicit**: Dependencies are discoverable and traceable
 - **Extensible**: Add-on modules for domain-specific tasks (plugin bundles, SDK configuration, etc.)
+
+## Why another software build tool?
+
+I was one of the original developers of SCons, and helped maintain it for many years. I love that python is the config language; that makes build descriptions incredibly flexible and powerful. Recently I've been using CMake for more projects, and despite the deeply painful configuration language, I've come to appreciate its power: conan integration, the separation between *describing* the build and running it, and dependency propagation, among other things. I feel that SCons hasn't kept up with modern python; like any very widely used mature project, it has a lot of accumulated wisdom but also a bit ossified ways of doing things.
+
+I've been thinking for years now about rearchitecting SCons onto a modern python stack with Path and decorators and all the other wonderful stuff python has been doing, and fixing some of the pain points at the same time (substitution/quoting, extensibility, tracing, separation between description and building, and more), but I've never had the time to dig into it. But recently as I've been using a lot more of Claude Code as a programming assistant, and it has gotten significantly better, it seemed like the right time to try this as a collaborative project. So, meet pcons!
 
 ## Status
 
@@ -35,8 +43,7 @@ from pcons.toolchains import find_c_toolchain
 project = Project("myapp", build_dir="build")
 
 # Find and configure a C/C++ toolchain
-toolchain = find_c_toolchain()
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=find_c_toolchain())
 env.cc.flags.extend(["-Wall"])
 
 # Build a static library
@@ -44,19 +51,17 @@ lib = project.StaticLibrary("core", env)
 lib.sources.append(project.node("src/core.c"))
 lib.public.include_dirs.append(Path("include"))
 
-# Build a program
+# Build a program using it
 app = project.Program("myapp", env)
 app.sources.append(project.node("src/main.c"))
 app.link(lib)
 
-project.Default(app)
-project.resolve()
+# Generate the ninja.build script
 project.generate()
 ```
 
 ```bash
-uv run pcons-build.py
-ninja -C build
+uvx pcons # generate ninja.build and run it, producing build/myapp (or build/myapp.exe)
 ```
 
 ## Installation
@@ -70,14 +75,6 @@ uv add pcons
 
 # Or pip
 pip install pcons
-```
-
-For development:
-
-```bash
-git clone https://github.com/garyo/pcons.git
-cd pcons
-uv sync
 ```
 
 ## Documentation

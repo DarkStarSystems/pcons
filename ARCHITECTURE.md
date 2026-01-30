@@ -161,6 +161,8 @@ The resolver takes the build description, and:
 2. Resolves the build into actual Nodes per each source/target file
 3. Substitutes variables in each Target command(s), producing the final commands to execute for that target
 
+The resolve phase is significant; before that, the node graph is sparse, with build info for targets but many nodes not yet defined. After `resolve()`, the node graph is complete and we can generate the build file. Some targets, like Install, defer much of their actual work until `resolve()`. For instance, when Install is passed a Target or a directory, it doesn't know at that point what exact nodes or files will be contained in it, so it can't yet know how exactly to install the given files or dirs. During resolve, it lazily creates that info so it's up to date when the generator asks for it.
+
 ### Phase 4: Generate
 > **Status: Partial** - Ninja generator fully implemented. compile_commands.json and Mermaid diagram generators available. Makefile and IDE generators planned.
 
