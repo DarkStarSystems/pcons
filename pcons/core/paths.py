@@ -44,7 +44,9 @@ class PathResolver:
         else:
             self._resolved_build_dir = (self.project_root / build_dir).resolve()
 
-    def normalize_target_path(self, path: Path | str) -> Path:
+    def normalize_target_path(
+        self, path: Path | str, *, target_name: str | None = None
+    ) -> Path:
         """Normalize a target (output) path to be relative to build_dir.
 
         Handles three cases:
@@ -54,6 +56,7 @@ class PathResolver:
 
         Args:
             path: The target path to normalize (Path or str).
+            target_name: Optional target name for better warning messages.
 
         Returns:
             Normalized path relative to build_dir.
@@ -74,16 +77,21 @@ class PathResolver:
                 return path_obj
 
         # Case 2: Relative path starting with build_dir name
-        # This could be a mistake (user passed "build/foo.tar.gz" instead of "foo.tar.gz")
-        # or intentional (user wants a "build/" subdirectory inside build_dir)
+        # This is almost always a mistake: the user passed a project-root-relative
+        # path (like "build/foo") but target paths should be build-dir-relative
+        # (just "foo"). The build system prepends build_dir, so "build/foo"
+        # becomes "build/build/foo".
         build_dir_name = self.build_dir.name
         parts = path_obj.parts
         if parts and parts[0] == build_dir_name:
+            suggested = "/".join(parts[1:])
+            context = f" (target '{target_name}')" if target_name else ""
             warnings.warn(
-                f"Target path '{path}' starts with build directory name '{build_dir_name}'. "
-                f"This will create '{build_dir_name}/{path}' inside the build directory. "
-                f"If you meant to put the output directly in the build directory, "
-                f"use '{'/'.join(parts[1:])}' instead.",
+                f"Target path '{path}'{context} starts with build directory "
+                f"name '{build_dir_name}'. "
+                f"This will create '{build_dir_name}/{path}' inside the build "
+                f"directory. Target paths are relative to build_dir, so use "
+                f"'{suggested}' instead of '{path}'.",
                 UserWarning,
                 stacklevel=3,  # Skip normalize_target_path and caller
             )

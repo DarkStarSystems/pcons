@@ -237,7 +237,9 @@ class InstallNodeFactory:
         """
         # Normalize destination directory using PathResolver
         path_resolver = self.project.path_resolver
-        dest_dir = path_resolver.normalize_target_path(dest_dir)
+        dest_dir = path_resolver.normalize_target_path(
+            dest_dir, target_name=target.name
+        )
 
         # Get environment with install tool
         env = self._get_install_env(target)
@@ -359,7 +361,7 @@ class InstallNodeFactory:
 
         # Normalize destination path using PathResolver
         path_resolver = self.project.path_resolver
-        dest = path_resolver.normalize_target_path(dest)
+        dest = path_resolver.normalize_target_path(dest, target_name=target.name)
 
         source_node = sources[0]
 
@@ -404,7 +406,9 @@ class InstallNodeFactory:
 
         # Normalize destination directory using PathResolver
         path_resolver = self.project.path_resolver
-        dest_dir = path_resolver.normalize_target_path(dest_dir)
+        dest_dir = path_resolver.normalize_target_path(
+            dest_dir, target_name=target.name
+        )
 
         source_node = sources[0]
         source_path = source_node.path
