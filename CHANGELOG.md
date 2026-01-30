@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`pcons info --targets`**: New CLI option to list all build targets grouped by type. Shows aliases first, then targets organized by type (program, shared_library, etc.) with their output paths.
+
+### Fixed
+
+- **Graph generators: path-based labels**: Mermaid and DOT graph node labels now show full relative paths (e.g., `obj.floss2/floss-core.o`) instead of just filenames, disambiguating same-named files across targets.
+- **Graph generators: directory containment edges**: Install target outputs inside a bundle directory now have edges drawn to that directory node, completing the dependency chain from sources through to installers.
+
 ## [0.6.1] - 2026-01-30
 
 ### Fixed
@@ -421,20 +430,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.6.1...HEAD
-[0.6.1]: https://github.com/garyo/pcons/compare/v0.6.0...v0.6.1
-[0.6.0]: https://github.com/garyo/pcons/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/garyo/pcons/compare/v0.4.3...v0.5.0
-[0.4.3]: https://github.com/garyo/pcons/compare/v0.4.2...v0.4.3
-[0.4.2]: https://github.com/garyo/pcons/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/garyo/pcons/compare/v0.4.0...v0.4.1
-[0.4.0]: https://github.com/garyo/pcons/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/garyo/pcons/compare/v0.2.4...v0.3.0
-[0.2.4]: https://github.com/garyo/pcons/compare/v0.2.3...v0.2.4
-[0.2.3]: https://github.com/garyo/pcons/compare/v0.2.2...v0.2.3
-[0.2.2]: https://github.com/garyo/pcons/compare/v0.2.1...v0.2.2
-[0.2.1]: https://github.com/garyo/pcons/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/garyo/pcons/compare/v0.1.4...v0.2.0
-[0.1.4]: https://github.com/garyo/pcons/compare/v0.1.3...v0.1.4
-[0.1.3]: https://github.com/garyo/pcons/compare/v0.1.2...v0.1.3
-[0.1.2]: https://github.com/garyo/pcons/releases/tag/v0.1.2
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/DarkStarSystems/pcons/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/DarkStarSystems/pcons/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/DarkStarSystems/pcons/compare/v0.4.3...v0.5.0
+[0.4.3]: https://github.com/DarkStarSystems/pcons/compare/v0.4.2...v0.4.3
+[0.4.2]: https://github.com/DarkStarSystems/pcons/compare/v0.4.1...v0.4.2
+[0.4.1]: https://github.com/DarkStarSystems/pcons/compare/v0.4.0...v0.4.1
+[0.4.0]: https://github.com/DarkStarSystems/pcons/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/DarkStarSystems/pcons/compare/v0.2.4...v0.3.0
+[0.2.4]: https://github.com/DarkStarSystems/pcons/compare/v0.2.3...v0.2.4
+[0.2.3]: https://github.com/DarkStarSystems/pcons/compare/v0.2.2...v0.2.3
+[0.2.2]: https://github.com/DarkStarSystems/pcons/compare/v0.2.1...v0.2.2
+[0.2.1]: https://github.com/DarkStarSystems/pcons/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/DarkStarSystems/pcons/compare/v0.1.4...v0.2.0
+[0.1.4]: https://github.com/DarkStarSystems/pcons/compare/v0.1.3...v0.1.4
+[0.1.3]: https://github.com/DarkStarSystems/pcons/compare/v0.1.2...v0.1.3
+[0.1.2]: https://github.com/DarkStarSystems/pcons/releases/tag/v0.1.2
