@@ -213,20 +213,21 @@ class InstallNodeFactory:
         Both the input path and node paths are normalized to build-dir-relative
         form before comparison, since sources passed as
         ``project.build_dir / subdir / ...`` include the build_dir prefix
-        while node paths in ``project._nodes`` are build-dir-relative.
+        while node paths in ``project._nodes`` may be build-dir-relative.
         """
-        # Strip build_dir prefix if present so the check path matches
-        # the build-dir-relative node paths stored in project._nodes.
-        build_dir_name = self.project.build_dir.name
-        parts = path.parts
-        if parts and parts[0] == build_dir_name:
-            check_path = Path(*parts[1:])
-        else:
-            check_path = path
         canonicalize = self.project.path_resolver.canonicalize
-        check_path = canonicalize(check_path)
+        build_dir_name = self.project.build_dir.name
+
+        def to_build_relative(p: Path) -> Path:
+            """Strip build_dir prefix to get build-dir-relative path."""
+            parts = p.parts
+            if parts and parts[0] == build_dir_name:
+                return Path(*parts[1:]) if len(parts) > 1 else Path(".")
+            return p
+
+        check_path = to_build_relative(canonicalize(path))
         for node_path in self.project._nodes:
-            canonical = canonicalize(node_path)
+            canonical = to_build_relative(canonicalize(node_path))
             if canonical != check_path:
                 try:
                     canonical.relative_to(check_path)
