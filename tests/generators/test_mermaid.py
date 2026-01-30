@@ -63,9 +63,9 @@ class TestMermaidGeneratorGraph:
         gen.generate(project, tmp_path)
 
         output = (tmp_path / "deps.mmd").read_text()
-        assert "myapp" in output
-        assert "main_c" in output
-        assert "main_o" in output
+        assert "build_myapp" in output
+        assert "src_main_c" in output
+        assert "build_main_o" in output
 
     def test_target_dependencies(self, tmp_path):
         """Test generation shows target dependencies."""
@@ -108,12 +108,12 @@ class TestMermaidGeneratorGraph:
         gen.generate(project, tmp_path)
 
         output = (tmp_path / "deps.mmd").read_text()
-        assert "libmath_a" in output
-        assert "libphysics_a" in output
-        assert "app[[app]]" in output
+        assert "build_libmath_a" in output
+        assert "build_libphysics_a" in output
+        assert "build_app[[" in output
         # Check library dependency edges
-        assert "libmath_a --> libphysics_a" in output
-        assert "libphysics_a --> app" in output
+        assert "build_libmath_a --> build_libphysics_a" in output
+        assert "build_libphysics_a --> build_app" in output
 
     def test_target_shapes(self, tmp_path):
         """Test different target types get different shapes."""
@@ -145,13 +145,13 @@ class TestMermaidGeneratorGraph:
 
         output = (tmp_path / "deps.mmd").read_text()
         # Static library: rectangle [name]
-        assert "libmylib_a[" in output
+        assert "build_libmylib_a[" in output
         # Shared library: stadium ([name])
-        assert "libmyshared_so([" in output
+        assert "build_libmyshared_so([" in output
         # Program: stadium [[name]]
-        assert "myapp[[" in output
+        assert "build_myapp[[" in output
         # Interface: hexagon {{name}}
-        assert "headers{{" in output
+        assert "include_headers{{" in output
 
 
 class TestMermaidGeneratorDirection:
@@ -235,17 +235,56 @@ class TestMermaidGeneratorIntegration:
 
         output = (tmp_path / "deps.mmd").read_text()
 
-        # Check all nodes present
-        assert "math_c" in output
-        assert "math_o" in output
-        assert "libmath_a" in output
-        assert "main_c" in output
-        assert "main_o" in output
-        assert "app[[app]]" in output
+        # Check all nodes present (path-based IDs)
+        assert "src_math_c" in output
+        assert "build_obj_libmath_math_o" in output
+        assert "build_libmath_a" in output
+        assert "src_main_c" in output
+        assert "build_obj_app_main_o" in output
+        assert "build_app[[" in output
 
         # Check edges
-        assert "math_c --> math_o" in output
-        assert "math_o --> libmath_a" in output
-        assert "main_c --> main_o" in output
-        assert "main_o --> app" in output
-        assert "libmath_a --> app" in output
+        assert "src_math_c --> build_obj_libmath_math_o" in output
+        assert "build_obj_libmath_math_o --> build_libmath_a" in output
+        assert "src_main_c --> build_obj_app_main_o" in output
+        assert "build_obj_app_main_o --> build_app" in output
+        assert "build_libmath_a --> build_app" in output
+
+    def test_directory_containment_edges(self, tmp_path):
+        """Test that output nodes inside a directory get containment edges."""
+        project = Project("bundle", build_dir=tmp_path)
+
+        # Simulate Install targets placing files into a bundle directory
+        install1 = Target("install_lib", target_type="command")
+        lib_src = FileNode(Path("build/libfoo.dylib"))
+        lib_installed = FileNode(Path("build/MyApp.app/lib/libfoo.dylib"))
+        lib_installed.depends([lib_src])
+        install1.output_nodes.append(lib_installed)
+
+        install2 = Target("install_exe", target_type="command")
+        exe_src = FileNode(Path("build/myapp"))
+        exe_installed = FileNode(Path("build/MyApp.app/bin/myapp"))
+        exe_installed.depends([exe_src])
+        install2.output_nodes.append(exe_installed)
+
+        # A target that depends on the bundle directory itself
+        pkg = Target("package", target_type="command")
+        bundle_dir = FileNode(Path("build/MyApp.app"))
+        pkg_output = FileNode(Path("build/MyApp.pkg"))
+        pkg_output.depends([bundle_dir])
+        pkg.output_nodes.append(pkg_output)
+
+        project.add_target(install1)
+        project.add_target(install2)
+        project.add_target(pkg)
+
+        gen = MermaidGenerator()
+        gen.generate(project, tmp_path)
+
+        output = (tmp_path / "deps.mmd").read_text()
+
+        # The bundle dir is a source dep of the pkg target
+        assert "build_MyApp_app>" in output
+        # Containment edges: installed files → bundle directory
+        assert "build_MyApp_app_lib_libfoo_dylib --> build_MyApp_app" in output
+        assert "build_MyApp_app_bin_myapp --> build_MyApp_app" in output

@@ -100,112 +100,97 @@ class DotGenerator(BaseGenerator):
         """Write DOT footer."""
         f.write("}\n")
 
+    def _get_label(self, path: Path, build_dir: Path, root_dir: Path) -> str:
+        """Get a display label for a node path.
+
+        Tries build_dir first, then root_dir, then returns as-is.
+        """
+        try:
+            return str(path.relative_to(build_dir))
+        except ValueError:
+            pass
+        try:
+            return str(path.relative_to(root_dir))
+        except ValueError:
+            return str(path)
+
     def _write_graph(self, f: TextIO, project: Project) -> None:
         """Write the complete dependency graph.
 
         Shows all files: sources, objects, libraries, programs.
         """
+        build_dir = project.build_dir
+        root_dir = project.root_dir
         written_nodes: set[str] = set()
         edges: list[tuple[str, str]] = []
 
-        # Track file names to detect conflicts (same name, different path)
-        name_to_paths: dict[str, list[Path]] = {}
+        # Track output node paths and source dep paths for containment edges
+        output_node_paths: dict[Path, str] = {}
+        source_nodes: dict[Path, str] = {}
 
-        def get_short_id(path: Path) -> str:
-            """Get a short but unique ID for a file path."""
-            name = path.name
-            if name not in name_to_paths:
-                name_to_paths[name] = []
-            if path not in name_to_paths[name]:
-                name_to_paths[name].append(path)
+        def get_id(path: Path) -> str:
+            """Get a unique ID based on the display label."""
+            label = self._get_label(path, build_dir, root_dir)
+            return self._sanitize_id(label)
 
-            # If multiple files have the same name, include parent dir
-            if len(name_to_paths[name]) > 1:
-                return self._sanitize_id(f"{path.parent.name}_{name}")
-            return self._sanitize_id(name)
+        def write_source_node(dep: FileNode) -> str:
+            """Write a source dependency node, return its ID."""
+            dep_id = get_id(dep.path)
+            if dep_id not in written_nodes:
+                dep_label = self._get_label(dep.path, build_dir, root_dir)
+                f.write(f'  {dep_id} [label="{dep_label}" shape=note];\n')
+                written_nodes.add(dep_id)
+            source_nodes[dep.path] = dep_id
+            return dep_id
 
-        # Helper to register a path for name conflict detection
-        def register_path(path: Path) -> None:
-            name = path.name
-            if name not in name_to_paths:
-                name_to_paths[name] = []
-            if path not in name_to_paths[name]:
-                name_to_paths[name].append(path)
-
-        # First pass: collect all file paths to detect name conflicts
-        for target in project.targets:
-            for node in target.output_nodes:
-                if isinstance(node, FileNode):
-                    register_path(node.path)
-                    # Also collect deps of output_nodes (for Command targets)
-                    for dep in node.explicit_deps:
-                        if isinstance(dep, FileNode):
-                            register_path(dep.path)
-
-            for node in target.object_nodes:
-                if isinstance(node, FileNode):
-                    register_path(node.path)
-                    for dep in node.explicit_deps:
-                        if isinstance(dep, FileNode):
-                            register_path(dep.path)
-
-        # Second pass: write nodes and collect edges
         f.write("  // Nodes\n")
         for target in project.targets:
             # Output nodes (libraries, programs, command outputs)
             for node in target.output_nodes:
                 if isinstance(node, FileNode):
-                    node_id = get_short_id(node.path)
+                    node_id = get_id(node.path)
                     if node_id not in written_nodes:
-                        label = node.path.name
+                        label = self._get_label(node.path, build_dir, root_dir)
                         shape, style = self._get_output_shape(target)
                         style_attr = f" style={style}" if style else ""
                         f.write(
                             f'  {node_id} [label="{label}" shape={shape}{style_attr}];\n'
                         )
                         written_nodes.add(node_id)
+                    output_node_paths[node.path] = node_id
 
                     # Source dependencies directly on output_nodes (for Command targets)
                     for dep in node.explicit_deps:
                         if isinstance(dep, FileNode):
-                            dep_id = get_short_id(dep.path)
-                            if dep_id not in written_nodes:
-                                dep_label = dep.path.name
-                                f.write(
-                                    f'  {dep_id} [label="{dep_label}" shape=note];\n'
-                                )
-                                written_nodes.add(dep_id)
+                            dep_id = write_source_node(dep)
                             edges.append((dep_id, node_id))
 
             # Object nodes
             for node in target.object_nodes:
                 if isinstance(node, FileNode):
-                    node_id = get_short_id(node.path)
+                    node_id = get_id(node.path)
                     if node_id not in written_nodes:
-                        label = node.path.name
+                        label = self._get_label(node.path, build_dir, root_dir)
                         f.write(f'  {node_id} [label="{label}" shape=ellipse];\n')
                         written_nodes.add(node_id)
 
                     # Source dependencies
                     for dep in node.explicit_deps:
                         if isinstance(dep, FileNode):
-                            dep_id = get_short_id(dep.path)
-                            if dep_id not in written_nodes:
-                                dep_label = dep.path.name
-                                f.write(
-                                    f'  {dep_id} [label="{dep_label}" shape=note];\n'
-                                )
-                                written_nodes.add(dep_id)
+                            dep_id = write_source_node(dep)
                             edges.append((dep_id, node_id))
 
                     # Header dependencies from .d files (if enabled)
                     if self._include_headers:
                         header_deps = self._parse_depfile(node.path)
                         for header in header_deps:
-                            header_id = get_short_id(header)
+                            header_id = get_id(header)
                             if header_id not in written_nodes:
+                                header_label = self._get_label(
+                                    header, build_dir, root_dir
+                                )
                                 f.write(
-                                    f'  {header_id} [label="{header.name}" shape=note];\n'
+                                    f'  {header_id} [label="{header_label}" shape=note];\n'
                                 )
                                 written_nodes.add(header_id)
                             edges.append((header_id, node_id))
@@ -213,19 +198,38 @@ class DotGenerator(BaseGenerator):
             # Edges: objects → outputs
             for output in target.output_nodes:
                 if isinstance(output, FileNode):
-                    output_id = get_short_id(output.path)
+                    output_id = get_id(output.path)
                     for obj in target.object_nodes:
                         if isinstance(obj, FileNode):
-                            edges.append((get_short_id(obj.path), output_id))
+                            edges.append((get_id(obj.path), output_id))
 
             # Edges: dependency libraries → this target's output
             for output in target.output_nodes:
                 if isinstance(output, FileNode):
-                    output_id = get_short_id(output.path)
+                    output_id = get_id(output.path)
                     for dep_target in target.dependencies:
                         for dep_output in dep_target.output_nodes:
                             if isinstance(dep_output, FileNode):
-                                edges.append((get_short_id(dep_output.path), output_id))
+                                edges.append((get_id(dep_output.path), output_id))
+
+        # Directory containment edges: connect output nodes to source dep
+        # nodes when the output path is inside the source path (directory).
+        # Normalize paths to labels for comparison since node paths may mix
+        # absolute and relative forms.
+        source_labels: dict[str, str] = {
+            self._get_label(p, build_dir, root_dir): sid
+            for p, sid in source_nodes.items()
+        }
+        output_labels: dict[str, str] = {
+            self._get_label(p, build_dir, root_dir): oid
+            for p, oid in output_node_paths.items()
+        }
+        for source_label, source_id in source_labels.items():
+            source_lpath = Path(source_label)
+            for output_label, output_id in output_labels.items():
+                if output_label != source_label:
+                    if Path(output_label).is_relative_to(source_lpath):
+                        edges.append((output_id, source_id))
 
         f.write("\n  // Edges\n")
 
