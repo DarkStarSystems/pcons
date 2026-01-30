@@ -592,7 +592,8 @@ def cmd_info(args: argparse.Namespace) -> int:
     """Show information about the build script.
 
     Displays the docstring from pcons-build.py which should document
-    available build variables and usage.
+    available build variables and usage. With --targets, runs the build
+    script and lists all defined targets grouped by type.
     """
     setup_logging(args.verbose, args.debug)
 
@@ -610,6 +611,9 @@ def cmd_info(args: argparse.Namespace) -> int:
             logger.error("No pcons-build.py found in current directory")
             return 1
         script = found_script
+
+    if getattr(args, "targets", False):
+        return _info_targets(args, script)
 
     # Extract docstring using AST
     import ast
@@ -636,6 +640,110 @@ def cmd_info(args: argparse.Namespace) -> int:
         print("      PORT     - Build target: ofx, ae (default: ofx)")
         print("      USE_CUDA - Enable CUDA: 0, 1 (default: 0)")
         print('  """')
+
+    return 0
+
+
+def _info_targets(args: argparse.Namespace, script: Path) -> int:
+    """List all targets defined by the build script."""
+    from pcons.core.node import AliasNode, FileNode
+    from pcons.core.target import TargetType
+
+    load_user_modules(args)
+
+    build_dir = Path(args.build_dir)
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    variables, _ = parse_variables(getattr(args, "extra", []))
+    variant = getattr(args, "variant", None)
+    generator = getattr(args, "generator", None)
+    reconfigure = getattr(args, "reconfigure", False)
+
+    exit_code, projects = run_script(
+        script,
+        build_dir,
+        variables=variables,
+        variant=variant,
+        generator=generator,
+        reconfigure=reconfigure,
+    )
+    if exit_code != 0:
+        return exit_code
+    if not projects:
+        logger.error("No Project created in build script")
+        return 1
+
+    project = projects[0]
+
+    # Aliases
+    aliases = project.aliases
+    if aliases:
+        print("Aliases:")
+        for name, alias_node in aliases.items():
+            # Collect the target names this alias refers to
+            dep_names: list[str] = []
+            for node in alias_node.targets:
+                if isinstance(node, FileNode):
+                    dep_names.append(node.path.name)
+                elif isinstance(node, AliasNode):
+                    dep_names.append(node.alias_name)
+                else:
+                    dep_names.append(str(node))
+            deps_str = ", ".join(dep_names) if dep_names else ""
+            print(f"  {name:30s} -> {deps_str}")
+        print()
+
+    # Group targets by type
+    by_type: dict[str, list[tuple[str, str]]] = {}
+    # Order: programs, shared libs, static libs, then the rest
+    type_order = [
+        TargetType.PROGRAM,
+        TargetType.SHARED_LIBRARY,
+        TargetType.STATIC_LIBRARY,
+        TargetType.OBJECT,
+        TargetType.INTERFACE,
+        TargetType.COMMAND,
+        TargetType.ARCHIVE,
+    ]
+
+    for target in project.targets:
+        ttype = target.target_type
+        type_name = ttype.value if ttype else "other"
+        outputs = ""
+        if target.output_nodes:
+            paths = []
+            for n in target.output_nodes:
+                if isinstance(n, FileNode):
+                    try:
+                        paths.append(str(n.path.relative_to(project.build_dir)))
+                    except ValueError:
+                        paths.append(str(n.path))
+            if paths:
+                outputs = ", ".join(paths)
+        entry = (target.name, outputs)
+        by_type.setdefault(type_name, []).append(entry)
+
+    print("Targets:")
+    for ttype in type_order:
+        entries = by_type.pop(ttype.value, None)
+        if entries:
+            print(f"  [{ttype.value}]")
+            for name, outputs in entries:
+                if outputs:
+                    print(f"    {name:30s} -> {outputs}")
+                else:
+                    print(f"    {name}")
+            print()
+
+    # Any remaining types not in our order
+    for type_name, entries in by_type.items():
+        print(f"  [{type_name}]")
+        for name, outputs in entries:
+            if outputs:
+                print(f"    {name:30s} -> {outputs}")
+            else:
+                print(f"    {name}")
+        print()
 
     return 0
 
@@ -881,8 +989,17 @@ def create_full_parser() -> argparse.ArgumentParser:
         "info", help="Show build script info and available variables"
     )
     add_common_args(info_parser)
+    add_generate_args(info_parser)
     info_parser.add_argument(
-        "-b", "--build-script", help="Path to pcons-build.py script"
+        "-t",
+        "--targets",
+        action="store_true",
+        help="List all build targets (runs the build script)",
+    )
+    info_parser.add_argument(
+        "extra",
+        nargs="*",
+        help="Build variables (KEY=value)",
     )
     info_parser.set_defaults(func=cmd_info)
 

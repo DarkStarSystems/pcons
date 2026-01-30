@@ -639,6 +639,37 @@ print(f"TEST_VAR={get_var('TEST_VAR', 'not_set')}")
         assert result.returncode == 0
         assert "targets" in result.stdout
 
+    def test_info_targets(self, tmp_path: Path) -> None:
+        """Test pcons info --targets lists targets by type."""
+        build_py = tmp_path / "pcons-build.py"
+        build_py.write_text("""\
+import os
+from pathlib import Path
+from pcons.core.project import Project
+
+build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
+source_dir = Path(os.environ.get("PCONS_SOURCE_DIR", "."))
+project = Project("test", root_dir=source_dir, build_dir=build_dir)
+env = project.Environment()
+
+hello = env.Command(target="hello.txt", source="hello.in", command="cp $SOURCE $TARGET")
+project.Alias("all", hello)
+""")
+        (tmp_path / "hello.in").write_text("hi")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "info", "--targets"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        assert "Aliases:" in result.stdout
+        assert "all" in result.stdout
+        assert "Targets:" in result.stdout
+        assert "[command]" in result.stdout
+        assert "hello.txt" in result.stdout
+
 
 class TestIntegration:
     """Integration tests for the full build cycle."""
