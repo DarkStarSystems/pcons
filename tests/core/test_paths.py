@@ -284,3 +284,71 @@ class TestMakeProjectRelative:
         rel_path = Path("src/main.c")
         result = resolver.make_project_relative(rel_path)
         assert result == "src/main.c"
+
+
+class TestCanonicalize:
+    def test_canonicalize_relative_unchanged(self, tmp_path: Path) -> None:
+        """Relative paths pass through (with normpath normalization)."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        resolver = PathResolver(project_root, Path("build"))
+
+        result = resolver.canonicalize("src/main.c")
+        assert result == Path("src/main.c")
+
+    def test_canonicalize_absolute_under_project_becomes_relative(
+        self, tmp_path: Path
+    ) -> None:
+        """Absolute paths under project root become relative."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        resolver = PathResolver(project_root, Path("build"))
+
+        abs_path = project_root / "src" / "main.c"
+        result = resolver.canonicalize(abs_path)
+        assert result == Path("src/main.c")
+
+    def test_canonicalize_absolute_external_stays_absolute(
+        self, tmp_path: Path
+    ) -> None:
+        """External absolute paths stay absolute."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        resolver = PathResolver(project_root, Path("build"))
+
+        external = Path("/opt/homebrew/lib/libfoo.dylib")
+        result = resolver.canonicalize(external)
+        assert result == external
+        assert result.is_absolute()
+
+    def test_canonicalize_dot_segments_normalized(self, tmp_path: Path) -> None:
+        """Dot segments (./foo, foo/../bar) are normalized."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        resolver = PathResolver(project_root, Path("build"))
+
+        result = resolver.canonicalize("src/../src/main.c")
+        assert result == Path("src/main.c")
+
+        result2 = resolver.canonicalize("./src/main.c")
+        assert result2 == Path("src/main.c")
+
+    def test_canonicalize_backslashes_normalized(self, tmp_path: Path) -> None:
+        """Backslashes are converted to forward slashes."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        resolver = PathResolver(project_root, Path("build"))
+
+        result = resolver.canonicalize("src\\subdir\\main.c")
+        assert result.parts == ("src", "subdir", "main.c")
+
+    def test_canonicalize_idempotent(self, tmp_path: Path) -> None:
+        """Canonicalizing an already-canonical path returns the same result."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        resolver = PathResolver(project_root, Path("build"))
+
+        path = "build/obj/hello.o"
+        first = resolver.canonicalize(path)
+        second = resolver.canonicalize(first)
+        assert first == second

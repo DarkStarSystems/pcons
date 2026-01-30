@@ -39,8 +39,8 @@ class CompileCommandsGenerator(BaseGenerator):
 
     Example:
         generator = CompileCommandsGenerator()
-        generator.generate(project, Path("build"))
-        # Creates build/compile_commands.json
+        generator.generate(project)
+        # Creates <build_dir>/compile_commands.json
     """
 
     # Languages that should be included in compile_commands.json

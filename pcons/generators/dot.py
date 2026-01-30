@@ -48,8 +48,13 @@ class DotGenerator(BaseGenerator):
 
     Usage:
         generator = DotGenerator()
-        generator.generate(project, Path("build"))
-        # Creates build/deps.dot
+        generator.generate(project)
+        # Creates <build_dir>/deps.dot
+
+        # Write to a specific directory:
+        generator = DotGenerator(output_dir=Path("/tmp"))
+        generator.generate(project)
+        # Creates /tmp/deps.dot
     """
 
     def __init__(
@@ -58,6 +63,7 @@ class DotGenerator(BaseGenerator):
         include_headers: bool = False,
         rankdir: str = "LR",
         output_filename: str = "deps.dot",
+        output_dir: Path | None = None,
     ) -> None:
         """Initialize the DOT generator.
 
@@ -67,11 +73,19 @@ class DotGenerator(BaseGenerator):
             rankdir: Graph direction - "LR" (left-right), "TB" (top-bottom),
                     "RL" (right-left), or "BT" (bottom-top).
             output_filename: Name of the output file.
+            output_dir: Override output directory (default: project.build_dir).
         """
         super().__init__("dot")
         self._include_headers = include_headers
         self._rankdir = rankdir
         self._output_filename = output_filename
+        self._output_dir_override = output_dir
+
+    def _resolve_output_dir(self, project: Project) -> Path:
+        """Use the override output_dir if set, otherwise default."""
+        if self._output_dir_override is not None:
+            return Path(self._output_dir_override)
+        return super()._resolve_output_dir(project)
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate DOT diagram file.

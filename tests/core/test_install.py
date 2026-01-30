@@ -268,7 +268,7 @@ class TestInstallWithNinja:
 
         # Generate ninja file
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path / "build")
+        gen.generate(project)
 
         # Read the generated file
         ninja_file = tmp_path / "build" / "build.ninja"

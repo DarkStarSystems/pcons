@@ -70,11 +70,11 @@ class XcodeGenerator(BaseGenerator):
     or opened in Xcode for IDE features and building.
 
     Example:
-        project = Project("myapp")
+        project = Project("myapp", build_dir="build")
         # ... configure project ...
 
         generator = XcodeGenerator()
-        generator.generate(project, Path("build"))
+        generator.generate(project)
         # Creates build/myapp.xcodeproj/
 
         # Build with: xcodebuild -project build/myapp.xcodeproj

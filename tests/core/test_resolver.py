@@ -40,9 +40,7 @@ class TestResolverSingleTarget:
         assert target._resolved
         assert len(target.object_nodes) == 1
         # Objects are placed in obj.<target>/ subdirectory to avoid naming conflicts
-        assert (
-            target.object_nodes[0].path == tmp_path / "build" / "obj.mylib" / "main.o"
-        )
+        assert target.object_nodes[0].path == Path("build/obj.mylib/main.o")
 
     def test_resolve_sets_object_build_info(self, tmp_path, gcc_toolchain):
         """Test that resolved objects have proper build_info."""

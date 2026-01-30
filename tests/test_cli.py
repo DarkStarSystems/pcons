@@ -728,7 +728,7 @@ obj = env.cc.Object("hello.o", "hello.c")
 env.link.Program("hello", obj)
 
 generator = NinjaGenerator()
-generator.generate(project, build_dir)
+generator.generate(project)
 """
         )
 

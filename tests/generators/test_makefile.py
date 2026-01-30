@@ -19,19 +19,19 @@ class TestMakefileGenerator:
         assert gen.name == "makefile"
 
     def test_creates_makefile(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         gen = MakefileGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         makefile = tmp_path / "Makefile"
         assert makefile.exists()
 
     def test_header_contains_project_name(self, tmp_path):
-        project = Project("myproject", root_dir=tmp_path)
+        project = Project("myproject", root_dir=tmp_path, build_dir=".")
         gen = MakefileGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "Makefile").read_text()
         assert "myproject" in content
@@ -40,27 +40,27 @@ class TestMakefileGenerator:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "out")
         gen = MakefileGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = (tmp_path / "Makefile").read_text()
+        content = (tmp_path / "out" / "Makefile").read_text()
         # Build dir should be the absolute path
         assert "BUILDDIR :=" in content
 
     def test_disables_builtin_rules(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         gen = MakefileGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "Makefile").read_text()
         assert ".SUFFIXES:" in content
         assert "--no-builtin-rules" in content
 
     def test_writes_phony_targets(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         gen = MakefileGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "Makefile").read_text()
         assert ".PHONY:" in content
@@ -71,9 +71,9 @@ class TestMakefileGenerator:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         gen = MakefileGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = (tmp_path / "Makefile").read_text()
+        content = (tmp_path / "build" / "Makefile").read_text()
         assert "clean:" in content
         assert "rm -rf" in content
 
@@ -103,9 +103,9 @@ class TestMakefileBuildStatements:
         project.add_target(target)
 
         gen = MakefileGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = normalize_path((tmp_path / "Makefile").read_text())
+        content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # Check that a build rule exists for the output
         assert "build/app.o:" in content
         assert "main.c" in content
@@ -129,9 +129,9 @@ class TestMakefileBuildStatements:
         project.add_target(target)
 
         gen = MakefileGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = normalize_path((tmp_path / "Makefile").read_text())
+        content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # Directory rule should exist
         assert "mkdir -p" in content
 
@@ -154,16 +154,16 @@ class TestMakefileBuildStatements:
         project.add_target(target)
 
         gen = MakefileGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = normalize_path((tmp_path / "Makefile").read_text())
+        content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # Order-only prerequisite syntax: target: prereqs | order-only
         assert " | " in content
 
 
 class TestMakefileAliases:
     def test_writes_aliases(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         # Create a simple target
         target = Target("mylib")
@@ -175,7 +175,7 @@ class TestMakefileAliases:
         project.Alias("all_libs", output_node)
 
         gen = MakefileGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "Makefile").read_text()
         assert "all_libs:" in content
@@ -192,9 +192,9 @@ class TestMakefileDefaultTarget:
         project.add_target(target)
 
         gen = MakefileGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = (tmp_path / "Makefile").read_text()
+        content = (tmp_path / "build" / "Makefile").read_text()
         assert ".DEFAULT_GOAL" in content
 
 
@@ -230,9 +230,9 @@ class TestMakefileDepfiles:
         project.add_target(target)
 
         gen = MakefileGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = (tmp_path / "Makefile").read_text()
+        content = (tmp_path / "build" / "Makefile").read_text()
         # Should include .d files for incremental builds
         assert "-include" in content
         assert "*.d" in content
@@ -262,9 +262,9 @@ class TestMakefileImplicitDeps:
         project.add_target(target)
 
         gen = MakefileGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = normalize_path((tmp_path / "Makefile").read_text())
+        content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # Implicit dep should be in prerequisites
         assert "header.h" in content
 
@@ -307,9 +307,9 @@ class TestMakefilePostBuild:
         project._resolved = True  # Skip auto-resolve since we set up nodes manually
 
         gen = MakefileGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = (tmp_path / "Makefile").read_text()
+        content = (tmp_path / "build" / "Makefile").read_text()
         # Post-build commands should be chained with &&
         assert "&&" in content
         assert "chmod +x" in content

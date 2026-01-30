@@ -18,7 +18,7 @@ def normalize_path(p: str) -> str:
 class TestNinjaMultiOutput:
     def test_multi_output_build_statement(self, tmp_path):
         """Test that multi-output builds generate correct ninja syntax."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("shlib")
         dll_node = FileNode("build/mylib.dll")
@@ -82,7 +82,7 @@ class TestNinjaMultiOutput:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
 
@@ -97,7 +97,7 @@ class TestNinjaMultiOutput:
 
     def test_multi_output_variables(self, tmp_path):
         """Test that multi-output builds include out_<name> variables."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("shlib")
         dll_node = FileNode("build/mylib.dll")
@@ -138,7 +138,7 @@ class TestNinjaMultiOutput:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
 
@@ -148,7 +148,7 @@ class TestNinjaMultiOutput:
 
     def test_secondary_nodes_not_written(self, tmp_path):
         """Test that secondary nodes don't get their own build statements."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("shlib")
         dll_node = FileNode("build/mylib.dll")
@@ -194,7 +194,7 @@ class TestNinjaMultiOutput:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
 
@@ -218,7 +218,7 @@ class TestNinjaSingleOutput:
         """Test that single-output builds still work normally."""
         from pcons.core.builder import CommandBuilder
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("prog")
         exe_node = FileNode("build/app.exe")
@@ -242,7 +242,7 @@ class TestNinjaSingleOutput:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
 

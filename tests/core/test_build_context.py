@@ -176,7 +176,7 @@ class TestNinjaQuoting:
         # Generate ninja file
         build_dir = tmp_path / "build"
         generator = NinjaGenerator()
-        generator.generate(project, build_dir)
+        generator.generate(project)
 
         # Read ninja file
         ninja_content = (build_dir / "build.ninja").read_text()
@@ -271,7 +271,7 @@ class TestCompileCommandsQuoting:
         # Generate compile_commands.json
         build_dir = tmp_path / "build"
         generator = CompileCommandsGenerator()
-        generator.generate(project, build_dir)
+        generator.generate(project)
 
         # Read and parse
         cc_file = build_dir / "compile_commands.json"
@@ -345,7 +345,7 @@ class TestEndToEndSpacesInPaths:
 
         # Generate and verify ninja
         build_dir = tmp_path / "build"
-        NinjaGenerator().generate(project, build_dir)
+        NinjaGenerator().generate(project)
 
         ninja = (build_dir / "build.ninja").read_text()
 

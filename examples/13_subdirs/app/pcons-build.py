@@ -53,7 +53,7 @@ def build_app(project: Project | None = None, build_dir: Path | None = None):
     if standalone:
         # Resolve and generate build file when running standalone
         project.resolve()
-        Generator().generate(project, build_dir)
+        Generator().generate(project)
         print(f"Generated {build_dir}")
 
 

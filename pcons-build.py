@@ -48,5 +48,5 @@ project.resolve()
 
 # Generate ninja file
 generator = NinjaGenerator()
-generator.generate(project, build_dir)
+generator.generate(project)
 print(f"Generated {build_dir / 'build.ninja'}")

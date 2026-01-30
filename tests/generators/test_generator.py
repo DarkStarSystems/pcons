@@ -1,8 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.generators.generator."""
 
-from pathlib import Path
-
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator, Generator
 
@@ -14,12 +12,10 @@ class MockGenerator(BaseGenerator):
         super().__init__("mock")
         self.generated = False
         self.last_project: Project | None = None
-        self.last_output_dir: Path | None = None
 
-    def generate(self, project: Project, output_dir: Path) -> None:
+    def generate(self, project: Project) -> None:
         self.generated = True
         self.last_project = project
-        self.last_output_dir = output_dir
 
 
 class TestGeneratorProtocol:
@@ -37,11 +33,10 @@ class TestBaseGenerator:
         gen = MockGenerator()
         project = Project("test")
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         assert gen.generated is True
         assert gen.last_project is project
-        assert gen.last_output_dir is tmp_path
 
     def test_repr(self):
         gen = MockGenerator()

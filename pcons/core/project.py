@@ -9,6 +9,7 @@ serves as the context for build descriptions.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -98,7 +99,13 @@ class Project:
         """
         self.name = name
         self.root_dir = Path(root_dir) if root_dir else Path.cwd()
-        self.build_dir = Path(build_dir)
+        bd = Path(build_dir)
+        if bd.is_absolute():
+            try:
+                bd = bd.relative_to(self.root_dir)
+            except ValueError:
+                pass  # Out-of-tree build — keep absolute
+        self.build_dir = bd
         self._environments: list[Env] = []
         self._targets: dict[str, Target] = {}
         self._nodes: dict[Path, Node] = {}
@@ -164,6 +171,19 @@ class Project:
         self._environments.append(env)
         return env
 
+    def _canonicalize_path(self, path: Path) -> Path:
+        """Convert path to canonical form for node storage.
+
+        Canonical: relative to project root if under it, absolute otherwise.
+        Uses pure path arithmetic (no filesystem access).
+        """
+        if path.is_absolute():
+            try:
+                return path.relative_to(self.root_dir)
+            except ValueError:
+                return path  # External path
+        return Path(os.path.normpath(path))
+
     def node(self, path: Path | str) -> FileNode:
         """Get or create a file node for a path.
 
@@ -176,7 +196,7 @@ class Project:
         Returns:
             FileNode for the path.
         """
-        path = Path(path)
+        path = self._canonicalize_path(Path(path))
         if path not in self._nodes:
             self._nodes[path] = FileNode(path, defined_at=get_caller_location())
         node = self._nodes[path]
@@ -195,7 +215,7 @@ class Project:
         Returns:
             DirNode for the path.
         """
-        path = Path(path)
+        path = self._canonicalize_path(Path(path))
         if path not in self._nodes:
             self._nodes[path] = DirNode(path, defined_at=get_caller_location())
         node = self._nodes[path]
@@ -421,18 +441,22 @@ class Project:
             from pcons.generators.dot import DotGenerator
 
             if graph_path == "-":
-                # Write to stdout
+                # Write to stdout via temp dir
                 print("# DOT dependency graph")
-                gen = DotGenerator(output_filename="deps.dot")
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    gen.generate(self, Path(tmpdir))
+                    gen = DotGenerator(
+                        output_filename="deps.dot", output_dir=Path(tmpdir)
+                    )
+                    gen.generate(self)
                     dot_content = (Path(tmpdir) / "deps.dot").read_text()
                     print(dot_content)
             else:
                 # Write to file
                 output_path = Path(graph_path)
-                gen = DotGenerator(output_filename=output_path.name)
-                gen.generate(self, output_path.parent)
+                gen = DotGenerator(
+                    output_filename=output_path.name, output_dir=output_path.parent
+                )
+                gen.generate(self)
                 logger.info("Wrote DOT graph to %s", graph_path)
 
         # Mermaid format graph
@@ -441,18 +465,22 @@ class Project:
             from pcons.generators.mermaid import MermaidGenerator
 
             if mermaid_path == "-":
-                # Write to stdout
+                # Write to stdout via temp dir
                 print("# Mermaid dependency graph")
-                gen = MermaidGenerator(output_filename="deps.mmd")
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    gen.generate(self, Path(tmpdir))
+                    gen = MermaidGenerator(
+                        output_filename="deps.mmd", output_dir=Path(tmpdir)
+                    )
+                    gen.generate(self)
                     mermaid_content = (Path(tmpdir) / "deps.mmd").read_text()
                     print(mermaid_content)
             else:
                 # Write to file
                 output_path = Path(mermaid_path)
-                gen = MermaidGenerator(output_filename=output_path.name)
-                gen.generate(self, output_path.parent)
+                gen = MermaidGenerator(
+                    output_filename=output_path.name, output_dir=output_path.parent
+                )
+                gen.generate(self)
                 logger.info("Wrote Mermaid graph to %s", mermaid_path)
 
     # =========================================================================

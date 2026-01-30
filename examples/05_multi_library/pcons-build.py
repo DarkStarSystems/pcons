@@ -64,15 +64,15 @@ project.resolve()
 
 # Generate build file
 generator = Generator()
-generator.generate(project, build_dir)
+generator.generate(project)
 
 # Generate Mermaid dependency diagram
 mermaid_gen = MermaidGenerator(direction="LR")
-mermaid_gen.generate(project, build_dir)
+mermaid_gen.generate(project)
 
 # Generate compile_commands.json for IDE integration
 cc_gen = CompileCommandsGenerator()
-cc_gen.generate(project, build_dir)
+cc_gen.generate(project)
 
 print(f"Generated {build_dir / 'build.ninja'}")
 print(f"Generated {build_dir / 'compile_commands.json'}")

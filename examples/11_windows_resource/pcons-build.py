@@ -35,6 +35,6 @@ project.resolve()
 
 # Generate build file
 generator = Generator()
-generator.generate(project, build_dir)
+generator.generate(project)
 
 print(f"Generated {build_dir} using {toolchain.name} toolchain")

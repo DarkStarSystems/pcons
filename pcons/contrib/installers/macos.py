@@ -154,18 +154,17 @@ def create_component_pkg(
     # Validate staging path doesn't conflict with user outputs
     _validate_staging_path(project, ".pkg_staging")
 
-    # Stage files to a temporary directory
+    # Stage files to a temporary directory (rel paths are relative to build_dir)
     staging_rel = Path(".pkg_staging") / identifier / "payload"
-    staging_dir = project.build_dir / staging_rel
 
     # Stage source files (Install auto-detects directory sources after resolve)
     stage_target = project.Install(staging_rel, sources)
 
-    # Build pkgbuild command
+    # Build pkgbuild command (paths relative to build_dir where ninja/make run)
     pkgbuild_args = [
         "pkgbuild",
         "--root",
-        str(staging_dir),
+        str(staging_rel),
         "--identifier",
         identifier,
         "--version",
@@ -265,14 +264,11 @@ def create_pkg(
     # Validate staging path doesn't conflict with user outputs
     _validate_staging_path(project, ".pkg_staging")
 
-    # Set up staging directories
+    # Set up staging directories (all paths relative to build_dir)
     staging_base_rel = Path(".pkg_staging") / name
-    staging_base = project.build_dir / staging_base_rel
     payload_rel = staging_base_rel / "payload"
-    payload_dir = project.build_dir / payload_rel
-    pkg_dir = project.build_dir / staging_base_rel / "packages"
+    pkg_rel = staging_base_rel / "packages"
     resources_rel = staging_base_rel / "resources"
-    resources_dir = project.build_dir / resources_rel
 
     # Stage source files (Install auto-detects directory sources after resolve)
     stage_target = project.Install(payload_rel, sources)
@@ -288,11 +284,11 @@ def create_pkg(
     has_bundle = any(is_bundle_source(src) for src in sources)
 
     # Create component package with pkgbuild
-    component_pkg_path = pkg_dir / f"{name}.pkg"
+    component_pkg_path = pkg_rel / f"{name}.pkg"
     pkgbuild_args = [
         "pkgbuild",
         "--root",
-        str(payload_dir),
+        str(payload_rel),
         "--identifier",
         identifier,
         "--version",
@@ -307,7 +303,7 @@ def create_pkg(
     # Non-bundle files (CLI tools, libraries) don't need it
     component_deps: list[Target] = [stage_target]
     if has_bundle:
-        component_plist_path = staging_base / "component.plist"
+        component_plist_path = staging_base_rel / "component.plist"
         plist_target = env.Command(
             target=component_plist_path,
             source=None,
@@ -338,7 +334,7 @@ def create_pkg(
     )
 
     # Generate distribution.xml
-    dist_xml_path = staging_base / "distribution.xml"
+    dist_xml_path = staging_base_rel / "distribution.xml"
     dist_cmd = [
         python_cmd,
         "-m",
@@ -381,11 +377,11 @@ def create_pkg(
         "--distribution",
         str(dist_xml_path),
         "--package-path",
-        str(pkg_dir),
+        str(pkg_rel),
     ]
 
     if any(f is not None for f in [welcome, readme, license, conclusion, background]):
-        productbuild_args.extend(["--resources", str(resources_dir)])
+        productbuild_args.extend(["--resources", str(resources_rel)])
 
     if sign_identity is not None:
         productbuild_args.extend(["--sign", sign_identity])
@@ -451,23 +447,23 @@ def create_dmg(
     # Validate staging path doesn't conflict with user outputs
     _validate_staging_path(project, ".dmg_staging")
 
-    # Stage files to a temporary directory
+    # Stage files to a temporary directory (path relative to build_dir)
     staging_rel = Path(".dmg_staging") / name
-    staging_dir = project.build_dir / staging_rel
 
     # Stage source files (Install auto-detects directory sources after resolve)
     stage_target = project.Install(staging_rel, sources)
 
     # Build hdiutil command (with optional symlink creation)
+    # Paths are relative to build_dir where ninja/make run
     if applications_symlink:
         hdiutil_cmd = [
             "bash",
             "-c",
-            f'rm -f "{staging_dir}/Applications" && '
-            f'ln -sf /Applications "{staging_dir}/Applications" && '
+            f'rm -f "{staging_rel}/Applications" && '
+            f'ln -sf /Applications "{staging_rel}/Applications" && '
             f'rm -f "{output}" && '
             f'hdiutil create -volname "{volume_name}" '
-            f'-srcfolder "{staging_dir}" -format {format} -ov "{output}"',
+            f'-srcfolder "{staging_rel}" -format {format} -ov "{output}"',
         ]
     else:
         hdiutil_cmd = [
@@ -475,7 +471,7 @@ def create_dmg(
             "-c",
             f'rm -f "{output}" && '
             f'hdiutil create -volname "{volume_name}" '
-            f'-srcfolder "{staging_dir}" -format {format} -ov "{output}"',
+            f'-srcfolder "{staging_rel}" -format {format} -ov "{output}"',
         ]
 
     return env.Command(

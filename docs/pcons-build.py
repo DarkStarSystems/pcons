@@ -229,7 +229,7 @@ def main() -> None:
     # ==========================================================================
 
     generator = NinjaGenerator()
-    generator.generate(project, build_dir)
+    generator.generate(project)
 
     # Print status
     git_info = get_git_info()

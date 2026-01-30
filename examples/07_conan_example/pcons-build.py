@@ -105,7 +105,7 @@ project.Default(hello)
 
 project.resolve()
 
-Generator().generate(project, build_dir)
-CompileCommandsGenerator().generate(project, build_dir)
+Generator().generate(project)
+CompileCommandsGenerator().generate(project)
 
 print(f"Generated {build_dir}")

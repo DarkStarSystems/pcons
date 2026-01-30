@@ -21,19 +21,19 @@ class TestNinjaGenerator:
         assert gen.name == "ninja"
 
     def test_creates_build_ninja(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         gen = NinjaGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         ninja_file = tmp_path / "build.ninja"
         assert ninja_file.exists()
 
     def test_header_contains_project_name(self, tmp_path):
-        project = Project("myproject", root_dir=tmp_path)
+        project = Project("myproject", root_dir=tmp_path, build_dir=".")
         gen = NinjaGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "myproject" in content
@@ -42,16 +42,16 @@ class TestNinjaGenerator:
         project = Project("test", root_dir=tmp_path, build_dir="out")
         gen = NinjaGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
-        content = (tmp_path / "build.ninja").read_text()
+        content = (tmp_path / "out" / "build.ninja").read_text()
         # builddir is always "." since the ninja file is inside the build directory
         assert "builddir = ." in content
 
 
 class TestNinjaBuildStatements:
     def test_writes_build_for_target(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         # Create a target with a node that has build info
         target = Target("app")
@@ -75,7 +75,7 @@ class TestNinjaBuildStatements:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         assert "build build/app.o:" in content
@@ -83,7 +83,7 @@ class TestNinjaBuildStatements:
         assert "src/main.c" in content
 
     def test_writes_rule_for_builder(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/app.o")
@@ -103,7 +103,7 @@ class TestNinjaBuildStatements:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "rule cc_cmdline" in content
@@ -112,7 +112,7 @@ class TestNinjaBuildStatements:
 
 class TestNinjaAliases:
     def test_writes_aliases(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("mylib")
         lib_node = FileNode("build/libmy.a")
@@ -123,7 +123,7 @@ class TestNinjaAliases:
         project.Alias("libs", target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         assert "build libs: phony" in content
@@ -132,7 +132,7 @@ class TestNinjaAliases:
 
 class TestNinjaDefaults:
     def test_writes_defaults(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         app_node = FileNode("build/app")
@@ -143,7 +143,7 @@ class TestNinjaDefaults:
         project.Default(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # Check for 'all' phony target and user-specified default
@@ -175,7 +175,7 @@ class TestNinjaEscaping:
 class TestNinjaPostBuild:
     def test_post_build_commands_in_ninja_output(self, tmp_path):
         """Post-build commands are baked into the rule command."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/app")
@@ -196,7 +196,7 @@ class TestNinjaPostBuild:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # Post-build commands are now baked directly into the rule's command line
@@ -207,7 +207,7 @@ class TestNinjaPostBuild:
 
     def test_post_build_multiple_commands_chained(self, tmp_path):
         """Multiple post-build commands are chained with && in the rule."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("plugin")
         output_node = FileNode("build/plugin.so")
@@ -233,7 +233,7 @@ class TestNinjaPostBuild:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # Post-build commands are baked into the rule's command line
@@ -244,7 +244,7 @@ class TestNinjaPostBuild:
 
     def test_post_build_variable_substitution(self, tmp_path):
         """$out and $in are substituted in post-build commands."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/myapp")
@@ -265,7 +265,7 @@ class TestNinjaPostBuild:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # $out should be substituted with the actual output path
@@ -276,7 +276,7 @@ class TestNinjaPostBuild:
 
     def test_no_post_build_when_empty(self, tmp_path):
         """No post_build commands in rule when target has none."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/app")
@@ -297,7 +297,7 @@ class TestNinjaPostBuild:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Should not have post_build variable
@@ -306,7 +306,7 @@ class TestNinjaPostBuild:
 
 class TestNinjaDepsDirectives:
     def test_gcc_deps_style_emits_depfile_and_deps(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         from pcons.core.subst import PathToken, TargetPath
 
@@ -336,14 +336,14 @@ class TestNinjaDepsDirectives:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "depfile = $out.d" in content
         assert "deps = gcc" in content
 
     def test_msvc_deps_style_emits_deps_msvc(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/app.obj")
@@ -370,7 +370,7 @@ class TestNinjaDepsDirectives:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "deps = msvc" in content
@@ -378,7 +378,7 @@ class TestNinjaDepsDirectives:
         assert "depfile" not in content
 
     def test_no_deps_style_emits_no_deps_directive(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/app")
@@ -400,7 +400,7 @@ class TestNinjaDepsDirectives:
         project.add_target(target)
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Should not have any deps directives for linker

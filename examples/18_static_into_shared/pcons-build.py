@@ -53,6 +53,6 @@ print(f"wrapper_lib dependencies: {wrapper_lib.dependencies}")
 print(f"prog output_nodes: {prog.output_nodes}")
 
 generator = Generator()
-generator.generate(project, build_dir)
+generator.generate(project)
 
 print(f"Generated {build_dir}")

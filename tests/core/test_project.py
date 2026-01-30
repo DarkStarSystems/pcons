@@ -265,3 +265,48 @@ class TestProjectAllNodes:
         nodes = project.all_nodes()
 
         assert len(nodes) == 4
+
+
+class TestNodeCanonicalization:
+    def test_node_absolute_path_deduplicates_with_relative(self, tmp_path):
+        """Absolute path under project root deduplicates with relative equivalent."""
+        project = Project("myproject", root_dir=tmp_path)
+        node_rel = project.node("src/main.c")
+        node_abs = project.node(tmp_path / "src" / "main.c")
+
+        assert node_rel is node_abs
+
+    def test_build_dir_absolute_normalized_to_relative(self, tmp_path):
+        """Absolute build_dir under root_dir is normalized to relative."""
+        abs_build = tmp_path / "build"
+        project = Project("myproject", root_dir=tmp_path, build_dir=abs_build)
+
+        assert not project.build_dir.is_absolute()
+        assert project.build_dir == Path("build")
+
+    def test_build_dir_out_of_tree_stays_absolute(self, tmp_path):
+        """Out-of-tree absolute build_dir stays absolute."""
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        out_of_tree = tmp_path / "builds" / "out"
+
+        project = Project("myproject", root_dir=project_root, build_dir=out_of_tree)
+
+        assert project.build_dir.is_absolute()
+        assert project.build_dir == out_of_tree
+
+    def test_dir_node_absolute_deduplicates(self, tmp_path):
+        """Absolute dir_node path under project root deduplicates with relative."""
+        project = Project("myproject", root_dir=tmp_path)
+        dir1 = project.dir_node("build/output")
+        dir2 = project.dir_node(tmp_path / "build" / "output")
+
+        assert dir1 is dir2
+
+    def test_node_dot_segments_normalized(self):
+        """Paths with dot segments deduplicate after normalization."""
+        project = Project("myproject")
+        node1 = project.node("src/main.c")
+        node2 = project.node("src/../src/main.c")
+
+        assert node1 is node2

@@ -10,6 +10,7 @@ PathResolver provides centralized path handling where:
 
 from __future__ import annotations
 
+import os
 import warnings
 from pathlib import Path
 
@@ -140,6 +141,31 @@ class PathResolver:
                 # Not under build_dir - return as-is
                 return path
         return path
+
+    def canonicalize(self, path: Path | str) -> Path:
+        """Convert to canonical form: project-root-relative or absolute.
+
+        Canonical form means:
+        - Paths under project root become relative to project root
+        - External absolute paths stay absolute
+        - Relative paths are normalized (dot segments removed)
+        - Backslashes are normalized to forward slashes
+
+        Uses pure path arithmetic (no filesystem access).
+
+        Args:
+            path: The path to canonicalize (Path or str).
+
+        Returns:
+            Canonicalized path.
+        """
+        path_obj = Path(str(path).replace("\\", "/"))
+        if path_obj.is_absolute():
+            try:
+                return path_obj.relative_to(self.project_root)
+            except ValueError:
+                return path_obj
+        return Path(os.path.normpath(str(path_obj)))
 
     def make_project_relative(self, path: Path) -> str:
         """Make a path relative to the project root.

@@ -34,11 +34,11 @@ class NinjaGenerator(BaseGenerator):
     - Default targets
 
     Example:
-        project = Project("myapp")
+        project = Project("myapp", build_dir="build")
         # ... configure project ...
 
         generator = NinjaGenerator()
-        generator.generate(project, Path("build"))
+        generator.generate(project)
         # Creates build/build.ninja
     """
 

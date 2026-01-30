@@ -90,7 +90,7 @@ project.Default(app)
 project.resolve()
 
 generator = Generator()
-generator.generate(project, build_dir)
+generator.generate(project)
 
 print(f"Generated {build_dir}")
 if installer_targets:

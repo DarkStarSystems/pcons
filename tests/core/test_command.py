@@ -220,7 +220,7 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(
@@ -228,7 +228,7 @@ class TestGenericCommandNinja:
         )
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Should have a command rule
@@ -241,7 +241,7 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(
@@ -249,7 +249,7 @@ class TestGenericCommandNinja:
         )
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "build output.txt:" in content
@@ -260,7 +260,7 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(
@@ -270,7 +270,7 @@ class TestGenericCommandNinja:
         )
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Build statement should list all sources
@@ -282,7 +282,7 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(
@@ -290,7 +290,7 @@ class TestGenericCommandNinja:
         )
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Build statement should list multiple outputs
@@ -302,13 +302,13 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(target="out.txt", source="in.txt", command="process $SOURCE")
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "process $in" in content
@@ -320,13 +320,13 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(target="out.txt", source="in.txt", command="process > $TARGET")
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "> $out" in content
@@ -338,7 +338,7 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(
@@ -348,7 +348,7 @@ class TestGenericCommandNinja:
         )
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "cat $in > $out" in content
@@ -358,7 +358,7 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(
@@ -368,7 +368,7 @@ class TestGenericCommandNinja:
         )
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "$source_0" in content
@@ -382,7 +382,7 @@ class TestGenericCommandNinja:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         env.Command(
@@ -392,7 +392,7 @@ class TestGenericCommandNinja:
         )
 
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "$target_0" in content
@@ -409,7 +409,7 @@ class TestTargetAsSources:
         """Target.add_source() accepts another Target."""
         from pcons.core.project import Project
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create a command target that generates code
@@ -434,7 +434,7 @@ class TestTargetAsSources:
         """Target.add_sources() accepts Targets mixed with paths."""
         from pcons.core.project import Project
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create command targets
@@ -458,7 +458,7 @@ class TestTargetAsSources:
         """env.Command() accepts Target as source."""
         from pcons.core.project import Project
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # First command produces output
@@ -486,7 +486,7 @@ class TestTargetAsSources:
         """env.Command() accepts mix of Targets and paths."""
         from pcons.core.project import Project
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # First command
@@ -514,7 +514,7 @@ class TestTargetAsSources:
         from pcons.core.project import Project
         from pcons.core.target import Target, TargetType
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create a command target that generates code
@@ -551,7 +551,7 @@ class TestTargetAsSources:
         from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create source file
@@ -587,7 +587,7 @@ class TestTargetAsSources:
 
         # Generate and verify ninja output
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
 

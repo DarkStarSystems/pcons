@@ -21,19 +21,19 @@ class TestCompileCommandsGenerator:
         assert gen.name == "compile_commands"
 
     def test_creates_compile_commands_json(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         gen = CompileCommandsGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         output_file = tmp_path / "compile_commands.json"
         assert output_file.exists()
 
     def test_empty_project_produces_empty_array(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         gen = CompileCommandsGenerator()
 
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert content == []
@@ -41,7 +41,7 @@ class TestCompileCommandsGenerator:
 
 class TestCompileCommandsEntries:
     def test_includes_c_files(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/main.o")
@@ -67,7 +67,7 @@ class TestCompileCommandsEntries:
         project.add_target(target)
 
         gen = CompileCommandsGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 1
@@ -76,7 +76,7 @@ class TestCompileCommandsEntries:
         assert normalize_path(content[0]["output"]) == "build/main.o"
 
     def test_includes_cpp_files(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/main.o")
@@ -101,7 +101,7 @@ class TestCompileCommandsEntries:
         project.add_target(target)
 
         gen = CompileCommandsGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 1
@@ -109,7 +109,7 @@ class TestCompileCommandsEntries:
         assert normalize_path(content[0]["file"]) == "src/main.cpp"
 
     def test_excludes_link_commands(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/app")
@@ -125,13 +125,13 @@ class TestCompileCommandsEntries:
         project.add_target(target)
 
         gen = CompileCommandsGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 0
 
     def test_entry_has_directory(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/main.o")
@@ -155,13 +155,13 @@ class TestCompileCommandsEntries:
         project.add_target(target)
 
         gen = CompileCommandsGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert content[0]["directory"] == str(tmp_path.absolute())
 
     def test_entry_has_command(self, tmp_path):
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
         output_node = FileNode("build/main.o")
@@ -185,7 +185,7 @@ class TestCompileCommandsEntries:
         project.add_target(target)
 
         gen = CompileCommandsGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert "command" in content[0]

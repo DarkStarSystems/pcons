@@ -21,9 +21,10 @@ if TYPE_CHECKING:
 class Generator(Protocol):
     """Protocol for build file generators.
 
-    A Generator takes a configured Project and writes build files
-    to the output directory. Different generators produce different
-    formats (Ninja, Make, IDE projects, etc.).
+    A Generator takes a configured Project and writes build files.
+    The output directory is derived from project.build_dir.
+    Different generators produce different formats (Ninja, Make,
+    IDE projects, etc.).
     """
 
     @property
@@ -31,12 +32,11 @@ class Generator(Protocol):
         """Generator name (e.g., 'ninja', 'make', 'compile_commands')."""
         ...
 
-    def generate(self, project: Project, output_dir: Path | None = None) -> None:
+    def generate(self, project: Project) -> None:
         """Generate build files for a project.
 
         Args:
             project: The configured project to generate for.
-            output_dir: Directory to write output files to (default: project.build_dir).
         """
         ...
 
@@ -56,21 +56,36 @@ class BaseGenerator:
     def name(self) -> str:
         return self._name
 
-    def generate(self, project: Project, output_dir: Path | None = None) -> None:
+    def generate(self, project: Project) -> None:
         """Generate build files.
 
         Auto-resolves the project if not already resolved, then
         calls _generate_impl() which subclasses must implement.
+        The output directory is computed from project.build_dir.
 
         Args:
             project: The configured project to generate for.
-            output_dir: Directory to write output files to (default: project.build_dir).
         """
-        if output_dir is None:
-            output_dir = project.build_dir
         if not project._resolved:
             project.resolve()
+        output_dir = self._resolve_output_dir(project)
         self._generate_impl(project, output_dir)
+
+    def _resolve_output_dir(self, project: Project) -> Path:
+        """Compute the output directory from the project.
+
+        If build_dir is absolute, use it directly; otherwise
+        resolve it relative to root_dir.
+
+        Args:
+            project: The project to get the output dir for.
+
+        Returns:
+            Absolute or resolved output directory path.
+        """
+        if project.build_dir.is_absolute():
+            return project.build_dir
+        return project.root_dir / project.build_dir
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Implementation of generate. Subclasses must override."""

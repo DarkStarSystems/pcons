@@ -25,7 +25,7 @@ class TestXcodeGeneratorBasic:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         xcodeproj_path = tmp_path / "myapp.xcodeproj"
         assert xcodeproj_path.exists()
@@ -38,7 +38,7 @@ class TestXcodeGeneratorBasic:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         pbxproj_path = tmp_path / "myapp.xcodeproj" / "project.pbxproj"
         assert pbxproj_path.exists()
@@ -60,7 +60,7 @@ class TestXcodeGeneratorTargets:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "com.apple.product-type.tool" in content
@@ -73,7 +73,7 @@ class TestXcodeGeneratorTargets:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "mylib.xcodeproj" / "project.pbxproj").read_text()
         assert "com.apple.product-type.library.static" in content
@@ -86,7 +86,7 @@ class TestXcodeGeneratorTargets:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "mylib.xcodeproj" / "project.pbxproj").read_text()
         assert "com.apple.product-type.library.dynamic" in content
@@ -99,7 +99,7 @@ class TestXcodeGeneratorTargets:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         # Interface-only projects don't create .xcodeproj
         xcodeproj_path = tmp_path / "mylib.xcodeproj"
@@ -121,7 +121,7 @@ class TestXcodeGeneratorBuildSettings:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "HEADER_SEARCH_PATHS" in content
@@ -135,7 +135,7 @@ class TestXcodeGeneratorBuildSettings:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "GCC_PREPROCESSOR_DEFINITIONS" in content
@@ -148,7 +148,7 @@ class TestXcodeGeneratorBuildSettings:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "OTHER_CFLAGS" in content
@@ -171,7 +171,7 @@ class TestXcodeGeneratorDependencies:
         project.add_target(app)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         # Should have both targets
@@ -191,7 +191,7 @@ class TestXcodeGeneratorBuildPhases:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "PBXSourcesBuildPhase" in content
@@ -203,7 +203,7 @@ class TestXcodeGeneratorBuildPhases:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "PBXFrameworksBuildPhase" in content
@@ -219,7 +219,7 @@ class TestXcodeGeneratorConfigurations:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "name = Debug" in content
@@ -231,7 +231,7 @@ class TestXcodeGeneratorConfigurations:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "name = Release" in content
@@ -247,7 +247,7 @@ class TestXcodeGeneratorGroups:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "name = Products" in content
@@ -259,7 +259,7 @@ class TestXcodeGeneratorGroups:
         project.add_target(target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "name = Sources" in content
@@ -285,7 +285,7 @@ class TestXcodeGeneratorMultiTarget:
         project.add_target(app)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "multi.xcodeproj" / "project.pbxproj").read_text()
 
@@ -332,7 +332,7 @@ class TestXcodeGeneratorInstall:
         project.add_target(install_target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "install_test.xcodeproj" / "project.pbxproj").read_text()
 
@@ -372,7 +372,7 @@ class TestXcodeGeneratorInstall:
         project.add_target(install_target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (
             tmp_path / "install_script.xcodeproj" / "project.pbxproj"
@@ -416,7 +416,7 @@ class TestXcodeGeneratorInstallDir:
         project.add_target(install_dir_target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (
             tmp_path / "install_dir_test.xcodeproj" / "project.pbxproj"
@@ -469,7 +469,7 @@ class TestXcodeGeneratorArchive:
         project.add_target(tar_target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "archive_test.xcodeproj" / "project.pbxproj").read_text()
 
@@ -515,7 +515,7 @@ class TestXcodeGeneratorArchive:
         project.add_target(zip_target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "zip_test.xcodeproj" / "project.pbxproj").read_text()
 
@@ -567,7 +567,7 @@ class TestXcodeGeneratorInstallDependencies:
         project.add_target(install_target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "dep_test.xcodeproj" / "project.pbxproj").read_text()
 
@@ -619,7 +619,7 @@ class TestXcodeGeneratorInstallDependencies:
         project.add_target(tar_target)
 
         gen = XcodeGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (
             tmp_path / "archive_dep_test.xcodeproj" / "project.pbxproj"

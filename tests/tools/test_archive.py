@@ -15,7 +15,7 @@ class TestTarfileBuilder:
 
     def test_tarfile_returns_target(self, tmp_path):
         """Tarfile() returns a Target object."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         tar = project.Tarfile(
@@ -29,7 +29,7 @@ class TestTarfileBuilder:
 
     def test_tarfile_name_derived_from_output(self, tmp_path):
         """Tarfile name is derived from output path."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Test various compression extensions
@@ -50,7 +50,7 @@ class TestTarfileBuilder:
 
     def test_tarfile_explicit_name(self, tmp_path):
         """Tarfile can have explicit name."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         tar = project.Tarfile(
@@ -64,7 +64,7 @@ class TestTarfileBuilder:
 
     def test_tarfile_compression_inferred_from_extension(self, tmp_path):
         """Compression type is inferred from output extension."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create tarfiles with different extensions
@@ -82,7 +82,7 @@ class TestTarfileBuilder:
 
     def test_tarfile_explicit_compression(self, tmp_path):
         """Explicit compression overrides inferred."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Override gzip with bz2
@@ -98,7 +98,7 @@ class TestTarfileBuilder:
 
     def test_tarfile_base_dir(self, tmp_path):
         """Tarfile respects base_dir parameter."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         tar = project.Tarfile(
@@ -113,7 +113,7 @@ class TestTarfileBuilder:
 
     def test_tarfile_default_base_dir(self, tmp_path):
         """Tarfile uses '.' as default base_dir."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         tar = project.Tarfile(
@@ -128,7 +128,7 @@ class TestZipfileBuilder:
 
     def test_zipfile_returns_target(self, tmp_path):
         """Zipfile() returns a Target object."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         zf = project.Zipfile(
@@ -142,7 +142,7 @@ class TestZipfileBuilder:
 
     def test_zipfile_name_derived_from_output(self, tmp_path):
         """Zipfile name is derived from output path."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         zf = project.Zipfile(env, output="dist/release.zip", sources=[])
@@ -150,7 +150,7 @@ class TestZipfileBuilder:
 
     def test_zipfile_explicit_name(self, tmp_path):
         """Zipfile can have explicit name."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         zf = project.Zipfile(
@@ -164,7 +164,7 @@ class TestZipfileBuilder:
 
     def test_zipfile_base_dir(self, tmp_path):
         """Zipfile respects base_dir parameter."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         zf = project.Zipfile(
@@ -183,7 +183,7 @@ class TestArchiveTargetProperties:
 
     def test_tarfile_compression_property(self, tmp_path):
         """ArchiveTarget.compression property allows override."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create tarfile with default compression inferred from extension
@@ -196,7 +196,7 @@ class TestArchiveTargetProperties:
 
     def test_tarfile_basedir_property(self, tmp_path):
         """ArchiveTarget.basedir property allows override."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create tarfile with default basedir
@@ -209,7 +209,7 @@ class TestArchiveTargetProperties:
 
     def test_zipfile_basedir_property(self, tmp_path):
         """Zipfile also supports basedir override."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         zf = project.Zipfile(env, output="archive.zip", sources=[], name="test")
@@ -222,7 +222,7 @@ class TestArchiveTargetProperties:
         """Property overrides are picked up by ArchiveContext."""
         from pcons.tools.archive_context import ArchiveContext
 
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         tar = project.Tarfile(
@@ -244,7 +244,7 @@ class TestArchiveNinjaGeneration:
 
     def test_generates_tarfile_rule(self, tmp_path):
         """Ninja generator creates rule for tarfile."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create a source file
@@ -260,7 +260,7 @@ class TestArchiveNinjaGeneration:
 
         project.resolve()
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
@@ -277,7 +277,7 @@ class TestArchiveNinjaGeneration:
 
     def test_generates_zipfile_rule(self, tmp_path):
         """Ninja generator creates rule for zipfile."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create a source file
@@ -293,7 +293,7 @@ class TestArchiveNinjaGeneration:
 
         project.resolve()
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
@@ -305,7 +305,7 @@ class TestArchiveNinjaGeneration:
 
     def test_generates_build_statement(self, tmp_path):
         """Ninja generator creates build statements for archives."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create source files
@@ -323,7 +323,7 @@ class TestArchiveNinjaGeneration:
 
         project.resolve()
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
@@ -335,7 +335,7 @@ class TestArchiveNinjaGeneration:
 
     def test_basedir_with_spaces_is_quoted(self, tmp_path):
         """Basedir with spaces must be properly quoted for shell execution."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create source file in directory with spaces
@@ -355,7 +355,7 @@ class TestArchiveNinjaGeneration:
 
         project.resolve()
         gen = NinjaGenerator()
-        gen.generate(project, tmp_path)
+        gen.generate(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
@@ -398,7 +398,7 @@ class TestArchiveWithInstall:
 
     def test_archive_can_be_installed(self, tmp_path):
         """Archives can be passed to Install() since they are Targets."""
-        project = Project("test", root_dir=tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
 
         # Create a source file

@@ -60,6 +60,6 @@ print(f"Program object_nodes: {prog.object_nodes}")
 print(f"Program sources: {prog.sources}")
 
 generator = Generator()
-generator.generate(project, build_dir)
+generator.generate(project)
 
 print(f"Generated {build_dir}")

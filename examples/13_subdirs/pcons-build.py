@@ -54,5 +54,5 @@ app.link(libfoo)  # Gets libfoo's public.include_dirs automatically
 
 # Resolve and generate the ninja file
 project.resolve()
-Generator().generate(project, build_dir)
+Generator().generate(project)
 print(f"Generated {build_dir}")

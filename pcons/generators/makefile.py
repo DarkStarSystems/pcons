@@ -35,11 +35,11 @@ class MakefileGenerator(BaseGenerator):
     Note: Requires GNU Make 3.80+ for order-only prerequisites.
 
     Example:
-        project = Project("myapp")
+        project = Project("myapp", build_dir="build")
         # ... configure project ...
 
         generator = MakefileGenerator()
-        generator.generate(project, Path("build"))
+        generator.generate(project)
         # Creates build/Makefile
     """
 
@@ -53,6 +53,7 @@ class MakefileGenerator(BaseGenerator):
         self._depfile_dirs: set[Path] = set()
         self._project_root: Path | None = None
         self._build_dir: Path | None = None
+        self._relative_build_dir: Path | None = None
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate Makefile.
@@ -69,6 +70,7 @@ class MakefileGenerator(BaseGenerator):
         self._depfile_dirs = set()
         self._project_root = project.root_dir.resolve()
         self._build_dir = output_dir
+        self._relative_build_dir = project.build_dir
 
         with open(makefile_path, "w") as f:
             self._write_header(f, project)
@@ -684,6 +686,9 @@ class MakefileGenerator(BaseGenerator):
         Since make runs from the build directory (via -C), paths that have
         the build_dir prefix need to have it stripped.
 
+        Tries both the output_dir (which may be absolute) and the project's
+        relative build_dir to handle canonical node paths.
+
         Args:
             path: Path that may have build_dir prefix.
 
@@ -692,12 +697,21 @@ class MakefileGenerator(BaseGenerator):
         """
         path_obj = Path(path)
 
-        if self._build_dir and not path_obj.is_absolute():
-            try:
-                rel = path_obj.relative_to(self._build_dir)
-                return str(rel)
-            except ValueError:
-                pass
+        if not path_obj.is_absolute():
+            # Try stripping the output_dir prefix (absolute)
+            if self._build_dir:
+                try:
+                    rel = path_obj.relative_to(self._build_dir)
+                    return str(rel)
+                except ValueError:
+                    pass
+            # Try stripping the project's relative build_dir prefix
+            if self._relative_build_dir:
+                try:
+                    rel = path_obj.relative_to(self._relative_build_dir)
+                    return str(rel)
+                except ValueError:
+                    pass
 
         return str(path_obj)
 

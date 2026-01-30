@@ -38,6 +38,6 @@ project.resolve()
 
 # Generate Makefile (instead of Ninja)
 generator = MakefileGenerator()
-generator.generate(project, build_dir)
+generator.generate(project)
 
 print(f"Generated {build_dir / 'Makefile'}")

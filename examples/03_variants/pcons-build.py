@@ -44,5 +44,5 @@ for variant in ["debug", "release"]:
 
 # Resolve and generate
 project.resolve()
-Generator().generate(project, build_dir)
+Generator().generate(project)
 print(f"Generated {build_dir}")

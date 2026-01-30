@@ -210,17 +210,16 @@ class InstallNodeFactory:
         If any node's path is a descendant of the given path, then the
         path represents a directory.  This avoids filesystem checks.
 
-        Both the input path and node paths are normalized to a consistent
-        form (relative to build_dir) before comparison, since node paths
-        may be stored as either absolute or relative.
+        Both the input path and node paths are canonicalized to a consistent
+        form (relative to project root) before comparison.
         """
-        normalize = self.project.path_resolver.normalize_target_path
-        check_path = normalize(path)
+        canonicalize = self.project.path_resolver.canonicalize
+        check_path = canonicalize(path)
         for node_path in self.project._nodes:
-            normalized = normalize(node_path)
-            if normalized != check_path:
+            canonical = canonicalize(node_path)
+            if canonical != check_path:
                 try:
-                    normalized.relative_to(check_path)
+                    canonical.relative_to(check_path)
                     return True
                 except ValueError:
                     continue
@@ -274,9 +273,10 @@ class InstallNodeFactory:
 
             installed_nodes.append(dest_node)
 
-            # Register the node with the project
-            if dest_path not in self.project._nodes:
-                self.project._nodes[dest_path] = dest_node
+            # Register the node with the project (canonicalize for consistency)
+            canonical = self.project.path_resolver.canonicalize(dest_path)
+            if canonical not in self.project._nodes:
+                self.project._nodes[canonical] = dest_node
 
         # Add installed files as output nodes
         target._install_nodes = installed_nodes
@@ -337,8 +337,9 @@ class InstallNodeFactory:
 
         installed_nodes.append(stamp_node)
 
-        if stamp_path not in self.project._nodes:
-            self.project._nodes[stamp_path] = stamp_node
+        canonical = self.project.path_resolver.canonicalize(stamp_path)
+        if canonical not in self.project._nodes:
+            self.project._nodes[canonical] = stamp_node
 
     def _create_install_as_node(
         self, target: Target, sources: list[FileNode], dest: Path
@@ -380,8 +381,9 @@ class InstallNodeFactory:
         target._install_nodes = [dest_node]
         target.output_nodes.append(dest_node)
 
-        if dest not in self.project._nodes:
-            self.project._nodes[dest] = dest_node
+        canonical = self.project.path_resolver.canonicalize(dest)
+        if canonical not in self.project._nodes:
+            self.project._nodes[canonical] = dest_node
 
     def _create_install_dir_node(
         self, target: Target, sources: list[FileNode], dest_dir: Path
@@ -455,8 +457,9 @@ class InstallNodeFactory:
         target._install_nodes = [stamp_node]
         target.output_nodes.append(stamp_node)
 
-        if stamp_path not in self.project._nodes:
-            self.project._nodes[stamp_path] = stamp_node
+        canonical = self.project.path_resolver.canonicalize(stamp_path)
+        if canonical not in self.project._nodes:
+            self.project._nodes[canonical] = stamp_node
 
 
 @builder("Install", target_type=TargetType.INTERFACE, factory_class=InstallNodeFactory)

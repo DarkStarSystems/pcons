@@ -287,7 +287,7 @@ class TestNinjaGeneration:
 
         # Generate ninja file
         generator = NinjaGenerator()
-        generator.generate(project, tmp_path)
+        generator.generate(project)
 
         # Check that ninja file was created
         ninja_file = tmp_path / "build.ninja"
@@ -352,7 +352,7 @@ class TestNinjaGeneration:
 
         # === Step 3: Generate ninja file ===
         generator = NinjaGenerator()
-        generator.generate(project, build_dir)
+        generator.generate(project)
 
         ninja_file = build_dir / "build.ninja"
         assert ninja_file.exists(), "build.ninja should be generated"

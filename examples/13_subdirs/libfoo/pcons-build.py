@@ -52,7 +52,7 @@ def build_libfoo(
     if standalone:
         # Resolve and generate build file when running standalone
         project.resolve()
-        Generator().generate(project, build_dir)
+        Generator().generate(project)
         print(f"Generated {build_dir}")
 
     return libfoo
