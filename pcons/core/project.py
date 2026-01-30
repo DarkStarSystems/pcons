@@ -261,9 +261,8 @@ class Project:
         alias = self._aliases[name]
         for t in targets:
             if isinstance(t, Target):
-                # Use output_nodes (populated after resolve()) or fall back to nodes
-                nodes = t.output_nodes if t.output_nodes else t.nodes
-                alias.add_targets(nodes)
+                # Defer resolution: output_nodes may not be populated until resolve()
+                alias.add_deferred_target(t)
             else:
                 alias.add_target(t)
 

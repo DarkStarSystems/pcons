@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-01-30
+
+### Fixed
+
+- **Alias() now resolves Target references lazily**: `Project.Alias()` no longer eagerly reads `target.output_nodes` at call time. Instead, `AliasNode.targets` is now a property that resolves Target references on access. This fixes aliases for `InstallDir` and other targets whose `output_nodes` are populated during `resolve()` — previously these aliases produced empty no-op phony rules in Ninja.
+
+### Changed
+
+- **`all` target includes every target**: `ninja all` / `make all` now builds every target in the project (commands, installers, archives, etc.), not just programs and libraries. The implicit default (when `project.Default()` is not called) remains programs and libraries only.
+
+### Documentation
+
+- Show version number in docs site heading via mkdocs-macros-plugin
+- Clarify Feature Detection docs: separate ToolChecks from Configure
+- Add Platform Installers section to user guide
+
 ## [0.6.0] - 2026-01-29
 
 ### Added
@@ -405,7 +421,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/garyo/pcons/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/garyo/pcons/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/garyo/pcons/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/garyo/pcons/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/garyo/pcons/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/garyo/pcons/compare/v0.4.2...v0.4.3

@@ -13,6 +13,7 @@ Node types:
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
@@ -23,7 +24,10 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.subst import PathToken
+    from pcons.core.target import Target
     from pcons.tools.toolchain import ToolchainContext
+
+logger = logging.getLogger(__name__)
 
 
 class OutputInfo(TypedDict, total=False):
@@ -375,12 +379,17 @@ class AliasNode(Node):
     that group other targets together. In Ninja, these become
     phony rules.
 
+    Target references added via add_deferred_target() are resolved lazily:
+    their output_nodes are read when the ``targets`` property is accessed,
+    not when the alias is created. This allows aliases to reference targets
+    whose output_nodes are populated later during resolve().
+
     Attributes:
         alias_name: The name of this alias.
-        targets: The nodes this alias refers to.
+        targets: The nodes this alias refers to (read-only property).
     """
 
-    __slots__ = ("alias_name", "targets")
+    __slots__ = ("alias_name", "_nodes", "_target_refs")
 
     def __init__(
         self,
@@ -398,19 +407,40 @@ class AliasNode(Node):
         """
         super().__init__(defined_at=defined_at)
         self.alias_name = alias_name
-        self.targets: list[Node] = list(targets) if targets else []
+        self._nodes: list[Node] = list(targets) if targets else []
+        self._target_refs: list[Target] = []
 
     @property
     def name(self) -> str:
         return self.alias_name
 
+    @property
+    def targets(self) -> list[Node]:
+        """Nodes this alias refers to, including lazily-resolved targets."""
+        result = list(self._nodes)
+        for t in self._target_refs:
+            nodes = t.output_nodes if t.output_nodes else t.nodes
+            if not nodes:
+                logger.warning(
+                    "Alias '%s': target '%s' has no output nodes "
+                    "(was resolve() called?)",
+                    self.alias_name,
+                    t.name,
+                )
+            result.extend(nodes)
+        return result
+
     def add_target(self, node: Node) -> None:
-        """Add a target to this alias."""
-        self.targets.append(node)
+        """Add a node to this alias."""
+        self._nodes.append(node)
 
     def add_targets(self, nodes: Sequence[Node]) -> None:
-        """Add multiple targets to this alias."""
-        self.targets.extend(nodes)
+        """Add multiple nodes to this alias."""
+        self._nodes.extend(nodes)
+
+    def add_deferred_target(self, target: Target) -> None:
+        """Add a target whose nodes will be resolved lazily."""
+        self._target_refs.append(target)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, AliasNode):

@@ -1,4 +1,4 @@
-# Pcons User Guide
+# Pcons User Guide <small>v{{ version }}</small>
 
 Pcons is a Python-based build system that generates [Ninja](https://ninja-build.org/) build files for C/C++ projects. It combines some of the best ideas from SCons and CMake: Python as the configuration language, environments with tools, and a fast generator architecture with proper dependency tracking.
 

@@ -133,6 +133,36 @@ class TestProjectAliases:
 
         assert len(alias.targets) == 2
 
+    def test_alias_resolves_targets_lazily(self):
+        """Alias should pick up target output_nodes even if empty at Alias() time."""
+        project = Project("myproject")
+        target = Target("install_stuff")
+        project.add_target(target)
+
+        # Create alias while target has no nodes at all
+        alias = project.Alias("install", target)
+        assert alias.targets == []
+
+        # Simulate resolve() populating output_nodes later
+        node = FileNode("prefix/bin/app")
+        target.output_nodes.append(node)
+
+        # Now the alias should see the node
+        assert alias.targets == [node]
+
+    def test_alias_lazy_falls_back_to_nodes(self):
+        """Alias deferred targets fall back to target.nodes when output_nodes is empty."""
+        project = Project("myproject")
+        target = Target("mylib")
+        node = FileNode("lib.a")
+        target.nodes.append(node)
+        project.add_target(target)
+
+        alias = project.Alias("libs", target)
+
+        # output_nodes is empty, so should fall back to nodes
+        assert alias.targets == [node]
+
 
 class TestProjectDefaults:
     def test_set_default_targets(self):
