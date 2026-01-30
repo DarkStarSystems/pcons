@@ -316,7 +316,8 @@ class TestCanonicalize:
         project_root.mkdir()
         resolver = PathResolver(project_root, Path("build"))
 
-        external = Path("/opt/homebrew/lib/libfoo.dylib")
+        # Use tmp_path-based path so it's absolute on all platforms
+        external = tmp_path / "external_lib" / "libfoo.dylib"
         result = resolver.canonicalize(external)
         assert result == external
         assert result.is_absolute()
