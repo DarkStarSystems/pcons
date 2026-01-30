@@ -246,6 +246,10 @@ class FileNode(Node):
 class DirNode(Node):
     """A node representing a directory.
 
+    Not currently used in production. This class exists as the intended
+    abstraction for directory nodes and could be wired into Install/InstallDir
+    builders in the future.
+
     Directory nodes have different semantics depending on usage:
 
     As a target:

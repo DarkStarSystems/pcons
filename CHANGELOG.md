@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Install directory detection with absolute build_dir**: Fixed `_has_child_nodes` failing to detect directory sources when `project.build_dir` is an absolute path. Node paths were stored as relative but the source path was absolute, so the comparison always failed. Both sides are now normalized before comparison.
 - **Graph generators: path-based labels**: Mermaid and DOT graph node labels now show full relative paths (e.g., `obj.floss2/floss-core.o`) instead of just filenames, disambiguating same-named files across targets.
 - **Graph generators: directory containment edges**: Install target outputs inside a bundle directory now have edges drawn to that directory node, completing the dependency chain from sources through to installers.
 

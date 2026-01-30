@@ -209,11 +209,18 @@ class InstallNodeFactory:
         After resolve, the node graph is populated with all output nodes.
         If any node's path is a descendant of the given path, then the
         path represents a directory.  This avoids filesystem checks.
+
+        Both the input path and node paths are normalized to a consistent
+        form (relative to build_dir) before comparison, since node paths
+        may be stored as either absolute or relative.
         """
+        normalize = self.project.path_resolver.normalize_target_path
+        check_path = normalize(path)
         for node_path in self.project._nodes:
-            if node_path != path:
+            normalized = normalize(node_path)
+            if normalized != check_path:
                 try:
-                    node_path.relative_to(path)
+                    normalized.relative_to(check_path)
                     return True
                 except ValueError:
                     continue
