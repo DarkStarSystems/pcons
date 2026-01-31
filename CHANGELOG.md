@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-01-31
+
+### Added
+
+- **`$SRCDIR` variable for `env.Command()`**: Generator-agnostic variable for referencing the project source tree root in custom commands. Ninja replaces it with `$topdir`, Makefile replaces it with the absolute project root path. Useful for scripts and config files that live in the source tree: `command="python $SRCDIR/tools/gen.py $SOURCE -o $TARGET"`.
+- **`target.depends()` method**: Add implicit dependencies to any target. Files added via `depends()` trigger rebuilds when changed but don't appear in `$in`/`$SOURCE`. Works with `str`, `Path`, `FileNode`, or `Target` arguments. Supports fluent chaining: `app.depends("version.txt", "config.yaml")`.
+- **`depends=` parameter on `env.Command()`**: Shorthand for adding implicit dependencies at command creation time: `env.Command(target=..., source=..., command=..., depends=["tools/gen.py"])`.
+- **`pcons build` auto-generates before building**: Running `pcons build` now automatically runs `pcons generate` first if needed, so a single command handles the full workflow.
+
+### Changed
+
+- **Project as single authority for node creation**: All `FileNode` objects in production code are now created through `project.node()`, which ensures the same canonical path always returns the same object. This eliminates duplicate-node bugs where metadata (like `_build_info`) was split across separate objects for the same file. The `_sync_output_nodes_to_project()` workaround has been removed.
+
+### Fixed
+
+- **Post-build `$out` expansion in ninja**: `$out` and `$in` in post-build commands are now left as literal ninja variables instead of being pre-expanded to project-root-relative paths. Since ninja runs from the build directory, pre-expanded paths were incorrect.
+- **InstallDir child nodes as implicit deps**: Child nodes of `InstallDir` targets now appear as implicit dependencies (after `|` in ninja) instead of explicit inputs. This prevents them from polluting `$in`, which `copytree` expects to contain only the source directory.
+- **Install directory deps and node deduplication for ninja paths**: Fixed ninja path generation for install directory dependencies and node deduplication.
+- **`create_pkg` Install target name collisions**: Install targets created by `create_pkg()` now use unique names derived from the package name (e.g., `pkg_payload_MyApp` instead of `install_payload`), eliminating rename warnings when `create_pkg` is called multiple times.
+
 ## [0.7.0] - 2026-01-30
 
 ### Added
@@ -439,7 +459,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/DarkStarSystems/pcons/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/DarkStarSystems/pcons/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/DarkStarSystems/pcons/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/DarkStarSystems/pcons/compare/v0.5.0...v0.6.0
