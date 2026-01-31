@@ -536,3 +536,53 @@ class TestInstallDirectoryAutoDetection:
 
         assert len(file_nodes) == 1
         assert len(dir_nodes) == 1
+
+    def test_install_directory_depends_on_child_nodes(self, tmp_path):
+        """Install stamp node for a directory depends on child FileNodes."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        project.Environment()
+
+        # Simulate a bundle directory with a child file produced by another target
+        bundle_dir = tmp_path / "build" / "my.bundle"
+        inner_file = bundle_dir / "Contents" / "MacOS" / "plugin.ofx"
+
+        # Register the inner file as a node (as if a SharedLibrary target produced it)
+        child_node = project.node(inner_file)
+
+        # Install the bundle directory
+        install = project.Install("dist", [bundle_dir])
+
+        project.resolve()
+
+        assert len(install.output_nodes) == 1
+        stamp_node = install.output_nodes[0]
+
+        # The stamp node must depend on the child node, not just the directory node
+        assert child_node in stamp_node.explicit_deps
+
+    def test_install_command_output_node_has_build_info(self, tmp_path):
+        """Install source created via project.node() shares build_info with Command output."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        # Simulate: Command produces a file inside build dir
+        generated = project.build_dir / "sub" / "generated.rsrc"
+        env.Command(
+            target=str(generated),
+            source=[],
+            command="touch $TARGET",
+            name="gen_rsrc",
+        )
+
+        # User code references the same file via project.node() for Install
+        node_ref = project.node(str(generated))
+
+        # Before resolve, the project.node() reference has no _build_info
+        # because Command created a separate FileNode.
+        project.resolve()
+
+        # After resolve, _sync_output_nodes_to_project merges _build_info
+        # into the project-registered node so the ninja generator treats it
+        # as a build output (not a source with $topdir prefix).
+        assert node_ref._build_info is not None
+        assert node_ref._build_info.get("tool") == "command"

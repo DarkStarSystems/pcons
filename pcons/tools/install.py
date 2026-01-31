@@ -203,39 +203,6 @@ class InstallNodeFactory:
 
         return None
 
-    def _has_child_nodes(self, path: Path) -> bool:
-        """Check if any project nodes are children of the given path.
-
-        After resolve, the node graph is populated with all output nodes.
-        If any node's path is a descendant of the given path, then the
-        path represents a directory.  This avoids filesystem checks.
-
-        Both the input path and node paths are normalized to build-dir-relative
-        form before comparison, since sources passed as
-        ``project.build_dir / subdir / ...`` include the build_dir prefix
-        while node paths in ``project._nodes`` may be build-dir-relative.
-        """
-        canonicalize = self.project.path_resolver.canonicalize
-        build_dir_name = self.project.build_dir.name
-
-        def to_build_relative(p: Path) -> Path:
-            """Strip build_dir prefix to get build-dir-relative path."""
-            parts = p.parts
-            if parts and parts[0] == build_dir_name:
-                return Path(*parts[1:]) if len(parts) > 1 else Path(".")
-            return p
-
-        check_path = to_build_relative(canonicalize(path))
-        for node_path in self.project._nodes:
-            canonical = to_build_relative(canonicalize(node_path))
-            if canonical != check_path:
-                try:
-                    canonical.relative_to(check_path)
-                    return True
-                except ValueError:
-                    continue
-        return False
-
     def _create_install_nodes(
         self, target: Target, sources: list[FileNode], dest_dir: Path
     ) -> None:
@@ -261,7 +228,7 @@ class InstallNodeFactory:
                 continue
 
             # Check if this source is a directory by examining the node graph
-            if self._has_child_nodes(file_node.path):
+            if self.project.has_child_nodes(file_node.path):
                 self._create_install_dir_node_for(
                     target, file_node, dest_dir, env, installed_nodes
                 )
@@ -320,7 +287,10 @@ class InstallNodeFactory:
         stamp_path = stamps_dir / stamp_name
 
         stamp_node = FileNode(stamp_path, defined_at=get_caller_location())
-        stamp_node.depends([source_node])
+        # Depend on the directory node AND any child nodes inside it,
+        # so ninja knows to build the children before copying the tree.
+        child_nodes = self.project.get_child_nodes(source_path)
+        stamp_node.depends([source_node] + child_nodes)
 
         # Build destination path relative to build directory
         try:
@@ -434,7 +404,10 @@ class InstallNodeFactory:
 
         # Create stamp node (this is what ninja tracks)
         stamp_node = FileNode(stamp_path, defined_at=get_caller_location())
-        stamp_node.depends([source_node])
+        # Depend on the directory node AND any child nodes inside it,
+        # so ninja knows to build the children before copying the tree.
+        child_nodes = self.project.get_child_nodes(source_path)
+        stamp_node.depends([source_node] + child_nodes)
 
         # Build the destination path relative to build directory for the command
         try:

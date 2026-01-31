@@ -320,6 +320,70 @@ class Project:
         """Collect all nodes from all targets."""
         return collect_all_nodes(list(self._targets.values()))
 
+    def get_child_nodes(self, path: Path | str) -> list[FileNode]:
+        """Get all project nodes whose path is a descendant of the given path.
+
+        Uses the same canonicalization as the node registry — no filesystem
+        access.  Both the query path and registered node paths are
+        normalized to build-dir-relative form before comparison so that
+        paths supplied with and without the ``build_dir`` prefix match.
+
+        Args:
+            path: Directory path to search under.
+
+        Returns:
+            List of FileNodes whose canonical path is strictly under *path*.
+        """
+        canonicalize = self._path_resolver.canonicalize
+        build_dir_name = self.build_dir.name
+
+        def _to_build_relative(p: Path) -> Path:
+            parts = p.parts
+            if parts and parts[0] == build_dir_name:
+                return Path(*parts[1:]) if len(parts) > 1 else Path(".")
+            return p
+
+        check_path = _to_build_relative(canonicalize(Path(path)))
+        children: list[FileNode] = []
+        for node_path, node in self._nodes.items():
+            if not isinstance(node, FileNode):
+                continue
+            canonical = _to_build_relative(canonicalize(node_path))
+            if canonical == check_path:
+                continue
+            try:
+                canonical.relative_to(check_path)
+                children.append(node)
+            except ValueError:
+                continue
+        return children
+
+    def has_child_nodes(self, path: Path | str) -> bool:
+        """Check whether any registered node is a descendant of *path*.
+
+        Equivalent to ``bool(self.get_child_nodes(path))`` but short-circuits
+        on the first match for efficiency.
+        """
+        canonicalize = self._path_resolver.canonicalize
+        build_dir_name = self.build_dir.name
+
+        def _to_build_relative(p: Path) -> Path:
+            parts = p.parts
+            if parts and parts[0] == build_dir_name:
+                return Path(*parts[1:]) if len(parts) > 1 else Path(".")
+            return p
+
+        check_path = _to_build_relative(canonicalize(Path(path)))
+        for node_path in self._nodes:
+            canonical = _to_build_relative(canonicalize(node_path))
+            if canonical != check_path:
+                try:
+                    canonical.relative_to(check_path)
+                    return True
+                except ValueError:
+                    continue
+        return False
+
     def validate(self) -> list[Exception]:
         """Validate the project configuration.
 

@@ -801,6 +801,15 @@ class Resolver:
             if not target._resolved:
                 self._resolve_target(target)
 
+        # Ensure builder-created output nodes are registered in the project's
+        # node registry.  Builders like GenericCommandBuilder create FileNode
+        # objects directly (not via project.node()), so a subsequent
+        # project.node(same_path) returns a *different* object that lacks
+        # _build_info.  Merging here ensures that nodes already in the
+        # registry (which Install targets may reference) carry the correct
+        # build metadata before phase-2 pending-source resolution runs.
+        self._sync_output_nodes_to_project()
+
         # Expand command templates for all nodes
         trace("resolve", "Starting command expansion")
         self._expand_node_commands()
@@ -1038,6 +1047,40 @@ class Resolver:
 
         # Mark as processed
         target._pending_sources = None
+
+    def _sync_output_nodes_to_project(self) -> None:
+        """Register builder-created output nodes in the project node registry.
+
+        Builders (e.g. GenericCommandBuilder) create FileNode objects directly
+        rather than via ``project.node()``.  If user code later calls
+        ``project.node(same_path)`` (common in Install sources), a *different*
+        FileNode is created — one that lacks ``_build_info``.  The ninja
+        generator then treats that node as a source file and emits a
+        ``$topdir/`` path instead of a build-relative path, causing a
+        "missing and no known rule" error.
+
+        This method reconciles the two by copying ``_build_info`` and
+        ``builder`` from target output nodes into matching project-registry
+        nodes.  Nodes that are not yet in the registry are added directly.
+        """
+        for target in self.project.targets:
+            for node in target.output_nodes:
+                if not isinstance(node, FileNode):
+                    continue
+                canonical = self.project._canonicalize_path(node.path)
+                existing = self.project._nodes.get(canonical)
+                if existing is None:
+                    # Not in the registry yet — register the builder's node.
+                    self.project._nodes[canonical] = node
+                elif existing is not node and isinstance(existing, FileNode):
+                    # A bare node already exists for this path.  Copy build
+                    # metadata so the generator recognises it as a build output.
+                    if getattr(node, "_build_info", None) and not getattr(
+                        existing, "_build_info", None
+                    ):
+                        existing._build_info = node._build_info
+                    if node.builder and not existing.builder:
+                        existing.builder = node.builder
 
     def _expand_node_commands(self) -> None:
         """Expand command templates for all nodes with _build_info.
