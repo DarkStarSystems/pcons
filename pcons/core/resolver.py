@@ -67,7 +67,6 @@ from pcons.core.requirements import (
 from pcons.core.subst import PathToken, TargetPath
 from pcons.core.target import TargetType
 from pcons.toolchains.build_context import CompileLinkContext
-from pcons.util.source_location import get_caller_location
 
 logger = logging.getLogger(__name__)
 
@@ -302,9 +301,9 @@ class ObjectNodeFactory:
         if cache_key in self._object_cache:
             return self._object_cache[cache_key]
 
-        # Create object node
+        # Create object node via project for deduplication
         obj_path = self.get_object_path(target, source.path, env)
-        obj_node = FileNode(obj_path, defined_at=get_caller_location())
+        obj_node = self.project.node(obj_path)
         obj_node.depends([source])
 
         # Resolve depfile: convert TargetPath to PathToken with actual target path
@@ -390,7 +389,7 @@ class OutputNodeFactory:
             lib_name = f"lib{target.name}.a"  # Fallback
             lib_path = build_dir / lib_name
 
-        lib_node = FileNode(lib_path, defined_at=get_caller_location())
+        lib_node = self.project.node(lib_path)
         lib_node.depends(target.object_nodes)
 
         # Compute effective link requirements
@@ -456,7 +455,7 @@ class OutputNodeFactory:
                 lib_name = f"lib{target.name}.so"
             lib_path = build_dir / lib_name
 
-        lib_node = FileNode(lib_path, defined_at=get_caller_location())
+        lib_node = self.project.node(lib_path)
         lib_node.depends(target.object_nodes)
 
         # Get auxiliary input files first so we can filter them from dep_libs
@@ -570,7 +569,7 @@ class OutputNodeFactory:
                 prog_name = target.name
             prog_path = build_dir / prog_name
 
-        prog_node = FileNode(prog_path, defined_at=get_caller_location())
+        prog_node = self.project.node(prog_path)
         prog_node.depends(target.object_nodes)
 
         # Get auxiliary input files first so we can filter them from dep_libs
@@ -663,17 +662,9 @@ class OutputNodeFactory:
                     outputs = build_info.get("outputs", {})
                     import_lib_info = outputs.get("import_lib")
                     if import_lib_info and "path" in import_lib_info:
-                        # Create or find the import library node
+                        # Get or create the import library node via project
                         import_lib_path = import_lib_info["path"]
-                        if import_lib_path in self.project._nodes:
-                            result.append(self.project._nodes[import_lib_path])
-                        else:
-                            # Create the import lib node
-                            import_lib_node = FileNode(
-                                import_lib_path, defined_at=node.defined_at
-                            )
-                            self.project._nodes[import_lib_path] = import_lib_node
-                            result.append(import_lib_node)
+                        result.append(self.project.node(import_lib_path))
                         continue
                 result.append(node)
         return result
@@ -800,15 +791,6 @@ class Resolver:
         for target in self._targets_in_build_order():
             if not target._resolved:
                 self._resolve_target(target)
-
-        # Ensure builder-created output nodes are registered in the project's
-        # node registry.  Builders like GenericCommandBuilder create FileNode
-        # objects directly (not via project.node()), so a subsequent
-        # project.node(same_path) returns a *different* object that lacks
-        # _build_info.  Merging here ensures that nodes already in the
-        # registry (which Install targets may reference) carry the correct
-        # build metadata before phase-2 pending-source resolution runs.
-        self._sync_output_nodes_to_project()
 
         # Expand command templates for all nodes
         trace("resolve", "Starting command expansion")
@@ -1047,40 +1029,6 @@ class Resolver:
 
         # Mark as processed
         target._pending_sources = None
-
-    def _sync_output_nodes_to_project(self) -> None:
-        """Register builder-created output nodes in the project node registry.
-
-        Builders (e.g. GenericCommandBuilder) create FileNode objects directly
-        rather than via ``project.node()``.  If user code later calls
-        ``project.node(same_path)`` (common in Install sources), a *different*
-        FileNode is created — one that lacks ``_build_info``.  The ninja
-        generator then treats that node as a source file and emits a
-        ``$topdir/`` path instead of a build-relative path, causing a
-        "missing and no known rule" error.
-
-        This method reconciles the two by copying ``_build_info`` and
-        ``builder`` from target output nodes into matching project-registry
-        nodes.  Nodes that are not yet in the registry are added directly.
-        """
-        for target in self.project.targets:
-            for node in target.output_nodes:
-                if not isinstance(node, FileNode):
-                    continue
-                canonical = self.project._canonicalize_path(node.path)
-                existing = self.project._nodes.get(canonical)
-                if existing is None:
-                    # Not in the registry yet — register the builder's node.
-                    self.project._nodes[canonical] = node
-                elif existing is not node and isinstance(existing, FileNode):
-                    # A bare node already exists for this path.  Copy build
-                    # metadata so the generator recognises it as a build output.
-                    if getattr(node, "_build_info", None) and not getattr(
-                        existing, "_build_info", None
-                    ):
-                        existing._build_info = node._build_info
-                    if node.builder and not existing.builder:
-                        existing.builder = node.builder
 
     def _expand_node_commands(self) -> None:
         """Expand command templates for all nodes with _build_info.

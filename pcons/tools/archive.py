@@ -194,8 +194,8 @@ class ArchiveNodeFactory:
         output_path = Path(build_data["output"])
         tool = build_data["tool"]
 
-        # Create the archive output node
-        archive_node = FileNode(output_path, defined_at=get_caller_location())
+        # Create the archive output node via project for deduplication
+        archive_node = self.project.node(output_path)
         archive_node.depends(sources)
 
         # Create context from target (merges env defaults with target overrides)
@@ -227,10 +227,6 @@ class ArchiveNodeFactory:
         # Add to target's output nodes
         target.output_nodes.append(archive_node)
         target.nodes.append(archive_node)
-
-        # Register with project
-        if output_path not in self.project._nodes:
-            self.project._nodes[output_path] = archive_node
 
 
 class ArchiveTarget(Target):

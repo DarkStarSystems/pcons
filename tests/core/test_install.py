@@ -84,9 +84,11 @@ class TestInstall:
         project.resolve()
 
         # Destination should be in dest_dir with same filename
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
         node = install.output_nodes[0]
-        assert node.path == dest_dir / "mylib.so"
+        expected = dest_dir.relative_to(tmp_path) / "mylib.so"
+        assert node.path == expected
 
     def test_install_from_target(self, tmp_path):
         """Install can install output files from a Target after resolve."""
@@ -115,8 +117,10 @@ class TestInstall:
         project.resolve()
 
         # Should have a node for the library
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == tmp_path / "dist" / "lib" / "libmylib.a"
+        expected = (tmp_path / "dist" / "lib" / "libmylib.a").relative_to(tmp_path)
+        assert install.output_nodes[0].path == expected
 
     def test_install_target_registered(self, tmp_path):
         """Install target is registered with the project."""
@@ -181,9 +185,10 @@ class TestInstallAs:
         # Resolve to create install nodes
         project.resolve()
 
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
         node = install.output_nodes[0]
-        assert node.path == dest_path
+        assert node.path == dest_path.relative_to(tmp_path)
 
     def test_install_as_from_target(self, tmp_path):
         """InstallAs can install from a Target after resolve."""
@@ -210,8 +215,9 @@ class TestInstallAs:
         # Resolve to create install nodes
         project.resolve()
 
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == dest
+        assert install.output_nodes[0].path == dest.relative_to(tmp_path)
 
     def test_install_as_dependency(self, tmp_path):
         """InstallAs destination depends on source after resolve."""
@@ -318,8 +324,10 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Install target should now have the installed file
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == tmp_path / "dist" / "lib" / "libmylib.a"
+        expected = (tmp_path / "dist" / "lib" / "libmylib.a").relative_to(tmp_path)
+        assert install.output_nodes[0].path == expected
 
     def test_install_as_before_target_definition(self, tmp_path):
         """InstallAs can reference a target before its output_nodes are populated."""
@@ -353,8 +361,9 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Should have the installed file with the custom name
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == dest
+        assert install.output_nodes[0].path == dest.relative_to(tmp_path)
 
     def test_install_chain_order_independence(self, tmp_path):
         """Install targets can be chained in any order."""
@@ -382,10 +391,15 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Both should work
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(final_install.output_nodes) == 1
         assert len(intermediate_install.output_nodes) == 1
-        assert final_install.output_nodes[0].path == final_dir / "mylib.a"
-        assert intermediate_install.output_nodes[0].path == intermediate_dir / "mylib.a"
+        assert final_install.output_nodes[0].path == (
+            final_dir / "mylib.a"
+        ).relative_to(tmp_path)
+        assert intermediate_install.output_nodes[0].path == (
+            intermediate_dir / "mylib.a"
+        ).relative_to(tmp_path)
 
     def test_install_file_before_it_exists(self, tmp_path):
         """Install can reference a file path before the file exists."""
@@ -401,8 +415,10 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Should have the install node
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == tmp_path / "include" / "generated.h"
+        expected = (tmp_path / "include" / "generated.h").relative_to(tmp_path)
+        assert install.output_nodes[0].path == expected
 
 
 class TestInstallAsValidation:
@@ -456,8 +472,10 @@ class TestInstallAsValidation:
 
         project.resolve()
 
+        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == tmp_path / "dest" / "renamed.txt"
+        expected = (tmp_path / "dest" / "renamed.txt").relative_to(tmp_path)
+        assert install.output_nodes[0].path == expected
 
 
 class TestInstallDirectoryAutoDetection:
@@ -561,7 +579,12 @@ class TestInstallDirectoryAutoDetection:
         assert child_node in stamp_node.explicit_deps
 
     def test_install_command_output_node_has_build_info(self, tmp_path):
-        """Install source created via project.node() shares build_info with Command output."""
+        """Command output node created via project.node() has build_info structurally.
+
+        Since all node creation goes through project.node(), the Command builder
+        and any subsequent project.node() call for the same path return the same
+        object — so build_info is always present on the canonical node.
+        """
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment()
 
@@ -577,12 +600,9 @@ class TestInstallDirectoryAutoDetection:
         # User code references the same file via project.node() for Install
         node_ref = project.node(str(generated))
 
-        # Before resolve, the project.node() reference has no _build_info
-        # because Command created a separate FileNode.
         project.resolve()
 
-        # After resolve, _sync_output_nodes_to_project merges _build_info
-        # into the project-registered node so the ninja generator treats it
-        # as a build output (not a source with $topdir prefix).
+        # Same object identity — project.node() returns the canonical node
+        # which is the same one the Command builder created.
         assert node_ref._build_info is not None
         assert node_ref._build_info.get("tool") == "command"

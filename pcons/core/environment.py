@@ -624,8 +624,10 @@ class Environment:
 
         from pcons.core.node import FileNode
 
-        # Simple implementation - real one will integrate with Project
+        # Use project.node() for deduplication when available
         matches = list(PathlibPath(".").glob(pattern))
+        if self._project is not None:
+            return [self._project.node(p) for p in matches]
         return [FileNode(p, defined_at=get_caller_location()) for p in matches]
 
     def Framework(self, *names: str, dirs: list[str] | None = None) -> None:

@@ -1044,7 +1044,7 @@ don't have direct xcode equivalents in the test harness.
 ### Project
 > **Status: Implemented**
 
-The top-level container for the entire build specification.
+The top-level container for the entire build specification. The Project serves as the **virtual filesystem** for the build: it maintains a registry of all nodes keyed by canonical path, ensuring that the same path always yields the same node object. All production code must create nodes through `project.node(path)` (or `project.dir_node(path)`), never via bare `FileNode(path)` — this guarantees that metadata like `_build_info` and dependencies are never split across duplicate objects for the same file.
 
 ```python
 class Project:
@@ -1055,7 +1055,11 @@ class Project:
     environments: list[Environment]
     targets: list[Target]
     default_targets: list[Target]
-    nodes: dict[Path, Node]      # All nodes, keyed by path
+    nodes: dict[Path, Node]      # All nodes, keyed by canonical path
+
+    def node(self, path: Path | str) -> FileNode:
+        """Get or create a file node. Same canonical path = same object."""
+        ...
 
     def Environment(self, toolchain: Toolchain = None, **kwargs) -> Environment:
         """Create a new environment in this project."""

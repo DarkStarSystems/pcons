@@ -222,8 +222,8 @@ class BaseBuilder(ABC):
 
         Normalizes inputs and delegates to _build().
         """
-        # Normalize sources to nodes
-        source_nodes = self._normalize_sources(sources)
+        # Normalize sources to nodes (use project for deduplication when available)
+        source_nodes = self._normalize_sources(sources, env)
 
         # Get target path(s)
         if target is None:
@@ -237,12 +237,19 @@ class BaseBuilder(ABC):
     def _normalize_sources(
         self,
         sources: list[str | Path | Node],
+        env: Environment | None = None,
     ) -> list[Node]:
-        """Convert sources to nodes."""
+        """Convert sources to nodes.
+
+        When env has a project, uses project.node() for deduplication.
+        """
         result: list[Node] = []
+        project = getattr(env, "_project", None) if env else None
         for src in sources:
             if isinstance(src, Node):
                 result.append(src)
+            elif project is not None:
+                result.append(project.node(src))
             else:
                 result.append(FileNode(src, defined_at=get_caller_location()))
         return result
@@ -393,7 +400,12 @@ class CommandBuilder(BaseBuilder):
         defined_at: SourceLocation,
     ) -> FileNode:
         """Create a single target node."""
-        node = FileNode(target, defined_at=defined_at)
+        project = getattr(env, "_project", None)
+        node = (
+            project.node(target)
+            if project is not None
+            else FileNode(target, defined_at=defined_at)
+        )
         node.depends(sources)
         node.builder = self
 
@@ -538,6 +550,7 @@ class MultiOutputBuilder(CommandBuilder):
         """
         nodes: dict[str, FileNode] = {}
         primary_name = self._outputs[0].name
+        project = getattr(env, "_project", None)
 
         # Create a node for each output
         for spec in self._outputs:
@@ -548,7 +561,11 @@ class MultiOutputBuilder(CommandBuilder):
                 # Other outputs derive path from primary
                 target_path = primary_target.with_suffix(spec.suffix)
 
-            node = FileNode(target_path, defined_at=defined_at)
+            node = (
+                project.node(target_path)
+                if project is not None
+                else FileNode(target_path, defined_at=defined_at)
+            )
             node.builder = self
             nodes[spec.name] = node
 
@@ -721,11 +738,16 @@ class GenericCommandBuilder(BaseBuilder):
     ) -> list[Node]:
         """Create target nodes for the command."""
         defined_at = kwargs.get("defined_at") or get_caller_location()
+        project = getattr(env, "_project", None)
 
         # Create target nodes (all FileNode, tracked for type safety)
         result: list[FileNode] = []
         for target in targets:
-            node = FileNode(target, defined_at=defined_at)
+            node = (
+                project.node(target)
+                if project is not None
+                else FileNode(target, defined_at=defined_at)
+            )
             node.depends(sources)
             node.builder = self
             result.append(node)

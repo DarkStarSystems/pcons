@@ -237,8 +237,8 @@ class InstallNodeFactory:
             # Destination path
             dest_path = dest_dir / file_node.path.name
 
-            # Create destination node
-            dest_node = FileNode(dest_path, defined_at=get_caller_location())
+            # Create destination node via project for deduplication
+            dest_node = self.project.node(dest_path)
             dest_node.depends([file_node])
 
             # Store build info referencing env.install.copycmd
@@ -252,11 +252,6 @@ class InstallNodeFactory:
             }
 
             installed_nodes.append(dest_node)
-
-            # Register the node with the project (canonicalize for consistency)
-            canonical = self.project.path_resolver.canonicalize(dest_path)
-            if canonical not in self.project._nodes:
-                self.project._nodes[canonical] = dest_node
 
         # Add installed files as output nodes
         target._install_nodes = installed_nodes
@@ -286,7 +281,7 @@ class InstallNodeFactory:
         stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
         stamp_path = stamps_dir / stamp_name
 
-        stamp_node = FileNode(stamp_path, defined_at=get_caller_location())
+        stamp_node = self.project.node(stamp_path)
         # Depend on the directory node AND any child nodes inside it,
         # so ninja knows to build the children before copying the tree.
         child_nodes = self.project.get_child_nodes(source_path)
@@ -320,10 +315,6 @@ class InstallNodeFactory:
 
         installed_nodes.append(stamp_node)
 
-        canonical = self.project.path_resolver.canonicalize(stamp_path)
-        if canonical not in self.project._nodes:
-            self.project._nodes[canonical] = stamp_node
-
     def _create_install_as_node(
         self, target: Target, sources: list[FileNode], dest: Path
     ) -> None:
@@ -346,8 +337,8 @@ class InstallNodeFactory:
 
         source_node = sources[0]
 
-        # Create destination node
-        dest_node = FileNode(dest, defined_at=get_caller_location())
+        # Create destination node via project for deduplication
+        dest_node = self.project.node(dest)
         dest_node.depends([source_node])
 
         # Store build info referencing env.install.copycmd
@@ -363,10 +354,6 @@ class InstallNodeFactory:
         # Add installed file as output node
         target._install_nodes = [dest_node]
         target.output_nodes.append(dest_node)
-
-        canonical = self.project.path_resolver.canonicalize(dest)
-        if canonical not in self.project._nodes:
-            self.project._nodes[canonical] = dest_node
 
     def _create_install_dir_node(
         self, target: Target, sources: list[FileNode], dest_dir: Path
@@ -402,8 +389,8 @@ class InstallNodeFactory:
         stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
         stamp_path = stamps_dir / stamp_name
 
-        # Create stamp node (this is what ninja tracks)
-        stamp_node = FileNode(stamp_path, defined_at=get_caller_location())
+        # Create stamp node via project for deduplication (this is what ninja tracks)
+        stamp_node = self.project.node(stamp_path)
         # Depend on the directory node AND any child nodes inside it,
         # so ninja knows to build the children before copying the tree.
         child_nodes = self.project.get_child_nodes(source_path)
@@ -444,10 +431,6 @@ class InstallNodeFactory:
         # Add stamp node as output
         target._install_nodes = [stamp_node]
         target.output_nodes.append(stamp_node)
-
-        canonical = self.project.path_resolver.canonicalize(stamp_path)
-        if canonical not in self.project._nodes:
-            self.project._nodes[canonical] = stamp_node
 
 
 @builder("Install", target_type=TargetType.INTERFACE, factory_class=InstallNodeFactory)

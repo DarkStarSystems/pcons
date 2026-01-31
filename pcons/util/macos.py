@@ -180,7 +180,7 @@ def create_universal_binary(
         elif isinstance(inp, FileNode):
             input_nodes.append(inp)
         elif isinstance(inp, (Path, str)):
-            input_nodes.append(FileNode(Path(inp)))
+            input_nodes.append(project.node(Path(inp)))
 
     if not input_nodes:
         raise ValueError("create_universal_binary requires at least one input")
