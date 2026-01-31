@@ -73,6 +73,42 @@ def find_script(name: str, search_dir: Path | None = None) -> Path | None:
     return None
 
 
+def _needs_generation(build_dir: Path, build_script: str | None = None) -> bool:
+    """Check if build files need (re)generation.
+
+    Returns True if no build files exist, or if the build script
+    is newer than the existing build files.
+    """
+    ninja_file = build_dir / "build.ninja"
+    makefile = build_dir / "Makefile"
+    xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
+
+    # Find the newest build file
+    build_file_mtime = 0.0
+    for f in [ninja_file, makefile]:
+        if f.exists():
+            build_file_mtime = max(build_file_mtime, f.stat().st_mtime)
+    for f in xcodeproj_files:
+        if f.is_dir():
+            build_file_mtime = max(build_file_mtime, f.stat().st_mtime)
+
+    if build_file_mtime == 0.0:
+        return True  # No build files at all
+
+    # Check if build script is newer than build files
+    if build_script:
+        script = Path(build_script)
+        if not script.exists():
+            return True  # Script not found; let cmd_generate handle the error
+    else:
+        script = find_script("pcons-build.py")
+
+    if script is None:
+        return False  # No script to generate from
+
+    return script.stat().st_mtime > build_file_mtime
+
+
 def parse_variables(args: list[str]) -> tuple[dict[str, str], list[str]]:
     """Parse KEY=value arguments from a list.
 
@@ -495,19 +531,33 @@ def cmd_build(args: argparse.Namespace) -> int:
     """Build targets using the appropriate build tool.
 
     This command detects which generator was used (ninja, make, xcode)
-    and runs the corresponding build tool.
+    and runs the corresponding build tool. If build files are missing
+    or out of date, generates them first.
     """
     setup_logging(args.verbose, args.debug)
 
     build_dir = Path(args.build_dir)
 
+    # Auto-generate if build files are missing or stale
+    build_script = getattr(args, "build_script", None)
+    if _needs_generation(build_dir, build_script=build_script):
+        script = (
+            find_script("pcons-build.py") if not build_script else Path(build_script)
+        )
+        if script is not None and script.exists():
+            logger.info("Build files missing or out of date, regenerating...")
+            load_user_modules(args)
+            result, project = cmd_generate(args)
+            if result != 0:
+                return result
+            if project:
+                args.build_dir = str(project.build_dir)
+                build_dir = Path(args.build_dir)
+
     # Get targets from args
-    targets = getattr(args, "targets", None)
-    if not targets:
-        # Check for remaining args that might be targets
-        extra = getattr(args, "extra", [])
-        _, remaining = parse_variables(extra)
-        targets = remaining if remaining else None
+    extra = getattr(args, "extra", [])
+    _, targets_list = parse_variables(extra)
+    targets = targets_list if targets_list else None
 
     jobs = getattr(args, "jobs", None)
     verbose = args.verbose
@@ -956,7 +1006,7 @@ def create_default_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "extra",
         nargs="*",
-        help="Build variables (KEY=value) or targets",
+        help="Build variables (KEY=value) and/or targets to build",
     )
     return parser
 
@@ -970,8 +1020,17 @@ def create_full_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="pcons",
-        description="A Python-based build system that generates Ninja files.",
+        description=(
+            "A Python-based build system that generates Ninja files.\n"
+            "\n"
+            "Without a subcommand, generates build files and builds specified\n"
+            "targets (or default targets if none given):\n"
+            "  pcons                     Generate and build default targets\n"
+            "  pcons hello               Generate and build 'hello'\n"
+            "  pcons CC=clang hello      Set CC=clang, generate and build 'hello'"
+        ),
         epilog="Run 'pcons <command> --help' for command-specific help.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
@@ -1039,10 +1098,21 @@ def create_full_parser() -> argparse.ArgumentParser:
     gen_parser.set_defaults(func=_cmd_generate_wrapper)
 
     # pcons build
-    build_parser = subparsers.add_parser("build", help="Build targets using ninja")
+    build_parser = subparsers.add_parser(
+        "build",
+        help="Build targets (auto-generates if needed)",
+        description="Build targets using the appropriate build tool. "
+        "If build files are missing or out of date, generates them first.",
+    )
     add_common_args(build_parser)
+    add_generate_args(build_parser)
     build_parser.add_argument("-j", "--jobs", type=int, help="Number of parallel jobs")
-    build_parser.add_argument("targets", nargs="*", help="Targets to build")
+    build_parser.add_argument(
+        "extra",
+        nargs="*",
+        metavar="arg",
+        help="Build variables (KEY=value) and/or targets to build",
+    )
     build_parser.set_defaults(func=cmd_build)
 
     # pcons clean
