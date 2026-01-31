@@ -1253,7 +1253,38 @@ env.Command(
 | `$TARGETS` | All target files (space-separated) |
 | `${SOURCES[n]}` | Indexed source access (0-based) |
 | `${TARGETS[n]}` | Indexed target access (0-based) |
+| `$SRCDIR` | Project source tree root directory |
 | `$$` | Literal `$` (escaped) |
+
+Use `$SRCDIR` to reference files in the source tree that aren't listed as sources. Since the build runs from the build directory, relative paths to source-tree files won't resolve correctly without this:
+
+```python
+# Run a source-tree script that isn't a build dependency
+env.Command(
+    target="generated.h",
+    source="schema.json",
+    command="python $SRCDIR/tools/codegen.py $SOURCE -o $TARGET"
+)
+```
+
+**Extra dependencies with `depends=`:** Files listed in `depends=` trigger a rebuild when they change, but don't appear in `$SOURCE`/`$SOURCES`. Use this for scripts, config files, or other build-time inputs:
+
+```python
+# Rebuild when the codegen script or its config changes
+env.Command(
+    target="generated.h",
+    source="schema.json",
+    command="python $SRCDIR/tools/codegen.py $SOURCE -o $TARGET",
+    depends=["tools/codegen.py", "tools/codegen.cfg"],
+)
+```
+
+You can also add dependencies to any target after creation using `target.depends()`:
+
+```python
+app = project.Program("app", ["main.c"])
+app.depends("version.txt")  # Rebuild when version.txt changes
+```
 
 Use `$$` to include a literal dollar sign in commands. This is useful for shell variables that should be expanded at build time rather than generation time:
 

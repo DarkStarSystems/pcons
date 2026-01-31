@@ -401,3 +401,119 @@ class TestPostBuild:
 
         post_build_cmds = target._builder_data.get("post_build_commands", [])
         assert post_build_cmds == []
+
+
+class TestTargetDepends:
+    """Tests for target.depends() implicit dependency support."""
+
+    def test_depends_with_file_node(self):
+        """depends() accepts FileNode objects."""
+        target = Target("app")
+        dep = FileNode("tools/codegen.py")
+
+        target.depends(dep)
+
+        assert dep in target._extra_implicit_deps
+
+    def test_depends_with_string_no_project(self):
+        """depends() with string creates FileNode when no project."""
+        target = Target("app")
+
+        target.depends("tools/codegen.py")
+
+        assert len(target._extra_implicit_deps) == 1
+        assert target._extra_implicit_deps[0].path == Path("tools/codegen.py")
+
+    def test_depends_with_target(self):
+        """depends() with Target adds to dependencies, not implicit deps."""
+        target = Target("app")
+        lib = Target("mylib")
+
+        target.depends(lib)
+
+        assert lib in target.dependencies
+        assert len(target._extra_implicit_deps) == 0
+
+    def test_depends_mixed_args(self):
+        """depends() handles mixed Target and file args."""
+        target = Target("app")
+        lib = Target("mylib")
+        config = FileNode("config.yaml")
+
+        target.depends(lib, config, "tools/script.py")
+
+        assert lib in target.dependencies
+        assert config in target._extra_implicit_deps
+        assert len(target._extra_implicit_deps) == 2
+
+    def test_depends_fluent(self):
+        """depends() returns self for chaining."""
+        target = Target("app")
+
+        result = target.depends("a.txt").depends("b.txt")
+
+        assert result is target
+        assert len(target._extra_implicit_deps) == 2
+
+    def test_depends_applied_during_resolve(self, tmp_path):
+        """depends() deps are applied to output nodes during resolve."""
+        from pcons.core.project import Project
+
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        cmd = env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="tool $SOURCE $TARGET",
+        )
+        cmd.depends("tools/codegen.py")
+
+        # Before resolve, output nodes don't have the implicit dep yet
+        assert len(cmd.output_nodes[0].implicit_deps) == 0
+
+        project.resolve()
+
+        # After resolve, the dep is on the output node
+        assert len(cmd.output_nodes[0].implicit_deps) == 1
+
+    def test_apply_extra_implicit_deps(self):
+        """_apply_extra_implicit_deps distributes to all output nodes."""
+        target = Target("app")
+        out1 = FileNode("build/app.o")
+        out2 = FileNode("build/app")
+        target.output_nodes.extend([out1, out2])
+        dep = FileNode("version.txt")
+        target._extra_implicit_deps.append(dep)
+
+        target._apply_extra_implicit_deps()
+
+        assert dep in out1.implicit_deps
+        assert dep in out2.implicit_deps
+
+    def test_apply_no_duplicates(self):
+        """_apply_extra_implicit_deps doesn't add duplicates."""
+        target = Target("app")
+        output = FileNode("build/app")
+        target.output_nodes.append(output)
+        dep = FileNode("version.txt")
+        target._extra_implicit_deps.append(dep)
+
+        target._apply_extra_implicit_deps()
+        target._apply_extra_implicit_deps()  # Apply twice
+
+        assert output.implicit_deps.count(dep) == 1
+
+    def test_depends_with_project(self, tmp_path):
+        """depends() uses project.node() when project is available."""
+        from pcons.core.project import Project
+
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        target = Target("app")
+        target._project = project
+
+        target.depends("tools/codegen.py")
+
+        dep = target._extra_implicit_deps[0]
+        # project.node() canonicalizes the path
+        assert dep is project.node("tools/codegen.py")

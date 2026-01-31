@@ -767,6 +767,7 @@ class Environment:
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
         command: str | list[str] = "",
         name: str | None = None,
+        depends: str | Path | Sequence[str | Path] | None = None,
     ) -> Target:
         """Run an arbitrary shell command to build targets from sources.
 
@@ -789,8 +790,16 @@ class Environment:
                     - $TARGETS: All target files (space-separated)
                     - ${SOURCES[n]}: Indexed source access (0-based)
                     - ${TARGETS[n]}: Indexed target access (0-based)
+                    - $SRCDIR: Project source tree root directory. Use this
+                      to reference source-tree files that aren't listed as
+                      sources (e.g., config files, scripts). Example:
+                      "$SRCDIR/scripts/generate.py $SOURCE $TARGET"
             name: Optional target name for `ninja <name>`. Derived from first
                   target filename if not specified.
+            depends: Extra files that trigger a rebuild when changed, but
+                    don't appear in $SOURCE/$SOURCES. These become implicit
+                    dependencies (after ``|`` in ninja). Useful for scripts,
+                    config files, or other build-time inputs.
 
         Returns:
             Target object representing the command outputs.
@@ -894,6 +903,13 @@ class Environment:
             for src_target in target_sources:
                 if src_target not in cmd_target.dependencies:
                     cmd_target.dependencies.append(src_target)
+
+        # Apply extra implicit dependencies
+        if depends is not None:
+            if isinstance(depends, (str, Path)):
+                cmd_target.depends(depends)
+            else:
+                cmd_target.depends(*depends)
 
         # Register target with project if available
         if self._project is not None:

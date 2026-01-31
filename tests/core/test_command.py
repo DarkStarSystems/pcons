@@ -8,6 +8,7 @@ import pytest
 from pcons.core.builder import GenericCommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
+from pcons.core.project import Project
 
 
 class TestGenericCommandBuilder:
@@ -95,6 +96,18 @@ class TestGenericCommandBuilder:
             TargetPath(),
         ]
         assert target._build_info.get("rule_name") == builder.rule_name
+
+    def test_srcdir_preserved_in_tokens(self):
+        """$SRCDIR is preserved as a plain string token (generators handle it)."""
+        builder = GenericCommandBuilder("python $SRCDIR/scripts/gen.py $SOURCE $TARGET")
+        from pcons.core.subst import SourcePath, TargetPath
+
+        assert builder.command == [
+            "python",
+            "$SRCDIR/scripts/gen.py",
+            SourcePath(),
+            TargetPath(),
+        ]
 
 
 class TestEnvironmentCommand:
@@ -594,3 +607,88 @@ class TestTargetAsSources:
         # Both targets should be in the ninja file
         assert "intermediate.txt" in content
         assert "final.txt" in content
+
+
+class TestCommandDepends:
+    """Tests for the depends= parameter on env.Command()."""
+
+    def test_depends_single_file(self, tmp_path):
+        """depends= with a single file adds implicit dep."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        result = env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="python $SRCDIR/tools/gen.py $SOURCE $TARGET",
+            depends="tools/gen.py",
+        )
+
+        assert len(result._extra_implicit_deps) == 1
+        # Applied to output nodes during resolve
+        project.resolve()
+        assert len(result.output_nodes[0].implicit_deps) == 1
+
+    def test_depends_multiple_files(self, tmp_path):
+        """depends= with a list adds multiple implicit deps."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        result = env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="tool $SOURCE $TARGET",
+            depends=["tools/gen.py", "config.yaml"],
+        )
+
+        assert len(result._extra_implicit_deps) == 2
+        project.resolve()
+        assert len(result.output_nodes[0].implicit_deps) == 2
+
+    def test_depends_appears_in_ninja_after_pipe(self, tmp_path):
+        """depends= files appear after | in ninja build statements."""
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="tool $SOURCE $TARGET",
+            depends="tools/gen.py",
+        )
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        # The dep should appear after | (implicit deps section)
+        assert "| " in content
+        assert "gen.py" in content
+        # The dep should NOT be in $in (explicit sources)
+        # Find the build line for output.txt
+        for line in content.splitlines():
+            if "build output.txt:" in line:
+                # Sources (before |) should only have input.txt
+                before_pipe = line.split("|")[0]
+                assert "gen.py" not in before_pipe
+                break
+
+    def test_depends_not_in_sources(self, tmp_path):
+        """depends= files don't appear in $SOURCE/$SOURCES."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        result = env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="tool $SOURCE $TARGET",
+            depends="tools/gen.py",
+        )
+
+        # The build_info sources should only contain input.txt
+        build_info = result.output_nodes[0]._build_info
+        source_paths = [str(s.path) for s in build_info["sources"]]
+        assert "tools/gen.py" not in source_paths

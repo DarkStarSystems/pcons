@@ -770,7 +770,12 @@ class MakefileGenerator(BaseGenerator):
                 # Use PathToken's relativize() with make path transformer
                 result.append(token.relativize(self._relativize_path_for_make))
             else:
-                result.append(str(token))
+                s = str(token)
+                # Replace $SRCDIR with project root path for make
+                # (make runs from build dir, so source-tree paths need to be absolute)
+                if "$SRCDIR" in s and self._project_root:
+                    s = s.replace("$SRCDIR", str(self._project_root))
+                result.append(s)
         return result
 
     def _relativize_path_for_make(self, path: str) -> str:

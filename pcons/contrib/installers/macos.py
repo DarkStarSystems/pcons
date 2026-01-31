@@ -271,7 +271,7 @@ def create_pkg(
     resources_rel = staging_base_rel / "resources"
 
     # Stage source files (Install auto-detects directory sources after resolve)
-    stage_target = project.Install(payload_rel, sources)
+    stage_target = project.Install(payload_rel, sources, name=f"pkg_payload_{name}")
 
     # Check if any source is a .app bundle (needs component plist)
     def is_bundle_source(src: Target | FileNode | Path | str) -> bool:
@@ -366,9 +366,14 @@ def create_pkg(
     productbuild_deps: list[Target] = [dist_target, component_target]
 
     # Copy resource files if provided
-    for res_file in [welcome, readme, license, conclusion, background]:
+    res_names = ["welcome", "readme", "license", "conclusion", "background"]
+    for res_name, res_file in zip(
+        res_names, [welcome, readme, license, conclusion, background], strict=True
+    ):
         if res_file is not None:
-            res_target = project.Install(resources_rel, [res_file])
+            res_target = project.Install(
+                resources_rel, [res_file], name=f"pkg_resource_{name}_{res_name}"
+            )
             productbuild_deps.append(res_target)
 
     # Build final package with productbuild

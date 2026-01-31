@@ -890,7 +890,11 @@ class NinjaGenerator(BaseGenerator):
                 result.append(token.relativize(self._relativize_path_for_ninja))
             else:
                 # Fall back to pattern-based detection for plain strings
-                result.append(self._relativize_flag_with_path(str(token)))
+                s = str(token)
+                # Replace $SRCDIR with $topdir for ninja (both are build-dir-relative
+                # references to the project source tree root)
+                s = s.replace("$SRCDIR", "$topdir")
+                result.append(self._relativize_flag_with_path(s))
         return result
 
     def _relativize_path_for_ninja(self, path: str) -> str:

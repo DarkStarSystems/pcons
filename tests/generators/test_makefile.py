@@ -314,3 +314,28 @@ class TestMakefilePostBuild:
         assert "&&" in content
         assert "chmod +x" in content
         assert "echo" in content
+
+
+class TestMakefileSrcDir:
+    def test_srcdir_replaced_with_project_root(self, tmp_path):
+        """$SRCDIR in Command() commands is replaced with project root for make."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="python $SRCDIR/scripts/generate.py $SOURCE $TARGET",
+            name="gen",
+        )
+        project.resolve()
+
+        gen = MakefileGenerator()
+        gen.generate(project)
+
+        content = normalize_path((tmp_path / "build" / "Makefile").read_text())
+        # $SRCDIR should become the absolute project root path
+        project_root = normalize_path(str(tmp_path))
+        assert f"{project_root}/scripts/generate.py" in content
+        # Original $SRCDIR should not appear
+        assert "$SRCDIR" not in content

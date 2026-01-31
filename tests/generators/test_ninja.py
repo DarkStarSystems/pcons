@@ -406,3 +406,75 @@ class TestNinjaDepsDirectives:
         assert "deps = gcc" not in content
         assert "deps = msvc" not in content
         assert "depfile" not in content
+
+
+class TestNinjaSrcDir:
+    def test_srcdir_replaced_with_topdir(self, tmp_path):
+        """$SRCDIR in Command() commands is replaced with $topdir for ninja."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="python $SRCDIR/scripts/generate.py $SOURCE $TARGET",
+            name="gen",
+        )
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        # $SRCDIR should become $topdir in the ninja file
+        assert "$topdir/scripts/generate.py" in content
+        # Original $SRCDIR should not appear
+        assert "$SRCDIR" not in content
+
+    def test_command_depends_in_ninja(self, tmp_path):
+        """Command with depends= generates implicit deps in ninja."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="python $SRCDIR/tools/gen.py $SOURCE -o $TARGET",
+            depends=["tools/gen.py", "config.yaml"],
+        )
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+
+        content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
+        # Both deps should appear after | in the build statement
+        for line in content.splitlines():
+            if "build output.txt:" in line:
+                assert "| " in line
+                after_pipe = line.split("| ", 1)[1]
+                assert "gen.py" in after_pipe
+                assert "config.yaml" in after_pipe
+                break
+        else:
+            raise AssertionError("build output.txt line not found")
+
+    def test_srcdir_in_middle_of_token(self, tmp_path):
+        """$SRCDIR works when embedded in a token (e.g., --config=$SRCDIR/cfg)."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="tool --config=$SRCDIR/my.cfg $SOURCE $TARGET",
+            name="cfg_tool",
+        )
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert "--config=$topdir/my.cfg" in content
+        assert "$SRCDIR" not in content

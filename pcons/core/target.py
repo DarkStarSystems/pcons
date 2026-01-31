@@ -173,6 +173,9 @@ class Target:
         #       Files passed to linker with flags and handler info
         #   - Other builder-specific data (dest_dir, compression, etc.)
         "_builder_data",
+        # Extra implicit dependencies (files that trigger rebuilds but aren't sources).
+        # Applied to output nodes during resolve, or immediately for Command targets.
+        "_extra_implicit_deps",
     )
 
     def __init__(
@@ -227,6 +230,8 @@ class Target:
         # Builder-specific data dict, initialized to empty dict (not None)
         # Contains: post_build_commands, auxiliary_inputs, and builder-specific data
         self._builder_data: dict[str, Any] = {}
+        # Extra implicit dependencies added via target.depends()
+        self._extra_implicit_deps: list[Node] = []
 
     @property
     def sources(self) -> list[Node]:
@@ -284,6 +289,60 @@ class Target:
         # Invalidate cached requirements
         self._collected_requirements = None
         return self
+
+    def depends(self, *items: Target | Node | Path | str) -> Target:
+        """Add extra dependencies that trigger rebuilds (fluent API).
+
+        Use this for files that should cause a rebuild when changed but
+        aren't inputs to the command (e.g., scripts, config files).
+
+        These are added as implicit dependencies on the target's output
+        nodes (appear after ``|`` in ninja, not in ``$in``).
+
+        Target arguments are added to ``self.dependencies`` instead.
+
+        Args:
+            *items: Files or targets to depend on. Strings and Paths are
+                   converted to FileNodes via ``project.node()`` if a
+                   project is available.
+
+        Returns:
+            self for method chaining.
+
+        Example:
+            gen = env.Command(
+                target="generated.h",
+                source="schema.json",
+                command="python $SRCDIR/tools/codegen.py $SOURCE -o $TARGET",
+            )
+            gen.depends("tools/codegen.py")
+        """
+        from pcons.core.node import FileNode, Node
+
+        for item in items:
+            if isinstance(item, Target):
+                if item not in self.dependencies:
+                    self.dependencies.append(item)
+            elif isinstance(item, Node):
+                self._extra_implicit_deps.append(item)
+            else:
+                # str or Path — convert to FileNode via project if available
+                project = self._project
+                if project is not None:
+                    self._extra_implicit_deps.append(project.node(item))
+                else:
+                    self._extra_implicit_deps.append(
+                        FileNode(item, defined_at=get_caller_location())
+                    )
+
+        return self
+
+    def _apply_extra_implicit_deps(self) -> None:
+        """Apply _extra_implicit_deps to all output nodes."""
+        for node in self.output_nodes:
+            for dep in self._extra_implicit_deps:
+                if dep not in node.implicit_deps:
+                    node.implicit_deps.append(dep)
 
     def add_source(self, source: Target | Node | Path | str) -> Target:
         """Add a source to this target (fluent API).
