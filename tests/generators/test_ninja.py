@@ -202,8 +202,9 @@ class TestNinjaPostBuild:
         # Post-build commands are now baked directly into the rule's command line
         # (not as a separate post_build variable)
         assert "post_build =" not in content
-        # The command should include the post-build commands
-        assert "&& install_name_tool -add_rpath @loader_path build/app" in content
+        # The command should include the post-build commands with literal $out
+        # for ninja to expand at build time (build-dir-relative)
+        assert "&& install_name_tool -add_rpath @loader_path $out" in content
 
     def test_post_build_multiple_commands_chained(self, tmp_path):
         """Multiple post-build commands are chained with && in the rule."""
@@ -238,12 +239,12 @@ class TestNinjaPostBuild:
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # Post-build commands are baked into the rule's command line
         assert "post_build =" not in content
-        # Both commands should be in the rule, chained with &&
-        assert "&& install_name_tool -add_rpath @loader_path build/plugin.so" in content
-        assert "&& codesign --sign - build/plugin.so" in content
+        # Both commands should be in the rule with literal $out for ninja
+        assert "&& install_name_tool -add_rpath @loader_path $out" in content
+        assert "&& codesign --sign - $out" in content
 
     def test_post_build_variable_substitution(self, tmp_path):
-        """$out and $in are substituted in post-build commands."""
+        """$out and $in are passed through as literals for ninja to expand."""
         project = Project("test", root_dir=tmp_path, build_dir=".")
 
         target = Target("app")
@@ -268,11 +269,9 @@ class TestNinjaPostBuild:
         gen.generate(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
-        # $out should be substituted with the actual output path
-        # $in should be substituted with the input files
-        # Post-build commands are baked into the rule's command line
+        # $out and $in are left as literals for ninja to expand at build time
         assert "post_build =" not in content
-        assert "&& echo Built build/myapp from build/main.o" in content
+        assert "&& echo Built $out from $in" in content
 
     def test_no_post_build_when_empty(self, tmp_path):
         """No post_build commands in rule when target has none."""

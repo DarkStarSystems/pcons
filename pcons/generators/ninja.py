@@ -188,8 +188,7 @@ class NinjaGenerator(BaseGenerator):
 
         # Append post-build commands directly to the command if needed
         # This ensures targets with different post-build commands get different rules
-        sources = cast(list[Node], build_info.get("sources", []))
-        post_build_suffix = self._get_post_build_suffix(node, target, sources)
+        post_build_suffix = self._get_post_build_suffix(node, target)
         if post_build_suffix:
             command = command.rstrip() + post_build_suffix
 
@@ -247,7 +246,6 @@ class NinjaGenerator(BaseGenerator):
         self,
         node: FileNode,
         target: Target | None,
-        sources: list[Node],
     ) -> str:
         """Get post-build command suffix if this node needs it.
 
@@ -273,16 +271,10 @@ class NinjaGenerator(BaseGenerator):
         if not post_build_cmds:
             return ""
 
-        # Substitute $out and $in in each command
-        out_path = str(node.path)
-        in_paths = " ".join(str(s.path) for s in sources if isinstance(s, FileNode))
-        substituted_cmds = []
-        for cmd in post_build_cmds:
-            cmd = cmd.replace("$out", out_path)
-            cmd = cmd.replace("$in", in_paths)
-            substituted_cmds.append(cmd)
-
-        return " && " + " && ".join(substituted_cmds)
+        # Leave $out and $in as literals for ninja to expand at build time.
+        # Ninja runs from the build directory, so its $out/$in are already
+        # build-dir-relative — matching the paths in the main command.
+        return " && " + " && ".join(post_build_cmds)
 
     def _expand_command_fallback(
         self,
@@ -437,7 +429,7 @@ class NinjaGenerator(BaseGenerator):
 
             # Append post-build commands directly to the command if needed
             # Must match _ensure_rule() logic for consistent rule naming
-            post_build_suffix = self._get_post_build_suffix(node, target, sources)
+            post_build_suffix = self._get_post_build_suffix(node, target)
             if post_build_suffix:
                 command = command.rstrip() + post_build_suffix
 

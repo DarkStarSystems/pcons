@@ -282,10 +282,12 @@ class InstallNodeFactory:
         stamp_path = stamps_dir / stamp_name
 
         stamp_node = self.project.node(stamp_path)
-        # Depend on the directory node AND any child nodes inside it,
-        # so ninja knows to build the children before copying the tree.
+        # Source directory is the explicit dep (becomes $in for copytree).
+        # Child nodes are implicit deps — they trigger rebuilds but don't
+        # appear in $in (ninja's | syntax).
+        stamp_node.depends([source_node])
         child_nodes = self.project.get_child_nodes(source_path)
-        stamp_node.depends([source_node] + child_nodes)
+        stamp_node.implicit_deps.extend(child_nodes)
 
         # Build destination path relative to build directory
         try:
@@ -391,10 +393,12 @@ class InstallNodeFactory:
 
         # Create stamp node via project for deduplication (this is what ninja tracks)
         stamp_node = self.project.node(stamp_path)
-        # Depend on the directory node AND any child nodes inside it,
-        # so ninja knows to build the children before copying the tree.
+        # Source directory is the explicit dep (becomes $in for copytree).
+        # Child nodes are implicit deps — they trigger rebuilds but don't
+        # appear in $in (ninja's | syntax).
+        stamp_node.depends([source_node])
         child_nodes = self.project.get_child_nodes(source_path)
-        stamp_node.depends([source_node] + child_nodes)
+        stamp_node.implicit_deps.extend(child_nodes)
 
         # Build the destination path relative to build directory for the command
         try:

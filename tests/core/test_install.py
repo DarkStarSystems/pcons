@@ -575,8 +575,9 @@ class TestInstallDirectoryAutoDetection:
         assert len(install.output_nodes) == 1
         stamp_node = install.output_nodes[0]
 
-        # The stamp node must depend on the child node, not just the directory node
-        assert child_node in stamp_node.explicit_deps
+        # Child nodes are implicit deps (for rebuild tracking via ninja's | syntax),
+        # not explicit deps (which would pollute $in)
+        assert child_node in stamp_node.implicit_deps
 
     def test_install_command_output_node_has_build_info(self, tmp_path):
         """Command output node created via project.node() has build_info structurally.
