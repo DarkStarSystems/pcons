@@ -1,0 +1,24 @@
+# Test configuration for the msvcup_hello example
+
+[test]
+description = "Demonstrates building with msvcup-managed MSVC (no Visual Studio required)"
+# msvcup downloads MSVC + SDK on first run, which can take a while
+timeout = 300
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/obj.hello/hello.obj",
+    "build/hello.exe",
+]
+
+[verify]
+# Run the built program and check output
+commands = [
+    { run = "./build/hello.exe", expect_stdout = "Hello from MSVC" },
+]
+
+[skip]
+# Only run on Windows -- msvcup is Windows-only
+platforms = ["linux", "darwin"]
+# Xcode and Make generators not applicable
+generators = ["xcode", "make"]

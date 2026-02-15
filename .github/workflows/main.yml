@@ -55,7 +55,7 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run tests
-        run: uv run pytest --cov=pcons --cov-report=xml
+        run: uv run pytest --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         uses: codecov/codecov-action@v4
@@ -63,9 +63,26 @@ jobs:
           file: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  test-msvcup:
+    name: "test msvcup (windows, no VS)"
+    needs: lint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: "latest"
+      # No MSVC setup - msvcup installs its own toolchain
+      - name: Set Python version
+        run: uv python install 3.14
+      - name: Install dependencies
+        run: uv sync
+      - name: Run msvcup example tests
+        run: uv run pytest tests/test_examples.py -k "21_msvcup_hello" tests/contrib/test_msvcup.py -v
+
   release:
     name: Create Release & Publish
-    needs: test
+    needs: [test, test-msvcup]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
