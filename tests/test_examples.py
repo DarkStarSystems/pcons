@@ -443,12 +443,13 @@ def run_example(
         "PCONS_GENERATOR": generator,
     }
 
+    timeout = test_config.get("timeout", 60)
     result = subprocess.run(
         cmd,
         cwd=work_dir,
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=timeout,
         env=env,
     )
 

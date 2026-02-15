@@ -1082,6 +1082,65 @@ else:
     env.cxx.flags.extend(["-Wall", "-Wextra"])
 ```
 
+### Windows: MSVC Without Visual Studio (msvcup)
+
+On Windows, `find_c_toolchain()` normally discovers the MSVC compiler from an installed Visual Studio. If you don't want to install all of Visual Studio with C++ workloads and Windows SDKs — or if you need a reproducible, locked compiler version — you can use **msvcup** to download just the MSVC compiler and Windows SDK directly from Microsoft's CDN.
+
+The `pcons.contrib.windows.msvcup` module wraps the [msvcup](https://github.com/marler8997/msvcup) tool. Call `ensure_msvc()` at the top of your build script, before `find_c_toolchain()`:
+
+```python
+import sys
+from pcons import Project, find_c_toolchain, Generator
+
+if sys.platform == "win32":
+    from pcons.contrib.windows.msvcup import ensure_msvc
+    ensure_msvc("14.44.17.14", "10.0.22621.7")
+
+project = Project("hello", build_dir="build")
+env = project.Environment(toolchain=find_c_toolchain())
+project.Program("hello", env, sources=["hello.c"])
+Generator().generate(project)
+```
+
+On the first run, `ensure_msvc()`:
+
+1. Downloads `msvcup.exe` from GitHub releases (auto-detects x64 vs arm64)
+2. Runs `msvcup install` to download the specified MSVC and SDK versions
+3. Runs `msvcup autoenv` to create wrapper executables (`cl.exe`, `link.exe`, etc.)
+4. Prepends the autoenv directory to `PATH`
+
+Subsequent runs are fast — msvcup detects the toolchain is already installed and skips the download. Everything installs to `C:\msvcup`.
+
+On non-Windows platforms, `ensure_msvc()` is a no-op (returns immediately).
+
+#### Version Pinning
+
+The MSVC version (e.g., `"14.44.17.14"`) and SDK version (e.g., `"10.0.22621.7"`) are explicit — every developer and CI machine gets the exact same compiler. To find available versions, run:
+
+```
+msvcup list
+```
+
+#### Lock Files
+
+By default, `ensure_msvc()` writes a lock file to `C:\msvcup\msvcup.lock` for reproducible installs. You can specify a project-local lock file:
+
+```python
+ensure_msvc("14.44.17.14", "10.0.22621.7", lock_file="msvcup.lock")
+```
+
+#### Cross-Compilation
+
+The target CPU is auto-detected from the host architecture (x64 on x86_64 machines, arm64 on ARM64). For cross-compilation, specify it explicitly:
+
+```python
+ensure_msvc("14.44.17.14", "10.0.22621.7", target_cpu="arm64")
+```
+
+#### CI Usage
+
+msvcup is particularly useful in CI environments where you want reproducible builds without depending on whatever Visual Studio version happens to be pre-installed on the runner. See `examples/21_msvcup_hello/` for a complete working example.
+
 ### IDE Integration
 
 Pcons generates `compile_commands.json` for IDE integration:
@@ -2068,7 +2127,7 @@ Note: `config.check_sizeof()` uses Python's `ctypes` to determine sizes on the h
 - macOS: `xcode-select --install`
 - Ubuntu/Debian: `sudo apt install build-essential`
 - Fedora: `sudo dnf install gcc gcc-c++`
-- Windows: Install Visual Studio with C++ workload
+- Windows: Install Visual Studio with C++ workload, or use [msvcup](#windows-msvc-without-visual-studio-msvcup) for a lightweight install
 
 ### Ninja not found
 
@@ -2157,6 +2216,7 @@ Note: `config.check_sizeof()` uses Python's `ctypes` to determine sizes on the h
 | `find_cuda_toolchain()` | Find CUDA toolchain (returns `None` if nvcc not found) |
 | `get_var(name, default)` | Get a build variable |
 | `get_variant(default)` | Get the build variant |
+| `ensure_msvc(msvc_ver, sdk_ver)` | Install MSVC toolchain via msvcup (Windows only; import from `pcons.contrib.windows.msvcup`) |
 
 ### Generators
 

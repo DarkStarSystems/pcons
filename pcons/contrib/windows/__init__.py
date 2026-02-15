@@ -3,6 +3,7 @@
 
 This package provides helpers for Windows development:
 - manifest: Windows SxS manifest generation (app and assembly manifests)
+- msvcup: MSVC toolchain installation via msvcup (no Visual Studio required)
 
 Usage:
     from pcons.contrib.windows import manifest
@@ -19,8 +20,13 @@ Usage:
     app = project.Program("myapp", env)
     app.add_sources(["src/main.c", app_manifest])
 
+    # Install MSVC without Visual Studio (call before find_c_toolchain)
+    from pcons.contrib.windows.msvcup import ensure_msvc
+    ensure_msvc("14.44.17.14", "10.0.22621.7")
+
 Available modules:
     - manifest: Windows SxS manifest generation
+    - msvcup: MSVC toolchain installation via msvcup
 """
 
 from __future__ import annotations
@@ -32,4 +38,4 @@ def list_modules() -> list[str]:
     Returns:
         List of module names in the windows package.
     """
-    return ["manifest"]
+    return ["manifest", "msvcup"]
