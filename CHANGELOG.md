@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-02-15
+
+### Added
+
+- **`pcons.contrib.windows.msvcup` module**: Install MSVC compiler and Windows SDK without Visual Studio using [msvcup](https://github.com/marlersoft/msvcup). Ideal for CI environments, lightweight dev setups, or reproducible locked compiler versions.
+  - `ensure_msvc()`: Downloads and installs MSVC + Windows SDK, sets up wrapper executables via `msvcup autoenv`
+  - Version pinning: Specify exact MSVC and SDK versions for reproducible builds
+  - Lock file support: Pin resolved versions for team consistency (`--lock-file`)
+  - Manifest update control: `manifest_update` parameter (`"off"`, `"daily"`, `"always"`)
+  - Integrates with pcons toolchain detection — msvcup-installed compiler is found automatically
+
+### Changed
+
+- **Dedicated CI job for msvcup testing**: msvcup example tests now run on a separate Windows runner without Visual Studio pre-installed, validating that msvcup can provide the full toolchain independently.
+- **Configurable test timeouts**: Example integration tests now support a `timeout` field in `test.toml` for tests that need longer execution time (e.g., downloading toolchains).
+
+### Internal
+
+- Code simplification pass: reduced ~163 lines across 17 files with no functional changes.
+
 ## [0.7.1] - 2026-01-31
 
 ### Added
@@ -459,7 +479,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/DarkStarSystems/pcons/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/DarkStarSystems/pcons/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/DarkStarSystems/pcons/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/DarkStarSystems/pcons/compare/v0.6.0...v0.6.1
