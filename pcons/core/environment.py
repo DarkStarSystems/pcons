@@ -425,13 +425,8 @@ class Environment:
             if "__" in key:
                 # Tool attribute override: cc__flags -> env.cc.flags
                 tool_name, attr_name = key.split("__", 1)
-                if temp_env.has_tool(tool_name):
-                    tool = getattr(temp_env, tool_name)
-                    setattr(tool, attr_name, value)
-                else:
-                    # Create tool if it doesn't exist
-                    tool = temp_env.add_tool(tool_name)
-                    setattr(tool, attr_name, value)
+                tool = temp_env.add_tool(tool_name)  # Returns existing or creates new
+                setattr(tool, attr_name, value)
             else:
                 # Cross-tool variable override
                 setattr(temp_env, key, value)
@@ -460,9 +455,8 @@ class Environment:
             env.set_variant("release", extra_flags=["-march=native"])
         """
         trace("env", "Setting variant: %s", name)
-        all_toolchains = self.toolchains
-        if all_toolchains:
-            for toolchain in all_toolchains:
+        if self.toolchains:
+            for toolchain in self.toolchains:
                 toolchain.apply_variant(self, name, **kwargs)
         else:
             # No toolchains - just set the variant name
@@ -498,12 +492,10 @@ class Environment:
             # Windows cross-compilation
             env.set_target_arch("arm64")  # Uses /MACHINE:ARM64 for MSVC
         """
-        all_toolchains = self.toolchains
-        if all_toolchains:
-            for toolchain in all_toolchains:
+        if self.toolchains:
+            for toolchain in self.toolchains:
                 toolchain.apply_target_arch(self, arch, **kwargs)
         else:
-            # No toolchains - just set the target arch name
             self.target_arch = arch
 
     def use_compiler_cache(self, tool: str | None = None) -> None:
@@ -574,9 +566,8 @@ class Environment:
             env.apply_preset("warnings")
             env.apply_preset("sanitize")
         """
-        all_toolchains = self.toolchains
-        if all_toolchains:
-            for toolchain in all_toolchains:
+        if self.toolchains:
+            for toolchain in self.toolchains:
                 toolchain.apply_preset(self, name)
         else:
             logger.warning("No toolchains configured; cannot apply preset '%s'", name)
@@ -597,9 +588,8 @@ class Environment:
             env.apply_cross_preset(android(ndk="~/android-ndk"))
             env.apply_cross_preset(ios(arch="arm64"))
         """
-        all_toolchains = self.toolchains
-        if all_toolchains:
-            for toolchain in all_toolchains:
+        if self.toolchains:
+            for toolchain in self.toolchains:
                 toolchain.apply_cross_preset(self, preset)
         else:
             logger.warning(
@@ -619,13 +609,10 @@ class Environment:
         Returns:
             List of FileNodes matching the pattern.
         """
-        # Import here to avoid circular import
-        from pathlib import Path as PathlibPath
-
         from pcons.core.node import FileNode
 
         # Use project.node() for deduplication when available
-        matches = list(PathlibPath(".").glob(pattern))
+        matches = list(Path(".").glob(pattern))
         if self._project is not None:
             return [self._project.node(p) for p in matches]
         return [FileNode(p, defined_at=get_caller_location()) for p in matches]

@@ -6,6 +6,7 @@ Generates build.ninja files from a configured pcons Project.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -140,6 +141,58 @@ class NinjaGenerator(BaseGenerator):
                 return env
         return None
 
+    def _resolve_rule_key(
+        self,
+        node: FileNode,
+        build_info: dict[str, Any],
+        target: Target | None,
+        env: Environment | None,
+    ) -> tuple[str, str]:
+        """Resolve the rule key and expanded command for a build node.
+
+        This is the single source of truth for computing a rule key from a
+        node's build info.  Both _ensure_rule() and _write_build_statement()
+        use this to guarantee consistent rule naming.
+
+        Args:
+            node: The file node being built.
+            build_info: The node's build info dict.
+            target: The owning target (may be None).
+            env: The environment (may be None).
+
+        Returns:
+            (rule_key, command) tuple.
+        """
+        from pcons.core.subst import to_shell_command
+
+        tool_name = build_info.get("tool", "unknown")
+        command_var = build_info.get("command_var", "cmdline")
+        custom_rule_name = build_info.get("rule_name")
+
+        # Resolve the command string
+        command_raw = build_info.get("command")
+        if command_raw is None:
+            command = self._expand_command_fallback(node, build_info, env)
+        elif isinstance(command_raw, list):
+            relativized_tokens = self._relativize_command_tokens(command_raw)
+            command = to_shell_command(relativized_tokens, shell="ninja")
+        else:
+            command = command_raw
+
+        # Append post-build commands
+        post_build_suffix = self._get_post_build_suffix(node, target)
+        if post_build_suffix:
+            command = command.rstrip() + post_build_suffix
+
+        # Compute rule key
+        if custom_rule_name:
+            rule_key = custom_rule_name
+        else:
+            cmd_hash = hashlib.md5(command.encode()).hexdigest()[:8]
+            rule_key = f"{tool_name}_{command_var}_{cmd_hash}"
+
+        return rule_key, command
+
     def _ensure_rule(
         self,
         f: TextIO,
@@ -160,49 +213,10 @@ class NinjaGenerator(BaseGenerator):
         if build_info is None:
             return "phony"
 
-        # Get basic info from build_info
         tool_name = build_info.get("tool", "unknown")
-        command_var = build_info.get("command_var", "cmdline")
-
-        # Check if this is a generic command (has custom rule_name)
         custom_rule_name = build_info.get("rule_name")
 
-        # Get the pre-expanded command from build_info (set by resolver)
-        # Command can be a list of tokens or a string
-        command_raw = build_info.get("command")
-
-        # If no pre-expanded command, fall back to old expansion logic
-        # (for backward compatibility with tests and direct node creation)
-        if command_raw is None:
-            command = self._expand_command_fallback(node, build_info, env)
-        elif isinstance(command_raw, list):
-            # Relativize path flags in tokens for ninja execution
-            # (ninja runs from build dir, paths are project-root-relative)
-            relativized_tokens = self._relativize_command_tokens(command_raw)
-            # Convert token list to shell command string with ninja quoting
-            from pcons.core.subst import to_shell_command
-
-            command = to_shell_command(relativized_tokens, shell="ninja")
-        else:
-            command = command_raw
-
-        # Append post-build commands directly to the command if needed
-        # This ensures targets with different post-build commands get different rules
-        post_build_suffix = self._get_post_build_suffix(node, target)
-        if post_build_suffix:
-            command = command.rstrip() + post_build_suffix
-
-        # Create a unique rule key based on the command
-        # This ensures identical commands share rules (deduplication)
-        if custom_rule_name:
-            rule_key = custom_rule_name
-        else:
-            # Hash the command to create a stable rule key
-            # Include tool and command_var for readability
-            import hashlib
-
-            cmd_hash = hashlib.md5(command.encode()).hexdigest()[:8]
-            rule_key = f"{tool_name}_{command_var}_{cmd_hash}"
+        rule_key, command = self._resolve_rule_key(node, build_info, target, env)
 
         if rule_key not in self._rules:
             rule_name = rule_key
@@ -393,8 +407,6 @@ class NinjaGenerator(BaseGenerator):
         if "primary_node" in build_info:
             return
 
-        tool_name = build_info.get("tool", "unknown")
-        command_var = build_info.get("command_var", "cmdline")
         sources = cast(list[Node], build_info.get("sources", []))
 
         # Get the environment for this build (needed for per-env rule naming)
@@ -406,38 +418,7 @@ class NinjaGenerator(BaseGenerator):
         elif project:
             env = self._find_env_for_node(node, project)
 
-        # Check for custom rule name (from generic command builder)
-        custom_rule_name = build_info.get("rule_name")
-        if custom_rule_name:
-            rule_name = custom_rule_name
-        else:
-            # Rule name must match _ensure_rule() logic
-            # Use the pre-expanded command to create a hash-based rule key
-            command_raw = build_info.get("command")
-            if command_raw is None:
-                # Fallback expansion - use same logic as _ensure_rule
-                command = self._expand_command_fallback(node, build_info, env)
-            elif isinstance(command_raw, list):
-                # Relativize path flags in tokens for ninja execution
-                relativized_tokens = self._relativize_command_tokens(command_raw)
-                # Convert token list to shell command string with ninja quoting
-                from pcons.core.subst import to_shell_command
-
-                command = to_shell_command(relativized_tokens, shell="ninja")
-            else:
-                command = command_raw
-
-            # Append post-build commands directly to the command if needed
-            # Must match _ensure_rule() logic for consistent rule naming
-            post_build_suffix = self._get_post_build_suffix(node, target)
-            if post_build_suffix:
-                command = command.rstrip() + post_build_suffix
-
-            # Hash the command to create a stable rule key
-            import hashlib
-
-            cmd_hash = hashlib.md5(command.encode()).hexdigest()[:8]
-            rule_name = f"{tool_name}_{command_var}_{cmd_hash}"
+        rule_name, _command = self._resolve_rule_key(node, build_info, target, env)
 
         # Handle multi-output builds from generic commands
         all_targets = build_info.get("all_targets")
@@ -747,18 +728,6 @@ class NinjaGenerator(BaseGenerator):
             # Path is not under project root
             return None
 
-    def _relativize_path_for_variable(self, path: str) -> str:
-        """Make a path relative for use in ninja variables (like includes).
-
-        For paths within the project, returns $topdir/relative/path.
-        For paths outside the project, returns the original path.
-        The result is shell-quoted if needed.
-        """
-        rel = self._make_source_relative(path)
-        if rel is not None:
-            return rel
-        return path
-
     def _is_build_dir_path(self, path: str) -> bool:
         """Check if a path refers to the build directory.
 
@@ -851,40 +820,31 @@ class NinjaGenerator(BaseGenerator):
         """
         from pcons.core.subst import PathToken, SourcePath, TargetPath
 
+        # Pre-compute whether tokens contain indexed SourcePath/TargetPath markers,
+        # which determines whether index-0 tokens use $in/$out or $source_0/$target_0.
+        has_indexed_source = any(
+            isinstance(t, SourcePath) and t.index > 0 for t in tokens
+        )
+        has_indexed_target = any(
+            isinstance(t, TargetPath) and t.index > 0 for t in tokens
+        )
+
         result: list[str] = []
         for token in tokens:
             if isinstance(token, SourcePath):
                 # Convert SourcePath marker to Ninja's $in or $source_N variable
-                # index=0 with no other indexed sources uses $in for simplicity
-                prefix = token.prefix if token.prefix else ""
-                suffix = token.suffix if token.suffix else ""
-                if token.index > 0:
-                    result.append(f"{prefix}$source_{token.index}{suffix}")
+                if token.index > 0 or has_indexed_source:
+                    ninja_var = f"$source_{token.index}"
                 else:
-                    # Check if there are any indexed sources in the token list
-                    has_indexed = any(
-                        isinstance(t, SourcePath) and t.index > 0 for t in tokens
-                    )
-                    if has_indexed:
-                        result.append(f"{prefix}$source_0{suffix}")
-                    else:
-                        result.append(f"{prefix}$in{suffix}")
+                    ninja_var = "$in"
+                result.append(f"{token.prefix}{ninja_var}{token.suffix}")
             elif isinstance(token, TargetPath):
                 # Convert TargetPath marker to Ninja's $out or $target_N variable
-                # Handle prefix (e.g., "/Fo" for MSVC) and suffix (e.g., ".d" for depfiles)
-                prefix = token.prefix if token.prefix else ""
-                suffix = token.suffix if token.suffix else ""
-                if token.index > 0:
-                    result.append(f"{prefix}$target_{token.index}{suffix}")
+                if token.index > 0 or has_indexed_target:
+                    ninja_var = f"$target_{token.index}"
                 else:
-                    # Check if there are any indexed targets in the token list
-                    has_indexed = any(
-                        isinstance(t, TargetPath) and t.index > 0 for t in tokens
-                    )
-                    if has_indexed:
-                        result.append(f"{prefix}$target_0{suffix}")
-                    else:
-                        result.append(f"{prefix}$out{suffix}")
+                    ninja_var = "$out"
+                result.append(f"{token.prefix}{ninja_var}{token.suffix}")
             elif isinstance(token, PathToken):
                 # Use PathToken's relativize() with ninja path transformer
                 result.append(token.relativize(self._relativize_path_for_ninja))

@@ -320,10 +320,22 @@ class Project:
         """Collect all nodes from all targets."""
         return collect_all_nodes(list(self._targets.values()))
 
+    def _to_build_relative(self, p: Path) -> Path:
+        """Strip the build_dir prefix from a canonicalized path.
+
+        Used by get_child_nodes/has_child_nodes to normalize paths for
+        comparison regardless of whether they include the build_dir prefix.
+        """
+        parts = p.parts
+        build_dir_name = self.build_dir.name
+        if parts and parts[0] == build_dir_name:
+            return Path(*parts[1:]) if len(parts) > 1 else Path(".")
+        return p
+
     def get_child_nodes(self, path: Path | str) -> list[FileNode]:
         """Get all project nodes whose path is a descendant of the given path.
 
-        Uses the same canonicalization as the node registry — no filesystem
+        Uses the same canonicalization as the node registry -- no filesystem
         access.  Both the query path and registered node paths are
         normalized to build-dir-relative form before comparison so that
         paths supplied with and without the ``build_dir`` prefix match.
@@ -335,20 +347,12 @@ class Project:
             List of FileNodes whose canonical path is strictly under *path*.
         """
         canonicalize = self._path_resolver.canonicalize
-        build_dir_name = self.build_dir.name
-
-        def _to_build_relative(p: Path) -> Path:
-            parts = p.parts
-            if parts and parts[0] == build_dir_name:
-                return Path(*parts[1:]) if len(parts) > 1 else Path(".")
-            return p
-
-        check_path = _to_build_relative(canonicalize(Path(path)))
+        check_path = self._to_build_relative(canonicalize(Path(path)))
         children: list[FileNode] = []
         for node_path, node in self._nodes.items():
             if not isinstance(node, FileNode):
                 continue
-            canonical = _to_build_relative(canonicalize(node_path))
+            canonical = self._to_build_relative(canonicalize(node_path))
             if canonical == check_path:
                 continue
             try:
@@ -365,17 +369,9 @@ class Project:
         on the first match for efficiency.
         """
         canonicalize = self._path_resolver.canonicalize
-        build_dir_name = self.build_dir.name
-
-        def _to_build_relative(p: Path) -> Path:
-            parts = p.parts
-            if parts and parts[0] == build_dir_name:
-                return Path(*parts[1:]) if len(parts) > 1 else Path(".")
-            return p
-
-        check_path = _to_build_relative(canonicalize(Path(path)))
+        check_path = self._to_build_relative(canonicalize(Path(path)))
         for node_path in self._nodes:
-            canonical = _to_build_relative(canonicalize(node_path))
+            canonical = self._to_build_relative(canonicalize(node_path))
             if canonical != check_path:
                 try:
                     canonical.relative_to(check_path)
@@ -496,56 +492,50 @@ class Project:
 
     def _output_graphs_if_requested(self) -> None:
         """Output dependency graphs if requested via PCONS_GRAPH/PCONS_MERMAID env vars."""
-        import os
-        import tempfile
-
-        # DOT format graph
         graph_path = os.environ.get("PCONS_GRAPH")
         if graph_path:
             from pcons.generators.dot import DotGenerator
 
-            if graph_path == "-":
-                # Write to stdout via temp dir
-                print("# DOT dependency graph")
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    gen = DotGenerator(
-                        output_filename="deps.dot", output_dir=Path(tmpdir)
-                    )
-                    gen.generate(self)
-                    dot_content = (Path(tmpdir) / "deps.dot").read_text()
-                    print(dot_content)
-            else:
-                # Write to file
-                output_path = Path(graph_path)
-                gen = DotGenerator(
-                    output_filename=output_path.name, output_dir=output_path.parent
-                )
-                gen.generate(self)
-                logger.info("Wrote DOT graph to %s", graph_path)
+            self._output_graph(DotGenerator, graph_path, "deps.dot", "DOT")
 
-        # Mermaid format graph
         mermaid_path = os.environ.get("PCONS_MERMAID")
         if mermaid_path:
             from pcons.generators.mermaid import MermaidGenerator
 
-            if mermaid_path == "-":
-                # Write to stdout via temp dir
-                print("# Mermaid dependency graph")
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    gen = MermaidGenerator(
-                        output_filename="deps.mmd", output_dir=Path(tmpdir)
-                    )
-                    gen.generate(self)
-                    mermaid_content = (Path(tmpdir) / "deps.mmd").read_text()
-                    print(mermaid_content)
-            else:
-                # Write to file
-                output_path = Path(mermaid_path)
-                gen = MermaidGenerator(
-                    output_filename=output_path.name, output_dir=output_path.parent
+            self._output_graph(MermaidGenerator, mermaid_path, "deps.mmd", "Mermaid")
+
+    def _output_graph(
+        self,
+        generator_class: type,
+        output_path_str: str,
+        default_filename: str,
+        format_name: str,
+    ) -> None:
+        """Write a dependency graph to stdout or a file.
+
+        Args:
+            generator_class: The generator class to instantiate.
+            output_path_str: "-" for stdout, or a file path.
+            default_filename: Filename to use when writing to stdout via temp dir.
+            format_name: Human-readable format name for log messages.
+        """
+        import tempfile
+
+        if output_path_str == "-":
+            print(f"# {format_name} dependency graph")
+            with tempfile.TemporaryDirectory() as tmpdir:
+                gen = generator_class(
+                    output_filename=default_filename, output_dir=Path(tmpdir)
                 )
                 gen.generate(self)
-                logger.info("Wrote Mermaid graph to %s", mermaid_path)
+                print((Path(tmpdir) / default_filename).read_text())
+        else:
+            output_path = Path(output_path_str)
+            gen = generator_class(
+                output_filename=output_path.name, output_dir=output_path.parent
+            )
+            gen.generate(self)
+            logger.info("Wrote %s graph to %s", format_name, output_path_str)
 
     # =========================================================================
     # Package Discovery

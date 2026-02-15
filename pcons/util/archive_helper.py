@@ -30,15 +30,10 @@ def create_tarfile(
         compression: Compression type (None, "gzip", "bz2", "xz").
         base_dir: Base directory for computing archive paths.
     """
-    mode = "w"
-    if compression == "gzip":
-        mode = "w:gz"
-    elif compression == "bz2":
-        mode = "w:bz2"
-    elif compression == "xz":
-        mode = "w:xz"
+    compression_modes = {"gzip": "w:gz", "bz2": "w:bz2", "xz": "w:xz"}
+    mode = compression_modes.get(compression, "w") if compression else "w"
 
-    with tarfile.open(output, mode) as tar:
+    with tarfile.open(output, mode) as tar:  # type: ignore[call-overload]
         for f in files:
             # Compute archive name relative to base_dir
             try:

@@ -59,7 +59,7 @@ from typing import TYPE_CHECKING, Any
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.graph import topological_sort_targets
-from pcons.core.node import FileNode
+from pcons.core.node import FileNode, Node
 from pcons.core.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
@@ -181,8 +181,7 @@ class ObjectNodeFactory:
             handler = toolchain.get_source_handler(source.suffix)
             if handler is not None:
                 if env.has_tool(handler.tool_name):
-                    result: SourceHandler = handler
-                    return result
+                    return handler
                 else:
                     logger.warning(
                         "Tool '%s' required for '%s' files is not available in the "
@@ -458,55 +457,7 @@ class OutputNodeFactory:
         lib_node = self.project.node(lib_path)
         lib_node.depends(target.object_nodes)
 
-        # Get auxiliary input files first so we can filter them from dep_libs
-        builder_data = getattr(target, "_builder_data", {}) or {}
-        auxiliary_inputs = builder_data.get("auxiliary_inputs", [])
-        auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
-
-        # Add dependency output nodes from linked targets
-        # Filter out auxiliary inputs to avoid duplicates (they're added separately)
-        dep_libs = self._collect_dependency_outputs(target)
-        if dep_libs:
-            # Filter out any nodes that are auxiliary inputs
-            dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
-            if dep_libs:
-                lib_node.depends(dep_libs)
-
-        # Add auxiliary input files as implicit dependencies
-        # These are dependencies for build ordering but NOT passed as linker inputs
-        # (they're passed via their specific flags like /MANIFESTINPUT:)
-        if auxiliary_inputs:
-            linker_input_nodes = [node for node, _, _ in auxiliary_inputs]
-            lib_node.implicit_deps.extend(linker_input_nodes)
-
-        # Compute effective link requirements
-        effective_link = compute_effective_requirements(
-            target, env, for_compilation=False
-        )
-
-        # Add auxiliary input flags to link flags
-        # Also add extra_flags from handlers (once per handler type)
-        link_flags = list(effective_link.link_flags)
-        seen_handlers: set[str] = (
-            set()
-        )  # Track handlers by suffix to add extra_flags once
-        for _, flag, handler in auxiliary_inputs:
-            link_flags.append(flag)
-            if handler.extra_flags and handler.suffix not in seen_handlers:
-                link_flags.extend(handler.extra_flags)
-                seen_handlers.add(handler.suffix)
-
-        # Determine linker language - we use 'link' tool for linking
-        # but track the language so toolchain context can set appropriate linker
-        link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
-
-        # Create context object from effective requirements
-        # We need to update link_flags in effective_link before creating context
-        # Pass language and env so the context can determine the appropriate linker
-        effective_link.link_flags = link_flags
-        context = CompileLinkContext.from_effective_requirements(
-            effective_link, language=link_language, env=env
-        )
+        link_language, context = self._setup_link_node(target, env, lib_node)
 
         lib_node._build_info = {
             "tool": "link",
@@ -572,55 +523,7 @@ class OutputNodeFactory:
         prog_node = self.project.node(prog_path)
         prog_node.depends(target.object_nodes)
 
-        # Get auxiliary input files first so we can filter them from dep_libs
-        builder_data_prog = getattr(target, "_builder_data", {}) or {}
-        auxiliary_inputs = builder_data_prog.get("auxiliary_inputs", [])
-        auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
-
-        # Add dependency output nodes from linked targets
-        # Filter out auxiliary inputs to avoid duplicates (they're added separately)
-        dep_libs = self._collect_dependency_outputs(target)
-        if dep_libs:
-            # Filter out any nodes that are auxiliary inputs
-            dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
-            if dep_libs:
-                prog_node.depends(dep_libs)
-
-        # Add auxiliary input files as implicit dependencies
-        # These are dependencies for build ordering but NOT passed as linker inputs
-        # (they're passed via their specific flags like /MANIFESTINPUT:)
-        if auxiliary_inputs:
-            linker_input_nodes = [node for node, _, _ in auxiliary_inputs]
-            prog_node.implicit_deps.extend(linker_input_nodes)
-
-        # Compute effective link requirements
-        effective_link = compute_effective_requirements(
-            target, env, for_compilation=False
-        )
-
-        # Add auxiliary input flags to link flags
-        # Also add extra_flags from handlers (once per handler type)
-        link_flags = list(effective_link.link_flags)
-        seen_handlers: set[str] = (
-            set()
-        )  # Track handlers by suffix to add extra_flags once
-        for _, flag, handler in auxiliary_inputs:
-            link_flags.append(flag)
-            if handler.extra_flags and handler.suffix not in seen_handlers:
-                link_flags.extend(handler.extra_flags)
-                seen_handlers.add(handler.suffix)
-
-        # Determine linker language - we use 'link' tool for linking
-        # but track the language so toolchain context can set appropriate linker
-        link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
-
-        # Create context object from effective requirements
-        # We need to update link_flags in effective_link before creating context
-        # Pass language and env so the context can determine the appropriate linker
-        effective_link.link_flags = link_flags
-        context = CompileLinkContext.from_effective_requirements(
-            effective_link, language=link_language, env=env
-        )
+        link_language, context = self._setup_link_node(target, env, prog_node)
 
         prog_node._build_info = {
             "tool": "link",
@@ -634,6 +537,65 @@ class OutputNodeFactory:
         target.output_nodes.append(prog_node)
         target.nodes.append(prog_node)
         env.register_node(prog_node)
+
+    def _setup_link_node(
+        self,
+        target: Target,
+        env: Environment,
+        output_node: FileNode,
+    ) -> tuple[str, CompileLinkContext]:
+        """Set up dependencies, auxiliary inputs, and link context for an output node.
+
+        Shared logic for both shared library and program output creation.
+        Handles dependency collection, auxiliary input filtering, effective
+        requirements computation, and context creation.
+
+        Args:
+            target: The target being linked.
+            env: Build environment.
+            output_node: The output node (library or program) to configure.
+
+        Returns:
+            Tuple of (link_language, context) for use in _build_info.
+        """
+        builder_data = getattr(target, "_builder_data", {}) or {}
+        auxiliary_inputs = builder_data.get("auxiliary_inputs", [])
+        auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
+
+        # Add dependency output nodes, filtering out auxiliary inputs
+        dep_libs = self._collect_dependency_outputs(target)
+        if dep_libs:
+            dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
+            if dep_libs:
+                output_node.depends(dep_libs)
+
+        # Add auxiliary input files as implicit dependencies
+        if auxiliary_inputs:
+            linker_input_nodes = [node for node, _, _ in auxiliary_inputs]
+            output_node.implicit_deps.extend(linker_input_nodes)
+
+        # Compute effective link requirements
+        effective_link = compute_effective_requirements(
+            target, env, for_compilation=False
+        )
+
+        # Add auxiliary input flags to link flags
+        link_flags = list(effective_link.link_flags)
+        seen_handlers: set[str] = set()
+        for _, flag, handler in auxiliary_inputs:
+            link_flags.append(flag)
+            if handler.extra_flags and handler.suffix not in seen_handlers:
+                link_flags.extend(handler.extra_flags)
+                seen_handlers.add(handler.suffix)
+
+        link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
+
+        effective_link.link_flags = link_flags
+        context = CompileLinkContext.from_effective_requirements(
+            effective_link, language=link_language, env=env
+        )
+
+        return link_language, context
 
     def _collect_dependency_outputs(self, target: Target) -> list[FileNode]:
         """Collect output nodes from all dependencies.
@@ -695,12 +657,7 @@ class CommandNodeFactory:
         target: Target,  # noqa: ARG002
         env: Environment | None,  # noqa: ARG002
     ) -> None:
-        """Resolve is not needed for Command targets.
-
-        Command targets already have their output_nodes populated by
-        GenericCommandBuilder. This method is a no-op.
-        """
-        pass
+        """No-op: Command targets already have output_nodes from GenericCommandBuilder."""
 
     def resolve_pending(self, target: Target) -> None:
         """Resolve pending Target sources for a Command target.
@@ -1049,30 +1006,30 @@ class Resolver:
         4. Stores the result in _build_info["command"]
         """
 
-        # Collect all nodes with _build_info from targets
+        # Collect all nodes with _build_info, deduplicating via seen set
         nodes_to_expand: list[FileNode] = []
+        seen: set[FileNode] = set()
+
+        def _add_node(node: Node) -> None:
+            if (
+                node not in seen
+                and isinstance(node, FileNode)
+                and node._build_info is not None
+            ):
+                seen.add(node)
+                nodes_to_expand.append(node)
 
         for target in self.project.targets:
-            # Collect object nodes
             for node in target.object_nodes:
-                if isinstance(node, FileNode) and hasattr(node, "_build_info"):
-                    nodes_to_expand.append(node)
-            # Collect output nodes
+                _add_node(node)
             for node in target.output_nodes:
-                if isinstance(node, FileNode) and hasattr(node, "_build_info"):
-                    nodes_to_expand.append(node)
-            # Collect other nodes
+                _add_node(node)
             for node in target.nodes:
-                if isinstance(node, FileNode) and hasattr(node, "_build_info"):
-                    if node not in nodes_to_expand:
-                        nodes_to_expand.append(node)
+                _add_node(node)
 
-        # Also check nodes tracked in environments
         for env in self.project.environments:
             for node in getattr(env, "_created_nodes", []):
-                if isinstance(node, FileNode) and hasattr(node, "_build_info"):
-                    if node not in nodes_to_expand:
-                        nodes_to_expand.append(node)
+                _add_node(node)
 
         # Expand commands for each node
         for node in nodes_to_expand:
@@ -1086,7 +1043,7 @@ class Resolver:
         """
         from pcons.core.environment import Environment
 
-        build_info = getattr(node, "_build_info", None)
+        build_info = node._build_info
         if build_info is None:
             return
 
@@ -1167,13 +1124,13 @@ class Resolver:
                         # Use extra_flags directly - they already include base env flags
                         # via compute_effective_requirements(). No merging needed.
                         # Templates use $cc.flags, not $cc.extra_flags
-                        tool_overrides[f"{tool_name}.flags"] = list(val)
+                        tool_overrides[f"{tool_name}.flags"] = list(val)  # type: ignore[arg-type]
                 elif key == "ldflags":
                     # ldflags are link flags - only apply to link commands
                     if is_link_command:
                         # Use ldflags directly - they already include base env flags
                         # via compute_effective_requirements(). No merging needed.
-                        tool_overrides[f"{tool_name}.flags"] = list(val)
+                        tool_overrides[f"{tool_name}.flags"] = list(val)  # type: ignore[arg-type]
                 elif key == "linker_cmd":
                     # linker_cmd overrides link.cmd (e.g., clang++ for C++ linking)
                     if is_link_command:

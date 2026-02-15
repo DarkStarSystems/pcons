@@ -77,9 +77,7 @@ def is_separated_arg_flag(
         >>> is_separated_arg_flag("-O2", gcc_flags)
         False
     """
-    if separated_arg_flags is None:
-        separated_arg_flags = DEFAULT_SEPARATED_ARG_FLAGS
-    return flag in separated_arg_flags
+    return flag in (separated_arg_flags or DEFAULT_SEPARATED_ARG_FLAGS)
 
 
 def deduplicate_flags(

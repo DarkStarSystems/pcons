@@ -30,8 +30,6 @@ def setup_logging(verbose: bool = False, debug: str | None = None) -> None:
                Comma-separated list: "resolve,subst,env,configure,generate,deps,all"
                Can also be set via PCONS_DEBUG environment variable.
     """
-    import os
-
     from pcons.core.debug import init_debug
 
     # Check CLI arg first, then environment variable
@@ -242,6 +240,25 @@ def run_script(
                 os.environ.pop(key, None)
 
 
+def _find_ninja() -> list[str] | None:
+    """Find ninja executable, falling back to uvx.
+
+    Returns:
+        Command prefix list (e.g., ["ninja"] or ["uvx", "ninja"]),
+        or None if neither is found.
+    """
+    ninja = shutil.which("ninja")
+    if ninja is not None:
+        return [ninja]
+
+    uvx = shutil.which("uvx")
+    if uvx is not None:
+        logger.info("ninja not in PATH, using 'uvx ninja'")
+        return [uvx, "ninja"]
+
+    return None
+
+
 def run_ninja(
     build_dir: Path,
     targets: list[str] | None = None,
@@ -266,27 +283,14 @@ def run_ninja(
         logger.info("Run 'pcons generate' first to create build files")
         return 1
 
-    # Find ninja - try direct path first, then uvx
-    ninja = shutil.which("ninja")
-    use_uvx = False
-    if ninja is None:
-        # Try uvx as fallback
-        uvx = shutil.which("uvx")
-        if uvx is not None:
-            ninja = uvx
-            use_uvx = True
-            logger.info("ninja not in PATH, using 'uvx ninja'")
-        else:
-            logger.error("ninja not found in PATH")
-            logger.info("Install ninja: https://ninja-build.org/")
-            logger.info("Or install uv and run with 'uvx ninja'")
-            return 1
+    ninja_cmd = _find_ninja()
+    if ninja_cmd is None:
+        logger.error("ninja not found in PATH")
+        logger.info("Install ninja: https://ninja-build.org/")
+        logger.info("Or install uv and run with 'uvx ninja'")
+        return 1
 
-    # Build ninja command
-    if use_uvx:
-        cmd = [ninja, "ninja", "-C", str(build_dir)]
-    else:
-        cmd = [ninja, "-C", str(build_dir)]
+    cmd = [*ninja_cmd, "-C", str(build_dir)]
 
     if jobs:
         cmd.extend(["-j", str(jobs)])
@@ -342,11 +346,7 @@ def run_xcodebuild(
         return 1
 
     # Map variant to Xcode configuration (capitalize first letter)
-    # Default to Release if not specified
-    if configuration:
-        xcode_config = configuration.capitalize()
-    else:
-        xcode_config = "Release"
+    xcode_config = configuration.capitalize() if configuration else "Release"
 
     # Build xcodebuild command
     cmd = [xcodebuild, "-project", str(xcodeproj), "-configuration", xcode_config]
@@ -555,9 +555,8 @@ def cmd_build(args: argparse.Namespace) -> int:
                 build_dir = Path(args.build_dir)
 
     # Get targets from args
-    extra = getattr(args, "extra", [])
-    _, targets_list = parse_variables(extra)
-    targets = targets_list if targets_list else None
+    _, targets_list = parse_variables(getattr(args, "extra", []))
+    targets = targets_list or None
 
     jobs = getattr(args, "jobs", None)
     verbose = args.verbose
@@ -613,21 +612,12 @@ def cmd_clean(args: argparse.Namespace) -> int:
         logger.info("No build.ninja found, nothing to clean")
         return 0
 
-    ninja = shutil.which("ninja")
-    use_uvx = False
-    if ninja is None:
-        uvx = shutil.which("uvx")
-        if uvx is not None:
-            ninja = uvx
-            use_uvx = True
-        else:
-            logger.error("ninja not found in PATH")
-            return 1
+    ninja_cmd = _find_ninja()
+    if ninja_cmd is None:
+        logger.error("ninja not found in PATH")
+        return 1
 
-    if use_uvx:
-        cmd = [ninja, "ninja", "-C", str(build_dir), "-t", "clean"]
-    else:
-        cmd = [ninja, "-C", str(build_dir), "-t", "clean"]
+    cmd = [*ninja_cmd, "-C", str(build_dir), "-t", "clean"]
     logger.info("Running: %s", " ".join(cmd))
 
     try:
@@ -773,27 +763,24 @@ def _info_targets(args: argparse.Namespace, script: Path) -> int:
         entry = (target.name, outputs)
         by_type.setdefault(type_name, []).append(entry)
 
-    print("Targets:")
-    for ttype in type_order:
-        entries = by_type.pop(ttype.value, None)
-        if entries:
-            print(f"  [{ttype.value}]")
-            for name, outputs in entries:
-                if outputs:
-                    print(f"    {name:30s} -> {outputs}")
-                else:
-                    print(f"    {name}")
-            print()
-
-    # Any remaining types not in our order
-    for type_name, entries in by_type.items():
-        print(f"  [{type_name}]")
+    def print_entries(label: str, entries: list[tuple[str, str]]) -> None:
+        print(f"  [{label}]")
         for name, outputs in entries:
             if outputs:
                 print(f"    {name:30s} -> {outputs}")
             else:
                 print(f"    {name}")
         print()
+
+    print("Targets:")
+    for ttype in type_order:
+        entries = by_type.pop(ttype.value, None)
+        if entries:
+            print_entries(ttype.value, entries)
+
+    # Any remaining types not in our order
+    for type_name, entries in by_type.items():
+        print_entries(type_name, entries)
 
     return 0
 
@@ -1166,8 +1153,7 @@ def main() -> int:
     args.extra = getattr(args, "extra", [])
 
     # Run the specified command
-    result: int = args.func(args)
-    return result
+    return args.func(args)
 
 
 if __name__ == "__main__":

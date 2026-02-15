@@ -344,8 +344,7 @@ def subst(
 
     if isinstance(template, MultiCmd):
         return [_subst_command(cmd, ns, location) for cmd in template.commands]
-    else:
-        return _subst_command(template, ns, location)
+    return _subst_command(template, ns, location)
 
 
 def _subst_command(

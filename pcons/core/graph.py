@@ -7,15 +7,14 @@ topological sorting, cycle detection, and node collection.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+from collections import deque
+from typing import TYPE_CHECKING
 
 from pcons.core.errors import DependencyCycleError
 
 if TYPE_CHECKING:
     from pcons.core.node import Node
     from pcons.core.target import Target
-
-T = TypeVar("T")
 
 
 def topological_sort_targets(targets: list[Target]) -> list[Target]:
@@ -49,11 +48,11 @@ def topological_sort_targets(targets: list[Target]) -> list[Target]:
                 in_degree[target.name] += 1
 
     # Start with targets that have no dependencies
-    queue: list[str] = [name for name, count in in_degree.items() if count == 0]
+    queue = deque(name for name, count in in_degree.items() if count == 0)
     result: list[Target] = []
 
     while queue:
-        name = queue.pop(0)
+        name = queue.popleft()
         result.append(target_map[name])
 
         # Reduce in-degree for all dependents
@@ -64,7 +63,6 @@ def topological_sort_targets(targets: list[Target]) -> list[Target]:
 
     # If we didn't process all targets, there's a cycle
     if len(result) != len(targets):
-        # Find nodes still in the cycle
         cycle_nodes = [name for name, count in in_degree.items() if count > 0]
         raise DependencyCycleError(cycle_nodes)
 
@@ -146,11 +144,11 @@ def topological_sort_nodes(nodes: list[Node]) -> list[Node]:
                 in_degree[node.name] += 1
 
     # Start with nodes that have no dependencies
-    queue: list[str] = [name for name, count in in_degree.items() if count == 0]
+    queue = deque(name for name, count in in_degree.items() if count == 0)
     result: list[Node] = []
 
     while queue:
-        name = queue.pop(0)
+        name = queue.popleft()
         result.append(node_map[name])
 
         for dependent_name in dependents[name]:

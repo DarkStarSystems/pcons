@@ -174,13 +174,8 @@ def compute_effective_requirements(
     result.merge(target.public)
 
     # Layer 3: All dependencies' public requirements (transitive)
+    # transitive_dependencies() includes direct dependencies via DFS
     for dep in target.transitive_dependencies():
-        result.merge(dep.public)
-
-    # Also merge direct dependencies' public requirements
-    # (transitive_dependencies returns deps before dependents,
-    # but we want to ensure we don't miss any)
-    for dep in target.dependencies:
         result.merge(dep.public)
 
     return result
@@ -214,8 +209,7 @@ def _get_primary_tool(target: Target, env: Environment) -> str | None:
             for toolchain in env.toolchains:
                 handler = toolchain.get_source_handler(source.path.suffix)
                 if handler is not None:
-                    tool_name: str = handler.tool_name
-                    return tool_name
+                    return handler.tool_name
 
     # Default to C++ if available
     if env.has_tool("cxx"):

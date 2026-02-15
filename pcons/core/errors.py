@@ -7,6 +7,7 @@ optional source location information for better error messages.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -152,10 +153,7 @@ class MissingSourceError(PconsError):
             msg += f"\n  Referenced by target: {target_name}"
 
         # Suggest checking the path
-        from pathlib import Path as P
-
-        p = P(path)
-        if not p.is_absolute():
+        if not Path(path).is_absolute():
             msg += "\n  Tip: Path is relative. Check that it's relative to the source directory."
 
         super().__init__(msg, location)

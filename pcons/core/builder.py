@@ -699,11 +699,9 @@ class GenericCommandBuilder(BaseBuilder):
                 # ${TARGETS[n]} -> TargetPath(index=n)
                 index = int(match.group(1))
                 result.append(TargetPath(index=index))
-            elif "$SOURCE" in token or "$TARGET" in token:
-                # Token has embedded variables - keep as string for generator to handle
-                # This covers cases like /Fo$TARGET or -MF$TARGET.d
-                result.append(token)
             else:
+                # Keep as string (covers embedded variables like /Fo$TARGET
+                # and plain tokens)
                 result.append(token)
 
         return result

@@ -37,6 +37,30 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
 
 
+def _deduplicate_target_name(project: Project, base_name: str) -> str:
+    """Generate a unique target name, appending a numeric suffix if needed.
+
+    Args:
+        project: The project to check for existing targets.
+        base_name: The desired target name.
+
+    Returns:
+        A target name that does not conflict with existing targets.
+    """
+    target_name = base_name
+    counter = 1
+    while project.get_target(target_name) is not None:
+        target_name = f"{base_name}_{counter}"
+        counter += 1
+    if target_name != base_name:
+        logger.warning(
+            "Install target renamed from '%s' to '%s' to avoid conflict",
+            base_name,
+            target_name,
+        )
+    return target_name
+
+
 class InstallTool(StandaloneTool):
     """Tool for file and directory installation operations.
 
@@ -465,20 +489,9 @@ class InstallBuilder:
             A Target representing the install operation.
         """
         dest_dir = Path(dest_dir)
-        target_name = name or f"install_{dest_dir.name}"
-
-        # Handle duplicate target names
-        base_name = target_name
-        counter = 1
-        while project.get_target(target_name) is not None:
-            target_name = f"{base_name}_{counter}"
-            counter += 1
-        if target_name != base_name:
-            logger.warning(
-                "Install target renamed from '%s' to '%s' to avoid conflict",
-                base_name,
-                target_name,
-            )
+        target_name = _deduplicate_target_name(
+            project, name or f"install_{dest_dir.name}"
+        )
 
         # Create the install target
         install_target = Target(
@@ -539,20 +552,7 @@ class InstallAsBuilder:
             )
 
         dest = Path(dest)
-        target_name = name or f"install_{dest.name}"
-
-        # Handle duplicate target names
-        base_name = target_name
-        counter = 1
-        while project.get_target(target_name) is not None:
-            target_name = f"{base_name}_{counter}"
-            counter += 1
-        if target_name != base_name:
-            logger.warning(
-                "Install target renamed from '%s' to '%s' to avoid conflict",
-                base_name,
-                target_name,
-            )
+        target_name = _deduplicate_target_name(project, name or f"install_{dest.name}")
 
         # Create the install target
         install_target = Target(
@@ -600,20 +600,9 @@ class InstallDirBuilder:
             A Target representing the install operation.
         """
         dest_dir = Path(dest_dir)
-        target_name = name or f"install_dir_{dest_dir.name}"
-
-        # Handle duplicate target names
-        base_name = target_name
-        counter = 1
-        while project.get_target(target_name) is not None:
-            target_name = f"{base_name}_{counter}"
-            counter += 1
-        if target_name != base_name:
-            logger.warning(
-                "InstallDir target renamed from '%s' to '%s' to avoid conflict",
-                base_name,
-                target_name,
-            )
+        target_name = _deduplicate_target_name(
+            project, name or f"install_dir_{dest_dir.name}"
+        )
 
         # Create the install target
         install_target = Target(

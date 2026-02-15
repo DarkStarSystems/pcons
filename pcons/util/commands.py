@@ -79,13 +79,9 @@ def copytree(
         # Write ninja depfile format: stamp_file: deps
         # Use the stamp file (or dest) as the "target" for dependency purposes
         target_str = (stamp or str(dest_path)).replace("\\", "/")
+        deps_str = " \\\n  ".join(source_files)
         with open(depfile_path, "w") as f:
-            f.write(f"{target_str}: \\\n")
-            for i, src_file in enumerate(source_files):
-                if i < len(source_files) - 1:
-                    f.write(f"  {src_file} \\\n")
-                else:
-                    f.write(f"  {src_file}\n")
+            f.write(f"{target_str}: \\\n  {deps_str}\n")
 
     # Touch stamp file if specified
     if stamp:

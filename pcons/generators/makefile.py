@@ -103,12 +103,7 @@ class MakefileGenerator(BaseGenerator):
 
     def _write_phony_declaration(self, f: TextIO, project: Project) -> None:
         """Write .PHONY declaration for all phony targets."""
-        phony_targets = ["all", "clean"]
-
-        # Add aliases
-        for name in project.aliases.keys():
-            phony_targets.append(name)
-
+        phony_targets = ["all", "clean", *project.aliases]
         f.write("# Phony targets\n")
         f.write(f".PHONY: {' '.join(phony_targets)}\n")
         f.write("\n")
@@ -791,9 +786,7 @@ class MakefileGenerator(BaseGenerator):
         Returns:
             Transformed path suitable for make command.
         """
-        from pathlib import Path as PathlibPath
-
-        path_obj = PathlibPath(path)
+        path_obj = Path(path)
 
         # Absolute paths stay unchanged
         if path_obj.is_absolute():
@@ -907,41 +900,45 @@ class MakefileGenerator(BaseGenerator):
             out_paths = [out_path]
 
         # Expand tokens
+        # Pre-compute whether tokens contain indexed SourcePath/TargetPath markers
+        has_indexed_source = any(
+            isinstance(t, SourcePath) and t.index > 0 for t in tokens
+        )
+        has_indexed_target = any(
+            isinstance(t, TargetPath) and t.index > 0 for t in tokens
+        )
+
         # Handle typed markers (SourcePath/TargetPath) first, then string patterns
         result: list[str] = []
         for token in tokens:
             # Handle typed marker objects (clean path)
             if isinstance(token, SourcePath):
-                prefix = token.prefix if token.prefix else ""
-                suffix = token.suffix if token.suffix else ""
                 # Indexed access or all sources
-                if token.index > 0 or any(
-                    isinstance(t, SourcePath) and t.index > 0 for t in tokens
-                ):
+                if token.index > 0 or has_indexed_source:
                     # Indexed access: use specific source
                     if token.index < len(in_paths):
-                        result.append(f"{prefix}{in_paths[token.index]}{suffix}")
+                        result.append(
+                            f"{token.prefix}{in_paths[token.index]}{token.suffix}"
+                        )
                     elif in_paths:
-                        result.append(f"{prefix}{in_paths[0]}{suffix}")
+                        result.append(f"{token.prefix}{in_paths[0]}{token.suffix}")
                 else:
                     # Non-indexed: expand to all input paths
                     for p in in_paths:
-                        result.append(f"{prefix}{p}{suffix}")
+                        result.append(f"{token.prefix}{p}{token.suffix}")
             elif isinstance(token, TargetPath):
                 # Indexed access or single output
-                prefix = token.prefix if token.prefix else ""
-                suffix = token.suffix if token.suffix else ""
-                if token.index > 0 or any(
-                    isinstance(t, TargetPath) and t.index > 0 for t in tokens
-                ):
+                if token.index > 0 or has_indexed_target:
                     # Indexed access: use specific target
                     if token.index < len(out_paths):
-                        result.append(f"{prefix}{out_paths[token.index]}{suffix}")
+                        result.append(
+                            f"{token.prefix}{out_paths[token.index]}{token.suffix}"
+                        )
                     else:
-                        result.append(f"{prefix}{out_path}{suffix}")
+                        result.append(f"{token.prefix}{out_path}{token.suffix}")
                 else:
                     # Non-indexed: use primary output
-                    result.append(f"{prefix}{out_path}{suffix}")
+                    result.append(f"{token.prefix}{out_path}{token.suffix}")
             # Handle string patterns (legacy support)
             elif isinstance(token, str):
                 if token in ("$SOURCES", "$SOURCE", "$in"):
@@ -1016,8 +1013,6 @@ class MakefileGenerator(BaseGenerator):
         Returns:
             Command with Make-compatible variables.
         """
-        import re
-
         # Convert plural forms first (so they don't match singular)
         command = command.replace("$SOURCES", "$in")
         command = command.replace("$TARGETS", "$out")

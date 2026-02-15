@@ -189,7 +189,6 @@ class ToolchainRegistry:
             A configured toolchain, or None if none available.
         """
         # Collect unique entries in preference order
-        tried: list[str] = []
         entries_to_try: list[ToolchainEntry] = []
         seen_classes: set[type] = set()
 
@@ -211,7 +210,6 @@ class ToolchainRegistry:
 
         # Try each entry
         for entry in entries_to_try:
-            tried.append(entry.aliases[0] if entry.aliases else "unknown")
             if shutil.which(entry.check_command) is not None:
                 return entry.create_toolchain()
 
@@ -641,23 +639,22 @@ class BaseToolchain(ABC):
         # (subclasses may override this mapping)
         return self._linker_for_language(max_lang)
 
+    # Default mapping from language to linker tool name.
+    # Override in subclasses if the mapping is different.
+    _LANGUAGE_TO_LINKER: dict[str, str] = {
+        "c": "cc",
+        "cxx": "cxx",
+        "objcxx": "cxx",
+        "fortran": "fortran",
+        "cuda": "cuda",
+    }
+
     def _linker_for_language(self, language: str) -> str:
         """Get the linker tool name for a language.
 
         Override in subclasses if the mapping is different.
         """
-        # Default: use the language's compiler as linker
-        # (e.g., 'cxx' means use g++ to link)
-        if language == "c":
-            return "cc"
-        elif language in ("cxx", "objcxx"):
-            return "cxx"
-        elif language == "fortran":
-            return "fortran"
-        elif language == "cuda":
-            return "cuda"
-        else:
-            return "link"
+        return self._LANGUAGE_TO_LINKER.get(language, "link")
 
     # =========================================================================
     # Source Handler Methods - Override in subclasses for tool-agnosticism
