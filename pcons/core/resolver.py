@@ -1121,10 +1121,20 @@ class Resolver:
                 if key == "extra_flags":
                     # extra_flags are compile flags - only apply to compile commands
                     if is_compile_command:
-                        # Use extra_flags directly - they already include base env flags
-                        # via compute_effective_requirements(). No merging needed.
-                        # Templates use $cc.flags, not $cc.extra_flags
-                        tool_overrides[f"{tool_name}.flags"] = list(val)  # type: ignore[arg-type]
+                        # Start with base env flags for this specific tool
+                        # (e.g., env.cc.flags for .c, env.cxx.flags for .cpp)
+                        # This ensures language-specific flags like -std=c++20
+                        # only apply to the correct language's sources.
+                        tool_cfg = (
+                            getattr(env, tool_name, None)
+                            if env.has_tool(tool_name)
+                            else None
+                        )
+                        base_flags = list(getattr(tool_cfg, "flags", None) or [])
+                        # Merge effective requirement flags (includes, defines,
+                        # target/dep requirements) on top of base flags
+                        merged = base_flags + [f for f in val if f not in base_flags]  # type: ignore[union-attr]
+                        tool_overrides[f"{tool_name}.flags"] = merged
                 elif key == "ldflags":
                     # ldflags are link flags - only apply to link commands
                     if is_link_command:

@@ -157,10 +157,11 @@ def compute_effective_requirements(
                 if define not in result.defines:
                     result.defines.append(define)
 
-        # Get flags from tool config (use flag-aware merge)
-        flags = getattr(tool_config, "flags", None)
-        if flags:
-            merge_flags(result.compile_flags, list(flags), separated_arg_flags)
+        # NOTE: We intentionally do NOT merge env.<tool>.flags here.
+        # In mixed-language targets (C + C++), the primary tool's flags
+        # (e.g., cxx.flags with -std=c++20) would leak to all sources.
+        # Instead, per-tool base flags are applied in resolver.py's
+        # _expand_single_node_command(), where tool_name is per-source.
 
     # Note: env.link settings (frameworks, libs, libdirs) are baked into the
     # ninja rule via template expansion. Effective requirements only contain
