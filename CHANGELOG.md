@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-02-16
+
+### Fixed
+
+- **C++ flags no longer leak to C compilation in mixed-language targets**: When a target contains both `.c` and `.cpp` sources (e.g., `Program("app", env, sources=["main.cpp", "util.c"])`), language-specific flags like `-std=c++20` set on `env.cxx.flags` no longer leak to `.c` file compilation. Previously, `compute_effective_requirements()` merged the primary tool's flags into a shared list applied to all sources. Now per-tool base flags are applied during command expansion where the tool name is correctly determined per-source file.
+
 ## [0.7.2] - 2026-02-15
 
 ### Added
@@ -479,7 +485,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.3...HEAD
+[0.7.3]: https://github.com/DarkStarSystems/pcons/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/DarkStarSystems/pcons/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/DarkStarSystems/pcons/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/DarkStarSystems/pcons/compare/v0.6.1...v0.7.0
