@@ -980,7 +980,13 @@ def create_default_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="pcons",
         description="A Python-based build system that generates Ninja files.",
-        epilog="Run 'pcons <command> --help' for command-specific help.",
+        epilog=(
+            "Run 'pcons <command> --help' for command-specific help.\n"
+            "\n"
+            "GitHub:  https://github.com/DarkStarSystems/pcons\n"
+            "Docs:    https://pcons.readthedocs.io/"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version", action="version", version=f"%(prog)s {__version__}"
@@ -1016,7 +1022,12 @@ def create_full_parser() -> argparse.ArgumentParser:
             "  pcons hello               Generate and build 'hello'\n"
             "  pcons CC=clang hello      Set CC=clang, generate and build 'hello'"
         ),
-        epilog="Run 'pcons <command> --help' for command-specific help.",
+        epilog=(
+            "Run 'pcons <command> --help' for command-specific help.\n"
+            "\n"
+            "GitHub:  https://github.com/DarkStarSystems/pcons\n"
+            "Docs:    https://pcons.readthedocs.io/"
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
