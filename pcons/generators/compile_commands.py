@@ -87,7 +87,16 @@ class CompileCommandsGenerator(BaseGenerator):
         """
         root_dir = project.root_dir
         link_path = root_dir / "compile_commands.json"
-        target_path = os.path.relpath(output_file, root_dir)
+
+        # If build_dir is the project root, the file is already there
+        if output_file.resolve() == link_path.resolve():
+            return
+
+        try:
+            target_path = os.path.relpath(output_file, root_dir)
+        except ValueError:
+            # On Windows, relpath fails across drive letters
+            return
 
         if link_path.exists() or link_path.is_symlink():
             if link_path.is_symlink():
