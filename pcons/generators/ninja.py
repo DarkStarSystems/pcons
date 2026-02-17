@@ -43,6 +43,8 @@ class NinjaGenerator(BaseGenerator):
         # Creates build/build.ninja
     """
 
+    _supports_compile_commands = True
+
     # Characters that need escaping in Ninja
     ESCAPE_CHARS = re.compile(r"([$:\s])")
 

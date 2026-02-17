@@ -80,6 +80,8 @@ class XcodeGenerator(BaseGenerator):
         # Build with: xcodebuild -project build/myapp.xcodeproj
     """
 
+    _supports_compile_commands = True
+
     def __init__(self) -> None:
         super().__init__("xcode")
         self._xcode_project: XcodeProject | None = None

@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
-from pcons.generators.compile_commands import CompileCommandsGenerator
 from pcons.generators.mermaid import MermaidGenerator
 
 # =============================================================================
@@ -69,10 +68,6 @@ generator.generate(project)
 # Generate Mermaid dependency diagram
 mermaid_gen = MermaidGenerator(direction="LR")
 mermaid_gen.generate(project)
-
-# Generate compile_commands.json for IDE integration
-cc_gen = CompileCommandsGenerator()
-cc_gen.generate(project)
 
 print(f"Generated {build_dir / 'build.ninja'}")
 print(f"Generated {build_dir / 'compile_commands.json'}")

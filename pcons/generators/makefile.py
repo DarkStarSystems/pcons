@@ -43,6 +43,8 @@ class MakefileGenerator(BaseGenerator):
         # Creates build/Makefile
     """
 
+    _supports_compile_commands = True
+
     # Characters that need escaping in Makefiles
     # $ -> $$, # -> \#, spaces in targets need escaping
     ESCAPE_DOLLAR = re.compile(r"\$")

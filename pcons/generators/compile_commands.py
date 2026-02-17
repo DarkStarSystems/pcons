@@ -8,6 +8,8 @@ clang-tidy can use for code intelligence.
 from __future__ import annotations
 
 import json
+import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -18,6 +20,8 @@ from pcons.toolchains.build_context import CompileLinkContext
 if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.core.target import Target
+
+logger = logging.getLogger(__name__)
 
 
 class CompileCommandsGenerator(BaseGenerator):
@@ -67,6 +71,47 @@ class CompileCommandsGenerator(BaseGenerator):
         with open(output_file, "w") as f:
             json.dump(commands, f, indent=2)
             f.write("\n")
+
+        self._create_root_symlink(output_file, project)
+
+    def _create_root_symlink(self, output_file: Path, project: Project) -> None:
+        """Create a symlink to compile_commands.json in the project root.
+
+        This allows IDEs and tools like clangd to find the file at the
+        project root without configuration. If the symlink cannot be
+        created (e.g., on Windows without privileges), a warning is logged.
+
+        Args:
+            output_file: Path to the generated compile_commands.json.
+            project: The project (used for root_dir).
+        """
+        root_dir = project.root_dir
+        link_path = root_dir / "compile_commands.json"
+        target_path = os.path.relpath(output_file, root_dir)
+
+        if link_path.exists() or link_path.is_symlink():
+            if link_path.is_symlink():
+                # Check if it already points to the right place
+                existing_target = os.readlink(link_path)
+                if Path(existing_target) == Path(target_path):
+                    return  # Already correct
+                # Wrong target, update it
+                link_path.unlink()
+            else:
+                # Regular file — don't overwrite
+                logger.warning(
+                    "compile_commands.json exists at project root as a "
+                    "regular file; not replacing with symlink"
+                )
+                return
+
+        try:
+            link_path.symlink_to(target_path)
+        except OSError as e:
+            logger.warning(
+                "Could not create compile_commands.json symlink at project root: %s",
+                e,
+            )
 
     def _collect_compile_commands(
         self, target: Target, project: Project

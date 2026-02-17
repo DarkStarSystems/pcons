@@ -44,6 +44,8 @@ class Generator(Protocol):
 class BaseGenerator:
     """Base class for generators with common functionality."""
 
+    _supports_compile_commands: bool = False
+
     def __init__(self, name: str) -> None:
         """Initialize a generator.
 
@@ -56,20 +58,33 @@ class BaseGenerator:
     def name(self) -> str:
         return self._name
 
-    def generate(self, project: Project) -> None:
+    def generate(self, project: Project, *, compile_commands: bool = True) -> None:
         """Generate build files.
 
         Auto-resolves the project if not already resolved, then
         calls _generate_impl() which subclasses must implement.
         The output directory is computed from project.build_dir.
 
+        For build generators (Ninja, Make, Xcode), also auto-generates
+        compile_commands.json for IDE integration unless disabled.
+
         Args:
             project: The configured project to generate for.
+            compile_commands: If True (default) and this generator supports
+                it, automatically generate compile_commands.json alongside
+                the build files.
         """
         if not project._resolved:
             project.resolve()
         output_dir = self._resolve_output_dir(project)
         self._generate_impl(project, output_dir)
+
+        if compile_commands and self._supports_compile_commands:
+            from pcons.generators.compile_commands import (
+                CompileCommandsGenerator,
+            )
+
+            CompileCommandsGenerator().generate(project)
 
     def _resolve_output_dir(self, project: Project) -> Path:
         """Compute the output directory from the project.
