@@ -33,7 +33,7 @@ register_builtin_builders()
 # Import modules namespace to make pcons.modules accessible
 from pcons import modules as modules  # noqa: E402, F401
 
-__version__ = "0.7.3"
+__version__ = "0.7.4"
 
 # Internal storage for CLI variables
 _cli_vars: dict[str, str] | None = None

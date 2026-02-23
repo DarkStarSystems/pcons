@@ -632,7 +632,6 @@ project/
 #!/usr/bin/env python3
 from pathlib import Path
 from pcons import Project, find_c_toolchain, Generator
-from pcons.generators.compile_commands import CompileCommandsGenerator
 
 project_dir = Path(__file__).parent
 src_dir = project_dir / "src"
@@ -662,14 +661,8 @@ simulator.link(libphysics)  # Gets BOTH physics and math includes!
 # Set defaults and generate
 project.Default(simulator)
 
-# Generate build files
-Generator().generate(project, build_dir)
-
-# Generate compile_commands.json for IDE integration
-CompileCommandsGenerator().generate(project, build_dir)
-
-print(f"Generated {build_dir / 'build.ninja'}")
-print(f"Generated {build_dir / 'compile_commands.json'}")
+# Generate build files (also auto-generates compile_commands.json)
+Generator().generate(project)
 ```
 
 ### Debug and Release Variants
@@ -1143,13 +1136,12 @@ msvcup is particularly useful in CI environments where you want reproducible bui
 
 ### IDE Integration
 
-Pcons generates `compile_commands.json` for IDE integration:
+Build generators (Ninja, Makefile, Xcode) automatically generate `compile_commands.json` alongside build files. A symlink is also created at the project root so tools find it automatically. No extra code is needed — just call `Generator().generate(project)` as usual.
+
+To disable auto-generation:
 
 ```python
-from pcons.generators.compile_commands import CompileCommandsGenerator
-
-# Generate compile_commands.json
-CompileCommandsGenerator().generate(project, build_dir)
+Generator().generate(project, compile_commands=False)
 ```
 
 This enables features in:

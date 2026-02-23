@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-02-23
+
+### Added
+
+- **Auto-generate `compile_commands.json` from build generators**: Ninja, Makefile, and Xcode generators now automatically generate `compile_commands.json` alongside build files for seamless IDE integration. A symlink is also created at the project root for tool discovery. No more manual `CompileCommandsGenerator()` calls needed. Opt out with `generator.generate(project, compile_commands=False)`.
+
+### Fixed
+
+- **`compile_commands.json` symlink on Windows cross-drive paths**: `os.path.relpath()` raises `ValueError` when source and build directories are on different Windows drives. Symlink creation is now skipped gracefully in that case, and also when `build_dir` is the project root (file already in place).
+
 ## [0.7.3] - 2026-02-16
 
 ### Fixed
@@ -485,7 +495,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.4...HEAD
+[0.7.4]: https://github.com/DarkStarSystems/pcons/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/DarkStarSystems/pcons/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/DarkStarSystems/pcons/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/DarkStarSystems/pcons/compare/v0.7.0...v0.7.1
