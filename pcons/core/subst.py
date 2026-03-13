@@ -174,7 +174,11 @@ class TargetPath:
     with the actual target path.
 
     Attributes:
-        index: Which target file (0 = first/only, for multi-output commands).
+        index: Which target file.  ``None`` (default) means "the" target —
+            maps to ``$out`` in Ninja.  An explicit integer (even 0) requests
+            indexed access — ``TargetPath(index=0)`` maps to ``$target_0``,
+            which is needed for multi-output builds where ``$out`` would
+            expand to *all* outputs.
         suffix: Suffix to append (e.g., ".d" for depfiles).
         prefix: Optional prefix (e.g., "-MF" for MSVC-style depfile flags).
 
@@ -186,7 +190,7 @@ class TargetPath:
         # TargetPath(suffix=".d") -> PathToken("", "build/obj/hello.o", "build", ".d")
     """
 
-    index: int = 0
+    index: int | None = None
     suffix: str = ""
     prefix: str = ""
 
@@ -199,7 +203,9 @@ class SourcePath:
     During resolution, it's converted to a PathToken with the actual source path.
 
     Attributes:
-        index: Which source file (0 = first/only, for multi-source commands).
+        index: Which source file.  ``None`` (default) means "the" source —
+            maps to ``$in`` in Ninja.  An explicit integer requests indexed
+            access (``$source_0``, ``$source_1``, etc.).
         suffix: Optional suffix to append.
         prefix: Optional prefix.
 
@@ -211,7 +217,7 @@ class SourcePath:
         # SourcePath() -> PathToken("", "src/hello.c", "project")
     """
 
-    index: int = 0
+    index: int | None = None
     suffix: str = ""
     prefix: str = ""
 

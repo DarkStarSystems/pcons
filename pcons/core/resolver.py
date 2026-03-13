@@ -534,6 +534,40 @@ class OutputNodeFactory:
             "env": env,
         }
 
+        # Generic multi-output support for Program builders.
+        # If the linker's Program builder is a MultiOutputBuilder, populate
+        # the outputs dict and create secondary output nodes (e.g. .wasm
+        # companion for Emscripten's .js primary).
+        from pcons.core.builder import MultiOutputBuilder
+        from pcons.core.node import OutputInfo
+
+        toolchain = env._toolchain
+        if toolchain and "link" in toolchain.tools:
+            link_tool = toolchain.tools["link"]
+            program_builder = link_tool.builders().get("Program")
+            if (
+                isinstance(program_builder, MultiOutputBuilder)
+                and len(program_builder.outputs) > 1
+            ):
+                outputs_dict: dict[str, OutputInfo] = {
+                    "primary": OutputInfo(path=prog_path, suffix=prog_path.suffix),
+                }
+                for spec in program_builder.outputs[1:]:
+                    secondary_path = prog_path.with_suffix(spec.suffix)
+                    outputs_dict[spec.name] = OutputInfo(
+                        path=secondary_path,
+                        suffix=spec.suffix,
+                        implicit=spec.implicit,
+                    )
+                    sec_node = self.project.node(secondary_path)
+                    sec_node._build_info = {
+                        "primary_node": prog_node,
+                        "output_name": spec.name,
+                    }
+                    target.output_nodes.append(sec_node)
+                    target.nodes.append(sec_node)
+                prog_node._build_info["outputs"] = outputs_dict
+
         target.output_nodes.append(prog_node)
         target.nodes.append(prog_node)
         env.register_node(prog_node)

@@ -207,7 +207,7 @@ class ClangClLinker(BaseTool):
                 "$link.cmd",
                 "/DLL",
                 "$link.flags",
-                TargetPath(prefix="/OUT:"),
+                TargetPath(prefix="/OUT:", index=0),
                 TargetPath(prefix="/IMPLIB:", index=1),
                 SourcePath(),
                 "${prefix(link.Lprefix, link.libdirs)}",

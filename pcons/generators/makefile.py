@@ -902,12 +902,13 @@ class MakefileGenerator(BaseGenerator):
             out_paths = [out_path]
 
         # Expand tokens
-        # Pre-compute whether tokens contain indexed SourcePath/TargetPath markers
+        # Pre-compute whether tokens contain indexed SourcePath/TargetPath markers.
+        # index=None means "auto"; an explicit int (even 0) triggers indexed mode.
         has_indexed_source = any(
-            isinstance(t, SourcePath) and t.index > 0 for t in tokens
+            isinstance(t, SourcePath) and t.index is not None for t in tokens
         )
         has_indexed_target = any(
-            isinstance(t, TargetPath) and t.index > 0 for t in tokens
+            isinstance(t, TargetPath) and t.index is not None for t in tokens
         )
 
         # Handle typed markers (SourcePath/TargetPath) first, then string patterns
@@ -916,12 +917,11 @@ class MakefileGenerator(BaseGenerator):
             # Handle typed marker objects (clean path)
             if isinstance(token, SourcePath):
                 # Indexed access or all sources
-                if token.index > 0 or has_indexed_source:
+                if token.index is not None or has_indexed_source:
                     # Indexed access: use specific source
-                    if token.index < len(in_paths):
-                        result.append(
-                            f"{token.prefix}{in_paths[token.index]}{token.suffix}"
-                        )
+                    idx = token.index or 0
+                    if idx < len(in_paths):
+                        result.append(f"{token.prefix}{in_paths[idx]}{token.suffix}")
                     elif in_paths:
                         result.append(f"{token.prefix}{in_paths[0]}{token.suffix}")
                 else:
@@ -930,12 +930,11 @@ class MakefileGenerator(BaseGenerator):
                         result.append(f"{token.prefix}{p}{token.suffix}")
             elif isinstance(token, TargetPath):
                 # Indexed access or single output
-                if token.index > 0 or has_indexed_target:
+                if token.index is not None or has_indexed_target:
                     # Indexed access: use specific target
-                    if token.index < len(out_paths):
-                        result.append(
-                            f"{token.prefix}{out_paths[token.index]}{token.suffix}"
-                        )
+                    idx = token.index or 0
+                    if idx < len(out_paths):
+                        result.append(f"{token.prefix}{out_paths[idx]}{token.suffix}")
                     else:
                         result.append(f"{token.prefix}{out_path}{token.suffix}")
                 else:

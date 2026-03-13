@@ -26,7 +26,11 @@ from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.generators.xcode import XcodeGenerator  # noqa: E402
-from pcons.toolchains import find_c_toolchain, find_wasi_toolchain  # noqa: E402
+from pcons.toolchains import (
+    find_c_toolchain,
+    find_emscripten_toolchain,
+    find_wasi_toolchain,
+)  # noqa: E402
 
 register_builtin_builders()
 
@@ -197,6 +201,7 @@ __all__ = [
     "XcodeGenerator",
     # Toolchain discovery
     "find_c_toolchain",
+    "find_emscripten_toolchain",
     "find_wasi_toolchain",
     # Module system
     "modules",

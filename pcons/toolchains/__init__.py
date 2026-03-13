@@ -32,6 +32,14 @@ from pcons.toolchains.cython import (
     CythonToolchain,
     CythonTranspiler,
 )
+from pcons.toolchains.emscripten import (
+    EmccArchiver,
+    EmccCCompiler,
+    EmccCxxCompiler,
+    EmccLinker,
+    EmscriptenToolchain,
+    find_emscripten_toolchain,
+)
 from pcons.toolchains.gcc import (
     GccArchiver,
     GccCCompiler,
@@ -136,6 +144,7 @@ __all__ = [
     # Toolchain finder and registry
     "find_c_toolchain",
     "find_cuda_toolchain",
+    "find_emscripten_toolchain",
     "find_wasi_toolchain",
     "toolchain_registry",
     # Build context classes
@@ -172,6 +181,12 @@ __all__ = [
     "MsvcLibrarian",
     "MsvcLinker",
     "MsvcToolchain",
+    # Emscripten toolchain
+    "EmccCCompiler",
+    "EmccCxxCompiler",
+    "EmccArchiver",
+    "EmccLinker",
+    "EmscriptenToolchain",
     # WASI toolchain
     "WasiCCompiler",
     "WasiCxxCompiler",

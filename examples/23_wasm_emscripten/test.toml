@@ -1,0 +1,21 @@
+# Test configuration for the wasm_emscripten example
+
+[test]
+description = "Demonstrates compiling a C program to WebAssembly via Emscripten"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/obj.hello/hello.o",
+    "build/hello.js",
+    "build/hello.wasm",
+]
+
+[verify]
+# Run the built .js with Node.js and check output
+commands = [
+    { run = "node build/hello.js", expect_stdout = "Hello from Emscripten!" },
+]
+
+[skip]
+# Requires emcc for building and node for verification
+require_commands = ["emcc", "node"]

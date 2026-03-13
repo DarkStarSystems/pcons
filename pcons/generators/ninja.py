@@ -824,26 +824,28 @@ class NinjaGenerator(BaseGenerator):
 
         # Pre-compute whether tokens contain indexed SourcePath/TargetPath markers,
         # which determines whether index-0 tokens use $in/$out or $source_0/$target_0.
+        # index=None means "auto" ($in/$out); index with an explicit int (even 0)
+        # triggers indexed mode ($source_N/$target_N) for all markers of that type.
         has_indexed_source = any(
-            isinstance(t, SourcePath) and t.index > 0 for t in tokens
+            isinstance(t, SourcePath) and t.index is not None for t in tokens
         )
         has_indexed_target = any(
-            isinstance(t, TargetPath) and t.index > 0 for t in tokens
+            isinstance(t, TargetPath) and t.index is not None for t in tokens
         )
 
         result: list[str] = []
         for token in tokens:
             if isinstance(token, SourcePath):
                 # Convert SourcePath marker to Ninja's $in or $source_N variable
-                if token.index > 0 or has_indexed_source:
-                    ninja_var = f"$source_{token.index}"
+                if token.index is not None or has_indexed_source:
+                    ninja_var = f"$source_{token.index or 0}"
                 else:
                     ninja_var = "$in"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
             elif isinstance(token, TargetPath):
                 # Convert TargetPath marker to Ninja's $out or $target_N variable
-                if token.index > 0 or has_indexed_target:
-                    ninja_var = f"$target_{token.index}"
+                if token.index is not None or has_indexed_target:
+                    ninja_var = f"$target_{token.index or 0}"
                 else:
                     ninja_var = "$out"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
