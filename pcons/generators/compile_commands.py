@@ -202,11 +202,20 @@ class CompileCommandsGenerator(BaseGenerator):
         """
         import shlex
 
-        # Basic command format
+        # Get the actual compiler command from the environment
         tool_cmd = tool_name
-        if tool_name == "cc":
+        if build_info:
+            env = build_info.get("env")
+            if env is not None:
+                tool_config = getattr(env, tool_name, None)
+                if tool_config is not None:
+                    cmd = getattr(tool_config, "cmd", None)
+                    if cmd:
+                        tool_cmd = str(cmd)
+        # Fallback to generic names if no env available
+        if tool_cmd == "cc":
             tool_cmd = "cc"
-        elif tool_name == "cxx":
+        elif tool_cmd == "cxx":
             tool_cmd = "c++"
 
         parts: list[str] = [tool_cmd, "-c"]
