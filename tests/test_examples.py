@@ -237,7 +237,8 @@ def should_skip(config: dict[str, Any]) -> str | None:
         return f"Skipped on {current_platform}"
 
     # Check required tools (all must be present)
-    requires = skip_config.get("requires", [])
+    # "requires" and "require_commands" are aliases
+    requires = skip_config.get("requires", []) + skip_config.get("require_commands", [])
     for tool in requires:
         if shutil.which(tool) is None:
             return f"Required tool '{tool}' not found"
@@ -247,6 +248,12 @@ def should_skip(config: dict[str, Any]) -> str | None:
     if requires_any:
         if not any(shutil.which(tool) is not None for tool in requires_any):
             return f"None of required tools found: {', '.join(requires_any)}"
+
+    # Check required environment variables
+    require_env = skip_config.get("require_env", [])
+    for var in require_env:
+        if not os.environ.get(var):
+            return f"Required environment variable '{var}' not set"
 
     return None
 
