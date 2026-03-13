@@ -423,6 +423,30 @@ class Toolchain(Protocol):
         """Return additional compile flags needed for the target type."""
         ...
 
+    def get_link_flags_for_target(
+        self,
+        target: Target,
+        output_name: str,
+        existing_flags: list[str],
+    ) -> list[str]:
+        """Return additional link flags for a specific target.
+
+        Called during resolution to inject target-specific link flags
+        such as install_name (macOS) or SONAME (Linux) for shared
+        libraries. The *existing_flags* are provided so that the
+        toolchain can skip defaults when the user has already set
+        an explicit override.
+
+        Args:
+            target: The target being linked.
+            output_name: The output filename (e.g., ``libfoo.dylib``).
+            existing_flags: Link flags already collected for this target.
+
+        Returns:
+            List of additional link flags. Default returns empty list.
+        """
+        ...
+
     def get_separated_arg_flags(self) -> frozenset[str]:
         """Return flags that take their argument as a separate token.
 
@@ -786,6 +810,27 @@ class BaseToolchain(ABC):
         Returns:
             List of additional compile flags needed for this target type.
             Default implementation returns an empty list.
+        """
+        return []
+
+    def get_link_flags_for_target(
+        self,
+        target: Target,
+        output_name: str,
+        existing_flags: list[str],
+    ) -> list[str]:
+        """Return additional link flags for a specific target.
+
+        Override in subclasses for platform/toolchain-specific flags
+        like install_name (macOS) or SONAME (Linux).
+
+        Args:
+            target: The target being linked.
+            output_name: The output filename (e.g., ``libfoo.dylib``).
+            existing_flags: Link flags already collected for this target.
+
+        Returns:
+            List of additional link flags. Default returns empty list.
         """
         return []
 

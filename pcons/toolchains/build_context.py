@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.requirements import EffectiveRequirements
+    from pcons.core.target import Target
 
 
 @dataclass
@@ -109,6 +110,8 @@ class CompileLinkContext:
         effective: EffectiveRequirements,
         language: str | None = None,
         env: Environment | None = None,
+        target: Target | None = None,
+        output_name: str | None = None,
     ) -> CompileLinkContext:
         """Create a CompileLinkContext from EffectiveRequirements.
 
@@ -122,6 +125,10 @@ class CompileLinkContext:
                 to ensure proper C++ runtime linkage.
             env: The build environment, used to look up the C++ compiler
                 command when linking C++ code.
+            target: The target being built. When provided along with
+                *output_name*, the toolchain may inject target-specific
+                link flags (e.g. install_name on macOS, SONAME on Linux).
+            output_name: The output filename (e.g., ``libfoo.dylib``).
 
         Returns:
             A CompileLinkContext populated from the requirements.
@@ -135,11 +142,24 @@ class CompileLinkContext:
             if cxx_cmd:
                 linker_cmd = cxx_cmd
 
+        link_flags = list(effective.link_flags)
+
+        # Let the toolchain inject target-specific link flags
+        if target is not None and output_name is not None and env is not None:
+            toolchain = env._toolchain
+            if toolchain is not None:
+                extra = toolchain.get_link_flags_for_target(
+                    target, output_name, link_flags
+                )
+                for flag in extra:
+                    if flag not in link_flags:
+                        link_flags.append(flag)
+
         return cls(
             includes=[str(p) for p in effective.includes],
             defines=list(effective.defines),
             flags=list(effective.compile_flags),
-            link_flags=list(effective.link_flags),
+            link_flags=link_flags,
             libs=list(effective.link_libs),
             libdirs=[str(p) for p in effective.link_dirs],
             linker_cmd=linker_cmd,
@@ -224,6 +244,8 @@ class MsvcCompileLinkContext(CompileLinkContext):
         effective: EffectiveRequirements,
         language: str | None = None,
         env: Environment | None = None,
+        target: Target | None = None,
+        output_name: str | None = None,
     ) -> MsvcCompileLinkContext:
         """Create a MsvcCompileLinkContext from EffectiveRequirements.
 
@@ -236,6 +258,8 @@ class MsvcCompileLinkContext(CompileLinkContext):
                 has a "cxx" tool, the linker_cmd will be set to env.cxx.cmd.
             env: The build environment, used to look up the C++ compiler
                 command when linking C++ code.
+            target: The target being built (unused by MSVC).
+            output_name: The output filename (unused by MSVC).
 
         Returns:
             A MsvcCompileLinkContext populated from the requirements.

@@ -626,7 +626,11 @@ class OutputNodeFactory:
 
         effective_link.link_flags = link_flags
         context = CompileLinkContext.from_effective_requirements(
-            effective_link, language=link_language, env=env
+            effective_link,
+            language=link_language,
+            env=env,
+            target=target,
+            output_name=output_node.path.name,
         )
 
         return link_language, context

@@ -518,6 +518,40 @@ class Target:
         self.private.compile_flags.extend(flags)
         return self
 
+    def set_option(self, key: str, value: Any) -> Target:
+        """Set a builder/toolchain option on this target (fluent API).
+
+        Stores arbitrary key-value metadata that builders and toolchains
+        can read during resolution.  The core does not interpret these
+        values — their meaning is defined by the builder or toolchain.
+
+        Common options (depends on target type and toolchain):
+
+        - ``"install_name"`` — shared-library install name (macOS) or
+          SONAME (Linux).  Set to ``""`` to disable the automatic default.
+
+        Args:
+            key: Option name.
+            value: Option value.
+
+        Returns:
+            self for method chaining.
+        """
+        self._builder_data[key] = value
+        return self
+
+    def get_option(self, key: str, default: Any = None) -> Any:
+        """Get a builder/toolchain option previously set with :meth:`set_option`.
+
+        Args:
+            key: Option name.
+            default: Value to return if *key* was never set.
+
+        Returns:
+            The stored value, or *default*.
+        """
+        return self._builder_data.get(key, default)
+
     def post_build(self, command: str) -> Target:
         """Add a post-build command (fluent API).
 

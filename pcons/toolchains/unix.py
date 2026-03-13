@@ -21,6 +21,7 @@ from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+    from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,42 @@ class UnixToolchain(BaseToolchain):
                 return ["-fPIC"]
 
         # Static libraries, programs, and other types don't need special flags
+        return []
+
+    def get_link_flags_for_target(
+        self,
+        target: Target,
+        output_name: str,
+        existing_flags: list[str],
+    ) -> list[str]:
+        """Return install_name (macOS) or SONAME (Linux) for shared libraries.
+
+        Uses ``target.install_name`` if set:
+        - ``None``: auto-generate from *output_name*
+        - a string: use as-is
+        - ``""``: disable entirely
+        """
+        from pcons.core.target import TargetType
+
+        if target.target_type != TargetType.SHARED_LIBRARY:
+            return []
+
+        # Check for explicit user setting via target.set("install_name", ...)
+        explicit = (
+            target.get_option("install_name") if hasattr(target, "get_option") else None
+        )
+        if explicit == "":
+            return []  # explicitly disabled
+
+        platform = get_platform()
+
+        if platform.is_macos:
+            name = explicit if explicit is not None else f"@rpath/{output_name}"
+            return [f"-Wl,-install_name,{name}"]
+        elif platform.is_linux:
+            name = explicit if explicit is not None else output_name
+            return [f"-Wl,-soname,{name}"]
+
         return []
 
     def get_separated_arg_flags(self) -> frozenset[str]:
