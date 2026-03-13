@@ -90,7 +90,11 @@ jobs:
           WASI_VERSION=31
           WASI_VERSION_FULL=${WASI_VERSION}.0
           ARCH=$(uname -m)
-          OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+          case "$(uname -s)" in
+            Linux)  OS=linux ;;
+            Darwin) OS=macos ;;
+            *)      echo "Unsupported OS"; exit 1 ;;
+          esac
           curl -sSfL "https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-${WASI_VERSION}/wasi-sdk-${WASI_VERSION_FULL}-${ARCH}-${OS}.tar.gz" | tar xz
           sudo mv "wasi-sdk-${WASI_VERSION_FULL}-${ARCH}-${OS}" /opt/wasi-sdk
       - name: Install wasmtime
