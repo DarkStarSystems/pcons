@@ -3,6 +3,17 @@
 
 Generators take a configured Project and produce build system files
 (e.g., Ninja, Makefiles, IDE project files).
+
+NOTE: Build scripts should use the ``Generator()`` factory from the
+top-level ``pcons`` package, NOT this Protocol directly::
+
+    from pcons import Generator, Project
+    project = Project("myapp", build_dir="build")
+    # ... define targets ...
+    Generator().generate(project)   # generates Ninja by default
+
+``Generator()`` auto-resolves the project and defaults to Ninja.
+See ``pcons/__init__.py`` for the factory implementation.
 """
 
 from __future__ import annotations

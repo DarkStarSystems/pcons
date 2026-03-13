@@ -2,6 +2,13 @@
 """Ninja build file generator.
 
 Generates build.ninja files from a configured pcons Project.
+
+Typically used via the ``Generator()`` factory::
+
+    from pcons import Generator
+    Generator().generate(project)  # Ninja is the default
+
+Direct use: ``NinjaGenerator().generate(project)``
 """
 
 from __future__ import annotations

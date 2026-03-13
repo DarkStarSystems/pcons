@@ -47,7 +47,9 @@ Pre-commit hooks run ruff check, ruff format, and ty (type checking) automatical
 3. **Generate** - Write Ninja/Make files
 4. *Build* - User runs `ninja` (pcons not involved)
 
-**Target resolution is lazy**: `lib.output_nodes` is empty until `project.resolve()` is called. This allows customizing `output_name` after target creation.
+**Build scripts end with `Generator().generate(project)`**: This auto-resolves the project and writes Ninja files (default). The `Generator()` factory is in `pcons/__init__.py` — do NOT use `NinjaGenerator` directly.
+
+**Target resolution is lazy**: `lib.output_nodes` is empty until `project.resolve()` is called (or `Generator().generate()` is called, which auto-resolves). This allows customizing `output_name` after target creation.
 
 **Namespaced tools**: `env.cc.flags`, `env.cxx.cmd`, `env.link.libs` - no flat variable collisions.
 
@@ -161,10 +163,11 @@ ssh tower1 '$env:PATH = "C:\Users\garyo\.local\bin;$env:PATH"; cd E:/src/pcons; 
 
 ## Common Gotchas
 
-1. **Target nodes empty until resolved**: Always call `project.resolve()` before accessing `target.output_nodes`
-2. **Platform suffixes vary**: `.o` (Unix), `.obj` (MSVC) - get from toolchain, don't hardcode
-3. **Circular variable refs detected**: `$foo` referencing `$bar` referencing `$foo` raises `CircularReferenceError`
-4. **Commands as lists**: Keep commands as `["$cc.cmd", "$flags", ...]` not strings, for proper space handling
+1. **Use `Generator()`, not `NinjaGenerator()`**: `from pcons import Generator; Generator().generate(project)` — this is a factory function in `pcons/__init__.py` that auto-resolves and defaults to Ninja. Don't import from `pcons.generators` directly.
+2. **Target nodes empty until resolved**: Always call `project.resolve()` before accessing `target.output_nodes`
+3. **Platform suffixes vary**: `.o` (Unix), `.obj` (MSVC) - get from toolchain, don't hardcode
+4. **Circular variable refs detected**: `$foo` referencing `$bar` referencing `$foo` raises `CircularReferenceError`
+5. **Commands as lists**: Keep commands as `["$cc.cmd", "$flags", ...]` not strings, for proper space handling
 
 ## Releasing
 
