@@ -141,20 +141,21 @@ class PackageDescription:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for TOML serialization."""
+        pkg: dict[str, Any] = {
+            "name": self.name,
+        }
         result: dict[str, Any] = {
-            "package": {
-                "name": self.name,
-            }
+            "package": pkg,
         }
 
         if self.version:
-            result["package"]["version"] = self.version
+            pkg["version"] = self.version
         if self.prefix:
-            result["package"]["prefix"] = self.prefix
+            pkg["prefix"] = self.prefix
         if self.found_by:
-            result["package"]["found_by"] = self.found_by
+            pkg["found_by"] = self.found_by
         if self.dependencies:
-            result["package"]["dependencies"] = self.dependencies
+            pkg["dependencies"] = self.dependencies
 
         # Paths section
         paths: dict[str, Any] = {}

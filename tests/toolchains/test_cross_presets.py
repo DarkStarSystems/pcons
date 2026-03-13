@@ -13,9 +13,9 @@ from pcons.core.environment import Environment
 from pcons.toolchains.presets import (
     CrossPreset,
     android,
+    emscripten,
     ios,
     linux_cross,
-    wasm,
 )
 
 
@@ -128,19 +128,19 @@ class TestIosPreset:
         assert preset.sysroot == "/path/to/sdk"
 
 
-class TestWasmPreset:
-    """Tests for the wasm() factory function."""
+class TestEmscriptenPreset:
+    """Tests for the emscripten() factory function."""
 
     def test_default(self) -> None:
-        preset = wasm()
-        assert preset.name == "wasm32"
+        preset = emscripten()
+        assert preset.name == "wasm32-emscripten"
         assert preset.arch == "wasm32"
         assert preset.triple == "wasm32-unknown-emscripten"
         assert preset.env_vars["CC"] == "emcc"
         assert preset.env_vars["CXX"] == "em++"
 
     def test_custom_emsdk(self) -> None:
-        preset = wasm(emsdk="/fake/emsdk")
+        preset = emscripten(emsdk="/fake/emsdk")
         assert "emcc" in preset.env_vars["CC"]
         assert "em++" in preset.env_vars["CXX"]
 

@@ -1,0 +1,21 @@
+# Test configuration for the wasm_wasi example
+
+[test]
+description = "Demonstrates compiling a C program to WebAssembly via wasi-sdk"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/obj.hello/hello.o",
+    "build/hello.wasm",
+]
+
+[verify]
+# Run the built .wasm with wasmtime and check output
+commands = [
+    { run = "wasmtime build/hello.wasm", expect_stdout = "Hello from WebAssembly (WASI)!" },
+]
+
+[skip]
+# Requires wasi-sdk for building and wasmtime for verification
+require_commands = ["wasmtime"]
+require_env = ["WASI_SDK_PATH"]

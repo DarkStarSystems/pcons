@@ -1810,7 +1810,7 @@ This works for static libraries, dynamic libraries, and executables.
 For cross-compiling to other platforms, pcons provides ready-made presets that configure sysroot, target triple, architecture flags, and SDK paths.
 
 ```python
-from pcons.toolchains.presets import android, ios, wasm, linux_cross
+from pcons.toolchains.presets import android, ios, emscripten, wasi_sdk, linux_cross
 
 # Android NDK
 env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a"))
@@ -1822,9 +1822,12 @@ env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
 env.apply_cross_preset(ios(arch="x86_64"))
 
 # WebAssembly via Emscripten
-env.apply_cross_preset(wasm(emsdk="~/emsdk"))
+env.apply_cross_preset(emscripten(emsdk="~/emsdk"))
 # Or if emcc is already in PATH:
-env.apply_cross_preset(wasm())
+env.apply_cross_preset(emscripten())
+
+# WebAssembly via wasi-sdk (as a cross-preset on an LLVM toolchain)
+env.apply_cross_preset(wasi_sdk())
 
 # Generic Linux cross-compilation
 env.apply_cross_preset(linux_cross(
@@ -1833,13 +1836,24 @@ env.apply_cross_preset(linux_cross(
 ))
 ```
 
+For a fully self-contained WASI build, prefer the dedicated WASI toolchain:
+
+```python
+from pcons import find_wasi_toolchain
+
+toolchain = find_wasi_toolchain()
+env = project.Environment(toolchain=toolchain)
+project.Program("hello", env, sources=["src/hello.c"])
+```
+
 #### Available Factory Functions
 
 | Factory | Key Arguments | Description |
 |---------|--------------|-------------|
 | `android(ndk, arch, api)` | `arch`: arm64-v8a, armeabi-v7a, x86_64, x86; `api`: minimum API level (default 21) | Android NDK cross-compilation |
 | `ios(arch, min_version, sdk)` | `arch`: arm64 or x86_64 (simulator); `min_version`: deployment target | iOS cross-compilation |
-| `wasm(emsdk)` | `emsdk`: path to Emscripten SDK (optional if emcc in PATH) | WebAssembly via Emscripten |
+| `emscripten(emsdk)` | `emsdk`: path to Emscripten SDK (optional if emcc in PATH) | WebAssembly via Emscripten |
+| `wasi_sdk(sdk_path)` | `sdk_path`: path to wasi-sdk (optional, auto-detected) | WebAssembly via wasi-sdk (cross-preset) |
 | `linux_cross(triple, sysroot)` | `triple`: GCC/Clang target triple; `sysroot`: target sysroot path | Generic Linux cross-compilation |
 
 #### Custom Cross-Compilation Presets

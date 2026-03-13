@@ -52,6 +52,14 @@ from pcons.toolchains.msvc import (
     MsvcLinker,
     MsvcToolchain,
 )
+from pcons.toolchains.wasi import (
+    WasiArchiver,
+    WasiCCompiler,
+    WasiCxxCompiler,
+    WasiLinker,
+    WasiToolchain,
+    find_wasi_toolchain,
+)
 from pcons.tools.cuda import CudaCompiler
 
 # Re-export the registry for users who want to register custom toolchains
@@ -128,6 +136,7 @@ __all__ = [
     # Toolchain finder and registry
     "find_c_toolchain",
     "find_cuda_toolchain",
+    "find_wasi_toolchain",
     "toolchain_registry",
     # Build context classes
     "CompileLinkContext",
@@ -163,4 +172,10 @@ __all__ = [
     "MsvcLibrarian",
     "MsvcLinker",
     "MsvcToolchain",
+    # WASI toolchain
+    "WasiCCompiler",
+    "WasiCxxCompiler",
+    "WasiArchiver",
+    "WasiLinker",
+    "WasiToolchain",
 ]

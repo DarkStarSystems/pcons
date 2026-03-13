@@ -5,11 +5,11 @@ Presets configure sysroot, target triple, architecture flags, and SDK paths
 for building on a different platform. Use with env.apply_cross_preset().
 
 Example:
-    from pcons.toolchains.presets import android, ios, wasm, linux_cross
+    from pcons.toolchains.presets import android, ios, emscripten, wasi_sdk, linux_cross
 
     env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a"))
     env.apply_cross_preset(ios(arch="arm64"))
-    env.apply_cross_preset(wasm(emsdk="~/emsdk"))
+    env.apply_cross_preset(emscripten(emsdk="~/emsdk"))
     env.apply_cross_preset(linux_cross(triple="aarch64-linux-gnu"))
 """
 
@@ -139,17 +139,21 @@ def ios(
     )
 
 
-def wasm(
+def emscripten(
     emsdk: str | None = None,
 ) -> CrossPreset:
     """Create a cross-compilation preset for WebAssembly via Emscripten.
+
+    Use this with a native C/C++ toolchain (LLVM or GCC) to cross-compile
+    to WebAssembly using the Emscripten SDK.  For WASI targets, use the
+    dedicated :class:`WasiToolchain` or the :func:`wasi_sdk` preset instead.
 
     Args:
         emsdk: Path to the Emscripten SDK root. If None, assumes emcc
                is already in PATH.
 
     Returns:
-        CrossPreset configured for WebAssembly.
+        CrossPreset configured for Emscripten WebAssembly.
     """
     env_vars: dict[str, str] = {}
 
@@ -163,9 +167,54 @@ def wasm(
         env_vars["CXX"] = "em++"
 
     return CrossPreset(
-        name="wasm32",
+        name="wasm32-emscripten",
         arch="wasm32",
         triple="wasm32-unknown-emscripten",
+        env_vars=env_vars,
+    )
+
+
+def wasi_sdk(
+    sdk_path: str | None = None,
+) -> CrossPreset:
+    """Create a cross-compilation preset for WASI via wasi-sdk.
+
+    This preset is for use with an existing LLVM toolchain when you want
+    to cross-compile to WASI without using :func:`find_wasi_toolchain`.
+    For a fully self-contained WASI build, prefer :class:`WasiToolchain`.
+
+    Args:
+        sdk_path: Path to the wasi-sdk root. If None, auto-detected
+                  via ``WASI_SDK_PATH`` or common install locations.
+
+    Returns:
+        CrossPreset configured for wasm32-wasi.
+    """
+    from pcons.toolchains.wasi import find_wasi_sdk
+
+    sysroot: str | None = None
+    env_vars: dict[str, str] = {}
+
+    if sdk_path:
+        p = Path(sdk_path).expanduser()
+    else:
+        p = find_wasi_sdk()
+
+    if p is not None:
+        bin_dir = p / "bin"
+        sysroot_dir = p / "share" / "wasi-sysroot"
+        if not sysroot_dir.is_dir():
+            sysroot_dir = p / "wasi-sysroot"
+        if sysroot_dir.is_dir():
+            sysroot = str(sysroot_dir)
+        env_vars["CC"] = str(bin_dir / "clang")
+        env_vars["CXX"] = str(bin_dir / "clang++")
+
+    return CrossPreset(
+        name="wasm32-wasi",
+        arch="wasm32",
+        triple="wasm32-wasi",
+        sysroot=sysroot,
         env_vars=env_vars,
     )
 
