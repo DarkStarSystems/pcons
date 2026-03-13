@@ -93,7 +93,14 @@ def get_var(name: str, default: str | None = None) -> str | None:
         if pcons_vars:
             try:
                 _cli_vars = json.loads(pcons_vars)
-            except json.JSONDecodeError:
+            except json.JSONDecodeError as e:
+                import warnings
+
+                warnings.warn(
+                    f"PCONS_VARS environment variable contains invalid JSON: {e}. "
+                    "All CLI variable overrides will be ignored.",
+                    stacklevel=2,
+                )
                 _cli_vars = {}
         else:
             _cli_vars = {}

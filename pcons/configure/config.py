@@ -8,6 +8,7 @@ including tool detection, feature checks, and configuration caching.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -20,6 +21,8 @@ from pcons.core.debug import trace, trace_value
 
 if TYPE_CHECKING:
     from pcons.tools.toolchain import Toolchain
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -96,7 +99,10 @@ class Configure:
             try:
                 with open(cache_path) as f:
                     self._cache = json.load(f)
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(
+                    "Corrupt or unreadable cache %s: %s — re-configuring", cache_path, e
+                )
                 self._cache = {}
 
     def save(self, path: Path | None = None) -> None:

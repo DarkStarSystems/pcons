@@ -139,7 +139,7 @@ def load_modules(extra_paths: list[Path | str] | None = None) -> dict[str, Modul
 
                 logger.debug("Loaded module: %s from %s", name, module_file)
 
-            except Exception as e:
+            except (ImportError, ModuleNotFoundError, SyntaxError) as e:
                 logger.warning("Failed to load module %s: %s", name, e)
 
     return dict(_loaded_modules)
