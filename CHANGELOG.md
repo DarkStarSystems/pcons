@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-03-13
+
+### Added
+
+- **WASI toolchain**: New `find_wasi_toolchain()` for compiling C/C++ to standalone WebAssembly (`.wasm`) using wasi-sdk. Supports `clang`, `clang++`, `llvm-ar` from wasi-sdk with automatic SDK discovery via `WASI_SDK_PATH` env var or common install locations. Includes `wasmtime` runner integration for executing built `.wasm` files.
+  - New example `22_wasm_wasi` demonstrating WASI compilation and execution
+
+- **Emscripten toolchain**: New `find_emscripten_toolchain()` for compiling C/C++ to WebAssembly + JavaScript using Emscripten. Uses `MultiOutputBuilder` for Program targets that produce both `.js` (primary) and `.wasm` (secondary) outputs. Supports Emscripten `-s` settings via `env.link.settings` list.
+  - New example `23_wasm_emscripten` demonstrating Emscripten compilation and Node.js execution
+  - Automatic SDK discovery via `EMSDK` env var, common install locations, or `emcc` in PATH
+
+- **Multi-output Program support in resolver**: The resolver now generically supports Program builders that produce multiple outputs (e.g., `.js` + `.wasm`). When a toolchain's Program builder is a `MultiOutputBuilder`, secondary output nodes are automatically created and tracked. This is tool-agnostic — it introspects the builder, not the toolchain name.
+
+- **CI testing for WebAssembly toolchains**: New `test-wasm` CI job tests both WASI and Emscripten examples on ubuntu-latest and macos-latest, installing emsdk, wasi-sdk, and wasmtime.
+
+### Changed
+
+- **`TargetPath.index` default changed from `0` to `None`**: This distinguishes "automatic" (`$out` in ninja, expanding to all outputs) from "explicit primary" (`$target_0`, expanding to first output only). Important for multi-output builds where `-o $out` would incorrectly expand to all outputs. `SourcePath.index` similarly changed.
+
+- **CI actions pinned to commit SHAs**: All GitHub Actions in the CI workflow are now pinned to specific commit SHAs instead of version tags, improving supply-chain security.
+
+### Fixed
+
+- **`compile_commands.json` now uses actual compiler command**: Previously hardcoded generic names like `cc`/`c++` instead of reading the actual compiler path (e.g., `emcc`, `/usr/bin/gcc`) from the environment's tool configuration.
+
 ## [0.7.4] - 2026-02-23
 
 ### Added
@@ -495,7 +520,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.7.4...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/DarkStarSystems/pcons/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/DarkStarSystems/pcons/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/DarkStarSystems/pcons/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/DarkStarSystems/pcons/compare/v0.7.1...v0.7.2
