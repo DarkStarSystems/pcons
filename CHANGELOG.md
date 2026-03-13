@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-03-13
+
+### Added
+
+- **`configure_file()` for template-based config headers**: CMake-style template substitution with `@VAR@` replacement and `#cmakedefine` / `#cmakedefine01` directives. Generates config headers from `.in` templates during the build description phase.
+  - New example `24_configure_file` demonstrating usage
+
+- **Automatic install_name (macOS) and SONAME (Linux) for shared libraries**: Unix toolchains now automatically set `-Wl,-install_name,@rpath/<name>` on macOS and `-Wl,-soname,<name>` on Linux when building shared libraries. Override with `target.set_option("install_name", value)` or disable with `target.set_option("install_name", "")`.
+
+- **Generic `target.set_option()` / `target.get_option()` API**: Targets now support arbitrary key-value metadata via `set_option(key, value)` and `get_option(key, default)`. This provides a clean extension point for toolchain-specific options without adding domain-specific properties to the core Target class.
+
+- **`Toolchain.get_link_flags_for_target()` hook**: Toolchains can now inject target-specific link flags (e.g., install_name, SONAME) during build context creation. The hook receives the target, output filename, and existing flags.
+
+- **Auto-generated toolchain and builder documentation**: `docs/toolchains.md` and `docs/builders.md` are now auto-generated from registered toolchains and builders.
+
+### Fixed
+
+- **Object file name collisions for same-basename sources**: Sources sharing a basename (e.g., `foo.c` and `foo.cpp`) no longer produce conflicting object files. Object filenames now include the source extension (`foo.c.o`, `foo.cpp.o`) and mirror the source directory structure under `obj.<target>/` (e.g., `src/lib/foo.cpp` → `obj.mylib/src/lib/foo.cpp.o`).
+
+### Changed
+
+- **Improved `Generator()` discoverability**: Better documentation and source organization for generator selection.
+
 ## [0.8.0] - 2026-03-13
 
 ### Added
@@ -520,7 +543,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/DarkStarSystems/pcons/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/DarkStarSystems/pcons/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/DarkStarSystems/pcons/compare/v0.7.3...v0.7.4
 [0.7.3]: https://github.com/DarkStarSystems/pcons/compare/v0.7.2...v0.7.3
