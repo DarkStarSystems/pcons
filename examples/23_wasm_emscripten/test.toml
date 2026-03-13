@@ -19,3 +19,5 @@ commands = [
 [skip]
 # Requires emcc for building and node for verification
 require_commands = ["emcc", "node"]
+# Xcode generator doesn't support wasm toolchains
+generators = ["xcode"]

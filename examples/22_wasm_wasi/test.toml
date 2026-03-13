@@ -19,3 +19,5 @@ commands = [
 # Requires wasi-sdk for building and wasmtime for verification
 require_commands = ["wasmtime"]
 require_env = ["WASI_SDK_PATH"]
+# Xcode generator doesn't support wasm toolchains
+generators = ["xcode"]
