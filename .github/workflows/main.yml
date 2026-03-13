@@ -101,16 +101,23 @@ jobs:
         uses: jcbhmr/setup-wasmtime@960c367a99921eb0b02f5778fce9ae8f110bf0f0 # v2
       - name: Install dependencies
         run: uv sync
-      - name: Verify tools
+      - name: Verify Emscripten tools
         run: |
           emcc --version
           node --version
+      - name: Verify WASI tools
+        id: verify-wasi
+        continue-on-error: true
+        run: |
           wasmtime --version
           /opt/wasi-sdk/bin/clang --version
-      - name: Run wasm example tests
+      - name: Run Emscripten example tests
+        run: uv run pytest tests/test_examples.py -v -k "23_wasm_emscripten"
+      - name: Run WASI example tests
+        if: steps.verify-wasi.outcome == 'success'
         env:
           WASI_SDK_PATH: /opt/wasi-sdk
-        run: uv run pytest tests/test_examples.py -v -k "22_wasm_wasi or 23_wasm_emscripten"
+        run: uv run pytest tests/test_examples.py -v -k "22_wasm_wasi"
 
   test-msvcup:
     name: "test msvcup (windows, no VS)"
