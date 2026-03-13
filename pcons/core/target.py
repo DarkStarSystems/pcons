@@ -43,6 +43,7 @@ class TargetType(StrEnum):
     OBJECT = "object"  # Object files only (no linking)
     ARCHIVE = "archive"  # Tar/Zip archives
     COMMAND = "command"  # Generic command output
+    INSTALLER = "installer"  # Platform-specific installer packages
 
 
 __all__ = ["SourceSpec", "TargetType", "UsageRequirements", "Target", "ImportedTarget"]

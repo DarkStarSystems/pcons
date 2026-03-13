@@ -28,6 +28,8 @@ from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.generators.xcode import XcodeGenerator  # noqa: E402
 from pcons.toolchains import (
     find_c_toolchain,
+    find_cuda_toolchain,
+    find_cython_toolchain,
     find_emscripten_toolchain,
     find_wasi_toolchain,
 )  # noqa: E402
@@ -201,6 +203,8 @@ __all__ = [
     "XcodeGenerator",
     # Toolchain discovery
     "find_c_toolchain",
+    "find_cuda_toolchain",
+    "find_cython_toolchain",
     "find_emscripten_toolchain",
     "find_wasi_toolchain",
     # Module system

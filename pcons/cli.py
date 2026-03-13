@@ -744,6 +744,7 @@ def _info_targets(args: argparse.Namespace, script: Path) -> int:
         TargetType.INTERFACE,
         TargetType.COMMAND,
         TargetType.ARCHIVE,
+        TargetType.INSTALLER,
     ]
 
     for target in project.targets:

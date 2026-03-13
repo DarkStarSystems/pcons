@@ -70,10 +70,14 @@ No installation needed, if you have `uv`; just use `uvx pcons` to configure and 
 If you want to install it, though:
 
 ```bash
-# Using uv
+# Install as a CLI tool (recommended)
+uv tool install pcons
+pcons ...
+
+# Or add to a project's dependencies
 uv add pcons
 
-# Or pip
+# Or with pip
 pip install pcons
 ```
 

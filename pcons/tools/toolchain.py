@@ -149,6 +149,9 @@ class ToolchainRegistry:
         check_command: str,
         tool_classes: list[type[BaseTool]],
         category: str = "general",
+        platforms: list[str] | None = None,
+        description: str = "",
+        finder: str = "",
     ) -> None:
         """Register a toolchain for auto-discovery.
 
@@ -158,6 +161,10 @@ class ToolchainRegistry:
             check_command: Command to check for availability (e.g., "clang").
             tool_classes: Tool classes to instantiate when using this toolchain.
             category: Category for grouping (e.g., "c", "python", "rust").
+            platforms: Platform names where this toolchain is available
+                       (e.g., ["linux", "darwin", "win32"]). Uses sys.platform values.
+            description: Short human-readable description of the toolchain.
+            finder: Name of the finder function (e.g., "find_c_toolchain()").
         """
         entry = ToolchainEntry(
             toolchain_class=toolchain_class,
@@ -165,6 +172,9 @@ class ToolchainRegistry:
             check_command=check_command,
             tool_classes=tool_classes,
             category=category,
+            platforms=platforms or [],
+            description=description,
+            finder=finder,
         )
         # Register under all aliases
         for alias in aliases:
@@ -251,12 +261,18 @@ class ToolchainEntry:
         check_command: str,
         tool_classes: list[type[BaseTool]],
         category: str,
+        platforms: list[str] | None = None,
+        description: str = "",
+        finder: str = "",
     ) -> None:
         self.toolchain_class = toolchain_class
         self.aliases = aliases
         self.check_command = check_command
         self.tool_classes = tool_classes
         self.category = category
+        self.platforms = platforms or []
+        self.description = description
+        self.finder = finder
 
     def create_toolchain(self) -> BaseToolchain:
         """Create and configure a toolchain instance."""

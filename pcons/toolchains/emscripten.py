@@ -529,4 +529,7 @@ toolchain_registry.register(
     check_command="emcc",
     tool_classes=[EmccCCompiler, EmccCxxCompiler, EmccArchiver, EmccLinker],
     category="wasm",
+    platforms=["linux", "darwin"],
+    description="Emscripten C/C++ to WebAssembly + JS (browser/Node.js)",
+    finder="find_emscripten_toolchain()",
 )

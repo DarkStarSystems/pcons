@@ -31,6 +31,7 @@ from pcons.toolchains.cython import (
     CythonLinker,
     CythonToolchain,
     CythonTranspiler,
+    find_cython_toolchain,
 )
 from pcons.toolchains.emscripten import (
     EmccArchiver,
@@ -144,6 +145,7 @@ __all__ = [
     # Toolchain finder and registry
     "find_c_toolchain",
     "find_cuda_toolchain",
+    "find_cython_toolchain",
     "find_emscripten_toolchain",
     "find_wasi_toolchain",
     "toolchain_registry",

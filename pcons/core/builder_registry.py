@@ -78,6 +78,8 @@ class BuilderRegistration:
         factory_class: Optional NodeFactory class for resolution.
         requires_env: Whether the builder requires an Environment argument.
         description: Human-readable description of the builder.
+        platforms: Platform names where this builder is available
+                   (e.g., ["linux", "darwin", "win32"]). Empty means all platforms.
     """
 
     name: str
@@ -86,6 +88,7 @@ class BuilderRegistration:
     factory_class: type | None = None
     requires_env: bool = False
     description: str = ""
+    platforms: list[str] = field(default_factory=list)
     # Additional options for the builder
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -113,6 +116,7 @@ class BuilderRegistry:
         factory_class: type | None = None,
         requires_env: bool = False,
         description: str = "",
+        platforms: list[str] | None = None,
         **options: Any,
     ) -> None:
         """Register a builder.
@@ -125,6 +129,8 @@ class BuilderRegistry:
             factory_class: Optional NodeFactory class for resolution.
             requires_env: Whether the builder requires an Environment argument.
             description: Human-readable description of the builder.
+            platforms: Platform names where this builder is available
+                       (e.g., ["linux", "darwin", "win32"]). None/empty means all.
             **options: Additional builder-specific options.
         """
         cls._builders[name] = BuilderRegistration(
@@ -134,6 +140,7 @@ class BuilderRegistry:
             factory_class=factory_class,
             requires_env=requires_env,
             description=description,
+            platforms=platforms or [],
             options=options,
         )
 
@@ -189,6 +196,7 @@ def builder(
     factory_class: type | None = None,
     requires_env: bool = False,
     description: str = "",
+    platforms: list[str] | None = None,
     **options: Any,
 ) -> Callable[[type], type]:
     """Decorator to register a builder class.
@@ -213,6 +221,8 @@ def builder(
         factory_class: Optional NodeFactory class for resolution.
         requires_env: Whether the builder requires an Environment argument.
         description: Human-readable description of the builder.
+        platforms: Platform names where this builder is available
+                   (e.g., ["linux", "darwin", "win32"]). None/empty means all.
         **options: Additional builder-specific options.
 
     Returns:
@@ -237,6 +247,7 @@ def builder(
             factory_class=factory_class,
             requires_env=requires_env,
             description=desc,
+            platforms=platforms,
             **options,
         )
 

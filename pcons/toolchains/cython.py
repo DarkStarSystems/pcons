@@ -394,6 +394,31 @@ class CythonToolchain(BaseToolchain):
 
 
 # =============================================================================
+# Finder
+# =============================================================================
+
+
+def find_cython_toolchain() -> CythonToolchain:
+    """Find and return a configured Cython toolchain.
+
+    Returns:
+        A configured CythonToolchain ready for use.
+
+    Raises:
+        RuntimeError: If Cython is not installed.
+    """
+    from pcons.tools.toolchain import toolchain_registry
+
+    toolchain = toolchain_registry.find_available("python", ["cython"])
+    if toolchain is not None:
+        return toolchain  # type: ignore[return-value]
+
+    raise RuntimeError(
+        "Cython not found. Install it with: pip install cython (or uv add cython)"
+    )
+
+
+# =============================================================================
 # Registration
 # =============================================================================
 
@@ -406,4 +431,7 @@ toolchain_registry.register(
     check_command="cython",
     tool_classes=[CythonTranspiler, CythonCCompiler, CythonLinker],
     category="python",
+    platforms=["linux", "darwin", "win32"],
+    description="Cython transpiler (.pyx to Python extension)",
+    finder="find_cython_toolchain()",
 )

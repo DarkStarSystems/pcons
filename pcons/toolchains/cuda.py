@@ -188,4 +188,7 @@ toolchain_registry.register(
     check_command="nvcc",
     tool_classes=[CudaCompiler],
     category="cuda",  # Separate category since it's often used alongside C
+    platforms=["linux", "win32"],
+    description="NVIDIA CUDA compiler (nvcc)",
+    finder="find_cuda_toolchain()",
 )

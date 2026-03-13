@@ -377,4 +377,7 @@ toolchain_registry.register(
         MsvcAssembler,
     ],
     category="c",
+    platforms=["win32"],
+    description="Clang with MSVC-compatible flags",
+    finder="find_c_toolchain()",
 )

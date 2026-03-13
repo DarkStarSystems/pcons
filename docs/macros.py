@@ -1,8 +1,15 @@
 # SPDX-License-Identifier: MIT
-"""MkDocs macros hook — exposes {{ version }} in markdown."""
+"""MkDocs macros hook — exposes template variables in markdown.
+
+Variables:
+    {{ version }}          — version string with optional git dev info
+    {{ toolchain_table }}  — auto-generated markdown table of registered toolchains
+    {{ builder_table }}    — auto-generated markdown table of registered builders
+"""
 
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -52,6 +59,120 @@ def _get_version() -> str:
     return version
 
 
+# ── Platform name mapping ────────────────────────────────────────────────────
+
+_PLATFORM_DISPLAY = {
+    "linux": "Linux",
+    "darwin": "macOS",
+    "win32": "Windows",
+}
+
+
+def _format_platforms(platforms: list[str]) -> str:
+    """Convert sys.platform values to human-readable names."""
+    if not platforms:
+        return "Any"
+    return ", ".join(_PLATFORM_DISPLAY.get(p, p) for p in platforms)
+
+
+# ── Toolchain table ──────────────────────────────────────────────────────────
+
+
+def _get_toolchain_table() -> str:
+    """Generate a markdown table of all registered toolchains."""
+    # Ensure pcons package is importable
+    pcons_root = Path(__file__).parent.parent
+    if str(pcons_root) not in sys.path:
+        sys.path.insert(0, str(pcons_root))
+
+    from pcons.tools.toolchain import toolchain_registry
+
+    # Collect unique toolchains (each may be registered under multiple aliases)
+    seen_classes: set[type] = set()
+    rows: list[dict[str, str]] = []
+
+    for entry in toolchain_registry._toolchains.values():
+        if entry.toolchain_class in seen_classes:
+            continue
+        seen_classes.add(entry.toolchain_class)
+        finder = f"`{entry.finder}`" if entry.finder else ""
+        rows.append({
+            "name": entry.toolchain_class.__name__.removesuffix("Toolchain"),
+            "aliases": ", ".join(f"`{a}`" for a in entry.aliases),
+            "category": entry.category,
+            "check_command": f"`{entry.check_command}`",
+            "platforms": _format_platforms(entry.platforms),
+            "description": entry.description,
+            "finder": finder,
+        })
+
+    # Sort: C toolchains first (GCC/LLVM before MSVC/Clang-CL), then others
+    category_order = {"c": 0, "cuda": 1, "wasm": 2, "python": 3}
+    # Within C category, prefer well-known names first
+    c_name_order = {"Gcc": 0, "Llvm": 1, "Msvc": 2, "ClangCl": 3}
+    rows.sort(key=lambda r: (
+        category_order.get(r["category"], 99),
+        c_name_order.get(r["name"], 99),
+        r["name"],
+    ))
+
+    # Build markdown table
+    lines = [
+        "| Toolchain | Finder | Platforms | Description |",
+        "|-----------|--------|-----------|-------------|",
+    ]
+    for r in rows:
+        lines.append(
+            f"| **{r['name']}** | {r['finder']} "
+            f"| {r['platforms']} | {r['description']} |"
+        )
+
+    return "\n".join(lines)
+
+
+# ── Builder table ────────────────────────────────────────────────────────────
+
+
+def _get_builder_table() -> str:
+    """Generate a markdown table of all registered builders."""
+    pcons_root = Path(__file__).parent.parent
+    if str(pcons_root) not in sys.path:
+        sys.path.insert(0, str(pcons_root))
+
+    from pcons.core.builder_registry import BuilderRegistry
+
+    rows: list[dict[str, str]] = []
+    for name, reg in sorted(BuilderRegistry.all().items()):
+        # Clean up the description: first sentence only
+        desc = reg.description.strip().split("\n")[0].rstrip(".")
+        platforms = _format_platforms(reg.platforms) if reg.platforms else "All"
+        rows.append({
+            "name": name,
+            "target_type": reg.target_type.name.replace("_", " ").title(),
+            "platforms": platforms,
+            "description": desc,
+        })
+
+    lines = [
+        "| Builder | Type | Platforms | Description |",
+        "|---------|------|-----------|-------------|",
+    ]
+    for r in rows:
+        # Use non-breaking spaces in method name to prevent wrapping
+        method = f"project.{r['name']}()"
+        lines.append(
+            f"| `{method}` | {r['target_type']} "
+            f"| {r['platforms']} | {r['description']} |"
+        )
+
+    return "\n".join(lines)
+
+
+# ── MkDocs entry point ───────────────────────────────────────────────────────
+
+
 def define_env(env):
     """Define template variables for mkdocs-macros."""
     env.variables["version"] = _get_version()
+    env.variables["toolchain_table"] = _get_toolchain_table()
+    env.variables["builder_table"] = _get_builder_table()

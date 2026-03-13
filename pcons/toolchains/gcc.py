@@ -374,4 +374,7 @@ toolchain_registry.register(
     check_command="gcc",
     tool_classes=[GccCCompiler, GccCxxCompiler, GccArchiver, GccLinker],
     category="c",
+    platforms=["linux", "darwin", "win32"],
+    description="GNU Compiler Collection (gcc/g++)",
+    finder="find_c_toolchain()",
 )

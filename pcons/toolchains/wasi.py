@@ -544,4 +544,7 @@ toolchain_registry.register(
     check_command="clang",
     tool_classes=[WasiCCompiler, WasiCxxCompiler, WasiArchiver, WasiLinker],
     category="wasm",
+    platforms=["linux", "darwin"],
+    description="WASI SDK for standalone WebAssembly (.wasm)",
+    finder="find_wasi_toolchain()",
 )

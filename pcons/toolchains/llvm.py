@@ -436,4 +436,7 @@ toolchain_registry.register(
         MetalCompiler,
     ],
     category="c",
+    platforms=["linux", "darwin", "win32"],
+    description="LLVM/Clang compiler",
+    finder="find_c_toolchain()",
 )

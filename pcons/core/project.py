@@ -720,6 +720,15 @@ class Project:
         # Check if it's a registered builder
         registration = BuilderRegistry.get(name)
         if registration is not None:
+            if registration.platforms:
+                import sys
+
+                if sys.platform not in registration.platforms:
+                    raise AttributeError(
+                        f"Builder '{name}' is only available on "
+                        f"{', '.join(registration.platforms)} "
+                        f"(current platform: {sys.platform})"
+                    )
             return self._make_builder_method(registration)
 
         raise AttributeError(

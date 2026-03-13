@@ -132,6 +132,68 @@ pcons init               # Create a template pcons-build.py
 
 ---
 
+## Supported Languages and Toolchains
+
+Pcons ships with built-in support for several languages and toolchains. The core is completely tool-agnostic — all language support comes from toolchain modules that register themselves at import time.
+
+### Registered Toolchains
+
+The following toolchains are auto-detected. Use `find_c_toolchain()` for C/C++, or the specialized finders listed below.
+
+{{ toolchain_table }}
+
+**Default C/C++ search order:**
+
+- **Windows**: clang-cl → msvc → llvm → gcc
+- **Linux / macOS**: llvm → gcc
+
+```python
+from pcons import find_c_toolchain
+
+toolchain = find_c_toolchain()                       # auto-detect
+toolchain = find_c_toolchain(prefer=["gcc", "llvm"]) # prefer GCC
+env = project.Environment(toolchain=toolchain)
+```
+
+**CUDA** is designed to work alongside a C/C++ toolchain — CUDA handles `.cu` compilation while the host toolchain handles linking:
+
+```python
+from pcons import find_c_toolchain, find_cuda_toolchain
+
+env = project.Environment(toolchain=find_c_toolchain())
+env.add_toolchain(find_cuda_toolchain())
+```
+
+**Emscripten** requires the Emscripten SDK. Set the `EMSDK` environment variable, or install to `~/emsdk` or `/opt/emsdk`.
+
+**WASI** requires the WASI SDK. Set `WASI_SDK_PATH`, or install to `/opt/wasi-sdk` or `~/.local/share/wasi-sdk` (also available via Homebrew).
+
+### Builder Types
+
+All builders are accessible as methods on `Project`:
+
+{{ builder_table }}
+
+### Custom Toolchains
+
+You can register your own toolchain to support additional languages or compilers:
+
+```python
+from pcons.toolchains import toolchain_registry
+
+toolchain_registry.register(
+    MyToolchain,
+    aliases=["my-toolchain"],
+    check_command="my-compiler",
+    tool_classes=[MyCompiler, MyLinker],
+    category="c",
+    platforms=["linux", "darwin", "win32"],
+    description="My custom compiler",
+)
+```
+
+---
+
 ## Core Concepts
 
 Understanding these core concepts will help you write effective pcons build scripts.

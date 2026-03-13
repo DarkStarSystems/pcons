@@ -515,4 +515,7 @@ toolchain_registry.register(
         MsvcAssembler,
     ],
     category="c",
+    platforms=["win32"],
+    description="Microsoft Visual C/C++ compiler",
+    finder="find_c_toolchain()",
 )
