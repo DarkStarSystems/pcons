@@ -7,7 +7,7 @@ description = "Demonstrates compiling a simple C program (cross-platform)"
 # Object files are in obj.<target>/ subdirectories
 # Paths are Unix-style; automatically adapted for Windows (.o -> .obj, adds .exe)
 expected_outputs = [
-    "build/obj.hello/hello.o",
+    "build/obj.hello/src/hello.c.o",
     "build/hello",
 ]
 

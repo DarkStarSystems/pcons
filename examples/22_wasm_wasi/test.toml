@@ -5,7 +5,7 @@ description = "Demonstrates compiling a C program to WebAssembly via wasi-sdk"
 
 # Files that should exist after the build
 expected_outputs = [
-    "build/obj.hello/hello.o",
+    "build/obj.hello/src/hello.c.o",
     "build/hello.wasm",
 ]
 

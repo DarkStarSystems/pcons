@@ -127,15 +127,15 @@ class ObjectNodeFactory:
     def get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
         """Generate target-specific output path for an object file.
 
-        Format: <build_dir>/obj.<target_name>/<source_stem>.<suffix>
+        Format: ``<build_dir>/obj.<target>/<relative_dir>/<name>.<src_ext><obj_ext>``
 
-        The "obj." prefix avoids naming conflicts between the object directory
-        and the final output file (e.g., program named "hello" vs directory
-        containing object files).
+        For example, ``src/lib/foo.cpp`` produces
+        ``build/obj.mylib/src/lib/foo.cpp.o``.
 
-        The object suffix is obtained from the source handler if available
-        (e.g., ".res" for resource files), otherwise from the toolchain's
-        default object suffix.
+        Including the source extension prevents collisions when two sources
+        share a basename (e.g., ``foo.c`` and ``foo.cpp``).  Mirroring the
+        source directory structure prevents collisions when sources with the
+        same filename live in different directories.
 
         Args:
             target: The target owning this object.
@@ -146,19 +146,27 @@ class ObjectNodeFactory:
             Path for the object file.
         """
         build_dir = self.project.build_dir
-        # Use "obj.<target_name>" as subdirectory to avoid conflicts with outputs
         obj_dir = build_dir / f"obj.{target.name}"
 
         # Try to get suffix from source handler first (for special file types like .rc)
         handler = self.get_source_handler(source, env)
         if handler:
-            suffix = handler.object_suffix
+            obj_suffix = handler.object_suffix
         else:
-            # Fallback to toolchain's default object suffix
             toolchain = env._toolchain
-            suffix = toolchain.get_object_suffix() if toolchain else ".o"
+            obj_suffix = toolchain.get_object_suffix() if toolchain else ".o"
 
-        obj_name = source.stem + suffix
+        # Mirror source directory structure and include source extension
+        # e.g. src/lib/foo.cpp → obj.mylib/src/lib/foo.cpp.o
+        obj_name = source.name + obj_suffix
+        rel_dir = source.parent
+        # Strip leading ".." components and absolute prefixes to keep paths
+        # inside the object directory
+        parts = [
+            p for p in rel_dir.parts if p not in ("..", "/") and p != rel_dir.anchor
+        ]
+        if parts:
+            return obj_dir.joinpath(*parts) / obj_name
         return obj_dir / obj_name
 
     def get_source_handler(

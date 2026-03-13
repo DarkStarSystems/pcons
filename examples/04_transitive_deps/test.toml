@@ -7,9 +7,9 @@ description = "Demonstrates transitive include directory propagation"
 # Object files are in obj.<target>/ subdirectories
 # Paths are Unix-style; automatically adapted for Windows
 expected_outputs = [
-    "build/obj.simulator/math_lib.o",
-    "build/obj.simulator/physics_lib.o",
-    "build/obj.simulator/main.o",
+    "build/obj.simulator/src/math_lib.c.o",
+    "build/obj.simulator/src/physics_lib.c.o",
+    "build/obj.simulator/src/main.c.o",
     "build/simulator",
 ]
 

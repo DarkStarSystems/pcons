@@ -7,8 +7,8 @@ description = "Demonstrates building a multi-file C project with include directo
 # Object files are in obj.<target>/ subdirectories
 # Paths are Unix-style; automatically adapted for Windows
 expected_outputs = [
-    "build/obj.calculator/math_ops.o",
-    "build/obj.calculator/main.o",
+    "build/obj.calculator/src/math_ops.c.o",
+    "build/obj.calculator/src/main.c.o",
     "build/calculator",
 ]
 

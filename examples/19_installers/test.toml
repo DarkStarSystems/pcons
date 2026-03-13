@@ -5,7 +5,7 @@ description = "Demonstrates platform-specific installer creation (.pkg/.dmg on m
 
 # macOS: expect the program and installers
 expected_outputs_darwin = [
-    "build/obj.hello/main.o",
+    "build/obj.hello/src/main.c.o",
     "build/hello",
     "build/HelloApp-1.0.0.pkg",
     "build/HelloApp.dmg",
@@ -13,14 +13,14 @@ expected_outputs_darwin = [
 
 # Windows: expect the MSIX installer to be built
 expected_outputs_windows = [
-    "build/obj.hello/main.obj",
+    "build/obj.hello/src/main.c.obj",
     "build/hello.exe",
     "build/HelloApp-1.0.0.0.msix",
 ]
 
 # Linux: just the program (no installer support yet)
 expected_outputs_linux = [
-    "build/obj.hello/main.o",
+    "build/obj.hello/src/main.c.o",
     "build/hello",
 ]
 

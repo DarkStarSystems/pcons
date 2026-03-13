@@ -40,7 +40,7 @@ class TestResolverSingleTarget:
         assert target._resolved
         assert len(target.object_nodes) == 1
         # Objects are placed in obj.<target>/ subdirectory to avoid naming conflicts
-        assert target.object_nodes[0].path == Path("build/obj.mylib/main.o")
+        assert target.object_nodes[0].path == Path("build/obj.mylib/main.c.o")
 
     def test_resolve_sets_object_build_info(self, tmp_path, gcc_toolchain):
         """Test that resolved objects have proper build_info."""
@@ -779,12 +779,12 @@ class TestResolverPrecompiledObjects:
         project.resolve()
 
         assert prog._resolved
-        # Should have 2 object nodes: main.o (compiled by Program) and helper.o (passed through)
+        # Should have 2 object nodes: main.c.o (compiled by Program) and helper.o (passed through)
         assert len(prog.object_nodes) == 2
 
         # Check that both objects are present
         obj_paths = [str(obj.path) for obj in prog.object_nodes]
-        assert any("main.o" in p for p in obj_paths)
+        assert any("main.c.o" in p for p in obj_paths)
         assert any("helper.o" in p for p in obj_paths)
 
     def test_unrecognized_file_passed_through(self, tmp_path, gcc_toolchain):
@@ -837,7 +837,7 @@ class TestResolverPrecompiledObjects:
         project.resolve()
 
         assert prog._resolved
-        # Should have 2 object nodes (main.o and the linker script)
+        # Should have 2 object nodes (main.c.o and the linker script)
         assert len(prog.object_nodes) == 2
 
         obj_paths = [obj.path for obj in prog.object_nodes]

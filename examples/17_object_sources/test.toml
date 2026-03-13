@@ -9,7 +9,7 @@ description = "Demonstrates using separately compiled objects as Program sources
 # main.o is compiled by Program's normal resolution
 expected_outputs = [
     "build/helper.o",
-    "build/obj.demo/main.o",
+    "build/obj.demo/src/main.c.o",
     "build/demo",
 ]
 

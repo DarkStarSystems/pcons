@@ -5,7 +5,7 @@ description = "Demonstrates configure_file() for generating config headers"
 
 expected_outputs = [
     "build/config.h",
-    "build/obj.configure_demo/main.o",
+    "build/obj.configure_demo/src/main.c.o",
     "build/configure_demo",
 ]
 

@@ -5,7 +5,7 @@ description = "Demonstrates Makefile generation with pcons"
 
 # Files that should exist after the build
 expected_outputs = [
-    "build/obj.hello/hello.o",
+    "build/obj.hello/src/hello.c.o",
     "build/hello",
 ]
 
