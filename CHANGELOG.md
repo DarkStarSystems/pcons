@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-03-13
+
+### Added
+
+- **`ToolChecks.try_compile()` public method**: Compile arbitrary source code snippets to probe for compiler features, struct members, intrinsics, etc. Handles compiler lookup and result caching automatically, matching the pattern of `check_header()` and `check_flag()`. Previously this required reaching for private `_try_compile()` and `_get_compiler()` methods.
+
 ## [0.8.1] - 2026-03-13
 
 ### Added
@@ -543,7 +549,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/DarkStarSystems/pcons/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/DarkStarSystems/pcons/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/DarkStarSystems/pcons/compare/v0.7.4...v0.8.0
 [0.7.4]: https://github.com/DarkStarSystems/pcons/compare/v0.7.3...v0.7.4
