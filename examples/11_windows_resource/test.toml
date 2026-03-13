@@ -6,8 +6,8 @@ description = "Demonstrates compiling Windows resource files (.rc) with MSVC"
 # Files that should exist after the build
 # Note: resource files compile to .res, not .obj
 expected_outputs = [
-    "build/obj.myapp/main.obj",
-    "build/obj.myapp/app.res",
+    "build/obj.myapp/src/main.c.obj",
+    "build/obj.myapp/src/app.rc.res",
     "build/myapp.exe",
 ]
 

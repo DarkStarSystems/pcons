@@ -7,7 +7,7 @@ timeout = 300
 
 # Files that should exist after the build
 expected_outputs = [
-    "build/obj.hello/hello.obj",
+    "build/obj.hello/src/hello.c.obj",
     "build/hello.exe",
 ]
 

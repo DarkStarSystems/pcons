@@ -6,7 +6,7 @@ description = "Demonstrates Windows SxS manifest support with DPI awareness"
 # Files that should exist after the build
 # Note: manifest files are generated and embedded
 expected_outputs = [
-    "build/obj.myapp/main.obj",
+    "build/obj.myapp/src/main.c.obj",
     "build/myapp.exe",
     "build/MyLib.dll",
     "build/ManifestExample.MyLib.manifest",
