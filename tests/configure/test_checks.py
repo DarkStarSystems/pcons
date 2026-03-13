@@ -125,6 +125,45 @@ class TestToolChecksWithCompiler:
         size = checks.check_type_size("void*")
         assert size in [4, 8]  # 32-bit or 64-bit
 
+    def test_try_compile_success(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        result = checks.try_compile("int main(void) { return 0; }\n")
+        assert result.success is True
+
+    def test_try_compile_failure(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        result = checks.try_compile("this is not valid C code")
+        assert result.success is False
+
+    def test_try_compile_with_header(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        result = checks.try_compile(
+            '#include <stdio.h>\nint main(void) { printf("hi"); return 0; }\n'
+        )
+        assert result.success is True
+
+    def test_try_compile_cached(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        source = "int main(void) { return 42; }\n"
+        result1 = checks.try_compile(source)
+        assert result1.cached is False
+        result2 = checks.try_compile(source)
+        assert result2.cached is True
+        assert result2.success == result1.success
+
+    def test_try_compile_with_extra_flags(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        flag = "/W4" if _is_msvc_style else "-Wall"
+        result = checks.try_compile(
+            "int main(void) { return 0; }\n", extra_flags=[flag]
+        )
+        assert result.success is True
+
     def test_check_caching(self, setup):
         config, env = setup
         checks = ToolChecks(config, env, "cc")

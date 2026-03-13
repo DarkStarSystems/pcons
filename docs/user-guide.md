@@ -2093,6 +2093,11 @@ if checks.check_function("pthread_create", headers=["pthread.h"], libs=["pthread
 
 # Read a predefined compiler macro
 gcc_ver = checks.check_define("__GNUC__")  # e.g. "14"
+
+# Custom compile check with arbitrary source code
+has_neon = checks.try_compile(
+    "#include <arm_neon.h>\nint main() { float a[] = {1,1}; vld1q_f32_x2(a); return 0; }"
+).success
 ```
 
 All results are automatically cached through `Configure`. On the first run, each check compiles a test program; on subsequent runs, cached results are returned instantly:
@@ -2359,6 +2364,9 @@ This is especially useful when porting CMake projects to pcons, since the templa
 | `checks.check_header(name)` | Check if a header exists |
 | `checks.check_type(name, headers=[])` | Check if a type exists |
 | `checks.check_type_size(name)` | Get the size of a type |
+| `checks.check_function(name)` | Check if a function is available |
+| `checks.check_define(name)` | Get value of a predefined macro |
+| `checks.try_compile(source)` | Try to compile arbitrary source code |
 
 ### macOS Utilities
 

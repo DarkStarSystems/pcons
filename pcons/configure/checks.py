@@ -81,6 +81,55 @@ class ToolChecks:
         compiler = self._get_compiler() or "unknown"
         return f"check:{self._tool_name}:{compiler}:{check_type}:{':'.join(args)}"
 
+    def try_compile(
+        self,
+        source: str,
+        *,
+        extra_flags: list[str] | None = None,
+        link: bool = False,
+    ) -> CheckResult:
+        """Try to compile (and optionally link) arbitrary source code.
+
+        Use this for custom compile checks that aren't covered by the
+        higher-level methods like check_header() or check_type().
+
+        Results are cached based on a hash of the source code and flags.
+
+        Args:
+            source: Source code to compile.
+            extra_flags: Additional compiler flags.
+            link: If True, also link the program.
+
+        Returns:
+            CheckResult indicating success/failure.
+
+        Example::
+
+            checks = ToolChecks(config, env, "cxx")
+
+            has_feature = checks.try_compile('''
+                #include <optional>
+                int main() { std::optional<int> x = 42; return *x; }
+            ''').success
+        """
+        import hashlib
+
+        code_hash = hashlib.sha256(source.encode()).hexdigest()[:16]
+        flags_str = ":".join(extra_flags) if extra_flags else ""
+        link_str = "link" if link else "compile"
+        cache_key = self._cache_key("try_compile", code_hash, flags_str, link_str)
+        cached = self._config.get(cache_key)
+        if cached is not None:
+            return CheckResult(success=cached, cached=True)
+
+        compiler = self._get_compiler()
+        if compiler is None:
+            return CheckResult(success=False, output="No compiler configured")
+
+        result = self._try_compile(compiler, source, extra_flags=extra_flags, link=link)
+        self._config.set(cache_key, result.success)
+        return result
+
     def check_flag(self, flag: str) -> CheckResult:
         """Check if the compiler accepts a flag.
 
