@@ -595,6 +595,7 @@ class TestResolverToolAgnostic:
 
     def test_custom_toolchain_source_handler(self, tmp_path):
         """Test resolver uses toolchain's source handler."""
+        from pcons.core.subst import SourcePath, TargetPath
         from pcons.tools.toolchain import BaseToolchain, SourceHandler
 
         # Create a mock toolchain that handles .tex files
@@ -637,7 +638,7 @@ class TestResolverToolAgnostic:
 
         # Add a fake latex tool
         env.add_tool("latex")
-        env.latex.objcmd = "pdflatex -output-directory $out_dir $SOURCE"
+        env.latex.objcmd = ["pdflatex", "-o", TargetPath(), SourcePath()]
 
         # Create target
         target = project.StaticLibrary("document", env, sources=[str(tex_file)])

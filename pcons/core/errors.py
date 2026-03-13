@@ -78,6 +78,13 @@ class MissingVariableError(SubstitutionError):
 
         msg = f"undefined variable: ${variable}"
 
+        # Hint about $$ escaping for shell/linker variables
+        if "." not in variable:
+            msg += (
+                f"\n  If ${variable} is a shell or linker variable"
+                f" (e.g., $ORIGIN), use $${variable} to pass it through literally."
+            )
+
         # Add suggestions for similar variable names
         if available_keys:
             var_prefix = variable.split(".")[0] if "." in variable else variable

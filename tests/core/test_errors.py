@@ -54,6 +54,19 @@ class TestMissingVariableError:
         assert "pcons-build.py:10" in str(err)
         assert "BAR" in str(err)
 
+    def test_bare_var_hints_dollar_escape(self):
+        """Bare $VAR (no dot) should suggest $$ escaping."""
+        err = MissingVariableError("ORIGIN")
+        msg = str(err)
+        assert "$$ORIGIN" in msg
+        assert "literally" in msg
+
+    def test_dotted_var_no_escape_hint(self):
+        """Dotted $tool.var should NOT suggest $$ escaping."""
+        err = MissingVariableError("link.badvar")
+        msg = str(err)
+        assert "$$" not in msg
+
 
 class TestCircularReferenceError:
     def test_format(self):

@@ -296,6 +296,18 @@ class TestSubstErrors:
             subst("$UNDEFINED", {})
         assert "UNDEFINED" in str(exc_info.value)
 
+    def test_dollar_origin_in_flags_raises(self):
+        """$ORIGIN in flag values (e.g., rpath) should raise with $$ hint."""
+        ns = {"link": {"flags": ["-Wl,-rpath,$ORIGIN"]}}
+        with pytest.raises(MissingVariableError, match=r"\$\$ORIGIN"):
+            subst(["$link.flags"], ns)
+
+    def test_escaped_dollar_origin_passes_through(self):
+        """$$ORIGIN should become literal $ORIGIN."""
+        ns = {"link": {"flags": ["-Wl,-rpath,$$ORIGIN"]}}
+        result = subst(["$link.flags"], ns)
+        assert result == ["-Wl,-rpath,$ORIGIN"]
+
     def test_circular_reference(self):
         ns = {
             "a": "$b",

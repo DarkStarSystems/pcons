@@ -248,8 +248,7 @@ class TestCompileCommandsQuoting:
 
         env = project.Environment(toolchain=toolchain)
         env.add_tool("cc")
-        env.cc.objcmd = "gcc $includes $defines $extra_flags -c $in -o $out"
-        env.cc.progcmd = "gcc $ldflags -o $out $in $libs"
+        env.add_tool("link")
 
         # Create source file in directory with spaces
         source_dir = tmp_path / "src with spaces"

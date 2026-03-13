@@ -1212,20 +1212,7 @@ class Resolver:
 
         # Expand the command template to a list of tokens
         # Tokens stay separate for proper quoting - generator joins with shell quoting
-        # If substitution fails due to missing variables (e.g., custom toolchain vars),
-        # leave the command unexpanded for the generator's fallback logic
-        from pcons.core.errors import MissingVariableError
-
-        try:
-            command_tokens = env.subst_list(cmd_template, **extra_vars)
-        except MissingVariableError as e:
-            logger.debug(
-                "Command expansion failed for node %s: %s. "
-                "Generator will use fallback expansion.",
-                node.path,
-                e,
-            )
-            return  # Don't set command, let generator handle it
+        command_tokens = env.subst_list(cmd_template, **extra_vars)
 
         # Store expanded command tokens in build_info
         # All context variables (includes, defines, flags, libs, etc.) are now
