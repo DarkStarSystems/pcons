@@ -1,0 +1,21 @@
+# Test configuration for the configure_file example
+
+[test]
+description = "Demonstrates configure_file() for generating config headers"
+
+expected_outputs = [
+    "build/config.h",
+    "build/obj.configure_demo/main.o",
+    "build/configure_demo",
+]
+
+[verify]
+commands = [
+    { run = "./build/configure_demo", expect_stdout = "Version: 1.2.3" },
+    { run = "./build/configure_demo", expect_stdout = "HAVE_THREADS: 1" },
+    { run = "./build/configure_demo", expect_stdout = "zlib: no" },
+]
+
+[skip]
+# configure_file writes to build dir; make/xcode have different cwd assumptions
+generators = ["make", "xcode"]

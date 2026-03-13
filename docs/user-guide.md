@@ -2183,6 +2183,53 @@ This generates:
 
 Note: `config.check_sizeof()` uses Python's `ctypes` to determine sizes on the host machine. For cross-compilation where host and target sizes differ, use `ToolChecks.check_type_size()` instead — it compiles a test program with the target compiler.
 
+### Template-Based Config Files with `configure_file()`
+
+For projects that use template-based configuration (like CMake's `configure_file()`), pcons provides a `configure_file()` function that substitutes variables in a template and writes the result:
+
+```python
+from pcons import configure_file
+
+configure_file(
+    "src/config.h.in", "build/config.h",
+    {"VERSION": "1.2.3", "HAVE_ZLIB": "1"},
+)
+```
+
+Two substitution styles are supported:
+
+**CMake style** (default) — processes `#cmakedefine` directives and `@VAR@` substitutions:
+
+```c
+/* config.h.in */
+#define VERSION "@VERSION@"
+#cmakedefine01 HAVE_THREADS
+#cmakedefine HAVE_ZLIB
+```
+
+With `{"VERSION": "1.2.3", "HAVE_THREADS": "1"}` this produces:
+
+```c
+#define VERSION "1.2.3"
+#define HAVE_THREADS 1
+/* #undef HAVE_ZLIB */
+```
+
+**At style** (`style="at"`) — simple `@VAR@` replacement only:
+
+```python
+configure_file("version.txt.in", "build/version.txt",
+               {"VERSION": "1.2.3"}, style="at")
+```
+
+Options:
+
+- `strict=True` (default): raises `KeyError` if a `@VAR@` has no matching key
+- `strict=False`: missing variables are replaced with empty string
+- Write-if-changed: the output file is only written if its content would change
+
+This is especially useful when porting CMake projects to pcons, since the template files can often be used as-is.
+
 ---
 
 ## Troubleshooting
@@ -2282,6 +2329,7 @@ Note: `config.check_sizeof()` uses Python's `ctypes` to determine sizes on the h
 | `find_c_toolchain()` | Find an available C/C++ toolchain (platform-aware defaults) |
 | `find_c_toolchain(prefer=[...])` | Find toolchain with explicit preference order |
 | `find_cuda_toolchain()` | Find CUDA toolchain (returns `None` if nvcc not found) |
+| `configure_file(template, output, vars)` | Substitute variables in a template file (CMake or @VAR@ style) |
 | `get_var(name, default)` | Get a build variable |
 | `get_variant(default)` | Get the build variant |
 | `ensure_msvc(msvc_ver, sdk_ver)` | Install MSVC toolchain via msvcup (Windows only; import from `pcons.contrib.windows.msvcup`) |

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 # This must happen after core imports but before any user code runs
 from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
+from pcons.configure.config_file import configure_file  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
@@ -194,6 +195,7 @@ __all__ = [
     "_clear_registered_projects",
     # Core classes
     "Configure",
+    "configure_file",
     "FlagPair",
     "Project",
     # Generators
