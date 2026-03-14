@@ -101,6 +101,31 @@ class TestToolChecksWithCompiler:
         result = checks.check_header("this_header_does_not_exist_12345.h")
         assert result.success is False
 
+    def test_check_header_with_defines(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        # stdint.h should work without defines
+        result = checks.check_header("stdint.h", defines=["__STDC_LIMIT_MACROS"])
+        assert result.success is True
+
+    @pytest.mark.skipif(sys.platform != "darwin", reason="macOS-specific header")
+    def test_check_header_ucontext_requires_define(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        # On macOS, ucontext.h requires _XOPEN_SOURCE
+        result_without = checks.check_header("ucontext.h")
+        result_with = checks.check_header("ucontext.h", defines=["_XOPEN_SOURCE"])
+        # Without the define it should fail; with it should succeed
+        assert result_without.success is False
+        assert result_with.success is True
+
+    def test_check_header_with_extra_flags(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        flag = "/W4" if _is_msvc_style else "-Wall"
+        result = checks.check_header("stdio.h", extra_flags=[flag])
+        assert result.success is True
+
     def test_check_type_exists(self, setup):
         config, env = setup
         checks = ToolChecks(config, env, "cc")

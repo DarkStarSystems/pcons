@@ -171,17 +171,37 @@ class ToolChecks:
         self._config.set(cache_key, result.success)
         return result
 
-    def check_header(self, header: str) -> CheckResult:
+    def check_header(
+        self,
+        header: str,
+        *,
+        defines: list[str] | None = None,
+        extra_flags: list[str] | None = None,
+    ) -> CheckResult:
         """Check if a header file is available.
 
         Args:
             header: Header to check (e.g., 'stdio.h', 'pthread.h').
+            defines: Preprocessor defines needed to include the header
+                (e.g., ['_XOPEN_SOURCE'] for ucontext.h on macOS).
+            extra_flags: Additional compiler flags.
 
         Returns:
             CheckResult indicating success/failure.
+
+        Example::
+
+            # ucontext.h requires _XOPEN_SOURCE on macOS
+            checks.check_header("ucontext.h", defines=["_XOPEN_SOURCE"])
         """
         trace("configure", "check_header: %s (%s)", header, self._tool_name)
-        cache_key = self._cache_key("header", header)
+        # Include defines in cache key so different define combos are cached separately
+        cache_parts = [header]
+        if defines:
+            cache_parts.extend(sorted(defines))
+        if extra_flags:
+            cache_parts.extend(sorted(extra_flags))
+        cache_key = self._cache_key("header", *cache_parts)
         cached = self._config.get(cache_key)
         if cached is not None:
             trace("configure", "  cached: %s", cached)
@@ -191,9 +211,13 @@ class ToolChecks:
         if compiler is None:
             return CheckResult(success=False, output="No compiler configured")
 
-        source = f"#include <{header}>\nint main(void) {{ return 0; }}\n"
+        define_lines = ""
+        if defines:
+            define_lines = "\n".join(f"#define {d}" for d in defines) + "\n"
 
-        result = self._try_compile(compiler, source)
+        source = f"{define_lines}#include <{header}>\nint main(void) {{ return 0; }}\n"
+
+        result = self._try_compile(compiler, source, extra_flags=extra_flags)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
