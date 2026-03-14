@@ -208,6 +208,25 @@ class TestNinjaQuoting:
         # Dollar -> $$
         assert gen._escape_path("$HOME/path") == "$$HOME/path"
 
+    def test_ninja_dollar_origin_in_link_flags(self, tmp_path: Path) -> None:
+        """Verify $ORIGIN in link flags is properly escaped in ninja output.
+
+        The linker flag -Wl,-rpath,$ORIGIN must survive ninja + shell expansion:
+        \\$$ in ninja → \\$ to shell → literal $ to linker.
+        """
+        from pcons.core.subst import to_shell_command
+
+        # Simulate what happens when a token containing $ORIGIN reaches
+        # the ninja generator's shell command formatter
+        tokens = ["gcc", "-Wl,-rpath,$ORIGIN", "-o", "$out", "$in"]
+        result = to_shell_command(tokens, shell="ninja")
+
+        # $ORIGIN should be escaped for both ninja and shell: \$$
+        assert "\\$$ORIGIN" in result
+        # Ninja variables should NOT be escaped
+        assert " $out " in result or result.endswith("$out")
+        assert " $in" in result or result.endswith("$in")
+
 
 class TestMakefileQuoting:
     """Test that Makefile generator properly quotes values."""

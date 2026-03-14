@@ -742,6 +742,18 @@ def _quote_for_shell(s: str, shell: str) -> str:
         if re.match(r"^\$[a-zA-Z_][a-zA-Z0-9_.]*$", s):
             return s
 
+        # Escape literal $ signs that are NOT ninja variable references.
+        # Ninja commands are passed to the shell, so $ must survive both layers:
+        #   \$$ in ninja file → ninja expands $$ to $ → shell sees \$ → literal $
+        # This handles e.g. -Wl,-rpath,$ORIGIN (linker token, not a variable).
+        # Known ninja vars ($in, $out, $topdir, $source_N, $target_N) are preserved.
+        _NINJA_VARS = r"(?:in|out|topdir|source_\d+|target_\d+)"
+        s = re.sub(
+            rf"\$(?!({_NINJA_VARS})(?!\w)|\$)",
+            lambda m: "\\$$",
+            s,
+        )
+
         # Path-like arguments with spaces need quoting (for paths pcons expanded)
         # Use double quotes for cross-platform compatibility
         has_spaces = " " in s or "\t" in s

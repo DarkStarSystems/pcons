@@ -436,6 +436,30 @@ class TestToShellCommand:
         result = to_shell_command(tokens, shell="cmd")
         assert result == 'echo "hello world"'
 
+    def test_ninja_escapes_literal_dollar(self):
+        """Literal $ in tokens must be escaped for both ninja and shell."""
+        tokens = ["gcc", "-Wl,-rpath,$ORIGIN", "-o", "$out", "$in"]
+        result = to_shell_command(tokens, shell="ninja")
+        # $ORIGIN should be escaped: \$$ (ninja $$ → $, shell \$ → $)
+        assert "\\$$ORIGIN" in result
+        # Ninja variables $out, $in should NOT be escaped
+        assert "$out" in result
+        assert "$in" in result
+
+    def test_ninja_preserves_topdir(self):
+        """$topdir in tokens should not be escaped."""
+        tokens = ["gcc", "-I$topdir/include", "-c", "$in"]
+        result = to_shell_command(tokens, shell="ninja")
+        assert "-I$topdir/include" in result
+        assert "$in" in result
+
+    def test_ninja_escapes_dollar_in_define(self):
+        """Literal $ in -D defines must be escaped for ninja."""
+        tokens = ["gcc", "-DPREFIX=$HOME/local", "-c", "$in"]
+        result = to_shell_command(tokens, shell="ninja")
+        assert "\\$$HOME" in result
+        assert "$in" in result
+
 
 class TestGeneratorVariables:
     """Test $$ escaping for generator variables like $SOURCE, $TARGET."""
