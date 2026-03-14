@@ -137,7 +137,13 @@ class ToolChecks:
         if compiler is None:
             return CheckResult(success=False, output="No compiler configured")
 
-        result = self._try_compile(compiler, source, extra_flags=extra_flags, link=link)
+        cdir = self._make_check_dir()
+        try:
+            result = self._try_compile(
+                compiler, source, extra_flags=extra_flags, link=link, check_dir=cdir
+            )
+        finally:
+            self._cleanup_check_dir(*cdir)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -167,7 +173,13 @@ class ToolChecks:
         # Minimal C program
         source = "int main(void) { return 0; }\n"
 
-        result = self._try_compile(compiler, source, extra_flags=[flag])
+        cdir = self._make_check_dir()
+        try:
+            result = self._try_compile(
+                compiler, source, extra_flags=[flag], check_dir=cdir
+            )
+        finally:
+            self._cleanup_check_dir(*cdir)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -218,7 +230,13 @@ class ToolChecks:
 
         source = f"{define_lines}#include <{header}>\nint main(void) {{ return 0; }}\n"
 
-        result = self._try_compile(compiler, source, extra_flags=extra_flags)
+        cdir = self._make_check_dir()
+        try:
+            result = self._try_compile(
+                compiler, source, extra_flags=extra_flags, check_dir=cdir
+            )
+        finally:
+            self._cleanup_check_dir(*cdir)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -252,7 +270,11 @@ class ToolChecks:
 
         source = f"{includes}\nint main(void) {{ {type_name} x; (void)x; return 0; }}\n"
 
-        result = self._try_compile(compiler, source)
+        cdir = self._make_check_dir()
+        try:
+            result = self._try_compile(compiler, source, check_dir=cdir)
+        finally:
+            self._cleanup_check_dir(*cdir)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -286,17 +308,21 @@ class ToolChecks:
 
         # Use compile-time assertion to encode the size
         # This avoids needing to run the compiled program
-        for size in [1, 2, 4, 8, 16]:
-            source = f"""
+        cdir = self._make_check_dir()
+        try:
+            for size in [1, 2, 4, 8, 16]:
+                source = f"""
 {includes}
 int check[sizeof({type_name}) == {size} ? 1 : -1];
 int main(void) {{ return 0; }}
 """
-            result = self._try_compile(compiler, source)
-            if result.success:
-                trace("configure", "  result: %d bytes", size)
-                self._config.set(cache_key, size)
-                return size
+                result = self._try_compile(compiler, source, check_dir=cdir)
+                if result.success:
+                    trace("configure", "  result: %d bytes", size)
+                    self._config.set(cache_key, size)
+                    return size
+        finally:
+            self._cleanup_check_dir(*cdir)
 
         trace("configure", "  result: unknown size")
         return None
@@ -330,7 +356,9 @@ PCONS_VALUE={define}
 PCONS_UNDEFINED
 #endif
 """
-        result = self._try_preprocess(compiler, source)
+        cdir = self._make_check_dir()
+        result = self._try_preprocess(compiler, source, check_dir=cdir)
+        self._cleanup_check_dir(*cdir)
         if not result.success:
             self._config.set(cache_key, "__UNDEFINED__")
             return None
@@ -396,7 +424,13 @@ int main(void) {{
         if libs:
             extra_flags.extend(f"-l{lib}" for lib in libs)
 
-        result = self._try_compile(compiler, source, extra_flags=extra_flags, link=True)
+        cdir = self._make_check_dir()
+        try:
+            result = self._try_compile(
+                compiler, source, extra_flags=extra_flags, link=True, check_dir=cdir
+            )
+        finally:
+            self._cleanup_check_dir(*cdir)
         trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
@@ -442,6 +476,7 @@ int main(void) {{
         *,
         extra_flags: list[str] | None = None,
         link: bool = False,
+        check_dir: tuple[Path, bool] | None = None,
     ) -> CheckResult:
         """Try to compile source code.
 
@@ -450,16 +485,19 @@ int main(void) {{
             source: Source code to compile.
             extra_flags: Additional compiler flags.
             link: If True, also link the program.
+            check_dir: Optional (dir, persistent) from _make_check_dir().
+                If not provided, creates and manages its own.
 
         Returns:
             CheckResult with compilation result.
         """
         suffix = ".c" if self._tool_name == "cc" else ".cpp"
-        check_dir, persistent = self._make_check_dir()
+        owns_dir = check_dir is None
+        dir_path, persistent = check_dir if check_dir else self._make_check_dir()
 
         try:
-            src_path = check_dir / f"check{suffix}"
-            out_path = check_dir / "check.out"
+            src_path = dir_path / f"check{suffix}"
+            out_path = dir_path / "check.out"
 
             src_path.write_text(source)
 
@@ -493,23 +531,32 @@ int main(void) {{
                 trace("configure", "  error: %s", e)
                 return CheckResult(success=False, output=str(e))
         finally:
-            self._cleanup_check_dir(check_dir, persistent)
+            if owns_dir:
+                self._cleanup_check_dir(dir_path, persistent)
 
-    def _try_preprocess(self, compiler: str, source: str) -> CheckResult:
+    def _try_preprocess(
+        self,
+        compiler: str,
+        source: str,
+        *,
+        check_dir: tuple[Path, bool] | None = None,
+    ) -> CheckResult:
         """Run the preprocessor on source code.
 
         Args:
             compiler: Compiler command.
             source: Source code to preprocess.
+            check_dir: Optional (dir, persistent) from _make_check_dir().
 
         Returns:
             CheckResult with preprocessor output.
         """
         suffix = ".c" if self._tool_name == "cc" else ".cpp"
-        check_dir, persistent = self._make_check_dir()
+        owns_dir = check_dir is None
+        dir_path, persistent = check_dir if check_dir else self._make_check_dir()
 
         try:
-            src_path = check_dir / f"check{suffix}"
+            src_path = dir_path / f"check{suffix}"
             src_path.write_text(source)
 
             cmd = [compiler, "-E", str(src_path)]
@@ -535,4 +582,5 @@ int main(void) {{
                 trace("configure", "  error: %s", e)
                 return CheckResult(success=False, output=str(e))
         finally:
-            self._cleanup_check_dir(check_dir, persistent)
+            if owns_dir:
+                self._cleanup_check_dir(dir_path, persistent)
