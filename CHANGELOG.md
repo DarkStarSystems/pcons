@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-03-14
+
+### Fixed
+
+- **`$ORIGIN` in linker flags**: Literal `$` in link flags (e.g., `-Wl,-rpath,$ORIGIN`) was silently interpreted as a pcons variable, producing broken output. Now raises a clear error with a hint to use `$$` for literal dollar signs. The ninja generator also properly escapes literal `$` as `\$$` so it survives both ninja and shell expansion.
+
+- **Silent error swallowing**: Narrowed overly-broad exception handlers in module loading, CLI variable parsing, and config cache loading to avoid hiding real errors.
+
+### Added
+
+- **`--debug=configure` tracing**: All configure checks (`check_header`, `check_flag`, `try_compile`, etc.) now log detailed trace output including the command run, exit codes, compiler errors, caller file:line, and source code previews. When active, check source files are preserved in `build/.configure-checks/` for inspection.
+
+- **`--debug=help`**: Lists available debug subsystems with descriptions. Unknown subsystem names now produce an error instead of being silently ignored.
+
+- **`check_header()` gains `defines` and `extra_flags` parameters**: Allows specifying preprocessor defines needed to include a header, e.g., `check_header("ucontext.h", defines=["_XOPEN_SOURCE"])` for headers that require feature macros.
+
 ## [0.8.2] - 2026-03-13
 
 ### Added
@@ -549,7 +565,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/DarkStarSystems/pcons/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/DarkStarSystems/pcons/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/DarkStarSystems/pcons/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/DarkStarSystems/pcons/compare/v0.7.4...v0.8.0
