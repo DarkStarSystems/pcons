@@ -75,6 +75,23 @@ class ToolChecks:
         self._tool_name = tool_name
         self._tool_config = getattr(env, tool_name, None)
 
+    @staticmethod
+    def _caller_location(depth: int = 2) -> str:
+        """Get caller's file:line for trace output."""
+        import inspect
+
+        frame = inspect.stack()[depth]
+        return f"{frame.filename}:{frame.lineno}"
+
+    @staticmethod
+    def _source_preview(source: str, maxlen: int = 80) -> str:
+        """One-line preview of source code for trace output."""
+        # Collapse to single line, strip leading/trailing whitespace
+        oneline = " ".join(source.split())
+        if len(oneline) > maxlen:
+            return oneline[:maxlen] + "..."
+        return oneline
+
     def _get_compiler(self) -> str | None:
         """Get the compiler command."""
         if self._tool_config is None:
@@ -124,11 +141,13 @@ class ToolChecks:
         link_str = "link" if link else "compile"
         trace(
             "configure",
-            "try_compile: %s%s (%s)",
+            "try_compile: %s%s (%s) at %s",
             link_str,
             f" flags={extra_flags}" if extra_flags else "",
             self._tool_name,
+            self._caller_location(),
         )
+        trace("configure", "  source: %s", self._source_preview(source))
         cache_key = self._cache_key("try_compile", code_hash, flags_str, link_str)
         cached = self._config.get(cache_key)
         if cached is not None:
@@ -161,7 +180,13 @@ class ToolChecks:
         Returns:
             CheckResult indicating success/failure.
         """
-        trace("configure", "check_flag: %s (%s)", flag, self._tool_name)
+        trace(
+            "configure",
+            "check_flag: %s (%s) at %s",
+            flag,
+            self._tool_name,
+            self._caller_location(),
+        )
         cache_key = self._cache_key("flag", flag)
         cached = self._config.get(cache_key)
         if cached is not None:
@@ -209,7 +234,13 @@ class ToolChecks:
             # ucontext.h requires _XOPEN_SOURCE on macOS
             checks.check_header("ucontext.h", defines=["_XOPEN_SOURCE"])
         """
-        trace("configure", "check_header: %s (%s)", header, self._tool_name)
+        trace(
+            "configure",
+            "check_header: %s (%s) at %s",
+            header,
+            self._tool_name,
+            self._caller_location(),
+        )
         # Include defines in cache key so different define combos are cached separately
         cache_parts = [header]
         if defines:
@@ -255,7 +286,13 @@ class ToolChecks:
         Returns:
             CheckResult indicating success/failure.
         """
-        trace("configure", "check_type: %s (%s)", type_name, self._tool_name)
+        trace(
+            "configure",
+            "check_type: %s (%s) at %s",
+            type_name,
+            self._tool_name,
+            self._caller_location(),
+        )
         cache_key = self._cache_key("type", type_name)
         cached = self._config.get(cache_key)
         if cached is not None:
@@ -293,7 +330,13 @@ class ToolChecks:
         Returns:
             Size in bytes, or None if check failed.
         """
-        trace("configure", "check_type_size: %s (%s)", type_name, self._tool_name)
+        trace(
+            "configure",
+            "check_type_size: %s (%s) at %s",
+            type_name,
+            self._tool_name,
+            self._caller_location(),
+        )
         cache_key = self._cache_key("sizeof", type_name)
         cached = self._config.get(cache_key)
         if cached is not None:
@@ -338,7 +381,13 @@ int main(void) {{ return 0; }}
         Returns:
             Macro value as string, or None if not defined.
         """
-        trace("configure", "check_define: %s (%s)", define, self._tool_name)
+        trace(
+            "configure",
+            "check_define: %s (%s) at %s",
+            define,
+            self._tool_name,
+            self._caller_location(),
+        )
         cache_key = self._cache_key("define", define)
         cached = self._config.get(cache_key)
         if cached is not None:
@@ -398,7 +447,13 @@ PCONS_UNDEFINED
         Returns:
             CheckResult indicating success/failure.
         """
-        trace("configure", "check_function: %s (%s)", function, self._tool_name)
+        trace(
+            "configure",
+            "check_function: %s (%s) at %s",
+            function,
+            self._tool_name,
+            self._caller_location(),
+        )
         cache_key = self._cache_key("function", function)
         cached = self._config.get(cache_key)
         if cached is not None:
