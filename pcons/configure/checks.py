@@ -71,6 +71,7 @@ class ToolChecks:
         self._env = env
         self._tool_name = tool_name
         self._tool_config = getattr(env, tool_name, None)
+        self._check_counter = 0
 
     def _get_compiler(self) -> str | None:
         """Get the compiler command."""
@@ -400,6 +401,40 @@ int main(void) {{
         self._config.set(cache_key, result.success)
         return result
 
+    def _make_check_dir(self) -> tuple[Path, bool]:
+        """Create a directory for a configure check.
+
+        When --debug=configure is active, creates a persistent numbered
+        directory under <build_dir>/.configure-checks/ so users can
+        inspect the source files and compiler output.  Otherwise uses
+        a temporary directory that will be cleaned up by the caller.
+
+        Returns:
+            (directory_path, persistent) — persistent=True means the caller
+            should NOT delete it.
+        """
+        from pcons.core.debug import is_enabled
+
+        self._check_counter += 1
+
+        if is_enabled("configure"):
+            base = self._config.build_dir / ".configure-checks"
+            check_dir = base / f"check_{self._check_counter:03d}"
+            check_dir.mkdir(parents=True, exist_ok=True)
+            trace("configure", "  dir: %s", check_dir)
+            return check_dir, True
+
+        tmpdir = Path(tempfile.mkdtemp())
+        return tmpdir, False
+
+    @staticmethod
+    def _cleanup_check_dir(check_dir: Path, persistent: bool) -> None:
+        """Remove a check directory if it's not persistent."""
+        if not persistent:
+            import shutil
+
+            shutil.rmtree(check_dir, ignore_errors=True)
+
     def _try_compile(
         self,
         compiler: str,
@@ -420,10 +455,11 @@ int main(void) {{
             CheckResult with compilation result.
         """
         suffix = ".c" if self._tool_name == "cc" else ".cpp"
+        check_dir, persistent = self._make_check_dir()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            src_path = Path(tmpdir) / f"check{suffix}"
-            out_path = Path(tmpdir) / "check.out"
+        try:
+            src_path = check_dir / f"check{suffix}"
+            out_path = check_dir / "check.out"
 
             src_path.write_text(source)
 
@@ -456,6 +492,8 @@ int main(void) {{
             except (subprocess.TimeoutExpired, OSError) as e:
                 trace("configure", "  error: %s", e)
                 return CheckResult(success=False, output=str(e))
+        finally:
+            self._cleanup_check_dir(check_dir, persistent)
 
     def _try_preprocess(self, compiler: str, source: str) -> CheckResult:
         """Run the preprocessor on source code.
@@ -468,9 +506,10 @@ int main(void) {{
             CheckResult with preprocessor output.
         """
         suffix = ".c" if self._tool_name == "cc" else ".cpp"
+        check_dir, persistent = self._make_check_dir()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            src_path = Path(tmpdir) / f"check{suffix}"
+        try:
+            src_path = check_dir / f"check{suffix}"
             src_path.write_text(source)
 
             cmd = [compiler, "-E", str(src_path)]
@@ -495,3 +534,5 @@ int main(void) {{
             except (subprocess.TimeoutExpired, OSError) as e:
                 trace("configure", "  error: %s", e)
                 return CheckResult(success=False, output=str(e))
+        finally:
+            self._cleanup_check_dir(check_dir, persistent)
