@@ -54,6 +54,9 @@ class ToolChecks:
             env.cc.defines.append("HAVE_PTHREAD_H")
     """
 
+    # Shared across all instances so check dirs are uniquely numbered
+    _check_counter: int = 0
+
     def __init__(
         self,
         config: Configure,
@@ -71,7 +74,6 @@ class ToolChecks:
         self._env = env
         self._tool_name = tool_name
         self._tool_config = getattr(env, tool_name, None)
-        self._check_counter = 0
 
     def _get_compiler(self) -> str | None:
         """Get the compiler command."""
@@ -449,7 +451,7 @@ int main(void) {{
         """
         from pcons.core.debug import is_enabled
 
-        self._check_counter += 1
+        ToolChecks._check_counter += 1
 
         if is_enabled("configure"):
             base = self._config.build_dir / ".configure-checks"
