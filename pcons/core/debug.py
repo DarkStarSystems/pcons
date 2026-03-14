@@ -4,17 +4,11 @@
 Provides selective tracing of specific subsystems via --debug=<subsystem>
 CLI flags or PCONS_DEBUG=<subsystems> environment variable.
 
-Available subsystems:
-    configure - Tool detection, feature checks, configuration caching
-    resolve   - Target resolution, object node creation, dependency propagation
-    generate  - Build file writing, rule creation, path handling
-    subst     - Variable substitution, function calls, token expansion
-    env       - Environment creation, tool setup, variable lookups
-    deps      - Dependency graph, effective requirements propagation
-    all       - Enable all subsystems
+Use --debug=help to list available subsystems.
 
 Usage:
     pcons --debug=resolve,subst
+    pcons --debug=help
     PCONS_DEBUG=all pcons
 """
 
@@ -28,9 +22,30 @@ from typing import Any
 _enabled_subsystems: set[str] = set()
 _initialized = False
 
-SUBSYSTEMS = frozenset(
-    {"configure", "resolve", "generate", "subst", "env", "deps", "all"}
-)
+# Subsystem descriptions — single source of truth for --debug help and --debug=help
+SUBSYSTEM_DESCRIPTIONS: dict[str, str] = {
+    "configure": "Tool detection, feature checks, compiler probes",
+    "resolve": "Target resolution, object nodes, dependency propagation",
+    "generate": "Build file writing, rule creation, path handling",
+    "subst": "Variable substitution, function calls, token expansion",
+    "env": "Environment creation, tool setup, variable lookups",
+    "deps": "Dependency graph, effective requirements propagation",
+}
+
+SUBSYSTEMS = frozenset(set(SUBSYSTEM_DESCRIPTIONS.keys()) | {"all"})
+
+
+def print_subsystems(file: Any = None) -> None:
+    """Print available debug subsystems and their descriptions."""
+    import sys
+
+    out = file or sys.stdout
+    print("Available debug subsystems (--debug=SUBSYSTEM[,SUBSYSTEM,...]):", file=out)
+    width = max(len(name) for name in SUBSYSTEM_DESCRIPTIONS)
+    for name, desc in SUBSYSTEM_DESCRIPTIONS.items():
+        print(f"  {name:<{width}}  {desc}", file=out)
+    print(f"  {'all':<{width}}  Enable all subsystems", file=out)
+    print(f"  {'help':<{width}}  Show this list", file=out)
 
 
 def init_debug(debug_spec: str | None = None) -> None:
@@ -54,10 +69,24 @@ def init_debug(debug_spec: str | None = None) -> None:
         return
 
     parts = [p.strip().lower() for p in spec.split(",") if p.strip()]
+
+    if "help" in parts:
+        print_subsystems()
+        raise SystemExit(0)
+
     if "all" in parts:
         _enabled_subsystems = set(SUBSYSTEMS - {"all"})
     else:
-        # Only include valid subsystem names
+        unknown = set(parts) - SUBSYSTEMS
+        if unknown:
+            import sys
+
+            print(
+                f"Unknown debug subsystem(s): {', '.join(sorted(unknown))}",
+                file=sys.stderr,
+            )
+            print_subsystems(file=sys.stderr)
+            raise SystemExit(1)
         _enabled_subsystems = set(parts) & SUBSYSTEMS
 
     _initialized = True

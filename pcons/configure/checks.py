@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.debug import trace
+
 if TYPE_CHECKING:
     from pcons.configure.config import Configure
     from pcons.core.environment import Environment
@@ -117,9 +119,17 @@ class ToolChecks:
         code_hash = hashlib.sha256(source.encode()).hexdigest()[:16]
         flags_str = ":".join(extra_flags) if extra_flags else ""
         link_str = "link" if link else "compile"
+        trace(
+            "configure",
+            "try_compile: %s%s (%s)",
+            link_str,
+            f" flags={extra_flags}" if extra_flags else "",
+            self._tool_name,
+        )
         cache_key = self._cache_key("try_compile", code_hash, flags_str, link_str)
         cached = self._config.get(cache_key)
         if cached is not None:
+            trace("configure", "  cached: %s", cached)
             return CheckResult(success=cached, cached=True)
 
         compiler = self._get_compiler()
@@ -127,6 +137,7 @@ class ToolChecks:
             return CheckResult(success=False, output="No compiler configured")
 
         result = self._try_compile(compiler, source, extra_flags=extra_flags, link=link)
+        trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
 
@@ -141,9 +152,11 @@ class ToolChecks:
         Returns:
             CheckResult indicating success/failure.
         """
+        trace("configure", "check_flag: %s (%s)", flag, self._tool_name)
         cache_key = self._cache_key("flag", flag)
         cached = self._config.get(cache_key)
         if cached is not None:
+            trace("configure", "  cached: %s", cached)
             return CheckResult(success=cached, cached=True)
 
         compiler = self._get_compiler()
@@ -154,6 +167,7 @@ class ToolChecks:
         source = "int main(void) { return 0; }\n"
 
         result = self._try_compile(compiler, source, extra_flags=[flag])
+        trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
 
@@ -166,9 +180,11 @@ class ToolChecks:
         Returns:
             CheckResult indicating success/failure.
         """
+        trace("configure", "check_header: %s (%s)", header, self._tool_name)
         cache_key = self._cache_key("header", header)
         cached = self._config.get(cache_key)
         if cached is not None:
+            trace("configure", "  cached: %s", cached)
             return CheckResult(success=cached, cached=True)
 
         compiler = self._get_compiler()
@@ -178,6 +194,7 @@ class ToolChecks:
         source = f"#include <{header}>\nint main(void) {{ return 0; }}\n"
 
         result = self._try_compile(compiler, source)
+        trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
 
@@ -193,9 +210,11 @@ class ToolChecks:
         Returns:
             CheckResult indicating success/failure.
         """
+        trace("configure", "check_type: %s (%s)", type_name, self._tool_name)
         cache_key = self._cache_key("type", type_name)
         cached = self._config.get(cache_key)
         if cached is not None:
+            trace("configure", "  cached: %s", cached)
             return CheckResult(success=cached, cached=True)
 
         compiler = self._get_compiler()
@@ -209,6 +228,7 @@ class ToolChecks:
         source = f"{includes}\nint main(void) {{ {type_name} x; (void)x; return 0; }}\n"
 
         result = self._try_compile(compiler, source)
+        trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
 
@@ -224,9 +244,11 @@ class ToolChecks:
         Returns:
             Size in bytes, or None if check failed.
         """
+        trace("configure", "check_type_size: %s (%s)", type_name, self._tool_name)
         cache_key = self._cache_key("sizeof", type_name)
         cached = self._config.get(cache_key)
         if cached is not None:
+            trace("configure", "  cached: %s", cached)
             return int(cached)
 
         compiler = self._get_compiler()
@@ -247,9 +269,11 @@ int main(void) {{ return 0; }}
 """
             result = self._try_compile(compiler, source)
             if result.success:
+                trace("configure", "  result: %d bytes", size)
                 self._config.set(cache_key, size)
                 return size
 
+        trace("configure", "  result: unknown size")
         return None
 
     def check_define(self, define: str) -> str | None:
@@ -261,10 +285,13 @@ int main(void) {{ return 0; }}
         Returns:
             Macro value as string, or None if not defined.
         """
+        trace("configure", "check_define: %s (%s)", define, self._tool_name)
         cache_key = self._cache_key("define", define)
         cached = self._config.get(cache_key)
         if cached is not None:
-            return cached if cached != "__UNDEFINED__" else None
+            value = cached if cached != "__UNDEFINED__" else None
+            trace("configure", "  cached: %s", value)
+            return value
 
         compiler = self._get_compiler()
         if compiler is None:
@@ -287,12 +314,15 @@ PCONS_UNDEFINED
         for line in result.output.split("\n"):
             if line.startswith("PCONS_VALUE="):
                 value = line[len("PCONS_VALUE=") :].strip()
+                trace("configure", "  result: %s", value)
                 self._config.set(cache_key, value)
                 return value
             if "PCONS_UNDEFINED" in line:
+                trace("configure", "  result: not defined")
                 self._config.set(cache_key, "__UNDEFINED__")
                 return None
 
+        trace("configure", "  result: not defined")
         self._config.set(cache_key, "__UNDEFINED__")
         return None
 
@@ -313,9 +343,11 @@ PCONS_UNDEFINED
         Returns:
             CheckResult indicating success/failure.
         """
+        trace("configure", "check_function: %s (%s)", function, self._tool_name)
         cache_key = self._cache_key("function", function)
         cached = self._config.get(cache_key)
         if cached is not None:
+            trace("configure", "  cached: %s", cached)
             return CheckResult(success=cached, cached=True)
 
         compiler = self._get_compiler()
@@ -340,6 +372,7 @@ int main(void) {{
             extra_flags.extend(f"-l{lib}" for lib in libs)
 
         result = self._try_compile(compiler, source, extra_flags=extra_flags, link=True)
+        trace("configure", "  result: %s", "yes" if result.success else "no")
         self._config.set(cache_key, result.success)
         return result
 
@@ -377,6 +410,8 @@ int main(void) {{
             if extra_flags:
                 cmd.extend(extra_flags)
 
+            trace("configure", "  cmd: %s", " ".join(cmd))
+
             try:
                 result = subprocess.run(
                     cmd,
@@ -384,11 +419,18 @@ int main(void) {{
                     text=True,
                     timeout=30,
                 )
+                output = result.stderr + result.stdout
+                if result.returncode != 0:
+                    trace("configure", "  exit code: %d", result.returncode)
+                    if output.strip():
+                        for line in output.strip().splitlines()[:10]:
+                            trace("configure", "  | %s", line)
                 return CheckResult(
                     success=result.returncode == 0,
-                    output=result.stderr + result.stdout,
+                    output=output,
                 )
             except (subprocess.TimeoutExpired, OSError) as e:
+                trace("configure", "  error: %s", e)
                 return CheckResult(success=False, output=str(e))
 
     def _try_preprocess(self, compiler: str, source: str) -> CheckResult:
@@ -408,6 +450,7 @@ int main(void) {{
             src_path.write_text(source)
 
             cmd = [compiler, "-E", str(src_path)]
+            trace("configure", "  cmd: %s", " ".join(cmd))
 
             try:
                 result = subprocess.run(
@@ -416,9 +459,15 @@ int main(void) {{
                     text=True,
                     timeout=30,
                 )
+                if result.returncode != 0:
+                    trace("configure", "  exit code: %d", result.returncode)
+                    if result.stderr.strip():
+                        for line in result.stderr.strip().splitlines()[:10]:
+                            trace("configure", "  | %s", line)
                 return CheckResult(
                     success=result.returncode == 0,
                     output=result.stdout,
                 )
             except (subprocess.TimeoutExpired, OSError) as e:
+                trace("configure", "  error: %s", e)
                 return CheckResult(success=False, output=str(e))

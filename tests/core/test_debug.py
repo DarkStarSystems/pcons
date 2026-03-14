@@ -65,12 +65,19 @@ class TestInitDebug:
         assert is_enabled("resolve")
         assert is_enabled("subst")
 
-    def test_init_debug_invalid_subsystem_ignored(self):
-        """Test that invalid subsystem names are silently ignored."""
-        init_debug("resolve,invalid_subsystem,subst")
-        assert is_enabled("resolve")
-        assert is_enabled("subst")
-        assert not is_enabled("invalid_subsystem")
+    def test_init_debug_invalid_subsystem_errors(self):
+        """Test that invalid subsystem names cause an error with help."""
+        with pytest.raises(SystemExit):
+            init_debug("resolve,invalid_subsystem,subst")
+
+    def test_init_debug_help(self, capsys):
+        """Test --debug=help prints subsystem list and exits."""
+        with pytest.raises(SystemExit) as exc_info:
+            init_debug("help")
+        assert exc_info.value.code == 0
+        output = capsys.readouterr().out
+        assert "configure" in output
+        assert "resolve" in output
 
     def test_init_debug_empty_string(self):
         """Test with empty string disables all subsystems."""

@@ -875,12 +875,14 @@ print(f"Generated {build_dir / 'build.ninja'}")
 def add_common_args(parser: argparse.ArgumentParser) -> None:
     """Add common arguments to a parser."""
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+    from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
+
+    subsystem_names = ",".join(SUBSYSTEM_DESCRIPTIONS.keys()) + ",all,help"
     parser.add_argument(
         "--debug",
         type=str,
         metavar="SUBSYSTEMS",
-        help="Enable debug tracing for subsystems (comma-separated): "
-        "configure,resolve,generate,subst,env,deps,all",
+        help=f"Enable debug tracing for subsystems (comma-separated): {subsystem_names}",
     )
     parser.add_argument(
         "-B", "--build-dir", default="build", help="Build directory (default: build)"
