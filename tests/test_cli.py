@@ -339,15 +339,16 @@ class TestCLICommands:
         assert result.returncode == 0
         assert (tmp_path / "pcons-build.py").exists()
 
-        # Check content - should have configure and build together
+        # Check content uses the canonical pcons API
         build_content = (tmp_path / "pcons-build.py").read_text()
-        assert "Project" in build_content
-        assert "NinjaGenerator" in build_content
-        assert "Configure" in build_content
-        assert "get_variant" in build_content
-        assert "get_var" in build_content
+        assert "from pcons import Generator, Project, find_c_toolchain" in build_content
+        assert "Generator().generate(project)" in build_content
         assert "PCONS_BUILD_DIR" in build_content
-        assert "PCONS_RECONFIGURE" in build_content
+        assert "SPDX-License-Identifier" in build_content
+        # Should NOT use internal imports
+        assert "NinjaGenerator" not in build_content
+        assert "from pcons.core" not in build_content
+        assert "from pcons.generators" not in build_content
 
     def test_pcons_init_creates_valid_python(self, tmp_path: Path) -> None:
         """Test that init creates syntactically valid Python."""
@@ -437,8 +438,7 @@ class TestCLICommands:
 
         # Check content was replaced
         build_content = (tmp_path / "pcons-build.py").read_text()
-        assert "Project" in build_content
-        assert "Configure" in build_content
+        assert "from pcons import Generator, Project, find_c_toolchain" in build_content
 
     def test_pcons_info(self, tmp_path: Path) -> None:
         """Test pcons info shows pcons-build.py docstring."""
