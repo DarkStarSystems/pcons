@@ -298,6 +298,78 @@ class TestFindCommandInArgv:
         assert find_command_in_argv(["BUILD"]) is None  # case sensitive
 
 
+class TestDirectoryArg:
+    """Tests for -C/--directory argument."""
+
+    def test_dash_c_changes_directory(self, tmp_path: Path) -> None:
+        """Test that -C changes to the specified directory."""
+        # Create a pcons-build.py in a subdirectory
+        subdir = tmp_path / "myproject"
+        subdir.mkdir()
+        (subdir / "pcons-build.py").write_text('"""Test project."""\nprint("ok")\n')
+
+        # Run pcons from tmp_path with -C myproject
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "-C", str(subdir), "info"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        assert "Test project" in result.stdout
+
+    def test_long_form_directory(self, tmp_path: Path) -> None:
+        """Test --directory=DIR form."""
+        subdir = tmp_path / "myproject"
+        subdir.mkdir()
+        (subdir / "pcons-build.py").write_text('"""Long form test."""\nprint("ok")\n')
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", f"--directory={subdir}", "info"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        assert "Long form test" in result.stdout
+
+    def test_dash_c_invalid_directory(self, tmp_path: Path) -> None:
+        """Test -C with non-existent directory."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "-C", str(tmp_path / "nope"), "info"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "error" in result.stderr
+
+    def test_dash_c_missing_arg(self) -> None:
+        """Test -C without a directory argument."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "-C"],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0
+        assert "requires an argument" in result.stderr
+
+    def test_dash_c_init(self, tmp_path: Path) -> None:
+        """Test -C works with init command."""
+        subdir = tmp_path / "newproject"
+        subdir.mkdir()
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "-C", str(subdir), "init"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        assert (subdir / "pcons-build.py").exists()
+        # Should NOT exist in the original directory
+        assert not (tmp_path / "pcons-build.py").exists()
+
+
 class TestCLICommands:
     """Tests for CLI commands."""
 

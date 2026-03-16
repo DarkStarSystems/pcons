@@ -839,7 +839,10 @@ Generator().generate(project)
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
-    """Add common arguments to a parser."""
+    """Add common arguments to a parser.
+
+    Note: -C/--directory is handled before argparse in _apply_directory_arg().
+    """
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
 
@@ -884,6 +887,7 @@ def find_command_in_argv(argv: list[str]) -> str | None:
     """
     valid_commands = {"info", "init", "generate", "build", "clean"}
     # Options that take a value
+    # Note: -C/--directory is consumed before this runs
     options_with_value = {
         "-B",
         "--build-dir",
@@ -930,7 +934,6 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         help="Generator to use (ninja, make, xcode). Default: ninja",
     )
     parser.add_argument(
-        "-C",
         "--reconfigure",
         action="store_true",
         help="Force re-run configuration checks",
@@ -950,6 +953,8 @@ def create_default_parser() -> argparse.ArgumentParser:
         prog="pcons",
         description="A Python-based build system that generates Ninja files.",
         epilog=(
+            "Use -C DIR to change to DIR before doing anything else.\n"
+            "\n"
             "Run 'pcons <command> --help' for command-specific help.\n"
             "\n"
             "GitHub:  https://github.com/DarkStarSystems/pcons\n"
@@ -992,6 +997,8 @@ def create_full_parser() -> argparse.ArgumentParser:
             "  pcons CC=clang hello      Set CC=clang, generate and build 'hello'"
         ),
         epilog=(
+            "Use -C DIR to change to DIR before doing anything else.\n"
+            "\n"
             "Run 'pcons <command> --help' for command-specific help.\n"
             "\n"
             "GitHub:  https://github.com/DarkStarSystems/pcons\n"
@@ -1093,8 +1100,43 @@ def create_full_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _apply_directory_arg() -> None:
+    """Handle -C/--directory before any other argument parsing.
+
+    Scans sys.argv for -C DIR or --directory DIR (or --directory=DIR),
+    changes to that directory, and removes the consumed args from sys.argv.
+    """
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg in ("-C", "--directory"):
+            if i + 1 >= len(sys.argv):
+                print("error: -C/--directory requires an argument", file=sys.stderr)
+                sys.exit(1)
+            target_dir = sys.argv[i + 1]
+            try:
+                os.chdir(target_dir)
+            except OSError as e:
+                print(f"error: -C {target_dir}: {e}", file=sys.stderr)
+                sys.exit(1)
+            # Remove -C and DIR from argv so argparse doesn't see them
+            del sys.argv[i : i + 2]
+        elif arg.startswith("--directory="):
+            target_dir = arg.split("=", 1)[1]
+            try:
+                os.chdir(target_dir)
+            except OSError as e:
+                print(f"error: --directory={target_dir}: {e}", file=sys.stderr)
+                sys.exit(1)
+            del sys.argv[i]
+        else:
+            i += 1
+
+
 def main() -> int:
     """Main entry point for the pcons CLI."""
+    _apply_directory_arg()
+
     # Check if argv contains a valid command
     # If not, use the default parser (no subcommands) to avoid
     # positional arguments being mistaken for commands
