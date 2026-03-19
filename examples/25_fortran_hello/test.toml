@@ -1,0 +1,20 @@
+# Test configuration for the fortran_hello example
+
+[test]
+description = "Demonstrates compiling a simple Fortran program with gfortran"
+
+expected_outputs = [
+    "build/obj.hello/src/hello.f90.o",
+    "build/hello",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_stdout = "Hello from Fortran!" },
+]
+
+[skip]
+platforms = ["win32"]
+missing_commands = ["gfortran"]
+# Xcode generator does not support Fortran
+generators = ["xcode"]

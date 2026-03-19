@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Fortran toolchain (`gfortran`)**: Full GNU Fortran support via `find_fortran_toolchain()`. Includes compiler, archiver, and linker tools; supports all standard Fortran source extensions (`.f90`, `.f95`, `.f03`, `.f08`, `.f18`, `.F`, `.F90`, `.f`, `.for`, `.ftn`).
+
+- **Ninja dyndep for Fortran module dependencies**: Correct build ordering for projects using Fortran `MODULE` / `USE` statements. A configure-time manifest is written and a build-time Python scanner (`pcons.toolchains.fortran_scanner`) produces a `.dyndep` file consumed by Ninja (requires Ninja ≥ 1.10).
+
+- **Mixed-language C++/Fortran builds**: `env.add_toolchain()` now supports mixing Fortran with C/C++ in a single target. Runtime libraries are automatically injected in both directions — gfortran as primary linker adds `-lc++`/`-lstdc++` for C++ objects; g++/clang++ as primary linker adds `-lgfortran` for Fortran objects. On macOS the gfortran library directory is also injected automatically.
+
+- **`after_resolve()` hook in toolchain protocol**: `BaseToolchain` now defines an optional `after_resolve(project, source_obj_by_language)` hook called after all targets are resolved but before command expansion. Toolchains override this to inspect or modify the build graph (e.g., Fortran dyndep setup).
+
+- **Four new Fortran examples**:
+  - `25_fortran_hello` — simple "Hello from Fortran!" program
+  - `26_fortran_modules` — Fortran MODULE / USE with correct dyndep ordering
+  - `27_fortran_calls_cxx` — Fortran primary calling C++ via `BIND(C)` (gfortran links, C++ runtime injected)
+  - `28_cxx_calls_fortran` — C++ primary calling Fortran via `BIND(C)` (clang++/g++ links, Fortran runtime injected)
+
 ## [0.8.4] - 2026-03-19
 
 ### Added

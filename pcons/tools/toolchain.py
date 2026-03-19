@@ -468,6 +468,34 @@ class Toolchain(Protocol):
         """
         ...
 
+    def get_runtime_libs(
+        self, linker_language: str, object_languages: set[str]
+    ) -> list[str]:
+        """Return runtime libraries needed for mixed-language builds.
+
+        Args:
+            linker_language: The language driving the link.
+            object_languages: All languages present in the object files.
+
+        Returns:
+            List of library names to add (without -l prefix).
+        """
+        ...
+
+    def get_runtime_libdirs(
+        self, linker_language: str, object_languages: set[str]
+    ) -> list[str]:
+        """Return library search directories for mixed-language runtime libs.
+
+        Args:
+            linker_language: The language driving the link.
+            object_languages: All languages present in the object files.
+
+        Returns:
+            List of directory paths to add as library search dirs.
+        """
+        ...
+
     def create_build_context(
         self,
         target: Target,
@@ -492,6 +520,24 @@ class Toolchain(Protocol):
         """
         ...
 
+    def after_resolve(
+        self,
+        project: Any,
+        source_obj_by_language: dict[str, list[Any]],
+    ) -> None:
+        """Optional post-resolution hook.
+
+        Called after all targets are resolved but before command expansion.
+        Override to inspect or modify the resolved build graph (e.g., Fortran
+        dyndep generation). The base implementation does nothing.
+
+        Args:
+            project: The resolved project.
+            source_obj_by_language: All (source_path, obj_node) pairs grouped
+                by language (e.g., ``{"fortran": [...], "cxx": [...]}``.
+        """
+        ...
+
 
 class BaseToolchain(ABC):
     """Abstract base class for toolchains.
@@ -500,13 +546,15 @@ class BaseToolchain(ABC):
     provide the list of tools and configure logic.
     """
 
-    # Default language priorities (higher = stronger)
+    # Default language priorities (higher = stronger).
+    # Fortran is NOT listed here so that C/C++ toolchains don't claim
+    # priority over Fortran objects. GfortranToolchain overrides this
+    # to add "fortran": 3 when it is the primary toolchain.
     DEFAULT_LANGUAGE_PRIORITY: dict[str, int] = {
         "c": 1,
         "cxx": 2,
         "objc": 2,
         "objcxx": 3,
-        "fortran": 3,
         "cuda": 4,
     }
 
@@ -696,9 +744,69 @@ class BaseToolchain(ABC):
         """
         return self._LANGUAGE_TO_LINKER.get(language, "link")
 
+    def get_runtime_libs(
+        self, linker_language: str, object_languages: set[str]
+    ) -> list[str]:
+        """Return runtime libraries needed for mixed-language builds.
+
+        Called during link setup when the set of object languages is known.
+        The base implementation returns an empty list. Toolchains that
+        require runtime libraries for mixed-language builds should override
+        this method.
+
+        Args:
+            linker_language: The language driving the link (e.g., "fortran").
+            object_languages: All languages present in the object files.
+
+        Returns:
+            List of library names to add (without -l prefix).
+        """
+        return []
+
+    def get_runtime_libdirs(
+        self, linker_language: str, object_languages: set[str]
+    ) -> list[str]:
+        """Return library search directories for mixed-language runtime libs.
+
+        Companion to get_runtime_libs(). Called with the same arguments to
+        provide the search paths needed to find the runtime libraries.
+        Required when runtime libraries are installed in non-standard
+        locations (e.g., Homebrew gfortran on macOS).
+
+        Args:
+            linker_language: The language driving the link.
+            object_languages: All languages present in the object files.
+
+        Returns:
+            List of directory paths to add as library search dirs.
+        """
+        return []
+
     # =========================================================================
     # Source Handler Methods - Override in subclasses for tool-agnosticism
     # =========================================================================
+
+    def after_resolve(  # noqa: B027
+        self,
+        project: Any,
+        source_obj_by_language: dict[str, list[Any]],
+    ) -> None:
+        """Optional post-resolution hook.
+
+        Called by the resolver after all targets have been resolved but
+        before command expansion. Toolchains that need to inspect or modify
+        the resolved build graph (e.g., to generate dyndep files for Fortran
+        module dependencies) should override this method.
+
+        The base implementation does nothing.
+
+        Args:
+            project: The resolved project.
+            source_obj_by_language: All compiled (source_path, obj_node) pairs,
+                grouped by language name. For example:
+                    {"fortran": [(Path("foo.f90"), FileNode(...)), ...],
+                     "cxx":     [(Path("bar.cpp"), FileNode(...)), ...]}
+        """
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled.

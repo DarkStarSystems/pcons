@@ -125,6 +125,138 @@ But what about the other popular modern build tools like Bazel and Meson?
 
 ---
 
+## Configure-Time Feature Detection
+
+C/C++ projects commonly need to probe the build environment at configure time — checking for headers, testing compiler capabilities, detecting platform features, and generating config headers. This is the `autoconf`/`cmake -DHAVE_FOO` territory.
+
+### pcons
+
+pcons has a `Configure` + `ToolChecks` API that covers the full range: `check_header()`, `check_flag()`, `check_function()`, `check_type()`, `try_compile()`, and `configure_file()` for template-based config header generation (CMake-style `#cmakedefine` and `@VAR@` substitution). Results are cached across runs.
+
+Because it's plain Python, configure-time logic reads naturally — no special DSL syntax for conditionals, no magic variables. Here's a real excerpt from a pcons build of OpenEXR (a large, complex C++ library):
+
+```python
+config = Configure(build_dir=BUILD_DIR)
+cc_checks = ToolChecks(config, env, "cc")
+cxx_checks = ToolChecks(config, env, "cxx")
+
+has_ucontext = cc_checks.check_header("ucontext.h").success
+
+has_control_register = False
+if has_ucontext:
+    has_control_register = cc_checks.try_compile(
+        "#include <ucontext.h>\nint main() { struct _libc_fpstate s; (void)s.mxcsr; return 0; }",
+    ).success
+
+has_gcc_inline_asm_avx = cxx_checks.try_compile("""
+#if defined(__SSE2__)
+int main() {
+    int n = 0, eax = 0, edx = 0;
+    __asm__("xgetbv; vzeroupper" : "=a"(eax), "=d"(edx) : "c"(n) : );
+    return 0;
+}
+#else
+#error No SSE support
+#endif
+""").success
+
+# ARM64: check for vld1q_f32_x2 intrinsic (missing on some toolchains)
+has_arm_vld1 = True
+if IS_ARM64:
+    has_arm_vld1 = cc_checks.try_compile(
+        "#include <arm_neon.h>\nint main() { float a[] = {1.0, 1.0}; vld1q_f32_x2(a); return 0; }"
+    ).success
+
+# Optional Python bindings — just a try/except, no special syntax
+try:
+    python3 = project.find_package("python3-embed")
+    pybind11 = project.find_package("pybind11")
+    # ... build PyOpenEXR shared library
+except Exception:
+    pass  # silently skip if not available
+
+# Generate config headers from CMake .in templates
+configure_file("cmake/OpenEXRConfig.h.in", CONFIG_DIR / "OpenEXRConfig.h", config_vars)
+```
+
+Notice: version numbers are extracted from existing headers using Python regex. Platform detection is `sys.platform` and `os.uname()`. ARM64-specific source exclusions are a plain list comprehension. Optional components are `try/except`. All of this is just Python — no new concepts to learn.
+
+### Meson
+
+Meson has the best-in-class configure API of the traditional build tools. The `compiler` object provides `has_header()`, `compiles()`, `has_function()`, `has_type()`, `sizeof()`, and `find_library()`. `configure_file()` supports both substitution and `#mesondefine` (analogous to `#cmakedefine`).
+
+```meson
+cc = meson.get_compiler('c')
+cxx = meson.get_compiler('cpp')
+
+has_ucontext = cc.has_header('ucontext.h')
+
+has_control_register = false
+if has_ucontext
+  has_control_register = cc.compiles('''
+    #include <ucontext.h>
+    int main() { struct _libc_fpstate s; (void)s.mxcsr; return 0; }
+  ''', name: 'control register support')
+endif
+
+conf = configuration_data()
+conf.set('HAVE_UCONTEXT_H', has_ucontext)
+conf.set('IEX_HAVE_CONTROL_REGISTER_SUPPORT', has_control_register)
+configure_file(input: 'IexConfig.h.in', output: 'IexConfig.h', configuration: conf)
+```
+
+This is clean and readable. Meson's configure API is mature and well-documented, and it handles caching automatically. The main limitations:
+- **Optional components** require `dependency(..., required: false)` and conditional blocks — more verbose than `try/except`
+- **Arbitrary logic** (e.g., extracting a version number from a header by regex) requires `run_command()` which is cumbersome and has limited error handling
+- **Dynamic source lists** (e.g., filtering SIMD files based on architecture) need `foreach` loops and `files()` — workable but less natural than a Python list comprehension
+
+### Bazel
+
+Bazel has no built-in equivalent to `check_header` or `try_compile`. The philosophy is that the build graph must be fully deterministic and declared upfront — probing the environment at configure time is antithetical to hermeticity.
+
+The idiomatic Bazel approach is:
+- Use `platform` constraints and `select()` to choose between pre-declared variants
+- Use `repository_rule` in Starlark to run arbitrary commands during the workspace loading phase (this is where configure-like probing happens)
+- Use `cc_library` with `defines` driven by `select()` over platform/cpu conditions
+
+```python
+# In a repository_rule (Starlark, runs at workspace load time)
+def _detect_features_impl(ctx):
+    result = ctx.execute(["gcc", "-x", "c", "-", "-o", "/dev/null"],
+                         input="#include <ucontext.h>\nint main(){}")
+    ctx.file("features.bzl",
+             "HAVE_UCONTEXT = %s" % (result.return_code == 0))
+
+# In BUILD files — static selection, not dynamic probing
+cc_library(
+    name = "iex",
+    defines = select({
+        "//conditions:linux": ["HAVE_UCONTEXT_H"],
+        "//conditions:default": [],
+    }),
+)
+```
+
+This works but is significantly more complex — `repository_rule`s are an advanced Starlark concept, and the results feed back into `select()` expressions scattered across BUILD files. There's no equivalent to a config header; you use `defines` instead. For projects that already have CMake-style `.h.in` templates (like OpenEXR), you'd need a custom genrule to process them.
+
+### Summary
+
+| Capability | pcons | Meson | Bazel |
+|---|---|---|---|
+| `check_header()` | Yes | Yes (`cc.has_header()`) | Via `repository_rule` |
+| `try_compile()` | Yes | Yes (`cc.compiles()`) | Via `repository_rule` |
+| `check_function()` | Yes | Yes (`cc.has_function()`) | Via `repository_rule` |
+| `configure_file()` | Yes (`#cmakedefine`, `@VAR@`) | Yes (`#mesondefine`, `@VAR@`) | Custom `genrule` |
+| Optional components | `try/except` | `required: false` + if block | `select()` + platform constraints |
+| Arbitrary logic at configure time | Full Python | `run_command()` (limited) | `repository_rule` (complex) |
+| Version extraction from files | Python regex, pathlib | `run_command()` + parsing | Custom Starlark |
+| Result caching | Yes (JSON cache) | Yes (built-in) | Yes (action cache) |
+| `--debug=configure` tracing | Yes (full trace + artifacts) | Verbose mode | Limited |
+
+pcons and Meson are comparable in capability for standard configure checks. pcons's edge is that unusual cases — extracting versions from headers, filtering source lists by architecture, optional features — are plain Python with no special API needed. Meson handles the common cases very well but reaches its DSL limits on the less common ones. Bazel treats configure-time probing as a second-class citizen, which is a real friction point when porting projects that have significant autoconf/CMake configure logic.
+
+---
+
 ## Build Description Expressiveness & Simplicity
 
 One of pcons's practical advantages is how little code it takes to describe a non-trivial build. Consider a project with two static libraries (`libmath`, `libphysics`) and an executable that links both, with transitive include propagation and debug/release variants.

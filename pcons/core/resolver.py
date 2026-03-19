@@ -123,6 +123,9 @@ class ObjectNodeFactory:
         """
         self.project = project
         self._object_cache: dict[tuple[Path, tuple], FileNode] = {}
+        # Maps language → list of (source_path, obj_node) pairs.
+        # Populated by create_object_node(); passed to toolchain after_resolve() hooks.
+        self._source_obj_by_language: dict[str, list[tuple[Path, FileNode]]] = {}
 
     def get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
         """Generate target-specific output path for an object file.
@@ -341,6 +344,11 @@ class ObjectNodeFactory:
 
         # Cache the object node
         self._object_cache[cache_key] = obj_node
+
+        # Track source-object pairs by language for toolchain after_resolve() hooks.
+        self._source_obj_by_language.setdefault(language, []).append(
+            (source.path, obj_node)
+        )
 
         # Register with environment
         env.register_node(obj_node)
@@ -630,7 +638,39 @@ class OutputNodeFactory:
                 link_flags.extend(handler.extra_flags)
                 seen_handlers.add(handler.suffix)
 
-        link_language = "cxx" if "cxx" in target.get_all_languages() else "c"
+        # Collect actual languages from this target's object nodes (not just
+        # the dominant language from required_languages) to detect mixed builds.
+        object_languages: set[str] = set()
+        for node in target.object_nodes:
+            bi = getattr(node, "_build_info", None)
+            if bi:
+                lang = bi.get("language")
+                if lang:
+                    object_languages.add(lang)
+
+        # Determine link language using the primary toolchain's priority.
+        # Using only the primary toolchain ensures the user's toolchain choice
+        # (not a secondary toolchain's language) controls the linker.
+        langs = target.get_all_languages() | object_languages
+        primary_tc = env._toolchain
+        priority = getattr(primary_tc, "language_priority", {}) if primary_tc else {}
+        link_language = (
+            max(langs, key=lambda lang: priority.get(lang, 0)) if langs else "c"
+        )
+
+        # Inject runtime libraries (and their search dirs) needed for
+        # mixed-language builds. Each toolchain can contribute runtime libs
+        # (e.g., gfortran injects -lgfortran when C++ links Fortran objects,
+        # or -lc++ when Fortran links C++ objects) and the dirs to find them.
+        for tc in env.toolchains:
+            runtime_libs = tc.get_runtime_libs(link_language, object_languages)
+            if runtime_libs:
+                effective_link.link_libs = effective_link.link_libs + runtime_libs
+            runtime_libdirs = tc.get_runtime_libdirs(link_language, object_languages)
+            if runtime_libdirs:
+                effective_link.link_dirs = effective_link.link_dirs + [
+                    Path(d) for d in runtime_libdirs
+                ]
 
         effective_link.link_flags = link_flags
         context = CompileLinkContext.from_effective_requirements(
@@ -794,6 +834,20 @@ class Resolver:
         for target in self._targets_in_build_order():
             if not target._resolved:
                 self._resolve_target(target)
+
+        # Call after_resolve hook on all toolchains that support it (e.g., Fortran dyndep).
+        # Iterates all toolchains (primary + additional) so secondary toolchains
+        # like GfortranToolchain added via env.add_toolchain() are also notified.
+        seen_toolchains: set[int] = set()
+        for target in self.project.targets:
+            if target._env:
+                for tc in target._env.toolchains:
+                    if id(tc) not in seen_toolchains and hasattr(tc, "after_resolve"):
+                        seen_toolchains.add(id(tc))
+                        tc.after_resolve(
+                            self.project,
+                            self._object_factory._source_obj_by_language,
+                        )
 
         # Expand command templates for all nodes
         trace("resolve", "Starting command expansion")

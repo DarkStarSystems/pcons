@@ -32,6 +32,7 @@ from pcons.toolchains import (
     find_cuda_toolchain,
     find_cython_toolchain,
     find_emscripten_toolchain,
+    find_fortran_toolchain,
     find_wasi_toolchain,
 )  # noqa: E402
 
@@ -215,6 +216,7 @@ __all__ = [
     "find_cuda_toolchain",
     "find_cython_toolchain",
     "find_emscripten_toolchain",
+    "find_fortran_toolchain",
     "find_wasi_toolchain",
     # Module system
     "modules",

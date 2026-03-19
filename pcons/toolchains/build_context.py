@@ -141,6 +141,10 @@ class CompileLinkContext:
             cxx_cmd = getattr(env.cxx, "cmd", None)
             if cxx_cmd:
                 linker_cmd = cxx_cmd
+        elif language == "fortran" and env is not None and env.has_tool("fc"):
+            fc_cmd = getattr(env.fc, "cmd", None)
+            if fc_cmd:
+                linker_cmd = fc_cmd
 
         link_flags = list(effective.link_flags)
 

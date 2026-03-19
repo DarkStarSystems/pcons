@@ -31,7 +31,13 @@ I've been thinking for years now about rearchitecting SCons onto a modern python
 
 🚧 **Under active development** - ready for experimentation and feedback.
 
-Core functionality is working: C/C++ compilation, static and shared libraries, programs, and install targets. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
+Core functionality is working: C/C++/Fortran compilation, static and shared libraries, programs, install targets, and mixed-language builds. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
+
+## This Project is AI-Assisted
+
+I've used Claude Code extensively to create this project, mostly Claude Opus 4.6. It has been a huge help in realizing a vision I've had for a long time. If you reflexively or morally reject all AI-generated or AI-assisted code, pcons is not for you. That said, I've reviewed every decision and nearly every line, and this code reflects my architecture, goals and priorities. I take full responsibility for it, and as a professional software engineer I stand behind it.
+
+One of my sub-goals has been to make sure the documentation and source organization is clear; not just for humans but for browsing by AI agents. I want to make it easy for a human or an AI agent to create a best-practices pcons-build.py for *your* project quickly and easily. Using AI to auto-generate doc and make sure APIs are clean and consistent helps with that goal.
 
 ## Quick Example
 

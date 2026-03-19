@@ -48,6 +48,12 @@ from pcons.toolchains.gcc import (
     GccLinker,
     GccToolchain,
 )
+from pcons.toolchains.gfortran import (
+    GfortranCompiler,
+    GfortranLinker,
+    GfortranToolchain,
+    find_fortran_toolchain,
+)
 from pcons.toolchains.llvm import (
     ClangCCompiler,
     ClangCxxCompiler,
@@ -144,6 +150,7 @@ def find_c_toolchain(
 __all__ = [
     # Toolchain finder and registry
     "find_c_toolchain",
+    "find_fortran_toolchain",
     "find_cuda_toolchain",
     "find_cython_toolchain",
     "find_emscripten_toolchain",
@@ -160,6 +167,10 @@ __all__ = [
     "CythonLinker",
     "CythonToolchain",
     "CythonTranspiler",
+    # GFortran toolchain
+    "GfortranCompiler",
+    "GfortranLinker",
+    "GfortranToolchain",
     # GCC toolchain
     "GccCCompiler",
     "GccCxxCompiler",

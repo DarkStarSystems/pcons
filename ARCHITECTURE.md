@@ -34,6 +34,7 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | LLVM/Clang toolchain | Implemented | Auto-detection, C/C++ |
 | MSVC toolchain | Implemented | Auto-detection, C/C++ |
 | Clang-cl toolchain | Implemented | Clang with MSVC compatibility |
+| GFortran toolchain | Implemented | GNU Fortran; Ninja dyndep for module deps |
 | **Generators** | | |
 | Ninja generator | Implemented | Primary, full support |
 | compile_commands.json | Implemented | For IDE integration |
@@ -57,6 +58,7 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | Scanner interface | Implemented | Protocol defined |
 | C/C++ header scanner | Planned | Relies on depfiles |
 | Build-time depfiles | Implemented | Via Ninja |
+| Fortran module scanner | Implemented | Ninja dyndep via fortran_scanner.py |
 
 **Legend:**
 - **Implemented** - Feature is complete and working
@@ -554,15 +556,18 @@ exe = env.Program('myapp', [c_obj, cxx_obj])
 **Language strength ordering** (configurable per toolchain):
 ```python
 # Higher = stronger, wins link-time tool selection
+# Default (BaseToolchain.DEFAULT_LANGUAGE_PRIORITY):
 language_strength = {
     'c': 1,
     'cxx': 2,
-    'fortran': 3,    # Fortran runtime often required
     'cuda': 4,       # CUDA requires nvcc link step
 }
+# GfortranToolchain adds: 'fortran': 3
+# Keeping fortran out of the default prevents C/C++ toolchains from
+# accidentally claiming linker authority over Fortran objects.
 ```
 
-**Implementation:** Target tracks `required_languages: set[str]`. Linker builder inspects this to choose the right link command.
+**Implementation:** `_setup_link_node()` collects actual object languages from `target.object_nodes`, then uses the primary toolchain's `language_priority` to select the link language. Each toolchain's `get_runtime_libs()` / `get_runtime_libdirs()` methods inject any required runtime libraries for mixed-language builds.
 
 ### Target (Build Specification with Usage Requirements)
 > **Status: Implemented**
@@ -1371,7 +1376,6 @@ pcons/
 │   ├── toolchain.py         # Toolchain base class ............... [Implemented]
 │   ├── cc.py                # C compiler tool .................... [Implemented]
 │   ├── cxx.py               # C++ compiler tool .................. [Implemented]
-│   ├── fortran.py           # Fortran compiler tool .............. [Planned]
 │   ├── link.py              # Linker tools ....................... [Implemented]
 │   └── ...                  # Other tools
 ├── toolchains/
@@ -1380,6 +1384,8 @@ pcons/
 │   ├── llvm.py              # LLVM/Clang toolchain ............... [Implemented]
 │   ├── msvc.py              # MSVC toolchain ..................... [Implemented]
 │   ├── clang_cl.py          # Clang-cl toolchain ................. [Implemented]
+│   ├── gfortran.py          # GNU Fortran toolchain .............. [Implemented]
+│   ├── fortran_scanner.py   # Fortran module dyndep scanner ...... [Implemented]
 │   └── unix.py              # Base Unix toolchain ................ [Implemented]
 ├── generators/
 │   ├── __init__.py          # Generator registry ................. [Implemented]

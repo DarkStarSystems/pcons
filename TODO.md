@@ -1,4 +1,3 @@
 - Universal binaries, cross compilation
-- Frameworks on Mac
-- Don't deduplicate flags (??!): -Framework foo -Framework bar etc.
-- simple Command builder
+- Now that we have dyndep support (for Fortran), add support for C++20 modules
+- Is Ninja restat=1 ever useful? (Prevents downstream rebuilds if target modtime unchanged)

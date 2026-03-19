@@ -112,5 +112,6 @@ class TestLanguagePriority:
     def test_get_linker_for_fortran(self):
         tc = MockToolchain()
         linker = tc.get_linker_for_languages({"c", "fortran"})
-        # Fortran should win (higher priority than C)
-        assert linker == "fortran"
+        # Base toolchains don't know about Fortran priority, so C wins.
+        # GfortranToolchain overrides language_priority to add "fortran": 3.
+        assert linker == "cc"

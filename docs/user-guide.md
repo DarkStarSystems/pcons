@@ -155,6 +155,31 @@ toolchain = find_c_toolchain(prefer=["gcc", "llvm"]) # prefer GCC
 env = project.Environment(toolchain=toolchain)
 ```
 
+**Fortran** (`gfortran`) is available via `find_fortran_toolchain()`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
+
+```python
+from pcons import find_fortran_toolchain
+
+env = project.Environment(toolchain=find_fortran_toolchain())
+project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
+```
+
+**Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
+
+```python
+from pcons import find_c_toolchain, find_fortran_toolchain
+
+# Fortran primary: gfortran links, -lc++ / -lstdc++ injected for C++ objects
+env = project.Environment(toolchain=find_fortran_toolchain())
+env.add_toolchain(find_c_toolchain())
+
+# C++ primary: g++/clang++ links, -lgfortran injected for Fortran objects
+env = project.Environment(toolchain=find_c_toolchain())
+env.add_toolchain(find_fortran_toolchain())
+
+project.Program("hello", env, sources=["src/main.f90", "src/helper.cpp"])
+```
+
 **CUDA** is designed to work alongside a C/C++ toolchain — CUDA handles `.cu` compilation while the host toolchain handles linking:
 
 ```python

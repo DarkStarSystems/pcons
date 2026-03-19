@@ -1,0 +1,21 @@
+# Test configuration for the cxx_calls_fortran example
+
+[test]
+description = "C++ primary calling Fortran via BIND(C), with automatic Fortran runtime injection"
+
+expected_outputs = [
+    "build/obj.hello/src/main.cpp.o",
+    "build/obj.hello/src/math_utils.f90.o",
+    "build/hello",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_stdout = "3 + 4 = 7 (computed by Fortran)" },
+]
+
+[skip]
+platforms = ["win32"]
+missing_commands = ["gfortran"]
+# Xcode generator does not support Fortran
+generators = ["xcode"]

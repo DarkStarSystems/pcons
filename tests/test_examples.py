@@ -556,7 +556,14 @@ def run_example(
 
         # Run xcodebuild
         result = subprocess.run(
-            ["xcodebuild", "-project", str(xcodeproj), "-configuration", "Release"],
+            [
+                "xcodebuild",
+                "-project",
+                str(xcodeproj),
+                "-configuration",
+                "Release",
+                "CODE_SIGNING_ALLOWED=NO",  # avoid keychain prompts in CI/tests
+            ],
             cwd=work_dir,
             capture_output=True,
             text=True,
