@@ -59,6 +59,15 @@ jobs:
         run: uv python install $PYTHON_VERSION
       - name: Install dependencies
         run: uv sync
+      - name: Extend Conan settings for new Apple Clang versions (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          CONAN_HOME=$(uvx conan config home)
+          cat > "$CONAN_HOME/settings_user.yml" << 'EOF'
+          compiler:
+              apple-clang:
+                  version: ["18"]
+          EOF
       - name: Run tests
         run: uv run pytest --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
