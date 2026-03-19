@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-03-19
+
+### Added
+
+- **`-C/--directory` option**: Like `make`, `cmake`, and `ninja`, pcons now supports `-C DIR` to change to a directory before doing anything else. The `-C` short flag previously used for `--reconfigure` has been removed; use `--reconfigure` instead.
+
+### Fixed
+
+- **`pcons init` template**: The generated template now uses the public API (`Generator`, `Project`, `find_c_toolchain`) matching the style of all examples, instead of internal imports (`NinjaGenerator`, `Configure`) and unnecessary boilerplate.
+
 ## [0.8.3] - 2026-03-14
 
 ### Fixed
@@ -565,7 +575,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.3...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.4...HEAD
+[0.8.4]: https://github.com/DarkStarSystems/pcons/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/DarkStarSystems/pcons/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/DarkStarSystems/pcons/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/DarkStarSystems/pcons/compare/v0.8.0...v0.8.1
