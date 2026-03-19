@@ -270,7 +270,7 @@ class GfortranToolchain(UnixToolchain):
         self._tools = {"fc": fc, "ar": ar, "link": link}
         return True
 
-    def get_source_handler(self, suffix: str) -> SourceHandler | None:  # type: ignore[override]
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for Fortran source file suffixes."""
         from pcons.tools.toolchain import SourceHandler
 
