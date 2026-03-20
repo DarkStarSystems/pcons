@@ -135,7 +135,7 @@ class TestLlvmSourceHandlers:
         assert handler is not None
         assert handler.tool_name == "cc"
         assert handler.language == "c"
-        assert handler.object_suffix == ".o"
+        assert handler.object_suffix == get_platform().object_suffix
         assert handler.depfile == TargetPath(suffix=".d")
         assert handler.deps_style == "gcc"
 
@@ -154,7 +154,7 @@ class TestLlvmSourceHandlers:
         assert handler is not None
         assert handler.tool_name == "cc"
         assert handler.language == "asm"
-        assert handler.object_suffix == ".o"
+        assert handler.object_suffix == get_platform().object_suffix
         # Preprocessed assembly has no dependency tracking
         assert handler.depfile is None
         assert handler.deps_style is None
@@ -168,7 +168,7 @@ class TestLlvmSourceHandlers:
         assert handler is not None
         assert handler.tool_name == "cc"
         assert handler.language == "asm-cpp"
-        assert handler.object_suffix == ".o"
+        assert handler.object_suffix == get_platform().object_suffix
         # Assembly needing preprocessing has gcc-style dependency tracking
         assert handler.depfile == TargetPath(suffix=".d")
         assert handler.deps_style == "gcc"
