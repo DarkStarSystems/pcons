@@ -390,7 +390,9 @@ class LlvmToolchain(UnixToolchain):
         # C++20 module interface units
         if suffix == ".cppm":
             depfile = TargetPath(suffix=".d")
-            return SourceHandler("cxx", "cxx_module", ".o", depfile, "gcc")
+            return SourceHandler(
+                "cxx", "cxx_module", get_platform().object_suffix, depfile, "gcc"
+            )
 
         # Metal shaders (macOS only)
         platform = get_platform()
@@ -508,7 +510,7 @@ class LlvmToolchain(UnixToolchain):
         # Inject -fprebuilt-module-path into ALL cxx/cxx_module compile contexts
         # (happens before command expansion, so context.flags is mutable)
         modpath_flag = f"-fprebuilt-module-path={moddir}"
-        for _src, obj_node in all_cxx_pairs:
+        for _, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             if bi:
                 context = bi.get("context")
