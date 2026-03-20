@@ -382,9 +382,20 @@ class LlvmToolchain(UnixToolchain):
         """
         from pcons.tools.toolchain import SourceHandler
 
-        # First check base Unix toolchain for standard C/C++/Objective-C/assembly
+        # First check base Unix toolchain for standard C/C++/Objective-C/assembly.
+        # Then replace the hardcoded ".o" with the platform object suffix so that
+        # on Windows we get ".obj" (Clang on Windows uses MSVC object file conventions).
         handler = super().get_source_handler(suffix)
         if handler is not None:
+            obj_suffix = get_platform().object_suffix
+            if handler.object_suffix != obj_suffix:
+                handler = SourceHandler(
+                    handler.tool_name,
+                    handler.language,
+                    obj_suffix,
+                    handler.depfile,
+                    handler.deps_style,
+                )
             return handler
 
         # C++20 module interface units
