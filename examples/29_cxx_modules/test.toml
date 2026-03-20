@@ -1,0 +1,19 @@
+# Test configuration for the cxx_modules example
+
+[test]
+description = "Demonstrates C++20 named modules with Ninja dyndep ordering"
+
+expected_outputs = [
+    "build/obj.hello/src/MyMod.cppm.o",
+    "build/obj.hello/src/main.cpp.o",
+    "build/hello",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_exit_code = 0 },
+]
+
+[skip]
+requires = ["clang-scan-deps", "clang++"]
+generators = ["xcode", "make"]

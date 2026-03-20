@@ -37,7 +37,7 @@ But what about the other popular modern build tools like Bazel and Meson?
 
 ## Language & Toolchain Support
 
-**pcons** is C/C++-focused in practice, with GCC, Clang/LLVM, MSVC, and Clang-CL supported. Specialized toolchains for CUDA, Cython, WebAssembly (WASI + Emscripten), Metal shaders, and Windows RC files. The architecture is fully extensible via a toolchain registry, so adding new languages is a first-class operation. Users can also easily add tools, toolchains and builders. Polyglot projects *should* work well and are a design goal, but it is still early days.
+**pcons** is C/C++-focused in practice, with GCC, Clang/LLVM, MSVC, and Clang-CL supported, including C++20 modules. Fortran is also built-in. Specialized toolchains for CUDA, Cython, WebAssembly (WASI + Emscripten), Metal shaders, and Windows RC files. The architecture is fully extensible via a toolchain registry, so adding new languages is a first-class operation. Users can also easily add tools, toolchains and builders. Polyglot projects *should* work well and are a design goal, but it is still early days.
 
 **Bazel** has comprehensive, community-maintained rules for virtually every language: `rules_cc`, `rules_java`, `rules_go`, `rules_python`, `rules_rust`, `rules_proto`, `rules_nodejs`, etc. The monorepo model also means polyglot projects (mixing Java + Go + Python in one repo) work well.
 

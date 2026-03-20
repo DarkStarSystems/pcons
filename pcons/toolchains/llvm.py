@@ -3,6 +3,9 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import sys
 from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
@@ -12,9 +15,15 @@ from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from pcons.core.builder import Builder
+    from pcons.core.node import FileNode
+    from pcons.core.project import Project
     from pcons.core.toolconfig import ToolConfig
     from pcons.tools.toolchain import SourceHandler
+
+logger = logging.getLogger(__name__)
 
 
 class ClangCCompiler(BaseTool):
@@ -91,6 +100,7 @@ class ClangCxxCompiler(BaseTool):
             "includes": [],
             "dprefix": "-D",
             "defines": [],
+            "moddir": "cxx_modules",
             "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
             "objcmd": [
                 "$cxx.cmd",
@@ -377,6 +387,11 @@ class LlvmToolchain(UnixToolchain):
         if handler is not None:
             return handler
 
+        # C++20 module interface units
+        if suffix == ".cppm":
+            depfile = TargetPath(suffix=".d")
+            return SourceHandler("cxx", "cxx_module", ".o", depfile, "gcc")
+
         # Metal shaders (macOS only)
         platform = get_platform()
         if suffix.lower() == ".metal" and platform.is_macos:
@@ -416,6 +431,138 @@ class LlvmToolchain(UnixToolchain):
                 self._tools["metal"] = metal
 
         return True
+
+    def after_resolve(
+        self,
+        project: Project,
+        source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
+    ) -> None:
+        """Set up Ninja dyndep for C++20 module dependencies.
+
+        Called after all targets are resolved. Creates:
+        1. A manifest JSON file mapping sources to objects/PCMs
+        2. A Ninja dyndep build step that scans sources with clang-scan-deps
+        3. Attaches dyndep to each CXX object node (interface + regular)
+        """
+        cxx_module_pairs = source_obj_by_language.get("cxx_module", [])
+        if not cxx_module_pairs:
+            return
+
+        cxx_pairs = source_obj_by_language.get("cxx", [])
+        all_cxx_pairs = cxx_module_pairs + cxx_pairs
+
+        build_dir = project.build_dir
+        moddir = "cxx_modules"
+        manifest_path = build_dir / "cxx.manifest.json"
+        dyndep_path = build_dir / "cxx_modules.dyndep"
+
+        # Get environment from first cxx_module object node
+        first_env = None
+        _, first_obj = cxx_module_pairs[0]
+        build_info = getattr(first_obj, "_build_info", None)
+        if build_info:
+            first_env = build_info.get("env")
+
+        # Get compiler command from env
+        cxx_tool = getattr(first_env, "cxx", None) if first_env else None
+        compiler_cmd = str(getattr(cxx_tool, "cmd", "clang++") or "clang++")
+        base_flags = list(getattr(cxx_tool, "flags", None) or [])
+
+        # Build manifest entries
+        manifest = []
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / moddir).mkdir(exist_ok=True)
+
+        for src, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            context = bi.get("context") if bi else None
+            is_module_interface = src.suffix == ".cppm"
+
+            # Combine base flags + effective requirement flags
+            seen: set[str] = set(base_flags)
+            compile_flags = list(base_flags)
+            if context:
+                for f in context.flags:
+                    if f not in seen:
+                        compile_flags.append(f)
+                        seen.add(f)
+                for inc in context.includes:
+                    compile_flags.append(f"-I{inc}")
+                for d in context.defines:
+                    compile_flags.append(f"-D{d}")
+
+            entry: dict[str, object] = {
+                "src": str(src.resolve()).replace("\\", "/"),
+                "obj": str(obj_node.path.relative_to(build_dir)).replace("\\", "/"),
+                "is_module_interface": is_module_interface,
+                "compiler": compiler_cmd,
+                "compile_flags": compile_flags,
+            }
+            if is_module_interface:
+                entry["pcm"] = f"{moddir}/{src.stem}.pcm"
+            manifest.append(entry)
+
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+        logger.debug("Wrote C++ module manifest to %s", manifest_path)
+
+        # Inject -fprebuilt-module-path into ALL cxx/cxx_module compile contexts
+        # (happens before command expansion, so context.flags is mutable)
+        modpath_flag = f"-fprebuilt-module-path={moddir}"
+        for _src, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi:
+                context = bi.get("context")
+                if context is not None and hasattr(context, "flags"):
+                    if modpath_flag not in context.flags:
+                        context.flags.append(modpath_flag)
+
+        # Inject -fmodule-output=... for module interface files
+        for src, obj_node in cxx_module_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi:
+                context = bi.get("context")
+                if context is not None and hasattr(context, "flags"):
+                    pcm_path = f"{moddir}/{src.stem}.pcm"
+                    module_out_flag = f"-fmodule-output={pcm_path}"
+                    if module_out_flag not in context.flags:
+                        context.flags.append(module_out_flag)
+
+        # Create source file nodes for scanner dependencies
+        all_sources = [src for src, _ in all_cxx_pairs]
+        source_nodes = [project.node(src) for src in all_sources]
+
+        # Create the dyndep scanner build node
+        dyndep_node = project.node(dyndep_path)
+        dyndep_node.depends(source_nodes)
+        dyndep_node._build_info = {
+            "tool": "cxx_scanner",
+            "command_var": "scancmd",
+            "description": "SCAN C++ modules",
+            "sources": source_nodes,
+            "command": [
+                sys.executable,
+                "-m",
+                "pcons.toolchains.cxx_module_scanner",
+                "--manifest",
+                "cxx.manifest.json",
+                "--out",
+                "cxx_modules.dyndep",
+                "--mod-dir",
+                moddir,
+            ],
+        }
+
+        # Register dyndep node with environment so generator writes its build statement
+        if first_env is not None:
+            first_env.register_node(dyndep_node)
+
+        # Attach dyndep to all CXX and CXX_MODULE object nodes
+        dyndep_rel = "cxx_modules.dyndep"
+        for _, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi is not None:
+                bi["dyndep"] = dyndep_rel
+            obj_node.implicit_deps.append(dyndep_node)
 
 
 # =============================================================================
