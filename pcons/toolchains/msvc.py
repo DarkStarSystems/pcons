@@ -3,9 +3,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,8 +23,11 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
+    from pcons.core.node import FileNode
+    from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.core.toolconfig import ToolConfig
+    from pcons.tools.toolchain import SourceHandler
 
 
 def _find_vswhere() -> Path | None:
@@ -128,6 +133,34 @@ class MsvcCompiler(BaseTool):
         from pcons.core.toolconfig import ToolConfig
 
         return ToolConfig(self._name, cmd=str(cl.path))
+
+
+class MsvcCxxCompiler(MsvcCompiler):
+    """MSVC C++ compiler tool (cxx namespace)."""
+
+    def __init__(self) -> None:
+        super().__init__("cxx", "cxx")
+
+    def default_vars(self) -> dict[str, object]:
+        return {
+            "cmd": "cl.exe",
+            "flags": ["/nologo"],
+            "iprefix": "/I",
+            "includes": [],
+            "dprefix": "/D",
+            "defines": [],
+            "depflags": ["/showIncludes"],
+            "objcmd": [
+                "$cxx.cmd",
+                "$cxx.flags",
+                "${prefix(cxx.iprefix, cxx.includes)}",
+                "${prefix(cxx.dprefix, cxx.defines)}",
+                "$cxx.depflags",
+                "/c",
+                TargetPath(prefix="/Fo"),
+                SourcePath(),
+            ],
+        }
 
 
 class MsvcLibrarian(BaseTool):
@@ -427,7 +460,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         if cc.configure(config) is None:
             return False
 
-        cxx = MsvcCompiler("cxx", "cxx")
+        cxx = MsvcCxxCompiler()
         cxx.configure(config)
 
         lib = MsvcLibrarian()
@@ -452,6 +485,156 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             "ml": ml,
         }
         return True
+
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
+        """Extend base MSVC handler to support C++20 module interface units (.cppm)."""
+        from pcons.tools.toolchain import SourceHandler
+
+        if suffix == ".cppm":
+            # No depfile for module interfaces: module deps are handled by dyndep.
+            return SourceHandler("cxx", "cxx_module", ".obj", None, None)
+        return super().get_source_handler(suffix)
+
+    def after_resolve(
+        self,
+        project: Project,
+        source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
+    ) -> None:
+        """Set up Ninja dyndep for C++20 module dependencies (MSVC).
+
+        Mirrors LlvmToolchain.after_resolve() but uses MSVC flags:
+        - /scanDependencies:<file> for dependency scanning (P1689R5)
+        - /interface /ifcOutput <path> to produce .ifc alongside .obj
+        - /ifcSearchDir <dir> so importers can find precompiled modules
+        """
+        cxx_module_pairs = source_obj_by_language.get("cxx_module", [])
+        if not cxx_module_pairs:
+            return
+
+        cxx_pairs = source_obj_by_language.get("cxx", [])
+        all_cxx_pairs = cxx_module_pairs + cxx_pairs
+
+        build_dir = project.build_dir
+        moddir = "cxx_modules"
+        manifest_path = build_dir / "cxx.manifest.json"
+        dyndep_path = build_dir / "cxx_modules.dyndep"
+
+        # Get environment and compiler command from first cxx_module object node
+        first_env = None
+        _, first_obj = cxx_module_pairs[0]
+        build_info = getattr(first_obj, "_build_info", None)
+        if build_info:
+            first_env = build_info.get("env")
+
+        cxx_tool = getattr(first_env, "cxx", None) if first_env else None
+        compiler_cmd = str(getattr(cxx_tool, "cmd", "cl.exe") or "cl.exe")
+        base_flags = list(getattr(cxx_tool, "flags", None) or [])
+
+        build_dir.mkdir(parents=True, exist_ok=True)
+        (build_dir / moddir).mkdir(exist_ok=True)
+
+        # Build manifest entries
+        manifest = []
+        for src, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            context = bi.get("context") if bi else None
+            is_module_interface = src.suffix == ".cppm"
+
+            # Combine base flags + effective requirement flags (MSVC-style prefixes)
+            seen: set[str] = set(base_flags)
+            compile_flags = list(base_flags)
+            if context:
+                for f in context.flags:
+                    if f not in seen:
+                        compile_flags.append(f)
+                        seen.add(f)
+                for inc in context.includes:
+                    compile_flags.append(f"/I{inc}")
+                for d in context.defines:
+                    compile_flags.append(f"/D{d}")
+
+            # For module interfaces, /TP and /interface are needed so the
+            # scanner (cl.exe /scanDependencies) detects what module is provided.
+            scan_flags = list(compile_flags)
+            if is_module_interface and "/interface" not in scan_flags:
+                scan_flags = ["/TP", "/interface"] + scan_flags
+
+            entry: dict[str, object] = {
+                "src": str(src.resolve()).replace("\\", "/"),
+                "obj": str(obj_node.path.relative_to(build_dir)).replace("\\", "/"),
+                "is_module_interface": is_module_interface,
+                "compiler": compiler_cmd,
+                "compile_flags": scan_flags,
+            }
+            if is_module_interface:
+                entry["ifc"] = f"{moddir}/{src.stem}.ifc"
+            manifest.append(entry)
+
+        manifest_path.write_text(json.dumps(manifest, indent=2))
+        logger.debug("Wrote C++ module manifest to %s", manifest_path)
+
+        # Inject /ifcSearchDir into ALL cxx/cxx_module compile contexts
+        for _, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi:
+                context = bi.get("context")
+                if context is not None and hasattr(context, "flags"):
+                    if "/ifcSearchDir" not in context.flags:
+                        context.flags.extend(["/ifcSearchDir", moddir])
+
+        # Inject /interface /ifcOutput for module interface files
+        for src, obj_node in cxx_module_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi:
+                context = bi.get("context")
+                if context is not None and hasattr(context, "flags"):
+                    ifc_path = f"{moddir}/{src.stem}.ifc"
+                    if "/interface" not in context.flags:
+                        # /TP forces C++ compilation for .cppm (unrecognized extension)
+                        context.flags.extend(
+                            ["/TP", "/interface", "/ifcOutput", ifc_path]
+                        )
+
+        # Create source file nodes for scanner dependencies
+        all_sources = [src for src, _ in all_cxx_pairs]
+        source_nodes = [project.node(src) for src in all_sources]
+
+        # Create the dyndep scanner build node
+        dyndep_node = project.node(dyndep_path)
+        dyndep_node.depends(source_nodes)
+        dyndep_node._build_info = {
+            "tool": "cxx_scanner",
+            "command_var": "scancmd",
+            "description": "SCAN C++ modules",
+            "sources": source_nodes,
+            "command": [
+                sys.executable,
+                "-m",
+                "pcons.toolchains.cxx_module_scanner",
+                "--manifest",
+                "cxx.manifest.json",
+                "--out",
+                "cxx_modules.dyndep",
+                "--mod-dir",
+                moddir,
+                "--scanner-style",
+                "msvc",
+                "--scanner",
+                compiler_cmd,
+            ],
+        }
+
+        # Register dyndep node with environment
+        if first_env is not None:
+            first_env.register_node(dyndep_node)
+
+        # Attach dyndep to all CXX and CXX_MODULE object nodes
+        dyndep_rel = "cxx_modules.dyndep"
+        for _, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi is not None:
+                bi["dyndep"] = dyndep_rel
+            obj_node.implicit_deps.append(dyndep_node)
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply build variant with MSVC flags.
@@ -509,6 +692,7 @@ toolchain_registry.register(
     check_command="cl.exe",
     tool_classes=[
         MsvcCompiler,
+        MsvcCxxCompiler,
         MsvcLibrarian,
         MsvcLinker,
         MsvcResourceCompiler,

@@ -133,13 +133,24 @@ class CompileLinkContext:
         Returns:
             A CompileLinkContext populated from the requirements.
         """
-        # Determine linker command override for C++ linking
-        # C++ code needs the C++ compiler (clang++/g++) as linker to properly
-        # link the C++ runtime library
+        # Determine linker command override for C++ linking.
+        # For GCC/Clang, g++/clang++ must be used as the linker driver to link
+        # the C++ runtime — the link tool uses the C compiler (gcc/clang) by
+        # default, so we override it with the C++ driver.
+        # For MSVC, link.exe is the linker (separate from cl.exe), and using
+        # cl.exe as a linker driver breaks flags like /OUT:. We only override
+        # when link.cmd == cc.cmd (i.e., the linker is the C compiler driver).
         linker_cmd = None
         if language == "cxx" and env is not None and env.has_tool("cxx"):
             cxx_cmd = getattr(env.cxx, "cmd", None)
-            if cxx_cmd:
+            # Only override when the link tool is using the C compiler as its cmd
+            # (GCC/Clang pattern). Skip when the link tool has its own separate
+            # executable (MSVC link.exe pattern).
+            cc_cmd = getattr(env.cc, "cmd", None) if env.has_tool("cc") else None
+            link_cmd = getattr(env.link, "cmd", None) if env.has_tool("link") else None
+            if cxx_cmd and link_cmd is not None and link_cmd == cc_cmd:
+                linker_cmd = cxx_cmd
+            elif cxx_cmd and link_cmd is None:
                 linker_cmd = cxx_cmd
         elif language == "fortran" and env is not None and env.has_tool("fc"):
             fc_cmd = getattr(env.fc, "cmd", None)
@@ -258,25 +269,17 @@ class MsvcCompileLinkContext(CompileLinkContext):
 
         Args:
             effective: The computed effective requirements.
-            language: The link language (e.g., "c", "cxx"). If "cxx" and env
-                has a "cxx" tool, the linker_cmd will be set to env.cxx.cmd.
-            env: The build environment, used to look up the C++ compiler
-                command when linking C++ code.
-            target: The target being built (unused by MSVC).
-            output_name: The output filename (unused by MSVC).
+            language: Unused for MSVC (kept for interface compatibility).
+            env: Unused for MSVC (kept for interface compatibility).
+            target: Unused for MSVC (kept for interface compatibility).
+            output_name: Unused for MSVC (kept for interface compatibility).
 
         Returns:
             A MsvcCompileLinkContext populated from the requirements.
         """
-        # Determine linker command override for C++ linking
-        # MSVC uses the same cl.exe for both C and C++, but we still support
-        # the override mechanism for consistency
-        linker_cmd = None
-        if language == "cxx" and env is not None and env.has_tool("cxx"):
-            cxx_cmd = getattr(env.cxx, "cmd", None)
-            if cxx_cmd:
-                linker_cmd = cxx_cmd
-
+        # MSVC always uses link.exe regardless of language (no linker_cmd override).
+        # Unlike GCC/Clang where g++/clang++ must be used as the linker driver for C++
+        # runtime linkage, MSVC link.exe handles all languages automatically.
         return cls(
             includes=[str(p) for p in effective.includes],
             defines=list(effective.defines),
@@ -284,5 +287,5 @@ class MsvcCompileLinkContext(CompileLinkContext):
             link_flags=list(effective.link_flags),
             libs=list(effective.link_libs),
             libdirs=[str(p) for p in effective.link_dirs],
-            linker_cmd=linker_cmd,
+            linker_cmd=None,
         )

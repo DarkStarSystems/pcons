@@ -1,26 +1,47 @@
 # SPDX-License-Identifier: MIT
 """C++20 module dependency scanner for Ninja dyndep.
 
-This module scans C++20 source files using clang-scan-deps (P1689R5 format)
-and produces a Ninja dyndep file that declares which object files produce
-and consume which .pcm (pre-compiled module) files.
+Supports two scanner styles:
+- "clang": uses clang-scan-deps (P1689R5 format); manifest uses "pcm" key
+- "msvc":  uses cl.exe /scanDependencies <file> (P1689R5 format); manifest uses "ifc" key
 
 Run as:
     python -m pcons.toolchains.cxx_module_scanner \\
         --manifest cxx.manifest.json \\
         --out cxx_modules.dyndep \\
         --mod-dir cxx_modules \\
-        --scanner clang-scan-deps
+        --scanner clang-scan-deps \\
+        --scanner-style clang
 
-The manifest JSON format:
+    python -m pcons.toolchains.cxx_module_scanner \\
+        --manifest cxx.manifest.json \\
+        --out cxx_modules.dyndep \\
+        --mod-dir cxx_modules \\
+        --scanner cl.exe \\
+        --scanner-style msvc
+
+The manifest JSON format (clang):
     [
       {
         "src": "/abs/path/MyMod.cppm",
-        "obj": "obj.hello/src/MyMod.cppm.o",
+        "obj": "obj.hello/src/MyMod.cppm.obj",
         "is_module_interface": true,
         "pcm": "cxx_modules/MyMod.pcm",
         "compiler": "clang++",
         "compile_flags": ["-std=c++20"]
+      },
+      ...
+    ]
+
+The manifest JSON format (msvc):
+    [
+      {
+        "src": "C:/abs/path/MyMod.cppm",
+        "obj": "obj.hello/src/MyMod.cppm.obj",
+        "is_module_interface": true,
+        "ifc": "cxx_modules/MyMod.ifc",
+        "compiler": "cl.exe",
+        "compile_flags": ["/nologo", "/std:c++20"]
       },
       ...
     ]
@@ -34,6 +55,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -93,22 +115,76 @@ def run_scan_deps(
         return None
 
 
+def run_scan_deps_msvc(
+    compiler: str,
+    compile_flags: list[str],
+    src: str,
+) -> dict[str, Any] | None:
+    """Run cl.exe /scanDependencies on a single source file and return P1689R5 JSON.
+
+    Args:
+        compiler: Path/name of cl.exe.
+        compile_flags: List of compiler flags (e.g. ["/nologo", "/std:c++20"]).
+        src: Absolute path to the source file.
+
+    Returns:
+        Parsed P1689R5 JSON dict, or None on failure.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+        tmp_path = f.name
+
+    try:
+        cmd = [compiler, "/scanDependencies", tmp_path] + compile_flags + [src]
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(
+                f"Warning: cl.exe /scanDependencies failed for {src}: {result.stderr}",
+                file=sys.stderr,
+            )
+            return None
+        try:
+            return json.loads(Path(tmp_path).read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(
+                f"Warning: could not parse cl.exe /scanDependencies output for {src}: {e}",
+                file=sys.stderr,
+            )
+            return None
+    except FileNotFoundError:
+        print(
+            f"Error: compiler '{compiler}' not found.",
+            file=sys.stderr,
+        )
+        return None
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+
 def write_dyndep(
     manifest: list[dict[str, Any]],
     mod_dir: str,
     out_path: str,
     scanner: str,
+    scanner_style: str = "clang",
 ) -> None:
-    """Scan manifest sources with clang-scan-deps and write Ninja dyndep file.
+    """Scan manifest sources and write Ninja dyndep file.
 
     Args:
         manifest: List of manifest entry dicts (see module docstring).
         mod_dir: Module directory, relative to build dir (e.g., "cxx_modules").
         out_path: Output dyndep file path (relative to build dir).
-        scanner: Name/path of the clang-scan-deps executable.
+        scanner: clang-scan-deps executable (clang style) or cl.exe path (msvc style).
+        scanner_style: "clang" (default) or "msvc".
     """
-    # First pass: build module_name -> pcm_path map from interface units.
-    # The pcm path comes from the manifest "pcm" field when present,
+    # Module file key in manifest entries ("pcm" for clang, "ifc" for msvc)
+    mod_key = "ifc" if scanner_style == "msvc" else "pcm"
+
+    # First pass: build module_name -> mod_path map from interface units.
+    # The mod path comes from the manifest "pcm"/"ifc" field when present,
     # or is derived from the logical-name after scanning.
     module_to_pcm: dict[str, str] = {}
 
@@ -132,7 +208,10 @@ def write_dyndep(
         compiler = str(item.get("compiler", "clang++"))
         compile_flags = list(item.get("compile_flags", []))
 
-        p1689 = run_scan_deps(scanner, compiler, compile_flags, src, obj)
+        if scanner_style == "msvc":
+            p1689 = run_scan_deps_msvc(compiler, compile_flags, src)
+        else:
+            p1689 = run_scan_deps(scanner, compiler, compile_flags, src, obj)
         scan_results.append((item, p1689))
 
     # Build module_name -> pcm_path map from scan results.
@@ -155,13 +234,14 @@ def write_dyndep(
                 logical_name = str(prov.get("logical-name", ""))
                 if not logical_name:
                     continue
-                # Use manifest pcm field if available, else derive from logical name
-                if item.get("is_module_interface") and "pcm" in item:
-                    pcm_path = str(item["pcm"])
+                # Use manifest mod file field if available, else derive from logical name
+                if item.get("is_module_interface") and mod_key in item:
+                    pcm_path = str(item[mod_key])
                 else:
                     # Derive: replace ':' with '-' for partition modules
                     safe_name = logical_name.replace(":", "-")
-                    pcm_path = f"{mod_dir}/{safe_name}.pcm"
+                    ext = ".ifc" if scanner_style == "msvc" else ".pcm"
+                    pcm_path = f"{mod_dir}/{safe_name}{ext}"
                 module_to_pcm[logical_name] = pcm_path
 
     # Third pass: build dyndep entries.
@@ -198,10 +278,10 @@ def write_dyndep(
                             if logical_name and logical_name in module_to_pcm:
                                 requires_pcms.append(module_to_pcm[logical_name])
 
-        # If it's a module interface and we have a pcm from the manifest but no
-        # provides from the scan (e.g., scanner failed), fall back to manifest pcm.
-        if is_interface and not provides_pcms and "pcm" in item:
-            provides_pcms = [str(item["pcm"])]
+        # If it's a module interface and we have a mod file from the manifest but no
+        # provides from the scan (e.g., scanner failed), fall back to manifest mod file.
+        if is_interface and not provides_pcms and mod_key in item:
+            provides_pcms = [str(item[mod_key])]
 
         entries.append((obj, provides_pcms, requires_pcms))
 
@@ -250,7 +330,13 @@ def main() -> int:
     parser.add_argument(
         "--scanner",
         default="clang-scan-deps",
-        help="Path/name of clang-scan-deps executable (default: clang-scan-deps)",
+        help="Path/name of scanner executable (default: clang-scan-deps)",
+    )
+    parser.add_argument(
+        "--scanner-style",
+        default="clang",
+        choices=["clang", "msvc"],
+        help="Scanner style: 'clang' (clang-scan-deps) or 'msvc' (cl.exe) (default: clang)",
     )
     args = parser.parse_args()
 
@@ -261,7 +347,7 @@ def main() -> int:
         print(f"Error reading manifest {args.manifest}: {e}", file=sys.stderr)
         return 1
 
-    write_dyndep(manifest, args.mod_dir, args.out, args.scanner)
+    write_dyndep(manifest, args.mod_dir, args.out, args.scanner, args.scanner_style)
     return 0
 
 
