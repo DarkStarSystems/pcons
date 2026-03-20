@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-03-20
+
 ### Added
 
 - **Fortran toolchain (`gfortran`)**: Full GNU Fortran support via `find_fortran_toolchain()`. Includes compiler, archiver, and linker tools; supports all standard Fortran source extensions (`.f90`, `.f95`, `.f03`, `.f08`, `.f18`, `.F`, `.F90`, `.f`, `.for`, `.ftn`).
@@ -15,13 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Mixed-language C++/Fortran builds**: `env.add_toolchain()` now supports mixing Fortran with C/C++ in a single target. Runtime libraries are automatically injected in both directions — gfortran as primary linker adds `-lc++`/`-lstdc++` for C++ objects; g++/clang++ as primary linker adds `-lgfortran` for Fortran objects. On macOS the gfortran library directory is also injected automatically.
 
-- **`after_resolve()` hook in toolchain protocol**: `BaseToolchain` now defines an optional `after_resolve(project, source_obj_by_language)` hook called after all targets are resolved but before command expansion. Toolchains override this to inspect or modify the build graph (e.g., Fortran dyndep setup).
+- **C++20 named modules (LLVM toolchain)**: `.cppm` module interface units are now handled by `LlvmToolchain`. The single-step compile (`-fmodule-output=`) produces both the `.pcm` precompiled module and the object file, exactly like Fortran's `-J modules`. A build-time scanner (`pcons.toolchains.cxx_module_scanner`) calls `clang-scan-deps -format=p1689` to discover dependencies and writes a Ninja dyndep file for correct build ordering (requires `clang-scan-deps` and Ninja ≥ 1.10).
 
-- **Four new Fortran examples**:
+- **`after_resolve()` hook in toolchain protocol**: `BaseToolchain` now defines an optional `after_resolve(project, source_obj_by_language)` hook called after all targets are resolved but before command expansion. Toolchains override this to inspect or modify the build graph (used by both Fortran and C++20 module support).
+
+- **Five new examples**:
   - `25_fortran_hello` — simple "Hello from Fortran!" program
   - `26_fortran_modules` — Fortran MODULE / USE with correct dyndep ordering
   - `27_fortran_calls_cxx` — Fortran primary calling C++ via `BIND(C)` (gfortran links, C++ runtime injected)
   - `28_cxx_calls_fortran` — C++ primary calling Fortran via `BIND(C)` (clang++/g++ links, Fortran runtime injected)
+  - `29_cxx_modules` — C++20 named modules with a module interface unit (`.cppm`) and consumer (`.cpp`)
+
+### Fixed
+
+- **LLVM object suffix on Windows**: `LlvmToolchain` now correctly produces `.obj` files on Windows (COFF convention) instead of `.o`. Previously the Unix base class suffix was used even when targeting `x86_64-pc-windows-msvc`.
 
 ## [0.8.4] - 2026-03-19
 
@@ -592,6 +601,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
 [Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.4...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/DarkStarSystems/pcons/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/DarkStarSystems/pcons/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/DarkStarSystems/pcons/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/DarkStarSystems/pcons/compare/v0.8.1...v0.8.2
