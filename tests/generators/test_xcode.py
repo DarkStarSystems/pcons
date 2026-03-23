@@ -631,3 +631,53 @@ class TestXcodeGeneratorInstallDependencies:
 
         # Should have target dependency
         assert "PBXTargetDependency" in content
+
+
+class TestXcodeImportIsolation:
+    """Test that pbxproj is not required at import time."""
+
+    def test_import_pcons_without_pbxproj(self, monkeypatch):
+        """Importing pcons and XcodeGenerator must not require pbxproj.
+
+        pbxproj is only needed when actually generating Xcode projects,
+        not at import time. This ensures docs builds and other environments
+        without pbxproj installed can still import pcons.
+        """
+        import importlib
+        import sys
+
+        # Save and remove all pbxproj and pcons.generators modules from cache
+        # so they get re-imported with pbxproj blocked
+        saved = {}
+        for mod_name in list(sys.modules):
+            if (
+                mod_name == "pbxproj"
+                or mod_name.startswith("pbxproj.")
+                or mod_name == "pcons"
+                or mod_name.startswith("pcons.generators")
+            ):
+                saved[mod_name] = sys.modules.pop(mod_name)
+
+        class PbxprojBlocker:
+            """Meta path finder that blocks all pbxproj imports."""
+
+            def find_module(self, fullname, path=None):
+                if fullname == "pbxproj" or fullname.startswith("pbxproj."):
+                    return self
+                return None
+
+            def load_module(self, fullname):
+                raise ImportError(f"{fullname} is not installed")
+
+        blocker = PbxprojBlocker()
+        sys.meta_path.insert(0, blocker)
+
+        try:
+            # These imports must succeed without pbxproj
+            pcons_mod = importlib.import_module("pcons")
+            xcode_mod = importlib.import_module("pcons.generators.xcode")
+            assert hasattr(xcode_mod, "XcodeGenerator")
+            assert hasattr(pcons_mod, "XcodeGenerator")
+        finally:
+            sys.meta_path.remove(blocker)
+            sys.modules.update(saved)

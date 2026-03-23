@@ -30,13 +30,11 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pbxproj import XcodeProject
-from pbxproj.pbxextensions.ProjectFiles import FileOptions
-from pbxproj.PBXGenericObject import PBXGenericObject
-
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
+    from pbxproj import XcodeProject
+
     from pcons.core.project import Project
     from pcons.core.target import Target
 
@@ -102,6 +100,7 @@ class XcodeGenerator(BaseGenerator):
             project: Configured project to generate for.
             output_dir: Directory to write .xcodeproj to.
         """
+
         output_dir.mkdir(parents=True, exist_ok=True)
 
         self._output_dir = output_dir.resolve()
@@ -133,6 +132,8 @@ class XcodeGenerator(BaseGenerator):
             return
 
         # Create XcodeProject and save
+        from pbxproj import XcodeProject
+
         self._xcode_project = XcodeProject(tree, str(pbxproj_path))
 
         # Add source files using pbxproj's add_file (handles build files)
@@ -784,6 +785,8 @@ class XcodeGenerator(BaseGenerator):
                 if src_path.suffix.lower() not in self._XCODE_COMPILABLE_EXTENSIONS:
                     continue
 
+                from pbxproj.pbxextensions.ProjectFiles import FileOptions
+
                 source_path = self._make_relative_path(src_path)
                 file_options = FileOptions(create_build_files=True)
                 self._xcode_project.add_file(
@@ -957,6 +960,8 @@ class XcodeGenerator(BaseGenerator):
             root_project = self._xcode_project.rootObject
 
             # PBXContainerItemProxy
+            from pbxproj.PBXGenericObject import PBXGenericObject
+
             proxy_obj = PBXGenericObject()
             proxy_obj._id = proxy_id  # type: ignore[attr-defined]  # pbxproj internal
             proxy_obj["isa"] = "PBXContainerItemProxy"
