@@ -1,6 +1,6 @@
 # Pcons
 
-A modern Python-based build system. Builds anything that requires a repeatable workflow using a dependency graph. Works with Ninja (or Makefile) to do the builds.
+A modern open-source cross-platform zero-install Python-based build system. Builds anything that requires a repeatable workflow, using a dependency graph. Easy to use, reliable and quick. Uses Ninja (or Makefile, XCode, or MSVS) to do the builds. Optimized for C/C++, Fortran, CUDA, wasm etc. but should work for anything that needs building.
 
 [![CI](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml/badge.svg)](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/DarkStarSystems/pcons/graph/badge.svg)](https://codecov.io/gh/DarkStarSystems/pcons)
@@ -24,21 +24,15 @@ Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), 
 
 ## Why another software build tool?
 
-I was one of the original developers of SCons, and helped maintain it for many years. I love that python is the config language; that makes build descriptions incredibly flexible and powerful. Recently I've been using CMake for more projects, and despite the deeply painful configuration language, I've come to appreciate its power: conan integration, the separation between *describing* the build and running it, and dependency propagation, among other things. I feel that SCons hasn't kept up with modern python; like any very widely used mature project, it has a lot of accumulated wisdom but also a bit ossified ways of doing things.
+I was one of the original developers of SCons, and helped maintain it for many years. I love that python is the config language; that makes build descriptions incredibly flexible and powerful. Recently I've been using CMake for more projects, and despite the deeply painful configuration language, I've come to appreciate its power: conan integration, the separation between *describing* the build andrunning it, and dependency propagation, among other things. I feel that SCons hasn't kept up with modern python; like any very widely used mature project, it has a lot of accumulated wisdom but also a bit ossified ways of doing things.
 
 I've been thinking for years now about rearchitecting SCons onto a modern python stack with Path and decorators and all the other wonderful stuff python has been doing, and fixing some of the pain points at the same time (substitution/quoting, extensibility, tracing, separation between description and building, and more), but I've never had the time to dig into it. But recently as I've been using a lot more of Claude Code as a programming assistant, and it has gotten significantly better, it seemed like the right time to try this as a collaborative project. So, meet pcons!
 
 ## Status
 
-🚧 **Under active development** - ready for experimentation and feedback.
+🚧 **Under active development** - ready for experimentation and feedback. It's working in several medium-sized projects.
 
-Core functionality is working: C/C++/Fortran compilation, static and shared libraries, programs, install targets, and mixed-language builds. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
-
-## This Project is AI-Assisted
-
-I've used Claude Code extensively to create this project, mostly Claude Opus 4.6. It has been a huge help in realizing a vision I've had for a long time. If you reflexively or morally reject all AI-generated or AI-assisted code, pcons is not for you. That said, I've reviewed every decision and nearly every line, and this code reflects my architecture, goals and priorities. I take full responsibility for it, and as a professional software engineer I stand behind it.
-
-One of my sub-goals has been to make sure the documentation and source organization is clear; not just for humans but for browsing by AI agents. I want to make it easy for a human or an AI agent to create a best-practices pcons-build.py for *your* project quickly and easily. Using AI to auto-generate doc and make sure APIs are clean and consistent helps with that goal.
+Core functionality is working and well tested: C/C++/Fortran compilation, static and shared libraries, programs, install targets, installers (Win/Mac), and mixed-language builds. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 
 ## Quick Example
 
@@ -138,6 +132,13 @@ uv run ruff check pcons/
 uv run mypy pcons/
 ```
 
+## This Project is AI-Assisted
+
+PCons is my long-term vision for a modern build tool. I've used Claude Code extensively to assist in creating this project, mostly Claude Opus 4.6. It has been a huge help in realizing the vision I've had for a long time. If you reflexively or morally reject all AI-generated or AI-assisted code, pcons is not for you. That said, I've reviewed every decision and nearly every line, and this code reflects my vision, my architecture, my goals and my priorities. I take full responsibility for it, and as a professional software engineer with 40+ years of C/C++/python experience I stand behind it. I also intend to support it long-term.
+
+One of my sub-goals has been to make sure the documentation and source organization is clear; not just for humans but for browsing by AI agents. I want to make it easy for a human or an AI agent to create a best-practices `pcons-build.py` for *your* project quickly and easily. Using AI to auto-generate doc and making sure APIs are clean and consistent helps with that goal.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE)
+
