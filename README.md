@@ -93,6 +93,33 @@ pip install pcons
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Design document and implementation status
 - [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
 
+## Fetching Dependencies
+
+`pcons` also ships with `pcons-fetch`, a helper for downloading and building
+third-party dependencies from source using a simple `deps.toml` file.
+
+Example:
+
+```toml
+[packages.zlib]
+url = "https://zlib.net/zlib-1.3.1.tar.gz"
+version = "1.3.1"
+build = "cmake"
+sha256 = "9a93b2b7df..."
+```
+
+```bash
+pcons-fetch fetch deps.toml
+```
+
+`sha256` is optional but recommended for archive downloads, especially in CI.
+When present, `pcons-fetch` verifies the downloaded archive before extraction
+and aborts on mismatch. This check applies to archive URLs, not Git clones.
+
+Archive extraction is also path-safe: `pcons-fetch` rejects archive members
+that try to escape the destination directory via absolute paths, `..`
+components, or tar/zip link tricks.
+
 ## Development
 
 ```bash

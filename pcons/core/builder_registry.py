@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -252,7 +252,7 @@ def builder(
         )
 
         # Store the registration name on the class for reference
-        cls._builder_name = name  # type: ignore[attr-defined]
+        cast(Any, cls)._builder_name = name
 
         return cls
 

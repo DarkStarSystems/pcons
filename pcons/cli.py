@@ -160,6 +160,16 @@ def run_script(
     """
     import pcons
 
+    sentinel = object()
+    previous_env: dict[str, str | object] = {}
+    updated_keys: set[str] = set()
+
+    def set_env_var(key: str, value: str) -> None:
+        if key not in previous_env:
+            previous_env[key] = os.environ.get(key, sentinel)
+        updated_keys.add(key)
+        os.environ[key] = value
+
     # Clear any previously registered projects
     pcons._clear_registered_projects()
 
@@ -167,23 +177,24 @@ def run_script(
     pcons._cli_vars = None
 
     # Set environment variables (scripts still read these)
-    os.environ["PCONS_BUILD_DIR"] = str(build_dir.absolute())
-    os.environ["PCONS_SOURCE_DIR"] = str(script_path.parent.absolute())
+    set_env_var("PCONS_BUILD_DIR", str(build_dir.absolute()))
+    set_env_var("PCONS_SOURCE_DIR", str(script_path.parent.absolute()))
 
     if variables:
-        os.environ["PCONS_VARS"] = json.dumps(variables)
+        set_env_var("PCONS_VARS", json.dumps(variables))
 
     if variant:
-        os.environ["PCONS_VARIANT"] = variant
+        set_env_var("PCONS_VARIANT", variant)
 
     if generator:
-        os.environ["PCONS_GENERATOR"] = generator
+        set_env_var("PCONS_GENERATOR", generator)
 
     if reconfigure:
-        os.environ["PCONS_RECONFIGURE"] = "1"
+        set_env_var("PCONS_RECONFIGURE", "1")
 
     if extra_env:
-        os.environ.update(extra_env)
+        for key, value in extra_env.items():
+            set_env_var(key, value)
 
     logger.info("Running %s", script_path)
     logger.debug("  PCONS_BUILD_DIR=%s", os.environ["PCONS_BUILD_DIR"])
@@ -225,19 +236,12 @@ def run_script(
     finally:
         os.chdir(old_cwd)
         sys.path[:] = old_path
-        # Clean up environment variables
-        for key in [
-            "PCONS_BUILD_DIR",
-            "PCONS_SOURCE_DIR",
-            "PCONS_VARS",
-            "PCONS_VARIANT",
-            "PCONS_GENERATOR",
-            "PCONS_RECONFIGURE",
-        ]:
-            os.environ.pop(key, None)
-        if extra_env:
-            for key in extra_env:
+        for key in updated_keys:
+            previous = previous_env[key]
+            if previous is sentinel:
                 os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
 
 
 def _find_ninja() -> list[str] | None:

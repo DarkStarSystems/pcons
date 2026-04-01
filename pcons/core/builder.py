@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
-from pcons.core.node import FileNode, Node
+from pcons.core.node import BuildInfo, FileNode, Node, OutputInfo
 from pcons.core.subst import PathToken, TargetPath
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -145,7 +145,7 @@ class Builder(Protocol):
         target: str | Path | None,
         sources: list[str | Path | Node],
         **kwargs: Any,
-    ) -> list[Node]:
+    ) -> list[Node] | OutputGroup:
         """Build targets from sources.
 
         Args:
@@ -217,7 +217,7 @@ class BaseBuilder(ABC):
         target: str | Path | None,
         sources: list[str | Path | Node],
         **kwargs: Any,
-    ) -> list[Node]:
+    ) -> list[Node] | OutputGroup:
         """Build targets from sources.
 
         Normalizes inputs and delegates to _build().
@@ -285,7 +285,7 @@ class BaseBuilder(ABC):
         targets: list[Path],
         sources: list[Node],
         **kwargs: Any,
-    ) -> list[Node]:
+    ) -> list[Node] | OutputGroup:
         """Actually create the target nodes.
 
         Subclasses implement this to create FileNodes with proper
@@ -365,7 +365,7 @@ class CommandBuilder(BaseBuilder):
         targets: list[Path],
         sources: list[Node],
         **kwargs: Any,
-    ) -> list[Node]:
+    ) -> list[Node] | OutputGroup:
         """Create target nodes for command execution."""
         tool_config = self._get_tool_config(env)
         defined_at = kwargs.get("defined_at") or get_caller_location()
@@ -421,15 +421,15 @@ class CommandBuilder(BaseBuilder):
 
         # Store build info for generator
         # These will be used by the generator to create ninja rules
-        node._build_info = {
-            "tool": self._tool_name,
-            "command_var": self._command_var,
-            "language": self._language,
-            "sources": sources,
-            "depfile": depfile,
-            "deps_style": self._deps_style,
-            "env": env,
-        }
+        node._build_info = BuildInfo(
+            tool=self._tool_name,
+            command_var=self._command_var,
+            language=self._language,
+            sources=sources,
+            depfile=depfile,
+            deps_style=self._deps_style,
+            env=env,
+        )
 
         return node
 
@@ -501,7 +501,7 @@ class MultiOutputBuilder(CommandBuilder):
         """Get the output specifications."""
         return self._outputs
 
-    def _build(  # type: ignore[override]
+    def _build(
         self,
         env: Environment,
         targets: list[Path],
@@ -575,7 +575,7 @@ class MultiOutputBuilder(CommandBuilder):
 
         # Store build info on the primary node
         # Include information about all outputs for the generator
-        output_info = {
+        output_info: dict[str, OutputInfo] = {
             spec.name: {
                 "path": nodes[spec.name].path,
                 "suffix": spec.suffix,
@@ -585,17 +585,26 @@ class MultiOutputBuilder(CommandBuilder):
             for spec in self._outputs
         }
 
-        primary_node._build_info = {  # type: ignore[assignment]
-            "tool": self._tool_name,
-            "command_var": self._command_var,
-            "language": self._language,
-            "sources": sources,
-            "outputs": output_info,
-            "all_output_nodes": nodes,
-            "depfile": self._depfile,
-            "deps_style": self._deps_style,
-            "env": env,
-        }
+        depfile: PathToken | None = None
+        if self._depfile is not None:
+            depfile = PathToken(
+                prefix=self._depfile.prefix,
+                path=str(primary_target),
+                path_type="build",
+                suffix=self._depfile.suffix,
+            )
+
+        primary_node._build_info = BuildInfo(
+            tool=self._tool_name,
+            command_var=self._command_var,
+            language=self._language,
+            sources=sources,
+            outputs=output_info,
+            all_output_nodes=nodes,
+            depfile=depfile,
+            deps_style=self._deps_style,
+            env=env,
+        )
 
         # Secondary nodes reference the primary for build info
         for name, node in nodes.items():

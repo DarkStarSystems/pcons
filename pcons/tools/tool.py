@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from pcons.core.builder import Builder
+    from pcons.core.builder import Builder, OutputGroup
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
 
@@ -190,7 +190,7 @@ class BuilderMethod:
         target: str | Path | None = None,
         sources: list[str | Path] | str | Path | None = None,
         **kwargs: object,
-    ) -> list:
+    ) -> list | OutputGroup:
         """Invoke the builder.
 
         Args:

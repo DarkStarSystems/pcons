@@ -17,6 +17,7 @@ import sys
 import tarfile
 import zipfile
 from pathlib import Path
+from typing import Literal
 
 
 def create_tarfile(
@@ -30,10 +31,16 @@ def create_tarfile(
         compression: Compression type (None, "gzip", "bz2", "xz").
         base_dir: Base directory for computing archive paths.
     """
-    compression_modes = {"gzip": "w:gz", "bz2": "w:bz2", "xz": "w:xz"}
-    mode = compression_modes.get(compression, "w") if compression else "w"
+    compression_modes: dict[str, Literal["w:gz", "w:bz2", "w:xz"]] = {
+        "gzip": "w:gz",
+        "bz2": "w:bz2",
+        "xz": "w:xz",
+    }
+    mode: Literal["w", "w:gz", "w:bz2", "w:xz"] = (
+        compression_modes.get(compression, "w") if compression else "w"
+    )
 
-    with tarfile.open(output, mode) as tar:  # type: ignore[call-overload]
+    with tarfile.open(output, mode=mode) as tar:
         for f in files:
             # Compute archive name relative to base_dir
             try:

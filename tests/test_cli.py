@@ -12,7 +12,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from pcons import Generator, MakefileGenerator, NinjaGenerator, get_var, get_variant
-from pcons.cli import find_command_in_argv, find_script, parse_variables, setup_logging
+from pcons.cli import (
+    find_command_in_argv,
+    find_script,
+    parse_variables,
+    run_script,
+    setup_logging,
+)
 
 if TYPE_CHECKING:
     pass
@@ -296,6 +302,66 @@ class TestFindCommandInArgv:
         """Test that invalid commands return None."""
         assert find_command_in_argv(["notacommand"]) is None
         assert find_command_in_argv(["BUILD"]) is None  # case sensitive
+
+
+class TestRunScriptEnvironment:
+    """Tests for run_script environment handling."""
+
+    def test_run_script_restores_previous_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Pre-existing PCONS environment should be restored after the run."""
+        import os
+
+        import pcons
+
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.setenv("PCONS_BUILD_DIR", "original-build")
+        monkeypatch.setenv("PCONS_GENERATOR", "original-generator")
+        monkeypatch.setenv("CUSTOM_ENV", "original-custom")
+        pcons._cli_vars = None
+
+        exit_code, projects = run_script(
+            script,
+            tmp_path / "build",
+            variables={"FOO": "BAR"},
+            generator="ninja",
+            extra_env={"CUSTOM_ENV": "override"},
+        )
+
+        assert exit_code == 0
+        assert len(projects) == 1
+        assert os.environ["PCONS_BUILD_DIR"] == "original-build"
+        assert os.environ["PCONS_GENERATOR"] == "original-generator"
+        assert os.environ["CUSTOM_ENV"] == "original-custom"
+        assert "PCONS_VARS" not in os.environ
+
+    def test_run_script_cleans_up_new_environment_keys(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Keys created only for the script run should be removed afterwards."""
+        import os
+
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARIANT", raising=False)
+        monkeypatch.delenv("CUSTOM_ENV", raising=False)
+
+        exit_code, _ = run_script(
+            script,
+            tmp_path / "build",
+            variant="debug",
+            extra_env={"CUSTOM_ENV": "temp"},
+        )
+
+        assert exit_code == 0
+        assert "PCONS_BUILD_DIR" not in os.environ
+        assert "PCONS_VARIANT" not in os.environ
+        assert "CUSTOM_ENV" not in os.environ
 
 
 class TestDirectoryArg:

@@ -54,7 +54,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
@@ -1233,14 +1233,19 @@ class Resolver:
                         base_flags = list(getattr(tool_cfg, "flags", None) or [])
                         # Merge effective requirement flags (includes, defines,
                         # target/dep requirements) on top of base flags
-                        merged = base_flags + [f for f in val if f not in base_flags]  # type: ignore[union-attr]
+                        extra_flags = cast(list[object], val)
+                        merged = base_flags + [
+                            f for f in extra_flags if f not in base_flags
+                        ]
                         tool_overrides[f"{tool_name}.flags"] = merged
                 elif key == "ldflags":
                     # ldflags are link flags - only apply to link commands
                     if is_link_command:
                         # Use ldflags directly - they already include base env flags
                         # via compute_effective_requirements(). No merging needed.
-                        tool_overrides[f"{tool_name}.flags"] = list(val)  # type: ignore[arg-type]
+                        tool_overrides[f"{tool_name}.flags"] = list(
+                            cast(list[object], val)
+                        )
                 elif key == "linker_cmd":
                     # linker_cmd overrides link.cmd (e.g., clang++ for C++ linking)
                     if is_link_command:

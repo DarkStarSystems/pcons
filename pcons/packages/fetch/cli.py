@@ -9,17 +9,18 @@ build and how to build them.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import shutil
 import subprocess
 import sys
+import tarfile
+import tomllib
+import urllib.parse
+import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any
-
-try:
-    import tomllib
-except ImportError:
-    import tomli as tomllib  # type: ignore[import-not-found,no-redef]
 
 from pcons.packages.description import PackageDescription
 
@@ -59,7 +60,91 @@ def load_deps_file(path: Path) -> dict[str, Any]:
         return tomllib.load(f)
 
 
-def download_source(url: str, dest_dir: Path, name: str) -> Path:
+def _split_git_url_and_ref(url: str) -> tuple[str, str | None]:
+    """Split a git URL into repository URL and optional ref."""
+    git_url = url[4:] if url.startswith("git+") else url
+    parsed = urllib.parse.urlsplit(git_url)
+
+    if parsed.scheme:
+        at_pos = git_url.rfind("@")
+        slash_pos = git_url.rfind("/")
+        if at_pos > slash_pos >= 0:
+            return git_url[:at_pos], git_url[at_pos + 1 :]
+
+    return git_url, None
+
+
+def _verify_sha256(path: Path, expected: str | None) -> None:
+    """Verify the SHA-256 digest of a downloaded archive."""
+    if not expected:
+        return
+
+    digest = hashlib.sha256()
+    with path.open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+
+    actual = digest.hexdigest()
+    if actual.lower() != expected.lower():
+        raise RuntimeError(
+            f"SHA-256 mismatch for {path.name}: expected {expected}, got {actual}"
+        )
+
+
+def _ensure_member_is_within_root(root: Path, member_name: str) -> Path:
+    """Resolve a member path and ensure it stays within the extraction root."""
+    destination = (root / member_name).resolve()
+    if destination == root or root in destination.parents:
+        return destination
+    raise RuntimeError(f"Archive member escapes extraction root: {member_name}")
+
+
+def _safe_extract_zip(archive_path: Path, source_dir: Path) -> None:
+    """Extract a zip archive while rejecting path traversal and symlinks."""
+    with zipfile.ZipFile(archive_path, "r") as zf:
+        for member in zf.infolist():
+            destination = _ensure_member_is_within_root(source_dir, member.filename)
+            if member.is_dir():
+                destination.mkdir(parents=True, exist_ok=True)
+                continue
+
+            mode = (member.external_attr >> 16) & 0o170000
+            if mode == 0o120000:
+                raise RuntimeError(
+                    f"Refusing to extract symlink from zip archive: {member.filename}"
+                )
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with zf.open(member, "r") as src, destination.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+
+
+def _safe_extract_tar(archive_path: Path, source_dir: Path) -> None:
+    """Extract a tar archive while rejecting path traversal and links."""
+    with tarfile.open(archive_path) as tf:
+        for member in tf.getmembers():
+            if member.issym() or member.islnk():
+                raise RuntimeError(
+                    f"Refusing to extract link from tar archive: {member.name}"
+                )
+
+            destination = _ensure_member_is_within_root(source_dir, member.name)
+            if member.isdir():
+                destination.mkdir(parents=True, exist_ok=True)
+                continue
+
+            extracted = tf.extractfile(member)
+            if extracted is None:
+                continue
+
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with extracted, destination.open("wb") as dst:
+                shutil.copyfileobj(extracted, dst)
+
+
+def download_source(
+    url: str, dest_dir: Path, name: str, sha256: str | None = None
+) -> Path:
     """Download source from a URL.
 
     Supports:
@@ -88,14 +173,7 @@ def download_source(url: str, dest_dir: Path, name: str) -> Path:
     # Determine download method
     if url.startswith("git://") or url.startswith("git+") or url.endswith(".git"):
         # Git clone
-        git_url = url
-        if url.startswith("git+"):
-            git_url = url[4:]
-
-        # Check for specific tag/branch/commit
-        ref = None
-        if "@" in git_url:
-            git_url, ref = git_url.rsplit("@", 1)
+        git_url, ref = _split_git_url_and_ref(url)
 
         logger.info("Cloning %s", git_url)
         cmd = ["git", "clone", "--depth=1"]
@@ -109,30 +187,24 @@ def download_source(url: str, dest_dir: Path, name: str) -> Path:
 
     elif url.endswith((".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip")):
         # Download archive
-        import urllib.request
-
         archive_name = url.split("/")[-1]
         archive_path = dest_dir / archive_name
 
         logger.info("Downloading %s", url)
         urllib.request.urlretrieve(url, archive_path)
+        _verify_sha256(archive_path, sha256)
 
         # Extract archive
         logger.info("Extracting %s", archive_path)
         source_dir.mkdir(parents=True, exist_ok=True)
 
-        if url.endswith(".zip"):
-            import zipfile
-
-            with zipfile.ZipFile(archive_path, "r") as zf:
-                zf.extractall(source_dir)
-        else:
-            import tarfile
-
-            with tarfile.open(archive_path) as tf:
-                tf.extractall(source_dir)
-
-        archive_path.unlink()
+        try:
+            if url.endswith(".zip"):
+                _safe_extract_zip(archive_path, source_dir)
+            else:
+                _safe_extract_tar(archive_path, source_dir)
+        finally:
+            archive_path.unlink(missing_ok=True)
 
         # If archive contained a single directory, move its contents up
         contents = list(source_dir.iterdir())
@@ -393,11 +465,12 @@ def fetch_package(
 
     version = pkg_config.get("version", "")
     build_system = pkg_config.get("build", "cmake")
+    sha256 = pkg_config.get("sha256")
 
     # Download source
     source_dir_parent = deps_dir / "src"
     try:
-        source_dir = download_source(url, source_dir_parent, name)
+        source_dir = download_source(url, source_dir_parent, name, sha256=sha256)
     except RuntimeError as e:
         logger.error("Failed to download %s: %s", name, e)
         return False

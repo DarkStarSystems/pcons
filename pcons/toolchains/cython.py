@@ -11,7 +11,7 @@ from .pyx files. The workflow is:
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
@@ -411,7 +411,7 @@ def find_cython_toolchain() -> CythonToolchain:
 
     toolchain = toolchain_registry.find_available("python", ["cython"])
     if toolchain is not None:
-        return toolchain  # type: ignore[return-value]
+        return cast(CythonToolchain, toolchain)
 
     raise RuntimeError(
         "Cython not found. Install it with: pip install cython (or uv add cython)"

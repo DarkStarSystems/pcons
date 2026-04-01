@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pcons.generators.generator import BaseGenerator
 
@@ -778,7 +778,7 @@ class XcodeGenerator(BaseGenerator):
         for source in target.sources:
             if hasattr(source, "path"):
                 # Cast to Path since we know it has path attribute (FileNode)
-                src_path: Path = source.path  # type: ignore[attr-defined]
+                src_path = cast(Path, source.path)
 
                 # Skip pre-compiled objects and unrecognized files
                 # These are passed through to the linker but aren't sources to compile
@@ -962,8 +962,8 @@ class XcodeGenerator(BaseGenerator):
             # PBXContainerItemProxy
             from pbxproj.PBXGenericObject import PBXGenericObject
 
-            proxy_obj = PBXGenericObject()
-            proxy_obj._id = proxy_id  # type: ignore[attr-defined]  # pbxproj internal
+            proxy_obj = cast(Any, PBXGenericObject())
+            proxy_obj._id = proxy_id  # pbxproj internal
             proxy_obj["isa"] = "PBXContainerItemProxy"
             proxy_obj["containerPortal"] = root_project
             proxy_obj["proxyType"] = "1"
@@ -972,8 +972,8 @@ class XcodeGenerator(BaseGenerator):
             self._xcode_project.objects[proxy_id] = proxy_obj
 
             # PBXTargetDependency
-            dep_obj = PBXGenericObject()
-            dep_obj._id = dep_id  # type: ignore[attr-defined]  # pbxproj internal
+            dep_obj = cast(Any, PBXGenericObject())
+            dep_obj._id = dep_id  # pbxproj internal
             dep_obj["isa"] = "PBXTargetDependency"
             dep_obj["target"] = self._target_ids[dep.name]
             dep_obj["targetProxy"] = proxy_id

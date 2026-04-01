@@ -263,3 +263,35 @@ class TestPkgConfigFinderMocked:
             assert "test" in result.libraries
             assert result.prefix == "/usr"
             assert result.found_by == "pkg-config"
+
+    def test_strict_version_comparisons_are_not_inclusive(self) -> None:
+        """Strict inequalities must reject the exact same version."""
+        finder = PkgConfigFinder()
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            if "--exists" in cmd:
+                result.returncode = 0
+                result.stdout = ""
+            elif "--modversion" in cmd:
+                result.returncode = 0
+                result.stdout = "1.2.3"
+            elif "--cflags" in cmd or "--libs" in cmd or "--print-requires" in cmd:
+                result.returncode = 0
+                result.stdout = ""
+            elif "--variable=prefix" in cmd:
+                result.returncode = 0
+                result.stdout = "/usr"
+            else:
+                result.returncode = 0
+                result.stdout = ""
+            return result
+
+        with (
+            patch.object(finder, "is_available", return_value=True),
+            patch("subprocess.run", side_effect=mock_run),
+        ):
+            assert finder.find("testpkg", version=">1.2.3") is None
+            assert finder.find("testpkg", version="<1.2.3") is None
+            assert finder.find("testpkg", version=">=1.2.3") is not None
+            assert finder.find("testpkg", version="<=1.2.3") is not None

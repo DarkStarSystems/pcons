@@ -3,13 +3,18 @@
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import sys
+import tarfile
+import zipfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pcons.packages.fetch.cli import (
+    download_source,
     generate_package_description,
     load_deps_file,
     setup_logging,
@@ -266,3 +271,143 @@ build = "autotools"
         )
         # Should succeed with warning
         assert result.returncode == 0
+
+
+class TestDownloadSource:
+    """Tests for source download helpers."""
+
+    def test_git_ssh_url_not_split_as_ref(self, tmp_path: Path) -> None:
+        """SCP-style SSH URLs should remain intact."""
+        commands: list[list[str]] = []
+
+        def mock_run(cmd, **kwargs):
+            commands.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            source_dir = download_source(
+                "git@github.com:org/repo.git", tmp_path, "repo"
+            )
+
+        assert source_dir == tmp_path / "repo"
+        assert commands == [
+            [
+                "git",
+                "clone",
+                "--depth=1",
+                "git@github.com:org/repo.git",
+                str(source_dir),
+            ]
+        ]
+
+    def test_git_https_url_with_ref_uses_branch(self, tmp_path: Path) -> None:
+        """HTTP(S) URLs may append a ref using @ref syntax."""
+        commands: list[list[str]] = []
+
+        def mock_run(cmd, **kwargs):
+            commands.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            download_source("git+https://example.com/repo.git@v1.2.3", tmp_path, "repo")
+
+        assert commands == [
+            [
+                "git",
+                "clone",
+                "--depth=1",
+                "--branch",
+                "v1.2.3",
+                "https://example.com/repo.git",
+                str(tmp_path / "repo"),
+            ]
+        ]
+
+    def test_zip_rejects_path_traversal(self, tmp_path: Path) -> None:
+        """Zip extraction must reject ../ traversal."""
+        archive_path = tmp_path / "payload.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr("../escape.txt", "owned")
+
+        def fake_urlretrieve(url, dest):
+            Path(dest).write_bytes(archive_path.read_bytes())
+            return str(dest), None
+
+        with (
+            patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve),
+            pytest.raises(RuntimeError, match="escapes extraction root"),
+        ):
+            download_source("https://example.com/payload.zip", tmp_path / "dest", "pkg")
+
+        assert not (tmp_path / "dest" / "escape.txt").exists()
+        assert not (tmp_path / "escape.txt").exists()
+
+    def test_tar_rejects_symlinks(self, tmp_path: Path) -> None:
+        """Tar extraction must reject symlinks."""
+        archive_path = tmp_path / "payload.tar.gz"
+        with tarfile.open(archive_path, "w:gz") as tf:
+            info = tarfile.TarInfo("link.txt")
+            info.type = tarfile.SYMTYPE
+            info.linkname = "../escape.txt"
+            tf.addfile(info)
+
+        def fake_urlretrieve(url, dest):
+            Path(dest).write_bytes(archive_path.read_bytes())
+            return str(dest), None
+
+        with (
+            patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve),
+            pytest.raises(RuntimeError, match="Refusing to extract link"),
+        ):
+            download_source(
+                "https://example.com/payload.tar.gz", tmp_path / "dest", "pkg"
+            )
+
+    def test_archive_sha256_mismatch_fails(self, tmp_path: Path) -> None:
+        """Downloaded archives must match the requested SHA-256."""
+        archive_path = tmp_path / "payload.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr("pkg/file.txt", "ok")
+
+        def fake_urlretrieve(url, dest):
+            Path(dest).write_bytes(archive_path.read_bytes())
+            return str(dest), None
+
+        with (
+            patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve),
+            pytest.raises(RuntimeError, match="SHA-256 mismatch"),
+        ):
+            download_source(
+                "https://example.com/payload.zip",
+                tmp_path / "dest",
+                "pkg",
+                sha256="0" * 64,
+            )
+
+    def test_archive_sha256_match_succeeds(self, tmp_path: Path) -> None:
+        """Matching SHA-256 should allow extraction to proceed."""
+        archive_path = tmp_path / "payload.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr("pkg/file.txt", "ok")
+        digest = hashlib.sha256(archive_path.read_bytes()).hexdigest()
+
+        def fake_urlretrieve(url, dest):
+            Path(dest).write_bytes(archive_path.read_bytes())
+            return str(dest), None
+
+        with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve):
+            source_dir = download_source(
+                "https://example.com/payload.zip",
+                tmp_path / "dest",
+                "pkg",
+                sha256=digest,
+            )
+
+        assert source_dir == tmp_path / "dest" / "pkg"
+        assert (source_dir / "file.txt").read_text() == "ok"

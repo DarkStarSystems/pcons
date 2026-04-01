@@ -21,7 +21,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.builder import CommandBuilder
 from pcons.core.subst import SourcePath, TargetPath
@@ -523,7 +523,7 @@ def find_wasi_toolchain() -> WasiToolchain:
 
     toolchain = toolchain_registry.find_available("wasm", ["wasi"])
     if toolchain is not None:
-        return toolchain  # type: ignore[return-value]
+        return cast(WasiToolchain, toolchain)
 
     raise RuntimeError(
         "wasi-sdk not found. Install it from https://github.com/WebAssembly/wasi-sdk "

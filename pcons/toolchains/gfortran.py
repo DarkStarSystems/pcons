@@ -14,7 +14,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
@@ -447,7 +447,7 @@ def find_fortran_toolchain(
 
     toolchain = toolchain_registry.find_available("fortran", prefer)
     if toolchain is not None:
-        return toolchain  # type: ignore[return-value]
+        return cast(GfortranToolchain, toolchain)
 
     tried = toolchain_registry.get_tried_names("fortran", prefer)
     raise RuntimeError(
