@@ -263,6 +263,9 @@ class NinjaGenerator(BaseGenerator):
                         f.write(f"  depfile = {depfile_ninja}\n")
                 f.write("  deps = gcc\n")
 
+            if build_info.get("restat"):
+                f.write("  restat = 1\n")
+
             f.write("\n")
             self._rules[rule_key] = rule_name
 
@@ -505,8 +508,6 @@ class NinjaGenerator(BaseGenerator):
             if implicit:
                 implicit_deps = f" | {implicit}"
 
-        # Note: No order-only dependencies for directories needed.
-        # Ninja automatically creates output directories before running commands.
         order_only = ""
 
         f.write(

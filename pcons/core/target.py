@@ -177,6 +177,10 @@ class Target:
         # Extra implicit dependencies (files that trigger rebuilds but aren't sources).
         # Applied to output nodes during resolve, or immediately for Command targets.
         "_extra_implicit_deps",
+        # Implicit target dependencies (from target.depends(other_target)):
+        # must be up to date before building, but outputs are NOT passed
+        # to the linker or included in $in.
+        "_implicit_target_deps",
     )
 
     def __init__(
@@ -233,6 +237,8 @@ class Target:
         self._builder_data: dict[str, Any] = {}
         # Extra implicit dependencies added via target.depends()
         self._extra_implicit_deps: list[Node] = []
+        # Implicit target deps (from target.depends(other_target))
+        self._implicit_target_deps: list[Target] = []
 
     @property
     def sources(self) -> list[Node]:
@@ -292,15 +298,22 @@ class Target:
         return self
 
     def depends(self, *items: Target | Node | Path | str) -> Target:
-        """Add extra dependencies that trigger rebuilds (fluent API).
+        """Add implicit dependencies (fluent API).
 
-        Use this for files that should cause a rebuild when changed but
-        aren't inputs to the command (e.g., scripts, config files).
+        Use this for files or targets that must be up to date before
+        building this target, but whose outputs should NOT be passed
+        to the linker or appear in ``$in``.
 
-        These are added as implicit dependencies on the target's output
-        nodes (appear after ``|`` in ninja, not in ``$in``).
+        For file/path arguments: added as implicit dependencies on
+        output nodes (appear after ``|`` in ninja).
 
-        Target arguments are added to ``self.dependencies`` instead.
+        For Target arguments: their output nodes are added as implicit
+        dependencies on this target's output nodes (after ``|`` in
+        ninja), ensuring correct build ordering without affecting link
+        inputs.
+
+        Use ``target.link()`` instead when you need a library's outputs
+        linked into this target.
 
         Args:
             *items: Files or targets to depend on. Strings and Paths are
@@ -317,13 +330,17 @@ class Target:
                 command="python $SRCDIR/tools/codegen.py $SOURCE -o $TARGET",
             )
             gen.depends("tools/codegen.py")
+
+            # Ensure generated header is built before compiling:
+            app = project.Program("app", env, sources=["main.c"])
+            app.depends(gen)  # implicit dep: won't try to link version.h
         """
         from pcons.core.node import FileNode, Node
 
         for item in items:
             if isinstance(item, Target):
-                if item not in self.dependencies:
-                    self.dependencies.append(item)
+                if item not in self._implicit_target_deps:
+                    self._implicit_target_deps.append(item)
             elif isinstance(item, Node):
                 self._extra_implicit_deps.append(item)
             else:

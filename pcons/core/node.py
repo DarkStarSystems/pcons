@@ -102,6 +102,7 @@ class BuildInfo(TypedDict, total=False):
     # Generic command builder
     rule_name: str
     all_targets: list[Any]  # list[Node]
+    restat: bool  # Ninja restat: re-check output timestamp after build
 
     # Per-build variables for standalone tools (Install, Archive)
     # These are written as Ninja build-level variables

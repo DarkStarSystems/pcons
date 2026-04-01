@@ -645,6 +645,7 @@ class GenericCommandBuilder(BaseBuilder):
         command: str | list[str],
         *,
         rule_name: str | None = None,
+        restat: bool = False,
     ) -> None:
         """Initialize a generic command builder.
 
@@ -655,6 +656,10 @@ class GenericCommandBuilder(BaseBuilder):
                     - ${SOURCES[n]}, ${TARGETS[n]}: Indexed access
             rule_name: Optional custom rule name for Ninja. If not provided,
                       a unique name is generated using uuid.
+            restat: If True, Ninja will re-stat the output after running the
+                   command. If the output didn't change, downstream targets
+                   won't be rebuilt. Useful for code generators that may
+                   produce identical output.
         """
         # Generate unique rule name if not provided
         # Using uuid4 ensures uniqueness without thread synchronization
@@ -672,6 +677,7 @@ class GenericCommandBuilder(BaseBuilder):
         # Convert command to tokenized list with SourcePath/TargetPath markers
         self._command = self._tokenize_command(command)
         self._rule_name = rule_name
+        self._restat = restat
 
     def _tokenize_command(self, command: str | list[str]) -> list:
         """Convert command string to tokenized list with typed markers.
@@ -773,6 +779,7 @@ class GenericCommandBuilder(BaseBuilder):
                 "all_targets": result,
                 "depfile": None,
                 "deps_style": None,
+                "restat": self._restat,
             }
 
             # For multiple outputs, mark secondary targets as referencing primary

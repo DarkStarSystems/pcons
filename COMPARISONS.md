@@ -57,11 +57,11 @@ But what about the other popular modern build tools like Bazel and Meson?
 
 ## Incremental Build Quality
 
-**pcons** relies entirely on Ninja for incrementality. Ninja's depfile mechanism handles header dependency tracking correctly. Build correctness is high for standard C/C++ patterns. No action-level caching beyond what the filesystem provides.
+**pcons** relies entirely on Ninja for incrementality. Ninja's depfile mechanism handles header dependency tracking correctly. Build correctness is high for standard C/C++ patterns. Commands that may produce unchanged output (code generators, configure steps) can use `restat=True` to avoid unnecessary downstream rebuilds. No action-level caching beyond what the filesystem provides.
 
 **Bazel** has the most sophisticated incremental build system of the three. Content-addressed action cache, remote cache sharing across CI and developer machines, and correct hermetic sandboxing mean stale builds are virtually impossible.
 
-**Meson** relies on Ninja (primary) for incrementality. Header tracking via depfiles works well. Similar quality to pcons's Ninja output. Meson currently has better integration with Ninja's restat feature for minimizing rebuilds.
+**Meson** relies on Ninja (primary) for incrementality. Header tracking via depfiles works well. Similar quality to pcons's Ninja output. Both pcons and Meson support Ninja's restat feature for minimizing rebuilds from code generators.
 
 ---
 
@@ -377,7 +377,7 @@ pcons and Meson are comparable in line count for simple cases. pcons pulls ahead
 | **Graph output**        | Mermaid, DOT built-in                             | `bazel query`                          | None built-in                      |
 | **Platform installers** | .pkg, .dmg, MSIX built-in                         | External rules needed                  | External tools needed              |
 | **Learning curve**      | Low (plain Python)                                | High (Starlark + concepts)             | Low-Medium (custom DSL)            |
-| **Production maturity** | Early (v0.8.x, active dev)                        | Very mature (Google-backed)            | Mature (used by GNOME, Mesa, etc.) |
+| **Production maturity** | Early (v0.10.x, active dev)                       | Very mature (Google-backed)            | Mature (used by GNOME, Mesa, etc.) |
 | **Wasm support**        | WASI + Emscripten built-in                        | Via custom rules                       | Limited                            |
 | **Compiler caching**    | ccache/sccache wrapper                            | Remote cache built-in                  | ccache integration                 |
 

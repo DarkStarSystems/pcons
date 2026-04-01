@@ -650,6 +650,7 @@ class Project:
         target: str | Path | list[str | Path],
         source: str | Path | list[str | Path] | None = None,
         command: str | list[str] = "",
+        restat: bool = False,
     ) -> Target:
         """Create a custom command target.
 
@@ -666,6 +667,9 @@ class Project:
                     - $SOURCES: All source files (space-separated)
                     - $TARGET / $out: First target file
                     - $TARGETS: All target files (space-separated)
+            restat: If True, Ninja will re-check the output timestamp after
+                   running the command. If the output didn't actually change,
+                   downstream targets won't be rebuilt.
 
         Returns:
             A new Target configured as a command.
@@ -679,7 +683,9 @@ class Project:
                 command="python gen.py $SOURCE -o $TARGET",
             )
         """
-        return env.Command(target=target, source=source, command=command, name=name)
+        return env.Command(
+            target=target, source=source, command=command, name=name, restat=restat
+        )
 
     def __str__(self) -> str:
         """User-friendly string representation for debugging."""

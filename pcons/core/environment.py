@@ -755,6 +755,7 @@ class Environment:
         command: str | list[str] = "",
         name: str | None = None,
         depends: str | Path | Sequence[str | Path] | None = None,
+        restat: bool = False,
     ) -> Target:
         """Run an arbitrary shell command to build targets from sources.
 
@@ -787,6 +788,10 @@ class Environment:
                     don't appear in $SOURCE/$SOURCES. These become implicit
                     dependencies (after ``|`` in ninja). Useful for scripts,
                     config files, or other build-time inputs.
+            restat: If True, Ninja will re-check the output timestamp after
+                   running the command. If the output didn't actually change,
+                   downstream targets won't be rebuilt. Useful for code
+                   generators that may produce identical output.
 
         Returns:
             Target object representing the command outputs.
@@ -856,7 +861,7 @@ class Environment:
                     immediate_sources.append(src)
 
         # Create the builder
-        builder = GenericCommandBuilder(command)
+        builder = GenericCommandBuilder(command, restat=restat)
 
         # Build the targets with immediate sources
         nodes = builder._build(

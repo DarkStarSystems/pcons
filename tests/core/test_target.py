@@ -425,13 +425,14 @@ class TestTargetDepends:
         assert target._extra_implicit_deps[0].path == Path("tools/codegen.py")
 
     def test_depends_with_target(self):
-        """depends() with Target adds to dependencies, not implicit deps."""
+        """depends() with Target adds to implicit target deps, not link deps."""
         target = Target("app")
         lib = Target("mylib")
 
         target.depends(lib)
 
-        assert lib in target.dependencies
+        assert lib in target._implicit_target_deps
+        assert len(target.dependencies) == 0
         assert len(target._extra_implicit_deps) == 0
 
     def test_depends_mixed_args(self):
@@ -442,7 +443,8 @@ class TestTargetDepends:
 
         target.depends(lib, config, "tools/script.py")
 
-        assert lib in target.dependencies
+        assert lib in target._implicit_target_deps
+        assert lib not in target.dependencies
         assert config in target._extra_implicit_deps
         assert len(target._extra_implicit_deps) == 2
 

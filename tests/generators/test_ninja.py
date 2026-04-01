@@ -478,3 +478,90 @@ class TestNinjaSrcDir:
         content = (tmp_path / "build" / "build.ninja").read_text()
         assert "--config=$topdir/my.cfg" in content
         assert "$SRCDIR" not in content
+
+    def test_restat_in_ninja_rule(self, tmp_path):
+        """Command with restat=True generates restat = 1 in the ninja rule."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="generated.h",
+            source="spec.yml",
+            command="python gen.py $SOURCE $TARGET",
+            restat=True,
+        )
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        # Find the rule block and verify restat is present
+        lines = content.splitlines()
+        in_rule = False
+        found_restat = False
+        for line in lines:
+            if line.startswith("rule "):
+                in_rule = "command" in line.lower() or True
+            elif in_rule and not line.startswith("  "):
+                in_rule = False
+            if in_rule and line.strip() == "restat = 1":
+                found_restat = True
+                break
+        assert found_restat, f"restat = 1 not found in ninja rules:\n{content}"
+
+    def test_no_restat_by_default(self, tmp_path):
+        """Command without restat should not generate restat = 1."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="cp $SOURCE $TARGET",
+        )
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert "restat" not in content
+
+    def test_target_depends_creates_implicit_dep_not_link_input(self, tmp_path):
+        """target.depends(gen) should create | dep, not add to $in."""
+        from pcons import find_c_toolchain
+
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=find_c_toolchain())
+
+        gen = env.Command(
+            target="build/generated.h",
+            source="spec.yml",
+            command="python gen.py $SOURCE $TARGET",
+        )
+
+        app = project.Program("app", env, sources=["main.c"])
+        app.depends(gen)
+
+        project.resolve()
+        gen = NinjaGenerator()
+        gen.generate(project)
+
+        content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
+        # Find the link line for 'app'
+        for line in content.splitlines():
+            if line.startswith("build app:"):
+                # generated.h should be after | (implicit), not before it
+                assert "| " in line, f"Expected implicit dep in: {line}"
+                before_pipe = line.split("| ", 1)[0]
+                after_pipe = line.split("| ", 1)[1]
+                assert "generated.h" not in before_pipe, (
+                    f"generated.h should not be in explicit deps: {line}"
+                )
+                assert "generated.h" in after_pipe, (
+                    f"generated.h should be in implicit deps: {line}"
+                )
+                break
+        else:
+            raise AssertionError("build app: line not found")

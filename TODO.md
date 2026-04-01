@@ -1,3 +1,2 @@
 - Universal binaries, cross compilation
 - Now that we have dyndep support (for Fortran), add support for C++20 modules
-- Is Ninja restat=1 ever useful? (Prevents downstream rebuilds if target modtime unchanged)
