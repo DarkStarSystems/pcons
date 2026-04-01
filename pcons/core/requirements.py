@@ -179,6 +179,14 @@ def compute_effective_requirements(
     for dep in target.transitive_dependencies():
         result.merge(dep.public)
 
+    # Layer 4: Implicit target deps from target.depends(other_target)
+    # These propagate public usage requirements (includes, defines) to
+    # compile steps, just like link() deps, but without adding outputs
+    # to the linker's $in.  Only propagated deps (not output-only).
+    if for_compilation:
+        for dep in target._implicit_target_deps:
+            result.merge(dep.public)
+
     return result
 
 

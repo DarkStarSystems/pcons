@@ -174,13 +174,19 @@ class Target:
         #       Files passed to linker with flags and handler info
         #   - Other builder-specific data (dest_dir, compression, etc.)
         "_builder_data",
-        # Extra implicit dependencies (files that trigger rebuilds but aren't sources).
-        # Applied to output nodes during resolve, or immediately for Command targets.
+        # Implicit file deps from target.depends(file/path/node).
+        # Applied to all build nodes (object + output) during resolve.
         "_extra_implicit_deps",
-        # Implicit target dependencies (from target.depends(other_target)):
-        # must be up to date before building, but outputs are NOT passed
-        # to the linker or included in $in.
+        # Implicit file deps with propagate=False (output nodes only).
+        "_extra_implicit_deps_output_only",
+        # Implicit target deps from target.depends(other_target).
+        # Outputs become implicit deps on all build nodes; public usage
+        # requirements propagate to compile steps (like link() but without
+        # adding outputs to linker $in).
         "_implicit_target_deps",
+        # Implicit target deps with propagate=False (output nodes only,
+        # no usage requirement propagation).
+        "_implicit_target_deps_output_only",
     )
 
     def __init__(
@@ -235,10 +241,12 @@ class Target:
         # Builder-specific data dict, initialized to empty dict (not None)
         # Contains: post_build_commands, auxiliary_inputs, and builder-specific data
         self._builder_data: dict[str, Any] = {}
-        # Extra implicit dependencies added via target.depends()
+        # Implicit file deps (from target.depends(file/path/node))
         self._extra_implicit_deps: list[Node] = []
+        self._extra_implicit_deps_output_only: list[Node] = []
         # Implicit target deps (from target.depends(other_target))
         self._implicit_target_deps: list[Target] = []
+        self._implicit_target_deps_output_only: list[Target] = []
 
     @property
     def sources(self) -> list[Node]:
@@ -297,28 +305,32 @@ class Target:
         self._collected_requirements = None
         return self
 
-    def depends(self, *items: Target | Node | Path | str) -> Target:
+    def depends(
+        self,
+        *items: Target | Node | Path | str,
+        propagate: bool = True,
+    ) -> Target:
         """Add implicit dependencies (fluent API).
 
-        Use this for files or targets that must be up to date before
-        building this target, but whose outputs should NOT be passed
-        to the linker or appear in ``$in``.
+        Dependencies are added as implicit deps (after ``|`` in ninja)
+        on this target's build nodes. They must be up to date before
+        building this target, but their outputs are NOT passed to the
+        linker (not in ``$in``). Use ``target.link()`` for that.
 
-        For file/path arguments: added as implicit dependencies on
-        output nodes (appear after ``|`` in ninja).
+        By default, deps are added to **all** build nodes — both
+        intermediate compile steps and the final link/archive step.
+        This ensures generated headers exist before compilation starts.
+        For Target deps, public usage requirements (include dirs,
+        defines) also propagate to compile steps, just like ``link()``.
 
-        For Target arguments: their output nodes are added as implicit
-        dependencies on this target's output nodes (after ``|`` in
-        ninja), ensuring correct build ordering without affecting link
-        inputs.
-
-        Use ``target.link()`` instead when you need a library's outputs
-        linked into this target.
+        With ``propagate=False``, deps are only added to the final
+        output node (link step). Compile steps are unaffected.
 
         Args:
             *items: Files or targets to depend on. Strings and Paths are
-                   converted to FileNodes via ``project.node()`` if a
-                   project is available.
+                   converted to FileNodes via ``project.node()``.
+            propagate: If True (default), apply to all build steps
+                      (compile + link). If False, only the final output.
 
         Returns:
             self for method chaining.
@@ -327,38 +339,57 @@ class Target:
             gen = env.Command(
                 target="generated.h",
                 source="schema.json",
-                command="python $SRCDIR/tools/codegen.py $SOURCE -o $TARGET",
+                command="python codegen.py $SOURCE -o $TARGET",
+                restat=True,
             )
-            gen.depends("tools/codegen.py")
-
-            # Ensure generated header is built before compiling:
+            # Generated header: use depends() so compile steps wait.
             app = project.Program("app", env, sources=["main.c"])
-            app.depends(gen)  # implicit dep: won't try to link version.h
+            app.depends(gen)
         """
         from pcons.core.node import FileNode, Node
 
         for item in items:
             if isinstance(item, Target):
-                if item not in self._implicit_target_deps:
-                    self._implicit_target_deps.append(item)
-            elif isinstance(item, Node):
-                self._extra_implicit_deps.append(item)
+                target_list = (
+                    self._implicit_target_deps
+                    if propagate
+                    else self._implicit_target_deps_output_only
+                )
+                if item not in target_list:
+                    target_list.append(item)
             else:
-                # str or Path — convert to FileNode via project if available
-                project = self._project
-                if project is not None:
-                    self._extra_implicit_deps.append(project.node(item))
+                file_list = (
+                    self._extra_implicit_deps
+                    if propagate
+                    else self._extra_implicit_deps_output_only
+                )
+                if isinstance(item, Node):
+                    file_list.append(item)
                 else:
-                    self._extra_implicit_deps.append(
-                        FileNode(item, defined_at=get_caller_location())
-                    )
+                    # str or Path — convert to FileNode via project
+                    project = self._project
+                    if project is not None:
+                        file_list.append(project.node(item))
+                    else:
+                        file_list.append(
+                            FileNode(item, defined_at=get_caller_location())
+                        )
 
         return self
 
     def _apply_extra_implicit_deps(self) -> None:
-        """Apply _extra_implicit_deps to all output nodes."""
-        for node in self.output_nodes:
-            for dep in self._extra_implicit_deps:
+        """Apply file-level implicit deps to build nodes.
+
+        Propagated deps go on all nodes (objects + outputs).
+        Output-only deps go on output nodes only.
+        """
+        all_nodes = self.object_nodes + self.output_nodes
+        for dep in self._extra_implicit_deps:
+            for node in all_nodes:
+                if dep not in node.implicit_deps:
+                    node.implicit_deps.append(dep)
+        for dep in self._extra_implicit_deps_output_only:
+            for node in self.output_nodes:
                 if dep not in node.implicit_deps:
                     node.implicit_deps.append(dep)
 

@@ -479,19 +479,47 @@ class TestTargetDepends:
         # After resolve, the dep is on the output node
         assert len(cmd.output_nodes[0].implicit_deps) == 1
 
-    def test_apply_extra_implicit_deps(self):
-        """_apply_extra_implicit_deps distributes to all output nodes."""
+    def test_apply_extra_implicit_deps_propagated(self):
+        """Propagated deps go on both object nodes and output nodes."""
         target = Target("app")
-        out1 = FileNode("build/app.o")
-        out2 = FileNode("build/app")
-        target.output_nodes.extend([out1, out2])
-        dep = FileNode("version.txt")
+        obj = FileNode("build/main.o")
+        exe = FileNode("build/app")
+        target.object_nodes.append(obj)
+        target.output_nodes.append(exe)
+        dep = FileNode("version.h")
         target._extra_implicit_deps.append(dep)
 
         target._apply_extra_implicit_deps()
 
-        assert dep in out1.implicit_deps
-        assert dep in out2.implicit_deps
+        assert dep in obj.implicit_deps
+        assert dep in exe.implicit_deps
+
+    def test_apply_extra_implicit_deps_output_only(self):
+        """Output-only deps go on output nodes but not object nodes."""
+        target = Target("app")
+        obj = FileNode("build/main.o")
+        exe = FileNode("build/app")
+        target.object_nodes.append(obj)
+        target.output_nodes.append(exe)
+        dep = FileNode("data.bin")
+        target._extra_implicit_deps_output_only.append(dep)
+
+        target._apply_extra_implicit_deps()
+
+        assert dep not in obj.implicit_deps
+        assert dep in exe.implicit_deps
+
+    def test_depends_propagate_false(self):
+        """depends(propagate=False) stores in output-only lists."""
+        target = Target("app")
+        lib = Target("mylib")
+
+        target.depends(lib, "config.yaml", propagate=False)
+
+        assert lib in target._implicit_target_deps_output_only
+        assert lib not in target._implicit_target_deps
+        assert len(target._extra_implicit_deps) == 0
+        assert len(target._extra_implicit_deps_output_only) == 1
 
     def test_apply_no_duplicates(self):
         """_apply_extra_implicit_deps doesn't add duplicates."""

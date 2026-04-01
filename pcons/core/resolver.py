@@ -983,20 +983,24 @@ class Resolver:
         if target._extra_implicit_deps:
             target._apply_extra_implicit_deps()
 
-        # Apply order-only target dependencies from target.depends(other_target).
-        # These ensure build ordering without adding outputs to link inputs.
-        # Apply order-only target dependencies from target.depends(other_target).
-        # These are implicit deps (after | in ninja): must be up to date before
-        # building this target, but outputs are NOT passed to the linker as $in.
-        if target._implicit_target_deps:
-            for dep_target in target._implicit_target_deps:
-                # Ensure the dependency is resolved first
-                if not dep_target._resolved:
-                    self._resolve_target(dep_target)
-                for output_node in target.output_nodes:
-                    for dep_node in dep_target.output_nodes:
-                        if dep_node not in output_node.implicit_deps:
-                            output_node.implicit_deps.append(dep_node)
+        # Apply implicit target dependencies from target.depends(other_target).
+        # Propagated deps: outputs become implicit deps on all build nodes
+        # (objects + outputs). Output-only deps: only on output nodes.
+        for dep_target in target._implicit_target_deps:
+            if not dep_target._resolved:
+                self._resolve_target(dep_target)
+            for node in target.object_nodes + target.output_nodes:
+                for dep_node in dep_target.output_nodes:
+                    if dep_node not in node.implicit_deps:
+                        node.implicit_deps.append(dep_node)
+
+        for dep_target in target._implicit_target_deps_output_only:
+            if not dep_target._resolved:
+                self._resolve_target(dep_target)
+            for node in target.output_nodes:
+                for dep_node in dep_target.output_nodes:
+                    if dep_node not in node.implicit_deps:
+                        node.implicit_deps.append(dep_node)
 
         target._resolved = True
 

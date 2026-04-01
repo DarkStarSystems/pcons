@@ -528,8 +528,8 @@ class TestNinjaSrcDir:
         content = (tmp_path / "build" / "build.ninja").read_text()
         assert "restat" not in content
 
-    def test_target_depends_creates_implicit_dep_not_link_input(self, tmp_path):
-        """target.depends(gen) should create | dep, not add to $in."""
+    def test_target_depends_creates_implicit_dep_on_all_steps(self, tmp_path):
+        """target.depends(gen) adds | dep to both compile and link steps."""
         from pcons import find_c_toolchain
 
         project = Project("test", root_dir=tmp_path, build_dir="build")
@@ -545,23 +545,30 @@ class TestNinjaSrcDir:
         app.depends(gen)
 
         project.resolve()
-        gen = NinjaGenerator()
-        gen.generate(project)
+        ninja_gen = NinjaGenerator()
+        ninja_gen.generate(project)
 
         content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
-        # Find the link line for 'app'
-        for line in content.splitlines():
-            if line.startswith("build app:"):
-                # generated.h should be after | (implicit), not before it
-                assert "| " in line, f"Expected implicit dep in: {line}"
-                before_pipe = line.split("| ", 1)[0]
-                after_pipe = line.split("| ", 1)[1]
-                assert "generated.h" not in before_pipe, (
-                    f"generated.h should not be in explicit deps: {line}"
-                )
-                assert "generated.h" in after_pipe, (
-                    f"generated.h should be in implicit deps: {line}"
-                )
-                break
-        else:
-            raise AssertionError("build app: line not found")
+        lines = content.splitlines()
+
+        # Compile step should have generated.h as implicit dep
+        compile_line = next((ln for ln in lines if ln.startswith("build obj.")), None)
+        assert compile_line is not None, "compile line not found"
+        assert "| " in compile_line, f"No implicit dep on compile: {compile_line}"
+        assert "generated.h" in compile_line.split("| ", 1)[1]
+
+        # Link step should also have generated.h as implicit dep, not in $in
+        link_line = next(
+            (
+                ln
+                for ln in lines
+                if ln.startswith("build app:") or ln.startswith("build app.exe:")
+            ),
+            None,
+        )
+        assert link_line is not None, "link line not found"
+        assert "| " in link_line, f"No implicit dep on link: {link_line}"
+        before_pipe = link_line.split("| ", 1)[0]
+        after_pipe = link_line.split("| ", 1)[1]
+        assert "generated.h" not in before_pipe, "generated.h should not be in $in"
+        assert "generated.h" in after_pipe
