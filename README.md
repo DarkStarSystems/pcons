@@ -3,6 +3,7 @@
 A modern Python-based build system. Builds anything that requires a repeatable workflow using a dependency graph. Works with Ninja (or Makefile) to do the builds.
 
 [![CI](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml/badge.svg)](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml)
+[![codecov](https://codecov.io/gh/DarkStarSystems/pcons/graph/badge.svg)](https://codecov.io/gh/DarkStarSystems/pcons)
 [![PyPI](https://img.shields.io/pypi/v/pcons)](https://pypi.org/project/pcons/)
 [![Python](https://img.shields.io/pypi/pyversions/pcons)](https://pypi.org/project/pcons/)
 
