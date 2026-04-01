@@ -30,6 +30,8 @@ I was one of the original developers of SCons, and helped maintain it for many y
 
 I've been thinking for years now about rearchitecting SCons onto a modern python stack with Path and decorators and all the other wonderful stuff python has been doing, and fixing some of the pain points at the same time (substitution/quoting, extensibility, tracing, separation between description and building, and more), but I've never had the time to dig into it. But recently as I've been using a lot more of Claude Code as a programming assistant, and it has gotten significantly better, it seemed like the right time to try this as a collaborative project. So, meet pcons!
 
+Here's a [comparison](COMPARISONS.md) between pcons and other common modern build tools. I think pcons fills a real need, for a general-purpose broadly applicable extensible software build tool using a modern well-known language to describe builds and tools.
+
 ## Status
 
 🚧 **Under active development** - ready for experimentation and feedback. It's working in several medium-sized projects.
@@ -89,33 +91,6 @@ pip install pcons
 - User Guide is at [ReadTheDocs](https://pcons.readthedocs.io)
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Design document and implementation status
 - [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
-
-## Fetching Dependencies
-
-`pcons` also ships with `pcons-fetch`, a helper for downloading and building
-third-party dependencies from source using a simple `deps.toml` file.
-
-Example:
-
-```toml
-[packages.zlib]
-url = "https://zlib.net/zlib-1.3.1.tar.gz"
-version = "1.3.1"
-build = "cmake"
-sha256 = "9a93b2b7df..."
-```
-
-```bash
-pcons-fetch fetch deps.toml
-```
-
-`sha256` is optional but recommended for archive downloads, especially in CI.
-When present, `pcons-fetch` verifies the downloaded archive before extraction
-and aborts on mismatch. This check applies to archive URLs, not Git clones.
-
-Archive extraction is also path-safe: `pcons-fetch` rejects archive members
-that try to escape the destination directory via absolute paths, `..`
-components, or tar/zip link tricks.
 
 ## Development
 
