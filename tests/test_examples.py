@@ -427,7 +427,7 @@ def run_example(
 
     # Copy example to temp directory (so we don't pollute the source tree)
     work_dir = tmp_path / example_dir.name
-    shutil.copytree(example_dir, work_dir)
+    shutil.copytree(example_dir, work_dir, ignore=shutil.ignore_patterns("build"))
 
     build_dir = work_dir / "build"
     build_dir.mkdir(exist_ok=True)

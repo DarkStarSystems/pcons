@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-01
+
+### Added
+
+- **MSVC C++20 module support**: `.cppm` module interface units are now handled by `MsvcToolchain` using `cl.exe /scanDependencies` for dependency scanning and Ninja dyndep for correct build ordering. Includes a dedicated `MsvcCxxCompiler` with proper `$cxx.*` namespace and correct linker command handling (MSVC's `link.exe` is separate from `cl.exe`, unlike GCC/Clang).
+
+- **`pcons-fetch` SHA-256 verification**: Archive downloads now support an optional `sha256` field in `deps.toml`. When present, the downloaded archive is verified before extraction and aborts on mismatch.
+
+- **Safe archive extraction in `pcons-fetch`**: Archive extraction now rejects path traversal (`../`), absolute paths, and symlink/hardlink escape tricks in both tar and zip archives.
+
+### Fixed
+
+- **CLI environment restoration**: `run_script()` now properly saves and restores pre-existing environment variables instead of unconditionally deleting them. Previously, running pcons could clobber `PCONS_BUILD_DIR` or other env vars set by an outer invocation.
+
+- **ReadTheDocs build**: Fixed import error by lazily importing `pbxproj` in `XcodeGenerator`, which is an optional dependency not available in the docs build environment.
+
+- **pkg-config version comparison**: Strict inequalities (`>`, `<`) are now handled correctly with a custom version comparator, instead of being silently mapped to `>=`/`<=` via pkg-config flags.
+
+- **Type safety cleanup**: Replaced `type: ignore` comments with proper `cast()` calls across toolchains, Xcode generator, and builder code. `BuildInfo` is now a dataclass instead of a raw dict.
+
 ## [0.9.0] - 2026-03-20
 
 ### Added
@@ -600,8 +620,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.8.4...HEAD
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/DarkStarSystems/pcons/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/DarkStarSystems/pcons/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/DarkStarSystems/pcons/compare/v0.8.3...v0.8.4
 [0.8.3]: https://github.com/DarkStarSystems/pcons/compare/v0.8.2...v0.8.3
