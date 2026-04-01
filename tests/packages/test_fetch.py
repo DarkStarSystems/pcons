@@ -7,14 +7,17 @@ import hashlib
 import subprocess
 import sys
 import tarfile
+import tomllib
 import zipfile
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pcons.packages.fetch.cli import (
     download_source,
+    fetch_package,
     generate_package_description,
     load_deps_file,
     setup_logging,
@@ -79,17 +82,18 @@ class TestGeneratePackageDescription:
         (lib_dir / "libtest.a").write_text("")
         (lib_dir / "libfoo.so").write_text("")
 
-        pkg = generate_package_description(
+        pkg, pc_files = generate_package_description(
             name="mylib",
             version="1.0",
             install_prefix=install_prefix,
             build_system="cmake",
         )
 
+        assert pc_files == []
         assert pkg.name == "mylib"
         assert pkg.version == "1.0"
-        assert str(include_dir) in pkg.include_dirs
-        assert str(lib_dir) in pkg.library_dirs
+        assert str(include_dir.resolve()) in pkg.include_dirs
+        assert str(lib_dir.resolve()) in pkg.library_dirs
         assert "test" in pkg.libraries
         assert "foo" in pkg.libraries
         assert "pcons-fetch" in pkg.found_by
@@ -99,16 +103,63 @@ class TestGeneratePackageDescription:
         install_prefix = tmp_path / "empty_install"
         install_prefix.mkdir()
 
-        pkg = generate_package_description(
+        pkg, pc_files = generate_package_description(
             name="empty",
             version="0.1",
             install_prefix=install_prefix,
             build_system="autotools",
         )
 
+        assert pc_files == []
         assert pkg.name == "empty"
         assert pkg.include_dirs == []
         assert pkg.libraries == []
+
+    def test_generate_prefers_pc_files(self, tmp_path: Path) -> None:
+        """When .pc files exist, return them instead of scanning libs."""
+        install_prefix = tmp_path / "install"
+        lib_dir = install_prefix / "lib"
+        pc_dir = lib_dir / "pkgconfig"
+        pc_dir.mkdir(parents=True)
+        (pc_dir / "mylib.pc").write_text("Name: mylib\nVersion: 1.0\n")
+        # Also create a library — should be ignored when .pc exists
+        (lib_dir / "libmylib.a").write_text("")
+
+        pkg, pc_files = generate_package_description(
+            name="mylib",
+            version="1.0",
+            install_prefix=install_prefix,
+            build_system="cmake",
+        )
+
+        assert len(pc_files) == 1
+        assert pc_files[0].name == "mylib.pc"
+        # When .pc files found, paths/link sections should be empty
+        assert pkg.include_dirs == []
+        assert pkg.libraries == []
+
+    def test_generate_skips_symlinks_and_versioned_libs(self, tmp_path: Path) -> None:
+        """Versioned dylib symlinks should not produce duplicate library names."""
+        install_prefix = tmp_path / "install"
+        lib_dir = install_prefix / "lib"
+        lib_dir.mkdir(parents=True)
+
+        # Real file
+        (lib_dir / "libz.1.3.1.dylib").write_text("")
+        # Symlinks
+        (lib_dir / "libz.1.dylib").symlink_to("libz.1.3.1.dylib")
+        (lib_dir / "libz.dylib").symlink_to("libz.1.dylib")
+        # Static lib (real file)
+        (lib_dir / "libz.a").write_text("")
+
+        pkg, _ = generate_package_description(
+            name="zlib",
+            version="1.3.1",
+            install_prefix=install_prefix,
+            build_system="cmake",
+        )
+
+        assert pkg.libraries == ["z"]
 
 
 class TestCLICommands:
@@ -411,3 +462,90 @@ class TestDownloadSource:
 
         assert source_dir == tmp_path / "dest" / "pkg"
         assert (source_dir / "file.txt").read_text() == "ok"
+
+
+class TestFetchPackage:
+    """Tests for the fetch_package end-to-end flow."""
+
+    def test_fetch_package_cmake_from_archive(self, tmp_path: Path) -> None:
+        """Test full fetch_package pipeline: download archive, build, generate .pcons-pkg.toml."""
+        # Create a zip archive with a fake CMakeLists.txt
+        archive_path = tmp_path / "source.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr(
+                "mylib/CMakeLists.txt", "cmake_minimum_required(VERSION 3.10)\n"
+            )
+            zf.writestr("mylib/src/lib.c", "int mylib_init(void) { return 0; }\n")
+
+        def fake_urlretrieve(url: str, dest: str) -> tuple[str, None]:
+            Path(dest).write_bytes(archive_path.read_bytes())
+            return str(dest), None
+
+        deps_dir = tmp_path / ".deps"
+        output_dir = tmp_path / "output"
+        install_prefix = deps_dir / "install"
+
+        def fake_cmake_run(cmd: list[str], **kwargs: Any) -> MagicMock:
+            """Simulate cmake: on --install, create include/ and lib/ dirs."""
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            result.stdout = ""
+            # When cmake --install is called, create the install tree
+            if "--install" in cmd:
+                inc = install_prefix / "include"
+                lib = install_prefix / "lib"
+                inc.mkdir(parents=True, exist_ok=True)
+                lib.mkdir(parents=True, exist_ok=True)
+                (inc / "mylib.h").write_text("#pragma once\nint mylib_init(void);\n")
+                (lib / "libmylib.a").write_text("")
+            return result
+
+        pkg_config = {
+            "url": "https://example.com/mylib-1.0.zip",
+            "version": "1.0",
+            "build": "cmake",
+        }
+
+        with (
+            patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve),
+            patch("shutil.which", return_value="/usr/bin/cmake"),
+            patch("subprocess.run", side_effect=fake_cmake_run),
+        ):
+            ok = fetch_package("mylib", pkg_config, deps_dir, output_dir)
+
+        assert ok
+        pkg_file = output_dir / "mylib.pcons-pkg.toml"
+        assert pkg_file.exists()
+
+        data = tomllib.loads(pkg_file.read_text())
+        assert data["package"]["name"] == "mylib"
+        assert data["package"]["version"] == "1.0"
+        assert any("include" in d for d in data["paths"]["include_dirs"])
+        assert "mylib" in data["link"]["libraries"]
+
+    def test_fetch_package_missing_url(self, tmp_path: Path) -> None:
+        """fetch_package should fail when no URL is provided."""
+        deps_dir = tmp_path / ".deps"
+        output_dir = tmp_path / "output"
+        ok = fetch_package("bad", {"version": "1.0"}, deps_dir, output_dir)
+        assert not ok
+
+    def test_fetch_package_unknown_build_system(self, tmp_path: Path) -> None:
+        """fetch_package should fail for an unknown build system."""
+        archive_path = tmp_path / "source.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr("pkg/file.txt", "ok")
+
+        def fake_urlretrieve(url: str, dest: str) -> tuple[str, None]:
+            Path(dest).write_bytes(archive_path.read_bytes())
+            return str(dest), None
+
+        pkg_config = {
+            "url": "https://example.com/pkg.zip",
+            "version": "1.0",
+            "build": "meson",  # unsupported
+        }
+        with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve):
+            ok = fetch_package("pkg", pkg_config, tmp_path / ".deps", tmp_path / "out")
+        assert not ok

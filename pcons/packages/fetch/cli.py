@@ -93,8 +93,9 @@ def _verify_sha256(path: Path, expected: str | None) -> None:
 
 def _ensure_member_is_within_root(root: Path, member_name: str) -> Path:
     """Resolve a member path and ensure it stays within the extraction root."""
+    resolved_root = root.resolve()
     destination = (root / member_name).resolve()
-    if destination == root or root in destination.parents:
+    if destination == resolved_root or resolved_root in destination.parents:
         return destination
     raise RuntimeError(f"Archive member escapes extraction root: {member_name}")
 
@@ -384,15 +385,27 @@ def build_autotools(
     return True
 
 
+def _find_pc_files(install_prefix: Path) -> list[Path]:
+    """Find .pc (pkg-config) files under an install prefix."""
+    pc_files: list[Path] = []
+    for pc_dir_name in ["lib/pkgconfig", "lib64/pkgconfig", "share/pkgconfig"]:
+        pc_dir = install_prefix / pc_dir_name
+        if pc_dir.is_dir():
+            pc_files.extend(pc_dir.glob("*.pc"))
+    return pc_files
+
+
 def generate_package_description(
     name: str,
     version: str,
     install_prefix: Path,
     build_system: str,
-) -> PackageDescription:
+) -> tuple[PackageDescription, list[Path]]:
     """Generate a PackageDescription for an installed package.
 
-    Scans the install prefix to find include directories, libraries, etc.
+    If the install prefix contains .pc files, returns those instead of
+    scanning for libraries (the .pc files are authoritative).  Otherwise
+    falls back to scanning include/lib directories.
 
     Args:
         name: Package name.
@@ -401,41 +414,67 @@ def generate_package_description(
         build_system: Build system used (for metadata).
 
     Returns:
-        PackageDescription with discovered paths.
+        Tuple of (PackageDescription, list of .pc file paths).
+        The .pc list is non-empty when pkg-config metadata was found.
     """
+    install_prefix = install_prefix.resolve()
+    pc_files = _find_pc_files(install_prefix)
+
+    if pc_files:
+        # .pc files are authoritative — don't guess from the file tree.
+        logger.info(
+            "Found pkg-config files: %s",
+            ", ".join(p.name for p in pc_files),
+        )
+        return (
+            PackageDescription(
+                name=name,
+                version=version,
+                prefix=str(install_prefix),
+                found_by=f"pcons-fetch ({build_system})",
+            ),
+            pc_files,
+        )
+
+    # Fallback: scan the install tree for include dirs and libraries.
     include_dirs: list[str] = []
     library_dirs: list[str] = []
     libraries: list[str] = []
 
-    # Check for include directory
     include_dir = install_prefix / "include"
     if include_dir.exists():
         include_dirs.append(str(include_dir))
 
-    # Check for library directory
     for lib_dir_name in ["lib", "lib64"]:
         lib_dir = install_prefix / lib_dir_name
         if lib_dir.exists():
             library_dirs.append(str(lib_dir))
 
-            # Find libraries
             for lib_file in lib_dir.iterdir():
-                if lib_file.suffix in (".a", ".so", ".dylib"):
-                    # Extract library name
+                # Skip symlinks (e.g. libz.1.dylib -> libz.1.3.1.dylib)
+                if lib_file.is_symlink():
+                    continue
+                if lib_file.suffix in (".a", ".so", ".dylib", ".lib"):
                     lib_name = lib_file.stem
                     if lib_name.startswith("lib"):
                         lib_name = lib_name[3:]
-                    if lib_name not in libraries:
-                        libraries.append(lib_name)
+                    # Strip version suffixes (e.g. "z.1.3.1" -> "z")
+                    # Versioned names contain dots after the base name
+                    base = lib_name.split(".")[0]
+                    if base and base not in libraries:
+                        libraries.append(base)
 
-    return PackageDescription(
-        name=name,
-        version=version,
-        include_dirs=include_dirs,
-        library_dirs=library_dirs,
-        libraries=libraries,
-        prefix=str(install_prefix),
-        found_by=f"pcons-fetch ({build_system})",
+    return (
+        PackageDescription(
+            name=name,
+            version=version,
+            include_dirs=include_dirs,
+            library_dirs=library_dirs,
+            libraries=libraries,
+            prefix=str(install_prefix),
+            found_by=f"pcons-fetch ({build_system})",
+        ),
+        [],
     )
 
 
@@ -498,12 +537,27 @@ def fetch_package(
         return False
 
     # Generate package description
-    pkg_desc = generate_package_description(name, version, install_prefix, build_system)
+    pkg_desc, pc_files = generate_package_description(
+        name, version, install_prefix, build_system
+    )
 
     # Write package description
     output_dir.mkdir(parents=True, exist_ok=True)
     pkg_file = output_dir / f"{name}.pcons-pkg.toml"
     pkg_desc.to_toml(pkg_file)
+
+    # If .pc files were found, append a [pkgconfig] section pointing to them.
+    # This tells consumers to use pkg-config rather than the (empty) paths/link
+    # sections.
+    if pc_files:
+        import tomli_w
+
+        pc_dirs = sorted({str(p.parent) for p in pc_files})
+        pc_section = {"pkgconfig": {"pc_dirs": pc_dirs}}
+        with open(pkg_file, "ab") as f:
+            f.write(b"\n")
+            f.write(tomli_w.dumps(pc_section).encode("utf-8"))
+
     logger.info("Generated %s", pkg_file)
 
     return True

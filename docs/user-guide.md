@@ -130,44 +130,6 @@ pcons info               # Show pcons-build.py documentation
 pcons init               # Create a template pcons-build.py
 ```
 
-### Fetching Third-Party Dependencies
-
-Pcons also includes `pcons-fetch`, a helper for downloading and building
-dependencies from source using a `deps.toml` file.
-
-Example:
-
-```toml
-[packages.zlib]
-url = "https://zlib.net/zlib-1.3.1.tar.gz"
-version = "1.3.1"
-build = "cmake"
-sha256 = "9a93b2b7df..."
-```
-
-```bash
-pcons-fetch fetch deps.toml
-```
-
-Supported source types:
-
-- Git repositories such as `git+https://example.com/lib.git@v1.2.3`
-- Archive downloads such as `.tar.gz`, `.tar.bz2`, `.tar.xz`, `.tgz`, and `.zip`
-
-Supported build types:
-
-- `cmake`
-- `autotools`
-
-`sha256` is an optional field for archive downloads. When provided,
-`pcons-fetch` verifies the downloaded archive before extraction and aborts if
-the digest does not match. It is ignored for Git-based sources.
-
-For safety, archive extraction rejects entries that try to write outside the
-destination directory, including absolute paths, `..` traversal, and link-based
-escape tricks. For reproducible CI, prefer pinned release archives plus
-`sha256`.
-
 ---
 
 ## Supported Languages and Toolchains
