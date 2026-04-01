@@ -71,11 +71,11 @@ jobs:
       - name: Run tests
         run: uv run pytest --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
-        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
+          flags: ${{ matrix.os }}
 
   test-wasm:
     name: "test wasm (emscripten + wasi)"
