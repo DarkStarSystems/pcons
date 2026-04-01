@@ -427,43 +427,50 @@ def run_example(
 
     # Copy example to temp directory (so we don't pollute the source tree)
     work_dir = tmp_path / example_dir.name
-    shutil.copytree(example_dir, work_dir, ignore=shutil.ignore_patterns("build"))
+    shutil.copytree(
+        example_dir,
+        work_dir,
+        ignore=shutil.ignore_patterns("build", "compile_commands.json"),
+    )
 
     build_dir = work_dir / "build"
     build_dir.mkdir(exist_ok=True)
 
     # Run build script using specified invocation method
     if invocation == "direct":
-        # Direct: python pcons-build.py
+        # Direct: run in-process via run_script() for coverage visibility
+        from pcons.cli import run_script
+
         build_script = work_dir / "pcons-build.py"
-        cmd = [sys.executable, str(build_script)]
-        cmd_desc = "pcons-build.py"
+        try:
+            exit_code, _projects = run_script(
+                build_script, build_dir, generator=generator
+            )
+            if exit_code != 0:
+                pytest.fail(f"pcons-build.py failed with code {exit_code}")
+        except Exception as e:
+            pytest.fail(f"pcons-build.py raised {type(e).__name__}: {e}")
     else:
-        # CLI: python -m pcons
+        # CLI: python -m pcons (subprocess, tests the CLI entry point)
         cmd = [sys.executable, "-m", "pcons"]
-        cmd_desc = "pcons"
-
-    # Set up environment with generator choice
-    env = {
-        **os.environ,
-        "PCONS_BUILD_DIR": str(build_dir),
-        "PCONS_GENERATOR": generator,
-    }
-
-    timeout = test_config.get("timeout", 60)
-    result = subprocess.run(
-        cmd,
-        cwd=work_dir,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=env,
-    )
-
-    if result.returncode != 0:
-        print(f"{cmd_desc} stdout:\n{result.stdout}")
-        print(f"{cmd_desc} stderr:\n{result.stderr}")
-        pytest.fail(f"{cmd_desc} failed with code {result.returncode}")
+        env = {
+            **os.environ,
+            "PCONS_BUILD_DIR": str(build_dir),
+            "PCONS_GENERATOR": generator,
+        }
+        timeout = test_config.get("timeout", 60)
+        result = subprocess.run(
+            cmd,
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+        if result.returncode != 0:
+            print(f"pcons stdout:\n{result.stdout}")
+            print(f"pcons stderr:\n{result.stderr}")
+            pytest.fail(f"pcons failed with code {result.returncode}")
 
     # Check for custom build command or use appropriate build tool
     build_command = test_config.get("build_command")
