@@ -5,7 +5,9 @@ A modern open-source cross-platform zero-install Python-based build system. Buil
 [![CI](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml/badge.svg)](https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/DarkStarSystems/pcons/graph/badge.svg)](https://codecov.io/gh/DarkStarSystems/pcons)
 [![PyPI](https://img.shields.io/pypi/v/pcons)](https://pypi.org/project/pcons/)
+[![PyPI Downloads](https://static.pepy.tech/badge/pcons)](https://pepy.tech/projects/pcons)
 [![Python](https://img.shields.io/pypi/pyversions/pcons)](https://pypi.org/project/pcons/)
+[![Doc Status](https://readthedocs.org/projects/pcons/badge/?version=latest)](https://pcons.readthedocs.io/en/latest/?badge=latest)
 
 ## Overview
 
