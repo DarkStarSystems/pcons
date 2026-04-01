@@ -122,12 +122,18 @@ jobs:
           wasmtime --version
           /opt/wasi-sdk/bin/clang --version
       - name: Run Emscripten example tests
-        run: uv run pytest tests/test_examples.py -v -k "23_wasm_emscripten"
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -v -k "23_wasm_emscripten"
       - name: Run WASI example tests
         if: steps.verify-wasi.outcome == 'success'
         env:
           WASI_SDK_PATH: /opt/wasi-sdk
-        run: uv run pytest tests/test_examples.py -v -k "22_wasm_wasi"
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml --cov-append -v -k "22_wasm_wasi"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: wasm
 
   test-msvcup:
     name: "test msvcup (windows, no VS)"
@@ -144,7 +150,13 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run msvcup example tests
-        run: uv run pytest tests/test_examples.py -k "21_msvcup_hello" tests/contrib/test_msvcup.py -v
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "21_msvcup_hello" tests/contrib/test_msvcup.py -v
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: msvcup
 
   test-cxx-modules:
     name: "test C++20 modules (${{ matrix.os }})"
@@ -174,7 +186,13 @@ jobs:
       - name: Install dependencies
         run: uv python install 3.12 && uv sync
       - name: Run C++20 modules example tests
-        run: uv run pytest tests/test_examples.py -k "29_cxx_modules" -v
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules" -v
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: cxx-modules
 
   release:
     name: Create Release & Publish
