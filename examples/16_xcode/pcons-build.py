@@ -16,22 +16,20 @@ Usage:
     open build/hello_xcode.xcodeproj
 """
 
-from pathlib import Path
-
 from pcons import Generator, Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Directories
-src_dir = Path(__file__).parent / "src"
-
 # Find a C toolchain
 toolchain = find_c_toolchain()
 
 # Create project
 project = Project("hello_xcode")
+
+# Directories
+src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 

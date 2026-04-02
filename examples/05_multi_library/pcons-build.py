@@ -12,7 +12,6 @@ Build graph:
 """
 
 import sys
-from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
 from pcons.generators.mermaid import MermaidGenerator
@@ -21,12 +20,12 @@ from pcons.generators.mermaid import MermaidGenerator
 # Build Script
 # =============================================================================
 
-src_dir = Path(__file__).parent / "src"
-include_dir = Path(__file__).parent / "include"
-
 # Find a C toolchain (uses platform-appropriate defaults)
 toolchain = find_c_toolchain()
 project = Project("multi_library")
+
+src_dir = project.root_dir / "src"
+include_dir = project.root_dir / "include"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 

@@ -14,7 +14,8 @@ class TestProjectCreation:
     def test_basic_creation(self):
         project = Project("myproject")
         assert project.name == "myproject"
-        assert project.root_dir == Path.cwd()
+        # root_dir defaults to directory containing the calling script
+        assert project.root_dir == Path(__file__).parent
         assert project.build_dir == Path("build")
 
     def test_custom_directories(self, tmp_path):

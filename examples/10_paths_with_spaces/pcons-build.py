@@ -17,24 +17,21 @@ This is important for projects on systems where paths commonly
 contain spaces (Windows, macOS with iCloud, etc.).
 """
 
-from pathlib import Path
-
 from pcons import Generator, Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Directories - note the spaces in names!
-example_dir = Path(__file__).parent
-src_dir = example_dir / "src with spaces"
-include_dir = example_dir / "My Headers"
-
 # Find a C toolchain
 toolchain = find_c_toolchain()
 
 # Create project
 project = Project("paths_with_spaces")
+
+# Directories - note the spaces in names!
+src_dir = project.root_dir / "src with spaces"
+include_dir = project.root_dir / "My Headers"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 

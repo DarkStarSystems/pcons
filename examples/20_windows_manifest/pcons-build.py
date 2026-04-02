@@ -8,15 +8,13 @@ This example shows how to:
 Windows-only: requires MSVC or clang-cl toolchain.
 """
 
-from pathlib import Path
-
 from pcons import Generator, Project, find_c_toolchain
-
-# Directories
-src_dir = Path(__file__).parent / "src"
 
 # Create project
 project = Project("manifest_example")
+
+# Directories
+src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 
 # Find C toolchain - prefer MSVC or clang-cl on Windows for manifest support

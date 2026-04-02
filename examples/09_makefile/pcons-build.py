@@ -6,8 +6,6 @@ This example is similar to 02_hello_c but generates a Makefile
 instead of Ninja build files.
 """
 
-from pathlib import Path
-
 from pcons.core.project import Project
 from pcons.generators.makefile import MakefileGenerator
 from pcons.toolchains import find_c_toolchain
@@ -16,14 +14,14 @@ from pcons.toolchains import find_c_toolchain
 # Build Script
 # =============================================================================
 
-# Directories
-src_dir = Path(__file__).parent / "src"
-
 # Find a C toolchain (tries clang, gcc, msvc in order)
 toolchain = find_c_toolchain()
 
 # Create project with the toolchain
 project = Project("hello_makefile")
+
+# Directories
+src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 

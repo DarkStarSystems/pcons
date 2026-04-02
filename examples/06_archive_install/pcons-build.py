@@ -12,22 +12,20 @@ The 'install' target creates source and binary tarballs and copies them
 to the Installers/ directory.
 """
 
-from pathlib import Path
-
 from pcons import Generator, Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Directories
-src_dir = Path(__file__).parent
-
 # Find a C toolchain
 toolchain = find_c_toolchain()
 
 # Create project
 project = Project("archive_install")
+
+# Directories
+src_dir = project.root_dir
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 

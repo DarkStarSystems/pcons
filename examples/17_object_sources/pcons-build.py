@@ -10,22 +10,20 @@ Use case: Compile some sources with different flags (e.g., different
 optimization level, or legacy code with warnings disabled).
 """
 
-from pathlib import Path
-
 from pcons import Generator, Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Directories
-src_dir = Path(__file__).parent / "src"
-
 # Find a C toolchain
 toolchain = find_c_toolchain()
 
 # Create project
 project = Project("object_sources")
+
+# Directories
+src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 

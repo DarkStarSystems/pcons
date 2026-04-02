@@ -9,7 +9,6 @@ Uses Python for cross-platform file concatenation.
 """
 
 import sys
-from pathlib import Path
 
 from pcons import Generator, Project
 from pcons.core.builder import Builder, CommandBuilder
@@ -59,11 +58,11 @@ class ConcatTool(BaseTool):
 # Build Script
 # =============================================================================
 
-# Directories
-src_dir = Path(__file__).parent / "src"
-
 # Create project
 project = Project("concat_example")
+
+# Directories
+src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 
 # Create environment and add our custom tool

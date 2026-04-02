@@ -94,8 +94,8 @@ class Project:
             name: Project name.
             root_dir: Project root directory. Defaults to the
                 PCONS_SOURCE_DIR environment variable if set (the CLI
-                sets this automatically), otherwise the current working
-                directory.
+                sets this automatically), then the directory containing
+                the calling script, then the current working directory.
             build_dir: Directory for build outputs. Defaults to the
                 PCONS_BUILD_DIR environment variable if set (the CLI
                 sets this automatically), otherwise "build".
@@ -105,6 +105,12 @@ class Project:
         self.name = name
         if root_dir is None:
             root_dir = os.environ.get("PCONS_SOURCE_DIR")
+        if root_dir is None:
+            # Infer from the script that called Project()
+            caller = defined_at or get_caller_location()
+            caller_file = Path(caller.filename)
+            if caller_file.exists():
+                root_dir = str(caller_file.parent)
         self.root_dir = Path(root_dir) if root_dir else Path.cwd()
         if build_dir is None:
             build_dir = os.environ.get("PCONS_BUILD_DIR", "build")

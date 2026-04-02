@@ -8,23 +8,21 @@ This example demonstrates the target-centric build API:
 - Automatic resolution of sources to objects
 """
 
-from pathlib import Path
-
 from pcons import Generator, Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Directories
-src_dir = Path(__file__).parent / "src"
-include_dir = Path(__file__).parent / "include"
-
 # Find a C toolchain (uses platform-appropriate defaults)
 toolchain = find_c_toolchain()
 
 # Create project with the toolchain
 project = Project("multi_file")
+
+# Directories
+src_dir = project.root_dir / "src"
+include_dir = project.root_dir / "include"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 

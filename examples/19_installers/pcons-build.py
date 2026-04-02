@@ -9,8 +9,6 @@ This example shows how to create:
 The installer targets are created based on the current platform.
 """
 
-from pathlib import Path
-
 from pcons import Generator, Project, find_c_toolchain
 from pcons.contrib import platform
 
@@ -18,14 +16,14 @@ from pcons.contrib import platform
 # Build Script
 # =============================================================================
 
-# Directories
-src_dir = Path(__file__).parent / "src"
-
 # Find a C toolchain
 toolchain = find_c_toolchain()
 
 # Create project
 project = Project("installer_example")
+
+# Directories
+src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 

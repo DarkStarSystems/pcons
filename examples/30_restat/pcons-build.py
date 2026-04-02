@@ -13,13 +13,12 @@ potentially expensive rebuilds in large projects.
 """
 
 import sys
-from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
 
-src_dir = Path(__file__).parent / "src"
-
 project = Project("restat_example")
+
+src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 env = project.Environment(toolchain=find_c_toolchain())
 
