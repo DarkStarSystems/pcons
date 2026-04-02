@@ -266,7 +266,9 @@ class ConanFinder(BaseFinder):
             match = re.match(r"[-/]std[:=](?:gnu\+\+|c\+\+)(\w+)", flag_str)
             if match:
                 std = match.group(1)
-                # Normalize historical aliases to version numbers
+                # Normalize historical aliases to version numbers.
+                # "latest" is passed through — Conan accepts it natively
+                # for MSVC profiles, and its meaning evolves over time.
                 aliases = {
                     "0x": "11",
                     "1y": "14",
@@ -274,7 +276,6 @@ class ConanFinder(BaseFinder):
                     "2a": "20",
                     "2b": "23",
                     "2c": "26",
-                    "latest": "23",
                 }
                 return aliases.get(std, std)
         return None

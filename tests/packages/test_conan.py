@@ -152,7 +152,7 @@ class TestConanFinderProfile:
             "-std=c++2a": "20",
             "-std=c++2b": "23",
             "/std:c++17": "17",
-            "/std:c++latest": "23",
+            "/std:c++latest": "latest",
         }
         for flag, expected in cases.items():
             env = SimpleNamespace(cxx=SimpleNamespace(flags=[flag]))

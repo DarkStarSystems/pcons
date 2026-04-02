@@ -502,7 +502,7 @@ class TestNinjaSrcDir:
         found_restat = False
         for line in lines:
             if line.startswith("rule "):
-                in_rule = "command" in line.lower() or True
+                in_rule = True
             elif in_rule and not line.startswith("  "):
                 in_rule = False
             if in_rule and line.strip() == "restat = 1":
