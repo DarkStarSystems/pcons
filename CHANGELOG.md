@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Ninja `restat` support**: `env.Command(..., restat=True)` tells Ninja to re-check output timestamps after running a command. If the output didn't actually change, downstream rebuilds are skipped.
+
+- **`target.depends()` for non-linked dependencies**: Targets can now declare implicit dependencies that propagate public usage requirements (includes, defines) without adding outputs to the linker command. Useful for generated headers.
+
+- **`cppstd` parameter for `ConanFinder.sync_profile()`**: Sets `compiler.cppstd` in the Conan profile. Can be specified explicitly (`cppstd="23"`) or inferred automatically from `env.cxx.flags` (e.g., `-std=c++23`). Many Conan packages require this setting.
+
+- **`PackageDescription` exported from top-level `pcons` package**: Users creating manual `ImportedTarget` instances (e.g., for header-only libraries without `.pc` files) can now write `from pcons import PackageDescription` instead of importing from `pcons.packages`.
+
+- **`ImportedTarget` exported from top-level `pcons` package**.
+
+### Fixed
+
+- **Link flags no longer leak into `ar` commands**: When a `StaticLibrary` depended on an `ImportedTarget` with `-L`, `-pthread`, or other link flags, those incorrectly appeared in the archiver command. The archiver (`ar` / `lib.exe`) only accepts object files.
+
+- **`pcons-fetch` bug fixes**: Prefer `.pc` files over directory scanning when generating package descriptions.
+
+### Improved
+
+- **Package management documentation**: New "Header-Only and Manual Packages" section in the user guide. `sync_profile()` reference with all parameters. Updated `ImportedTarget` docstring to show `find_package()` + `link()` pattern instead of manual flag copying.
+
+- **README quick example**: Updated to use top-level imports (`from pcons import ...`) and current API (`Generator().generate(project)`, `sources=` parameter).
+
+- **ARCHITECTURE.md**: Replaced stale planned-API examples with current working API. Updated status notes for package management features that are now fully implemented.
+
 ## [0.10.0] - 2026-04-01
 
 ### Added
