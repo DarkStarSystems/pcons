@@ -44,7 +44,7 @@ Core functionality is working and well tested: C/C++/Fortran compilation, static
 # pcons-build.py
 from pcons import Generator, Project, find_c_toolchain
 
-project = Project("myapp", build_dir="build")
+project = Project("myapp")
 
 # Find and configure a C/C++ toolchain
 env = project.Environment(toolchain=find_c_toolchain())

@@ -92,7 +92,10 @@ class Project:
 
         Args:
             name: Project name.
-            root_dir: Project root directory (default: current dir).
+            root_dir: Project root directory. Defaults to the
+                PCONS_SOURCE_DIR environment variable if set (the CLI
+                sets this automatically), otherwise the current working
+                directory.
             build_dir: Directory for build outputs. Defaults to the
                 PCONS_BUILD_DIR environment variable if set (the CLI
                 sets this automatically), otherwise "build".
@@ -100,6 +103,8 @@ class Project:
             defined_at: Source location where project was created.
         """
         self.name = name
+        if root_dir is None:
+            root_dir = os.environ.get("PCONS_SOURCE_DIR")
         self.root_dir = Path(root_dir) if root_dir else Path.cwd()
         if build_dir is None:
             build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
