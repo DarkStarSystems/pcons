@@ -27,6 +27,7 @@ from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.generators.xcode import XcodeGenerator  # noqa: E402
+from pcons.packages.imported import ImportedTarget  # noqa: E402
 from pcons.toolchains import (
     find_c_toolchain,
     find_cuda_toolchain,
@@ -205,6 +206,7 @@ __all__ = [
     "Configure",
     "configure_file",
     "FlagPair",
+    "ImportedTarget",
     "Project",
     # Generators
     "Generator",
