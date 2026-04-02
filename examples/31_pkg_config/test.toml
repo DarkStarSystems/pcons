@@ -1,0 +1,18 @@
+# Test configuration for pkg-config .pc file generation example
+
+[test]
+description = "Build a library and generate a pkg-config .pc file"
+
+# The .pc file is generated at configure time (not a ninja output)
+expected_outputs = []
+
+[verify]
+commands = [
+    { run = "grep 'Name: mylib' build/mylib.pc" },
+    { run = "grep 'Version: 1.0.0' build/mylib.pc" },
+    { run = "grep -- '-lmylib' build/mylib.pc" },
+    { run = "grep -- '-I' build/mylib.pc" },
+]
+
+[skip]
+generators = ["xcode", "make"]

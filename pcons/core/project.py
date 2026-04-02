@@ -566,6 +566,103 @@ class Project:
 
         Generator().generate(self)
 
+    def generate_pc_file(
+        self,
+        target: Target,
+        *,
+        version: str = "0.0.0",
+        description: str = "",
+        install_prefix: str = "/usr/local",
+    ) -> Path:
+        """Generate a pkg-config .pc file for a library target.
+
+        Writes a standard .pc file based on the target's public usage
+        requirements (include_dirs, link_libs, defines, link_flags).
+        The file is written to the build directory and can be installed
+        with ``project.Install("lib/pkgconfig", [pc_path])``.
+
+        This runs at configure time (like ``configure_file()``), not as
+        a ninja build step. Uses write-if-changed to avoid unnecessary
+        downstream rebuilds.
+
+        Args:
+            target: The library target to generate a .pc file for.
+            version: Package version string (e.g., "1.2.0").
+            description: One-line package description.
+            install_prefix: Expected install prefix. The .pc file uses
+                ``${prefix}`` variables so it's relocatable.
+
+        Returns:
+            Path to the generated .pc file.
+
+        Example:
+            lib = project.StaticLibrary("foo", env, sources=["src/foo.c"])
+            lib.public.include_dirs.append("include")
+
+            pc = project.generate_pc_file(lib, version="1.2.0")
+            project.Install("lib/pkgconfig", [pc])
+        """
+        from pcons.packages.imported import ImportedTarget
+
+        name = target.name
+
+        # Build Requires: list from dependencies that came from pkg-config
+        requires: list[str] = []
+        for dep in target.dependencies:
+            if isinstance(dep, ImportedTarget) and dep.package is not None:
+                if getattr(dep.package, "found_by", None) == "pkg-config":
+                    requires.append(dep.name)
+
+        # Build Cflags: from public include_dirs and defines
+        # Use ${includedir} for dirs that end with "include", absolute for others
+        cflags_parts: list[str] = []
+        for inc_dir in target.public.include_dirs:
+            inc_str = str(inc_dir)
+            if inc_str == "include" or inc_str.endswith("/include"):
+                cflags_parts.append("-I${includedir}")
+            else:
+                cflags_parts.append(f"-I{inc_str}")
+        for define in target.public.defines:
+            cflags_parts.append(f"-D{define}")
+        for flag in target.public.compile_flags:
+            cflags_parts.append(str(flag))
+
+        # Build Libs: the library itself plus any public link flags/libs
+        # Exclude libs that are covered by Requires
+        libs_parts: list[str] = ["-L${libdir}", f"-l{name}"]
+        for flag in target.public.link_flags:
+            libs_parts.append(str(flag))
+        for lib in target.public.link_libs:
+            if lib not in requires:
+                libs_parts.append(f"-l{lib}")
+
+        # Write .pc content
+        lines = [
+            f"prefix={install_prefix}",
+            "libdir=${prefix}/lib",
+            "includedir=${prefix}/include",
+            "",
+            f"Name: {name}",
+            f"Description: {description or name}",
+            f"Version: {version}",
+        ]
+        if requires:
+            lines.append(f"Requires: {' '.join(requires)}")
+        lines.append(f"Libs: {' '.join(libs_parts)}")
+        if cflags_parts:
+            lines.append(f"Cflags: {' '.join(cflags_parts)}")
+
+        content = "\n".join(lines) + "\n"
+
+        # Write-if-changed
+        pc_path = self.build_dir / f"{name}.pc"
+        pc_path.parent.mkdir(parents=True, exist_ok=True)
+        if pc_path.exists() and pc_path.read_text() == content:
+            return pc_path
+        pc_path.write_text(content)
+        logger.info("Generated %s", pc_path)
+        return pc_path
+
     # =========================================================================
     # Package Discovery
     # =========================================================================

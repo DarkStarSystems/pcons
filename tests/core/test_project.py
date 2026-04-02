@@ -311,3 +311,65 @@ class TestNodeCanonicalization:
         node2 = project.node("src/../src/main.c")
 
         assert node1 is node2
+
+
+class TestGeneratePcFile:
+    def test_basic_pc_file(self, tmp_path):
+        """generate_pc_file() writes a valid .pc with target's public reqs."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        target = Target("mylib")
+        target.public.include_dirs.append(Path("include"))
+        target.public.defines.append("MYLIB_STATIC")
+        target.public.link_libs.append("m")
+        project.add_target(target)
+
+        pc = project.generate_pc_file(target, version="2.1.0", description="My lib")
+
+        assert pc.exists()
+        content = pc.read_text()
+        assert "Name: mylib" in content
+        assert "Version: 2.1.0" in content
+        assert "Description: My lib" in content
+        assert "-lmylib" in content
+        assert "-lm" in content
+        assert "-I${includedir}" in content
+        assert "-DMYLIB_STATIC" in content
+
+    def test_pc_file_write_if_changed(self, tmp_path):
+        """generate_pc_file() doesn't rewrite if content unchanged."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        target = Target("foo")
+        project.add_target(target)
+
+        pc = project.generate_pc_file(target, version="1.0")
+        mtime1 = pc.stat().st_mtime
+
+        # Call again — should not rewrite
+        import time
+
+        time.sleep(0.01)
+        project.generate_pc_file(target, version="1.0")
+        mtime2 = pc.stat().st_mtime
+        assert mtime1 == mtime2
+
+    def test_pc_file_requires_from_pkgconfig_deps(self, tmp_path):
+        """Dependencies found via pkg-config become Requires: entries."""
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        # Simulate a pkg-config dependency
+        pkg = PackageDescription(name="zlib", libraries=["z"])
+        pkg.found_by = "pkg-config"
+        zlib = ImportedTarget.from_package(pkg)
+
+        target = Target("mylib")
+        target.link(zlib)
+        project.add_target(target)
+
+        pc = project.generate_pc_file(target, version="1.0")
+        content = pc.read_text()
+        assert "Requires: zlib" in content
+        # zlib's -lz should NOT appear in Libs (it's in Requires)
+        assert "-lz" not in content

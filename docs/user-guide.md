@@ -1344,6 +1344,20 @@ project.InstallDir("dist", src_dir / "assets")
 
 `InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run.
 
+### Generating pkg-config Files
+
+To make a pcons-built library consumable by downstream CMake or pkg-config projects, generate a `.pc` file:
+
+```python
+lib = project.StaticLibrary("mylib", env, sources=["src/mylib.c"])
+lib.public.include_dirs.append("include")
+
+pc = project.generate_pc_file(lib, version="1.0.0", description="My library")
+project.Install("lib/pkgconfig", [pc])
+```
+
+The `.pc` file is derived from the target's public usage requirements (include_dirs, defines, link_libs, link_flags). Dependencies that were found via pkg-config automatically become `Requires:` entries rather than inlined flags.
+
 ### Environment Cloning
 
 Create variant environments by cloning:
