@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`ImportedTarget` exported from top-level `pcons` package**.
 
+- **Smarter `Project()` defaults**: `build_dir` defaults to `PCONS_BUILD_DIR` env var (set by the CLI), and `root_dir` is inferred from the calling script's directory via stack inspection. Build scripts no longer need `Path(__file__).parent` or `os.environ.get("PCONS_BUILD_DIR", "build")` boilerplate.
+
 ### Fixed
 
 - **Link flags no longer leak into `ar` commands**: When a `StaticLibrary` depended on an `ImportedTarget` with `-L`, `-pthread`, or other link flags, those incorrectly appeared in the archiver command. The archiver (`ar` / `lib.exe`) only accepts object files.
