@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-02
+
 ### Added
+
+- **`project.generate()` convenience method**: Replaces the `Generator().generate(project)` pattern — build scripts no longer need to import `Generator`. Selects the right backend (ninja/make/xcode) from CLI flags or environment variables.
+
+- **Smarter `Project()` defaults**: `build_dir` defaults to `PCONS_BUILD_DIR` env var (set by the CLI), and `root_dir` is inferred from the calling script's directory via stack inspection. Build scripts no longer need `Path(__file__).parent` or `os.environ.get("PCONS_BUILD_DIR", "build")` boilerplate.
 
 - **Ninja `restat` support**: `env.Command(..., restat=True)` tells Ninja to re-check output timestamps after running a command. If the output didn't actually change, downstream rebuilds are skipped.
 
@@ -15,23 +21,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`cppstd` parameter for `ConanFinder.sync_profile()`**: Sets `compiler.cppstd` in the Conan profile. Can be specified explicitly (`cppstd="23"`) or inferred automatically from `env.cxx.flags` (e.g., `-std=c++23`). Many Conan packages require this setting.
 
-- **`PackageDescription` exported from top-level `pcons` package**: Users creating manual `ImportedTarget` instances (e.g., for header-only libraries without `.pc` files) can now write `from pcons import PackageDescription` instead of importing from `pcons.packages`.
+- **`PackageDescription` and `ImportedTarget` exported from top-level `pcons` package**: Users can now write `from pcons import ImportedTarget, PackageDescription` instead of importing from subpackages.
 
-- **`ImportedTarget` exported from top-level `pcons` package**.
+- **`pcons-fetch` header-only packages**: `build="none"` in deps.toml skips the build step for header-only libraries, using the source directory directly as the install prefix.
 
-- **Smarter `Project()` defaults**: `build_dir` defaults to `PCONS_BUILD_DIR` env var (set by the CLI), and `root_dir` is inferred from the calling script's directory via stack inspection. Build scripts no longer need `Path(__file__).parent` or `os.environ.get("PCONS_BUILD_DIR", "build")` boilerplate.
+- **`pcons-fetch` commit SHA pinning**: Git refs that look like commit SHAs now trigger a full clone + checkout instead of `--depth=1 --branch`, which only works for branch/tag names.
 
 ### Fixed
 
 - **Link flags no longer leak into `ar` commands**: When a `StaticLibrary` depended on an `ImportedTarget` with `-L`, `-pthread`, or other link flags, those incorrectly appeared in the archiver command. The archiver (`ar` / `lib.exe`) only accepts object files.
 
-- **`pcons-fetch` bug fixes**: Prefer `.pc` files over directory scanning when generating package descriptions.
+- **`pcons-fetch` git URL detection with `@ref` suffix**: URLs like `https://...repo.git@main` are now correctly detected as git repos. Previously `endswith(".git")` failed because the URL ends with `@main`.
+
+- **`pcons-fetch`**: Prefer `.pc` files over directory scanning when generating package descriptions.
 
 ### Improved
 
-- **Package management documentation**: New "Header-Only and Manual Packages" section in the user guide. `sync_profile()` reference with all parameters. Updated `ImportedTarget` docstring to show `find_package()` + `link()` pattern instead of manual flag copying.
+- **Simplified examples**: Removed boilerplate from all 30+ example build scripts. The minimal hello_c example is now 6 lines of code with a single import.
 
-- **README quick example**: Updated to use top-level imports (`from pcons import ...`) and current API (`Generator().generate(project)`, `sources=` parameter).
+- **Package management documentation**: New "Header-Only and Manual Packages" section in the user guide. `sync_profile()` reference with all parameters. Updated `ImportedTarget` docstring to show `find_package()` + `link()` pattern instead of manual flag copying.
 
 - **ARCHITECTURE.md**: Replaced stale planned-API examples with current working API. Updated status notes for package management features that are now fully implemented.
 
@@ -648,7 +656,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/DarkStarSystems/pcons/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/DarkStarSystems/pcons/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/DarkStarSystems/pcons/compare/v0.8.4...v0.9.0
 [0.8.4]: https://github.com/DarkStarSystems/pcons/compare/v0.8.3...v0.8.4
