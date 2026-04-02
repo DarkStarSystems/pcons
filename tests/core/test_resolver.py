@@ -1014,3 +1014,48 @@ class TestResolverCxxLinker:
         context = output_node._build_info["context"]
         # Mixed C/C++ should use C++ linker
         assert context.linker_cmd == "g++"
+
+    def test_static_library_no_link_flags_from_imported(self, tmp_path, gcc_toolchain):
+        """Link flags from ImportedTarget must not leak into ar command.
+
+        The archiver (ar) only accepts 'ar rcs <archive> <objects>'.
+        Flags like -L, -pthread from dependencies should only propagate
+        to actual link commands (Program, SharedLibrary), not to ar.
+        """
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        # Create an ImportedTarget with link flags that should NOT end up in ar
+        pkg = PackageDescription(
+            name="yamlcpp",
+            library_dirs=["/opt/lib/yaml-cpp"],
+            libraries=["yaml-cpp"],
+            link_flags=["-pthread"],
+        )
+        imported = ImportedTarget.from_package(pkg)
+
+        lib = project.StaticLibrary("mylib", env, sources=[str(src_file)])
+        lib.link(imported)
+        project.resolve()
+
+        assert lib._resolved
+        lib_node = lib.output_nodes[0]
+        command = lib_node._build_info.get("command", [])
+        cmd_str = " ".join(str(t) for t in command)
+
+        # The ar command must not contain link flags
+        assert "-L" not in cmd_str, (
+            f"ar command should not contain -L flags, got: {cmd_str}"
+        )
+        assert "-pthread" not in cmd_str, (
+            f"ar command should not contain -pthread, got: {cmd_str}"
+        )
+        assert "-lyaml-cpp" not in cmd_str, (
+            f"ar command should not contain -l flags, got: {cmd_str}"
+        )

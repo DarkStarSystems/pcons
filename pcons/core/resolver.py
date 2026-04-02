@@ -1223,8 +1223,10 @@ class Resolver:
         # to subst_list() via extra_vars.
         #
         # Determine if this is a compile command (objcmd) vs link command
+        # Note: "libcmd" (ar/archiver) is NOT a link command — the archiver
+        # only accepts object files, not link flags like -L, -l, -pthread.
         is_compile_command = command_var == "objcmd"
-        is_link_command = command_var in ("progcmd", "sharedcmd", "linkcmd", "libcmd")
+        is_link_command = command_var in ("progcmd", "sharedcmd", "linkcmd")
 
         # Build tool-specific overrides as a dictionary for subst()
         # These will be passed as extra_vars and take precedence over tool_config
