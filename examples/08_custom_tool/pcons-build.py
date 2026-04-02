@@ -10,7 +10,7 @@ Uses Python for cross-platform file concatenation.
 
 import sys
 
-from pcons import Generator, Project
+from pcons import Project
 from pcons.core.builder import Builder, CommandBuilder
 from pcons.tools.tool import BaseTool
 
@@ -80,8 +80,6 @@ env.concat.Bundle(
     ],
 )
 
-# Generate build file
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir}")

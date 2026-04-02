@@ -9,7 +9,7 @@ This demonstrates a subdir that works both:
 
 from pathlib import Path
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 from pcons.core.target import Target
 
 
@@ -44,9 +44,8 @@ def build_libfoo(
     libfoo.public.include_dirs.append(include_dir)
 
     if standalone:
-        # Resolve and generate build file when running standalone
-        project.resolve()
-        Generator().generate(project)
+        # Generate build file when running standalone
+        project.generate()
         print(f"Generated {project.build_dir}")
 
     return libfoo

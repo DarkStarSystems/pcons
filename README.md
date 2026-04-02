@@ -42,11 +42,9 @@ Core functionality is working and well tested: C/C++/Fortran compilation, static
 
 ```python
 # pcons-build.py
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 project = Project("myapp")
-
-# Find and configure a C/C++ toolchain
 env = project.Environment(toolchain=find_c_toolchain())
 env.cc.flags.extend(["-Wall"])
 
@@ -58,8 +56,7 @@ lib.public.include_dirs.append("include")
 app = project.Program("myapp", env, sources=["src/main.c"])
 app.link(lib)
 
-# Generate the build.ninja file
-Generator().generate(project)
+project.generate()
 ```
 
 ```bash

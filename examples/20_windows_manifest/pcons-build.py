@@ -8,7 +8,7 @@ This example shows how to:
 Windows-only: requires MSVC or clang-cl toolchain.
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 # Create project
 project = Project("manifest_example")
@@ -67,12 +67,7 @@ else:
     app.add_sources([src_dir / "main.c"])
     project.Default(app, mylib)
 
-# Resolve dependencies
-project.resolve()
-
-# Generate build file
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir} using {toolchain.name} toolchain")
 if is_windows_toolchain:

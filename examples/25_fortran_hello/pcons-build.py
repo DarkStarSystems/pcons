@@ -7,11 +7,11 @@ This example demonstrates:
 - Creating a Program target with a Fortran source file
 """
 
-from pcons import Generator, Project, find_fortran_toolchain
+from pcons import Project, find_fortran_toolchain
 
 project = Project("fortran_hello")
 env = project.Environment(toolchain=find_fortran_toolchain())
 
 project.Program("hello", env, sources=["src/hello.f90"])
 
-Generator().generate(project)
+project.generate()

@@ -14,7 +14,7 @@ potentially expensive rebuilds in large projects.
 
 import sys
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 project = Project("restat_example")
 
@@ -38,5 +38,5 @@ env.cc.includes.append(str(build_dir))
 app = project.Program("app", env, sources=[src_dir / "main.c"])
 app.depends(gen)  # implicit dep: build gen first, but don't link version.h
 
-Generator().generate(project)
+project.generate()
 print(f"Generated {build_dir}")

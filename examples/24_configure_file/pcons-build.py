@@ -8,7 +8,7 @@ This example demonstrates:
 - Using the generated header in a C program
 """
 
-from pcons import Generator, Project, configure_file, find_c_toolchain
+from pcons import Project, configure_file, find_c_toolchain
 
 project = Project("configure_file_example")
 env = project.Environment(toolchain=find_c_toolchain())
@@ -25,4 +25,4 @@ env.cc.flags += ["-Ibuild"]
 
 project.Program("configure_demo", env, sources=["src/main.c"])
 
-Generator().generate(project)
+project.generate()

@@ -8,7 +8,7 @@ This example demonstrates:
 - Automatic Fortran runtime injection (-lgfortran)
 """
 
-from pcons import Generator, Project, find_c_toolchain, find_fortran_toolchain
+from pcons import Project, find_c_toolchain, find_fortran_toolchain
 
 project = Project("cxx_calls_fortran")
 
@@ -19,4 +19,4 @@ env.add_toolchain(find_fortran_toolchain())  # gfortran for Fortran compilation
 
 project.Program("hello", env, sources=["src/main.cpp", "src/math_utils.f90"])
 
-Generator().generate(project)
+project.generate()

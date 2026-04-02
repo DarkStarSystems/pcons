@@ -552,6 +552,20 @@ class Project:
             gen.generate(self)
             logger.info("Wrote %s graph to %s", format_name, output_path_str)
 
+    def generate(self) -> None:
+        """Generate build files (convenience method).
+
+        Selects the appropriate generator (Ninja by default, overridable
+        via ``--generator`` CLI flag or ``PCONS_GENERATOR`` env var),
+        auto-resolves the project if needed, and writes the build files.
+
+        For advanced usage (e.g., disabling compile_commands.json),
+        use ``Generator().generate(project)`` directly.
+        """
+        from pcons import Generator
+
+        Generator().generate(self)
+
     # =========================================================================
     # Package Discovery
     # =========================================================================

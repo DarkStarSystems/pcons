@@ -8,7 +8,7 @@ Demonstrates:
 - Ninja dyndep for correct module dependency ordering
 """
 
-from pcons import Generator, Project
+from pcons import Project
 from pcons.toolchains import find_c_toolchain
 
 project = Project("cxx_modules")
@@ -17,4 +17,4 @@ env.cxx.flags.append("-std=c++20")
 
 project.Program("hello", env, sources=["src/MyMod.cppm", "src/main.cpp"])
 
-Generator().generate(project)
+project.generate()

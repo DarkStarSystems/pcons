@@ -11,7 +11,6 @@ from pathlib import Path
 from pcons import get_variant
 from pcons.configure.config import Configure
 from pcons.core.project import Project
-from pcons.generators.ninja import NinjaGenerator
 from pcons.toolchains import find_c_toolchain
 
 # Get directories from environment or use defaults
@@ -43,10 +42,5 @@ env.set_variant(variant)
 # app = project.Program("hello", env, sources=["hello.c"])
 # project.Default(app)
 
-# Resolve targets
-project.resolve()
-
-# Generate ninja file
-generator = NinjaGenerator()
-generator.generate(project)
+project.generate()
 print(f"Generated {build_dir / 'build.ninja'}")

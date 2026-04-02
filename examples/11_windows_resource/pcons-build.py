@@ -7,7 +7,7 @@ information that gets embedded into the executable.
 Windows-only: requires MSVC toolchain.
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 # Create project
 project = Project("resource_example")
@@ -27,11 +27,6 @@ app.add_sources([src_dir / "main.c", src_dir / "app.rc"])
 # Set as default target
 project.Default(app)
 
-# Resolve dependencies
-project.resolve()
-
-# Generate build file
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir} using {toolchain.name} toolchain")

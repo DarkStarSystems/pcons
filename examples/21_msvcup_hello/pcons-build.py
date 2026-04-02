@@ -8,7 +8,7 @@ Works on both x64 and ARM64 Windows machines -- target_cpu is auto-detected.
 
 import sys
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 if sys.platform == "win32":
     from pcons.contrib.windows.msvcup import ensure_msvc
@@ -19,4 +19,4 @@ if sys.platform == "win32":
 project = Project("hello")
 env = project.Environment(toolchain=find_c_toolchain())
 project.Program("hello", env, sources=["src/hello.c"])
-Generator().generate(project)
+project.generate()

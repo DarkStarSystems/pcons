@@ -8,11 +8,11 @@ This example demonstrates:
 - Ninja dyndep for correct module dependency ordering
 """
 
-from pcons import Generator, Project, find_fortran_toolchain
+from pcons import Project, find_fortran_toolchain
 
 project = Project("fortran_modules")
 env = project.Environment(toolchain=find_fortran_toolchain())
 
 project.Program("hello", env, sources=["src/greetings.f90", "src/main.f90"])
 
-Generator().generate(project)
+project.generate()

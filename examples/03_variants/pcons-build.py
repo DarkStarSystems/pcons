@@ -9,7 +9,7 @@ This example demonstrates:
 - Organizing outputs into variant-specific directories
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
@@ -39,7 +39,5 @@ for variant in ["debug", "release"]:
     prog.output_name = f"{variant}/" + toolchain.get_program_name("variant_demo")
     prog.add_sources([src_dir / "main.c"])
 
-# Resolve and generate
-project.resolve()
-Generator().generate(project)
+project.generate()
 print(f"Generated {build_dir}")

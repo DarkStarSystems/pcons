@@ -6,7 +6,7 @@ This example demonstrates using env.override() to compile specific
 source files with different flags - like extra defines or includes.
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 toolchain = find_c_toolchain()
 project = Project("override_example")
@@ -36,5 +36,5 @@ with env.override() as extra_env:
 # Link both objects into the program
 env.link.Program(build_dir / prog_name, [main_obj, extra_obj])
 
-Generator().generate(project)
+project.generate()
 print(f"Generated {build_dir}")

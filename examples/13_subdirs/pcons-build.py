@@ -30,7 +30,7 @@ Usage:
 import runpy
 from pathlib import Path
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 this_dir = Path(__file__).parent
 
@@ -50,7 +50,5 @@ app = project.Program("subdirs_demo", env)
 app.add_sources([app_src_dir / "main.c"])
 app.link(libfoo)  # Gets libfoo's public.include_dirs automatically
 
-# Resolve and generate the ninja file
-project.resolve()
-Generator().generate(project)
+project.generate()
 print(f"Generated {build_dir}")

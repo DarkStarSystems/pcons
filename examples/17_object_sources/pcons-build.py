@@ -10,7 +10,7 @@ Use case: Compile some sources with different flags (e.g., different
 optimization level, or legacy code with warnings disabled).
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
@@ -49,14 +49,13 @@ prog.add_sources(
     ]
 )
 
-# Resolve and generate
+# Resolve to inspect resolved state
 project.resolve()
 
 # Check what happened
 print(f"Program object_nodes: {prog.object_nodes}")
 print(f"Program sources: {prog.sources}")
 
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir}")

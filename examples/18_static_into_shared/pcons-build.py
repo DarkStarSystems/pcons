@@ -12,7 +12,7 @@ Expected: core.h is found via public include propagation,
 and core_value() from static lib is available in shared lib.
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 # Create project
 project = Project("static_into_shared")
@@ -36,7 +36,7 @@ wrapper_lib.link(core_lib)
 prog = project.Program("demo", env, sources=[src_dir / "main.c"])
 prog.link(wrapper_lib)
 
-# Resolve and generate
+# Resolve to inspect resolved state
 project.resolve()
 
 # Debug output
@@ -46,7 +46,6 @@ print(f"wrapper_lib output_nodes: {wrapper_lib.output_nodes}")
 print(f"wrapper_lib dependencies: {wrapper_lib.dependencies}")
 print(f"prog output_nodes: {prog.output_nodes}")
 
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir}")

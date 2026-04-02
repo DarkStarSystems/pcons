@@ -8,11 +8,11 @@ This example demonstrates:
 - Automatic resolution and generation
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 project = Project("hello_c")
 env = project.Environment(toolchain=find_c_toolchain())
 
 project.Program("hello", env, sources=["src/hello.c"])
 
-Generator().generate(project)
+project.generate()

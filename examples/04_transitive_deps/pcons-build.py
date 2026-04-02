@@ -7,7 +7,7 @@ This example shows:
 - Using private.include_dirs for shared headers
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 project = Project("transitive_deps")
 env = project.Environment(toolchain=find_c_toolchain())
@@ -23,4 +23,4 @@ simulator = project.Program(
 )
 simulator.private.include_dirs.append("include")
 
-Generator().generate(project)
+project.generate()

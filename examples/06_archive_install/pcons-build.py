@@ -12,7 +12,7 @@ The 'install' target creates source and binary tarballs and copies them
 to the Installers/ directory.
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
@@ -64,14 +64,12 @@ bin_tarball = project.Tarfile(
 # Install target: copy tarballs to ./Installers directory
 install_target = project.Install("Installers", [src_tarball, bin_tarball])
 
-# Resolve all targets
+# Resolve so output_nodes are populated for Alias
 project.resolve()
 
 # Create alias after resolve() so output_nodes are populated
 project.Alias("install", install_target)
 
-# Generate build file
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir}")

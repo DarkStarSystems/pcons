@@ -10,7 +10,7 @@ InstallDir uses ninja's depfile feature for incremental rebuilds:
 if any file in the source directory changes, the copy is re-run.
 """
 
-from pcons import Generator, Project
+from pcons import Project
 
 # =============================================================================
 # Build Script
@@ -31,11 +31,6 @@ installed_assets = project.InstallDir("dist", src_dir / "assets")
 # Set as default target
 project.Default(installed_assets)
 
-# Resolve all targets
-project.resolve()
-
-# Generate build file
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir}")

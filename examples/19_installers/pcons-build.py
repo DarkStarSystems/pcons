@@ -9,7 +9,7 @@ This example shows how to create:
 The installer targets are created based on the current platform.
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 from pcons.contrib import platform
 
 # =============================================================================
@@ -80,11 +80,7 @@ if installer_targets:
 # Set the app as the default target
 project.Default(app)
 
-# Resolve and generate
-project.resolve()
-
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir}")
 if installer_targets:

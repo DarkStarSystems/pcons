@@ -8,7 +8,7 @@ This example demonstrates:
 - Automatic C++ runtime injection (-lc++ / -lstdc++)
 """
 
-from pcons import Generator, Project, find_c_toolchain, find_fortran_toolchain
+from pcons import Project, find_c_toolchain, find_fortran_toolchain
 
 project = Project("fortran_calls_cxx")
 
@@ -19,4 +19,4 @@ env.add_toolchain(find_c_toolchain())  # gcc/clang for C++ compilation
 
 project.Program("hello", env, sources=["src/main.f90", "src/greet.cpp"])
 
-Generator().generate(project)
+project.generate()

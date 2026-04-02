@@ -12,11 +12,11 @@ Prerequisites:
   Set EMSDK or activate the emsdk environment.
 """
 
-from pcons import Generator, Project, find_emscripten_toolchain
+from pcons import Project, find_emscripten_toolchain
 
 project = Project("hello_emscripten")
 env = project.Environment(toolchain=find_emscripten_toolchain())
 
 project.Program("hello", env, sources=["src/hello.c"])
 
-Generator().generate(project)
+project.generate()

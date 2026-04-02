@@ -13,7 +13,7 @@ Build graph:
 
 import sys
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 from pcons.generators.mermaid import MermaidGenerator
 
 # =============================================================================
@@ -52,16 +52,9 @@ simulator = project.Program("simulator", env)
 simulator.add_sources([src_dir / "main.c"])
 simulator.link(libphysics)  # Gets both libphysics and libmath includes
 
-# -----------------------------------------------------------------------------
-# Resolve and Generate
-# -----------------------------------------------------------------------------
-project.resolve()
+project.generate()
 
-# Generate build file
-generator = Generator()
-generator.generate(project)
-
-# Generate Mermaid dependency diagram
+# Generate Mermaid dependency diagram (after generate, which auto-resolves)
 mermaid_gen = MermaidGenerator(direction="LR")
 mermaid_gen.generate(project)
 

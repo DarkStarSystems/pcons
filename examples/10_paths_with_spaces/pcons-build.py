@@ -17,7 +17,7 @@ This is important for projects on systems where paths commonly
 contain spaces (Windows, macOS with iCloud, etc.).
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 # =============================================================================
 # Build Script
@@ -55,10 +55,6 @@ if toolchain.name in ("msvc", "clang-cl"):
 else:
     program.private.compile_flags.extend(["-Wall", "-Wextra"])
 
-# Resolve and generate
-project.resolve()
-
-generator = Generator()
-generator.generate(project)
+project.generate()
 
 print(f"Generated {build_dir}")

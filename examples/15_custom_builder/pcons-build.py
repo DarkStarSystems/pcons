@@ -15,7 +15,7 @@ file with version information.
 
 from pathlib import Path
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode
 from pcons.core.target import Target, TargetType
@@ -155,8 +155,7 @@ for src_node in app.sources:
 
 project.Default(app)
 
-# Generate build files
-Generator().generate(project)
+project.generate()
 
 print(f"Generated build files in {build_dir}")
 print("Run 'ninja -C build' to build, then './build/demo' to run")

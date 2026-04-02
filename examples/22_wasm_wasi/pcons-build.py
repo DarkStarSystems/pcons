@@ -12,11 +12,11 @@ Prerequisites:
   Set WASI_SDK_PATH or install to /opt/wasi-sdk.
 """
 
-from pcons import Generator, Project, find_wasi_toolchain
+from pcons import Project, find_wasi_toolchain
 
 project = Project("hello_wasi")
 env = project.Environment(toolchain=find_wasi_toolchain())
 
 project.Program("hello", env, sources=["src/hello.c"])
 
-Generator().generate(project)
+project.generate()
