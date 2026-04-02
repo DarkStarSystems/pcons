@@ -189,3 +189,44 @@ class TestImportedTarget:
         assert target.public.compile_flags == []
         assert target.public.link_libs == []
         assert target.public.link_flags == []
+
+    def test_imported_link_transitive_propagation(self) -> None:
+        """ImportedTarget.link() propagates requirements transitively.
+
+        When httplib.link(openssl), anything that links httplib should
+        transitively get openssl's public requirements. This replaces
+        the need to manually copy public requirements between targets.
+        """
+        from pcons.core.target import Target
+
+        openssl = ImportedTarget.from_package(
+            PackageDescription(
+                name="openssl",
+                include_dirs=["/usr/include/openssl"],
+                library_dirs=["/usr/lib"],
+                libraries=["ssl", "crypto"],
+            )
+        )
+
+        httplib = ImportedTarget.from_package(
+            PackageDescription(
+                name="cpp-httplib",
+                include_dirs=["/usr/include"],
+                defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
+            )
+        )
+        httplib.link(openssl)
+
+        # A target that links httplib should get openssl transitively
+        app = Target("app")
+        app.link(httplib)
+
+        reqs = app.collect_usage_requirements()
+        # httplib's own requirements
+        assert Path("/usr/include") in reqs.include_dirs
+        assert "CPPHTTPLIB_OPENSSL_SUPPORT" in reqs.defines
+        # openssl's requirements, propagated transitively via link()
+        assert Path("/usr/include/openssl") in reqs.include_dirs
+        assert "ssl" in reqs.link_libs
+        assert "crypto" in reqs.link_libs
+        assert "-L/usr/lib" in reqs.link_flags

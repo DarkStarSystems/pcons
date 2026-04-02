@@ -98,6 +98,78 @@ class TestConanFinderProfile:
         assert "[conf]" in content
         assert "tools.build:cxxflags" in content
 
+    def test_sync_profile_cppstd_explicit(self, tmp_path: Path) -> None:
+        """Test explicit cppstd parameter."""
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.sync_profile(cppstd="20")
+
+        content = finder.profile_path.read_text()
+        assert "compiler.cppstd=20" in content
+
+    def test_sync_profile_cppstd_inferred_from_env(self, tmp_path: Path) -> None:
+        """Test cppstd inferred from env.cxx.flags."""
+        from types import SimpleNamespace
+
+        env = SimpleNamespace(cxx=SimpleNamespace(flags=["-std=c++23"]))
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.sync_profile(env=env)
+
+        content = finder.profile_path.read_text()
+        assert "compiler.cppstd=23" in content
+
+    def test_sync_profile_cppstd_explicit_overrides_env(self, tmp_path: Path) -> None:
+        """Explicit cppstd takes precedence over env inference."""
+        from types import SimpleNamespace
+
+        env = SimpleNamespace(cxx=SimpleNamespace(flags=["-std=c++17"]))
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.sync_profile(env=env, cppstd="20")
+
+        content = finder.profile_path.read_text()
+        assert "compiler.cppstd=20" in content
+        assert "compiler.cppstd=17" not in content
+
+    def test_sync_profile_cppstd_set_profile_setting_overrides(
+        self, tmp_path: Path
+    ) -> None:
+        """set_profile_setting overrides both explicit and inferred cppstd."""
+        finder = ConanFinder(output_folder=tmp_path)
+        finder.set_profile_setting("compiler.cppstd", "14")
+        finder.sync_profile(cppstd="20")
+
+        content = finder.profile_path.read_text()
+        assert "compiler.cppstd=14" in content
+
+    def test_infer_cppstd_variants(self) -> None:
+        """Test cppstd inference from various flag formats."""
+        from types import SimpleNamespace
+
+        cases = {
+            "-std=c++17": "17",
+            "-std=c++20": "20",
+            "-std=c++23": "23",
+            "-std=gnu++20": "20",
+            "-std=c++2a": "20",
+            "-std=c++2b": "23",
+            "/std:c++17": "17",
+            "/std:c++latest": "23",
+        }
+        for flag, expected in cases.items():
+            env = SimpleNamespace(cxx=SimpleNamespace(flags=[flag]))
+            result = ConanFinder._infer_cppstd(env)
+            assert result == expected, f"Flag {flag}: expected {expected}, got {result}"
+
+    def test_infer_cppstd_no_env(self) -> None:
+        """Test that None env returns None."""
+        assert ConanFinder._infer_cppstd(None) is None
+
+    def test_infer_cppstd_no_std_flag(self) -> None:
+        """Test that env without -std flag returns None."""
+        from types import SimpleNamespace
+
+        env = SimpleNamespace(cxx=SimpleNamespace(flags=["-Wall", "-O2"]))
+        assert ConanFinder._infer_cppstd(env) is None
+
 
 class TestConanFinderInstall:
     """Tests for conan install with mocked subprocess."""

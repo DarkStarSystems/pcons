@@ -42,8 +42,7 @@ Core functionality is working and well tested: C/C++/Fortran compilation, static
 
 ```python
 # pcons-build.py
-from pcons.core.project import Project
-from pcons.toolchains import find_c_toolchain
+from pcons import Generator, Project, find_c_toolchain
 
 project = Project("myapp", build_dir="build")
 
@@ -52,17 +51,15 @@ env = project.Environment(toolchain=find_c_toolchain())
 env.cc.flags.extend(["-Wall"])
 
 # Build a static library
-lib = project.StaticLibrary("core", env)
-lib.sources.append(project.node("src/core.c"))
+lib = project.StaticLibrary("core", env, sources=["src/core.c"])
 lib.public.include_dirs.append(Path("include"))
 
-# Build a program using it
-app = project.Program("myapp", env)
-app.sources.append(project.node("src/main.c"))
+# Build a program that links the library
+app = project.Program("myapp", env, sources=["src/main.c"])
 app.link(lib)
 
-# Generate the ninja.build script
-project.generate()
+# Generate the build.ninja file
+Generator().generate(project)
 ```
 
 ```bash

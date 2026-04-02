@@ -32,15 +32,19 @@ class ImportedTarget(Target):
         requested_components: Which components were requested.
 
     Example:
-        # Find a package
-        zlib = finder.find("zlib")
+        # Find packages via project (preferred)
+        zlib = project.find_package("zlib")
+        openssl = project.find_package("openssl")
+        app = project.Program("myapp", env, sources=["main.c"])
+        app.link(zlib, openssl)  # flags propagate automatically
 
-        # Create an imported target
-        target = ImportedTarget.from_package(zlib)
-
-        # Use as a dependency
-        env.cc.flags += target.compile_flags
-        env.link.libs += target.link_flags
+        # Header-only lib without a .pc file — create manually
+        httplib = ImportedTarget.from_package(PackageDescription(
+            name="cpp-httplib",
+            include_dirs=["/usr/include"],
+            defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
+        ))
+        httplib.link(openssl)  # transitive: consumers of httplib get openssl too
     """
 
     __slots__ = ("package", "is_imported", "requested_components")

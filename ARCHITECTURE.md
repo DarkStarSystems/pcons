@@ -1422,92 +1422,39 @@ pcons/
 ---
 
 ## Example: Complete Build
-> **Note:** This example shows the intended API. Some features (like `find_toolchain('cxx')` auto-detection and `config.packages` dict) are partially implemented or planned.
-
-### pcons-configure.py
-```python
-from pcons import Configure
-from pcons.packages import PkgConfigFinder, ConanFinder, SystemFinder
-
-config = Configure()
-
-# Find C++ toolchain (tries gcc, then clang, then msvc)
-cxx_toolchain = config.find_toolchain('cxx')
-
-# Check for C++20 support
-if cxx_toolchain.cxx.check_flag('-std=c++20'):
-    config.set('cxx_standard', 'c++20')
-else:
-    config.set('cxx_standard', 'c++17')
-
-# Check for optional headers
-config.set('have_optional', cxx_toolchain.cxx.check_header('optional'))
-
-# Find dependencies
-config.packages['zlib'] = config.find_package('zlib',
-    finders=[PkgConfigFinder, SystemFinder(libraries=['z'])])
-
-config.packages['openssl'] = config.find_package('openssl',
-    finders=[PkgConfigFinder])
-
-# Or load from pcons-fetch results
-for pkg_file in Path('deps/install').glob('*.pcons-pkg.toml'):
-    pkg = config.load_package(pkg_file)
-    config.packages[pkg.name] = pkg
-
-# Save
-config.save()
-```
 
 ### pcons-build.py
 ```python
-from pcons import Project, load_config
+from pcons import Generator, ImportedTarget, PackageDescription, Project, find_c_toolchain
 
-config = load_config()
-project = Project('myapp', config)
+project = Project('myapp', build_dir='build')
+toolchain = find_c_toolchain()
+env = project.Environment(toolchain=toolchain)
+env.cxx.flags.extend(['-std=c++20', '-Wall'])
 
-# Import external dependencies as targets
-zlib = project.ImportedTarget(config.packages['zlib'])
-openssl = project.ImportedTarget(config.packages['openssl'])
+# Find dependencies via pkg-config/system search
+zlib = project.find_package('zlib')
+openssl = project.find_package('openssl', version='>=3.0')
 
-# Create environment with configured toolchain
-env = project.Environment(toolchain=config.cxx_toolchain)
-env.cxx.flags = [f'-std={config.cxx_standard}', '-Wall']
+# Header-only lib without a .pc file — create manually
+httplib = ImportedTarget.from_package(PackageDescription(
+    name='cpp-httplib',
+    include_dirs=['/opt/homebrew/include'],
+    defines=['CPPHTTPLIB_OPENSSL_SUPPORT'],
+))
+httplib.link(openssl)  # transitive: consumers get openssl too
 
-if config.have_optional:
-    env.cxx.defines.append('HAVE_OPTIONAL')
+# Build library
+libcore = project.StaticLibrary('core', env, sources=['src/core.cpp'])
+libcore.public.include_dirs.append(Path('include'))
+libcore.link(zlib)  # zlib is a private dep (not re-exported)
 
-# Debug variant
-debug = env.clone()
-debug.cxx.flags += ['-g', '-O0']
-debug.cxx.defines += ['DEBUG']
-debug.build_dir = 'build/debug'
-
-# Release variant
-release = env.clone()
-release.cxx.flags += ['-O3', '-DNDEBUG']
-release.build_dir = 'build/release'
-
-# Build library (uses cxx tool explicitly for .cpp files)
-libcore_sources = env.Glob('src/core/*.cpp')
-libcore = release.StaticLibrary(
-    'core',
-    sources=libcore_sources,
-    public_include_dirs=['include'],
-    private_link_libs=[zlib],      # Uses zlib internally
-)
-
-# Build executable - links against libcore and openssl
-# Automatically uses C++ linker because libcore contains C++ objects
-# Gets zlib transitively through libcore (if it were public)
-app = release.Program(
-    'myapp',
-    sources=['src/main.cpp'],
-    link_libs=[libcore, openssl],
-)
+# Build executable — gets zlib transitively through libcore's link deps
+app = project.Program('myapp', env, sources=['src/main.cpp'])
+app.link(libcore, openssl, httplib)
 
 project.Default(app)
-project.generate()
+Generator().generate(project)
 ```
 
 ---
@@ -1525,7 +1472,7 @@ project.generate()
 ---
 
 ## Package Management Integration
-> **Status: Partial** - PackageDescription, ImportedTarget, pkg-config finder, system finder, and pcons-fetch tool are implemented. Conan/vcpkg finders planned. Integration with Project.ImportedTarget() needs work.
+> **Status: Implemented** - PackageDescription, ImportedTarget, pkg-config finder, system finder, Conan finder, and pcons-fetch tool are all implemented. `project.find_package()` provides the high-level API with FinderChain (PkgConfig → System by default, extensible via `project.add_package_finder()`).
 
 **Core principle: Pcons handles consumption, not acquisition.**
 
@@ -1604,98 +1551,64 @@ libraries = ["boost_system"]
 ```
 
 ### ImportedTarget
-> **Status: Implemented** - Class exists with full API. Integration with Project needs completion.
+> **Status: Implemented** - Full API including `from_package()` factory and transitive dependency propagation via `link()`.
 
-An ImportedTarget represents an external dependency. It has usage requirements but no build rules.
+An ImportedTarget represents an external dependency. It has usage requirements but no build rules. Created via `project.find_package()` or manually via `ImportedTarget.from_package(PackageDescription(...))`.
 
 ```python
-class ImportedTarget(Target):
-    """A target representing an external/pre-built dependency."""
+# Preferred: use project.find_package()
+zlib = project.find_package("zlib")
+app.link(zlib)  # public requirements propagate automatically
 
-    # Inherited from Target:
-    # - public_include_dirs
-    # - public_link_libs
-    # - public_defines
-    # - public_link_flags
-
-    # Additional:
-    library_files: list[Path]    # Actual .a/.so/.lib files
-    library_dirs: list[Path]     # -L paths
-    is_imported: bool = True     # No build rules generated
+# Manual: for header-only libs or packages without .pc files
+httplib = ImportedTarget.from_package(PackageDescription(
+    name="cpp-httplib",
+    include_dirs=["/usr/include"],
+    defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
+))
+httplib.link(openssl)  # transitive propagation via link()
 ```
 
 ### Package Finders
-> **Status: Partial** - PkgConfigFinder, SystemFinder, and ConanFinder implemented. VcpkgFinder planned.
+> **Status: Implemented** - PkgConfigFinder, SystemFinder, and ConanFinder implemented. FinderChain provides ordered search.
 
-Finders locate packages and generate `.pcons-pkg.toml` files (or create ImportedTargets directly).
+Finders locate packages and return `PackageDescription` objects. The easiest way to use them is through `project.find_package()`, which manages a FinderChain internally:
 
 ```python
-# In configure.py
-from pcons import Configure
-from pcons.packages import (
-    PkgConfigFinder,
-    ConanFinder,
-    VcpkgFinder,
-    SystemFinder,
-)
+# High-level API (preferred) — uses PkgConfig → System by default
+zlib = project.find_package("zlib")
+openssl = project.find_package("openssl", version=">=3.0")
 
-config = Configure()
+# Add Conan as the first finder to try
+from pcons.packages.finders import ConanFinder
+project.add_package_finder(ConanFinder(config, conanfile="conanfile.txt"))
+fmt = project.find_package("fmt")  # tries Conan → PkgConfig → System
 
-# From pkg-config (reads .pc files)
-zlib = PkgConfigFinder.find('zlib')
-
-# From Conan (reads conan-generated files)
-# Assumes you've run: conan install . --output-folder=build
-openssl = ConanFinder.find('openssl', conan_folder='build')
-
-# From vcpkg
-fmt = VcpkgFinder.find('fmt', vcpkg_root='/opt/vcpkg')
-
-# Manual system search
-jpeg = SystemFinder.find('jpeg',
-    headers=['jpeglib.h'],
-    libraries=['jpeg'],
-    include_hints=['/usr/include', '/opt/local/include'],
-    library_hints=['/usr/lib', '/opt/local/lib'],
-)
-
-# From existing .pcons-pkg.toml file
-custom = config.load_package('deps/custom.pcons-pkg.toml')
-
-config.packages['zlib'] = zlib
-config.packages['openssl'] = openssl
-config.packages['fmt'] = fmt
-config.packages['jpeg'] = jpeg
-config.packages['custom'] = custom
-config.save()
+# Low-level API — use finders directly
+from pcons.packages.finders import PkgConfigFinder, SystemFinder
+finder = PkgConfigFinder()
+desc = finder.find("zlib", version=">=1.2")  # returns PackageDescription or None
 ```
 
 ### Using Packages in Builds
-> **Status: Planned** - This API pattern is the goal; current implementation requires manual flag handling.
+> **Status: Implemented** - `find_package()` returns ImportedTargets; `link()` propagates requirements.
 
 ```python
-# In pcons-build.py
-from pcons import Project, load_config
+from pcons import Generator, Project, find_c_toolchain
 
-config = load_config()
-project = Project('myapp', config)
+project = Project('myapp', build_dir='build')
+env = project.Environment(toolchain=find_c_toolchain())
 
-env = project.Environment(toolchain=config.cxx_toolchain)
+# find_package returns ImportedTarget — link() propagates requirements
+zlib = project.find_package('zlib')
+openssl = project.find_package('openssl')
+boost = project.find_package('boost', components=['filesystem'])
 
-# Import packages as targets
-zlib = project.ImportedTarget(config.packages['zlib'])
-openssl = project.ImportedTarget(config.packages['openssl'])
-
-# For component-based packages
-boost_fs = project.ImportedTarget(
-    config.packages['boost'],
-    components=['filesystem']  # pulls in 'system' transitively
-)
-
-# Use them like any other target - usage requirements propagate
-app = env.Program('myapp', ['main.cpp'],
-    link_libs=[zlib, openssl, boost_fs])
+app = project.Program('myapp', env, sources=['main.cpp'])
+app.link(zlib, openssl, boost)
 # Automatically gets all include dirs, library dirs, libraries, flags
+
+Generator().generate(project)
 ```
 
 ### pcons-fetch: Source Dependency Tool
@@ -1810,64 +1723,40 @@ cxxflags = "-O2 -std=c++17"
 ```
 
 ### Integration with External Package Managers
-> **Status: Planned** - Conan and vcpkg integration planned but not yet implemented.
+> **Status: Partial** - Conan integration implemented via ConanFinder. vcpkg finder planned.
 
 #### Conan Integration
 
-For users who prefer Conan's more sophisticated dependency resolution:
-
-```ini
-# conanfile.txt
-[requires]
-zlib/1.3.1
-openssl/3.2.0
-boost/1.84.0
-
-[generators]
-PconsDeps
-```
-
-We provide a Conan generator (`PconsDeps`) that outputs `.pcons-pkg.toml` files:
-
-```bash
-conan install . --output-folder=build --build=missing
-# Creates build/zlib.pcons-pkg.toml, build/openssl.pcons-pkg.toml, etc.
-```
-
-Then in configure.py:
-```python
-# Load all Conan-generated package files
-for pkg_file in Path('build').glob('*.pcons-pkg.toml'):
-    pkg = config.load_package(pkg_file)
-    config.packages[pkg.name] = pkg
-```
-
-#### vcpkg Integration
-
-Similar approach - vcpkg generates CMake files, we provide a finder that reads them:
+ConanFinder runs `conan install` with `PkgConfigDeps` generator, then reads the generated `.pc` files:
 
 ```python
-# VcpkgFinder reads vcpkg's installed packages
-fmt = VcpkgFinder.find('fmt', vcpkg_root=os.environ.get('VCPKG_ROOT'))
+from pcons.packages.finders import ConanFinder
+
+conan = ConanFinder(config, conanfile="conanfile.txt", output_folder=build_dir / "conan")
+conan.sync_profile(toolchain, build_type="release")
+packages = conan.install()
+
+# Use via project.add_package_finder for seamless find_package() integration
+project.add_package_finder(conan)
+fmt = project.find_package("fmt")
+
+# Or use packages dict directly
+env.use(packages.get("fmt"))
 ```
+
+See `examples/07_conan_example/` for a complete working example.
 
 ### Package Search Order
-> **Status: Partial** - Individual finders work; chained search order pattern not yet implemented.
-
-When finding a package, finders can search multiple sources:
+> **Status: Implemented** - FinderChain tries finders in order; `project.find_package()` manages the chain.
 
 ```python
-# Try to find zlib from multiple sources, in order
-zlib = config.find_package('zlib',
-    finders=[
-        PkgConfigFinder,           # Try pkg-config first
-        ConanFinder(folder='build'), # Then Conan
-        SystemFinder(              # Finally, manual search
-            headers=['zlib.h'],
-            libraries=['z'],
-        ),
-    ]
-)
+# Default chain: PkgConfig → System
+zlib = project.find_package("zlib")
+
+# Prepend custom finders
+project.add_package_finder(ConanFinder(config, conanfile="conanfile.txt"))
+# Now: Conan → PkgConfig → System
+fmt = project.find_package("fmt")
 ```
 
 ### Limitations and Tradeoffs

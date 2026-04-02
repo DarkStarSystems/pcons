@@ -886,6 +886,38 @@ fmt = project.find_package("fmt")
 
 Results are cached: calling `find_package("zlib")` twice returns the same target.
 
+### Header-Only and Manual Packages
+
+Some libraries (especially header-only ones) don't have `.pc` files and can't be found by `find_package()`. Create an `ImportedTarget` manually using `PackageDescription`:
+
+```python
+from pcons import ImportedTarget, PackageDescription
+
+# Header-only library with no .pc file
+httplib = ImportedTarget.from_package(PackageDescription(
+    name="cpp-httplib",
+    include_dirs=["/opt/homebrew/include"],
+    defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
+))
+```
+
+If the manual package depends on another package, use `link()` to wire up transitive dependencies — don't copy public requirements manually:
+
+```python
+openssl = project.find_package("openssl")
+
+httplib = ImportedTarget.from_package(PackageDescription(
+    name="cpp-httplib",
+    include_dirs=["/opt/homebrew/include"],
+    defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
+))
+httplib.link(openssl)  # openssl requirements propagate to anything linking httplib
+
+# Now any target that links httplib automatically gets openssl too
+app = project.Program("myapp", env, sources=["main.cpp"])
+app.link(httplib)  # gets httplib AND openssl includes, libs, flags
+```
+
 ### Using pkg-config
 
 The `PkgConfigFinder` uses the system's pkg-config to find packages.

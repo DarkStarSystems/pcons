@@ -235,6 +235,50 @@ class ConanFinder(BaseFinder):
 
         return settings
 
+    @staticmethod
+    def _infer_cppstd(env: Any) -> str | None:
+        """Infer C++ standard from environment flags.
+
+        Parses -std=c++XX (GCC/Clang) or /std:c++XX (MSVC) from
+        env.cxx.flags to determine the C++ standard version.
+
+        Args:
+            env: Environment with cxx.flags, or None.
+
+        Returns:
+            Standard version string (e.g., "17", "20", "23") or None.
+        """
+        if env is None:
+            return None
+        cxx_config = getattr(env, "cxx", None)
+        if cxx_config is None:
+            return None
+        flags = getattr(cxx_config, "flags", None)
+        if not flags:
+            return None
+
+        import re
+
+        for flag in flags:
+            flag_str = str(flag)
+            # GCC/Clang: -std=c++17, -std=c++20, -std=c++2a, -std=gnu++23
+            # MSVC: /std:c++17, /std:c++20, /std:c++latest
+            match = re.match(r"[-/]std[:=](?:gnu\+\+|c\+\+)(\w+)", flag_str)
+            if match:
+                std = match.group(1)
+                # Normalize historical aliases to version numbers
+                aliases = {
+                    "0x": "11",
+                    "1y": "14",
+                    "1z": "17",
+                    "2a": "20",
+                    "2b": "23",
+                    "2c": "26",
+                    "latest": "23",
+                }
+                return aliases.get(std, std)
+        return None
+
     def _detect_compiler_version(self, compiler: str) -> str | None:
         """Auto-detect compiler version by running the compiler.
 
@@ -301,6 +345,7 @@ class ConanFinder(BaseFinder):
         toolchain: Toolchain | None = None,
         env: Any = None,
         build_type: str = "Release",
+        cppstd: str | None = None,
     ) -> Path:
         """Generate or update Conan profile from pcons settings.
 
@@ -308,6 +353,11 @@ class ConanFinder(BaseFinder):
             toolchain: Toolchain to use for compiler settings.
             env: Environment for additional settings (optional).
             build_type: Build type (Release, Debug, etc.).
+            cppstd: C++ standard (e.g., "17", "20", "23"). Sets
+                compiler.cppstd in the profile. Many Conan packages
+                require this. If not provided, inferred from
+                env.cxx.flags if a -std=c++XX or /std:c++XX flag
+                is present.
 
         Returns:
             Path to the generated profile.
@@ -323,7 +373,12 @@ class ConanFinder(BaseFinder):
         settings = self._detect_compiler_settings(toolchain)
         settings["build_type"] = build_type
 
-        # Add custom settings
+        # Set compiler.cppstd — explicit parameter wins, then infer from env
+        resolved_cppstd = cppstd or self._infer_cppstd(env)
+        if resolved_cppstd:
+            settings["compiler.cppstd"] = resolved_cppstd
+
+        # Add custom settings (can override anything above)
         settings.update(self._profile_settings)
 
         # Write settings
