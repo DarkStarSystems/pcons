@@ -172,19 +172,43 @@ def download_source(
     dest_dir.mkdir(parents=True, exist_ok=True)
 
     # Determine download method
-    if url.startswith("git://") or url.startswith("git+") or url.endswith(".git"):
+    # Check for git URL — strip @ref suffix before checking .git extension
+    bare_url = url.split("@")[0] if "@" in url and "://" in url else url
+    is_git = (
+        url.startswith("git://") or url.startswith("git+") or bare_url.endswith(".git")
+    )
+    if is_git:
         # Git clone
         git_url, ref = _split_git_url_and_ref(url)
 
         logger.info("Cloning %s", git_url)
-        cmd = ["git", "clone", "--depth=1"]
-        if ref:
-            cmd.extend(["--branch", ref])
-        cmd.extend([git_url, str(source_dir)])
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise RuntimeError(f"Git clone failed: {result.stderr}")
+        is_sha = (
+            ref is not None
+            and len(ref) >= 7
+            and all(c in "0123456789abcdef" for c in ref)
+        )
+        if is_sha:
+            assert ref is not None  # guarded by is_sha check
+            # Commit SHAs require a full clone + checkout (can't use --branch)
+            cmd = ["git", "clone", git_url, str(source_dir)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"Git clone failed: {result.stderr}")
+            result = subprocess.run(
+                ["git", "-C", str(source_dir), "checkout", ref],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(f"Git checkout {ref} failed: {result.stderr}")
+        else:
+            cmd = ["git", "clone", "--depth=1"]
+            if ref:
+                cmd.extend(["--branch", ref])
+            cmd.extend([git_url, str(source_dir)])
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError(f"Git clone failed: {result.stderr}")
 
     elif url.endswith((".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip")):
         # Download archive
@@ -520,7 +544,11 @@ def fetch_package(
 
     # Build
     success = False
-    if build_system == "cmake":
+    if build_system == "none":
+        # Header-only or pre-built — skip build, use source dir as install prefix
+        install_prefix = source_dir
+        success = True
+    elif build_system == "cmake":
         cmake_options = pkg_config.get("cmake_options", {})
         success = build_cmake(source_dir, build_dir, install_prefix, cmake_options)
     elif build_system == "autotools":

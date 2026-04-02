@@ -380,6 +380,47 @@ class TestDownloadSource:
             ]
         ]
 
+    def test_git_url_with_ref_and_dotgit_detected(self, tmp_path: Path) -> None:
+        """URLs like https://...repo.git@main should be detected as git."""
+        commands: list[list[str]] = []
+
+        def mock_run(cmd, **kwargs):
+            commands.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            download_source("https://github.com/org/repo.git@main", tmp_path, "repo")
+
+        # Should clone with --branch main, not try to download as archive
+        assert commands[0][:2] == ["git", "clone"]
+        assert "--branch" in commands[0]
+        assert "main" in commands[0]
+
+    def test_git_clone_with_commit_sha(self, tmp_path: Path) -> None:
+        """Commit SHAs should do full clone + checkout, not --branch."""
+        commands: list[list[str]] = []
+
+        def mock_run(cmd, **kwargs):
+            commands.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            return result
+
+        sha = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2"
+        with patch("subprocess.run", side_effect=mock_run):
+            download_source(f"git+https://example.com/repo.git@{sha}", tmp_path, "repo")
+
+        # First command: full clone (no --depth=1, no --branch)
+        assert commands[0][:2] == ["git", "clone"]
+        assert "--depth=1" not in commands[0]
+        assert "--branch" not in commands[0]
+        # Second command: checkout the SHA
+        assert commands[1] == ["git", "-C", str(tmp_path / "repo"), "checkout", sha]
+
     def test_zip_rejects_path_traversal(self, tmp_path: Path) -> None:
         """Zip extraction must reject ../ traversal."""
         archive_path = tmp_path / "payload.zip"
