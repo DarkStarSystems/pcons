@@ -977,24 +977,23 @@ conan = ConanFinder(
     output_folder=build_dir / "conan",
 )
 
-# Sync profile with toolchain settings
-conan.sync_profile(toolchain, build_type=variant.capitalize())
-
-# Install packages (cached, only runs when needed)
-packages = conan.install()
-
-print(f"Found packages: {list(packages.keys())}")
-
-# Get the fmt package
-fmt_pkg = packages.get("fmt")
-if not fmt_pkg:
-    raise RuntimeError("fmt package not found")
-
 # Create project and environment
 project = Project("conan_example", root_dir=project_dir, build_dir=build_dir)
 env = project.Environment(toolchain=toolchain)
 env.set_variant(variant)
 env.cxx.flags.append("-std=c++17")
+
+# Sync Conan profile with toolchain settings.
+# cppstd can be set explicitly, or inferred from env.cxx.flags.
+conan.sync_profile(toolchain, env=env, build_type=variant.capitalize())
+
+# Install packages (cached, only runs when needed)
+packages = conan.install()
+
+# Get the fmt package
+fmt_pkg = packages.get("fmt")
+if not fmt_pkg:
+    raise RuntimeError("fmt package not found")
 
 # Apply package settings with env.use()
 env.use(fmt_pkg)
@@ -1006,6 +1005,21 @@ hello.add_sources([project_dir / "src" / "main.cpp"])
 project.Default(hello)
 Generator().generate(project, build_dir)
 ```
+
+#### sync_profile() Reference
+
+`conan.sync_profile()` generates a Conan profile from pcons settings:
+
+```python
+conan.sync_profile(
+    toolchain,                # Detects compiler, version, OS, arch
+    env=env,                  # Infers cppstd from env.cxx.flags (optional)
+    build_type="Release",     # Release, Debug, RelWithDebInfo, MinSizeRel
+    cppstd="23",              # Explicit C++ standard (overrides env inference)
+)
+```
+
+The `cppstd` parameter sets `compiler.cppstd` in the Conan profile, which many packages require. If omitted, it's inferred from `env.cxx.flags` (e.g., `-std=c++23` becomes `compiler.cppstd=23`). You can also use the lower-level `conan.set_profile_setting("compiler.cppstd", "23")` before calling `sync_profile()`.
 
 ### The env.use() Helper
 
