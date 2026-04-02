@@ -373,3 +373,50 @@ class TestGeneratePcFile:
         assert "Requires: zlib" in content
         # zlib's -lz should NOT appear in Libs (it's in Requires)
         assert "-lz" not in content
+
+    def test_pc_file_absolute_include_under_root_uses_includedir(self, tmp_path):
+        """Absolute include dirs under root_dir map to ${includedir}."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        target = Target("mylib")
+        target.public.include_dirs.append(tmp_path / "include")
+        project.add_target(target)
+
+        pc = project.generate_pc_file(target, version="1.0")
+        content = pc.read_text()
+        assert "-I${includedir}" in content
+        assert str(tmp_path) not in content
+
+    def test_pc_file_external_include_kept_absolute(self, tmp_path):
+        """Absolute include dirs outside root_dir stay absolute."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        target = Target("mylib")
+        target.public.include_dirs.append(Path("/opt/external/include"))
+        project.add_target(target)
+
+        pc = project.generate_pc_file(target, version="1.0")
+        content = pc.read_text()
+        assert "-I/opt/external/include" in content
+
+
+class TestAlias:
+    def test_alias_accepts_list(self, tmp_path):
+        """Alias() should accept a list of targets, not just varargs."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        t1 = Target("lib1")
+        t2 = Target("lib2")
+        project.add_target(t1)
+        project.add_target(t2)
+
+        alias = project.Alias("install", [t1, t2])
+        assert len(alias._target_refs) == 2
+
+    def test_alias_varargs_still_works(self, tmp_path):
+        """Alias() should still accept varargs."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        t1 = Target("lib1")
+        t2 = Target("lib2")
+        project.add_target(t1)
+        project.add_target(t2)
+
+        alias = project.Alias("install", t1, t2)
+        assert len(alias._target_refs) == 2

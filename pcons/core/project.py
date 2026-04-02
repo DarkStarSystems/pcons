@@ -278,14 +278,16 @@ class Project:
         """Get all registered environments."""
         return list(self._environments)
 
-    def Alias(self, name: str, *targets: Target | Node) -> AliasNode:
+    def Alias(
+        self, name: str, *targets: Target | Node | list[Target | Node]
+    ) -> AliasNode:
         """Create a named alias for targets.
 
         Aliases can be used as build targets (e.g., 'ninja test').
 
         Args:
             name: Alias name.
-            *targets: Targets or nodes to include in the alias.
+            *targets: Targets, nodes, or lists of them.
 
         Returns:
             AliasNode for this alias.
@@ -294,7 +296,14 @@ class Project:
             self._aliases[name] = AliasNode(name, defined_at=get_caller_location())
 
         alias = self._aliases[name]
+        # Flatten lists so Alias("name", [a, b]) works like Alias("name", a, b)
+        flat: list[Target | Node] = []
         for t in targets:
+            if isinstance(t, list):
+                flat.extend(t)
+            else:
+                flat.append(t)
+        for t in flat:
             if isinstance(t, Target):
                 # Defer resolution: output_nodes may not be populated until resolve()
                 alias.add_deferred_target(t)
@@ -614,14 +623,30 @@ class Project:
                     requires.append(dep.name)
 
         # Build Cflags: from public include_dirs and defines
-        # Use ${includedir} for dirs that end with "include", absolute for others
+        # Rewrite include dirs to use ${includedir} for relocatability:
+        # - dirs under root_dir → ${includedir} (installed layout)
+        # - relative dirs like "include" → ${includedir}
+        # - absolute dirs outside the project → kept as-is
         cflags_parts: list[str] = []
+        seen_includedir = False
         for inc_dir in target.public.include_dirs:
-            inc_str = str(inc_dir)
-            if inc_str == "include" or inc_str.endswith("/include"):
-                cflags_parts.append("-I${includedir}")
+            inc_path = Path(inc_dir)
+            if not inc_path.is_absolute():
+                # Relative path (e.g., "include") — use ${includedir}
+                if not seen_includedir:
+                    cflags_parts.append("-I${includedir}")
+                    seen_includedir = True
             else:
-                cflags_parts.append(f"-I{inc_str}")
+                # Absolute path — check if it's under the project root
+                try:
+                    inc_path.relative_to(self.root_dir)
+                    # Under project root — will be installed to ${includedir}
+                    if not seen_includedir:
+                        cflags_parts.append("-I${includedir}")
+                        seen_includedir = True
+                except ValueError:
+                    # External path (e.g., /usr/include) — keep as-is
+                    cflags_parts.append(f"-I{inc_dir}")
         for define in target.public.defines:
             cflags_parts.append(f"-D{define}")
         for flag in target.public.compile_flags:

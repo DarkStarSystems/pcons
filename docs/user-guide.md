@@ -445,10 +445,10 @@ If you don't call `project.Default()`, all programs and libraries (static and sh
 
 ```python
 # Create an alias - builds with "ninja install"
-project.Alias("install", [installed_lib, installed_headers])
+project.Alias("install", installed_lib, installed_headers)
 
 # Create an alias for tests
-project.Alias("test", [test_runner])
+project.Alias("test", test_runner)
 
 # Now you can run:
 #   ninja install    # Build and install
