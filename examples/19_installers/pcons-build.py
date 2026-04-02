@@ -16,16 +16,13 @@ from pcons.contrib import platform
 # Build Script
 # =============================================================================
 
-# Find a C toolchain
-toolchain = find_c_toolchain()
-
 # Create project
 project = Project("installer_example")
 
 # Directories
 src_dir = project.root_dir / "src"
 build_dir = project.build_dir
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=find_c_toolchain())
 
 # Build the application
 app = project.Program("hello", env)

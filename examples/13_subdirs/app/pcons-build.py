@@ -37,8 +37,7 @@ def build_app(project: Project | None = None, build_dir: Path | None = None):
     # Build libfoo first to get its library target
     libfoo = build_libfoo(project, build_dir)
 
-    toolchain = find_c_toolchain()
-    env = project.Environment(toolchain=toolchain)
+    env = project.Environment(toolchain=find_c_toolchain())
 
     # Build app program, linking to libfoo (gets includes automatically)
     app = project.Program("app", env)

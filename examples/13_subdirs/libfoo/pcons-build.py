@@ -36,8 +36,7 @@ def build_libfoo(
 
     assert project is not None  # For type checker - always true after above
 
-    toolchain = find_c_toolchain()
-    env = project.Environment(toolchain=toolchain)
+    env = project.Environment(toolchain=find_c_toolchain())
 
     # Build static library with public include directory
     libfoo = project.StaticLibrary("foo", env)

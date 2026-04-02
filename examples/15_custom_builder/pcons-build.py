@@ -131,9 +131,7 @@ class GenerateVersionBuilder:
 project = Project("custom_builder_example")
 build_dir = project.build_dir
 
-# Find a C toolchain
-toolchain = find_c_toolchain()
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=find_c_toolchain())
 
 # Use our custom builder to generate a version header
 # This works exactly like built-in builders!

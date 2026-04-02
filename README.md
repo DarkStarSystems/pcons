@@ -52,7 +52,7 @@ env.cc.flags.extend(["-Wall"])
 
 # Build a static library
 lib = project.StaticLibrary("core", env, sources=["src/core.c"])
-lib.public.include_dirs.append(Path("include"))
+lib.public.include_dirs.append("include")
 
 # Build a program that links the library
 app = project.Program("myapp", env, sources=["src/main.c"])

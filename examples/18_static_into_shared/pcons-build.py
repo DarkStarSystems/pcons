@@ -14,16 +14,13 @@ and core_value() from static lib is available in shared lib.
 
 from pcons import Generator, Project, find_c_toolchain
 
-# Find a C toolchain
-toolchain = find_c_toolchain()
-
 # Create project
 project = Project("static_into_shared")
 
 # Directories
 src_dir = project.root_dir / "src"
 build_dir = project.build_dir
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=find_c_toolchain())
 
 # 1. Create static library from core.c with PUBLIC include directory
 #    This should propagate to any target that links core_lib

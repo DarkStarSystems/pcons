@@ -14,16 +14,13 @@ from pcons.toolchains import find_c_toolchain
 # Build Script
 # =============================================================================
 
-# Find a C toolchain (tries clang, gcc, msvc in order)
-toolchain = find_c_toolchain()
-
-# Create project with the toolchain
+# Create project
 project = Project("hello_makefile")
 
 # Directories
 src_dir = project.root_dir / "src"
 build_dir = project.build_dir
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=find_c_toolchain())
 
 # Create program target using the target-centric API
 hello = project.Program("hello", env)

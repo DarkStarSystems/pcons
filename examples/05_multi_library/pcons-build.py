@@ -20,14 +20,12 @@ from pcons.generators.mermaid import MermaidGenerator
 # Build Script
 # =============================================================================
 
-# Find a C toolchain (uses platform-appropriate defaults)
-toolchain = find_c_toolchain()
 project = Project("multi_library")
 
 src_dir = project.root_dir / "src"
 include_dir = project.root_dir / "include"
 build_dir = project.build_dir
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=find_c_toolchain())
 
 # -----------------------------------------------------------------------------
 # Library: libmath - low-level math utilities
