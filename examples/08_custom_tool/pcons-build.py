@@ -8,7 +8,6 @@ that concatenates multiple text files into one.
 Uses Python for cross-platform file concatenation.
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -61,11 +60,11 @@ class ConcatTool(BaseTool):
 # =============================================================================
 
 # Directories
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 
 # Create project
-project = Project("concat_example", build_dir=build_dir)
+project = Project("concat_example")
+build_dir = project.build_dir
 
 # Create environment and add our custom tool
 env = project.Environment()

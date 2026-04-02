@@ -17,7 +17,6 @@ This is important for projects on systems where paths commonly
 contain spaces (Windows, macOS with iCloud, etc.).
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
@@ -27,7 +26,6 @@ from pcons import Generator, Project, find_c_toolchain
 # =============================================================================
 
 # Directories - note the spaces in names!
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 example_dir = Path(__file__).parent
 src_dir = example_dir / "src with spaces"
 include_dir = example_dir / "My Headers"
@@ -36,7 +34,8 @@ include_dir = example_dir / "My Headers"
 toolchain = find_c_toolchain()
 
 # Create project
-project = Project("paths_with_spaces", build_dir=build_dir)
+project = Project("paths_with_spaces")
+build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 
 # Create program target

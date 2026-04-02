@@ -12,20 +12,19 @@ Expected: core.h is found via public include propagation,
 and core_value() from static lib is available in shared lib.
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
 
 # Directories
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 
 # Find a C toolchain
 toolchain = find_c_toolchain()
 
 # Create project
-project = Project("static_into_shared", build_dir=build_dir)
+project = Project("static_into_shared")
+build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 
 # 1. Create static library from core.c with PUBLIC include directory

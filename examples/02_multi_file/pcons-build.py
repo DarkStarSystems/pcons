@@ -8,7 +8,6 @@ This example demonstrates the target-centric build API:
 - Automatic resolution of sources to objects
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
@@ -18,7 +17,6 @@ from pcons import Generator, Project, find_c_toolchain
 # =============================================================================
 
 # Directories
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
 
@@ -26,7 +24,8 @@ include_dir = Path(__file__).parent / "include"
 toolchain = find_c_toolchain()
 
 # Create project with the toolchain
-project = Project("multi_file", build_dir=build_dir)
+project = Project("multi_file")
+build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 
 # Create calculator program target using target-centric API

@@ -906,11 +906,7 @@ If the manual package depends on another package, use `link()` to wire up transi
 ```python
 openssl = project.find_package("openssl")
 
-httplib = ImportedTarget.from_package(PackageDescription(
-    name="cpp-httplib",
-    include_dirs=["/opt/homebrew/include"],
-    defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
-))
+httplib = # ... see above
 httplib.link(openssl)  # openssl requirements propagate to anything linking httplib
 
 # Now any target that links httplib automatically gets openssl too

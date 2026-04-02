@@ -6,17 +6,16 @@ This example demonstrates using env.override() to compile specific
 source files with different flags - like extra defines or includes.
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
 
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
 
 toolchain = find_c_toolchain()
-project = Project("override_example", build_dir=build_dir)
+project = Project("override_example")
+build_dir = project.build_dir
 
 env = project.Environment(toolchain=toolchain)
 

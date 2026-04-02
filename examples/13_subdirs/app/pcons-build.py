@@ -6,7 +6,6 @@ This demonstrates a subdir that depends on another subdir (libfoo).
 Works both standalone and as part of the parent build.
 """
 
-import os
 import runpy
 from pathlib import Path
 
@@ -23,19 +22,15 @@ def build_app(project: Project | None = None, build_dir: Path | None = None):
 
     Args:
         project: Parent project, or None for standalone build
-        build_dir: Build output directory
+        build_dir: Build output directory (unused, kept for API compat)
     """
     this_dir = Path(__file__).parent
     src_dir = this_dir / "src"
 
-    # Use provided build_dir or default
-    if build_dir is None:
-        build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
-
     # Create project if not provided (standalone mode)
     standalone = project is None
     if standalone:
-        project = Project("app", build_dir=build_dir)
+        project = Project("app")
 
     assert project is not None  # For type checker - always true after above
 
@@ -54,7 +49,7 @@ def build_app(project: Project | None = None, build_dir: Path | None = None):
         # Resolve and generate build file when running standalone
         project.resolve()
         Generator().generate(project)
-        print(f"Generated {build_dir}")
+        print(f"Generated {project.build_dir}")
 
 
 if __name__ == "__main__":

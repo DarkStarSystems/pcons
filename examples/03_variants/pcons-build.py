@@ -9,7 +9,6 @@ This example demonstrates:
 - Organizing outputs into variant-specific directories
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
@@ -19,12 +18,12 @@ from pcons import Generator, Project, find_c_toolchain
 # =============================================================================
 
 # Directories
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 
 # Find a C toolchain (uses platform-appropriate defaults)
 toolchain = find_c_toolchain()
-project = Project("variants_example", build_dir=build_dir)
+project = Project("variants_example")
+build_dir = project.build_dir
 
 # Create base environment with common settings
 base_env = project.Environment(toolchain=toolchain)

@@ -84,7 +84,7 @@ class Project:
         name: str,
         *,
         root_dir: Path | str | None = None,
-        build_dir: Path | str = "build",
+        build_dir: Path | str | None = None,
         config: Any = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
@@ -93,12 +93,16 @@ class Project:
         Args:
             name: Project name.
             root_dir: Project root directory (default: current dir).
-            build_dir: Directory for build outputs (default: "build").
+            build_dir: Directory for build outputs. Defaults to the
+                PCONS_BUILD_DIR environment variable if set (the CLI
+                sets this automatically), otherwise "build".
             config: Cached configuration from configure phase.
             defined_at: Source location where project was created.
         """
         self.name = name
         self.root_dir = Path(root_dir) if root_dir else Path.cwd()
+        if build_dir is None:
+            build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
         bd = Path(build_dir)
         if bd.is_absolute():
             try:

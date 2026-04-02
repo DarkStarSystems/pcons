@@ -11,7 +11,6 @@ Build graph:
     libmath <-- libphysics <-- simulator
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -22,13 +21,13 @@ from pcons.generators.mermaid import MermaidGenerator
 # Build Script
 # =============================================================================
 
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
 
 # Find a C toolchain (uses platform-appropriate defaults)
 toolchain = find_c_toolchain()
-project = Project("multi_library", build_dir=build_dir)
+project = Project("multi_library")
+build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 
 # -----------------------------------------------------------------------------

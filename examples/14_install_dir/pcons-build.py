@@ -10,7 +10,6 @@ InstallDir uses ninja's depfile feature for incremental rebuilds:
 if any file in the source directory changes, the copy is re-run.
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project
@@ -20,11 +19,11 @@ from pcons import Generator, Project
 # =============================================================================
 
 # Directories
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent
 
 # Create project (no toolchain needed for this example)
-project = Project("install_dir", build_dir=build_dir)
+project = Project("install_dir")
+build_dir = project.build_dir
 
 # Install the assets directory to the build output
 # This copies the entire 'assets' directory tree to 'build/dist/assets'

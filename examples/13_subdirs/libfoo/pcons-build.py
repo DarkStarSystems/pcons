@@ -7,7 +7,6 @@ This demonstrates a subdir that works both:
 - As subdir: called from parent pcons-build.py
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
@@ -21,7 +20,7 @@ def build_libfoo(
 
     Args:
         project: Parent project, or None for standalone build
-        build_dir: Build output directory
+        build_dir: Build output directory (unused, kept for API compat)
 
     Returns:
         The libfoo static library target (with public.include_dirs set)
@@ -30,14 +29,10 @@ def build_libfoo(
     src_dir = this_dir / "src"
     include_dir = this_dir / "include"
 
-    # Use provided build_dir or default
-    if build_dir is None:
-        build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
-
     # Create project if not provided (standalone mode)
     standalone = project is None
     if standalone:
-        project = Project("libfoo", build_dir=build_dir)
+        project = Project("libfoo")
 
     assert project is not None  # For type checker - always true after above
 
@@ -53,7 +48,7 @@ def build_libfoo(
         # Resolve and generate build file when running standalone
         project.resolve()
         Generator().generate(project)
-        print(f"Generated {build_dir}")
+        print(f"Generated {project.build_dir}")
 
     return libfoo
 

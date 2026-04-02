@@ -10,7 +10,6 @@ Use case: Compile some sources with different flags (e.g., different
 optimization level, or legacy code with warnings disabled).
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
@@ -20,14 +19,14 @@ from pcons import Generator, Project, find_c_toolchain
 # =============================================================================
 
 # Directories
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 
 # Find a C toolchain
 toolchain = find_c_toolchain()
 
 # Create project
-project = Project("object_sources", build_dir=build_dir)
+project = Project("object_sources")
+build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 
 # Compile helper.c separately with special flags

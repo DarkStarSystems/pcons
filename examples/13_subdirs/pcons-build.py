@@ -27,17 +27,16 @@ Usage:
   cd app && python pcons-build.py && ninja -C build
 """
 
-import os
 import runpy
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
 
 this_dir = Path(__file__).parent
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 
 # Create the main project
-project = Project("subdirs_example", build_dir=build_dir)
+project = Project("subdirs_example")
+build_dir = project.build_dir
 toolchain = find_c_toolchain()
 
 # Load libfoo's build script using runpy (simpler than importlib.util)

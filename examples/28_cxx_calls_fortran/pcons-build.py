@@ -8,13 +8,9 @@ This example demonstrates:
 - Automatic Fortran runtime injection (-lgfortran)
 """
 
-import os
-
 from pcons import Generator, Project, find_c_toolchain, find_fortran_toolchain
 
-project = Project(
-    "cxx_calls_fortran", build_dir=os.environ.get("PCONS_BUILD_DIR", "build")
-)
+project = Project("cxx_calls_fortran")
 
 # C++ is primary - g++/clang++ will drive the link.
 # The Fortran toolchain is added as secondary to compile the Fortran source.

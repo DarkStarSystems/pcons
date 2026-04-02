@@ -8,11 +8,9 @@ This example demonstrates:
 - Automatic resolution and generation
 """
 
-import os
-
 from pcons import Generator, Project, find_c_toolchain
 
-project = Project("hello_c", build_dir=os.environ.get("PCONS_BUILD_DIR", "build"))
+project = Project("hello_c")
 env = project.Environment(toolchain=find_c_toolchain())
 
 project.Program("hello", env, sources=["src/hello.c"])

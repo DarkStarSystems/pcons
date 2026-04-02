@@ -8,13 +8,9 @@ This example demonstrates:
 - Using the generated header in a C program
 """
 
-import os
-
 from pcons import Generator, Project, configure_file, find_c_toolchain
 
-project = Project(
-    "configure_file_example", build_dir=os.environ.get("PCONS_BUILD_DIR", "build")
-)
+project = Project("configure_file_example")
 env = project.Environment(toolchain=find_c_toolchain())
 
 # Generate config.h from template at configure time

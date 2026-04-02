@@ -31,7 +31,7 @@ if not config.get("configured") or os.environ.get("PCONS_RECONFIGURE"):
 variant = get_variant("release")
 
 # Create project
-project = Project("myproject", root_dir=source_dir, build_dir=build_dir)
+project = Project("myproject", root_dir=source_dir)
 
 # Create environment with toolchain
 toolchain = find_c_toolchain()

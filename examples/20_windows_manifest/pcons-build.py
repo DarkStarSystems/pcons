@@ -8,17 +8,16 @@ This example shows how to:
 Windows-only: requires MSVC or clang-cl toolchain.
 """
 
-import os
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
 
 # Directories
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 
 # Create project
-project = Project("manifest_example", build_dir=build_dir)
+project = Project("manifest_example")
+build_dir = project.build_dir
 
 # Find C toolchain - prefer MSVC or clang-cl on Windows for manifest support
 toolchain = find_c_toolchain(prefer=["msvc", "clang-cl", "gcc", "llvm"])

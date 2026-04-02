@@ -12,16 +12,15 @@ modified, Ninja skips recompiling main.c and relinking — saving
 potentially expensive rebuilds in large projects.
 """
 
-import os
 import sys
 from pathlib import Path
 
 from pcons import Generator, Project, find_c_toolchain
 
-build_dir = Path(os.environ.get("PCONS_BUILD_DIR", "build"))
 src_dir = Path(__file__).parent / "src"
 
-project = Project("restat_example", build_dir=build_dir)
+project = Project("restat_example")
+build_dir = project.build_dir
 env = project.Environment(toolchain=find_c_toolchain())
 
 # Generate version.h from version.txt, with restat so unchanged
