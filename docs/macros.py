@@ -87,6 +87,9 @@ def _get_toolchain_table() -> str:
 
     from pcons.tools.toolchain import toolchain_registry
 
+    # Import contrib toolchains so their registrations appear in the table
+    import pcons.contrib.latex.toolchain  # noqa: F401
+
     # Collect unique toolchains (each may be registered under multiple aliases)
     seen_classes: set[type] = set()
     rows: list[dict[str, str]] = []

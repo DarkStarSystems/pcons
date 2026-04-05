@@ -123,4 +123,5 @@ toolchain_registry.register(
     tool_classes=[LatexTool],
     category="latex",
     description="LaTeX document compilation via latexmk",
+    finder="find_latex_toolchain()",
 )
