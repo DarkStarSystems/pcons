@@ -1,19 +1,21 @@
 # SPDX-License-Identifier: MIT
-"""Target resolution system for target-centric builds.
+"""Target resolution system — tool-agnostic factory dispatch.
 
 Resolution Overview
 -------------------
 The Resolver transforms high-level Target descriptions into concrete build nodes
-that generators can emit. This happens in three distinct phases:
+that generators can emit. This happens in three phases:
 
 **Phase 1: Main Resolution** (resolve() -> _resolve_target())
-    For each target in dependency order:
-    1. Compute effective requirements by merging target's own requirements with
-       public requirements from all dependencies (transitive).
-    2. Query toolchain for source handlers to determine how each source file
-       should be compiled (tool-agnostic - no hardcoded C/C++ knowledge).
-    3. Create object nodes for compilable sources, linking them to their commands.
-    4. Create output nodes (library/program) with proper dependencies on objects.
+    For each target in dependency order, dispatch to the target's registered
+    factory (via BuilderRegistry) to create build nodes. All tool-specific logic
+    lives in factories — the resolver is completely tool-agnostic.
+
+    Built-in factories:
+    - CompileLinkFactory (pcons/tools/compile_link.py): Program, Library, Object
+    - InstallNodeFactory (pcons/tools/install.py): Install, InstallAs, InstallDir
+    - ArchiveNodeFactory (pcons/tools/archive.py): Tarfile, Zipfile
+    - CommandNodeFactory (below): env.Command targets
 
 **Phase 2: Pending Source Resolution** (resolve_pending_sources())
     Some targets (Install, Tarfile, etc.) reference other targets' outputs.
@@ -29,25 +31,16 @@ that generators can emit. This happens in three distinct phases:
 
 Key Design Decisions
 --------------------
-- **Tool-agnostic**: The resolver asks toolchains how to handle sources rather
-  than having hardcoded knowledge of file extensions or compile commands.
+- **Tool-agnostic core**: The resolver knows nothing about compilers, linkers,
+  or any specific tools. All tool-specific resolution logic is in factories
+  registered via the BuilderRegistry.
 
-- **Object caching**: Same source + same effective requirements = shared object.
-  This avoids duplicate compilations when multiple targets share a source file
-  with identical compile flags.
-
-- **Factory pattern**: Resolution logic is split into focused factories:
-  - ObjectNodeFactory: Object file creation and caching
-  - OutputNodeFactory: Library and program output creation
-  - Builder factories (from BuilderRegistry): Pending source resolution
+- **Unified factory dispatch**: All target types (compile-link, install, archive,
+  command) are resolved through the same factory dispatch mechanism. No target
+  type gets special-cased in the resolver.
 
 - **Lazy resolution**: Targets are just descriptions until resolve() is called.
   This allows customization (output_name, flags) after target creation.
-
-The resolution logic is organized into focused factory classes:
-- ObjectNodeFactory: Creates and caches object nodes for source files
-- OutputNodeFactory: Creates library and program output nodes
-- InstallNodeFactory (in pcons/tools/install.py): Creates install/copy nodes
 """
 
 from __future__ import annotations
@@ -60,13 +53,8 @@ from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode, Node
-from pcons.core.requirements import (
-    EffectiveRequirements,
-    compute_effective_requirements,
-)
-from pcons.core.subst import PathToken, TargetPath
+from pcons.core.subst import TargetPath
 from pcons.core.target import TargetType
-from pcons.toolchains.build_context import CompileLinkContext
 
 logger = logging.getLogger(__name__)
 
@@ -74,648 +62,6 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.core.target import Target
-    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
-
-
-class ObjectNodeFactory:
-    """Factory for creating and caching object file nodes.
-
-    Object Node Caching Strategy
-    ----------------------------
-    When multiple targets share a source file with identical effective requirements,
-    the same object file can be reused. The cache key is:
-
-        (source_path.resolve(), effective_requirements.as_hashable_tuple())
-
-    For example, if lib_a and lib_b both compile "common.cpp" with the same includes
-    and defines, only one object file is created. This is safe because:
-    - Effective requirements fully determine the compile command
-    - The source path is resolved to absolute to avoid path aliasing
-
-    However, if lib_a adds "-DDEBUG" and lib_b does not, they get separate objects
-    because their effective requirements differ.
-
-    Tool-Agnostic Source Handling
-    -----------------------------
-    The factory queries the toolchain to determine how to compile each source:
-
-        handler = toolchain.get_source_handler(source.path.suffix)
-
-    If a handler is returned, it provides:
-    - tool_name: Which tool to use (e.g., "cc", "cxx")
-    - language: For linker selection (e.g., "c", "cxx", "cuda")
-    - object_suffix: Output suffix (e.g., ".o", ".obj")
-    - depfile: How to track header dependencies
-    - command_var: Which command template to use (e.g., "objcmd")
-
-    If no handler is found, the source passes through as-is (pre-compiled .o files).
-
-    Attributes:
-        project: The project being resolved.
-        _object_cache: Cache mapping (source_path, effective_hash) to object node.
-    """
-
-    def __init__(self, project: Project) -> None:
-        """Initialize the factory.
-
-        Args:
-            project: The project to resolve.
-        """
-        self.project = project
-        self._object_cache: dict[tuple[Path, tuple], FileNode] = {}
-        # Maps language → list of (source_path, obj_node) pairs.
-        # Populated by create_object_node(); passed to toolchain after_resolve() hooks.
-        self._source_obj_by_language: dict[str, list[tuple[Path, FileNode]]] = {}
-
-    def get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
-        """Generate target-specific output path for an object file.
-
-        Format: ``<build_dir>/obj.<target>/<relative_dir>/<name>.<src_ext><obj_ext>``
-
-        For example, ``src/lib/foo.cpp`` produces
-        ``build/obj.mylib/src/lib/foo.cpp.o``.
-
-        Including the source extension prevents collisions when two sources
-        share a basename (e.g., ``foo.c`` and ``foo.cpp``).  Mirroring the
-        source directory structure prevents collisions when sources with the
-        same filename live in different directories.
-
-        Args:
-            target: The target owning this object.
-            source: Source file path.
-            env: Environment containing the toolchain.
-
-        Returns:
-            Path for the object file.
-        """
-        build_dir = self.project.build_dir
-        obj_dir = build_dir / f"obj.{target.name}"
-
-        # Try to get suffix from source handler first (for special file types like .rc)
-        handler = self.get_source_handler(source, env)
-        if handler:
-            obj_suffix = handler.object_suffix
-        else:
-            toolchain = env._toolchain
-            obj_suffix = toolchain.get_object_suffix() if toolchain else ".o"
-
-        # Mirror source directory structure and include source extension
-        # e.g. src/lib/foo.cpp → obj.mylib/src/lib/foo.cpp.o
-        obj_name = source.name + obj_suffix
-        rel_dir = source.parent
-        # Strip leading ".." components and absolute prefixes to keep paths
-        # inside the object directory
-        parts = [
-            p for p in rel_dir.parts if p not in ("..", "/") and p != rel_dir.anchor
-        ]
-        if parts:
-            return obj_dir.joinpath(*parts) / obj_name
-        return obj_dir / obj_name
-
-    def get_source_handler(
-        self, source: Path, env: Environment
-    ) -> SourceHandler | None:
-        """Get source handler from any of the environment's toolchains.
-
-        This is the tool-agnostic way to determine how to compile a source.
-        Checks all toolchains in order (primary first, then additional).
-
-        Args:
-            source: Source file path.
-            env: Environment containing the toolchain(s).
-
-        Returns:
-            SourceHandler if any toolchain can handle this source, else None.
-        """
-        # Check all toolchains in order (primary first, then additional)
-        for toolchain in env.toolchains:
-            handler = toolchain.get_source_handler(source.suffix)
-            if handler is not None:
-                if env.has_tool(handler.tool_name):
-                    return handler
-                else:
-                    logger.warning(
-                        "Tool '%s' required for '%s' files is not available in the "
-                        "environment. Configure the toolchain or add the tool manually.",
-                        handler.tool_name,
-                        source.suffix,
-                    )
-        return None
-
-    def _resolve_depfile(
-        self, depfile_spec: TargetPath | None, target_path: Path
-    ) -> PathToken | None:
-        """Resolve depfile specification to a concrete PathToken.
-
-        Dependency files (depfiles) are used by build systems like Ninja to track
-        implicit dependencies discovered during compilation (typically C/C++ header
-        includes). The compiler generates a depfile alongside the object file, and
-        the build system uses it for incremental rebuilds.
-
-        This method converts a TargetPath marker (which represents "the depfile path
-        relative to the target") into a concrete PathToken that generators can use.
-
-        Example flow:
-            1. SourceHandler specifies: depfile=TargetPath(suffix=".d")
-            2. Target path is: build/obj.hello/main.o
-            3. This method returns: PathToken(path="build/obj.hello/main.o", suffix=".d")
-            4. Generator writes: depfile = build/obj.hello/main.o.d
-
-        The depfile location is always derived from the target path to ensure it's
-        in the build directory and properly associated with the object file.
-
-        Args:
-            depfile_spec: The depfile specification from SourceHandler.
-                - TargetPath(suffix=".d"): Depfile is target path + ".d" suffix
-                - None: No depfile (tool doesn't support dependency tracking)
-            target_path: The actual target output path (object file).
-
-        Returns:
-            PathToken with concrete path for TargetPath input, None for None input.
-        """
-        if depfile_spec is None:
-            return None
-
-        # Convert TargetPath to PathToken with actual target path
-        # The depfile path is the target path with the suffix appended
-        return PathToken(
-            prefix=depfile_spec.prefix,
-            path=str(target_path),
-            path_type="build",  # Depfiles are in the build directory
-            suffix=depfile_spec.suffix,
-        )
-
-    def get_auxiliary_input_handler(
-        self, source: Path, env: Environment
-    ) -> AuxiliaryInputHandler | None:
-        """Get auxiliary input handler from any of the environment's toolchains.
-
-        Auxiliary input files are passed directly to a downstream tool with
-        specific flags rather than being compiled to object files.
-
-        Args:
-            source: Source file path.
-            env: Environment containing the toolchain(s).
-
-        Returns:
-            AuxiliaryInputHandler if any toolchain handles this as an auxiliary
-            input, else None.
-        """
-        # Check all toolchains in order (primary first, then additional)
-        for toolchain in env.toolchains:
-            handler = toolchain.get_auxiliary_input_handler(source.suffix)
-            if handler is not None:
-                return handler
-        return None
-
-    def create_object_node(
-        self,
-        target: Target,
-        source: FileNode,
-        effective: EffectiveRequirements,
-        env: Environment,
-    ) -> FileNode | None:
-        """Create object file node with effective requirements in build_info.
-
-        Implements object caching: if the same source is compiled with the
-        same effective requirements, the same object node is reused.
-
-        Args:
-            target: The target this object belongs to.
-            source: Source file node.
-            effective: Computed effective requirements.
-            env: Build environment.
-
-        Returns:
-            FileNode for the object file, or the source directly if not compilable
-            (e.g., pre-compiled .o files, linker scripts).
-        """
-        # Get source handler from the toolchain (tool-agnostic)
-        handler = self.get_source_handler(source.path, env)
-        if handler is None:
-            # No handler = not a compilable source
-            # Pass through directly (e.g., pre-compiled .o files, linker scripts)
-            return source
-
-        tool_name = handler.tool_name
-        language = handler.language
-        deps_style = handler.deps_style
-        command_var = handler.command_var
-
-        # Generate cache key: (source path, effective requirements hash)
-        # Use resolved (absolute) path to avoid duplicate objects for same file
-        effective_hash = effective.as_hashable_tuple()
-        cache_key = (source.path.resolve(), effective_hash)
-
-        # Check cache
-        if cache_key in self._object_cache:
-            return self._object_cache[cache_key]
-
-        # Create object node via project for deduplication
-        obj_path = self.get_object_path(target, source.path, env)
-        obj_node = self.project.node(obj_path)
-        obj_node.depends([source])
-
-        # Resolve depfile: convert TargetPath to PathToken with actual target path
-        depfile = self._resolve_depfile(handler.depfile, obj_path)
-
-        # Propagate explicit dependencies from source to object as implicit deps.
-        # This allows generated headers (added via source.depends()) to trigger
-        # rebuilds without being explicit compiler inputs.
-        if source.explicit_deps:
-            obj_node.implicit_deps.extend(source.explicit_deps)
-
-        # Create context object from effective requirements
-        context = CompileLinkContext.from_effective_requirements(effective)
-
-        # Store build info for the generator
-        # Use handler's depfile/deps_style (from toolchain, not hardcoded)
-        # Store env reference so command expansion can access tool configuration
-        obj_node._build_info = {
-            "tool": tool_name,
-            "command_var": command_var,
-            "language": language,
-            "sources": [source],
-            "depfile": depfile,
-            "deps_style": deps_style,
-            "context": context,
-            "env": env,
-        }
-
-        # Cache the object node
-        self._object_cache[cache_key] = obj_node
-
-        # Track source-object pairs by language for toolchain after_resolve() hooks.
-        self._source_obj_by_language.setdefault(language, []).append(
-            (source.path, obj_node)
-        )
-
-        # Register with environment
-        env.register_node(obj_node)
-
-        return obj_node
-
-
-class OutputNodeFactory:
-    """Factory for creating library and program output nodes.
-
-    Handles creation of static libraries, shared libraries, and programs
-    with proper dependencies and link flags.
-
-    Attributes:
-        project: The project being resolved.
-    """
-
-    def __init__(self, project: Project) -> None:
-        """Initialize the factory.
-
-        Args:
-            project: The project to resolve.
-        """
-        self.project = project
-
-    def create_static_library_output(self, target: Target, env: Environment) -> None:
-        """Create static library output node.
-
-        Args:
-            target: The target to create output for.
-            env: Build environment.
-        """
-        if not target.object_nodes:
-            logger.warning(
-                "Target '%s' has no sources - no output will be generated",
-                target.name,
-            )
-            return
-
-        build_dir = self.project.build_dir
-        path_resolver = self.project.path_resolver
-
-        # Check for custom output name first
-        if target.output_name:
-            # User provided custom output - normalize it
-            lib_path = build_dir / path_resolver.normalize_target_path(
-                target.output_name
-            )
-        elif toolchain := env._toolchain:
-            lib_name = toolchain.get_static_library_name(target.name)
-            lib_path = build_dir / lib_name
-        else:
-            lib_name = f"lib{target.name}.a"  # Fallback
-            lib_path = build_dir / lib_name
-
-        lib_node = self.project.node(lib_path)
-        lib_node.depends(target.object_nodes)
-
-        # Compute effective link requirements
-        effective_link = compute_effective_requirements(
-            target, env, for_compilation=False
-        )
-
-        # Create context object from effective requirements
-        context = CompileLinkContext.from_effective_requirements(effective_link)
-
-        # Get archiver tool name from toolchain (e.g., "ar" for GCC, "lib" for MSVC)
-        archiver_tool = "ar"  # default
-        if toolchain := env._toolchain:
-            archiver_tool = toolchain.get_archiver_tool_name()
-
-        lib_node._build_info = {
-            "tool": archiver_tool,
-            "command_var": "libcmd",
-            "sources": target.object_nodes,
-            "context": context,
-            "env": env,
-        }
-
-        target.output_nodes.append(lib_node)
-        target.nodes.append(lib_node)
-        env.register_node(lib_node)
-
-    def create_shared_library_output(self, target: Target, env: Environment) -> None:
-        """Create shared library output node.
-
-        Args:
-            target: The target to create output for.
-            env: Build environment.
-        """
-        if not target.object_nodes:
-            logger.warning(
-                "Target '%s' has no sources - no output will be generated",
-                target.name,
-            )
-            return
-
-        build_dir = self.project.build_dir
-        path_resolver = self.project.path_resolver
-
-        # Check for custom output name first
-        if target.output_name:
-            # User provided custom output - normalize it
-            lib_path = build_dir / path_resolver.normalize_target_path(
-                target.output_name
-            )
-        elif toolchain := env._toolchain:
-            lib_name = toolchain.get_shared_library_name(target.name)
-            lib_path = build_dir / lib_name
-        else:
-            # Fallback to platform-specific naming
-            import sys
-
-            if sys.platform == "darwin":
-                lib_name = f"lib{target.name}.dylib"
-            elif sys.platform == "win32":
-                lib_name = f"{target.name}.dll"
-            else:
-                lib_name = f"lib{target.name}.so"
-            lib_path = build_dir / lib_name
-
-        lib_node = self.project.node(lib_path)
-        lib_node.depends(target.object_nodes)
-
-        link_language, context = self._setup_link_node(target, env, lib_node)
-
-        lib_node._build_info = {
-            "tool": "link",
-            "command_var": "sharedcmd",
-            "language": link_language,
-            "sources": target.object_nodes,
-            "context": context,
-            "env": env,
-        }
-
-        # For MSVC/clang-cl, also set up outputs dict for multi-output builds
-        # MSVC SharedLibrary produces both .dll and .lib (import library)
-        import sys
-
-        if sys.platform == "win32":
-            # Generate import library path (.lib file)
-            import_lib_path = lib_path.with_suffix(".lib")
-            lib_node._build_info["outputs"] = {
-                "primary": {"path": lib_path, "suffix": lib_path.suffix},
-                "import_lib": {"path": import_lib_path, "suffix": ".lib"},
-            }
-
-        target.output_nodes.append(lib_node)
-        target.nodes.append(lib_node)
-        env.register_node(lib_node)
-
-    def create_program_output(self, target: Target, env: Environment) -> None:
-        """Create program output node.
-
-        Args:
-            target: The target to create output for.
-            env: Build environment.
-        """
-        if not target.object_nodes:
-            logger.warning(
-                "Target '%s' has no sources - no output will be generated",
-                target.name,
-            )
-            return
-
-        build_dir = self.project.build_dir
-        path_resolver = self.project.path_resolver
-
-        # Check for custom output name first
-        if target.output_name:
-            # User provided custom output - normalize it
-            prog_path = build_dir / path_resolver.normalize_target_path(
-                target.output_name
-            )
-        elif toolchain := env._toolchain:
-            prog_name = toolchain.get_program_name(target.name)
-            prog_path = build_dir / prog_name
-        else:
-            # Fallback to platform-specific naming
-            import sys
-
-            if sys.platform == "win32":
-                prog_name = f"{target.name}.exe"
-            else:
-                prog_name = target.name
-            prog_path = build_dir / prog_name
-
-        prog_node = self.project.node(prog_path)
-        prog_node.depends(target.object_nodes)
-
-        link_language, context = self._setup_link_node(target, env, prog_node)
-
-        prog_node._build_info = {
-            "tool": "link",
-            "command_var": "progcmd",
-            "language": link_language,
-            "sources": target.object_nodes,
-            "context": context,
-            "env": env,
-        }
-
-        # Generic multi-output support for Program builders.
-        # If the linker's Program builder is a MultiOutputBuilder, populate
-        # the outputs dict and create secondary output nodes (e.g. .wasm
-        # companion for Emscripten's .js primary).
-        from pcons.core.builder import MultiOutputBuilder
-        from pcons.core.node import OutputInfo
-
-        toolchain = env._toolchain
-        if toolchain and "link" in toolchain.tools:
-            link_tool = toolchain.tools["link"]
-            program_builder = link_tool.builders().get("Program")
-            if (
-                isinstance(program_builder, MultiOutputBuilder)
-                and len(program_builder.outputs) > 1
-            ):
-                outputs_dict: dict[str, OutputInfo] = {
-                    "primary": OutputInfo(path=prog_path, suffix=prog_path.suffix),
-                }
-                for spec in program_builder.outputs[1:]:
-                    secondary_path = prog_path.with_suffix(spec.suffix)
-                    outputs_dict[spec.name] = OutputInfo(
-                        path=secondary_path,
-                        suffix=spec.suffix,
-                        implicit=spec.implicit,
-                    )
-                    sec_node = self.project.node(secondary_path)
-                    sec_node._build_info = {
-                        "primary_node": prog_node,
-                        "output_name": spec.name,
-                    }
-                    target.output_nodes.append(sec_node)
-                    target.nodes.append(sec_node)
-                prog_node._build_info["outputs"] = outputs_dict
-
-        target.output_nodes.append(prog_node)
-        target.nodes.append(prog_node)
-        env.register_node(prog_node)
-
-    def _setup_link_node(
-        self,
-        target: Target,
-        env: Environment,
-        output_node: FileNode,
-    ) -> tuple[str, CompileLinkContext]:
-        """Set up dependencies, auxiliary inputs, and link context for an output node.
-
-        Shared logic for both shared library and program output creation.
-        Handles dependency collection, auxiliary input filtering, effective
-        requirements computation, and context creation.
-
-        Args:
-            target: The target being linked.
-            env: Build environment.
-            output_node: The output node (library or program) to configure.
-
-        Returns:
-            Tuple of (link_language, context) for use in _build_info.
-        """
-        builder_data = getattr(target, "_builder_data", {}) or {}
-        auxiliary_inputs = builder_data.get("auxiliary_inputs", [])
-        auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
-
-        # Add dependency output nodes, filtering out auxiliary inputs
-        dep_libs = self._collect_dependency_outputs(target)
-        if dep_libs:
-            dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
-            if dep_libs:
-                output_node.depends(dep_libs)
-
-        # Add auxiliary input files as implicit dependencies
-        if auxiliary_inputs:
-            linker_input_nodes = [node for node, _, _ in auxiliary_inputs]
-            output_node.implicit_deps.extend(linker_input_nodes)
-
-        # Compute effective link requirements
-        effective_link = compute_effective_requirements(
-            target, env, for_compilation=False
-        )
-
-        # Add auxiliary input flags to link flags
-        link_flags = list(effective_link.link_flags)
-        seen_handlers: set[str] = set()
-        for _, flag, handler in auxiliary_inputs:
-            link_flags.append(flag)
-            if handler.extra_flags and handler.suffix not in seen_handlers:
-                link_flags.extend(handler.extra_flags)
-                seen_handlers.add(handler.suffix)
-
-        # Collect actual languages from this target's object nodes (not just
-        # the dominant language from required_languages) to detect mixed builds.
-        object_languages: set[str] = set()
-        for node in target.object_nodes:
-            bi = getattr(node, "_build_info", None)
-            if bi:
-                lang = bi.get("language")
-                if lang:
-                    object_languages.add(lang)
-
-        # Determine link language using the primary toolchain's priority.
-        # Using only the primary toolchain ensures the user's toolchain choice
-        # (not a secondary toolchain's language) controls the linker.
-        langs = target.get_all_languages() | object_languages
-        primary_tc = env._toolchain
-        priority = getattr(primary_tc, "language_priority", {}) if primary_tc else {}
-        link_language = (
-            max(langs, key=lambda lang: priority.get(lang, 0)) if langs else "c"
-        )
-
-        # Inject runtime libraries (and their search dirs) needed for
-        # mixed-language builds. Each toolchain can contribute runtime libs
-        # (e.g., gfortran injects -lgfortran when C++ links Fortran objects,
-        # or -lc++ when Fortran links C++ objects) and the dirs to find them.
-        for tc in env.toolchains:
-            runtime_libs = tc.get_runtime_libs(link_language, object_languages)
-            if runtime_libs:
-                effective_link.link_libs = effective_link.link_libs + runtime_libs
-            runtime_libdirs = tc.get_runtime_libdirs(link_language, object_languages)
-            if runtime_libdirs:
-                effective_link.link_dirs = effective_link.link_dirs + [
-                    Path(d) for d in runtime_libdirs
-                ]
-
-        effective_link.link_flags = link_flags
-        context = CompileLinkContext.from_effective_requirements(
-            effective_link,
-            language=link_language,
-            env=env,
-            target=target,
-            output_name=output_node.path.name,
-        )
-
-        return link_language, context
-
-    def _collect_dependency_outputs(self, target: Target) -> list[FileNode]:
-        """Collect output nodes from all dependencies.
-
-        For SharedLibrary dependencies on Windows, returns the import library
-        (.lib) instead of the DLL (.dll) since that's what the linker needs.
-
-        Args:
-            target: The target whose dependencies to collect.
-
-        Returns:
-            List of FileNode outputs from dependencies.
-        """
-        import sys
-
-        result: list[FileNode] = []
-        for dep in target.transitive_dependencies():
-            for node in dep.output_nodes:
-                # On Windows, SharedLibrary produces both .dll and .lib (import library)
-                # For linking, we need the import library, not the DLL
-                if (
-                    sys.platform == "win32"
-                    and dep.target_type == TargetType.SHARED_LIBRARY
-                ):
-                    build_info = getattr(node, "_build_info", {})
-                    outputs = build_info.get("outputs", {})
-                    import_lib_info = outputs.get("import_lib")
-                    if import_lib_info and "path" in import_lib_info:
-                        # Get or create the import library node via project
-                        import_lib_path = import_lib_info["path"]
-                        result.append(self.project.node(import_lib_path))
-                        continue
-                result.append(node)
-        return result
 
 
 class CommandNodeFactory:
@@ -784,19 +130,16 @@ class Resolver:
     """Resolves targets: computes effective flags and creates nodes.
 
     The resolver processes all targets in build order (dependencies first),
-    computing effective requirements and creating the necessary nodes for
-    compilation and linking.
+    dispatching each target to its registered factory for resolution.
+    All target types — compile-link, install, archive, command — are handled
+    uniformly through factory dispatch via the BuilderRegistry.
 
-    Resolution is delegated to factory classes:
-    - ObjectNodeFactory: Creates and caches object nodes for compilation
-    - OutputNodeFactory: Creates library and program output nodes
-    - Builder factories (from BuilderRegistry): Handle pending source resolution
-      for Install, Tarfile, and other registered builders
+    The resolver itself is tool-agnostic: it knows nothing about compilation,
+    linking, or any specific tools. All tool-specific logic lives in factories
+    (e.g., CompileLinkFactory for Program/Library, InstallNodeFactory for Install).
 
     Attributes:
         project: The project being resolved.
-        _object_factory: Factory for creating object nodes.
-        _output_factory: Factory for creating output nodes.
         _builder_factories: Factory instances from registered builders.
     """
 
@@ -807,12 +150,9 @@ class Resolver:
             project: The project to resolve.
         """
         self.project = project
-        self._object_factory = ObjectNodeFactory(project)
-        self._output_factory = OutputNodeFactory(project)
 
-        # Build factory dispatch table from BuilderRegistry
-        # This allows registered builders to provide custom resolution factories
-        # All built-in builders (Install, Tarfile, etc.) register their factories here
+        # Build factory dispatch table from BuilderRegistry.
+        # All builders (Program, Install, Tarfile, etc.) register their factories here.
         self._builder_factories: dict[str, Any] = {}
         for name, registration in BuilderRegistry.all().items():
             if registration.factory_class is not None:
@@ -838,6 +178,14 @@ class Resolver:
         # Call after_resolve hook on all toolchains that support it (e.g., Fortran dyndep).
         # Iterates all toolchains (primary + additional) so secondary toolchains
         # like GfortranToolchain added via env.add_toolchain() are also notified.
+        # Collect source_obj_by_language from all factory instances that track it.
+        source_obj_by_language: dict[str, list[tuple[Path, FileNode]]] = {}
+        for factory in self._builder_factories.values():
+            lang_map = getattr(factory, "_source_obj_by_language", None)
+            if lang_map:
+                for lang, pairs in lang_map.items():
+                    source_obj_by_language.setdefault(lang, []).extend(pairs)
+
         seen_toolchains: set[int] = set()
         for target in self.project.targets:
             if target._env:
@@ -846,7 +194,7 @@ class Resolver:
                         seen_toolchains.add(id(tc))
                         tc.after_resolve(
                             self.project,
-                            self._object_factory._source_obj_by_language,
+                            source_obj_by_language,
                         )
 
         # Expand command templates for all nodes
@@ -865,13 +213,17 @@ class Resolver:
         return topological_sort_targets(self.project.targets)
 
     def _resolve_target(self, target: Target) -> None:
-        """Resolve a single target.
+        """Resolve a single target via factory dispatch.
 
-        Steps:
-        1. Compute effective requirements
-        2. Create object nodes for each source (via ObjectNodeFactory)
-        3. Create output node (library/program) (via OutputNodeFactory)
-        4. Set up node dependencies
+        All target types are resolved through their registered factory:
+        - CompileLinkFactory: Program, StaticLibrary, SharedLibrary, ObjectLibrary
+        - InstallNodeFactory: Install, InstallAs, InstallDir
+        - ArchiveNodeFactory: Tarfile, Zipfile
+        - CommandNodeFactory: env.Command targets
+
+        The factory handles all tool-specific logic (compilation, linking, etc.).
+        The resolver only handles generic concerns: dependency ordering, implicit
+        deps, and command expansion.
 
         Args:
             target: The target to resolve.
@@ -881,103 +233,32 @@ class Resolver:
 
         trace("resolve", "Resolving target: %s", target.name)
 
-        # Get environment for this target
         env = target._env
-        if env is None:
-            # No environment set - this target can't be resolved
-            # (might be an imported target or interface-only)
-            if target.target_type == "interface":
-                trace("resolve", "  Skipping interface target (no env)")
-                target._resolved = True
-                return
-            # For other types without env, skip silently
-            trace("resolve", "  Skipping target without env")
+
+        # Interface targets have no outputs
+        if target.target_type == TargetType.INTERFACE:
+            trace("resolve", "  Skipping interface target")
+            target._resolved = True
             return
 
-        if is_enabled("resolve"):
-            trace_value("resolve", "defined_at", target.defined_at)
-            trace_value("resolve", "type", target.target_type)
-            trace_value("resolve", "sources", [str(s.name) for s in target.sources])
-            trace_value(
-                "resolve", "dependencies", [d.name for d in target.dependencies]
+        # Dispatch to registered factory via _builder_name
+        builder_name = target._builder_name
+        if builder_name is not None and builder_name in self._builder_factories:
+            factory = self._builder_factories[builder_name]
+            factory.resolve(target, env)
+        elif env is None:
+            trace("resolve", "  Skipping target without env")
+        else:
+            logger.debug(
+                "Target '%s' has no factory registered for builder '%s'",
+                target.name,
+                builder_name,
             )
-
-        # Compute effective requirements for compilation
-        effective = compute_effective_requirements(target, env, for_compilation=True)
-
-        if is_enabled("resolve"):
-            trace("resolve", "  Effective requirements:")
-            trace_value("resolve", "includes", [str(p) for p in effective.includes])
-            trace_value("resolve", "defines", effective.defines)
-            trace_value("resolve", "compile_flags", effective.compile_flags)
-
-        # Get additional compile flags for this target type from the toolchain
-        # (e.g., -fPIC for shared libraries on Linux)
-        toolchain = env._toolchain
-        if toolchain is not None and target.target_type is not None:
-            target_type_flags = toolchain.get_compile_flags_for_target_type(
-                str(target.target_type)
-            )
-            # Merge target-type-specific flags into effective requirements
-            for flag in target_type_flags:
-                if flag not in effective.compile_flags:
-                    effective.compile_flags.append(flag)
-
-        # Determine the language for this target based on sources
-        language = self._determine_language(target, env)
-        if language:
-            target.required_languages.add(language)
-
-        # Separate sources into compilable sources and auxiliary inputs
-        # Auxiliary inputs are files like .def that are passed directly to a downstream tool
-        # AuxiliaryInputHandler is imported at module level under TYPE_CHECKING
-        auxiliary_inputs: list[tuple[FileNode, str, AuxiliaryInputHandler]] = []
-
-        # Create object nodes for each source (delegated to factory)
-        trace("resolve", "  Creating object nodes for %d sources", len(target.sources))
-        for source in target.sources:
-            if isinstance(source, FileNode):
-                # Check if this is an auxiliary input file
-                aux_handler = self._object_factory.get_auxiliary_input_handler(
-                    source.path, env
-                )
-                if aux_handler is not None:
-                    # This is an auxiliary input - generate the flag
-                    flag = aux_handler.flag_template.replace("$file", str(source.path))
-                    auxiliary_inputs.append((source, flag, aux_handler))
-                    trace("resolve", "    %s -> auxiliary input", source.path)
-                    continue
-
-                # Normal source file - create object node
-                obj_node = self._object_factory.create_object_node(
-                    target, source, effective, env
-                )
-                if obj_node:
-                    target.object_nodes.append(obj_node)
-                    trace("resolve", "    %s -> %s", source.path, obj_node.path)
-
-        # Store auxiliary inputs on the target for use by output factories
-        if auxiliary_inputs:
-            target._builder_data["auxiliary_inputs"] = auxiliary_inputs
-
-        # Create output node(s) based on target type (delegated to factory)
-        trace("resolve", "  Creating output for type: %s", target.target_type)
-        if target.target_type == "static_library":
-            self._output_factory.create_static_library_output(target, env)
-        elif target.target_type == "shared_library":
-            self._output_factory.create_shared_library_output(target, env)
-        elif target.target_type == "program":
-            self._output_factory.create_program_output(target, env)
-        elif target.target_type == "interface":
-            # Interface targets have no outputs
-            pass
-        elif target.target_type == "object":
-            # Object-only targets: output_nodes are the object files
-            target.output_nodes = list(target.object_nodes)
-            target.nodes = list(target.object_nodes)
 
         if target.output_nodes:
-            trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
+            trace(
+                "resolve", "  Output: %s", [str(n.path) for n in target.output_nodes]
+            )
 
         # Apply any extra implicit deps added via target.depends()
         if target._extra_implicit_deps:
@@ -1003,57 +284,6 @@ class Resolver:
                         node.implicit_deps.append(dep_node)
 
         target._resolved = True
-
-    def _determine_language(self, target: Target, env: Environment) -> str | None:
-        """Determine the primary language for a target based on its sources.
-
-        Uses toolchains to determine language in a tool-agnostic way:
-        1. Queries each toolchain's source handlers to identify languages
-        2. Uses the toolchain's language_priority to select the strongest language
-
-        This keeps the core tool-agnostic - no hardcoded knowledge of C/C++.
-        The toolchain defines what languages it handles and their priorities.
-
-        Args:
-            target: The target to analyze.
-            env: Environment containing the toolchain(s).
-
-        Returns:
-            Language name (e.g., 'c', 'cxx', 'cuda') or None if no sources.
-        """
-        languages: set[str] = set()
-
-        for source in target.sources:
-            if isinstance(source, FileNode):
-                # Try all toolchains (tool-agnostic)
-                for toolchain in env.toolchains:
-                    handler = toolchain.get_source_handler(source.path.suffix)
-                    if handler:
-                        languages.add(handler.language)
-                        break  # First handler wins for this source
-
-        if not languages:
-            return None
-
-        # Use the primary toolchain's language_priority to determine strongest language
-        # This delegates the priority decision to the toolchain, keeping core tool-agnostic
-        primary_toolchain = env._toolchain
-        if primary_toolchain is None:
-            # No toolchain - return any language we found
-            return next(iter(languages))
-
-        # Find highest priority language according to toolchain
-        priority = getattr(primary_toolchain, "language_priority", {})
-        max_priority = -1
-        max_lang: str | None = None
-
-        for lang in languages:
-            p = priority.get(lang, 0)
-            if p > max_priority:
-                max_priority = p
-                max_lang = lang
-
-        return max_lang
 
     def resolve_pending_sources(self) -> None:
         """Resolve _pending_sources for all targets that have them.

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 from pcons.core.builder_registry import builder
 from pcons.core.node import Node
 from pcons.core.target import Target, TargetType
+from pcons.tools.compile_link import CompileLinkFactory
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
@@ -26,7 +27,8 @@ if TYPE_CHECKING:
     from pcons.util.source_location import SourceLocation
 
 
-@builder("Program", target_type=TargetType.PROGRAM, requires_env=True)
+@builder("Program", target_type=TargetType.PROGRAM, requires_env=True,
+         factory_class=CompileLinkFactory)
 class ProgramBuilder:
     """Create a program (executable) target."""
 
@@ -67,7 +69,8 @@ class ProgramBuilder:
         return target
 
 
-@builder("StaticLibrary", target_type=TargetType.STATIC_LIBRARY, requires_env=True)
+@builder("StaticLibrary", target_type=TargetType.STATIC_LIBRARY, requires_env=True,
+         factory_class=CompileLinkFactory)
 class StaticLibraryBuilder:
     """Create a static library target."""
 
@@ -108,7 +111,8 @@ class StaticLibraryBuilder:
         return target
 
 
-@builder("SharedLibrary", target_type=TargetType.SHARED_LIBRARY, requires_env=True)
+@builder("SharedLibrary", target_type=TargetType.SHARED_LIBRARY, requires_env=True,
+         factory_class=CompileLinkFactory)
 class SharedLibraryBuilder:
     """Create a shared library target."""
 
@@ -149,7 +153,8 @@ class SharedLibraryBuilder:
         return target
 
 
-@builder("ObjectLibrary", target_type=TargetType.OBJECT, requires_env=True)
+@builder("ObjectLibrary", target_type=TargetType.OBJECT, requires_env=True,
+         factory_class=CompileLinkFactory)
 class ObjectLibraryBuilder:
     """Create an object library target (compiles but doesn't link)."""
 
