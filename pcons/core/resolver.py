@@ -64,24 +64,15 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
 
 
-class CommandNodeFactory:
-    """Factory for resolving Command target pending sources.
+class PendingSourceFactory:
+    """Base factory for targets that resolve pending sources in phase 2.
 
-    Command targets (created by env.Command) may have Target sources
-    that need to be resolved to their output nodes. This factory handles
-    that resolution by adding the source targets' output nodes as
-    dependencies to the command's output nodes.
-
-    Attributes:
-        project: The project being resolved.
+    A "pending source" is a source that references another Target whose
+    output_nodes aren't available yet during phase 1, so resolution is
+    deferred until phase 2 when all targets have been resolved.
     """
 
     def __init__(self, project: Project) -> None:
-        """Initialize the factory.
-
-        Args:
-            project: The project to resolve.
-        """
         self.project = project
 
     def resolve(
@@ -89,7 +80,46 @@ class CommandNodeFactory:
         target: Target,  # noqa: ARG002
         env: Environment | None,  # noqa: ARG002
     ) -> None:
-        """No-op: Command targets already have output_nodes from GenericCommandBuilder."""
+        """Phase 1 — no-op by default."""
+
+    def resolve_pending(self, target: Target) -> None:
+        """Phase 2 — resolve pending sources. Subclasses must override."""
+        raise NotImplementedError
+
+    def _resolve_sources(self, target: Target) -> list[FileNode]:
+        """Resolve pending sources to FileNodes.
+
+        Handles Target sources (extracts output_nodes), FileNode passthrough,
+        and Path/str sources (creates nodes via project).
+        """
+        from pcons.core.target import Target as TargetClass
+
+        if target._pending_sources is None:
+            return []
+
+        resolved: list[FileNode] = []
+        for source in target._pending_sources:
+            if isinstance(source, TargetClass):
+                resolved.extend(source.output_nodes)
+                for node in source.nodes:
+                    if isinstance(node, FileNode) and node not in resolved:
+                        resolved.append(node)
+            elif isinstance(source, FileNode):
+                resolved.append(source)
+            elif isinstance(source, Node):
+                pass
+            elif isinstance(source, (Path, str)):
+                resolved.append(self.project.node(source))
+        return resolved
+
+
+class CommandNodeFactory(PendingSourceFactory):
+    """Factory for resolving Command target pending sources.
+
+    Command targets (created by env.Command) already have output_nodes
+    from GenericCommandBuilder. This factory wires up pending source
+    dependencies and updates build_info.
+    """
 
     def resolve_pending(self, target: Target) -> None:
         """Resolve pending Target sources for a Command target.
@@ -98,16 +128,7 @@ class CommandNodeFactory:
         to the command's output nodes. Also updates the _build_info
         to include the additional source files.
         """
-        from pcons.core.target import Target as TargetClass
-
-        if target._pending_sources is None:
-            return
-
-        # Collect output nodes from source Targets
-        additional_sources: list[FileNode] = []
-        for source in target._pending_sources:
-            if isinstance(source, TargetClass):
-                additional_sources.extend(source.output_nodes)
+        additional_sources = self._resolve_sources(target)
 
         if not additional_sources:
             return

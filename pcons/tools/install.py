@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, cast
 
 from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode
+from pcons.core.resolver import PendingSourceFactory
 from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target, TargetType
 from pcons.tools.tool import StandaloneTool
@@ -134,28 +135,12 @@ class InstallTool(StandaloneTool):
         return {}
 
 
-class InstallNodeFactory:
+class InstallNodeFactory(PendingSourceFactory):
     """Factory for creating install/copy nodes.
 
     Handles creation of nodes for Install, InstallAs, and InstallDir targets.
     This factory is used during the pending-sources resolution phase.
     """
-
-    def __init__(self, project: Project) -> None:
-        """Initialize the factory.
-
-        Args:
-            project: The project to resolve.
-        """
-        self.project = project
-
-    def resolve(self, target: Target, env: Environment | None) -> None:
-        """Resolve the target (phase 1).
-
-        Install targets don't need phase 1 resolution - they only handle
-        pending sources in phase 2.
-        """
-        pass
 
     def resolve_pending(self, target: Target) -> None:
         """Resolve pending sources for an install target (phase 2).
@@ -182,32 +167,6 @@ class InstallNodeFactory:
         elif builder_name == "InstallDir":
             dest_dir = Path(target._builder_data["dest_dir"])
             self._create_install_dir_node(target, resolved_sources, dest_dir)
-
-    def _resolve_sources(self, target: Target) -> list[FileNode]:
-        """Resolve pending sources to FileNodes."""
-        from pcons.core.node import Node
-
-        if target._pending_sources is None:
-            return []
-
-        resolved: list[FileNode] = []
-        for source in target._pending_sources:
-            if isinstance(source, Target):
-                # Get output files from the resolved target
-                resolved.extend(source.output_nodes)
-                # Also check nodes directly (for interface targets)
-                for node in source.nodes:
-                    if isinstance(node, FileNode) and node not in resolved:
-                        resolved.append(node)
-            elif isinstance(source, FileNode):
-                resolved.append(source)
-            elif isinstance(source, Node):
-                # Skip non-file nodes
-                pass
-            elif isinstance(source, (Path, str)):
-                resolved.append(self.project.node(source))
-
-        return resolved
 
     def _get_install_env(self, target: Target) -> Environment | None:
         """Get an environment that has the install tool.
