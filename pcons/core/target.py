@@ -280,7 +280,7 @@ class Target:
         )
 
     @property
-    def nodes(self) -> list[Node]:
+    def nodes(self) -> list[FileNode]:
         """All build nodes for this target (intermediate + output)."""
         return self.intermediate_nodes + self.output_nodes
 
