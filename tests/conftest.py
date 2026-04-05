@@ -3,13 +3,29 @@
 
 import pytest
 
-from pcons.toolchains.gcc import GccToolchain
+from pcons.toolchains.gcc import (
+    GccArchiver,
+    GccCCompiler,
+    GccCxxCompiler,
+    GccLinker,
+    GccToolchain,
+)
 
 
 @pytest.fixture
 def gcc_toolchain():
-    """Create a pre-configured GCC toolchain for testing."""
+    """Create a pre-configured GCC toolchain for testing.
+
+    Populates _tools so that Environment(toolchain=...) registers all tools
+    (cc, cxx, ar, link) and command templates expand correctly.
+    """
     toolchain = GccToolchain()
+    toolchain._tools = {
+        "cc": GccCCompiler(),
+        "cxx": GccCxxCompiler(),
+        "ar": GccArchiver(),
+        "link": GccLinker(),
+    }
     toolchain._configured = True
     return toolchain
 
