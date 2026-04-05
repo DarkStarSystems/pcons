@@ -97,7 +97,7 @@ jobs:
           actions-cache-folder: 'emsdk-cache'
       - name: Install wasi-sdk
         run: |
-          WASI_VERSION=31
+          WASI_VERSION=30  # v31 broken on macOS: hardcoded rpath to build tree (libedit.0.dylib)
           WASI_VERSION_FULL=${WASI_VERSION}.0
           ARCH=$(uname -m)
           case "$(uname -s)" in
