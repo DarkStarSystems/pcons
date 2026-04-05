@@ -388,14 +388,21 @@ class TestGeneratePcFile:
 
     def test_pc_file_external_include_kept_absolute(self, tmp_path):
         """Absolute include dirs outside root_dir stay absolute."""
+        import sys
+
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         target = Target("mylib")
-        target.public.include_dirs.append(Path("/opt/external/include"))
+        # Use a platform-appropriate absolute path outside the project root
+        if sys.platform == "win32":
+            ext_inc = Path("C:/opt/external/include")
+        else:
+            ext_inc = Path("/opt/external/include")
+        target.public.include_dirs.append(ext_inc)
         project.add_target(target)
 
         pc = project.generate_pc_file(target, version="1.0")
         content = pc.read_text()
-        assert "-I/opt/external/include" in content
+        assert f"-I{ext_inc}" in content
 
 
 class TestAlias:

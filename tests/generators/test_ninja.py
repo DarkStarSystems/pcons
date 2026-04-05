@@ -3,6 +3,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from pcons.core.builder import CommandBuilder
 from pcons.core.node import FileNode
 from pcons.core.project import Project
@@ -532,8 +534,12 @@ class TestNinjaSrcDir:
         """target.depends(gen) adds | dep to both compile and link steps."""
         from pcons import find_c_toolchain
 
+        try:
+            toolchain = find_c_toolchain()
+        except RuntimeError:
+            pytest.skip("No C toolchain available")
         project = Project("test", root_dir=tmp_path, build_dir="build")
-        env = project.Environment(toolchain=find_c_toolchain())
+        env = project.Environment(toolchain=toolchain)
 
         gen = env.Command(
             target="build/generated.h",

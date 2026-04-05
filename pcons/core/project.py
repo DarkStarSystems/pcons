@@ -631,7 +631,11 @@ class Project:
         seen_includedir = False
         for inc_dir in target.public.include_dirs:
             inc_path = Path(inc_dir)
-            if not inc_path.is_absolute():
+            # Check the original string for Unix-style absolute paths
+            # (starting with /) since Path("/opt/...") is not absolute on Windows.
+            inc_str = str(inc_dir)
+            is_abs = inc_path.is_absolute() or inc_str.startswith("/")
+            if not is_abs:
                 # Relative path (e.g., "include") — use ${includedir}
                 if not seen_includedir:
                     cflags_parts.append("-I${includedir}")
