@@ -20,7 +20,7 @@ Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), 
 
 - **Configuration, not execution**: Pcons generates Ninja files; Ninja executes the build
 - **Python is the language**: No custom DSL—build scripts are real Python with full IDE support
-- **Language-agnostic**: Build C++, Rust, LaTeX, protobuf, or anything else — includes a [LaTeX contrib toolchain](examples/32_latex/) using `latexmk`
+- **Language-agnostic**: Build C++, Rust, LaTeX, protobuf, or anything else
 - **Explicit over implicit**: Dependencies are discoverable and traceable
 - **Extensible**: Add-on modules for domain-specific tasks (plugin bundles, SDK configuration, etc.)
 

@@ -2577,7 +2577,6 @@ Pcons includes built-in helper modules in `pcons.contrib`:
 
 ```python
 from pcons.contrib import bundle, platform
-from pcons.contrib.latex import find_latex_toolchain
 
 # Bundle creation helpers
 plist = bundle.generate_info_plist("MyPlugin", "1.0.0", bundle_type="BNDL")
