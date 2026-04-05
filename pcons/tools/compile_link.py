@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.node import FileNode
-from pcons.core.requirements import (
+from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
 )

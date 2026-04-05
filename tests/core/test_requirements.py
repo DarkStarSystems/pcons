@@ -1,10 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Tests for pcons.core.requirements."""
+"""Tests for pcons.tools.requirements."""
 
 from pathlib import Path
 
 from pcons.core.project import Project
-from pcons.core.requirements import (
+from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
 )

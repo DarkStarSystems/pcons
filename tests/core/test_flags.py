@@ -259,7 +259,7 @@ class TestIntegrationWithEffectiveRequirements:
 
     def test_effective_requirements_merge_preserves_paired_flags(self):
         """Test that EffectiveRequirements.merge handles paired flags correctly."""
-        from pcons.core.requirements import EffectiveRequirements
+        from pcons.tools.requirements import EffectiveRequirements
         from pcons.core.target import UsageRequirements
 
         eff = EffectiveRequirements(
@@ -274,7 +274,7 @@ class TestIntegrationWithEffectiveRequirements:
 
     def test_real_world_macos_frameworks(self):
         """Test a realistic macOS scenario with multiple frameworks."""
-        from pcons.core.requirements import EffectiveRequirements
+        from pcons.tools.requirements import EffectiveRequirements
         from pcons.core.target import UsageRequirements
 
         # Simulating what happens when multiple dependencies each need frameworks
