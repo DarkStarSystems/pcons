@@ -10,6 +10,7 @@ from __future__ import annotations
 import shutil
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from pcons.core.subst import TargetPath
@@ -152,6 +153,7 @@ class ToolchainRegistry:
         platforms: list[str] | None = None,
         description: str = "",
         finder: str = "",
+        is_available: Callable[[], bool] | None = None,
     ) -> None:
         """Register a toolchain for auto-discovery.
 
@@ -165,6 +167,9 @@ class ToolchainRegistry:
                        (e.g., ["linux", "darwin", "win32"]). Uses sys.platform values.
             description: Short human-readable description of the toolchain.
             finder: Name of the finder function (e.g., "find_c_toolchain()").
+            is_available: Optional custom availability check. If provided, called
+                instead of ``shutil.which(check_command)``. Should return True
+                if the toolchain can be used.
         """
         entry = ToolchainEntry(
             toolchain_class=toolchain_class,
@@ -175,6 +180,7 @@ class ToolchainRegistry:
             platforms=platforms or [],
             description=description,
             finder=finder,
+            is_available=is_available,
         )
         # Register under all aliases
         for alias in aliases:
@@ -220,7 +226,10 @@ class ToolchainRegistry:
 
         # Try each entry
         for entry in entries_to_try:
-            if shutil.which(entry.check_command) is not None:
+            if entry.is_available is not None:
+                if entry.is_available():
+                    return entry.create_toolchain()
+            elif shutil.which(entry.check_command) is not None:
                 return entry.create_toolchain()
 
         return None
@@ -264,6 +273,7 @@ class ToolchainEntry:
         platforms: list[str] | None = None,
         description: str = "",
         finder: str = "",
+        is_available: Callable[[], bool] | None = None,
     ) -> None:
         self.toolchain_class = toolchain_class
         self.aliases = aliases
@@ -273,6 +283,7 @@ class ToolchainEntry:
         self.platforms = platforms or []
         self.description = description
         self.finder = finder
+        self.is_available = is_available
 
     def create_toolchain(self) -> BaseToolchain:
         """Create and configure a toolchain instance."""

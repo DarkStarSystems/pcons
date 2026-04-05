@@ -690,6 +690,13 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
 from pcons.tools.toolchain import toolchain_registry  # noqa: E402
 
+def _is_msvc_available() -> bool:
+    """Check if MSVC is available, either in PATH or via vswhere."""
+    import shutil
+
+    return shutil.which("cl.exe") is not None or _find_msvc_install() is not None
+
+
 toolchain_registry.register(
     MsvcToolchain,
     aliases=["msvc", "vc", "visualstudio"],
@@ -706,4 +713,5 @@ toolchain_registry.register(
     platforms=["win32"],
     description="Microsoft Visual C/C++ compiler",
     finder="find_c_toolchain()",
+    is_available=_is_msvc_available,
 )
