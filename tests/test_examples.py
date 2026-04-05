@@ -35,6 +35,15 @@ except ImportError:
 EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
 IS_WINDOWS = platform.system().lower() == "windows"
 
+
+def _find_ninja() -> list[str] | None:
+    """Find a working ninja command, trying PATH then uvx."""
+    if shutil.which("ninja") is not None:
+        return ["ninja"]
+    if shutil.which("uvx") is not None:
+        return ["uvx", "ninja"]
+    return None
+
 # Generators to test
 # xcode generator works on all platforms but xcodebuild only runs on macOS
 GENERATORS = ["ninja", "make", "xcode"]
@@ -151,8 +160,10 @@ def run_rebuild_test(
         touch_path.touch()
 
     # 2. Run ninja -C build_dir
+    ninja_cmd = _find_ninja()
+    assert ninja_cmd is not None, "ninja not available"
     result = subprocess.run(
-        ["ninja", "-C", str(build_dir)],
+        [*ninja_cmd, "-C", str(build_dir)],
         cwd=work_dir,
         capture_output=True,
         text=True,
@@ -501,14 +512,15 @@ def run_example(
         if not ninja_file.exists():
             pytest.fail(f"build.ninja not generated in {build_dir}")
 
-        if shutil.which("ninja") is None:
+        ninja_cmd = _find_ninja()
+        if ninja_cmd is None:
             pytest.skip("ninja not available")
 
         # Get build targets (if specified)
         build_targets = get_platform_value(test_config, "build_targets", [])
 
         # Run ninja from the build directory using -C
-        ninja_cmd = ["ninja", "-C", str(build_dir)] + build_targets
+        ninja_cmd = [*ninja_cmd, "-C", str(build_dir)] + build_targets
         result = subprocess.run(
             ninja_cmd,
             cwd=work_dir,
@@ -706,7 +718,7 @@ def run_example(
             pass  # Skip rebuild tests on Windows
         else:
             # Make sure ninja is available for rebuild tests
-            if shutil.which("ninja") is None:
+            if _find_ninja() is None:
                 pytest.skip("ninja not available for rebuild tests")
 
             for rebuild_config in rebuild_tests:
