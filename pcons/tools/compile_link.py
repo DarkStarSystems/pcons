@@ -314,24 +314,17 @@ class CompileLinkFactory:
         lib_node = self.project.node(lib_path)
         lib_node.depends(target.intermediate_nodes)
 
-        effective_link = compute_effective_requirements(
-            target, env, for_compilation=False
-        )
-
-        context = CompileLinkContext.from_effective_requirements(
-            effective_link,
-            mode="link",
-        )
-
         archiver_tool = "ar"
         if toolchain := env._toolchain:
             archiver_tool = toolchain.get_archiver_tool_name()
 
+        # Static libraries use ar (or lib.exe) which only takes object files.
+        # No link context: -L, -l, -framework flags belong on consumers
+        # (Programs/SharedLibraries), not on the archiver command.
         lib_node._build_info = {
             "tool": archiver_tool,
             "command_var": "libcmd",
             "sources": target.intermediate_nodes,
-            "context": context,
             "env": env,
         }
 

@@ -1046,16 +1046,8 @@ class TestResolverCxxLinker:
 
         assert lib._resolved
         lib_node = lib.output_nodes[0]
-        command = lib_node._build_info.get("command", [])
-        cmd_str = " ".join(str(t) for t in command)
-
-        # The ar command must not contain link flags
-        assert "-L" not in cmd_str, (
-            f"ar command should not contain -L flags, got: {cmd_str}"
-        )
-        assert "-pthread" not in cmd_str, (
-            f"ar command should not contain -pthread, got: {cmd_str}"
-        )
-        assert "-lyaml-cpp" not in cmd_str, (
-            f"ar command should not contain -l flags, got: {cmd_str}"
+        # Static library build_info must not include a context — the archiver
+        # command should never receive link flags, libdirs, or libs.
+        assert "context" not in lib_node._build_info, (
+            "Static library build_info should not have a context"
         )
