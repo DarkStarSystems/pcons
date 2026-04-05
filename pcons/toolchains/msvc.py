@@ -677,7 +677,10 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         effective = compute_effective_requirements(target, env, for_compilation)
 
         # Create and return MSVC-specific context
-        return MsvcCompileLinkContext.from_effective_requirements(effective)
+        mode = "compile" if for_compilation else "link"
+        return MsvcCompileLinkContext.from_effective_requirements(
+            effective, mode=mode,
+        )
 
 
 # =============================================================================

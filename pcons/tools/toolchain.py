@@ -983,7 +983,10 @@ class BaseToolchain(ABC):
         effective = compute_effective_requirements(target, env, for_compilation)
 
         # Create and return context
-        return CompileLinkContext.from_effective_requirements(effective)
+        mode = "compile" if for_compilation else "link"
+        return CompileLinkContext.from_effective_requirements(
+            effective, mode=mode,
+        )
 
     def __repr__(self) -> str:
         tools = ", ".join(self._tools.keys())

@@ -30,8 +30,12 @@ class CompileLinkContext:
     toolchains (GCC, Clang). It holds all the information needed for compilation
     and linking, and formats it into variables suitable for command templates.
 
-    The formatting (prefixes like -I, -D, -L, -l) is done here rather than
-    in the generator, allowing different toolchains to use different prefixes.
+    The ``mode`` field controls which overrides ``get_env_overrides()`` returns:
+    - ``"compile"``: includes, defines, flags (merged with base env flags)
+    - ``"link"``: libdirs, libs, flags, cmd
+
+    This allows the resolver to remain tool-agnostic — it just applies all
+    returned keys as ``{tool_name}.{key}`` without interpreting them.
 
     Attributes:
         includes: Include directories (without -I prefix).
@@ -41,6 +45,7 @@ class CompileLinkContext:
         libs: Libraries to link (without -l prefix).
         libdirs: Library search directories (without -L prefix).
         linker_cmd: Override for link.cmd (e.g., "clang++" for C++ linking).
+        mode: Which overrides to return: "compile" or "link".
         include_prefix: Prefix for include directories (default: "-I").
         define_prefix: Prefix for preprocessor definitions (default: "-D").
         libdir_prefix: Prefix for library directories (default: "-L").
@@ -54,6 +59,7 @@ class CompileLinkContext:
     libs: list[str] = field(default_factory=list)
     libdirs: list[str] = field(default_factory=list)
     linker_cmd: str | None = None  # Override for link.cmd (e.g., "clang++" for C++)
+    mode: str = "compile"  # "compile" or "link"
 
     # Prefixes - allow toolchains to customize (e.g., MSVC uses /I, /D, /LIBPATH:)
     include_prefix: str = "-I"
@@ -61,46 +67,63 @@ class CompileLinkContext:
     libdir_prefix: str = "-L"
     lib_prefix: str = "-l"
 
+    # Runtime-only fields for flag merging (not part of build identity)
+    _tool_name: str | None = field(default=None, repr=False, compare=False)
+    _env: Environment | None = field(default=None, repr=False, compare=False)
+
     def get_env_overrides(self) -> dict[str, object]:
-        """Return values to set on env.<tool>.* before subst().
+        """Return mode-appropriate overrides for env.<tool>.* before subst().
 
-        These values are set on the environment's tool namespace so that
-        template expressions like ${prefix(cc.iprefix, cc.includes)} are
-        expanded during subst() with the effective requirements.
-
-        Path values (includes, libdirs) are wrapped in ProjectPath markers
-        so that the prefix() function creates PathToken objects. This allows
-        generators to apply appropriate path relativization.
+        Keys are named to map directly to tool config attributes (e.g.,
+        ``flags`` maps to ``{tool_name}.flags``). The resolver applies them
+        generically without interpreting their meaning.
 
         Returns:
             Dictionary mapping variable names to values.
-            Lists are returned as-is for the prefix() function to process.
         """
+        if self.mode == "compile":
+            return self._compile_overrides()
+        elif self.mode == "link":
+            return self._link_overrides()
+        return {}
+
+    def _compile_overrides(self) -> dict[str, object]:
+        """Return compile-time overrides: includes, defines, flags."""
         from pcons.core.subst import ProjectPath
 
         result: dict[str, object] = {}
 
-        # Compile-time settings
-        # Wrap include paths in ProjectPath for generator-specific relativization
         if self.includes:
             result["includes"] = [ProjectPath(p) for p in self.includes]
         if self.defines:
             result["defines"] = list(self.defines)
         if self.flags:
-            result["extra_flags"] = list(self.flags)
+            # Merge with base flags from env.{tool_name}.flags so that
+            # language-specific flags (e.g., -std=c++20 on env.cxx.flags)
+            # are preserved alongside effective-requirement flags.
+            base_flags: list[object] = []
+            if self._tool_name and self._env and self._env.has_tool(self._tool_name):
+                tool_cfg = getattr(self._env, self._tool_name, None)
+                base_flags = list(getattr(tool_cfg, "flags", None) or [])
+            merged = base_flags + [f for f in self.flags if f not in base_flags]
+            result["flags"] = merged
 
-        # Link-time settings
-        # Wrap library paths in ProjectPath for generator-specific relativization
+        return result
+
+    def _link_overrides(self) -> dict[str, object]:
+        """Return link-time overrides: libdirs, libs, flags, cmd."""
+        from pcons.core.subst import ProjectPath
+
+        result: dict[str, object] = {}
+
         if self.libdirs:
             result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
         if self.libs:
             result["libs"] = list(self.libs)
         if self.link_flags:
-            result["ldflags"] = list(self.link_flags)
-
-        # Linker command override (e.g., "clang++" for C++ linking)
+            result["flags"] = list(self.link_flags)
         if self.linker_cmd:
-            result["linker_cmd"] = self.linker_cmd
+            result["cmd"] = self.linker_cmd
 
         return result
 
@@ -108,6 +131,9 @@ class CompileLinkContext:
     def from_effective_requirements(
         cls,
         effective: EffectiveRequirements,
+        *,
+        mode: str = "compile",
+        tool_name: str | None = None,
         language: str | None = None,
         env: Environment | None = None,
         target: Target | None = None,
@@ -120,6 +146,9 @@ class CompileLinkContext:
 
         Args:
             effective: The computed effective requirements.
+            mode: Which overrides to return: "compile" or "link".
+            tool_name: The tool name (e.g., "cc", "cxx") for flag merging
+                in compile mode.
             language: The link language (e.g., "c", "cxx"). If "cxx" and env
                 has a "cxx" tool, the linker_cmd will be set to env.cxx.cmd
                 to ensure proper C++ runtime linkage.
@@ -178,6 +207,9 @@ class CompileLinkContext:
             libs=list(effective.link_libs),
             libdirs=[str(p) for p in effective.link_dirs],
             linker_cmd=linker_cmd,
+            mode=mode,
+            _tool_name=tool_name,
+            _env=env,
         )
 
     def as_hashable_tuple(self) -> tuple:
@@ -212,27 +244,12 @@ class MsvcCompileLinkContext(CompileLinkContext):
     libdir_prefix: str = "/LIBPATH:"
     lib_prefix: str = ""  # MSVC uses full library names (foo.lib)
 
-    def get_env_overrides(self) -> dict[str, object]:
-        """Return values to set on env.<tool>.* before subst().
-
-        MSVC-specific: libraries use full names (foo.lib) rather than -lfoo.
-
-        Returns:
-            Dictionary mapping variable names to values.
-        """
+    def _link_overrides(self) -> dict[str, object]:
+        """Return link-time overrides with MSVC-specific lib formatting."""
         from pcons.core.subst import ProjectPath
 
         result: dict[str, object] = {}
 
-        # Compile-time settings
-        if self.includes:
-            result["includes"] = [ProjectPath(p) for p in self.includes]
-        if self.defines:
-            result["defines"] = list(self.defines)
-        if self.flags:
-            result["extra_flags"] = list(self.flags)
-
-        # Link-time settings
         if self.libdirs:
             result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
         if self.libs:
@@ -245,11 +262,9 @@ class MsvcCompileLinkContext(CompileLinkContext):
                     formatted_libs.append(f"{lib}.lib")
             result["libs"] = formatted_libs
         if self.link_flags:
-            result["ldflags"] = list(self.link_flags)
-
-        # Linker command override (e.g., "cl" for C++ linking with MSVC)
+            result["flags"] = list(self.link_flags)
         if self.linker_cmd:
-            result["linker_cmd"] = self.linker_cmd
+            result["cmd"] = self.linker_cmd
 
         return result
 
@@ -257,6 +272,9 @@ class MsvcCompileLinkContext(CompileLinkContext):
     def from_effective_requirements(
         cls,
         effective: EffectiveRequirements,
+        *,
+        mode: str = "compile",
+        tool_name: str | None = None,
         language: str | None = None,
         env: Environment | None = None,
         target: Target | None = None,
@@ -269,6 +287,8 @@ class MsvcCompileLinkContext(CompileLinkContext):
 
         Args:
             effective: The computed effective requirements.
+            mode: Which overrides to return: "compile" or "link".
+            tool_name: The tool name for flag merging in compile mode.
             language: Unused for MSVC (kept for interface compatibility).
             env: Unused for MSVC (kept for interface compatibility).
             target: Unused for MSVC (kept for interface compatibility).
@@ -288,4 +308,7 @@ class MsvcCompileLinkContext(CompileLinkContext):
             libs=list(effective.link_libs),
             libdirs=[str(p) for p in effective.link_dirs],
             linker_cmd=None,
+            mode=mode,
+            _tool_name=tool_name,
+            _env=env,
         )

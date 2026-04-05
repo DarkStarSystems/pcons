@@ -11,8 +11,8 @@ from pcons.toolchains.build_context import CompileLinkContext, MsvcCompileLinkCo
 class TestCompileLinkContext:
     """Test CompileLinkContext get_env_overrides."""
 
-    def test_get_env_overrides_returns_dict(self) -> None:
-        """Verify get_env_overrides returns dict with expected keys."""
+    def test_compile_overrides(self) -> None:
+        """Verify compile mode returns includes, defines, flags."""
         from typing import cast
 
         from pcons.core.subst import ProjectPath
@@ -21,13 +21,14 @@ class TestCompileLinkContext:
             includes=["/usr/include", "/opt/local/include"],
             defines=["DEBUG", "VERSION=1"],
             flags=["-Wall", "-O2"],
+            mode="compile",
         )
         overrides = ctx.get_env_overrides()
 
         # Check that overrides contain the expected keys
         assert "includes" in overrides
         assert "defines" in overrides
-        assert "extra_flags" in overrides
+        assert "flags" in overrides
 
         # Includes should be wrapped in ProjectPath
         includes = cast(list[ProjectPath], overrides["includes"])
@@ -38,29 +39,69 @@ class TestCompileLinkContext:
         # Defines are raw strings
         assert overrides["defines"] == ["DEBUG", "VERSION=1"]
 
-        # Flags are raw strings
-        assert overrides["extra_flags"] == ["-Wall", "-O2"]
+        # Flags are the compile flags (no base flags without _env/_tool_name)
+        assert overrides["flags"] == ["-Wall", "-O2"]
 
-    def test_paths_with_spaces(self) -> None:
-        """Verify paths with spaces are preserved in ProjectPath markers."""
+    def test_link_overrides(self) -> None:
+        """Verify link mode returns libdirs, libs, flags, cmd."""
+        from typing import cast
+
+        from pcons.core.subst import ProjectPath
+
+        ctx = CompileLinkContext(
+            includes=["/usr/include"],
+            defines=["DEBUG"],
+            link_flags=["-pthread"],
+            libs=["m", "pthread"],
+            libdirs=["/usr/lib"],
+            linker_cmd="g++",
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+
+        # Link mode should NOT include compile-time keys
+        assert "includes" not in overrides
+        assert "defines" not in overrides
+
+        # Should include link-time keys
+        assert overrides["flags"] == ["-pthread"]
+        assert overrides["libs"] == ["m", "pthread"]
+        assert overrides["cmd"] == "g++"
+
+        libdirs = cast(list[ProjectPath], overrides["libdirs"])
+        assert len(libdirs) == 1
+        assert isinstance(libdirs[0], ProjectPath)
+
+    def test_paths_with_spaces_compile(self) -> None:
+        """Verify paths with spaces are preserved in compile mode."""
         from typing import cast
 
         from pcons.core.subst import ProjectPath
 
         ctx = CompileLinkContext(
             includes=["/path/with spaces/include", "/another path/headers"],
-            libdirs=["/lib path/with spaces"],
+            mode="compile",
         )
         overrides = ctx.get_env_overrides()
 
-        # Includes wrapped in ProjectPath
         includes = cast(list[ProjectPath], overrides["includes"])
         assert len(includes) == 2
         assert isinstance(includes[0], ProjectPath)
         assert includes[0].path == "/path/with spaces/include"
         assert includes[1].path == "/another path/headers"
 
-        # Libdirs wrapped in ProjectPath
+    def test_paths_with_spaces_link(self) -> None:
+        """Verify paths with spaces are preserved in link mode."""
+        from typing import cast
+
+        from pcons.core.subst import ProjectPath
+
+        ctx = CompileLinkContext(
+            libdirs=["/lib path/with spaces"],
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+
         libdirs = cast(list[ProjectPath], overrides["libdirs"])
         assert len(libdirs) == 1
         assert isinstance(libdirs[0], ProjectPath)
@@ -75,6 +116,7 @@ class TestCompileLinkContext:
                 'MESSAGE="Hello World"',
                 "PATH=/some/path with spaces",
             ],
+            mode="compile",
         )
         overrides = ctx.get_env_overrides()
 
@@ -90,8 +132,8 @@ class TestCompileLinkContext:
 class TestMsvcCompileLinkContext:
     """Test MSVC-specific context formatting."""
 
-    def test_msvc_env_overrides(self) -> None:
-        """Verify MSVC get_env_overrides returns expected values."""
+    def test_msvc_compile_overrides(self) -> None:
+        """Verify MSVC compile mode returns includes, defines."""
         from typing import cast
 
         from pcons.core.subst import ProjectPath
@@ -99,21 +141,30 @@ class TestMsvcCompileLinkContext:
         ctx = MsvcCompileLinkContext(
             includes=["/path/with spaces"],
             defines=["DEBUG"],
-            libdirs=["/lib path"],
-            libs=["kernel32", "user32.lib"],
+            mode="compile",
         )
         overrides = ctx.get_env_overrides()
 
-        # Includes wrapped in ProjectPath
         includes = cast(list[ProjectPath], overrides["includes"])
         assert len(includes) == 1
         assert isinstance(includes[0], ProjectPath)
         assert includes[0].path == "/path/with spaces"
 
-        # Defines are raw strings
         assert overrides["defines"] == ["DEBUG"]
 
-        # Libdirs wrapped in ProjectPath
+    def test_msvc_link_overrides(self) -> None:
+        """Verify MSVC link mode adds .lib suffix to libraries."""
+        from typing import cast
+
+        from pcons.core.subst import ProjectPath
+
+        ctx = MsvcCompileLinkContext(
+            libdirs=["/lib path"],
+            libs=["kernel32", "user32.lib"],
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+
         libdirs = cast(list[ProjectPath], overrides["libdirs"])
         assert len(libdirs) == 1
         assert isinstance(libdirs[0], ProjectPath)

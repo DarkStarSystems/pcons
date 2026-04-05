@@ -263,7 +263,9 @@ class CompileLinkFactory:
         if source.explicit_deps:
             obj_node.implicit_deps.extend(source.explicit_deps)
 
-        context = CompileLinkContext.from_effective_requirements(effective)
+        context = CompileLinkContext.from_effective_requirements(
+            effective, mode="compile", tool_name=tool_name, env=env,
+        )
 
         obj_node._build_info = {
             "tool": tool_name,
@@ -321,7 +323,9 @@ class CompileLinkFactory:
             target, env, for_compilation=False
         )
 
-        context = CompileLinkContext.from_effective_requirements(effective_link)
+        context = CompileLinkContext.from_effective_requirements(
+            effective_link, mode="link",
+        )
 
         archiver_tool = "ar"
         if toolchain := env._toolchain:
@@ -543,6 +547,7 @@ class CompileLinkFactory:
         effective_link.link_flags = link_flags
         context = CompileLinkContext.from_effective_requirements(
             effective_link,
+            mode="link",
             language=link_language,
             env=env,
             target=target,

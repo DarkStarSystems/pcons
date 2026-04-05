@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
@@ -463,24 +463,14 @@ class Resolver:
             )
             return
 
-        # Check if context has get_env_overrides() - for all contexts (archive/install
-        # and compile/link). Build tool-specific overrides as extra_vars for subst().
-        # This allows templates like ${prefix(cc.iprefix, cc.includes)} to expand
-        # with the effective requirements.
+        # Get context overrides and apply them as namespaced tool variables.
+        # Each context's get_env_overrides() returns keys that map directly to
+        # tool config attributes (e.g., "flags" -> "{tool_name}.flags").
         #
         # IMPORTANT: We must NOT mutate the shared tool_config, as that would cause
         # flags to accumulate across multiple source files in the same target.
         # Instead, we build a dictionary of namespaced overrides that get passed
         # to subst_list() via extra_vars.
-        #
-        # Determine if this is a compile command (objcmd) vs link command
-        # Note: "libcmd" (ar/archiver) is NOT a link command — the archiver
-        # only accepts object files, not link flags like -L, -l, -pthread.
-        is_compile_command = command_var == "objcmd"
-        is_link_command = command_var in ("progcmd", "sharedcmd", "linkcmd")
-
-        # Build tool-specific overrides as a dictionary for subst()
-        # These will be passed as extra_vars and take precedence over tool_config
         tool_overrides: dict[str, object] = {}
 
         if context is not None and hasattr(context, "get_env_overrides"):
@@ -490,41 +480,7 @@ class Resolver:
                 for k, v in context_overrides.items():
                     trace_value("subst", k, v)
             for key, val in context_overrides.items():
-                if key == "extra_flags":
-                    # extra_flags are compile flags - only apply to compile commands
-                    if is_compile_command:
-                        # Start with base env flags for this specific tool
-                        # (e.g., env.cc.flags for .c, env.cxx.flags for .cpp)
-                        # This ensures language-specific flags like -std=c++20
-                        # only apply to the correct language's sources.
-                        tool_cfg = (
-                            getattr(env, tool_name, None)
-                            if env.has_tool(tool_name)
-                            else None
-                        )
-                        base_flags = list(getattr(tool_cfg, "flags", None) or [])
-                        # Merge effective requirement flags (includes, defines,
-                        # target/dep requirements) on top of base flags
-                        extra_flags = cast(list[object], val)
-                        merged = base_flags + [
-                            f for f in extra_flags if f not in base_flags
-                        ]
-                        tool_overrides[f"{tool_name}.flags"] = merged
-                elif key == "ldflags":
-                    # ldflags are link flags - only apply to link commands
-                    if is_link_command:
-                        # Use ldflags directly - they already include base env flags
-                        # via compute_effective_requirements(). No merging needed.
-                        tool_overrides[f"{tool_name}.flags"] = list(
-                            cast(list[object], val)
-                        )
-                elif key == "linker_cmd":
-                    # linker_cmd overrides link.cmd (e.g., clang++ for C++ linking)
-                    if is_link_command:
-                        tool_overrides[f"{tool_name}.cmd"] = val
-                else:
-                    # Set as namespaced key (includes, defines, libs, libdirs)
-                    tool_overrides[f"{tool_name}.{key}"] = val
+                tool_overrides[f"{tool_name}.{key}"] = val
 
         # Use typed marker objects for generator-agnostic path references
         # SourcePath/TargetPath are preserved through subst() and converted
