@@ -35,14 +35,17 @@ class TargetType(StrEnum):
     while providing type safety and preventing typos.
     """
 
-    STATIC_LIBRARY = "static_library"
-    SHARED_LIBRARY = "shared_library"
-    PROGRAM = "program"
-    INTERFACE = "interface"  # Header-only library
-    OBJECT = "object"  # Object files only (no linking)
+    # Generic target types
     ARCHIVE = "archive"  # Tar/Zip archives
     COMMAND = "command"  # Generic command output
     INSTALLER = "installer"  # Platform-specific installer packages
+    INTERFACE = "interface"  # Metadata-only target (no build output)
+
+    # Compile-link target types (used by C/C++ toolchains)
+    STATIC_LIBRARY = "static_library"
+    SHARED_LIBRARY = "shared_library"
+    PROGRAM = "program"
+    OBJECT = "object"  # Intermediate artifacts only (no final output)
 
 
 __all__ = ["SourceSpec", "TargetType", "UsageRequirements", "Target", "ImportedTarget"]
@@ -147,7 +150,7 @@ class Target:
         dependencies: Other targets this depends on.
         public: Usage requirements that propagate to dependents.
         private: Usage requirements for this target only.
-        required_languages: Languages needed to build/link this target.
+        required_languages: Languages used by this target (set by toolchains).
         defined_at: Where this target was created in user code.
         target_type: Type of target (static_library, shared_library, program, interface).
         _env: Reference to the Environment used for building.
@@ -330,23 +333,22 @@ class Target:
 
         Dependencies are added as implicit deps (after ``|`` in ninja)
         on this target's build nodes. They must be up to date before
-        building this target, but their outputs are NOT passed to the
-        linker (not in ``$in``). Use ``target.link()`` for that.
+        building this target, but their outputs are NOT passed as
+        sources (not in ``$in``). Use ``target.link()`` for that.
 
         By default, deps are added to **all** build nodes — both
-        intermediate compile steps and the final link/archive step.
-        This ensures generated headers exist before compilation starts.
-        For Target deps, public usage requirements (include dirs,
-        defines) also propagate to compile steps, just like ``link()``.
+        intermediate and final output steps. This ensures generated
+        files exist before any build step starts. For Target deps,
+        public usage requirements also propagate, just like ``link()``.
 
         With ``propagate=False``, deps are only added to the final
-        output node (link step). Compile steps are unaffected.
+        output nodes. Intermediate steps are unaffected.
 
         Args:
             *items: Files or targets to depend on. Strings and Paths are
                    converted to FileNodes via ``project.node()``.
             propagate: If True (default), apply to all build steps
-                      (compile + link). If False, only the final output.
+                      (intermediate + output). If False, only output.
 
         Returns:
             self for method chaining.
@@ -396,7 +398,7 @@ class Target:
     def _apply_extra_implicit_deps(self) -> None:
         """Apply file-level implicit deps to build nodes.
 
-        Propagated deps go on all nodes (objects + outputs).
+        Propagated deps go on all nodes (intermediate + output).
         Output-only deps go on output nodes only.
         """
         all_nodes = self.intermediate_nodes + self.output_nodes
@@ -493,94 +495,6 @@ class Target:
             node: Node = self._project.node(path)
             return node
         return FileNode(path)
-
-    # Fluent API for usage requirements
-
-    def public_includes(self, dirs: list[Path | str]) -> Target:
-        """Add public include directories (fluent API).
-
-        These directories propagate to targets that depend on this one.
-
-        Args:
-            dirs: Include directories.
-
-        Returns:
-            self for method chaining.
-        """
-        for d in dirs:
-            self.public.include_dirs.append(Path(d))
-        return self
-
-    def public_defines(self, defines: list[str]) -> Target:
-        """Add public preprocessor defines (fluent API).
-
-        These defines propagate to targets that depend on this one.
-
-        Args:
-            defines: Preprocessor defines (e.g., ["FOO", "BAR=1"]).
-
-        Returns:
-            self for method chaining.
-        """
-        self.public.defines.extend(defines)
-        return self
-
-    def public_flags(self, flags: list[str]) -> Target:
-        """Add public compiler flags (fluent API).
-
-        These flags propagate to targets that depend on this one.
-
-        Args:
-            flags: Compiler flags.
-
-        Returns:
-            self for method chaining.
-        """
-        self.public.compile_flags.extend(flags)
-        return self
-
-    def private_includes(self, dirs: list[Path | str]) -> Target:
-        """Add private include directories (fluent API).
-
-        These directories are only used when building this target.
-
-        Args:
-            dirs: Include directories.
-
-        Returns:
-            self for method chaining.
-        """
-        for d in dirs:
-            self.private.include_dirs.append(Path(d))
-        return self
-
-    def private_defines(self, defines: list[str]) -> Target:
-        """Add private preprocessor defines (fluent API).
-
-        These defines are only used when building this target.
-
-        Args:
-            defines: Preprocessor defines (e.g., ["FOO", "BAR=1"]).
-
-        Returns:
-            self for method chaining.
-        """
-        self.private.defines.extend(defines)
-        return self
-
-    def private_flags(self, flags: list[str]) -> Target:
-        """Add private compiler flags (fluent API).
-
-        These flags are only used when building this target.
-
-        Args:
-            flags: Compiler flags.
-
-        Returns:
-            self for method chaining.
-        """
-        self.private.compile_flags.extend(flags)
-        return self
 
     def set_option(self, key: str, value: Any) -> Target:
         """Set a builder/toolchain option on this target (fluent API).

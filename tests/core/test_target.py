@@ -269,61 +269,20 @@ class TestFluentAPI:
         assert src_dir / "main.c" in paths
         assert src_dir / "util.c" in paths
 
-    def test_public_includes_returns_self(self):
-        """public_includes() returns self for chaining."""
+    def test_public_private_requirements(self):
+        """Usage requirements can be set directly on public/private."""
         target = Target("lib")
 
-        result = target.public_includes([Path("include")])
+        target.public.include_dirs.append(Path("include"))
+        target.public.defines.extend(["FOO", "BAR=1"])
+        target.private.include_dirs.append(Path("src"))
+        target.private.defines.append("BUILDING_LIB")
 
-        assert result is target
         assert Path("include") in target.public.include_dirs
-
-    def test_public_defines_returns_self(self):
-        """public_defines() returns self for chaining."""
-        target = Target("lib")
-
-        result = target.public_defines(["FOO", "BAR=1"])
-
-        assert result is target
         assert "FOO" in target.public.defines
         assert "BAR=1" in target.public.defines
-
-    def test_private_includes_returns_self(self):
-        """private_includes() returns self for chaining."""
-        target = Target("lib")
-
-        result = target.private_includes([Path("src")])
-
-        assert result is target
         assert Path("src") in target.private.include_dirs
-
-    def test_private_defines_returns_self(self):
-        """private_defines() returns self for chaining."""
-        target = Target("lib")
-
-        result = target.private_defines(["BUILDING_LIB"])
-
-        assert result is target
         assert "BUILDING_LIB" in target.private.defines
-
-    def test_chained_calls(self, tmp_path):
-        """Multiple fluent calls can be chained."""
-        lib = Target("lib")
-        src = tmp_path / "lib.c"
-        src.touch()
-
-        result = (
-            lib.add_source(src)
-            .public_includes([Path("include")])
-            .public_defines(["LIB_API"])
-            .private_defines(["BUILDING_LIB"])
-        )
-
-        assert result is lib
-        assert len(lib.sources) == 1
-        assert Path("include") in lib.public.include_dirs
-        assert "LIB_API" in lib.public.defines
-        assert "BUILDING_LIB" in lib.private.defines
 
     def test_link_chain(self, tmp_path):
         """link() can be chained with other fluent methods."""
@@ -383,11 +342,8 @@ class TestPostBuild:
         src = tmp_path / "main.c"
         src.touch()
 
-        result = (
-            target.add_source(src)
-            .post_build("chmod +x $out")
-            .private_defines(["DEBUG"])
-        )
+        result = target.add_source(src).post_build("chmod +x $out")
+        target.private.defines.append("DEBUG")
 
         assert result is target
         assert len(target.sources) == 1

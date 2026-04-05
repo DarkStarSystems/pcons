@@ -285,7 +285,7 @@ class Resolver:
 
         # Apply implicit target dependencies from target.depends(other_target).
         # Propagated deps: outputs become implicit deps on all build nodes
-        # (objects + outputs). Output-only deps: only on output nodes.
+        # (intermediate + output). Output-only deps: only on output nodes.
         for dep_target in target._implicit_target_deps:
             if not dep_target._resolved:
                 self._resolve_target(dep_target)
