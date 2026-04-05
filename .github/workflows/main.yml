@@ -58,6 +58,11 @@ jobs:
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: uv python install $PYTHON_VERSION
+      - name: Install LaTeX (one Ubuntu job only)
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.14'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq texlive-latex-base texlive-bibtex-extra latexmk >/dev/null 2>&1
       - name: Install dependencies
         run: uv sync
       - name: Extend Conan settings for new Apple Clang versions (macOS)
