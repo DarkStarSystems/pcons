@@ -193,6 +193,19 @@ env.add_toolchain(find_cuda_toolchain())
 
 **WASI** requires the WASI SDK. Set `WASI_SDK_PATH`, or install to `/opt/wasi-sdk` or `~/.local/share/wasi-sdk` (also available via Homebrew).
 
+**LaTeX** is available as a contrib toolchain using `latexmk`. It handles multi-pass compilation, BibTeX/Biber bibliography processing, makeindex, cross-references, and automatic dependency tracking (including `\input`'d files and `.bib` sources):
+
+```python
+from pcons.contrib.latex import find_latex_toolchain
+
+env = project.Environment(toolchain=find_latex_toolchain())
+env.latex.Pdf(build_dir / "paper.pdf", src_dir / "paper.tex")
+
+# Optional: change engine or add flags
+env.latex.engine = "xelatex"
+env.latex.flags.append("-shell-escape")
+```
+
 ### Builder Types
 
 All builders are accessible as methods on `Project`:
@@ -2564,6 +2577,7 @@ Pcons includes built-in helper modules in `pcons.contrib`:
 
 ```python
 from pcons.contrib import bundle, platform
+from pcons.contrib.latex import find_latex_toolchain
 
 # Bundle creation helpers
 plist = bundle.generate_info_plist("MyPlugin", "1.0.0", bundle_type="BNDL")
@@ -2599,6 +2613,10 @@ if platform.is_macos():
 | `create_macos_bundle(...)` | Create macOS .bundle structure |
 | `create_flat_bundle(...)` | Create flat directory bundle |
 | `get_arch_subdir(platform, arch)` | Get architecture subdirectory name |
+
+| `pcons.contrib.latex` Function | Description |
+|-------------------------------|-------------|
+| `find_latex_toolchain()` | Find and configure a LaTeX toolchain (requires `latexmk` in PATH) |
 
 | `pcons.contrib.platform` Function | Description |
 |----------------------------------|-------------|
