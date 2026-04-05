@@ -1,0 +1,12 @@
+# Test configuration for the LaTeX example
+
+[test]
+description = "LaTeX PDF compilation via latexmk"
+
+[test.verify]
+files = ["build/main.pdf"]
+
+[skip]
+require_commands = ["latexmk"]
+# Xcode generator doesn't support custom tool targets
+generators = ["xcode"]

@@ -330,6 +330,7 @@ class CommandBuilder(BaseBuilder):
         single_source: bool = False,
         depfile: TargetPath | None = None,
         deps_style: str | None = None,
+        restat: bool = False,
     ) -> None:
         """Initialize a command builder.
 
@@ -346,6 +347,8 @@ class CommandBuilder(BaseBuilder):
             depfile: Depfile specification - TargetPath(suffix=".d") for depfile
                     path derived from target output, or None.
             deps_style: Dependency style for Ninja ("gcc" or "msvc").
+            restat: If True, Ninja re-checks output timestamp after build.
+                   Useful when a command may not change its output.
         """
         super().__init__(
             name,
@@ -358,6 +361,7 @@ class CommandBuilder(BaseBuilder):
         self._single_source = single_source
         self._depfile = depfile
         self._deps_style = deps_style
+        self._restat = restat
 
     def _build(
         self,
@@ -428,6 +432,7 @@ class CommandBuilder(BaseBuilder):
             sources=sources,
             depfile=depfile,
             deps_style=self._deps_style,
+            restat=self._restat,
             env=env,
         )
 

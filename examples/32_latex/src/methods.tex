@@ -1,0 +1,12 @@
+\section{Methods}
+\label{sec:methods}
+
+This section is loaded via \verb|\input{methods}|, which tests that
+the depfile tracks included source files.  Modifying this file should
+trigger a rebuild via Ninja's dependency tracking.
+
+\index{dependency tracking}
+The \texttt{-recorder} flag causes \LaTeX{} to write a \texttt{.fls} file
+listing every file it reads.  The pcons helper converts this to a Ninja
+depfile so that changes to any included \texttt{.tex}, \texttt{.sty},
+or \texttt{.cls} file trigger a rebuild.
