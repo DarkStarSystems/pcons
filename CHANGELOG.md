@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-05
+
+### Added
+
+- **`project.generate_pc_file()` for pkg-config `.pc` generation**: Targets can now generate `.pc` files for downstream consumers. Handles prefix-relative paths, external include directories, and library flags automatically.
+
+- **`target.nodes` computed property**: Returns all nodes (intermediate + output) for a target, convenient for dependency inspection.
+
+- **`Alias()` accepts list arguments**: `project.Alias("name", [target1, target2])` now works in addition to `project.Alias("name", target1, target2)`.
+
+- **Automatic `uvx ninja` fallback**: When `ninja` is not in PATH, pcons now falls back to running it via `uvx ninja`, so users with `uv` installed don't need a separate ninja installation.
+
+- **MSVC detection via `vswhere`**: When `cl.exe` is not in PATH, pcons now finds Visual Studio installations via `vswhere.exe`, improving out-of-the-box Windows experience.
+
+- **MSVC `link.exe`/`lib.exe` resolution**: When other tools shadow MSVC's `link.exe` or `lib.exe` in PATH (e.g., Cygwin, Git for Windows), pcons now resolves them from the Visual Studio installation directory.
+
+### Changed
+
+- **`object_nodes` renamed to `intermediate_nodes`**: Better reflects that these are not always object files (e.g., archive or custom tool intermediates).
+
+- **`TargetType` enum replaced with plain strings**: `target.target_type` is now a simple string (`"program"`, `"static_library"`, etc.) instead of an enum value.
+
+- **Core is now fully tool-agnostic**: All C/C++ compile-link logic has been extracted from `core/resolver.py` into `tools/compile_link.py` via a factory dispatch system. `UsageRequirements` is now generic and extensible with dict-based storage. The core knows nothing about compilers, linkers, or languages.
+
+### Fixed
+
+- **`.pc` file include paths**: External include directories (outside the install prefix) are now correctly emitted as absolute `-I` flags in the `Cflags` field.
+
 ## [0.11.0] - 2026-04-02
 
 ### Added
@@ -656,7 +684,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/DarkStarSystems/pcons/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/DarkStarSystems/pcons/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/DarkStarSystems/pcons/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/DarkStarSystems/pcons/compare/v0.8.4...v0.9.0
