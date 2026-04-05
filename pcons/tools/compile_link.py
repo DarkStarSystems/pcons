@@ -149,9 +149,7 @@ class CompileLinkFactory:
             target.nodes = list(target.object_nodes)
 
         if target.output_nodes:
-            trace(
-                "resolve", "  Output: %s", [str(n.path) for n in target.output_nodes]
-            )
+            trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
 
     def resolve_pending(self, target: Target) -> None:
         """No-op: compile-link targets don't have pending sources."""
@@ -188,9 +186,7 @@ class CompileLinkFactory:
                 return handler
         return None
 
-    def _get_object_path(
-        self, target: Target, source: Path, env: Environment
-    ) -> Path:
+    def _get_object_path(self, target: Target, source: Path, env: Environment) -> Path:
         """Generate target-specific output path for an object file.
 
         Format: ``<build_dir>/obj.<target>/<relative_dir>/<name>.<src_ext><obj_ext>``
@@ -264,7 +260,10 @@ class CompileLinkFactory:
             obj_node.implicit_deps.extend(source.explicit_deps)
 
         context = CompileLinkContext.from_effective_requirements(
-            effective, mode="compile", tool_name=tool_name, env=env,
+            effective,
+            mode="compile",
+            tool_name=tool_name,
+            env=env,
         )
 
         obj_node._build_info = {
@@ -291,9 +290,7 @@ class CompileLinkFactory:
     # Output node creation (link step)
     # -------------------------------------------------------------------------
 
-    def _create_static_library_output(
-        self, target: Target, env: Environment
-    ) -> None:
+    def _create_static_library_output(self, target: Target, env: Environment) -> None:
         """Create static library output node."""
         if not target.object_nodes:
             logger.warning(
@@ -324,7 +321,8 @@ class CompileLinkFactory:
         )
 
         context = CompileLinkContext.from_effective_requirements(
-            effective_link, mode="link",
+            effective_link,
+            mode="link",
         )
 
         archiver_tool = "ar"
@@ -343,9 +341,7 @@ class CompileLinkFactory:
         target.nodes.append(lib_node)
         env.register_node(lib_node)
 
-    def _create_shared_library_output(
-        self, target: Target, env: Environment
-    ) -> None:
+    def _create_shared_library_output(self, target: Target, env: Environment) -> None:
         """Create shared library output node."""
         if not target.object_nodes:
             logger.warning(
@@ -585,9 +581,7 @@ class CompileLinkFactory:
     # Language detection
     # -------------------------------------------------------------------------
 
-    def _determine_language(
-        self, target: Target, env: Environment
-    ) -> str | None:
+    def _determine_language(self, target: Target, env: Environment) -> str | None:
         """Determine the primary language for a target based on its sources.
 
         Uses toolchains to determine language in a tool-agnostic way.

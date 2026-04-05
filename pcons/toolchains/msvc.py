@@ -679,7 +679,8 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         # Create and return MSVC-specific context
         mode = "compile" if for_compilation else "link"
         return MsvcCompileLinkContext.from_effective_requirements(
-            effective, mode=mode,
+            effective,
+            mode=mode,
         )
 
 

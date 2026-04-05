@@ -985,7 +985,8 @@ class BaseToolchain(ABC):
         # Create and return context
         mode = "compile" if for_compilation else "link"
         return CompileLinkContext.from_effective_requirements(
-            effective, mode=mode,
+            effective,
+            mode=mode,
         )
 
     def __repr__(self) -> str:

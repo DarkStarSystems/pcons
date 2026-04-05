@@ -277,9 +277,7 @@ class Resolver:
             )
 
         if target.output_nodes:
-            trace(
-                "resolve", "  Output: %s", [str(n.path) for n in target.output_nodes]
-            )
+            trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
 
         # Apply any extra implicit deps added via target.depends()
         if target._extra_implicit_deps:
