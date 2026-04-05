@@ -64,6 +64,8 @@ class UsageRequirements:
     use any names they need (e.g., python_packages, data_schemas).
     """
 
+    _data: dict[str, list]
+
     def __init__(self, **kwargs: list) -> None:
         object.__setattr__(self, "_data", {})
         for k, v in kwargs.items():
@@ -71,14 +73,14 @@ class UsageRequirements:
 
     def __getattr__(self, name: str) -> list:
         """Return the named list, creating it on first access."""
-        data = object.__getattribute__(self, "_data")
+        data: dict[str, list] = object.__getattribute__(self, "_data")
         return data.setdefault(name, [])
 
-    def __setattr__(self, name: str, value: object) -> None:
+    def __setattr__(self, name: str, value: list) -> None:  # type: ignore[override]
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
-            self._data[name] = value  # type: ignore[assignment]
+            self._data[name] = value
 
     def merge(
         self,
@@ -119,8 +121,8 @@ class UsageRequirements:
         non_empty = {k: v for k, v in self._data.items() if v}
         if not non_empty:
             return "UsageRequirements()"
-        items = ", ".join(f"{k}={v!r}" for k, v in non_empty.items())
-        return f"UsageRequirements({items})"
+        items_str = ", ".join(f"{k}={v!r}" for k, v in non_empty.items())
+        return f"UsageRequirements({items_str})"
 
 
 class Target:
