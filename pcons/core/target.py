@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -49,20 +48,34 @@ class TargetType(StrEnum):
 __all__ = ["SourceSpec", "TargetType", "UsageRequirements", "Target", "ImportedTarget"]
 
 
-@dataclass
 class UsageRequirements:
     """Requirements that propagate from a target to its consumers.
 
     When target A depends on target B, B's public usage requirements
     are added to A's build. This enables CMake-style transitive
     dependency management.
+
+    Stores named lists of values via attribute access. Any toolchain can
+    define its own requirement names. C/C++ toolchains use include_dirs,
+    defines, compile_flags, link_flags, link_libs. Other toolchains can
+    use any names they need (e.g., python_packages, data_schemas).
     """
 
-    include_dirs: list[Path] = field(default_factory=list)
-    link_libs: list[str] = field(default_factory=list)
-    defines: list[str] = field(default_factory=list)
-    compile_flags: list[str] = field(default_factory=list)
-    link_flags: list[str] = field(default_factory=list)
+    def __init__(self, **kwargs: list) -> None:
+        object.__setattr__(self, "_data", {})
+        for k, v in kwargs.items():
+            self._data[k] = list(v)
+
+    def __getattr__(self, name: str) -> list:
+        """Return the named list, creating it on first access."""
+        data = object.__getattribute__(self, "_data")
+        return data.setdefault(name, [])
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name.startswith("_"):
+            object.__setattr__(self, name, value)
+        else:
+            self._data[name] = value  # type: ignore[assignment]
 
     def merge(
         self,
@@ -71,37 +84,40 @@ class UsageRequirements:
     ) -> None:
         """Merge another UsageRequirements into this one.
 
-        Avoids duplicates while preserving order. For compiler and linker
-        flags, handles flags that take separate arguments (like -F path,
-        -framework Foo) by treating the flag+argument pair as a unit.
+        Avoids duplicates while preserving order. For flags that take
+        separate arguments (like -F path, -framework Foo), the
+        flag+argument pair is treated as a unit.
 
         Args:
             other: The UsageRequirements to merge from.
             separated_arg_flags: Set of flags that take separate arguments.
                                If None, uses default (empty set).
         """
-        for inc_dir in other.include_dirs:
-            if inc_dir not in self.include_dirs:
-                self.include_dirs.append(inc_dir)
-        for lib in other.link_libs:
-            if lib not in self.link_libs:
-                self.link_libs.append(lib)
-        for define in other.defines:
-            if define not in self.defines:
-                self.defines.append(define)
-        # Use flag-aware merge for compile and link flags
-        merge_flags(self.compile_flags, other.compile_flags, separated_arg_flags)
-        merge_flags(self.link_flags, other.link_flags, separated_arg_flags)
+        for key, values in other._data.items():
+            mine = self._data.setdefault(key, [])
+            merge_flags(mine, values, separated_arg_flags)
 
     def clone(self) -> UsageRequirements:
         """Create a copy of this UsageRequirements."""
-        return UsageRequirements(
-            include_dirs=list(self.include_dirs),
-            link_libs=list(self.link_libs),
-            defines=list(self.defines),
-            compile_flags=list(self.compile_flags),
-            link_flags=list(self.link_flags),
-        )
+        result = UsageRequirements()
+        for k, v in self._data.items():
+            result._data[k] = list(v)
+        return result
+
+    def items(self) -> list[tuple[str, list]]:
+        """Return all (name, list) pairs."""
+        return list(self._data.items())
+
+    def __bool__(self) -> bool:
+        """True if any requirement list is non-empty."""
+        return any(bool(v) for v in self._data.values())
+
+    def __repr__(self) -> str:
+        non_empty = {k: v for k, v in self._data.items() if v}
+        if not non_empty:
+            return "UsageRequirements()"
+        items = ", ".join(f"{k}={v!r}" for k, v in non_empty.items())
+        return f"UsageRequirements({items})"
 
 
 class Target:
