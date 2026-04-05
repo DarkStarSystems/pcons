@@ -774,6 +774,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
 from pcons.tools.toolchain import toolchain_registry  # noqa: E402
 
+
 def _is_msvc_available() -> bool:
     """Check if MSVC is available, either in PATH or via vswhere."""
     import shutil
