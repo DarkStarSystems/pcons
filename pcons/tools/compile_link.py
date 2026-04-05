@@ -18,13 +18,13 @@ from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.node import FileNode
+from pcons.core.subst import PathToken, TargetPath
+from pcons.core.target import TargetType
+from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
 )
-from pcons.core.subst import PathToken, TargetPath
-from pcons.core.target import TargetType
-from pcons.toolchains.build_context import CompileLinkContext
 
 logger = logging.getLogger(__name__)
 

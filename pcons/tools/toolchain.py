@@ -976,8 +976,8 @@ class BaseToolchain(ABC):
             or None if this toolchain doesn't use the context mechanism.
         """
         # Import here to avoid circular imports
-        from pcons.tools.requirements import compute_effective_requirements
         from pcons.toolchains.build_context import CompileLinkContext
+        from pcons.tools.requirements import compute_effective_requirements
 
         # Compute effective requirements
         effective = compute_effective_requirements(target, env, for_compilation)

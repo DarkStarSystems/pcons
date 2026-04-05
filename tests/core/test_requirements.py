@@ -4,11 +4,11 @@
 from pathlib import Path
 
 from pcons.core.project import Project
+from pcons.core.target import Target, UsageRequirements
 from pcons.tools.requirements import (
     EffectiveRequirements,
     compute_effective_requirements,
 )
-from pcons.core.target import Target, UsageRequirements
 
 
 class TestEffectiveRequirements:

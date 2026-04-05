@@ -18,8 +18,8 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
-    from pcons.tools.requirements import EffectiveRequirements
     from pcons.core.target import Target
+    from pcons.tools.requirements import EffectiveRequirements
 
 
 @dataclass

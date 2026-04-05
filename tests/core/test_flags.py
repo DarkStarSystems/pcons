@@ -259,8 +259,8 @@ class TestIntegrationWithEffectiveRequirements:
 
     def test_effective_requirements_merge_preserves_paired_flags(self):
         """Test that EffectiveRequirements.merge handles paired flags correctly."""
-        from pcons.tools.requirements import EffectiveRequirements
         from pcons.core.target import UsageRequirements
+        from pcons.tools.requirements import EffectiveRequirements
 
         eff = EffectiveRequirements(
             link_flags=["-F", "path1"], separated_arg_flags=TEST_SEPARATED_ARG_FLAGS
@@ -274,8 +274,8 @@ class TestIntegrationWithEffectiveRequirements:
 
     def test_real_world_macos_frameworks(self):
         """Test a realistic macOS scenario with multiple frameworks."""
-        from pcons.tools.requirements import EffectiveRequirements
         from pcons.core.target import UsageRequirements
+        from pcons.tools.requirements import EffectiveRequirements
 
         # Simulating what happens when multiple dependencies each need frameworks
         eff = EffectiveRequirements(separated_arg_flags=TEST_SEPARATED_ARG_FLAGS)
