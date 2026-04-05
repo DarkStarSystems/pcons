@@ -44,6 +44,7 @@ def _find_ninja() -> list[str] | None:
         return ["uvx", "ninja"]
     return None
 
+
 # Generators to test
 # xcode generator works on all platforms but xcodebuild only runs on macOS
 GENERATORS = ["ninja", "make", "xcode"]
