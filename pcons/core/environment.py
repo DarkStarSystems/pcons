@@ -885,7 +885,6 @@ class Environment:
             if isinstance(node, FileNode):
                 self.register_node(node)
                 cmd_target.output_nodes.append(node)
-                cmd_target.nodes.append(node)
 
         # Handle Target sources - store for deferred resolution
         if target_sources:

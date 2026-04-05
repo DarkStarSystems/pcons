@@ -151,7 +151,7 @@ class TestCollectAllNodes:
         src = FileNode("main.c")
         out = FileNode("app")
         target.add_source(src)
-        target.nodes.append(out)
+        target.output_nodes.append(out)
 
         nodes = collect_all_nodes([target])
 
@@ -163,13 +163,13 @@ class TestCollectAllNodes:
         lib_src = FileNode("lib.c")
         lib_out = FileNode("lib.o")
         lib.add_source(lib_src)
-        lib.nodes.append(lib_out)
+        lib.output_nodes.append(lib_out)
 
         app = Target("app")
         app_src = FileNode("main.c")
         app_out = FileNode("app")
         app.add_source(app_src)
-        app.nodes.append(app_out)
+        app.output_nodes.append(app_out)
         app.link(lib)
 
         nodes = collect_all_nodes([app])

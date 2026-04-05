@@ -392,8 +392,6 @@ class Resolver:
                 _add_node(node)
             for node in target.output_nodes:
                 _add_node(node)
-            for node in target.nodes:
-                _add_node(node)
 
         for env in self.project.environments:
             for node in getattr(env, "_created_nodes", []):

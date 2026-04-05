@@ -115,7 +115,7 @@ class TargetLike(Protocol):
 
     @property
     def nodes(self) -> list[Any]:
-        """Output nodes created by building this target."""
+        """All build nodes (intermediate + output)."""
         ...
 
     @property

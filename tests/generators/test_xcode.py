@@ -464,7 +464,7 @@ class TestXcodeGeneratorArchive:
         }
 
         tar_target.output_nodes.append(archive)
-        tar_target.nodes.append(archive)
+        tar_target.output_nodes.append(archive)
 
         project.add_target(tar_target)
 
@@ -510,7 +510,7 @@ class TestXcodeGeneratorArchive:
         }
 
         zip_target.output_nodes.append(archive)
-        zip_target.nodes.append(archive)
+        zip_target.output_nodes.append(archive)
 
         project.add_target(zip_target)
 
@@ -614,7 +614,7 @@ class TestXcodeGeneratorInstallDependencies:
         }
 
         tar_target.output_nodes.append(archive)
-        tar_target.nodes.append(archive)
+        tar_target.output_nodes.append(archive)
 
         project.add_target(tar_target)
 

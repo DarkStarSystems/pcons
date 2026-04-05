@@ -145,7 +145,6 @@ class CompileLinkFactory:
         elif target.target_type == "object":
             # Object-only targets: output_nodes are the object files
             target.output_nodes = list(target.intermediate_nodes)
-            target.nodes = list(target.intermediate_nodes)
 
         if target.output_nodes:
             trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
@@ -337,7 +336,6 @@ class CompileLinkFactory:
         }
 
         target.output_nodes.append(lib_node)
-        target.nodes.append(lib_node)
         env.register_node(lib_node)
 
     def _create_shared_library_output(self, target: Target, env: Environment) -> None:
@@ -394,7 +392,6 @@ class CompileLinkFactory:
             }
 
         target.output_nodes.append(lib_node)
-        target.nodes.append(lib_node)
         env.register_node(lib_node)
 
     def _create_program_output(self, target: Target, env: Environment) -> None:
@@ -467,11 +464,9 @@ class CompileLinkFactory:
                         "output_name": spec.name,
                     }
                     target.output_nodes.append(sec_node)
-                    target.nodes.append(sec_node)
                 prog_node._build_info["outputs"] = outputs_dict
 
         target.output_nodes.append(prog_node)
-        target.nodes.append(prog_node)
         env.register_node(prog_node)
 
     # -------------------------------------------------------------------------

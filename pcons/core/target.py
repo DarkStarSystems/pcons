@@ -125,7 +125,7 @@ class Target:
 
     Attributes:
         name: Target name.
-        nodes: Output nodes created by building this target.
+        nodes: All build nodes (intermediate + output), computed property.
         builder: Builder used to create this target.
         sources: Source nodes for this target.
         dependencies: Other targets this depends on.
@@ -133,7 +133,7 @@ class Target:
         private: Usage requirements for this target only.
         required_languages: Languages used by this target (set by toolchains).
         defined_at: Where this target was created in user code.
-        target_type: Type of target (static_library, shared_library, program, interface).
+        target_type: Type of target (e.g., "program", "static_library").
         _env: Reference to the Environment used for building.
         intermediate_nodes: Intermediate build artifacts (e.g., object files).
         output_nodes: Final output nodes (library/program, populated by resolver).
@@ -142,7 +142,6 @@ class Target:
 
     __slots__ = (
         "name",
-        "nodes",
         "builder",
         "_sources",
         "dependencies",
@@ -207,7 +206,6 @@ class Target:
             defined_at: Source location where target was created.
         """
         self.name = name
-        self.nodes: list[Node] = []
         self.builder = builder
         self._sources: list[Node] = []
         self.dependencies: list[Target] = []
@@ -280,6 +278,11 @@ class Target:
             f"Use add_source() or add_sources() instead. "
             f"Example: target.add_sources({value!r})"
         )
+
+    @property
+    def nodes(self) -> list[Node]:
+        """All build nodes for this target (intermediate + output)."""
+        return self.intermediate_nodes + self.output_nodes
 
     def link(self, *targets: Target) -> Target:
         """Add targets as dependencies (fluent API).

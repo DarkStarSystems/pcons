@@ -183,9 +183,7 @@ class ArchiveNodeFactory(PendingSourceFactory):
             },
         )
 
-        # Add to target's output nodes
         target.output_nodes.append(archive_node)
-        target.nodes.append(archive_node)
 
 
 class ArchiveTarget(Target):

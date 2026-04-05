@@ -115,7 +115,7 @@ class TestProjectAliases:
     def test_create_alias(self):
         project = Project("myproject")
         target = Target("mylib")
-        target.nodes.append(FileNode("lib.a"))
+        target.output_nodes.append(FileNode("lib.a"))
         project.add_target(target)
 
         alias = project.Alias("libs", target)
@@ -126,9 +126,9 @@ class TestProjectAliases:
     def test_alias_with_multiple_targets(self):
         project = Project("myproject")
         lib1 = Target("lib1")
-        lib1.nodes.append(FileNode("lib1.a"))
+        lib1.output_nodes.append(FileNode("lib1.a"))
         lib2 = Target("lib2")
-        lib2.nodes.append(FileNode("lib2.a"))
+        lib2.output_nodes.append(FileNode("lib2.a"))
 
         alias = project.Alias("all_libs", lib1, lib2)
 
@@ -156,7 +156,7 @@ class TestProjectAliases:
         project = Project("myproject")
         target = Target("mylib")
         node = FileNode("lib.a")
-        target.nodes.append(node)
+        target.output_nodes.append(node)
         project.add_target(target)
 
         alias = project.Alias("libs", target)
@@ -253,11 +253,11 @@ class TestProjectAllNodes:
 
         lib = Target("lib")
         lib.add_source(FileNode("lib.c"))
-        lib.nodes.append(FileNode("lib.o"))
+        lib.output_nodes.append(FileNode("lib.o"))
 
         app = Target("app")
         app.add_source(FileNode("main.c"))
-        app.nodes.append(FileNode("app"))
+        app.output_nodes.append(FileNode("app"))
         app.link(lib)
 
         project.add_target(lib)
