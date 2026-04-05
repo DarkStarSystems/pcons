@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.node import FileNode
 from pcons.core.subst import PathToken, TargetPath
-from pcons.core.target import TargetType
 from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
     EffectiveRequirements,
@@ -70,7 +69,7 @@ class CompileLinkFactory:
         3. Create output node (library/program) from objects (linking)
         """
         if env is None:
-            if target.target_type == TargetType.INTERFACE:
+            if target.target_type == "interface":
                 return
             logger.debug("Skipping target '%s' without env", target.name)
             return
@@ -137,13 +136,13 @@ class CompileLinkFactory:
 
         # Create output node(s) based on target type
         trace("resolve", "  Creating output for type: %s", target.target_type)
-        if target.target_type == TargetType.STATIC_LIBRARY:
+        if target.target_type == "static_library":
             self._create_static_library_output(target, env)
-        elif target.target_type == TargetType.SHARED_LIBRARY:
+        elif target.target_type == "shared_library":
             self._create_shared_library_output(target, env)
-        elif target.target_type == TargetType.PROGRAM:
+        elif target.target_type == "program":
             self._create_program_output(target, env)
-        elif target.target_type == TargetType.OBJECT:
+        elif target.target_type == "object":
             # Object-only targets: output_nodes are the object files
             target.output_nodes = list(target.intermediate_nodes)
             target.nodes = list(target.intermediate_nodes)
@@ -563,10 +562,7 @@ class CompileLinkFactory:
         result: list[FileNode] = []
         for dep in target.transitive_dependencies():
             for node in dep.output_nodes:
-                if (
-                    sys.platform == "win32"
-                    and dep.target_type == TargetType.SHARED_LIBRARY
-                ):
+                if sys.platform == "win32" and dep.target_type == "shared_library":
                     build_info = getattr(node, "_build_info", {})
                     outputs = build_info.get("outputs", {})
                     import_lib_info = outputs.get("import_lib")

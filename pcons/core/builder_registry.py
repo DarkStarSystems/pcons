@@ -10,7 +10,7 @@ footing with built-ins.
 
 Example:
     # Register a builder using the decorator
-    @builder("InstallSymlink", target_type=TargetType.INTERFACE)
+    @builder("InstallSymlink", target_type="interface")
     class InstallSymlinkBuilder:
         @staticmethod
         def create_target(project, dest, source, **kwargs):
@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
-    from pcons.core.target import Target, TargetType
+    from pcons.core.target import Target
 
 
 @runtime_checkable
@@ -74,7 +74,7 @@ class BuilderRegistration:
     Attributes:
         name: The builder name (e.g., "Program", "Install").
         create_target: Function to create a target for this builder.
-        target_type: The TargetType for targets created by this builder.
+        target_type: The str for targets created by this builder.
         factory_class: Optional NodeFactory class for resolution.
         requires_env: Whether the builder requires an Environment argument.
         description: Human-readable description of the builder.
@@ -84,7 +84,7 @@ class BuilderRegistration:
 
     name: str
     create_target: Callable[..., Target]
-    target_type: TargetType
+    target_type: str
     factory_class: type | None = None
     requires_env: bool = False
     description: str = ""
@@ -112,7 +112,7 @@ class BuilderRegistry:
         name: str,
         *,
         create_target: Callable[..., Target],
-        target_type: TargetType,
+        target_type: str,
         factory_class: type | None = None,
         requires_env: bool = False,
         description: str = "",
@@ -125,7 +125,7 @@ class BuilderRegistry:
             name: The builder name. This becomes the method name on Project.
             create_target: Function to create a Target for this builder.
                 Should have signature: (project, *args, **kwargs) -> Target
-            target_type: The TargetType for targets created by this builder.
+            target_type: The str for targets created by this builder.
             factory_class: Optional NodeFactory class for resolution.
             requires_env: Whether the builder requires an Environment argument.
             description: Human-readable description of the builder.
@@ -192,7 +192,7 @@ class BuilderRegistry:
 def builder(
     name: str,
     *,
-    target_type: TargetType,
+    target_type: str,
     factory_class: type | None = None,
     requires_env: bool = False,
     description: str = "",
@@ -205,7 +205,7 @@ def builder(
     that creates and returns a Target.
 
     Example:
-        @builder("InstallSymlink", target_type=TargetType.INTERFACE)
+        @builder("InstallSymlink", target_type="interface")
         class InstallSymlinkBuilder:
             @staticmethod
             def create_target(project, dest, source, *, name=None):
@@ -217,7 +217,7 @@ def builder(
 
     Args:
         name: The builder name.
-        target_type: The TargetType for targets created by this builder.
+        target_type: The str for targets created by this builder.
         factory_class: Optional NodeFactory class for resolution.
         requires_env: Whether the builder requires an Environment argument.
         description: Human-readable description of the builder.

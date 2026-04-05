@@ -25,7 +25,7 @@ from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode
 from pcons.core.resolver import PendingSourceFactory
 from pcons.core.subst import SourcePath, TargetPath
-from pcons.core.target import Target, TargetType
+from pcons.core.target import Target
 from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
 
@@ -242,7 +242,7 @@ class ArchiveTarget(Target):
 
 @builder(
     "Tarfile",
-    target_type=TargetType.ARCHIVE,
+    target_type="archive",
     factory_class=ArchiveNodeFactory,
     requires_env=True,
 )
@@ -304,7 +304,7 @@ class TarfileBuilder:
 
         target = ArchiveTarget(
             name,
-            target_type=TargetType.ARCHIVE,
+            target_type="archive",
             defined_at=get_caller_location(),
         )
         target._env = env
@@ -326,7 +326,7 @@ class TarfileBuilder:
 
 @builder(
     "Zipfile",
-    target_type=TargetType.ARCHIVE,
+    target_type="archive",
     factory_class=ArchiveNodeFactory,
     requires_env=True,
 )
@@ -370,7 +370,7 @@ class ZipfileBuilder:
 
         target = ArchiveTarget(
             name,
-            target_type=TargetType.ARCHIVE,
+            target_type="archive",
             defined_at=get_caller_location(),
         )
         target._env = env

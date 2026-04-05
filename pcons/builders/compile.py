@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING
 
 from pcons.core.builder_registry import builder
 from pcons.core.node import Node
-from pcons.core.target import Target, TargetType
+from pcons.core.resolver import NoOpFactory
+from pcons.core.target import Target
 from pcons.tools.compile_link import CompileLinkFactory
 from pcons.util.source_location import get_caller_location
 
@@ -29,7 +30,7 @@ if TYPE_CHECKING:
 
 @builder(
     "Program",
-    target_type=TargetType.PROGRAM,
+    target_type="program",
     requires_env=True,
     factory_class=CompileLinkFactory,
 )
@@ -58,7 +59,7 @@ class ProgramBuilder:
         """
         target = Target(
             name,
-            target_type=TargetType.PROGRAM,
+            target_type="program",
             defined_at=defined_at or get_caller_location(),
         )
         target._env = env
@@ -75,7 +76,7 @@ class ProgramBuilder:
 
 @builder(
     "StaticLibrary",
-    target_type=TargetType.STATIC_LIBRARY,
+    target_type="static_library",
     requires_env=True,
     factory_class=CompileLinkFactory,
 )
@@ -104,7 +105,7 @@ class StaticLibraryBuilder:
         """
         target = Target(
             name,
-            target_type=TargetType.STATIC_LIBRARY,
+            target_type="static_library",
             defined_at=defined_at or get_caller_location(),
         )
         target._env = env
@@ -121,7 +122,7 @@ class StaticLibraryBuilder:
 
 @builder(
     "SharedLibrary",
-    target_type=TargetType.SHARED_LIBRARY,
+    target_type="shared_library",
     requires_env=True,
     factory_class=CompileLinkFactory,
 )
@@ -150,7 +151,7 @@ class SharedLibraryBuilder:
         """
         target = Target(
             name,
-            target_type=TargetType.SHARED_LIBRARY,
+            target_type="shared_library",
             defined_at=defined_at or get_caller_location(),
         )
         target._env = env
@@ -167,7 +168,7 @@ class SharedLibraryBuilder:
 
 @builder(
     "ObjectLibrary",
-    target_type=TargetType.OBJECT,
+    target_type="object",
     requires_env=True,
     factory_class=CompileLinkFactory,
 )
@@ -196,7 +197,7 @@ class ObjectLibraryBuilder:
         """
         target = Target(
             name,
-            target_type=TargetType.OBJECT,
+            target_type="object",
             defined_at=defined_at or get_caller_location(),
         )
         target._env = env
@@ -211,7 +212,7 @@ class ObjectLibraryBuilder:
         return target
 
 
-@builder("HeaderOnlyLibrary", target_type=TargetType.INTERFACE)
+@builder("HeaderOnlyLibrary", target_type="interface", factory_class=NoOpFactory)
 class HeaderOnlyLibraryBuilder:
     """Create a header-only (interface) library target."""
 
@@ -235,7 +236,7 @@ class HeaderOnlyLibraryBuilder:
         """
         target = Target(
             name,
-            target_type=TargetType.INTERFACE,
+            target_type="interface",
             defined_at=defined_at or get_caller_location(),
         )
         target._builder_name = "HeaderOnlyLibrary"
@@ -248,7 +249,7 @@ class HeaderOnlyLibraryBuilder:
         return target
 
 
-@builder("Command", target_type=TargetType.COMMAND, requires_env=True)
+@builder("Command", target_type="command", requires_env=True)
 class CommandBuilder:
     """Create a custom command target.
 

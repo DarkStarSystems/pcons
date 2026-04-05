@@ -44,12 +44,11 @@ def _register_contrib_builders() -> None:
     )
     from pcons.contrib.installers.windows import create_appx, create_msix
     from pcons.core.builder_registry import BuilderRegistry
-    from pcons.core.target import TargetType
 
     BuilderRegistry.register(
         "Pkg",
         create_target=create_pkg,
-        target_type=TargetType.INSTALLER,
+        target_type="installer",
         requires_env=True,
         description="Create a macOS product archive (.pkg) installer",
         platforms=["darwin"],
@@ -57,7 +56,7 @@ def _register_contrib_builders() -> None:
     BuilderRegistry.register(
         "ComponentPkg",
         create_target=create_component_pkg,
-        target_type=TargetType.INSTALLER,
+        target_type="installer",
         requires_env=True,
         description="Create a macOS component package using pkgbuild",
         platforms=["darwin"],
@@ -65,7 +64,7 @@ def _register_contrib_builders() -> None:
     BuilderRegistry.register(
         "Dmg",
         create_target=create_dmg,
-        target_type=TargetType.INSTALLER,
+        target_type="installer",
         requires_env=True,
         description="Create a macOS .dmg disk image",
         platforms=["darwin"],
@@ -73,7 +72,7 @@ def _register_contrib_builders() -> None:
     BuilderRegistry.register(
         "Msix",
         create_target=create_msix,
-        target_type=TargetType.INSTALLER,
+        target_type="installer",
         requires_env=True,
         description="Create a Windows MSIX package",
         platforms=["win32"],
@@ -81,7 +80,7 @@ def _register_contrib_builders() -> None:
     BuilderRegistry.register(
         "Appx",
         create_target=create_appx,
-        target_type=TargetType.INSTALLER,
+        target_type="installer",
         requires_env=True,
         description="Create a Windows AppX package (legacy MSIX format)",
         platforms=["win32"],
@@ -89,7 +88,7 @@ def _register_contrib_builders() -> None:
     BuilderRegistry.register(
         "MacosBundle",
         create_target=create_macos_bundle,
-        target_type=TargetType.INSTALLER,
+        target_type="installer",
         requires_env=True,
         description="Create a macOS .bundle or .plugin structure",
         platforms=["darwin"],
@@ -97,7 +96,7 @@ def _register_contrib_builders() -> None:
     BuilderRegistry.register(
         "FlatBundle",
         create_target=create_flat_bundle,
-        target_type=TargetType.INSTALLER,
+        target_type="installer",
         requires_env=True,
         description="Create a flat directory bundle (cross-platform)",
     )

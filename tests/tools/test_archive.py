@@ -6,7 +6,7 @@ import zipfile
 from pathlib import Path
 
 from pcons.core.project import Project
-from pcons.core.target import Target, TargetType
+from pcons.core.target import Target
 from pcons.generators.ninja import NinjaGenerator
 
 
@@ -25,7 +25,7 @@ class TestTarfileBuilder:
         )
 
         assert isinstance(tar, Target)
-        assert tar.target_type == TargetType.ARCHIVE
+        assert tar.target_type == "archive"
 
     def test_tarfile_name_derived_from_output(self, tmp_path):
         """Tarfile name is derived from output path."""
@@ -138,7 +138,7 @@ class TestZipfileBuilder:
         )
 
         assert isinstance(zf, Target)
-        assert zf.target_type == TargetType.ARCHIVE
+        assert zf.target_type == "archive"
 
     def test_zipfile_name_derived_from_output(self, tmp_path):
         """Zipfile name is derived from output path."""

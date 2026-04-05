@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from pcons.core.target import Target, TargetType
+from pcons.core.target import Target
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
 
@@ -14,20 +14,20 @@ from pcons.toolchains.llvm import LlvmToolchain
 
 class TestTargetSetGet:
     def test_default_is_none(self) -> None:
-        t = Target("lib", target_type=TargetType.SHARED_LIBRARY)
+        t = Target("lib", target_type="shared_library")
         assert t.get_option("install_name") is None
 
     def test_set_and_get(self) -> None:
-        t = Target("lib", target_type=TargetType.SHARED_LIBRARY)
+        t = Target("lib", target_type="shared_library")
         t.set_option("install_name", "@rpath/libcustom.dylib")
         assert t.get_option("install_name") == "@rpath/libcustom.dylib"
 
     def test_set_returns_self(self) -> None:
-        t = Target("lib", target_type=TargetType.SHARED_LIBRARY)
+        t = Target("lib", target_type="shared_library")
         assert t.set_option("install_name", "foo") is t
 
     def test_get_with_default(self) -> None:
-        t = Target("lib", target_type=TargetType.SHARED_LIBRARY)
+        t = Target("lib", target_type="shared_library")
         assert t.get_option("missing_key", "fallback") == "fallback"
 
 
@@ -35,7 +35,7 @@ class TestTargetSetGet:
 
 
 def _make_shared_target(name: str = "foo") -> Target:
-    return Target(name, target_type=TargetType.SHARED_LIBRARY)
+    return Target(name, target_type="shared_library")
 
 
 class TestGccInstallName:
@@ -99,13 +99,13 @@ class TestGccInstallName:
 
     def test_program_gets_no_flags(self) -> None:
         tc = GccToolchain()
-        target = Target("app", target_type=TargetType.PROGRAM)
+        target = Target("app", target_type="program")
         flags = tc.get_link_flags_for_target(target, "app", [])
         assert flags == []
 
     def test_static_library_gets_no_flags(self) -> None:
         tc = GccToolchain()
-        target = Target("lib", target_type=TargetType.STATIC_LIBRARY)
+        target = Target("lib", target_type="static_library")
         flags = tc.get_link_flags_for_target(target, "libfoo.a", [])
         assert flags == []
 

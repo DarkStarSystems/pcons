@@ -221,9 +221,7 @@ class UnixToolchain(BaseToolchain):
         - a string: use as-is
         - ``""``: disable entirely
         """
-        from pcons.core.target import TargetType
-
-        if target.target_type != TargetType.SHARED_LIBRARY:
+        if target.target_type != "shared_library":
             return []
 
         # Check for explicit user setting via target.set("install_name", ...)

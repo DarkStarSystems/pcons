@@ -18,7 +18,7 @@ from pathlib import Path
 from pcons import Project, find_c_toolchain
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode
-from pcons.core.target import Target, TargetType
+from pcons.core.target import Target
 from pcons.util.source_location import get_caller_location
 
 # =============================================================================
@@ -49,7 +49,7 @@ def _create_version_header_content(app_name: str, version: str) -> str:
 
 @builder(
     "GenerateVersion",
-    target_type=TargetType.COMMAND,
+    target_type="command",
     description="Generate a version header file",
 )
 class GenerateVersionBuilder:
@@ -88,7 +88,7 @@ class GenerateVersionBuilder:
 
         target = Target(
             target_name,
-            target_type=TargetType.COMMAND,
+            target_type="command",
             defined_at=get_caller_location(),
         )
         target._project = project

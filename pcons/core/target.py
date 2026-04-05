@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -28,27 +27,7 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
 
 
-class TargetType(StrEnum):
-    """Valid target types.
-
-    Using StrEnum allows these values to be used directly in string comparisons
-    while providing type safety and preventing typos.
-    """
-
-    # Generic target types
-    ARCHIVE = "archive"  # Tar/Zip archives
-    COMMAND = "command"  # Generic command output
-    INSTALLER = "installer"  # Platform-specific installer packages
-    INTERFACE = "interface"  # Metadata-only target (no build output)
-
-    # Compile-link target types (used by C/C++ toolchains)
-    STATIC_LIBRARY = "static_library"
-    SHARED_LIBRARY = "shared_library"
-    PROGRAM = "program"
-    OBJECT = "object"  # Intermediate artifacts only (no final output)
-
-
-__all__ = ["SourceSpec", "TargetType", "UsageRequirements", "Target", "ImportedTarget"]
+__all__ = ["SourceSpec", "UsageRequirements", "Target", "ImportedTarget"]
 
 
 class UsageRequirements:
@@ -214,7 +193,7 @@ class Target:
         self,
         name: str,
         *,
-        target_type: TargetType | str | None = None,
+        target_type: str | None = None,
         builder: Builder | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
@@ -222,8 +201,8 @@ class Target:
 
         Args:
             name: Target name (e.g., "mylib", "myapp").
-            target_type: Type of target (TargetType enum or string like "static_library").
-                        Using TargetType enum constants is preferred for type safety.
+            target_type: Type of target (e.g., "program", "static_library").
+                        Toolchains define their own type strings.
             builder: Builder to use for this target.
             defined_at: Source location where target was created.
         """
@@ -237,12 +216,7 @@ class Target:
         self.required_languages: set[str] = set()
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
-        # NEW for target-centric build model:
-        # Convert string target_type to TargetType enum if provided as string
-        if isinstance(target_type, str):
-            self.target_type: TargetType | None = TargetType(target_type)
-        else:
-            self.target_type = target_type
+        self.target_type: str | None = target_type
         self._env: Environment | None = None
         self._project: Project | None = None  # Set by Project when target is created
         self.intermediate_nodes: list[FileNode] = []
@@ -638,7 +612,7 @@ class Target:
         """User-friendly string representation for debugging."""
         lines = [f"Target: {self.name}"]
         if self.target_type:
-            lines.append(f"  Type: {self.target_type.name}")
+            lines.append(f"  Type: {self.target_type}")
         if self.defined_at:
             lines.append(f"  Defined at: {self.defined_at}")
         if self._sources:

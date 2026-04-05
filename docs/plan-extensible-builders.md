@@ -19,7 +19,7 @@ This plan redesigns pcons to treat all builders and toolchains as first-class ad
 class BuilderRegistration:
     name: str                    # e.g., "Program", "Install"
     builder_class: type          # The builder class
-    target_type: TargetType      # e.g., TargetType.PROGRAM
+    target_type: str             # e.g., "program"
     factory_class: type | None   # NodeFactory class for resolution
 
 class BuilderRegistry:
@@ -188,7 +188,7 @@ pcons_gamedev.register(project)
 shaders = project.CompileShaders("shaders/", output="build/shaders")
 
 # Creating a custom builder
-@builder("InstallSymlink", target_type=TargetType.INTERFACE)
+@builder("InstallSymlink", target_type="interface")
 class InstallSymlinkBuilder:
     @staticmethod
     def create_target(project, dest, source, **kwargs):

@@ -54,7 +54,6 @@ from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import TargetPath
-from pcons.core.target import TargetType
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +110,13 @@ class PendingSourceFactory:
             elif isinstance(source, (Path, str)):
                 resolved.append(self.project.node(source))
         return resolved
+
+
+class NoOpFactory(PendingSourceFactory):
+    """Factory for targets that need no resolution (e.g., interface targets)."""
+
+    def resolve_pending(self, target: Target) -> None:
+        """No-op: nothing to resolve."""
 
 
 class CommandNodeFactory(PendingSourceFactory):
@@ -255,12 +261,6 @@ class Resolver:
         trace("resolve", "Resolving target: %s", target.name)
 
         env = target._env
-
-        # Interface targets have no outputs
-        if target.target_type == TargetType.INTERFACE:
-            trace("resolve", "  Skipping interface target")
-            target._resolved = True
-            return
 
         # Dispatch to registered factory via _builder_name
         builder_name = target._builder_name

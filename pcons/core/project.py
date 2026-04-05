@@ -723,7 +723,7 @@ class Project:
         lines.append(f"  Build: {self.build_dir}")
         lines.append(f"  Targets: {len(self._targets)}")
         for target in list(self._targets.values())[:5]:
-            target_type = target.target_type.name if target.target_type else "unknown"
+            target_type = target.target_type or "unknown"
             lines.append(f"    - {target.name} ({target_type})")
         if len(self._targets) > 5:
             lines.append(f"    ... and {len(self._targets) - 5} more")

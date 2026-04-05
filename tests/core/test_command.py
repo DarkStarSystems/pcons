@@ -525,7 +525,7 @@ class TestTargetAsSources:
     def test_resolved_target_sources(self, tmp_path):
         """Target.sources includes resolved Target outputs before pending sources cleared."""
         from pcons.core.project import Project
-        from pcons.core.target import Target, TargetType
+        from pcons.core.target import Target
 
         project = Project("test", root_dir=tmp_path, build_dir=".")
         env = project.Environment()
@@ -543,7 +543,7 @@ class TestTargetAsSources:
         assert generated.output_nodes[0].path == Path("generated.cpp")
 
         # Create a target that uses the generated source
-        consumer = Target("consumer", target_type=TargetType.PROGRAM)
+        consumer = Target("consumer", target_type="program")
         consumer._project = project
         consumer.add_source("main.cpp")
         consumer.add_source(generated)

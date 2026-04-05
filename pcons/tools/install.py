@@ -26,7 +26,7 @@ from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode
 from pcons.core.resolver import PendingSourceFactory
 from pcons.core.subst import PathToken, SourcePath, TargetPath
-from pcons.core.target import Target, TargetType
+from pcons.core.target import Target
 from pcons.tools.tool import StandaloneTool
 from pcons.util.source_location import get_caller_location
 
@@ -420,7 +420,7 @@ class InstallNodeFactory(PendingSourceFactory):
         target.output_nodes.append(stamp_node)
 
 
-@builder("Install", target_type=TargetType.INTERFACE, factory_class=InstallNodeFactory)
+@builder("Install", target_type="interface", factory_class=InstallNodeFactory)
 class InstallBuilder:
     """Install files to a destination directory.
 
@@ -455,7 +455,7 @@ class InstallBuilder:
         # Create the install target
         install_target = Target(
             target_name,
-            target_type=TargetType.INTERFACE,
+            target_type="interface",
             defined_at=get_caller_location(),
         )
 
@@ -468,9 +468,7 @@ class InstallBuilder:
         return install_target
 
 
-@builder(
-    "InstallAs", target_type=TargetType.INTERFACE, factory_class=InstallNodeFactory
-)
+@builder("InstallAs", target_type="interface", factory_class=InstallNodeFactory)
 class InstallAsBuilder:
     """Install a file to a specific destination path.
 
@@ -516,7 +514,7 @@ class InstallAsBuilder:
         # Create the install target
         install_target = Target(
             target_name,
-            target_type=TargetType.INTERFACE,
+            target_type="interface",
             defined_at=get_caller_location(),
         )
 
@@ -529,9 +527,7 @@ class InstallAsBuilder:
         return install_target
 
 
-@builder(
-    "InstallDir", target_type=TargetType.INTERFACE, factory_class=InstallNodeFactory
-)
+@builder("InstallDir", target_type="interface", factory_class=InstallNodeFactory)
 class InstallDirBuilder:
     """Install a directory tree to a destination.
 
@@ -566,7 +562,7 @@ class InstallDirBuilder:
         # Create the install target
         install_target = Target(
             target_name,
-            target_type=TargetType.INTERFACE,
+            target_type="interface",
             defined_at=get_caller_location(),
         )
 

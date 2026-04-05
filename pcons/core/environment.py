@@ -832,7 +832,6 @@ class Environment:
         from pcons.core.builder import GenericCommandBuilder
         from pcons.core.node import FileNode
         from pcons.core.target import Target as TargetClass
-        from pcons.core.target import TargetType
 
         # Normalize target to list
         if isinstance(target, (str, Path)):
@@ -874,7 +873,7 @@ class Environment:
         # Create Target object
         cmd_target = TargetClass(
             name,
-            target_type=TargetType.COMMAND,
+            target_type="command",
             defined_at=get_caller_location(),
         )
         cmd_target._env = self

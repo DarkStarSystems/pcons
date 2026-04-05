@@ -435,7 +435,7 @@ All builders in pcons register through a unified `BuilderRegistry`. This ensures
 class BuilderRegistration:
     name: str                      # e.g., "Program", "Install"
     create_target: Callable        # Function to create a Target
-    target_type: TargetType        # e.g., TargetType.PROGRAM
+    target_type: str        # e.g., "program"
     factory_class: type | None     # Optional NodeFactory for resolution
     requires_env: bool             # Whether builder needs an Environment
     description: str               # Human-readable description
@@ -456,7 +456,7 @@ class BuilderRegistry:
 
 3. **@builder decorator** - Easy registration:
 ```python
-@builder("InstallSymlink", target_type=TargetType.INTERFACE)
+@builder("InstallSymlink", target_type="interface")
 class InstallSymlinkBuilder:
     @staticmethod
     def create_target(project, dest, source, **kwargs):
@@ -486,13 +486,13 @@ project.InstallSymlink("dist/latest", app)
 
 ```python
 from pcons.core.builder_registry import builder
-from pcons.core.target import Target, TargetType
+from pcons.core.target import Target
 
-@builder("CompileShaders", target_type=TargetType.COMMAND, requires_env=True)
+@builder("CompileShaders", target_type="command", requires_env=True)
 class ShaderBuilder:
     @staticmethod
     def create_target(project, env, *, output, sources, **kwargs):
-        target = Target(output, target_type=TargetType.COMMAND)
+        target = Target(output, target_type="command")
         target._env = env
         target._project = project
         target._builder_name = "CompileShaders"
@@ -1162,9 +1162,9 @@ This is sufficient for most cases and much simpler. The tradeoff:
 **Builders are plugins (fully implemented):**
 ```python
 from pcons.core.builder_registry import builder
-from pcons.core.target import TargetType
+from pcons.core.target import Target
 
-@builder("MyBuilder", target_type=TargetType.COMMAND)
+@builder("MyBuilder", target_type="command")
 class MyBuilder:
     @staticmethod
     def create_target(project, ...):

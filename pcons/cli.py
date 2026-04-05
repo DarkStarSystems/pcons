@@ -694,7 +694,6 @@ def cmd_info(args: argparse.Namespace) -> int:
 def _info_targets(args: argparse.Namespace, script: Path) -> int:
     """List all targets defined by the build script."""
     from pcons.core.node import AliasNode, FileNode
-    from pcons.core.target import TargetType
 
     load_user_modules(args)
 
@@ -744,19 +743,19 @@ def _info_targets(args: argparse.Namespace, script: Path) -> int:
     by_type: dict[str, list[tuple[str, str]]] = {}
     # Order: programs, shared libs, static libs, then the rest
     type_order = [
-        TargetType.PROGRAM,
-        TargetType.SHARED_LIBRARY,
-        TargetType.STATIC_LIBRARY,
-        TargetType.OBJECT,
-        TargetType.INTERFACE,
-        TargetType.COMMAND,
-        TargetType.ARCHIVE,
-        TargetType.INSTALLER,
+        "program",
+        "shared_library",
+        "static_library",
+        "object",
+        "interface",
+        "command",
+        "archive",
+        "installer",
     ]
 
     for target in project.targets:
         ttype = target.target_type
-        type_name = ttype.value if ttype else "other"
+        type_name = ttype if ttype else "other"
         outputs = ""
         if target.output_nodes:
             paths = []
@@ -782,9 +781,9 @@ def _info_targets(args: argparse.Namespace, script: Path) -> int:
 
     print("Targets:")
     for ttype in type_order:
-        entries = by_type.pop(ttype.value, None)
+        entries = by_type.pop(ttype, None)
         if entries:
-            print_entries(ttype.value, entries)
+            print_entries(ttype, entries)
 
     # Any remaining types not in our order
     for type_name, entries in by_type.items():
