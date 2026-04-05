@@ -289,7 +289,7 @@ class Resolver:
         for dep_target in target._implicit_target_deps:
             if not dep_target._resolved:
                 self._resolve_target(dep_target)
-            for node in target.object_nodes + target.output_nodes:
+            for node in target.intermediate_nodes + target.output_nodes:
                 for dep_node in dep_target.output_nodes:
                     if dep_node not in node.implicit_deps:
                         node.implicit_deps.append(dep_node)
@@ -388,7 +388,7 @@ class Resolver:
                 nodes_to_expand.append(node)
 
         for target in self.project.targets:
-            for node in target.object_nodes:
+            for node in target.intermediate_nodes:
                 _add_node(node)
             for node in target.output_nodes:
                 _add_node(node)

@@ -124,7 +124,7 @@ class TargetLike(Protocol):
         ...
 
     @property
-    def object_nodes(self) -> list[Any]:
+    def intermediate_nodes(self) -> list[Any]:
         """Compiled object nodes."""
         ...
 

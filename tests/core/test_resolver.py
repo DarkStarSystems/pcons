@@ -38,9 +38,9 @@ class TestResolverSingleTarget:
 
         # Check that target was resolved
         assert target._resolved
-        assert len(target.object_nodes) == 1
+        assert len(target.intermediate_nodes) == 1
         # Objects are placed in obj.<target>/ subdirectory to avoid naming conflicts
-        assert target.object_nodes[0].path == Path("build/obj.mylib/main.c.o")
+        assert target.intermediate_nodes[0].path == Path("build/obj.mylib/main.c.o")
 
     def test_resolve_sets_object_build_info(self, tmp_path, gcc_toolchain):
         """Test that resolved objects have proper build_info."""
@@ -55,7 +55,7 @@ class TestResolverSingleTarget:
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
 
-        obj_node = target.object_nodes[0]
+        obj_node = target.intermediate_nodes[0]
         build_info = obj_node._build_info
 
         assert build_info["tool"] == "cc"
@@ -98,11 +98,11 @@ class TestResolverSameSourceDifferentTargets:
         assert target2._resolved
 
         # Each target should have its own object node
-        assert len(target1.object_nodes) == 1
-        assert len(target2.object_nodes) == 1
+        assert len(target1.intermediate_nodes) == 1
+        assert len(target2.intermediate_nodes) == 1
 
-        obj1 = target1.object_nodes[0]
-        obj2 = target2.object_nodes[0]
+        obj1 = target1.intermediate_nodes[0]
+        obj2 = target2.intermediate_nodes[0]
 
         # Objects should be in different directories
         assert obj1.path != obj2.path
@@ -144,7 +144,7 @@ class TestResolverTransitiveRequirements:
         project.resolve()
 
         # App's objects should have lib's public requirements
-        app_obj = app.object_nodes[0]
+        app_obj = app.intermediate_nodes[0]
         context = app_obj._build_info["context"]
         assert Path("include") in [Path(p) for p in context.includes]
         assert "LIB_API" in context.defines
@@ -176,11 +176,11 @@ class TestResolverHeaderOnlyLibrary:
 
         # Header library should be resolved but have no objects/outputs
         assert header_lib._resolved
-        assert header_lib.object_nodes == []
+        assert header_lib.intermediate_nodes == []
         assert header_lib.output_nodes == []
 
         # App should have header lib's requirements
-        app_obj = app.object_nodes[0]
+        app_obj = app.intermediate_nodes[0]
         context = app_obj._build_info["context"]
         # Normalize path separators for cross-platform comparison
         includes_normalized = " ".join(
@@ -240,7 +240,7 @@ class TestResolverTargetTypes:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 1
+        assert len(target.intermediate_nodes) == 1
         assert len(target.output_nodes) == 1
         # On Windows, programs have .exe suffix
         expected_name = "myapp.exe" if sys.platform == "win32" else "myapp"
@@ -286,9 +286,9 @@ class TestResolverTargetTypes:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 1
+        assert len(target.intermediate_nodes) == 1
         # Object library's output_nodes are the object files themselves
-        assert target.output_nodes == target.object_nodes
+        assert target.output_nodes == target.intermediate_nodes
 
 
 class TestResolverLanguageDetection:
@@ -450,10 +450,10 @@ class TestResolverSharedLibraryCompileFlags:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 1
+        assert len(target.intermediate_nodes) == 1
 
         # Check that -fPIC is in the compile flags via context
-        obj_node = target.object_nodes[0]
+        obj_node = target.intermediate_nodes[0]
         context = obj_node._build_info["context"]
         assert "-fPIC" in context.flags
 
@@ -494,10 +494,10 @@ class TestResolverSharedLibraryCompileFlags:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 1
+        assert len(target.intermediate_nodes) == 1
 
         # Check that -fPIC is NOT in the compile flags via context
-        obj_node = target.object_nodes[0]
+        obj_node = target.intermediate_nodes[0]
         context = obj_node._build_info["context"]
         assert "-fPIC" not in context.flags
 
@@ -538,10 +538,10 @@ class TestResolverSharedLibraryCompileFlags:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 1
+        assert len(target.intermediate_nodes) == 1
 
         # Check that -fPIC is NOT in the compile flags via context
-        obj_node = target.object_nodes[0]
+        obj_node = target.intermediate_nodes[0]
         context = obj_node._build_info["context"]
         assert "-fPIC" not in context.flags
 
@@ -582,10 +582,10 @@ class TestResolverSharedLibraryCompileFlags:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 1
+        assert len(target.intermediate_nodes) == 1
 
         # Check that -fPIC is NOT in the compile flags via context
-        obj_node = target.object_nodes[0]
+        obj_node = target.intermediate_nodes[0]
         context = obj_node._build_info["context"]
         assert "-fPIC" not in context.flags
 
@@ -646,9 +646,9 @@ class TestResolverToolAgnostic:
 
         # Verify the toolchain's source handler was used
         assert target._resolved
-        assert len(target.object_nodes) == 1
+        assert len(target.intermediate_nodes) == 1
 
-        obj_node = target.object_nodes[0]
+        obj_node = target.intermediate_nodes[0]
 
         # Check that the object has .aux suffix (from toolchain, not hardcoded)
         assert obj_node.path.suffix == ".aux"
@@ -709,7 +709,7 @@ class TestResolverToolAgnostic:
 
         assert lib._resolved
         # Check that object has custom suffix
-        assert lib.object_nodes[0].path.suffix == ".obj"
+        assert lib.intermediate_nodes[0].path.suffix == ".obj"
         # Check that library has custom name
         assert lib.output_nodes[0].path.name == "libmylib_custom.a"
 
@@ -781,10 +781,10 @@ class TestResolverPrecompiledObjects:
 
         assert prog._resolved
         # Should have 2 object nodes: main.c.o (compiled by Program) and helper.o (passed through)
-        assert len(prog.object_nodes) == 2
+        assert len(prog.intermediate_nodes) == 2
 
         # Check that both objects are present
-        obj_paths = [str(obj.path) for obj in prog.object_nodes]
+        obj_paths = [str(obj.path) for obj in prog.intermediate_nodes]
         assert any("main.c.o" in p for p in obj_paths)
         assert any("helper.o" in p for p in obj_paths)
 
@@ -811,10 +811,10 @@ class TestResolverPrecompiledObjects:
 
         assert prog._resolved
         # Should have 2 object nodes
-        assert len(prog.object_nodes) == 2
+        assert len(prog.intermediate_nodes) == 2
 
         # The external.o should be passed through unchanged
-        obj_paths = [obj.path for obj in prog.object_nodes]
+        obj_paths = [obj.path for obj in prog.intermediate_nodes]
         assert tmp_path / "external.o" in obj_paths
 
     def test_linker_script_passed_through(self, tmp_path, gcc_toolchain):
@@ -839,13 +839,13 @@ class TestResolverPrecompiledObjects:
 
         assert prog._resolved
         # Should have 2 object nodes (main.c.o and the linker script)
-        assert len(prog.object_nodes) == 2
+        assert len(prog.intermediate_nodes) == 2
 
-        obj_paths = [obj.path for obj in prog.object_nodes]
+        obj_paths = [obj.path for obj in prog.intermediate_nodes]
         assert tmp_path / "custom.ld" in obj_paths
 
     def test_mixed_sources_and_objects(self, tmp_path, gcc_toolchain):
-        """Mix of .c sources and .o objects all end up in object_nodes."""
+        """Mix of .c sources and .o objects all end up in intermediate_nodes."""
         from pcons.core.node import FileNode
 
         # Create multiple source files
@@ -870,7 +870,7 @@ class TestResolverPrecompiledObjects:
 
         assert prog._resolved
         # 2 compiled from .c sources + 2 passed through .o files = 4 total
-        assert len(prog.object_nodes) == 4
+        assert len(prog.intermediate_nodes) == 4
 
 
 class TestResolverFlagAccumulation:
@@ -899,10 +899,10 @@ class TestResolverFlagAccumulation:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 3
+        assert len(target.intermediate_nodes) == 3
 
         # Check that each object node has the same defines - no accumulation
-        for obj_node in target.object_nodes:
+        for obj_node in target.intermediate_nodes:
             context = obj_node._build_info["context"]
             # Should have exactly one occurrence of TEST_DEFINE
             assert context.defines.count("TEST_DEFINE") == 1
@@ -924,7 +924,7 @@ class TestResolverFlagAccumulation:
         project.resolve()
 
         # Check that each object has -Wall exactly once in context.flags
-        for obj_node in target.object_nodes:
+        for obj_node in target.intermediate_nodes:
             context = obj_node._build_info["context"]
             # The flag should appear exactly once
             wall_count = context.flags.count("-Wall")

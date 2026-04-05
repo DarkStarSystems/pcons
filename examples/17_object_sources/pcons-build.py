@@ -53,7 +53,7 @@ prog.add_sources(
 project.resolve()
 
 # Check what happened
-print(f"Program object_nodes: {prog.object_nodes}")
+print(f"Program intermediate_nodes: {prog.intermediate_nodes}")
 print(f"Program sources: {prog.sources}")
 
 project.generate()

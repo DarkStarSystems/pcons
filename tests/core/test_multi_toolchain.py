@@ -230,12 +230,12 @@ class TestMultiToolchainResolver:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 2
+        assert len(target.intermediate_nodes) == 2
 
         # Check that each source went to the correct tool
         build_infos = {
             obj._build_info["language"]: obj._build_info["tool"]
-            for obj in target.object_nodes
+            for obj in target.intermediate_nodes
         }
         assert build_infos.get("cxx") == "cxx"
         assert build_infos.get("cuda") == "cuda"
@@ -278,8 +278,8 @@ class TestMultiToolchainResolver:
         project.resolve()
 
         # Should use the primary toolchain's handler (cxx), not the conflicting one
-        assert target.object_nodes[0]._build_info["tool"] == "cxx"
-        assert target.object_nodes[0]._build_info["language"] == "cxx"
+        assert target.intermediate_nodes[0]._build_info["tool"] == "cxx"
+        assert target.intermediate_nodes[0]._build_info["language"] == "cxx"
 
     def test_linker_selection_with_multiple_languages(self, tmp_path):
         """Test correct linker selection when mixing C++ and CUDA."""
@@ -334,10 +334,10 @@ class TestCppPlusCuda:
         project.resolve()
 
         assert lib._resolved
-        assert len(lib.object_nodes) == 2
+        assert len(lib.intermediate_nodes) == 2
 
         # Verify both compilers were used
-        tools_used = {obj._build_info["tool"] for obj in lib.object_nodes}
+        tools_used = {obj._build_info["tool"] for obj in lib.intermediate_nodes}
         assert "cxx" in tools_used
         assert "cuda" in tools_used
 
@@ -356,8 +356,8 @@ class TestCppPlusCuda:
         project.resolve()
 
         assert lib._resolved
-        assert len(lib.object_nodes) == 1
-        assert lib.object_nodes[0]._build_info["tool"] == "cuda"
+        assert len(lib.intermediate_nodes) == 1
+        assert lib.intermediate_nodes[0]._build_info["tool"] == "cuda"
 
 
 class TestBackwardsCompatibility:
@@ -378,5 +378,5 @@ class TestBackwardsCompatibility:
         project.resolve()
 
         assert target._resolved
-        assert len(target.object_nodes) == 1
-        assert target.object_nodes[0]._build_info["tool"] == "cxx"
+        assert len(target.intermediate_nodes) == 1
+        assert target.intermediate_nodes[0]._build_info["tool"] == "cxx"

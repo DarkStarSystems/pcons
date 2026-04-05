@@ -69,8 +69,8 @@ class TestNinjaBuildStatements:
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
-        # Use object_nodes for .o file outputs
-        target.object_nodes.append(output_node)
+        # Use intermediate_nodes for .o file outputs
+        target.intermediate_nodes.append(output_node)
         target._sources.append(source_node)
         project.add_target(target)
 
@@ -98,8 +98,8 @@ class TestNinjaBuildStatements:
             "Object", "cc", "cmdline", src_suffixes=[".c"], target_suffixes=[".o"]
         )
 
-        # Use object_nodes for .o file outputs
-        target.object_nodes.append(output_node)
+        # Use intermediate_nodes for .o file outputs
+        target.intermediate_nodes.append(output_node)
         project.add_target(target)
 
         gen = NinjaGenerator()
@@ -330,8 +330,8 @@ class TestNinjaDepsDirectives:
             deps_style="gcc",
         )
 
-        # Use object_nodes for .o file outputs
-        target.object_nodes.append(output_node)
+        # Use intermediate_nodes for .o file outputs
+        target.intermediate_nodes.append(output_node)
         project.add_target(target)
 
         gen = NinjaGenerator()
@@ -364,8 +364,8 @@ class TestNinjaDepsDirectives:
             deps_style="msvc",
         )
 
-        # Use object_nodes for .obj file outputs
-        target.object_nodes.append(output_node)
+        # Use intermediate_nodes for .obj file outputs
+        target.intermediate_nodes.append(output_node)
         project.add_target(target)
 
         gen = NinjaGenerator()

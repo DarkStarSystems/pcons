@@ -151,7 +151,7 @@ class Target:
         defined_at: Where this target was created in user code.
         target_type: Type of target (static_library, shared_library, program, interface).
         _env: Reference to the Environment used for building.
-        object_nodes: Compiled object nodes (populated by resolver).
+        intermediate_nodes: Intermediate build artifacts (e.g., object files).
         output_nodes: Final output nodes (library/program, populated by resolver).
         _resolved: Whether resolve() has been called on this target.
     """
@@ -171,7 +171,7 @@ class Target:
         "target_type",
         "_env",
         "_project",
-        "object_nodes",
+        "intermediate_nodes",
         "output_nodes",
         "_resolved",
         # For install targets:
@@ -240,7 +240,7 @@ class Target:
             self.target_type = target_type
         self._env: Environment | None = None
         self._project: Project | None = None  # Set by Project when target is created
-        self.object_nodes: list[FileNode] = []
+        self.intermediate_nodes: list[FileNode] = []
         self.output_nodes: list[FileNode] = []
         self._resolved: bool = False
         # For install targets:
@@ -399,7 +399,7 @@ class Target:
         Propagated deps go on all nodes (objects + outputs).
         Output-only deps go on output nodes only.
         """
-        all_nodes = self.object_nodes + self.output_nodes
+        all_nodes = self.intermediate_nodes + self.output_nodes
         for dep in self._extra_implicit_deps:
             for node in all_nodes:
                 if dep not in node.implicit_deps:

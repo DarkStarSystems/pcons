@@ -63,8 +63,8 @@ class TestCompileCommandsEntries:
             language="c",
         )
 
-        # Use object_nodes for compilation outputs
-        target.object_nodes.append(output_node)
+        # Use intermediate_nodes for compilation outputs
+        target.intermediate_nodes.append(output_node)
         target._sources.append(source_node)
         project.add_target(target)
 
@@ -98,8 +98,8 @@ class TestCompileCommandsEntries:
             language="cxx",
         )
 
-        # Use object_nodes for compilation outputs
-        target.object_nodes.append(output_node)
+        # Use intermediate_nodes for compilation outputs
+        target.intermediate_nodes.append(output_node)
         project.add_target(target)
 
         gen = CompileCommandsGenerator()
@@ -123,7 +123,7 @@ class TestCompileCommandsEntries:
             "sources": [source_node],
         }
 
-        target.object_nodes.append(output_node)
+        target.intermediate_nodes.append(output_node)
         project.add_target(target)
 
         gen = CompileCommandsGenerator()
@@ -153,7 +153,7 @@ class TestCompileCommandsEntries:
             language="c",
         )
 
-        target.object_nodes.append(output_node)
+        target.intermediate_nodes.append(output_node)
         project.add_target(target)
 
         gen = CompileCommandsGenerator()
@@ -183,7 +183,7 @@ class TestCompileCommandsEntries:
             language="c",
         )
 
-        target.object_nodes.append(output_node)
+        target.intermediate_nodes.append(output_node)
         project.add_target(target)
 
         gen = CompileCommandsGenerator()

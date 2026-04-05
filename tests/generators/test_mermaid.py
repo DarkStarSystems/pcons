@@ -54,7 +54,7 @@ class TestMermaidGeneratorGraph:
         exe = FileNode(Path("build/myapp"))
 
         obj.depends([src])
-        target.object_nodes.append(obj)
+        target.intermediate_nodes.append(obj)
         target.output_nodes.append(exe)
 
         project.add_target(target)
@@ -77,7 +77,7 @@ class TestMermaidGeneratorGraph:
         math_obj = FileNode(Path("build/math.o"))
         math_lib = FileNode(Path("build/libmath.a"))
         math_obj.depends([math_src])
-        libmath.object_nodes.append(math_obj)
+        libmath.intermediate_nodes.append(math_obj)
         libmath.output_nodes.append(math_lib)
 
         # Create libphysics depending on libmath
@@ -86,7 +86,7 @@ class TestMermaidGeneratorGraph:
         physics_obj = FileNode(Path("build/physics.o"))
         physics_lib = FileNode(Path("build/libphysics.a"))
         physics_obj.depends([physics_src])
-        libphysics.object_nodes.append(physics_obj)
+        libphysics.intermediate_nodes.append(physics_obj)
         libphysics.output_nodes.append(physics_lib)
         libphysics.link(libmath)
 
@@ -96,7 +96,7 @@ class TestMermaidGeneratorGraph:
         app_obj = FileNode(Path("build/main.o"))
         app_exe = FileNode(Path("build/app"))
         app_obj.depends([app_src])
-        app.object_nodes.append(app_obj)
+        app.intermediate_nodes.append(app_obj)
         app.output_nodes.append(app_exe)
         app.link(libphysics)
 
@@ -214,7 +214,7 @@ class TestMermaidGeneratorIntegration:
         math_obj = FileNode(Path("build/obj.libmath/math.o"))
         math_lib = FileNode(Path("build/libmath.a"))
         math_obj.depends([math_src])
-        libmath.object_nodes.append(math_obj)
+        libmath.intermediate_nodes.append(math_obj)
         libmath.output_nodes.append(math_lib)
 
         # app: main.c -> main.o -> app (links libmath)
@@ -223,7 +223,7 @@ class TestMermaidGeneratorIntegration:
         app_obj = FileNode(Path("build/obj.app/main.o"))
         app_exe = FileNode(Path("build/app"))
         app_obj.depends([app_src])
-        app.object_nodes.append(app_obj)
+        app.intermediate_nodes.append(app_obj)
         app.output_nodes.append(app_exe)
         app.link(libmath)
 

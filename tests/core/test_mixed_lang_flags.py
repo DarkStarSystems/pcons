@@ -75,7 +75,7 @@ class TestMixedLanguageFlagLeakage:
         # Find the object node for util.c (the C file)
         c_obj = None
         cpp_obj = None
-        for obj in target.object_nodes:
+        for obj in target.intermediate_nodes:
             if "util" in str(obj.path):
                 c_obj = obj
             elif "main" in str(obj.path):
@@ -118,7 +118,7 @@ class TestMixedLanguageFlagLeakage:
 
         c_obj = None
         cpp_obj = None
-        for obj in target.object_nodes:
+        for obj in target.intermediate_nodes:
             if "legacy" in str(obj.path):
                 c_obj = obj
             elif "app" in str(obj.path):

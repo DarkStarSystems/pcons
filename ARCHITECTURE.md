@@ -567,7 +567,7 @@ language_strength = {
 # accidentally claiming linker authority over Fortran objects.
 ```
 
-**Implementation:** `_setup_link_node()` collects actual object languages from `target.object_nodes`, then uses the primary toolchain's `language_priority` to select the link language. Each toolchain's `get_runtime_libs()` / `get_runtime_libdirs()` methods inject any required runtime libraries for mixed-language builds.
+**Implementation:** `_setup_link_node()` collects actual object languages from `target.intermediate_nodes`, then uses the primary toolchain's `language_priority` to select the link language. Each toolchain's `get_runtime_libs()` / `get_runtime_libdirs()` methods inject any required runtime libraries for mixed-language builds.
 
 ### Target (Build Specification with Usage Requirements)
 > **Status: Implemented**
@@ -630,7 +630,7 @@ lib.output_name = "mylib.ofx"  # Customize output filename
 # At this point:
 # - lib.sources contains the source FileNodes
 # - lib.output_nodes is EMPTY []
-# - lib.object_nodes is EMPTY []
+# - lib.intermediate_nodes is EMPTY []
 ```
 
 **Resolution populates the nodes.** The Resolver, called via `project.resolve()`, processes all targets in dependency order and:
@@ -644,7 +644,7 @@ lib.output_name = "mylib.ofx"  # Customize output filename
 project.resolve()
 
 # Now:
-# - lib.object_nodes contains [FileNode("build/obj.mylib/lib.o")]
+# - lib.intermediate_nodes contains [FileNode("build/obj.mylib/lib.o")]
 # - lib.output_nodes contains [FileNode("build/mylib.ofx")]
 ```
 

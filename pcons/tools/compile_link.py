@@ -128,7 +128,7 @@ class CompileLinkFactory:
                 # Normal source file - create object node
                 obj_node = self._create_object_node(target, source, effective, env)
                 if obj_node:
-                    target.object_nodes.append(obj_node)
+                    target.intermediate_nodes.append(obj_node)
                     trace("resolve", "    %s -> %s", source.path, obj_node.path)
 
         # Store auxiliary inputs on the target for use by output creation
@@ -145,8 +145,8 @@ class CompileLinkFactory:
             self._create_program_output(target, env)
         elif target.target_type == TargetType.OBJECT:
             # Object-only targets: output_nodes are the object files
-            target.output_nodes = list(target.object_nodes)
-            target.nodes = list(target.object_nodes)
+            target.output_nodes = list(target.intermediate_nodes)
+            target.nodes = list(target.intermediate_nodes)
 
         if target.output_nodes:
             trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
@@ -292,7 +292,7 @@ class CompileLinkFactory:
 
     def _create_static_library_output(self, target: Target, env: Environment) -> None:
         """Create static library output node."""
-        if not target.object_nodes:
+        if not target.intermediate_nodes:
             logger.warning(
                 "Target '%s' has no sources - no output will be generated",
                 target.name,
@@ -314,7 +314,7 @@ class CompileLinkFactory:
             lib_path = build_dir / lib_name
 
         lib_node = self.project.node(lib_path)
-        lib_node.depends(target.object_nodes)
+        lib_node.depends(target.intermediate_nodes)
 
         effective_link = compute_effective_requirements(
             target, env, for_compilation=False
@@ -332,7 +332,7 @@ class CompileLinkFactory:
         lib_node._build_info = {
             "tool": archiver_tool,
             "command_var": "libcmd",
-            "sources": target.object_nodes,
+            "sources": target.intermediate_nodes,
             "context": context,
             "env": env,
         }
@@ -343,7 +343,7 @@ class CompileLinkFactory:
 
     def _create_shared_library_output(self, target: Target, env: Environment) -> None:
         """Create shared library output node."""
-        if not target.object_nodes:
+        if not target.intermediate_nodes:
             logger.warning(
                 "Target '%s' has no sources - no output will be generated",
                 target.name,
@@ -372,7 +372,7 @@ class CompileLinkFactory:
             lib_path = build_dir / lib_name
 
         lib_node = self.project.node(lib_path)
-        lib_node.depends(target.object_nodes)
+        lib_node.depends(target.intermediate_nodes)
 
         link_language, context = self._setup_link_node(target, env, lib_node)
 
@@ -380,7 +380,7 @@ class CompileLinkFactory:
             "tool": "link",
             "command_var": "sharedcmd",
             "language": link_language,
-            "sources": target.object_nodes,
+            "sources": target.intermediate_nodes,
             "context": context,
             "env": env,
         }
@@ -400,7 +400,7 @@ class CompileLinkFactory:
 
     def _create_program_output(self, target: Target, env: Environment) -> None:
         """Create program output node."""
-        if not target.object_nodes:
+        if not target.intermediate_nodes:
             logger.warning(
                 "Target '%s' has no sources - no output will be generated",
                 target.name,
@@ -427,7 +427,7 @@ class CompileLinkFactory:
             prog_path = build_dir / prog_name
 
         prog_node = self.project.node(prog_path)
-        prog_node.depends(target.object_nodes)
+        prog_node.depends(target.intermediate_nodes)
 
         link_language, context = self._setup_link_node(target, env, prog_node)
 
@@ -435,7 +435,7 @@ class CompileLinkFactory:
             "tool": "link",
             "command_var": "progcmd",
             "language": link_language,
-            "sources": target.object_nodes,
+            "sources": target.intermediate_nodes,
             "context": context,
             "env": env,
         }
@@ -516,7 +516,7 @@ class CompileLinkFactory:
                 seen_handlers.add(handler.suffix)
 
         object_languages: set[str] = set()
-        for node in target.object_nodes:
+        for node in target.intermediate_nodes:
             bi = getattr(node, "_build_info", None)
             if bi:
                 lang = bi.get("language")

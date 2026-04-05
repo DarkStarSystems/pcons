@@ -464,7 +464,7 @@ class Project:
         """Resolve all targets in two phases.
 
         Phase 1: Resolve build targets (compiles, links)
-            This populates object_nodes and output_nodes for libraries/programs.
+            This populates intermediate_nodes and output_nodes for libraries/programs.
 
         Phase 2: Resolve pending sources (Install, InstallAs, etc.)
             This handles targets that reference outputs from other targets.

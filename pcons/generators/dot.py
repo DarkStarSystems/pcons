@@ -180,7 +180,7 @@ class DotGenerator(BaseGenerator):
                             edges.append((dep_id, node_id))
 
             # Object nodes
-            for node in target.object_nodes:
+            for node in target.intermediate_nodes:
                 if isinstance(node, FileNode):
                     node_id = get_id(node.path)
                     if node_id not in written_nodes:
@@ -213,7 +213,7 @@ class DotGenerator(BaseGenerator):
             for output in target.output_nodes:
                 if isinstance(output, FileNode):
                     output_id = get_id(output.path)
-                    for obj in target.object_nodes:
+                    for obj in target.intermediate_nodes:
                         if isinstance(obj, FileNode):
                             edges.append((get_id(obj.path), output_id))
 

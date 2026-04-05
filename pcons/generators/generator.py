@@ -131,7 +131,7 @@ class BaseGenerator:
         nodes: list[FileNode] = []
 
         # Add object nodes and output nodes
-        for obj_node in target.object_nodes:
+        for obj_node in target.intermediate_nodes:
             if isinstance(obj_node, FileNode):
                 nodes.append(obj_node)
         for out_node in target.output_nodes:
