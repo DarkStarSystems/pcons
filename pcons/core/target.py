@@ -327,7 +327,13 @@ class Target:
         Raises:
             TypeError: If a non-Target argument is passed.
             ValueError: If a target tries to link itself.
+            RuntimeError: If called after the target has been resolved.
         """
+        if self._resolved:
+            raise RuntimeError(
+                f"Cannot modify target '{self.name}' after resolve(). "
+                f"Call link() before project.resolve() or project.generate()."
+            )
         for target in targets:
             if isinstance(target, (list, tuple)):
                 raise TypeError(
@@ -485,12 +491,18 @@ class Target:
 
         Raises:
             TypeError: If sources is a string or bare Path instead of a list.
+            RuntimeError: If called after the target has been resolved.
 
         Example:
             # Mix regular and generated sources
             generated = env.Command(target="gen.cpp", source="gen.y", command="...")
             target.add_sources([generated, "main.cpp", "util.cpp"], base=src_dir)
         """
+        if self._resolved:
+            raise RuntimeError(
+                f"Cannot modify target '{self.name}' after resolve(). "
+                f"Call add_sources() before project.resolve() or project.generate()."
+            )
         if isinstance(sources, str):
             raise TypeError(
                 f"add_sources() requires a list, got a string. "

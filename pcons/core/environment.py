@@ -85,6 +85,15 @@ class Environment:
         self._name = name
         self.defined_at = defined_at or get_caller_location()
 
+        # Validate toolchain type early, before any access
+        if toolchain is not None and (
+            not hasattr(toolchain, "setup") or isinstance(toolchain, str)
+        ):
+            raise TypeError(
+                f"toolchain must be a Toolchain object, got {type(toolchain).__name__}. "
+                f"Use find_c_toolchain() or similar to get a toolchain."
+            )
+
         trace("env", "Creating environment: %s", name or "(unnamed)")
         trace_value("env", "defined_at", self.defined_at)
         if toolchain:

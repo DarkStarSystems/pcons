@@ -56,12 +56,35 @@ class ToolConfig:
             f"Available: {', '.join(vars_dict.keys()) or '(none)'}"
         )
 
+    # Variable names that should always be lists (flags, paths, etc.)
+    # Command templates (objcmd, linkcmd, etc.) can be strings or lists.
+    _LIST_ONLY_VARS = frozenset({"flags", "includes", "defines", "libs"})
+
     def __setattr__(self, name: str, value: Any) -> None:
-        """Set a tool variable."""
+        """Set a tool variable.
+
+        Raises:
+            TypeError: If assigning a string to a known list-type variable
+                      (likely a user error like ``env.cc.flags = "-Wall"``
+                      instead of ``env.cc.flags = ["-Wall"]``).
+        """
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
             vars_dict = object.__getattribute__(self, "_vars")
+            # Catch common mistake: assigning string to a list-only variable
+            if (
+                isinstance(value, str)
+                and name in self._LIST_ONLY_VARS
+                and name in vars_dict
+                and isinstance(vars_dict[name], list)
+            ):
+                raise TypeError(
+                    f"Cannot assign a string to '{self.name}.{name}' "
+                    f"(must be a list). "
+                    f'Use {self.name}.{name} = ["{value}"] or '
+                    f'{self.name}.{name}.append("{value}").'
+                )
             vars_dict[name] = value
 
     def __delattr__(self, name: str) -> None:

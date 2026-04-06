@@ -87,9 +87,6 @@ class TestWrongArgumentTypes:
         with pytest.raises((TypeError, ValueError), match="sources"):
             app.add_sources("src/main.c")
 
-    @pytest.mark.xfail(
-        reason="No type validation on Environment toolchain parameter", strict=True
-    )
     def test_environment_toolchain_string(self, project_env):
         """User passes a string like "gcc" instead of find_c_toolchain()."""
         project, _ = project_env
@@ -235,9 +232,6 @@ class TestWrongApiOrder:
         # Second resolve should not crash
         project.resolve()
 
-    @pytest.mark.xfail(
-        reason="Sources added after resolve are silently ignored", strict=True
-    )
     def test_add_sources_after_resolve(self, project_env):
         """User adds sources after calling resolve().
 
@@ -250,9 +244,6 @@ class TestWrongApiOrder:
         with pytest.raises((PconsError, RuntimeError), match="resolve"):
             app.add_sources(["src/lib.c"])
 
-    @pytest.mark.xfail(
-        reason="Dependencies added after resolve are silently ignored", strict=True
-    )
     def test_link_after_resolve(self, project_env):
         """User links a library after resolve has already run."""
         project, env = project_env
@@ -387,9 +378,6 @@ class TestDependencyMistakes:
 class TestVariableAndFlagErrors:
     """Users making mistakes with variables and flags."""
 
-    @pytest.mark.xfail(
-        reason="No type validation: string accepted for flags list", strict=True
-    )
     def test_flags_string_instead_of_list(self, project_env):
         """User assigns a string to flags instead of a list.
 
