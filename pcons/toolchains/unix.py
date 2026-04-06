@@ -361,7 +361,10 @@ class UnixToolchain(BaseToolchain):
             compile_flags = ["-Os"]
             defines = ["NDEBUG"]
         else:
-            logger.warning("Unknown variant '%s', no flags applied", variant)
+            raise ValueError(
+                f"Unknown variant '{variant}'. "
+                f"Supported variants: debug, release, relwithdebinfo, minsizerel."
+            )
 
         # Add extra flags/defines from kwargs
         extra_flags = kwargs.get("extra_flags", [])

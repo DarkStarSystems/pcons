@@ -442,10 +442,6 @@ class TestVariableAndFlagErrors:
 class TestEnvironmentMisuse:
     """Users misusing Environment objects."""
 
-    @pytest.mark.xfail(
-        reason="No-toolchain env for compile logs warnings, doesn't raise",
-        strict=True,
-    )
     def test_no_toolchain_env_for_program(self, project_env):
         """Using an environment without a toolchain for compilation.
 
@@ -467,9 +463,6 @@ class TestEnvironmentMisuse:
         # Original should NOT have the flag
         assert "-DCLONE_ONLY" not in env.cc.flags
 
-    @pytest.mark.xfail(
-        reason="set_variant silently ignores unknown variant names", strict=True
-    )
     def test_set_variant_invalid_name(self, project_env):
         """User passes a nonexistent variant name."""
         _, env = project_env

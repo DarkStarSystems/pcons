@@ -11,6 +11,8 @@ The prefix is applied during expansion via ${prefix(dprefix, defines)}.
 
 from __future__ import annotations
 
+import pytest
+
 from pcons.core.environment import Environment
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
@@ -144,13 +146,9 @@ class TestGccVariants:
         cc.set("defines", [])
 
         toolchain = GccToolchain()
-        toolchain.apply_variant(env, "custom")
-
-        # Variant name should be set
-        assert env.variant == "custom"
-        # No flags should be added for unknown variant
-        assert len(cc.flags) == 0
-        assert len(cc.defines) == 0
+        # Unknown variants now raise ValueError with supported variant list
+        with pytest.raises(ValueError, match="Unknown variant.*custom"):
+            toolchain.apply_variant(env, "custom")
 
     def test_case_insensitive(self) -> None:
         """Test variant names are case-insensitive."""
@@ -268,12 +266,20 @@ class TestBaseToolchainVariant:
         """Test base implementation sets variant name."""
 
         # Can't instantiate abstract class directly, use a concrete one
-        # and verify the base behavior
+        # and verify the base behavior (super().apply_variant sets env.variant)
+        env = Environment()
+        env.add_tool("cc").set("flags", [])
+        env.add_tool("cc").set("defines", [])
+
+        toolchain = GccToolchain()
+        toolchain.apply_variant(env, "debug")
+
+        assert env.variant == "debug"
+
+    def test_base_rejects_unknown_variant(self) -> None:
+        """Test that unknown variant names are rejected with a helpful error."""
         env = Environment()
 
         toolchain = GccToolchain()
-        # Call parent's apply_variant indirectly through subclass
-        # The subclass calls super().apply_variant() which sets env.variant
-        toolchain.apply_variant(env, "custom")
-
-        assert env.variant == "custom"
+        with pytest.raises(ValueError, match="Unknown variant.*custom"):
+            toolchain.apply_variant(env, "custom")

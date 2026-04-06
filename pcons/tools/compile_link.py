@@ -74,6 +74,18 @@ class CompileLinkFactory:
             logger.debug("Skipping target '%s' without env", target.name)
             return
 
+        # Check that the environment has toolchains for compilation
+        if not env.toolchains and target.target_type != "interface":
+            from pcons.core.errors import PconsError
+
+            raise PconsError(
+                f"Target '{target.name}' requires a toolchain but the "
+                f"environment has none configured. "
+                f"Use project.Environment(toolchain=find_c_toolchain()) "
+                f"to create an environment with a compiler.",
+                location=target.defined_at,
+            )
+
         trace("resolve", "Resolving target: %s", target.name)
 
         if is_enabled("resolve"):
