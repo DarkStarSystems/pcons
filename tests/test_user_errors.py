@@ -93,7 +93,6 @@ class TestWrongArgumentTypes:
         with pytest.raises(TypeError, match="toolchain"):
             project.Environment(toolchain="gcc")
 
-    @pytest.mark.xfail(reason="No type validation: string replaces list", strict=True)
     def test_public_include_dirs_assigned_string(self, project_env):
         """User assigns a string instead of appending to the list.
 
@@ -102,12 +101,9 @@ class TestWrongArgumentTypes:
         """
         project, env = project_env
         app = project.Program("app", env, sources=["src/main.c"])
-        # This replaces the list with a string, which is iterable as chars
-        app.public.include_dirs = "/usr/include"
-        # The value should be validated as a list
-        with pytest.raises(TypeError):
-            # If we can't prevent the assignment, at least detect it at resolve
-            project.resolve()
+        # Assigning a string to a usage requirement raises immediately
+        with pytest.raises(TypeError, match="list"):
+            app.public.include_dirs = "/usr/include"
 
     def test_depends_wrong_type(self, project_env):
         """User passes a nonsense type to depends() -- pcons catches this."""

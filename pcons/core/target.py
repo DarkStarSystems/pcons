@@ -60,6 +60,13 @@ class UsageRequirements:
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
+            if not isinstance(value, list):
+                raise TypeError(
+                    f"Usage requirement '{name}' must be a list, "
+                    f"got {type(value).__name__}. "
+                    f"Use target.public.{name}.append(value) to add items, "
+                    f"or target.public.{name} = [value] to replace."
+                )
             self._data[name] = value
 
     def merge(
@@ -79,6 +86,13 @@ class UsageRequirements:
                                If None, uses default (empty set).
         """
         for key, values in other._data.items():
+            if not isinstance(values, list):
+                raise TypeError(
+                    f"Usage requirement '{key}' must be a list, "
+                    f"got {type(values).__name__}. "
+                    f'Use target.public.{key} = ["{values}"] or '
+                    f'target.public.{key}.append("{values}").'
+                )
             mine = self._data.setdefault(key, [])
             merge_flags(mine, values, separated_arg_flags)
 
