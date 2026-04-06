@@ -90,11 +90,9 @@ class TestDetectCycles:
 
     def test_self_cycle(self):
         a = Target("A")
-        a.link(a)
-
-        cycles = detect_cycles_in_targets([a])
-        assert len(cycles) == 1
-        assert cycles[0] == ["A", "A"]
+        # Self-link is now caught early by link() validation
+        with pytest.raises(ValueError, match="cannot link itself"):
+            a.link(a)
 
     def test_multiple_cycles(self):
         # Two separate cycles: A<->B and C<->D

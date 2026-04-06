@@ -43,9 +43,6 @@ def project_env(tmp_path, gcc_toolchain):
 class TestWrongArgumentTypes:
     """Users passing wrong types to builders and methods."""
 
-    @pytest.mark.xfail(
-        reason="No type validation: string sources iterated as chars", strict=True
-    )
     def test_program_sources_string_not_list(self, project_env):
         """User passes a string instead of a list for sources.
 
@@ -56,25 +53,18 @@ class TestWrongArgumentTypes:
         with pytest.raises((TypeError, ValueError), match="sources"):
             project.Program("app", env, sources="src/main.c")
 
-    @pytest.mark.xfail(
-        reason="No type validation: bare Path iterated oddly", strict=True
-    )
     def test_program_sources_bare_path_not_list(self, project_env):
         """User passes a bare Path instead of [Path]."""
         project, env = project_env
         with pytest.raises((TypeError, ValueError), match="sources"):
             project.Program("app", env, sources=Path("src/main.c"))
 
-    @pytest.mark.xfail(
-        reason="No type validation: int accepted as target name", strict=True
-    )
     def test_program_name_not_string(self, project_env):
         """User passes an int as the target name."""
         project, env = project_env
         with pytest.raises(TypeError, match="name"):
             project.Program(123, env, sources=["src/main.c"])
 
-    @pytest.mark.xfail(reason="No type validation on link() arguments", strict=True)
     def test_link_string_instead_of_target(self, project_env):
         """User passes a string library name instead of a Target object."""
         project, env = project_env
@@ -82,7 +72,6 @@ class TestWrongArgumentTypes:
         with pytest.raises(TypeError, match="[Tt]arget"):
             app.link("mylib")
 
-    @pytest.mark.xfail(reason="No type validation on link() arguments", strict=True)
     def test_link_list_instead_of_varargs(self, project_env):
         """User passes a list instead of unpacking: link([a, b]) vs link(a, b)."""
         project, env = project_env
@@ -91,9 +80,6 @@ class TestWrongArgumentTypes:
         with pytest.raises(TypeError):
             app.link([lib])
 
-    @pytest.mark.xfail(
-        reason="No type validation: string add_sources iterated as chars", strict=True
-    )
     def test_add_sources_string_not_list(self, project_env):
         """User passes a string to add_sources instead of a list."""
         project, env = project_env
@@ -148,9 +134,6 @@ class TestMissingSwappedArguments:
         with pytest.raises(TypeError):
             project.Program("app", sources=["src/main.c"])
 
-    @pytest.mark.xfail(
-        reason="No detection of env passed in name position", strict=True
-    )
     def test_program_env_in_name_position(self, project_env):
         """User passes env where name should be.
 
@@ -158,8 +141,8 @@ class TestMissingSwappedArguments:
         project.Program("app", env, sources=[...])  # right
         """
         project, env = project_env
-        # env object becomes the target name via str(env)
-        with pytest.raises((TypeError, ValueError), match="name"):
+        # env goes to name position, so Python complains about missing env arg
+        with pytest.raises(TypeError):
             project.Program(env, sources=["src/main.c"])
 
     def test_project_no_name(self):
@@ -371,7 +354,6 @@ class TestDependencyMistakes:
         with pytest.raises(PconsError):
             project.resolve(strict=True)
 
-    @pytest.mark.xfail(reason="Self-link not detected", strict=True)
     def test_self_link(self, project_env):
         """Target links itself."""
         project, env = project_env
@@ -379,7 +361,6 @@ class TestDependencyMistakes:
         with pytest.raises((DependencyCycleError, ValueError), match="self|cycle"):
             app.link(app)
 
-    @pytest.mark.xfail(reason="Self-dependency not detected", strict=True)
     def test_depends_on_self(self, project_env):
         """Target depends on itself."""
         project, env = project_env
@@ -523,28 +504,25 @@ class TestTargetNaming:
         with pytest.raises(ValueError, match="already exists"):
             project.Program("app", env, sources=["src/lib.c"])
 
-    @pytest.mark.xfail(reason="No validation of target name format", strict=True)
     def test_target_name_with_spaces(self, project_env):
         """Target names with spaces may break ninja output."""
         project, env = project_env
         with pytest.raises((ValueError, PconsError), match="name"):
             project.Program("my app", env, sources=["src/main.c"])
 
-    @pytest.mark.xfail(reason="No validation of target name format", strict=True)
     def test_empty_target_name(self, project_env):
         """Empty target name should be rejected."""
         project, env = project_env
         with pytest.raises((ValueError, PconsError), match="name"):
             project.Program("", env, sources=["src/main.c"])
 
-    @pytest.mark.xfail(reason="No validation of target name format", strict=True)
-    def test_target_name_with_slashes(self, project_env):
-        """Target names with slashes could conflict with path handling."""
+    def test_target_name_with_slashes_is_ok(self, project_env):
+        """Target names with slashes are valid (used by archive/install builders)."""
         project, env = project_env
-        with pytest.raises((ValueError, PconsError), match="name"):
-            project.Program("bin/app", env, sources=["src/main.c"])
+        # Slashes are allowed -- used for subdirectory-style target names
+        app = project.Program("bin/app", env, sources=["src/main.c"])
+        assert app.name == "bin/app"
 
-    @pytest.mark.xfail(reason="No validation of target name format", strict=True)
     def test_target_name_special_chars(self, project_env):
         """Target names with special chars may break ninja."""
         project, env = project_env

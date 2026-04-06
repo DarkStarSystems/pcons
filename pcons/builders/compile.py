@@ -56,7 +56,11 @@ class ProgramBuilder:
 
         Returns:
             A new Target configured as a program.
+
+        Raises:
+            TypeError: If name is not a string or sources is not a list.
         """
+        _validate_builder_name(name, "Program")
         target = Target(
             name,
             target_type="program",
@@ -102,7 +106,11 @@ class StaticLibraryBuilder:
 
         Returns:
             A new Target configured as a static library.
+
+        Raises:
+            TypeError: If name is not a string or sources is not a list.
         """
+        _validate_builder_name(name, "StaticLibrary")
         target = Target(
             name,
             target_type="static_library",
@@ -148,7 +156,11 @@ class SharedLibraryBuilder:
 
         Returns:
             A new Target configured as a shared library.
+
+        Raises:
+            TypeError: If name is not a string or sources is not a list.
         """
+        _validate_builder_name(name, "SharedLibrary")
         target = Target(
             name,
             target_type="shared_library",
@@ -194,7 +206,11 @@ class ObjectLibraryBuilder:
 
         Returns:
             A new Target configured as an object library.
+
+        Raises:
+            TypeError: If name is not a string or sources is not a list.
         """
+        _validate_builder_name(name, "ObjectLibrary")
         target = Target(
             name,
             target_type="object",
@@ -283,6 +299,28 @@ class CommandBuilder:
         return env.Command(target=target, source=source, command=command, name=name)
 
 
+def _validate_builder_name(name: object, builder_name: str) -> None:
+    """Validate that a target name is a string.
+
+    Raises:
+        TypeError: If name is not a string (e.g., an Environment passed
+                  in the wrong position).
+    """
+    if not isinstance(name, str):
+        from pcons.core.environment import Environment as Env
+
+        if isinstance(name, Env):
+            raise TypeError(
+                f"{builder_name}() first argument must be a name string, "
+                f"got an Environment. "
+                f'Use {builder_name}("name", env, sources=[...]).'
+            )
+        raise TypeError(
+            f"{builder_name}() first argument must be a name string, "
+            f"got {type(name).__name__}."
+        )
+
+
 def _normalize_sources(
     project: Project,
     sources: list[str | Path | Node],
@@ -297,7 +335,18 @@ def _normalize_sources(
 
     Returns:
         List of Node objects.
+
+    Raises:
+        TypeError: If sources is a string or bare Path instead of a list.
     """
+    if isinstance(sources, str):
+        raise TypeError(
+            f'sources must be a list, got a string. Use sources=["{sources}"].'
+        )
+    if isinstance(sources, Path):
+        raise TypeError(
+            f"sources must be a list, got a Path. Use sources=[{sources!r}]."
+        )
     result: list[Node] = []
     for src in sources:
         if isinstance(src, Node):

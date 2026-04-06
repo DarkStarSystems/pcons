@@ -8,6 +8,7 @@ and carries "usage requirements" that propagate to consumers (CMake-style).
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -102,6 +103,32 @@ class UsageRequirements:
             return "UsageRequirements()"
         items_str = ", ".join(f"{k}={v!r}" for k, v in non_empty.items())
         return f"UsageRequirements({items_str})"
+
+
+# Characters not allowed in target names (would break ninja syntax or cause confusion).
+# Allow: word chars, dots, plus, minus, forward slash (for subdirectory-style names).
+_INVALID_TARGET_NAME_RE = re.compile(r"[^\w./+-]")
+
+
+def _validate_target_name(name: str) -> None:
+    """Validate that a target name is well-formed.
+
+    Target names must be non-empty strings without spaces, slashes, or
+    special characters that would break ninja build syntax.
+
+    Raises:
+        ValueError: If the name is empty or contains invalid characters.
+    """
+    if not name:
+        raise ValueError("Target name must not be empty.")
+    bad = _INVALID_TARGET_NAME_RE.findall(name)
+    if bad:
+        chars = "".join(sorted(set(bad)))
+        raise ValueError(
+            f"Target name {name!r} contains invalid characters: {chars!r}. "
+            f"Target names may contain letters, digits, underscores, dots, "
+            f"plus signs, hyphens, and forward slashes."
+        )
 
 
 class Target:
@@ -205,6 +232,7 @@ class Target:
             builder: Builder to use for this target.
             defined_at: Source location where target was created.
         """
+        _validate_target_name(name)
         self.name = name
         self.builder = builder
         self._sources: list[Node] = []
@@ -295,8 +323,24 @@ class Target:
 
         Returns:
             self for method chaining.
+
+        Raises:
+            TypeError: If a non-Target argument is passed.
+            ValueError: If a target tries to link itself.
         """
         for target in targets:
+            if isinstance(target, (list, tuple)):
+                raise TypeError(
+                    "link() takes Target arguments, not a list. "
+                    "Use target.link(a, b) instead of target.link([a, b])."
+                )
+            if not isinstance(target, Target):
+                raise TypeError(
+                    f"link() requires Target objects, got {type(target).__name__}. "
+                    f"Use project.get_target(name) to look up a target by name."
+                )
+            if target is self:
+                raise ValueError(f"Target '{self.name}' cannot link itself.")
             if target not in self.dependencies:
                 self.dependencies.append(target)
         # Invalidate cached requirements
@@ -347,6 +391,8 @@ class Target:
 
         for item in items:
             if isinstance(item, Target):
+                if item is self:
+                    raise ValueError(f"Target '{self.name}' cannot depend on itself.")
                 target_list = (
                     self._implicit_target_deps
                     if propagate
@@ -437,11 +483,24 @@ class Target:
         Returns:
             self for method chaining.
 
+        Raises:
+            TypeError: If sources is a string or bare Path instead of a list.
+
         Example:
             # Mix regular and generated sources
             generated = env.Command(target="gen.cpp", source="gen.y", command="...")
             target.add_sources([generated, "main.cpp", "util.cpp"], base=src_dir)
         """
+        if isinstance(sources, str):
+            raise TypeError(
+                f"add_sources() requires a list, got a string. "
+                f'Use add_sources(["{sources}"]) or add_source("{sources}").'
+            )
+        if isinstance(sources, Path):
+            raise TypeError(
+                f"add_sources() requires a list, got a Path. "
+                f"Use add_sources([{sources!r}]) or add_source({sources!r})."
+            )
         base_path = Path(base) if base else None
         for source in sources:
             if isinstance(source, Target):
