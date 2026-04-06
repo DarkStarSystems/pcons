@@ -151,7 +151,7 @@ def _get_builder_table() -> str:
         platforms = _format_platforms(reg.platforms) if reg.platforms else "All"
         rows.append({
             "name": name,
-            "target_type": reg.target_type.name.replace("_", " ").title(),
+            "target_type": reg.target_type.replace("_", " ").title(),
             "platforms": platforms,
             "description": desc,
         })
