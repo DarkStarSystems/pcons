@@ -385,26 +385,17 @@ class TestVariableAndFlagErrors:
         with pytest.raises(TypeError, match="list"):
             env.cc.flags = "-Wall -O2"
 
-    @pytest.mark.xfail(
-        reason="Undefined variables in commands log warnings, don't raise",
-        strict=True,
-    )
     def test_undefined_variable_in_command(self, project_env):
-        """User references an undefined variable in a command template.
-
-        Currently this only logs a warning at resolve time. In strict mode,
-        this should raise MissingVariableError.
-        """
+        """User references an undefined variable in a command template."""
         project, env = project_env
-        project.Command(
-            "gen",
-            env,
-            target="out.txt",
-            source="src/main.c",
-            command="$NONEXISTENT_TOOL $SOURCE -o $TARGET",
-        )
         with pytest.raises(MissingVariableError, match="NONEXISTENT_TOOL"):
-            project.resolve(strict=True)
+            project.Command(
+                "gen",
+                env,
+                target="out.txt",
+                source="src/main.c",
+                command="$NONEXISTENT_TOOL $SOURCE -o $TARGET",
+            )
 
     def test_undefined_variable_message_quality(self):
         """MissingVariableError should include helpful hints."""

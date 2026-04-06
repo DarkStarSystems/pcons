@@ -770,6 +770,17 @@ class GenericCommandBuilder(BaseBuilder):
             node.builder = self
             result.append(node)
 
+        # Validate that any $var references in command tokens are defined.
+        # At this point, $SOURCE/$TARGET are already typed markers (SourcePath/
+        # TargetPath), so only user variables like $MYVAR remain as strings.
+        # $SRCDIR is handled by generators, and $$ is a literal dollar escape.
+        for token in self._command:
+            if isinstance(token, str) and "$" in token and not token.startswith("$$"):
+                # Skip $SRCDIR -- handled by generators, not subst
+                if "$SRCDIR" in token:
+                    continue
+                env.subst_list(token)
+
         # Store build info on the first (primary) target
         # This is used by the Ninja generator to create build rules
         if result:
