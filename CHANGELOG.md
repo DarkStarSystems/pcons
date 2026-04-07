@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-04-07
+
+### Added
+
+- **LaTeX contrib toolchain**: New `latexmk`-based toolchain for building LaTeX documents, with documentation and CI testing.
+
+- **User error experience test suite**: 48 tests covering common user mistakes, ensuring clear error messages for misuse.
+
+### Improved
+
+- **Input validation for common errors**: Toolchain type mismatches, incorrect flag types, post-resolve mutation attempts, no-toolchain compilation, and unknown variant names now raise clear, actionable error messages instead of confusing failures.
+
+- **UsageRequirements values validated**: Passing a string instead of a list (e.g., `target.public.defines = "-DFOO"`) now raises an immediate error with guidance.
+
+- **Command() template variable validation**: Unknown `$variables` in `Command()` templates are now caught at build-description time, not at ninja-run time.
+
+### Fixed
+
+- **ReadTheDocs build**: Fixed pcons installation and `target_type` string rendering in documentation.
+
+### CI
+
+- Bumped `wasi-sdk` from v30 to v32.
+- Bumped `mymindstorm/setup-emsdk` from 14 to 15.
+
 ## [0.12.0] - 2026-04-05
 
 ### Added
@@ -684,7 +709,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/DarkStarSystems/pcons/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/DarkStarSystems/pcons/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/DarkStarSystems/pcons/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/DarkStarSystems/pcons/compare/v0.9.0...v0.10.0

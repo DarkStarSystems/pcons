@@ -43,7 +43,7 @@ register_builtin_builders()
 # Import modules namespace to make pcons.modules accessible
 from pcons import modules as modules  # noqa: E402, F401
 
-__version__ = "0.12.0"
+__version__ = "0.12.1"
 
 # Internal storage for CLI variables
 _cli_vars: dict[str, str] | None = None
@@ -109,6 +109,7 @@ def get_var(name: str, default: str | None = None) -> str | None:
             _cli_vars = {}
 
     # Check CLI vars first
+    assert _cli_vars is not None
     if name in _cli_vars:
         return _cli_vars[name]
 
