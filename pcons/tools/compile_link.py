@@ -300,6 +300,61 @@ class CompileLinkFactory:
     # Output node creation (link step)
     # -------------------------------------------------------------------------
 
+    @staticmethod
+    def _apply_output_naming(
+        target: Target,
+        env: Environment,
+        target_type: str,
+    ) -> str:
+        """Compute the output filename for a target.
+
+        Always applies prefix and suffix to the base name (output_name or
+        target.name), like CMake's OUTPUT_NAME / PREFIX / SUFFIX.
+
+        Default prefix/suffix come from the toolchain (which handles
+        cross-compilation, e.g., Emscripten → ".js"). Use
+        output_prefix/output_suffix to override (set to "" to suppress).
+
+        Args:
+            target: Target to compute name for.
+            env: Environment with toolchain.
+            target_type: One of "static_library", "shared_library", "program".
+
+        Returns:
+            Output filename (relative, may include subdirectory via prefix).
+        """
+        from pcons.configure.platform import get_platform
+
+        base_name = target.output_name or target.name
+        toolchain = env._toolchain
+
+        if toolchain:
+            default_prefix = toolchain.get_output_prefix(target_type)
+            default_suffix = toolchain.get_output_suffix(target_type)
+        else:
+            plat = get_platform()
+            if target_type == "static_library":
+                default_prefix, default_suffix = (
+                    plat.static_lib_prefix,
+                    plat.static_lib_suffix,
+                )
+            elif target_type == "shared_library":
+                default_prefix, default_suffix = (
+                    plat.shared_lib_prefix,
+                    plat.shared_lib_suffix,
+                )
+            else:
+                default_prefix, default_suffix = "", plat.exe_suffix
+
+        prefix = (
+            target.output_prefix if target.output_prefix is not None else default_prefix
+        )
+        suffix = (
+            target.output_suffix if target.output_suffix is not None else default_suffix
+        )
+
+        return f"{prefix}{base_name}{suffix}"
+
     def _create_static_library_output(self, target: Target, env: Environment) -> None:
         """Create static library output node."""
         if not target.intermediate_nodes:
@@ -312,16 +367,8 @@ class CompileLinkFactory:
         build_dir = self.project.build_dir
         path_resolver = self.project.path_resolver
 
-        if target.output_name:
-            lib_path = build_dir / path_resolver.normalize_target_path(
-                target.output_name
-            )
-        elif toolchain := env._toolchain:
-            lib_name = toolchain.get_static_library_name(target.name)
-            lib_path = build_dir / lib_name
-        else:
-            lib_name = f"lib{target.name}.a"
-            lib_path = build_dir / lib_name
+        lib_name = self._apply_output_naming(target, env, "static_library")
+        lib_path = build_dir / path_resolver.normalize_target_path(lib_name)
 
         lib_node = self.project.node(lib_path)
         lib_node.depends(target.intermediate_nodes)
@@ -355,23 +402,8 @@ class CompileLinkFactory:
         build_dir = self.project.build_dir
         path_resolver = self.project.path_resolver
 
-        if target.output_name:
-            lib_path = build_dir / path_resolver.normalize_target_path(
-                target.output_name
-            )
-        elif toolchain := env._toolchain:
-            lib_name = toolchain.get_shared_library_name(target.name)
-            lib_path = build_dir / lib_name
-        else:
-            import sys
-
-            if sys.platform == "darwin":
-                lib_name = f"lib{target.name}.dylib"
-            elif sys.platform == "win32":
-                lib_name = f"{target.name}.dll"
-            else:
-                lib_name = f"lib{target.name}.so"
-            lib_path = build_dir / lib_name
+        lib_name = self._apply_output_naming(target, env, "shared_library")
+        lib_path = build_dir / path_resolver.normalize_target_path(lib_name)
 
         lib_node = self.project.node(lib_path)
         lib_node.depends(target.intermediate_nodes)
@@ -411,21 +443,8 @@ class CompileLinkFactory:
         build_dir = self.project.build_dir
         path_resolver = self.project.path_resolver
 
-        if target.output_name:
-            prog_path = build_dir / path_resolver.normalize_target_path(
-                target.output_name
-            )
-        elif toolchain := env._toolchain:
-            prog_name = toolchain.get_program_name(target.name)
-            prog_path = build_dir / prog_name
-        else:
-            import sys
-
-            if sys.platform == "win32":
-                prog_name = f"{target.name}.exe"
-            else:
-                prog_name = target.name
-            prog_path = build_dir / prog_name
+        prog_name = self._apply_output_naming(target, env, "program")
+        prog_path = build_dir / path_resolver.normalize_target_path(prog_name)
 
         prog_node = self.project.node(prog_path)
         prog_node.depends(target.intermediate_nodes)

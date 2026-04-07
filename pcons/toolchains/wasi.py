@@ -383,14 +383,15 @@ class WasiToolchain(UnixToolchain):
 
     # -- Suffix / naming overrides ------------------------------------------
 
-    def get_program_name(self, name: str) -> str:
-        return f"{name}.wasm"
-
-    def get_shared_library_name(self, name: str) -> str:
-        raise NotImplementedError(
-            "WASI does not support shared libraries. "
-            "Use StaticLibrary instead, or target a native platform."
-        )
+    def get_output_suffix(self, target_type: str) -> str:
+        if target_type == "program":
+            return ".wasm"
+        if target_type == "shared_library":
+            raise NotImplementedError(
+                "WASI does not support shared libraries. "
+                "Use StaticLibrary instead, or target a native platform."
+            )
+        return ".a"  # static library
 
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
         # No -fPIC needed for WebAssembly

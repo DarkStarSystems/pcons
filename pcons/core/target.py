@@ -202,6 +202,9 @@ class Target:
         "_install_nodes",
         # Custom output filename:
         "output_name",
+        # Override platform prefix/suffix for output naming:
+        "output_prefix",
+        "output_suffix",
         # Lazy source resolution (for Install, etc.):
         "_pending_sources",
         # Build info for archive and command targets:
@@ -266,6 +269,9 @@ class Target:
         self._install_nodes: list[FileNode] = []
         # Custom output filename (overrides toolchain default naming):
         self.output_name: str | None = None
+        # Override platform prefix/suffix (e.g., output_prefix="" to drop "lib"):
+        self.output_prefix: str | None = None
+        self.output_suffix: str | None = None
         # Lazy source resolution (for Install, etc.):
         # Sources that need resolution after main resolve phase
         self._pending_sources: list[Target | Node | Path | str] | None = None

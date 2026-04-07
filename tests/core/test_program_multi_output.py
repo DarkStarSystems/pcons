@@ -97,11 +97,12 @@ class _TestToolchain(UnixToolchain):
     def _configure_tools(self, config: object) -> bool:
         return True
 
-    def get_program_name(self, name: str) -> str:
-        return f"{name}.js"
-
-    def get_shared_library_name(self, name: str) -> str:
-        raise NotImplementedError
+    def get_output_suffix(self, target_type: str) -> str:
+        if target_type == "program":
+            return ".js"
+        if target_type == "shared_library":
+            raise NotImplementedError
+        return ".a"
 
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
         return []

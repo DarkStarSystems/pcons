@@ -430,6 +430,20 @@ class Toolchain(Protocol):
         """Return filename for a program."""
         ...
 
+    def get_output_prefix(self, target_type: str) -> str:
+        """Return the default output filename prefix for a target type.
+
+        E.g., "lib" for shared/static libraries on Unix, "" on Windows.
+        """
+        ...
+
+    def get_output_suffix(self, target_type: str) -> str:
+        """Return the default output filename suffix for a target type.
+
+        E.g., ".so" / ".dylib" / ".dll" for shared libraries.
+        """
+        ...
+
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
         """Return additional compile flags needed for the target type."""
         ...
@@ -874,47 +888,46 @@ class BaseToolchain(ABC):
         """
         return "ar"
 
-    def get_static_library_name(self, name: str) -> str:
-        """Return filename for a static library.
+    def get_output_prefix(self, target_type: str) -> str:
+        """Return the default output filename prefix for a target type.
 
-        Override in subclasses for platform-specific naming.
-        Default is Unix-style "lib{name}.a".
-
-        Args:
-            name: Library base name.
-
-        Returns:
-            Full library filename (e.g., "libfoo.a").
+        Override in subclasses for platform/toolchain-specific naming.
+        Default is "lib" for libraries, "" for programs.
         """
-        return f"lib{name}.a"
+        from pcons.configure.platform import get_platform
+
+        plat = get_platform()
+        if target_type == "static_library":
+            return plat.static_lib_prefix
+        elif target_type == "shared_library":
+            return plat.shared_lib_prefix
+        return ""
+
+    def get_output_suffix(self, target_type: str) -> str:
+        """Return the default output filename suffix for a target type.
+
+        Override in subclasses for platform/toolchain-specific naming.
+        """
+        from pcons.configure.platform import get_platform
+
+        plat = get_platform()
+        if target_type == "static_library":
+            return plat.static_lib_suffix
+        elif target_type == "shared_library":
+            return plat.shared_lib_suffix
+        return plat.exe_suffix
+
+    def get_static_library_name(self, name: str) -> str:
+        """Return filename for a static library."""
+        return f"{self.get_output_prefix('static_library')}{name}{self.get_output_suffix('static_library')}"
 
     def get_shared_library_name(self, name: str) -> str:
-        """Return filename for a shared library.
-
-        Override in subclasses for platform-specific naming.
-        Default is Unix-style "lib{name}.so".
-
-        Args:
-            name: Library base name.
-
-        Returns:
-            Full library filename (e.g., "libfoo.so", "libfoo.dylib").
-        """
-        return f"lib{name}.so"
+        """Return filename for a shared library."""
+        return f"{self.get_output_prefix('shared_library')}{name}{self.get_output_suffix('shared_library')}"
 
     def get_program_name(self, name: str) -> str:
-        """Return filename for a program.
-
-        Override in subclasses for platform-specific naming.
-        Default has no suffix (Unix-style).
-
-        Args:
-            name: Program base name.
-
-        Returns:
-            Full program filename (e.g., "myapp", "myapp.exe").
-        """
-        return name
+        """Return filename for a program."""
+        return f"{self.get_output_prefix('program')}{name}{self.get_output_suffix('program')}"
 
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
         """Return additional compile flags needed for the target type.

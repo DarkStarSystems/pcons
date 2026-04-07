@@ -327,7 +327,7 @@ class TestResolverOutputName:
     """Tests for target.output_name custom output naming."""
 
     def test_shared_library_output_name(self, tmp_path, gcc_toolchain):
-        """Test that output_name overrides shared library naming."""
+        """Test that output_name is used as base name with platform naming."""
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
 
@@ -337,17 +337,18 @@ class TestResolverOutputName:
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.SharedLibrary("plugin", env, sources=[str(src_file)])
-        target.output_name = "plugin.ofx"  # Custom name with .ofx suffix
+        target.output_name = "myplugin"
+        target.output_prefix = ""
+        target.output_suffix = ".ofx"
 
         project.resolve()
 
         assert target._resolved
         assert len(target.output_nodes) == 1
-        # Should use custom name, not platform default
-        assert target.output_nodes[0].path.name == "plugin.ofx"
+        assert target.output_nodes[0].path.name == "myplugin.ofx"
 
     def test_static_library_output_name(self, tmp_path, gcc_toolchain):
-        """Test that output_name overrides static library naming."""
+        """Test that output_name applies platform prefix/suffix."""
         src_file = tmp_path / "lib.c"
         src_file.write_text("void lib_func() {}")
 
@@ -357,7 +358,9 @@ class TestResolverOutputName:
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
-        target.output_name = "custom_mylib.lib"  # Windows-style naming
+        target.output_name = "custom_mylib"
+        target.output_prefix = ""
+        target.output_suffix = ".lib"
 
         project.resolve()
 
@@ -365,7 +368,7 @@ class TestResolverOutputName:
         assert target.output_nodes[0].path.name == "custom_mylib.lib"
 
     def test_program_output_name(self, tmp_path, gcc_toolchain):
-        """Test that output_name overrides program naming."""
+        """Test that output_name is used as base name for programs."""
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
 
@@ -375,7 +378,8 @@ class TestResolverOutputName:
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
         target = project.Program("myapp", env, sources=[str(src_file)])
-        target.output_name = "custom_app.bin"
+        target.output_name = "custom_app"
+        target.output_suffix = ".bin"
 
         project.resolve()
 
@@ -407,6 +411,108 @@ class TestResolverOutputName:
             assert target.output_nodes[0].path.name == "mylib.dll"
         else:
             assert target.output_nodes[0].path.name == "libmylib.so"
+
+
+class TestOutputPrefixSuffix:
+    """Test output_prefix and output_suffix overrides."""
+
+    def test_shared_library_no_prefix(self, tmp_path, gcc_toolchain):
+        """Test output_prefix='' drops the 'lib' prefix."""
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        target = project.SharedLibrary("myplugin", env, sources=[str(src_file)])
+        target.output_prefix = ""
+
+        project.resolve()
+
+        name = target.output_nodes[0].path.name
+        assert not name.startswith("lib"), f"Expected no 'lib' prefix, got {name}"
+        assert name.startswith("myplugin")
+
+    def test_shared_library_custom_suffix(self, tmp_path, gcc_toolchain):
+        """Test output_suffix overrides the platform default."""
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        target = project.SharedLibrary("myplugin", env, sources=[str(src_file)])
+        target.output_suffix = ".ofx"
+
+        project.resolve()
+
+        name = target.output_nodes[0].path.name
+        assert name.endswith(".ofx"), f"Expected .ofx suffix, got {name}"
+
+    def test_static_library_custom_prefix_suffix(self, tmp_path, gcc_toolchain):
+        """Test both prefix and suffix overrides on static library."""
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        target = project.StaticLibrary("mylib", env, sources=[str(src_file)])
+        target.output_prefix = ""
+        target.output_suffix = ".lib"
+
+        project.resolve()
+
+        assert target.output_nodes[0].path.name == "mylib.lib"
+
+    def test_output_name_with_prefix_suffix(self, tmp_path, gcc_toolchain):
+        """output_name is the base name; prefix/suffix are always applied."""
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
+        target.output_name = "custom"
+        target.output_prefix = "pre_"
+        target.output_suffix = ".suf"
+
+        project.resolve()
+
+        assert target.output_nodes[0].path.name == "pre_custom.suf"
+
+    def test_output_name_gets_platform_naming(self, tmp_path, gcc_toolchain):
+        """output_name without prefix/suffix overrides gets platform defaults."""
+        import sys
+
+        src_file = tmp_path / "lib.c"
+        src_file.write_text("void lib_func() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        target = project.SharedLibrary("internal", env, sources=[str(src_file)])
+        target.output_name = "fyaml"
+
+        project.resolve()
+
+        if sys.platform == "darwin":
+            assert target.output_nodes[0].path.name == "libfyaml.dylib"
+        elif sys.platform == "win32":
+            assert target.output_nodes[0].path.name == "fyaml.dll"
+        else:
+            assert target.output_nodes[0].path.name == "libfyaml.so"
 
 
 class TestResolverSharedLibraryCompileFlags:
@@ -661,7 +767,7 @@ class TestResolverToolAgnostic:
         assert build_info["deps_style"] is None
 
     def test_toolchain_library_naming(self, tmp_path):
-        """Test that library names come from toolchain, not hardcoded."""
+        """Test that library names come from toolchain prefix/suffix."""
         from pcons.tools.toolchain import BaseToolchain, SourceHandler
 
         class CustomToolchain(BaseToolchain):
@@ -683,14 +789,15 @@ class TestResolverToolAgnostic:
             def get_object_suffix(self) -> str:
                 return ".obj"  # Custom object suffix
 
-            def get_static_library_name(self, name: str) -> str:
-                return f"lib{name}_custom.a"  # Custom naming
+            def get_output_prefix(self, target_type: str) -> str:
+                if target_type == "static_library":
+                    return "static_"
+                return ""
 
-            def get_shared_library_name(self, name: str) -> str:
-                return f"{name}_custom.dll"  # Custom naming
-
-            def get_program_name(self, name: str) -> str:
-                return f"{name}_custom.bin"  # Custom naming
+            def get_output_suffix(self, target_type: str) -> str:
+                if target_type == "static_library":
+                    return ".mylib"
+                return ".exe"
 
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
@@ -703,18 +810,16 @@ class TestResolverToolAgnostic:
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
 
-        # Test static library naming
+        # Test static library naming from toolchain prefix/suffix
         lib = project.StaticLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()
 
         assert lib._resolved
-        # Check that object has custom suffix
         assert lib.intermediate_nodes[0].path.suffix == ".obj"
-        # Check that library has custom name
-        assert lib.output_nodes[0].path.name == "libmylib_custom.a"
+        assert lib.output_nodes[0].path.name == "static_mylib.mylib"
 
     def test_toolchain_program_naming(self, tmp_path):
-        """Test that program names come from toolchain."""
+        """Test that program names come from toolchain prefix/suffix."""
         from pcons.tools.toolchain import BaseToolchain, SourceHandler
 
         class CustomToolchain(BaseToolchain):
@@ -733,8 +838,10 @@ class TestResolverToolAgnostic:
                     )
                 return None
 
-            def get_program_name(self, name: str) -> str:
-                return f"{name}.exe"  # Always add .exe
+            def get_output_suffix(self, target_type: str) -> str:
+                if target_type == "program":
+                    return ".exe"
+                return super().get_output_suffix(target_type)
 
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")

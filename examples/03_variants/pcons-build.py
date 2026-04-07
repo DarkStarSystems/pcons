@@ -36,7 +36,8 @@ for variant in ["debug", "release"]:
     env.set_variant(variant)  # Sets appropriate flags for each variant
 
     prog = project.Program(f"variant_demo_{variant}", env)
-    prog.output_name = f"{variant}/" + toolchain.get_program_name("variant_demo")
+    prog.output_name = "variant_demo"
+    prog.output_prefix = f"{variant}/"
     prog.add_sources([src_dir / "main.c"])
 
 project.generate()

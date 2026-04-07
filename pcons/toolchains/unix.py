@@ -162,28 +162,6 @@ class UnixToolchain(BaseToolchain):
         """Return the object file suffix for Unix toolchains."""
         return ".o"
 
-    def get_static_library_name(self, name: str) -> str:
-        """Return filename for a static library (Unix-style)."""
-        return f"lib{name}.a"
-
-    def get_shared_library_name(self, name: str) -> str:
-        """Return filename for a shared library (platform-aware)."""
-        platform = get_platform()
-        if platform.is_windows:
-            # GCC/MinGW on Windows produces .dll files
-            return f"{name}.dll"
-        if platform.is_macos:
-            return f"lib{name}.dylib"
-        return f"lib{name}.so"
-
-    def get_program_name(self, name: str) -> str:
-        """Return filename for a program (platform-aware)."""
-        platform = get_platform()
-        if platform.is_windows:
-            # GCC/MinGW on Windows produces .exe files
-            return f"{name}.exe"
-        return name
-
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
         """Return additional compile flags needed for the target type.
 

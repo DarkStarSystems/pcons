@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
 from pcons.configure.config_file import configure_file  # noqa: E402
+from pcons.configure.platform import Platform, get_platform  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
@@ -208,6 +209,8 @@ __all__ = [
     "Configure",
     "configure_file",
     "FlagPair",
+    "Platform",
+    "get_platform",
     "ImportedTarget",
     "PackageDescription",
     "Project",

@@ -169,10 +169,23 @@ class ToolChecks:
         self._config.set(cache_key, result.success)
         return result
 
+    def _get_werror_flag(self) -> str:
+        """Return the appropriate treat-warnings-as-errors flag.
+
+        MSVC and clang-cl use /WX; GCC and Clang use -Werror.
+        """
+        toolchain = getattr(self._env, "_toolchain", None)
+        tc_name = getattr(toolchain, "name", "") if toolchain else ""
+        if tc_name in ("msvc", "clang-cl"):
+            return "/WX"
+        return "-Werror"
+
     def check_flag(self, flag: str) -> CheckResult:
         """Check if the compiler accepts a flag.
 
         Compiles a minimal program with the flag to test if it's accepted.
+        Uses -Werror (or /WX for MSVC/clang-cl) so that flags which produce
+        warnings (e.g., clang's "unknown warning option") are rejected.
 
         Args:
             flag: Compiler flag to test (e.g., '-Wall', '-std=c++20').
@@ -200,10 +213,14 @@ class ToolChecks:
         # Minimal C program
         source = "int main(void) { return 0; }\n"
 
+        # Use -Werror / /WX so that flags producing warnings (like clang's
+        # "unknown warning option") are treated as failures.
+        werror = self._get_werror_flag()
+
         cdir = self._make_check_dir()
         try:
             result = self._try_compile(
-                compiler, source, extra_flags=[flag], check_dir=cdir
+                compiler, source, extra_flags=[werror, flag], check_dir=cdir
             )
         finally:
             self._cleanup_check_dir(*cdir)

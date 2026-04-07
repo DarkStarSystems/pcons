@@ -130,18 +130,6 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """Return the archiver tool name (lib for MSVC-compatible)."""
         return "lib"
 
-    def get_static_library_name(self, name: str) -> str:
-        """Return filename for a static library (Windows-style .lib)."""
-        return f"{name}.lib"
-
-    def get_shared_library_name(self, name: str) -> str:
-        """Return filename for a shared library (Windows-style .dll)."""
-        return f"{name}.dll"
-
-    def get_program_name(self, name: str) -> str:
-        """Return filename for a program (Windows-style .exe)."""
-        return f"{name}.exe"
-
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
         """Return additional compile flags for target type.
 
