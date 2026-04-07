@@ -34,6 +34,7 @@ This guide maps common CMake patterns to their pcons equivalents. It's designed 
 | `add_compile_options(-Wall)` | `env.cc.flags.append("-Wall")` |
 | `option(OPT "desc" ON)` | `pcons.get_var("OPT", "ON")` or `os.environ.get("OPT", "ON")` |
 | `install(TARGETS t DESTINATION d)` | `project.Install(d, [t])` |
+| `add_custom_target(name DEPENDS ...)` | `project.Alias("name", targets...)` |
 | `add_custom_command(...)` | `env.Command(target, source, cmd)` |
 
 ---
@@ -608,6 +609,28 @@ for variant_name, flags in [("sse2", ["-msse2"]), ("avx2", ["-mavx2"])]:
 ### FetchContent / ExternalProject
 
 CMake's `FetchContent` downloads and builds dependencies at configure time. Pcons doesn't have a built-in equivalent in the build script. Use `pcons-fetch` (a companion tool) or manage dependencies externally.
+
+### Custom targets (phony / alias)
+
+CMake's `add_custom_target()` creates a named target that is always considered out of date. In pcons, use `project.Alias()` to create named build targets:
+
+```cmake
+# CMake
+add_custom_target(tests DEPENDS test_foo test_bar)
+```
+
+```python
+# pcons
+project.Alias("tests", test_foo, test_bar)
+```
+
+Then build with `ninja tests`. Aliases can be built up incrementally — calling `Alias()` with the same name adds to it:
+
+```python
+project.Alias("tests", test_foo)
+# ... later ...
+project.Alias("tests", test_bar)  # adds to existing "tests" alias
+```
 
 ---
 
