@@ -648,7 +648,9 @@ libmath.add_sources([src_dir / "math_utils.c"])
 # Public includes propagate to consumers
 libmath.public.include_dirs.append(include_dir)
 
-# Public link libs (e.g., math library on Linux)
+# Public link libs (e.g., math library on Linux).
+# Use link_libs for -l libraries (placed after objects on the link line).
+# Use link_flags for other linker flags (placed before objects).
 libmath.public.link_libs.append("m")
 
 # Create program that uses the library
@@ -2397,7 +2399,8 @@ This is especially useful when porting CMake projects to pcons, since the templa
 | `target.add_sources(paths)` | Add multiple source files |
 | `target.link(*targets)` | Add library dependencies |
 | `target.public.include_dirs` | Include dirs for consumers |
-| `target.public.link_libs` | Link libs for consumers |
+| `target.public.link_libs` | Libraries to link (`-l`; placed after objects) |
+| `target.public.link_flags` | Linker flags (placed before objects; use `link_libs` for `-l` libraries) |
 | `target.public.defines` | Defines for consumers |
 | `target.private.compile_flags` | Flags for this target only |
 

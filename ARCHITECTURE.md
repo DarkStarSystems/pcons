@@ -735,8 +735,8 @@ This makes build scripts declarative - the order of declarations doesn't matter.
        includes: list[str]      # Include directories (no prefix)
        defines: list[str]       # Preprocessor definitions (no prefix)
        flags: list[str]         # Additional compiler flags
-       link_flags: list[str]    # Linker flags
-       libs: list[str]          # Libraries to link (no prefix)
+       link_flags: list[str]    # Linker flags (placed before objects)
+       libs: list[str]          # Libraries to link (placed after objects; use for -l)
        libdirs: list[str]       # Library search directories (no prefix)
 
        # Prefixes (customizable per toolchain)
