@@ -383,6 +383,13 @@ class WasiToolchain(UnixToolchain):
 
     # -- Suffix / naming overrides ------------------------------------------
 
+    def get_output_prefix(self, target_type: str) -> str:
+        # WASI targets Unix-like wasm — always use "lib" prefix
+        # regardless of host platform (e.g., when cross-compiling from Windows).
+        if target_type in ("static_library", "shared_library"):
+            return "lib"
+        return ""
+
     def get_output_suffix(self, target_type: str) -> str:
         if target_type == "program":
             return ".wasm"

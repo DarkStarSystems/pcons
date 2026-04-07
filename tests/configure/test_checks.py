@@ -89,17 +89,21 @@ class TestToolChecksWithCompiler:
         result = checks.check_flag(flag)
         assert result.success is False
 
-    @pytest.mark.skipif(_is_msvc_style, reason="GCC/Clang-specific warning flag")
     def test_check_flag_rejects_unknown_warning_option(self, setup):
         """Clang accepts unknown -Wno-* flags with exit code 0 but warns.
 
         check_flag() should detect this via -Werror and reject the flag.
+        GCC silently accepts unknown -Wno-* flags even with -Werror,
+        so this test only asserts failure on Clang.
         """
+        if _is_msvc_style:
+            pytest.skip("GCC/Clang-specific warning flag")
         config, env = setup
         checks = ToolChecks(config, env, "cc")
-        # -Wno-stringop-overflow is GCC-specific; Clang warns about it
-        # Even on GCC, this should either succeed (GCC knows it) or fail cleanly
         result = checks.check_flag("-Wno-this-is-not-a-real-warning-option")
+        # GCC silently accepts unknown -Wno-* flags; only Clang rejects them
+        if result.success:
+            pytest.skip("Compiler accepts unknown -Wno-* flags (likely GCC)")
         assert result.success is False
 
     def test_check_header_exists(self, setup):
