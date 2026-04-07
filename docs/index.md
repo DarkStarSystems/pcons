@@ -48,3 +48,5 @@ See the [User Guide](user-guide.md) for:
 - Shared libraries and installation
 - Creating custom tools
 - API reference
+
+Porting an existing CMake project? See the [CMake to Pcons Porting Guide](porting-from-cmake.md).

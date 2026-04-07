@@ -83,6 +83,7 @@ pip install pcons
 ## Documentation
 
 - User Guide is at [ReadTheDocs](https://pcons.readthedocs.io)
+- [Porting from CMake](docs/porting-from-cmake.md) - Side-by-side guide for migrating CMake projects to pcons
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Design document and implementation status
 - [CONTRIBUTING.md](CONTRIBUTING.md) - How to contribute
 
