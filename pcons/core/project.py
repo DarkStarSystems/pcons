@@ -351,9 +351,10 @@ class Project:
         comparison regardless of whether they include the build_dir prefix.
         """
         parts = p.parts
-        build_dir_name = self.build_dir.name
-        if parts and parts[0] == build_dir_name:
-            return Path(*parts[1:]) if len(parts) > 1 else Path(".")
+        bd_parts = self.build_dir.parts
+        n = len(bd_parts)
+        if bd_parts and parts[:n] == bd_parts:
+            return Path(*parts[n:]) if len(parts) > n else Path(".")
         return p
 
     def get_child_nodes(self, path: Path | str) -> list[FileNode]:

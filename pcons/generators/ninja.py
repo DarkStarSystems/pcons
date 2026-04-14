@@ -63,6 +63,7 @@ class NinjaGenerator(BaseGenerator):
         self._project_root: Path | None = None  # Set during generate()
         self._topdir: str = ".."  # Relative path from output_dir to project root
         self._path_resolver: PathResolver | None = None  # Set during generate()
+        self._build_dir_parts: tuple[str, ...] = ()  # Parts of relative build_dir
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate build.ninja file.
@@ -84,6 +85,8 @@ class NinjaGenerator(BaseGenerator):
         self._project_root = project.root_dir.resolve()
         # Store path_resolver from project if available
         self._path_resolver = getattr(project, "_path_resolver", None)
+        # Store build_dir parts for stripping prefix from relative paths
+        self._build_dir_parts = Path(project.build_dir).parts
         # Compute relative path from output_dir to project root
         try:
             self._topdir = str(
@@ -690,13 +693,14 @@ class NinjaGenerator(BaseGenerator):
 
         # Handle relative paths - strip the build dir prefix if present
         # e.g., "build/my_program" when output_dir is "build"
-        if self._output_dir is not None:
-            build_dir_name = self._output_dir.name
+        # or "build/release/my_program" when output_dir is "build/release"
+        if self._build_dir_parts:
             parts = path_obj.parts
-            if parts and parts[0] == build_dir_name:
-                # Strip the build dir prefix
-                if len(parts) > 1:
-                    return str(Path(*parts[1:])).replace("\\", "/")
+            n = len(self._build_dir_parts)
+            if parts[:n] == self._build_dir_parts:
+                # Strip the full build dir prefix
+                if len(parts) > n:
+                    return str(Path(*parts[n:])).replace("\\", "/")
                 return "."
 
         return str(path).replace("\\", "/")

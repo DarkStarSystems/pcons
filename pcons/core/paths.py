@@ -76,20 +76,21 @@ class PathResolver:
                 # Path is not under build_dir - return as-is (external output)
                 return path_obj
 
-        # Case 2: Relative path starting with build_dir name
+        # Case 2: Relative path starting with build_dir prefix
         # This is almost always a mistake: the user passed a project-root-relative
         # path (like "build/foo") but target paths should be build-dir-relative
         # (just "foo"). The build system prepends build_dir, so "build/foo"
         # becomes "build/build/foo".
-        build_dir_name = self.build_dir.name
+        bd_parts = self.build_dir.parts
         parts = path_obj.parts
-        if parts and parts[0] == build_dir_name:
-            suggested = "/".join(parts[1:])
+        if bd_parts and parts[: len(bd_parts)] == bd_parts:
+            suggested = "/".join(parts[len(bd_parts) :])
+            build_dir_str = str(self.build_dir)
             context = f" (target '{target_name}')" if target_name else ""
             warnings.warn(
                 f"Target path '{path}'{context} starts with build directory "
-                f"name '{build_dir_name}'. "
-                f"This will create '{build_dir_name}/{path}' inside the build "
+                f"'{build_dir_str}'. "
+                f"This will create '{build_dir_str}/{path}' inside the build "
                 f"directory. Target paths are relative to build_dir, so use "
                 f"'{suggested}' instead of '{path}'.",
                 UserWarning,

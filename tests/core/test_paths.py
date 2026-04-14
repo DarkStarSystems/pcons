@@ -110,7 +110,7 @@ class TestNormalizeTargetPath:
         resolver = PathResolver(project_root, Path("build"))
 
         # Relative path starting with "build/" - warn but keep
-        with pytest.warns(UserWarning, match="starts with build directory name"):
+        with pytest.warns(UserWarning, match="starts with build directory"):
             result = resolver.normalize_target_path("build/foo.tar.gz")
 
         # Path is kept as-is (NOT stripped)
