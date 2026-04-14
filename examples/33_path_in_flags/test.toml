@@ -18,13 +18,8 @@ commands = [
     { run = "cat build/build.ninja", expect_stdout = "-Wl,-force_load,libmylib.a" },
 ]
 
-commands_windows = [
-    { run = "build\\main.exe", expect_stdout = "Main program" },
-    { run = "build\\main.exe", expect_stdout = "Hello from mylib!" },
-    { run = "type build\\build.ninja", expect_stdout = "-Wl,-force_load,mylib.lib" },
-]
-
 [skip]
-# -Wl,-force_load is macOS/Linux specific; skip xcode (different paths) and makefile
-# (verify commands check build.ninja specifically)
+# -Wl,-force_load is macOS-only; Linux ld doesn't support it.
+# PathToken correctness is verified by unit tests on all platforms.
+platforms = ["linux", "windows"]
 generators = ["xcode", "make"]
