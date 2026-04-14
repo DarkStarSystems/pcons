@@ -114,13 +114,20 @@ class PathToken:
     def relativize(self, relativizer: Callable[[str], str]) -> str:
         """Apply a relativization function and return the complete token.
 
+        For "project" paths, the relativizer transforms the path for the target
+        generator (e.g., prepending $topdir for ninja). For "build" paths (already
+        relative to the build directory) and "absolute" paths, the path is used
+        as-is since no transformation is needed.
+
         Args:
-            relativizer: Function that transforms the path for the target generator.
-                        Receives the raw path, returns the relativized path.
+            relativizer: Function that transforms project-relative paths for the
+                        target generator. Only called for path_type="project".
 
         Returns:
-            The complete token: prefix + relativized path + suffix.
+            The complete token: prefix + (possibly relativized) path + suffix.
         """
+        if self.path_type in ("build", "absolute"):
+            return self.prefix + self.path + self.suffix
         return self.prefix + relativizer(self.path) + self.suffix
 
     def __str__(self) -> str:

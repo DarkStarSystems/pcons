@@ -12,7 +12,14 @@ from pcons.core.errors import (
     MissingVariableError,
     SubstitutionError,
 )
-from pcons.core.subst import MultiCmd, Namespace, escape, subst, to_shell_command
+from pcons.core.subst import (
+    MultiCmd,
+    Namespace,
+    PathToken,
+    escape,
+    subst,
+    to_shell_command,
+)
 
 
 class TestNamespace:
@@ -603,3 +610,46 @@ class TestEscape:
 
     def test_already_escaped(self):
         assert escape("$$VAR") == "$$$$VAR"
+
+
+class TestPathToken:
+    """Tests for PathToken relativization behavior."""
+
+    def _dummy_relativizer(self, path: str) -> str:
+        """Simulates ninja-style relativization: prepend $topdir/."""
+        return f"$topdir/{path}"
+
+    def test_project_path_is_relativized(self):
+        token = PathToken(prefix="-I", path="src/include", path_type="project")
+        assert token.relativize(self._dummy_relativizer) == "-I$topdir/src/include"
+
+    def test_build_path_skips_relativizer(self):
+        token = PathToken(prefix="-I", path="generated", path_type="build")
+        assert token.relativize(self._dummy_relativizer) == "-Igenerated"
+
+    def test_absolute_path_skips_relativizer(self):
+        token = PathToken(prefix="-L", path="/usr/local/lib", path_type="absolute")
+        assert token.relativize(self._dummy_relativizer) == "-L/usr/local/lib"
+
+    def test_build_path_with_complex_prefix(self):
+        """PathToken with an arbitrary flag prefix (e.g. -Wl,-force_load,)."""
+        token = PathToken(prefix="-Wl,-force_load,", path="libfoo.a", path_type="build")
+        assert token.relativize(self._dummy_relativizer) == "-Wl,-force_load,libfoo.a"
+
+    def test_project_path_with_complex_prefix(self):
+        """Project-relative path inside an arbitrary flag prefix."""
+        token = PathToken(
+            prefix="-Wl,-force_load,", path="libs/libfoo.a", path_type="project"
+        )
+        result = token.relativize(self._dummy_relativizer)
+        assert result == "-Wl,-force_load,$topdir/libs/libfoo.a"
+
+    def test_suffix_preserved(self):
+        token = PathToken(
+            prefix="", path="build/obj/hello.o", path_type="build", suffix=".d"
+        )
+        assert token.relativize(self._dummy_relativizer) == "build/obj/hello.o.d"
+
+    def test_str_fallback(self):
+        token = PathToken(prefix="-I", path="src", path_type="project")
+        assert str(token) == "-Isrc"

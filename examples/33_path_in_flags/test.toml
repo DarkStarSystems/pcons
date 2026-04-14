@@ -1,0 +1,30 @@
+# Test configuration for path_in_flags example
+# Tests embedding paths inside arbitrary flags using PathToken
+
+[test]
+description = "Demonstrates using PathToken to embed paths in linker flags"
+
+expected_outputs = [
+    "build/build.ninja",
+    "build/libmylib.a",
+    "build/main",
+]
+
+[verify]
+commands = [
+    { run = "./build/main", expect_stdout = "Main program" },
+    { run = "./build/main", expect_stdout = "Hello from mylib!" },
+    # Verify the generated ninja file has the correct relativized path (no $topdir prefix)
+    { run = "cat build/build.ninja", expect_stdout = "-Wl,-force_load,libmylib.a" },
+]
+
+commands_windows = [
+    { run = "build\\main.exe", expect_stdout = "Main program" },
+    { run = "build\\main.exe", expect_stdout = "Hello from mylib!" },
+    { run = "type build\\build.ninja", expect_stdout = "-Wl,-force_load,mylib.lib" },
+]
+
+[skip]
+# -Wl,-force_load is macOS/Linux specific; skip xcode (different paths) and makefile
+# (verify commands check build.ninja specifically)
+generators = ["xcode", "make"]
