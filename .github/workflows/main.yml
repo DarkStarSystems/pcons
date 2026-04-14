@@ -132,7 +132,7 @@ jobs:
         with:
           version: "latest"
       - name: Install Emscripten
-        uses: mymindstorm/setup-emsdk@667eb33f24e84e7f362c16d8d7fff0629a73e15e # v15
+        uses: mymindstorm/setup-emsdk@4528d102f7230f0e7b276855c01ea1159be0e984 # v16
         with:
           actions-cache-folder: 'emsdk-cache'
       - name: Install wasi-sdk
@@ -252,7 +252,7 @@ jobs:
       - name: Generate Changelog
         run: .github/release_message.sh > release_message.md
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2.6.1
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           body_path: release_message.md
       - name: Build package
