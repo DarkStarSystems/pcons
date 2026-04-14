@@ -1869,6 +1869,41 @@ env.link.flags.extend(["-framework", "Metal"])
 env.link.flags.extend(["-F", "/path/to/frameworks"])
 ```
 
+### Paths in Linker Flags (PathToken)
+
+Sometimes you need to embed a file path inside a linker flag, such as `-Wl,-force_load,<path>` (macOS whole-archive linking) or `-Wl,--version-script=<path>`. Plain strings don't work here because the path needs to be relativized correctly for the generator (Ninja runs from the build directory, so paths must be relative to it).
+
+Use `PathToken` to embed paths in flags:
+
+```python
+from pcons import PathToken, Project, find_c_toolchain
+
+project = Project("myapp")
+env = project.Environment(toolchain=find_c_toolchain())
+
+lib = project.StaticLibrary("mylib", env)
+lib.add_sources(["src/mylib.c"])
+
+prog = project.Program("myapp", env)
+prog.add_sources(["src/main.c"])
+prog.link(lib)
+
+# Force-load all symbols from the static library (macOS)
+prog.private.link_flags.append(
+    PathToken(prefix="-Wl,-force_load,", path="libmylib.a", path_type="build")
+)
+```
+
+`PathToken` takes three key arguments:
+- **`prefix`**: The flag text before the path (e.g., `"-Wl,-force_load,"`, `"-Wl,--version-script="`)
+- **`path`**: The file path
+- **`path_type`**: How the path should be interpreted:
+  - `"build"` — relative to the build directory (for build outputs like libraries)
+  - `"project"` — relative to the project root (for source tree files)
+  - `"absolute"` — used as-is
+
+See `examples/33_path_in_flags` for a complete working example.
+
 ### Multi-Architecture Builds
 
 Pcons supports building for multiple CPU architectures, which is useful for:
@@ -2400,7 +2435,7 @@ This is especially useful when porting CMake projects to pcons, since the templa
 | `target.link(*targets)` | Add library dependencies |
 | `target.public.include_dirs` | Include dirs for consumers |
 | `target.public.link_libs` | Libraries to link (`-l`; placed after objects) |
-| `target.public.link_flags` | Linker flags (placed before objects; use `link_libs` for `-l` libraries) |
+| `target.public.link_flags` | Linker flags (placed before objects; use `link_libs` for `-l` libraries). Use `PathToken` for flags containing paths. |
 | `target.public.defines` | Defines for consumers |
 | `target.private.compile_flags` | Flags for this target only |
 

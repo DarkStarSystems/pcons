@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`PathToken` exported from top-level `pcons` package**: Allows embedding paths inside arbitrary flags (e.g., `-Wl,-force_load,<path>`) with proper generator-relative path handling. See new example `33_path_in_flags`.
+
+### Fixed
+
+- **`PathToken.relativize()` now respects `path_type`**: Build-relative and absolute paths are no longer incorrectly transformed by the generator's relativizer (e.g., `path_type="build"` no longer gets a `$topdir/` prefix in Ninja output).
+
+- **Multi-component `build_dir` paths (e.g., `build/release`) now work correctly**: The Ninja generator was only stripping the last component of the build directory prefix from output paths, causing double-nested paths like `build/release/build/release/libfoo.a`. Fixed in the Ninja generator, project node resolution, and path normalization warnings.
+
 ## [0.13.0] - 2026-04-07
 
 ### Added

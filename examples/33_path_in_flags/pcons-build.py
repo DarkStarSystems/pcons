@@ -18,8 +18,7 @@ linker behavior.
 
 import sys
 
-from pcons import Project, find_c_toolchain
-from pcons.core.subst import PathToken
+from pcons import PathToken, Project, find_c_toolchain
 
 project = Project("path_in_flags")
 env = project.Environment(toolchain=find_c_toolchain())

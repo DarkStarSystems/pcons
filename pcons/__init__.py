@@ -25,6 +25,7 @@ from pcons.configure.config_file import configure_file  # noqa: E402
 from pcons.configure.platform import Platform, get_platform  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
+from pcons.core.subst import PathToken  # noqa: E402
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.generators.xcode import XcodeGenerator  # noqa: E402
@@ -209,6 +210,7 @@ __all__ = [
     "Configure",
     "configure_file",
     "FlagPair",
+    "PathToken",
     "Platform",
     "get_platform",
     "ImportedTarget",
