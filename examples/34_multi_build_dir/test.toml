@@ -1,0 +1,31 @@
+# Test configuration for the multi-build-dir example
+
+[test]
+description = "Demonstrates separate build directories using --variant (CMake-style)"
+
+# Run the build script once per variant
+variants = ["debug", "release"]
+
+# Files that should exist after the build
+# Paths are Unix-style; automatically adapted for Windows
+expected_outputs = [
+    "build/debug/build.ninja",
+    "build/release/build.ninja",
+    "build/debug/app",
+    "build/release/app",
+]
+
+[verify]
+# Debug variant should have DEBUG defined and assertions enabled
+# Release variant should have NDEBUG defined (assertions disabled)
+# Commands are Unix-style; automatically adapted for Windows
+commands = [
+    { run = "./build/debug/app", expect_stdout = "Running in DEBUG mode" },
+    { run = "./build/debug/app", expect_stdout = "Assertions enabled" },
+    { run = "./build/release/app", expect_stdout = "Running in RELEASE mode" },
+    { run = "./build/release/app", expect_stdout = "Assertions disabled" },
+]
+
+[skip]
+# Xcode uses its own Debug/Release configuration system
+generators = ["xcode"]

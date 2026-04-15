@@ -400,6 +400,63 @@ def get_platform_value(
     return value
 
 
+def _run_generate(
+    work_dir: Path,
+    build_dir: Path,
+    invocation: str,
+    generator: str,
+    test_config: dict[str, Any],
+    variant: str | None = None,
+) -> None:
+    """Run the build script to generate build files.
+
+    Args:
+        work_dir: Working directory (copied example).
+        build_dir: Base build directory.
+        invocation: "direct" or "cli".
+        generator: Generator name.
+        test_config: Test configuration dict.
+        variant: Optional variant name (e.g., "debug", "release").
+    """
+    if invocation == "direct":
+        from pcons.cli import run_script
+
+        build_script = work_dir / "pcons-build.py"
+        try:
+            exit_code, _projects = run_script(
+                build_script, build_dir, generator=generator, variant=variant
+            )
+            if exit_code != 0:
+                variant_msg = f" (variant={variant})" if variant else ""
+                pytest.fail(f"pcons-build.py failed with code {exit_code}{variant_msg}")
+        except Exception as e:
+            variant_msg = f" (variant={variant})" if variant else ""
+            pytest.fail(f"pcons-build.py raised {type(e).__name__}: {e}{variant_msg}")
+    else:
+        cmd = [sys.executable, "-m", "pcons"]
+        env = {
+            **os.environ,
+            "PCONS_BUILD_DIR": str(build_dir),
+            "PCONS_GENERATOR": generator,
+        }
+        if variant:
+            env["PCONS_VARIANT"] = variant
+        timeout = test_config.get("timeout", 60)
+        result = subprocess.run(
+            cmd,
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+        )
+        if result.returncode != 0:
+            print(f"pcons stdout:\n{result.stdout}")
+            print(f"pcons stderr:\n{result.stderr}")
+            variant_msg = f" (variant={variant})" if variant else ""
+            pytest.fail(f"pcons failed with code {result.returncode}{variant_msg}")
+
+
 def run_example(
     example_dir: Path,
     tmp_path: Path,
@@ -448,41 +505,18 @@ def run_example(
     build_dir = work_dir / "build"
     build_dir.mkdir(exist_ok=True)
 
-    # Run build script using specified invocation method
-    if invocation == "direct":
-        # Direct: run in-process via run_script() for coverage visibility
-        from pcons.cli import run_script
+    # Check for variants (CMake-style: run the script once per variant)
+    variants = test_config.get("variants", [None])
 
-        build_script = work_dir / "pcons-build.py"
-        try:
-            exit_code, _projects = run_script(
-                build_script, build_dir, generator=generator
-            )
-            if exit_code != 0:
-                pytest.fail(f"pcons-build.py failed with code {exit_code}")
-        except Exception as e:
-            pytest.fail(f"pcons-build.py raised {type(e).__name__}: {e}")
-    else:
-        # CLI: python -m pcons (subprocess, tests the CLI entry point)
-        cmd = [sys.executable, "-m", "pcons"]
-        env = {
-            **os.environ,
-            "PCONS_BUILD_DIR": str(build_dir),
-            "PCONS_GENERATOR": generator,
-        }
-        timeout = test_config.get("timeout", 60)
-        result = subprocess.run(
-            cmd,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-        )
-        if result.returncode != 0:
-            print(f"pcons stdout:\n{result.stdout}")
-            print(f"pcons stderr:\n{result.stderr}")
-            pytest.fail(f"pcons failed with code {result.returncode}")
+    for variant in variants:
+        _run_generate(work_dir, build_dir, invocation, generator, test_config, variant)
+
+    # For variant builds, collect all variant build dirs for the build step
+    variant_build_dirs = (
+        [work_dir / "build" / v for v in variants if v is not None]
+        if any(v is not None for v in variants)
+        else [build_dir]
+    )
 
     # Check for custom build command or use appropriate build tool
     build_command = test_config.get("build_command")
@@ -508,60 +542,56 @@ def run_example(
             print(f"Build stderr:\n{result.stderr}")
             pytest.fail(f"Build command failed with code {result.returncode}")
     elif generator == "ninja":
-        # Use ninja
-        ninja_file = build_dir / "build.ninja"
-        if not ninja_file.exists():
-            pytest.fail(f"build.ninja not generated in {build_dir}")
-
-        ninja_cmd = _find_ninja()
-        if ninja_cmd is None:
+        ninja_cmd_base = _find_ninja()
+        if ninja_cmd_base is None:
             pytest.skip("ninja not available")
 
-        # Get build targets (if specified)
         build_targets = get_platform_value(test_config, "build_targets", [])
 
-        # Run ninja from the build directory using -C
-        ninja_cmd = [*ninja_cmd, "-C", str(build_dir)] + build_targets
-        result = subprocess.run(
-            ninja_cmd,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        for vbd in variant_build_dirs:
+            ninja_file = vbd / "build.ninja"
+            if not ninja_file.exists():
+                pytest.fail(f"build.ninja not generated in {vbd}")
 
-        if result.returncode != 0:
-            print(f"Ninja stdout:\n{result.stdout}")
-            print(f"Ninja stderr:\n{result.stderr}")
-            print(f"build.ninja contents:\n{ninja_file.read_text()}")
-            pytest.fail(f"ninja failed with code {result.returncode}")
+            ninja_cmd = [*ninja_cmd_base, "-C", str(vbd)] + build_targets
+            result = subprocess.run(
+                ninja_cmd,
+                cwd=work_dir,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode != 0:
+                print(f"Ninja stdout:\n{result.stdout}")
+                print(f"Ninja stderr:\n{result.stderr}")
+                print(f"build.ninja contents:\n{ninja_file.read_text()}")
+                pytest.fail(f"ninja failed with code {result.returncode}")
     elif generator == "make":
-        # Use make
-        makefile = build_dir / "Makefile"
-        if not makefile.exists():
-            pytest.fail(f"Makefile not generated in {build_dir}")
-
         if shutil.which("make") is None:
             pytest.skip("make not available")
 
-        # Get build targets (if specified)
         build_targets = get_platform_value(test_config, "build_targets", [])
 
-        # Run make from the build directory using -C
-        make_cmd = ["make", "-C", str(build_dir)] + build_targets
-        result = subprocess.run(
-            make_cmd,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        for vbd in variant_build_dirs:
+            makefile = vbd / "Makefile"
+            if not makefile.exists():
+                pytest.fail(f"Makefile not generated in {vbd}")
 
-        if result.returncode != 0:
-            print(f"Make stdout:\n{result.stdout}")
-            print(f"Make stderr:\n{result.stderr}")
-            print(f"Makefile contents:\n{makefile.read_text()}")
-            pytest.fail(f"make failed with code {result.returncode}")
+            make_cmd = ["make", "-C", str(vbd)] + build_targets
+            result = subprocess.run(
+                make_cmd,
+                cwd=work_dir,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.returncode != 0:
+                print(f"Make stdout:\n{result.stdout}")
+                print(f"Make stderr:\n{result.stderr}")
+                print(f"Makefile contents:\n{makefile.read_text()}")
+                pytest.fail(f"make failed with code {result.returncode}")
     elif generator == "xcode":
         # Use xcodebuild (macOS only)
         # Find the .xcodeproj in the build directory
