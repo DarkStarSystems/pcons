@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-04-15
+
+### Added
+
+- **New example `34_multi_build_dir`**: Demonstrates CMake-style separate build directories per variant (`build/debug/`, `build/release/`) using `get_variant()`. Complements example 03 which uses `output_prefix` for variants in a single build directory.
+
+- **Test harness `variants` support**: Examples can now specify `variants = ["debug", "release"]` in `test.toml` to run the build script once per variant, testing multi-variant workflows.
+
+### Fixed
+
+- **`env.link.flags` no longer dropped when target has `public.link_flags`**: Setting `target.public.link_flags` was replacing `env.link.flags` instead of merging with them, making env-level link flags (e.g., `-fsanitize=address`) unreliable. Fixed for both Unix and MSVC toolchains.
+
 ## [0.14.0] - 2026-04-14
 
 ### Added
@@ -743,7 +755,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/DarkStarSystems/pcons/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/DarkStarSystems/pcons/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/DarkStarSystems/pcons/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/DarkStarSystems/pcons/compare/v0.12.0...v0.12.1
