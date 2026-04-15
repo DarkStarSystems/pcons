@@ -72,6 +72,108 @@ class TestCompileLinkContext:
         assert len(libdirs) == 1
         assert isinstance(libdirs[0], ProjectPath)
 
+    def test_link_overrides_merge_with_env_link_flags(self) -> None:
+        """Verify link_flags are merged with env.link.flags, not replaced.
+
+        Regression test: env.link.flags (e.g. -fsanitize=address) must be
+        preserved when a target adds public.link_flags.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from pcons.core.project import Project
+        from pcons.toolchains.gcc import GccToolchain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+            toolchain = GccToolchain()
+            toolchain._configured = True
+            env = project.Environment(toolchain=toolchain)
+            env.add_tool("link")
+            env.link.flags = ["-fsanitize=address"]
+
+            ctx = CompileLinkContext(
+                link_flags=["-pthread"],
+                mode="link",
+                _env=env,
+            )
+            overrides = ctx.get_env_overrides()
+
+            # Both env.link.flags and target link_flags must be present
+            assert "-fsanitize=address" in overrides["flags"]
+            assert "-pthread" in overrides["flags"]
+
+    def test_link_overrides_without_env(self) -> None:
+        """Verify link_flags work when no env is provided (no base to merge)."""
+        ctx = CompileLinkContext(
+            link_flags=["-pthread"],
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+        assert overrides["flags"] == ["-pthread"]
+
+    def test_link_overrides_no_duplicate_flags(self) -> None:
+        """Verify duplicate flags between env and target are not repeated."""
+        import tempfile
+        from pathlib import Path
+
+        from pcons.core.project import Project
+        from pcons.toolchains.gcc import GccToolchain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+            toolchain = GccToolchain()
+            toolchain._configured = True
+            env = project.Environment(toolchain=toolchain)
+            env.add_tool("link")
+            env.link.flags = ["-fsanitize=address"]
+
+            # Target also has -fsanitize=address — should not appear twice
+            ctx = CompileLinkContext(
+                link_flags=["-fsanitize=address", "-pthread"],
+                mode="link",
+                _env=env,
+            )
+            overrides = ctx.get_env_overrides()
+            flags = overrides["flags"]
+            assert flags.count("-fsanitize=address") == 1
+            assert "-pthread" in flags
+
+    def test_compile_overrides_merge_with_env_flags(self) -> None:
+        """Verify compile flags are merged with env.{tool}.flags.
+
+        This tests the compile-side merging that was already correct,
+        ensuring it continues to work.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from pcons.core.project import Project
+        from pcons.toolchains.gcc import GccToolchain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+            toolchain = GccToolchain()
+            toolchain._configured = True
+            env = project.Environment(toolchain=toolchain)
+            env.add_tool("cc")
+            env.cc.flags = ["-std=c11"]
+
+            ctx = CompileLinkContext(
+                flags=["-Wall"],
+                mode="compile",
+                _tool_name="cc",
+                _env=env,
+            )
+            overrides = ctx.get_env_overrides()
+
+            # Both env.cc.flags and target compile flags must be present
+            assert "-std=c11" in overrides["flags"]
+            assert "-Wall" in overrides["flags"]
+
     def test_paths_with_spaces_compile(self) -> None:
         """Verify paths with spaces are preserved in compile mode."""
         from typing import cast
@@ -171,6 +273,37 @@ class TestMsvcCompileLinkContext:
 
         # MSVC adds .lib suffix if missing
         assert overrides["libs"] == ["kernel32.lib", "user32.lib"]
+
+    def test_msvc_link_overrides_merge_with_env_link_flags(self) -> None:
+        """Verify MSVC link_flags are merged with env.link.flags.
+
+        Regression test: same as the Unix variant but for MSVC context.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from pcons.core.project import Project
+        from pcons.toolchains.msvc import MsvcToolchain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+            toolchain = MsvcToolchain()
+            toolchain._configured = True
+            env = project.Environment(toolchain=toolchain)
+            env.add_tool("link")
+            env.link.flags = ["/DEBUG"]
+
+            ctx = MsvcCompileLinkContext(
+                link_flags=["/LTCG"],
+                mode="link",
+                _env=env,
+            )
+            overrides = ctx.get_env_overrides()
+
+            # Both env.link.flags and target link_flags must be present
+            assert "/DEBUG" in overrides["flags"]
+            assert "/LTCG" in overrides["flags"]
 
 
 class TestNinjaQuoting:

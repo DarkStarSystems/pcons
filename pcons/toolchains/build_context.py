@@ -121,7 +121,15 @@ class CompileLinkContext:
         if self.libs:
             result["libs"] = list(self.libs)
         if self.link_flags:
-            result["flags"] = list(self.link_flags)
+            # Merge with base flags from env.link.flags so that env-level
+            # link flags (e.g., -fsanitize=address) are preserved alongside
+            # target-specific link flags from usage requirements.
+            base_flags: list[object] = []
+            if self._env and self._env.has_tool("link"):
+                link_cfg = getattr(self._env, "link", None)
+                base_flags = list(getattr(link_cfg, "flags", None) or [])
+            merged = base_flags + [f for f in self.link_flags if f not in base_flags]
+            result["flags"] = merged
         if self.linker_cmd:
             result["cmd"] = self.linker_cmd
 
@@ -262,7 +270,13 @@ class MsvcCompileLinkContext(CompileLinkContext):
                     formatted_libs.append(f"{lib}.lib")
             result["libs"] = formatted_libs
         if self.link_flags:
-            result["flags"] = list(self.link_flags)
+            # Merge with base flags from env.link.flags (same as base class)
+            base_flags: list[object] = []
+            if self._env and self._env.has_tool("link"):
+                link_cfg = getattr(self._env, "link", None)
+                base_flags = list(getattr(link_cfg, "flags", None) or [])
+            merged = base_flags + [f for f in self.link_flags if f not in base_flags]
+            result["flags"] = merged
         if self.linker_cmd:
             result["cmd"] = self.linker_cmd
 
