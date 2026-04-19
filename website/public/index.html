@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pcons - Modern Python Build System</title>
+  <meta name="description" content="A modern, cross-platform, zero-install Python-based build system. Configuration in Python, execution via Ninja.">
+  <link rel="icon" type="image/png" href="pcons-logo.png">
+  <style>
+    :root {
+      --teal: #1a8a8a;
+      --teal-dark: #136868;
+      --teal-light: #e0f4f4;
+      --gold: #b8960c;
+      --bg: #fafbfc;
+      --text: #1e293b;
+      --text-muted: #64748b;
+      --code-bg: #0f172a;
+      --code-text: #e2e8f0;
+      --border: #e2e8f0;
+      --card-bg: #ffffff;
+      --max-width: 1100px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      color: var(--text);
+      background: var(--bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--teal); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* Header / Nav */
+    header {
+      background: var(--card-bg);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    nav {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 0.75rem 1.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .nav-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 700;
+      font-size: 1.25rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+    .nav-brand img { height: 32px; }
+    .nav-links { display: flex; gap: 1.75rem; align-items: center; }
+    .nav-links a { color: var(--text-muted); font-size: 0.9rem; font-weight: 500; }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+    .nav-links .gh-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+    }
+    .nav-links .gh-link svg { width: 18px; height: 18px; fill: currentColor; }
+
+    /* Hero */
+    .hero {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 4rem 1.5rem 3rem;
+      text-align: center;
+    }
+    .hero img {
+      height: 100px;
+      margin-bottom: 1.5rem;
+    }
+    .hero h1 {
+      font-size: 2.75rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 1rem;
+    }
+    .hero h1 span { color: var(--teal); }
+    .hero p {
+      font-size: 1.2rem;
+      color: var(--text-muted);
+      max-width: 680px;
+      margin: 0 auto 2rem;
+    }
+    .hero-badges {
+      display: flex;
+      gap: 0.5rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 2rem;
+    }
+    .hero-badges img { height: 22px; }
+    .hero-actions {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn {
+      display: inline-block;
+      padding: 0.7rem 1.6rem;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: all 0.15s;
+    }
+    .btn-primary {
+      background: var(--teal);
+      color: #fff;
+    }
+    .btn-primary:hover { background: var(--teal-dark); text-decoration: none; }
+    .btn-secondary {
+      background: var(--card-bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+    .btn-secondary:hover { border-color: var(--teal); text-decoration: none; }
+
+    /* Install banner */
+    .install-banner {
+      max-width: 500px;
+      margin: 2rem auto 0;
+      background: var(--code-bg);
+      color: var(--code-text);
+      border-radius: 10px;
+      padding: 1rem 1.5rem;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .install-banner code { flex: 1; }
+    .install-banner .prompt { color: var(--teal); user-select: none; }
+    .copy-btn {
+      background: transparent;
+      border: 1px solid #334155;
+      color: #94a3b8;
+      border-radius: 6px;
+      padding: 0.3rem 0.6rem;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-family: inherit;
+      transition: all 0.15s;
+    }
+    .copy-btn:hover { border-color: var(--teal); color: #e2e8f0; }
+
+    /* Sections */
+    section {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 4rem 1.5rem;
+    }
+    section + section { padding-top: 0; }
+    .section-title {
+      font-size: 1.75rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+    .section-subtitle {
+      color: var(--text-muted);
+      margin-bottom: 2rem;
+      font-size: 1.05rem;
+    }
+
+    /* Feature grid */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+    .feature {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1.5rem;
+    }
+    .feature h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+    .feature p {
+      color: var(--text-muted);
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
+    /* Code blocks */
+    .code-section {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      align-items: start;
+    }
+    @media (max-width: 768px) {
+      .code-section { grid-template-columns: 1fr; }
+    }
+    .code-block {
+      background: var(--code-bg);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .code-block-header {
+      background: #1e293b;
+      padding: 0.6rem 1rem;
+      font-size: 0.8rem;
+      color: #94a3b8;
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      border-bottom: 1px solid #334155;
+    }
+    .code-block pre {
+      padding: 1.25rem;
+      overflow-x: auto;
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 0.85rem;
+      line-height: 1.65;
+      color: var(--code-text);
+    }
+    .code-block pre code { color: inherit; }
+    /* Syntax highlighting classes */
+    .kw { color: #c084fc; }
+    .fn { color: #7dd3fc; }
+    .str { color: #86efac; }
+    .cm { color: #64748b; }
+    .op { color: #f8fafc; }
+
+    /* Comparison table */
+    .comparison-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--card-bg);
+    }
+    .comparison-wrap table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+    }
+    .comparison-wrap th, .comparison-wrap td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .comparison-wrap thead th {
+      background: #f8fafc;
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .comparison-wrap tbody tr:last-child td { border-bottom: none; }
+    .comparison-wrap tbody td:first-child { font-weight: 500; }
+
+    /* Toolchain logos */
+    .toolchain-strip {
+      display: flex;
+      gap: 2rem;
+      justify-content: center;
+      flex-wrap: wrap;
+      padding: 1rem 0;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: 500;
+    }
+    .toolchain-strip span {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    /* CTA */
+    .cta {
+      text-align: center;
+      background: var(--teal-light);
+      border-radius: 14px;
+      padding: 3rem 2rem;
+      margin: 2rem 0;
+    }
+    .cta h2 { font-size: 1.5rem; margin-bottom: 0.75rem; }
+    .cta p { color: var(--text-muted); margin-bottom: 1.5rem; }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 2rem 1.5rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--text-muted); }
+    footer a:hover { color: var(--text); }
+
+    /* Responsive */
+    @media (max-width: 640px) {
+      .hero h1 { font-size: 2rem; }
+      .hero p { font-size: 1.05rem; }
+      .features { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <nav>
+      <a href="/" class="nav-brand">
+        <img src="pcons-logo.png" alt="pcons logo">
+        pcons
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#examples">Examples</a>
+        <a href="#comparison">Comparison</a>
+        <a href="https://pcons.readthedocs.io" target="_blank">Docs</a>
+        <a href="https://github.com/DarkStarSystems/pcons" target="_blank" class="gh-link">
+          <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </nav>
+  </header>
+
+  <!-- Hero -->
+  <div class="hero">
+    <img src="pcons-logo.png" alt="pcons">
+    <h1>Build anything. <span>Effortlessly.</span></h1>
+    <p>A modern, cross-platform, zero-install build system. Describe your builds in real Python. Generate Ninja files. Build fast.</p>
+    <div class="hero-badges">
+      <a href="https://pypi.org/project/pcons/"><img src="https://img.shields.io/pypi/v/pcons" alt="PyPI version"></a>
+      <a href="https://pypi.org/project/pcons/"><img src="https://img.shields.io/pypi/pyversions/pcons" alt="Python versions"></a>
+      <a href="https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml"><img src="https://github.com/DarkStarSystems/pcons/actions/workflows/main.yml/badge.svg" alt="CI"></a>
+      <a href="https://pcons.readthedocs.io"><img src="https://readthedocs.org/projects/pcons/badge/?version=latest" alt="Docs"></a>
+    </div>
+    <div class="hero-actions">
+      <a href="https://pcons.readthedocs.io" class="btn btn-primary">Read the Docs</a>
+      <a href="https://github.com/DarkStarSystems/pcons" class="btn btn-secondary">View on GitHub</a>
+    </div>
+    <div class="install-banner">
+      <code><span class="prompt">$</span> uvx pcons</code>
+      <button class="copy-btn" onclick="navigator.clipboard.writeText('uvx pcons');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+    </div>
+  </div>
+
+  <!-- Features -->
+  <section id="features">
+    <h2 class="section-title">Why pcons?</h2>
+    <p class="section-subtitle">Inspired by SCons and CMake, taking the best ideas from each.</p>
+    <div class="features">
+      <div class="feature">
+        <h3>Python is the language</h3>
+        <p>No custom DSL to learn. Your build scripts are real Python with full IDE support, debugging, type checking, and the entire ecosystem at your fingertips.</p>
+      </div>
+      <div class="feature">
+        <h3>Zero install</h3>
+        <p>Run with <code>uvx pcons</code> &mdash; no installation required beyond <a href="https://github.com/astral-sh/uv">uv</a>. No daemon, no workspace lock files, no registry setup.</p>
+      </div>
+      <div class="feature">
+        <h3>Fast builds via Ninja</h3>
+        <p>Pcons generates Ninja build files and lets Ninja handle execution. Fast, parallel builds with minimal overhead. Also supports Makefile, Xcode, and MSVS output.</p>
+      </div>
+      <div class="feature">
+        <h3>Transitive dependencies</h3>
+        <p>Like CMake's usage requirements: include directories, link flags, and defines propagate automatically through your dependency graph.</p>
+      </div>
+      <div class="feature">
+        <h3>Cross-platform</h3>
+        <p>First-class support for Linux, macOS, and Windows. GCC, Clang, MSVC, Clang-CL, plus cross-compilation for Android, iOS, and WebAssembly.</p>
+      </div>
+      <div class="feature">
+        <h3>Tool-agnostic core</h3>
+        <p>The core knows nothing about compilers or languages. All tool-specific logic lives in pluggable toolchains. Build C++, Fortran, CUDA, Cython, Metal shaders, or anything else.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Examples -->
+  <section id="examples">
+    <h2 class="section-title">Simple and expressive</h2>
+    <p class="section-subtitle">Real build scripts from the pcons examples.</p>
+    <div class="code-section">
+      <div>
+        <div class="code-block">
+          <div class="code-block-header">pcons-build.py &mdash; Hello World</div>
+          <pre><code><span class="kw">from</span> pcons <span class="kw">import</span> Project, find_c_toolchain
+
+project = <span class="fn">Project</span>(<span class="str">"hello"</span>)
+env = project.<span class="fn">Environment</span>(toolchain=<span class="fn">find_c_toolchain</span>())
+
+project.<span class="fn">Program</span>(<span class="str">"hello"</span>, env, sources=[<span class="str">"src/hello.c"</span>])
+
+project.<span class="fn">generate</span>()</code></pre>
+        </div>
+      </div>
+      <div>
+        <div class="code-block">
+          <div class="code-block-header">pcons-build.py &mdash; Libraries + Transitive Deps</div>
+          <pre><code><span class="kw">from</span> pcons <span class="kw">import</span> Project, find_c_toolchain
+
+project = <span class="fn">Project</span>(<span class="str">"myapp"</span>)
+env = project.<span class="fn">Environment</span>(toolchain=<span class="fn">find_c_toolchain</span>())
+
+<span class="cm"># Build a static library</span>
+lib = project.<span class="fn">StaticLibrary</span>(<span class="str">"core"</span>, env, sources=[<span class="str">"src/core.c"</span>])
+lib.public.include_dirs.append(<span class="str">"include"</span>)
+
+<span class="cm"># Program links the library &mdash; includes propagate</span>
+app = project.<span class="fn">Program</span>(<span class="str">"myapp"</span>, env, sources=[<span class="str">"src/main.c"</span>])
+app.<span class="fn">link</span>(lib)
+
+project.<span class="fn">generate</span>()</code></pre>
+        </div>
+      </div>
+    </div>
+    <div style="margin-top: 2rem;">
+      <div class="code-block" style="max-width: 600px;">
+        <div class="code-block-header">Terminal</div>
+        <pre><code><span class="prompt">$</span> uvx pcons
+<span class="cm">Generating build/build.ninja...</span>
+<span class="cm">Generating build/compile_commands.json...</span>
+<span class="prompt">$</span> ninja -C build
+<span class="cm">[3/3] Linking myapp</span></code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- What it supports -->
+  <section>
+    <h2 class="section-title">Built-in support</h2>
+    <p class="section-subtitle">Toolchains, generators, and packages &mdash; all pluggable and extensible.</p>
+    <div class="toolchain-strip">
+      <span>GCC</span>
+      <span>Clang / LLVM</span>
+      <span>MSVC</span>
+      <span>Clang-CL</span>
+      <span>CUDA</span>
+      <span>Cython</span>
+      <span>Fortran</span>
+      <span>WASI</span>
+      <span>Emscripten</span>
+      <span>Metal</span>
+    </div>
+    <div class="features" style="margin-top: 1.5rem;">
+      <div class="feature">
+        <h3>Generators</h3>
+        <p>Ninja (default), Makefile, Xcode, compile_commands.json, and Mermaid dependency diagrams.</p>
+      </div>
+      <div class="feature">
+        <h3>Package management</h3>
+        <p>Integrates with pkg-config, Conan, and vcpkg. The <code>pcons-fetch</code> tool builds dependencies from source.</p>
+      </div>
+      <div class="feature">
+        <h3>Configure-time checks</h3>
+        <p>check_header(), check_flag(), try_compile(), configure_file() with CMake-style template substitution. Results are cached.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Comparison -->
+  <section id="comparison">
+    <h2 class="section-title">How it compares</h2>
+    <p class="section-subtitle">pcons sits between Meson's ergonomics and Bazel's extensibility.</p>
+    <div class="comparison-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Feature</th>
+            <th>pcons</th>
+            <th>CMake</th>
+            <th>Meson</th>
+            <th>Bazel</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Config language</td>
+            <td>Python 3.11+</td>
+            <td>CMake DSL</td>
+            <td>Custom DSL</td>
+            <td>Starlark</td>
+          </tr>
+          <tr>
+            <td>Execution model</td>
+            <td>Generates Ninja/Make/Xcode</td>
+            <td>Generates Ninja/Make</td>
+            <td>Generates Ninja/VS/Xcode</td>
+            <td>Executes directly</td>
+          </tr>
+          <tr>
+            <td>Transitive deps</td>
+            <td>Yes</td>
+            <td>Yes</td>
+            <td>Limited</td>
+            <td>Yes</td>
+          </tr>
+          <tr>
+            <td>IDE support</td>
+            <td>compile_commands.json</td>
+            <td>compile_commands.json</td>
+            <td>compile_commands.json</td>
+            <td>External tools</td>
+          </tr>
+          <tr>
+            <td>Windows support</td>
+            <td>Excellent</td>
+            <td>Excellent</td>
+            <td>Excellent</td>
+            <td>Fair</td>
+          </tr>
+          <tr>
+            <td>Setup overhead</td>
+            <td><code>uvx pcons</code></td>
+            <td>Install CMake + generator</td>
+            <td>pip/brew + Ninja</td>
+            <td>Bazel + workspace setup</td>
+          </tr>
+          <tr>
+            <td>Learning curve</td>
+            <td>Low (it's Python)</td>
+            <td>High</td>
+            <td>Low-Medium</td>
+            <td>High</td>
+          </tr>
+          <tr>
+            <td>Extensibility</td>
+            <td>Plugin registry</td>
+            <td>CMake modules</td>
+            <td>Limited</td>
+            <td>Custom Starlark rules</td>
+          </tr>
+          <tr>
+            <td>Debuggability</td>
+            <td>Full Python debugger</td>
+            <td>message() / cmake --trace</td>
+            <td>Print statements</td>
+            <td>bazel query</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Status -->
+  <section>
+    <div class="cta">
+      <h2>Under active development</h2>
+      <p>pcons is working in several medium-sized projects. Core C/C++/Fortran compilation, static and shared libraries, programs, install targets, installers, and mixed-language builds are all tested and working across Linux, macOS, and Windows.</p>
+      <div class="hero-actions">
+        <a href="https://pcons.readthedocs.io" class="btn btn-primary">Get Started</a>
+        <a href="https://github.com/DarkStarSystems/pcons" class="btn btn-secondary">Contribute on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      pcons is MIT licensed open source software.
+      <a href="https://github.com/DarkStarSystems/pcons">GitHub</a> &middot;
+      <a href="https://pcons.readthedocs.io">Documentation</a> &middot;
+      <a href="https://pypi.org/project/pcons/">PyPI</a>
+    </p>
+  </footer>
+</body>
+</html>
