@@ -238,10 +238,10 @@ def run_script(
         sys.path[:] = old_path
         for key in updated_keys:
             previous = previous_env[key]
-            if previous is sentinel:
-                os.environ.pop(key, None)
-            else:
+            if isinstance(previous, str):
                 os.environ[key] = previous
+            else:
+                os.environ.pop(key, None)
 
 
 def _find_ninja() -> list[str] | None:
