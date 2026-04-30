@@ -42,6 +42,12 @@ docs = [
 pcons = "pcons.cli:main"
 pcons-fetch = "pcons.packages.fetch.cli:main"
 
+[project.entry-points."rez.plugins.build_system"]
+# Registers PconsBuildSystem with rez. After `pip install pcons` (or
+# `uv tool install rez --with-editable <pcons-checkout>`), `rez-build`
+# auto-detects packages with a pcons-build.py and builds them with pcons.
+pcons = "pcons.integrations.rez.build_system"
+
 [project.urls]
 Homepage = "https://github.com/DarkStarSystems/pcons"
 Repository = "https://github.com/DarkStarSystems/pcons"
