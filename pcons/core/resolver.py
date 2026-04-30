@@ -88,8 +88,9 @@ class PendingSourceFactory:
     def _resolve_sources(self, target: Target) -> list[FileNode]:
         """Resolve pending sources to FileNodes.
 
-        Handles Target sources (extracts output_nodes), FileNode passthrough,
-        and Path/str sources (creates nodes via project).
+        Handles Target sources (extracts output_nodes — final products
+        only, not intermediates), FileNode passthrough, and Path/str
+        sources (creates nodes via project).
         """
         from pcons.core.target import Target as TargetClass
 
@@ -100,9 +101,6 @@ class PendingSourceFactory:
         for source in target._pending_sources:
             if isinstance(source, TargetClass):
                 resolved.extend(source.output_nodes)
-                for node in source.nodes:
-                    if isinstance(node, FileNode) and node not in resolved:
-                        resolved.append(node)
             elif isinstance(source, FileNode):
                 resolved.append(source)
             elif isinstance(source, Node):
