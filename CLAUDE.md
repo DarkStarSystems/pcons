@@ -203,4 +203,8 @@ To create a new release (e.g., `v0.3.0`):
    git push && git push --tags
    ```
 
-CI will run tests on all platforms, then automatically create a GitHub release and publish to PyPI.
+CI will run tests on all platforms, then automatically:
+- Build the sdist + wheel
+- Sign them with [Sigstore](https://www.sigstore.dev/) (keyless, via GitHub Actions OIDC — no key management required)
+- Create the GitHub release with the artifacts and `.sigstore.json` bundles attached
+- Publish to PyPI (signature bundles are not uploaded to PyPI; PyPI removed GPG/Sigstore-bundle support and uses its own attestation scheme)

@@ -249,16 +249,26 @@ jobs:
       - uses: astral-sh/setup-uv@cec208311dfd045dd5311c1add060b2062131d57 # v8.0.0
         with:
           version: "latest"
+      - name: Build package
+        run: uv build
+      - name: Sign distributions with Sigstore
+        uses: sigstore/gh-action-sigstore-python@f514d46b907ebcd5bedc05145c03b69c1edd8b46 # v3.0.0
+        with:
+          inputs: ./dist/*.tar.gz ./dist/*.whl
+          upload-signing-artifacts: false
+          release-signing-artifacts: false
       - name: Generate Changelog
         run: .github/release_message.sh > release_message.md
       - name: Create GitHub Release
         uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
         with:
           body_path: release_message.md
-      - name: Build package
-        run: uv build
+          files: |
+            dist/*.tar.gz
+            dist/*.whl
+            dist/*.sigstore.json
       - name: Publish to PyPI
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
-        run: uvx twine upload dist/*
+        run: uvx twine upload dist/*.tar.gz dist/*.whl

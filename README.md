@@ -80,6 +80,19 @@ uv add pcons
 pip install pcons
 ```
 
+## Verifying Release Signatures
+
+Release artifacts on the [GitHub Releases page](https://github.com/DarkStarSystems/pcons/releases) are signed with [Sigstore](https://www.sigstore.dev/) using short-lived certificates issued via GitHub Actions OIDC; transparency-log records are stored at [rekor.sigstore.dev](https://rekor.sigstore.dev). Each `.tar.gz` and `.whl` has a matching `.sigstore.json` bundle. To verify with [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/):
+
+```bash
+cosign verify-blob \
+  pcons-x.y.z.tar.gz \
+  --bundle pcons-x.y.z.tar.gz.sigstore.json \
+  --new-bundle-format \
+  --certificate-identity-regexp='https://github.com/DarkStarSystems/pcons/.*' \
+  --certificate-oidc-issuer='https://token.actions.githubusercontent.com'
+```
+
 ## Documentation
 
 - User Guide is at [ReadTheDocs](https://pcons.readthedocs.io)
