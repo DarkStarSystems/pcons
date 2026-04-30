@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rez integration (`pcons.integrations.rez`)**: Two-sided integration with the [rez](https://rez.readthedocs.io) VFX/animation package manager.
+  - `rez_environment(env)` and `RezFinder` read a rez resolve from inside a `pcons-build.py` and inject every resolved package's include/lib/define settings into the pcons `Environment`.
+  - A `pcons` rez `build_system` plugin (registered via `[project.entry-points."rez.plugins.build_system"]`) lets `rez-build` auto-detect packages with a `pcons-build.py` and build them with pcons. CLI options exposed as `--pcons-generator` and `--pcons-jobs`.
+  - New example `45_rez_integration` with worked `hello_lib` (cmake) and `hello_app` (pcons) test rez packages.
+  - Documented in `docs/user-guide.md` under a new top-level "Integrations" section.
+
 ## [0.20.0] - 2026-06-16
 
 ### Added

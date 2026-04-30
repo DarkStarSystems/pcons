@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+# Test configuration for the rez integration example.
+#
+# This example only builds inside a rez-env shell. The test framework
+# skips it unless REZ_USED_RESOLVE is set, i.e. you ran pytest like:
+#
+#     rez-env hello_lib -- uv run pytest tests/test_examples.py
+#
+# See examples/35_rez_integration/README.md for full setup.
+
+[test]
+description = "pcons reads a rez resolve and builds against rez-resolved packages"
+
+expected_outputs = [
+    "build/obj.rez_demo/src/main.cpp.o",
+    "build/rez_demo",
+]
+
+[verify]
+commands = [
+    { run = "./build/rez_demo", expect_stdout = "Hello, rez (env-only), from rez-resolved hello_lib!" },
+]
+
+[skip]
+# Skip unless we're already inside a rez resolve that provides hello_lib.
+require_env = ["REZ_USED_RESOLVE"]
+# Skip on Windows: rez's macOS/Linux assumptions don't fully port.
+platforms = ["windows"]
+# Xcode and make generators don't fit a rez-driven flow.
+generators = ["xcode", "make"]

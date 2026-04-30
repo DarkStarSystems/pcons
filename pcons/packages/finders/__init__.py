@@ -6,6 +6,9 @@ This module provides various ways to find external packages:
 - SystemFinder: Searches standard system paths
 - ConanFinder: Uses Conan 2.x package manager
 - FinderChain: Tries multiple finders in order
+
+Integration-specific finders live under :mod:`pcons.integrations`. For
+example, :class:`pcons.integrations.rez.RezFinder` reads a rez resolve.
 """
 
 from pcons.packages.finders.base import BaseFinder, FinderChain
