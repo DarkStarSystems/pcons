@@ -244,13 +244,29 @@ def run_script(
                 os.environ.pop(key, None)
 
 
-def _find_ninja() -> list[str] | None:
-    """Find ninja executable, falling back to uvx.
+def _find_ninja(override: str | None = None) -> list[str] | None:
+    """Find ninja-compatible executable, falling back to uvx.
+
+    Args:
+        override: Explicit program name or path (e.g., "n2"). If given, takes
+            precedence over PATH lookup of "ninja". Falls back to the NINJA
+            env var if not provided.
 
     Returns:
-        Command prefix list (e.g., ["ninja"] or ["uvx", "ninja"]),
-        or None if neither is found.
+        Command prefix list (e.g., ["ninja"], ["n2"], or ["uvx", "ninja"]),
+        or None if no runner is found.
     """
+    chosen = override or os.environ.get("NINJA")
+    if chosen:
+        # Allow either an absolute path or a name resolvable on PATH
+        resolved = shutil.which(chosen) or (
+            chosen if Path(chosen).is_absolute() else None
+        )
+        if resolved is None:
+            logger.error("ninja runner %r not found on PATH", chosen)
+            return None
+        return [resolved]
+
     ninja = shutil.which("ninja")
     if ninja is not None:
         return [ninja]
@@ -268,14 +284,17 @@ def run_ninja(
     targets: list[str] | None = None,
     jobs: int | None = None,
     verbose: bool = False,
+    runner: str | None = None,
 ) -> int:
-    """Run ninja in the build directory.
+    """Run ninja (or a ninja-compatible tool) in the build directory.
 
     Args:
         build_dir: Build directory containing build.ninja.
         targets: Specific targets to build.
         jobs: Number of parallel jobs.
         verbose: Enable verbose output.
+        runner: Ninja-compatible runner to use (e.g., "n2"). Falls back to the
+            NINJA env var, then "ninja".
 
     Returns:
         Exit code from ninja.
@@ -287,7 +306,7 @@ def run_ninja(
         logger.info("Run 'pcons generate' first to create build files")
         return 1
 
-    ninja_cmd = _find_ninja()
+    ninja_cmd = _find_ninja(runner)
     if ninja_cmd is None:
         logger.error("ninja not found in PATH")
         logger.info("Install ninja: https://ninja-build.org/")
@@ -565,6 +584,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     jobs = getattr(args, "jobs", None)
     verbose = args.verbose
     variant = getattr(args, "variant", None)
+    ninja_runner = getattr(args, "ninja", None)
 
     # Detect which generator was used and run the appropriate build tool
     ninja_file = build_dir / "build.ninja"
@@ -572,7 +592,9 @@ def cmd_build(args: argparse.Namespace) -> int:
     xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
 
     if ninja_file.exists():
-        return run_ninja(build_dir, targets=targets, jobs=jobs, verbose=verbose)
+        return run_ninja(
+            build_dir, targets=targets, jobs=jobs, verbose=verbose, runner=ninja_runner
+        )
     elif makefile.exists():
         return run_make(build_dir, targets=targets, jobs=jobs, verbose=verbose)
     elif xcodeproj_files:
@@ -616,9 +638,15 @@ def cmd_clean(args: argparse.Namespace) -> int:
         logger.info("No build.ninja found, nothing to clean")
         return 0
 
-    ninja_cmd = _find_ninja()
+    ninja_runner = getattr(args, "ninja", None)
+    ninja_cmd = _find_ninja(ninja_runner)
     if ninja_cmd is None:
         logger.error("ninja not found in PATH")
+        return 1
+
+    # n2 does not implement `-t clean`. Fall back to suggesting `clean --all`.
+    if Path(ninja_cmd[-1]).name == "n2":
+        logger.error("n2 does not support 'clean'; use 'pcons clean --all' instead")
         return 1
 
     cmd = [*ninja_cmd, "-C", str(build_dir), "-t", "clean"]
@@ -903,6 +931,7 @@ def find_command_in_argv(argv: list[str]) -> str | None:
         "--mermaid",
         "--debug",
         "--modules-path",
+        "--ninja",
     }
     i = 0
     while i < len(argv):
@@ -920,6 +949,18 @@ def find_command_in_argv(argv: list[str]) -> str | None:
                 return arg
             return None
     return None
+
+
+def add_build_args(parser: argparse.ArgumentParser) -> None:
+    """Add arguments that affect how the build is run (not generated)."""
+    parser.add_argument(
+        "--ninja",
+        metavar="PROG",
+        help=(
+            "Ninja-compatible runner to invoke (e.g., 'n2'). "
+            "Defaults to the NINJA env var, then 'ninja'."
+        ),
+    )
 
 
 def add_generate_args(parser: argparse.ArgumentParser) -> None:
@@ -970,6 +1011,7 @@ def create_default_parser() -> argparse.ArgumentParser:
     )
     add_common_args(parser)
     add_generate_args(parser)
+    add_build_args(parser)
     parser.add_argument(
         "-j", "--jobs", type=int, help="Number of parallel jobs for build"
     )
@@ -1014,6 +1056,7 @@ def create_full_parser() -> argparse.ArgumentParser:
     )
     add_common_args(parser)
     add_generate_args(parser)
+    add_build_args(parser)
     parser.add_argument(
         "-j", "--jobs", type=int, help="Number of parallel jobs for build"
     )
@@ -1083,6 +1126,7 @@ def create_full_parser() -> argparse.ArgumentParser:
     )
     add_common_args(build_parser)
     add_generate_args(build_parser)
+    add_build_args(build_parser)
     build_parser.add_argument("-j", "--jobs", type=int, help="Number of parallel jobs")
     build_parser.add_argument(
         "extra",
@@ -1095,6 +1139,7 @@ def create_full_parser() -> argparse.ArgumentParser:
     # pcons clean
     clean_parser = subparsers.add_parser("clean", help="Clean build artifacts")
     add_common_args(clean_parser)
+    add_build_args(clean_parser)
     clean_parser.add_argument(
         "-a", "--all", action="store_true", help="Remove entire build directory"
     )

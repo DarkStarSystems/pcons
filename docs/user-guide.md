@@ -109,6 +109,8 @@ pcons
 
 This runs your `pcons-build.py` to generate `build/build.ninja`, then invokes Ninja to compile your program. If you don't have ninja installed, pcons will try to invoke it via `uvx ninja`.
 
+> **Tip:** You can swap in a ninja-compatible runner like [n2](https://github.com/evmar/n2) (content-hash rebuilds) with `pcons --ninja=n2` or by setting `NINJA=n2` in the environment.
+
 **4. Run your program**:
 
 ```bash

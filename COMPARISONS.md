@@ -57,7 +57,9 @@ But what about the other popular modern build tools like Bazel and Meson?
 
 ## Incremental Build Quality
 
-**pcons** relies entirely on Ninja for incrementality. Ninja's depfile mechanism handles header dependency tracking correctly. Build correctness is high for standard C/C++ patterns. Commands that may produce unchanged output (code generators, configure steps) can use `restat=True` to avoid unnecessary downstream rebuilds. No action-level caching beyond what the filesystem provides.
+**pcons** relies entirely on Ninja for incrementality. Ninja's depfile mechanism handles header dependency tracking correctly. Build correctness is high for standard C/C++ patterns. Commands that may produce unchanged output (code generators, configure steps) can use `restat=True` to avoid unnecessary downstream rebuilds.
+
+For projects that want Bazel-style content-hash rebuilds (skip work when inputs are byte-identical, even if mtimes changed), pcons can drive [n2](https://github.com/evmar/n2) — a ninja-compatible runner that hashes inputs instead of comparing mtimes — via `pcons --ninja=n2` or `NINJA=n2`. Combined with `ccache`/`sccache` on the compile command, this gets pcons close to Bazel's action-cache benefits (local hits across branch switches and clean rebuilds) without leaving the simple Ninja model. n2 does not yet implement `dyndep`, so projects using Fortran modules or C++20 modules should stay on classic Ninja for now.
 
 **Bazel** has the most sophisticated incremental build system of the three. Content-addressed action cache, remote cache sharing across CI and developer machines, and correct hermetic sandboxing mean stale builds are virtually impossible.
 
@@ -97,7 +99,7 @@ But what about the other popular modern build tools like Bazel and Meson?
 
 ## Hermetic / Reproducible Builds
 
-**pcons** makes no specific hermeticity guarantees. Build scripts can read files, call network APIs, or do arbitrary computation. Reproducibility depends on developer discipline; because it's all python, dependencies can be locked and queried. It does support 
+**pcons** makes no specific hermeticity guarantees. Build scripts can read files, call network APIs, or do arbitrary computation. Reproducibility depends on developer discipline; because it's all python, dependencies can be locked and queried. 
 
 **Bazel** enforces hermeticity via sandboxing. Every action sees only its declared inputs. This is the core feature that enables remote caching and reproducible builds across machines.
 
