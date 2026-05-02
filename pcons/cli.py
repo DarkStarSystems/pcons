@@ -953,6 +953,9 @@ def find_command_in_argv(argv: list[str]) -> str | None:
 
 def add_build_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments that affect how the build is run (not generated)."""
+
+    # n2 is a ninja-compatible runner (Rust rewrite of Ninja) with more advanced
+    # rebuild tracking.
     parser.add_argument(
         "--ninja",
         metavar="PROG",

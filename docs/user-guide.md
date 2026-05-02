@@ -109,7 +109,7 @@ pcons
 
 This runs your `pcons-build.py` to generate `build/build.ninja`, then invokes Ninja to compile your program. If you don't have ninja installed, pcons will try to invoke it via `uvx ninja`.
 
-> **Tip:** You can swap in a ninja-compatible runner like [n2](https://github.com/evmar/n2) (content-hash rebuilds) with `pcons --ninja=n2` or by setting `NINJA=n2` in the environment.
+> **Tip:** You can swap in a ninja-compatible runner like [n2](https://github.com/evmar/n2) (a Rust rewrite of Ninja) with `pcons --ninja=n2` or by setting `NINJA=n2` in the environment to get more advanced rebuild checking. For content-hash rebuilds, use `env.use_compiler_cache()` (see the Compiler Caching section below).
 
 **4. Run your program**:
 
