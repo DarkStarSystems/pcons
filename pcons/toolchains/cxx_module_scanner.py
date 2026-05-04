@@ -61,6 +61,16 @@ from pathlib import Path
 from typing import Any
 
 
+class CxxModuleScannerNotFound(RuntimeError):
+    """Raised when the C++ module scanner executable is not on PATH.
+
+    Carries an actionable message telling the user how to make the scanner
+    available (e.g., run vcvars64.bat for cl.exe, install LLVM for
+    clang-scan-deps). Toolchain after_resolve() should let this propagate
+    so configure fails loudly instead of producing empty/silent scans.
+    """
+
+
 def run_scan_deps(
     scanner: str,
     compiler: str,
@@ -98,13 +108,17 @@ def run_scan_deps(
             file=sys.stderr,
         )
         return None
-    except FileNotFoundError:
-        print(
-            f"Error: scanner '{scanner}' not found. "
-            "Install clang-scan-deps (part of LLVM/Clang tools).",
-            file=sys.stderr,
-        )
-        return None
+    except FileNotFoundError as e:
+        raise CxxModuleScannerNotFound(
+            f"C++ module scanner '{scanner}' not found on PATH.\n"
+            "  C++20 modules require clang-scan-deps (shipped with LLVM/Clang).\n"
+            "  Install hints:\n"
+            "    macOS:        brew install llvm  (then add the keg's bin to PATH)\n"
+            "    Ubuntu/Deb:   apt install clang-tools  (or a recent LLVM via apt.llvm.org)\n"
+            "    Fedora/RHEL:  dnf install clang-tools-extra\n"
+            "    Windows:      winget install LLVM.LLVM  (or use the LLVM installer)\n"
+            "  Or set env.cxx.scan_deps to the full path of your clang-scan-deps."
+        ) from e
 
     try:
         return json.loads(result.stdout)
@@ -155,12 +169,16 @@ def run_scan_deps_msvc(
                 file=sys.stderr,
             )
             return None
-    except FileNotFoundError:
-        print(
-            f"Error: compiler '{compiler}' not found.",
-            file=sys.stderr,
-        )
-        return None
+    except FileNotFoundError as e:
+        raise CxxModuleScannerNotFound(
+            f"MSVC compiler '{compiler}' not found on PATH.\n"
+            "  C++20 module scanning needs cl.exe to invoke /scanDependencies.\n"
+            "  On Windows, run a Visual Studio Developer Command Prompt, or\n"
+            '  source vcvars64.bat (e.g. "C:\\Program Files\\Microsoft Visual\n'
+            '  Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat") in\n'
+            "  the shell that invokes pcons-build.py — that puts cl.exe and\n"
+            "  the rest of the MSVC toolchain on PATH for the configure step."
+        ) from e
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -342,6 +360,36 @@ def select_modules_scope(
     )
 
 
+# TODO(scan-cache): Cache TuScanResults across configure runs.
+#
+# Configure-time scanning currently re-invokes clang-scan-deps / cl.exe on
+# every TU every run. For large module-heavy projects (jt-computing,
+# mp-units) this dominates configure latency even when nothing has changed.
+#
+# Design sketch (n2-style content-addressed cache):
+#   key   = sha256 of (source content + transitive #includes the scanner
+#           reads, scanner version string, compiler version string,
+#           normalized compile_flags, scanner_style)
+#   value = parsed P1689R5 dict (small JSON)
+#   store = .pcons-cache/scan/<first 2 hex chars>/<rest>.json under build_dir
+#
+# Invalidation comes for free from the key — no mtime-only shortcuts; an
+# `--include` path change or a compiler upgrade must miss the cache. mtime
+# can short-circuit the hash computation when (path, mtime, size) match a
+# prior entry, the same trick n2 uses for its build-step cache.
+#
+# Open questions before implementing:
+#   - Where does "transitive #includes the scanner reads" come from? P1689
+#     output lists requires (modules) but not headers; need either a -MD-
+#     style depfile pass, or accept that header changes won't invalidate
+#     (acceptable for module-only deps but not for `import std;` header
+#     units once those land).
+#   - Scope: per-build-dir cache (simple), or shared across build dirs
+#     (faster for monorepos, harder to garbage-collect).
+#   - Eviction: bound on entries? LRU? Probably fine to never evict and
+#     let users `rm -rf .pcons-cache` if it grows.
+#
+# Until this lands, scans are O(TUs) per configure. That's the cost.
 def scan_translation_units(
     specs: list[TuScanSpec],
     scanner: str,

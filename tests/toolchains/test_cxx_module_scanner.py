@@ -11,11 +11,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pcons.toolchains.cxx_module_scanner import (
+    CxxModuleScannerNotFound,
     TuScanResult,
     TuScanSpec,
     build_module_map,
     module_file_for,
+    run_scan_deps,
+    run_scan_deps_msvc,
     select_modules_scope,
     write_dyndep_from_results,
 )
@@ -222,3 +227,36 @@ class TestSelectModulesScope:
         assert m_pairs == []
         assert len(c_pairs) == 1
         assert c_pairs[0][1] is m_obj
+
+
+class TestScannerNotFound:
+    """A missing scanner executable must raise an actionable error.
+
+    Configure used to silently warn and return None when the scanner wasn't
+    on PATH; that produced empty dyndep files and confusing downstream
+    failures. Now we raise CxxModuleScannerNotFound with install hints.
+    """
+
+    def test_clang_scan_deps_missing_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _enoent(*args: object, **kwargs: object) -> None:
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _enoent
+        )
+        with pytest.raises(CxxModuleScannerNotFound, match="clang-scan-deps"):
+            run_scan_deps(
+                "clang-scan-deps", "clang++", ["-std=c++20"], "/x/y.cpp", "y.o"
+            )
+
+    def test_msvc_cl_missing_raises(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _enoent(*args: object, **kwargs: object) -> None:
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _enoent
+        )
+        with pytest.raises(CxxModuleScannerNotFound, match="vcvars64"):
+            run_scan_deps_msvc("cl.exe", ["/std:c++20"], "C:/x/y.cpp")
