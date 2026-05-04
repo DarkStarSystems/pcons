@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-05-04
+
 ### Added
 
 - **Recognize `.ixx`, `.cxxm`, `.c++m` as C++20 module interface units** (in addition to existing `.cppm`). MSVC's preferred `.ixx` extension now works out of the box. The LLVM toolchain forces clang into module mode with `-x c++-module` so any of these extensions compile correctly with clang as well.
@@ -14,10 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`env.cxx.modules = True` opt-in for module scanning.** Targets whose module units live in `.cpp`/`.cc` files (e.g., fmtlib's `src/fmt.cc` — its primary interface) or whose only module use is `import std;` from a `.cpp` file can now request scanning explicitly. The historical extension-driven trigger (any source with a `.cppm`/`.ixx`/`.cxxm`/`.c++m` extension auto-enables scanning for that env) is preserved as the default, and scanning is restricted per-env so unrelated targets in the same project don't pay the scan cost.
 - **New example `30_cxx_partitions`**: primary interface in `.cppm`, partition interface in `.cpp` (`export module M:P;`), internal partition in `.cpp` (`module M:P;`), module implementation unit, and a consumer. Exercises the scan-driven module detection on both LLVM and MSVC.
 - **New example `31_cxx_modules_optin`**: target whose primary module interface lives in a `.cpp` file, opting in via `env.cxx.modules = True`. Documents the fmtlib-style layout.
+- **`--ninja=PROG` flag (and `NINJA` env var) to swap in ninja-compatible runners.** Lets users build with [n2](https://github.com/evmar/n2) (or any other ninja-compatible tool) for content-hash–based rebuilds, complementing the existing `ccache`/`sccache` support.
+- **Release artifacts are signed with [Sigstore](https://www.sigstore.dev/).** The sdist and wheel are signed keylessly via GitHub Actions OIDC, and `.sigstore.json` bundles are attached to each GitHub release. README documents how to verify a downloaded artifact with `cosign`. (PyPI uploads remain unsigned because PyPI removed support for external signature bundles.)
 
 ### Changed
 
 - **C++20 module compilation is now scan-driven, not extension-driven.** The C++ module scanner (`cl /scanDependencies` for MSVC, `clang-scan-deps` for LLVM) now runs at *configure* time, and its P1689R5 output drives per-source flag injection. This means partition units that live in `.cpp` files (e.g., a partition interface `export module M:P;` or an internal partition `module M:P;`) are detected and compiled correctly even though their extension doesn't mark them as modules. The MSVC toolchain now emits `/internalPartition` (instead of `/interface`, which is incompatible) for partition implementation units that the scanner reports with `is-interface: false`. IFC/PCM filenames are derived from the logical module name, so partitions like `M:P` resolve to `<moddir>/M-P.ifc`. The Ninja `dyndep` file is generated once at configure time; the build-time scanner build node is gone.
+
+### Fixed
+
+- **`Install()` and `Tarfile()` no longer pull in intermediate object files when given a `Target` source.** `_resolve_sources` was walking `target.nodes` (which includes intermediates) instead of `target.output_nodes`; `project.Install("dest", [program])` was copying `.o` files next to the binary, and tarballs were bundling them in.
+- **Better error when the C++ module scanner is missing from PATH.** `clang-scan-deps` / `cl.exe` not found at configure time now raises `CxxModuleScannerNotFound` with platform-specific install hints (vcvars64.bat for MSVC, package commands for clang-scan-deps), instead of silently producing empty dyndep files and confusing downstream build failures.
 
 ## [0.14.1] - 2026-04-15
 
@@ -767,7 +776,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/DarkStarSystems/pcons/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/DarkStarSystems/pcons/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/DarkStarSystems/pcons/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/DarkStarSystems/pcons/compare/v0.12.1...v0.13.0
