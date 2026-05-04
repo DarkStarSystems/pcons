@@ -3,9 +3,7 @@
 
 from __future__ import annotations
 
-import json
 import logging
-import sys
 from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
@@ -13,6 +11,7 @@ from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
+from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -399,7 +398,7 @@ class LlvmToolchain(UnixToolchain):
             return handler
 
         # C++20 module interface units
-        if suffix == ".cppm":
+        if suffix in CXX_MODULE_INTERFACE_SUFFIXES:
             depfile = TargetPath(suffix=".d")
             return SourceHandler(
                 "cxx", "cxx_module", get_platform().object_suffix, depfile, "gcc"
@@ -450,13 +449,22 @@ class LlvmToolchain(UnixToolchain):
         project: Project,
         source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
     ) -> None:
-        """Set up Ninja dyndep for C++20 module dependencies.
+        """Configure C++20 module compilation (LLVM/Clang).
 
-        Called after all targets are resolved. Creates:
-        1. A manifest JSON file mapping sources to objects/PCMs
-        2. A Ninja dyndep build step that scans sources with clang-scan-deps
-        3. Attaches dyndep to each CXX object node (interface + regular)
+        Runs `clang-scan-deps` at configure time on every C++ TU in any
+        target that uses modules, and uses the scan output to drive flag
+        injection. Module-providing TUs get `-x c++-module` and
+        `-fmodule-output=<pcm>` regardless of file extension; the PCM path
+        comes from the logical module name (so partitions like
+        `M:P` resolve to `<moddir>/M-P.pcm`).
         """
+        from pcons.toolchains.cxx_module_scanner import (
+            TuScanSpec,
+            build_module_map,
+            scan_translation_units,
+            write_dyndep_from_results,
+        )
+
         cxx_module_pairs = source_obj_by_language.get("cxx_module", [])
         if not cxx_module_pairs:
             return
@@ -466,32 +474,49 @@ class LlvmToolchain(UnixToolchain):
 
         build_dir = project.build_dir
         moddir = "cxx_modules"
-        manifest_path = build_dir / "cxx.manifest.json"
         dyndep_path = build_dir / "cxx_modules.dyndep"
+        dyndep_rel = "cxx_modules.dyndep"
 
-        # Get environment from first cxx_module object node
         first_env = None
         _, first_obj = cxx_module_pairs[0]
         build_info = getattr(first_obj, "_build_info", None)
         if build_info:
             first_env = build_info.get("env")
 
-        # Get compiler command from env
         cxx_tool = getattr(first_env, "cxx", None) if first_env else None
         compiler_cmd = str(getattr(cxx_tool, "cmd", "clang++") or "clang++")
         base_flags = list(getattr(cxx_tool, "flags", None) or [])
 
-        # Build manifest entries
-        manifest = []
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / moddir).mkdir(exist_ok=True)
 
+        # -fprebuilt-module-path on every C++ TU so importers find PCMs.
+        modpath_flag = f"-fprebuilt-module-path={moddir}"
+        for _, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi:
+                context = bi.get("context")
+                if context is not None and hasattr(context, "flags"):
+                    if modpath_flag not in context.flags:
+                        context.flags.append(modpath_flag)
+
+        # Pre-flag extension-tagged module units with -x c++-module so the
+        # scanner sees them as modules (clang doesn't recognize .ixx natively).
+        # The scan output may identify *additional* TUs (e.g., partition units
+        # in .cpp files) as module providers — those get flagged below.
+        for _, obj_node in cxx_module_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi:
+                context = bi.get("context")
+                if context is not None and hasattr(context, "flags"):
+                    if "-x" not in context.flags:
+                        context.flags.extend(["-x", "c++-module"])
+
+        # Build per-TU scan specs.
+        specs: list[TuScanSpec] = []
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
-            is_module_interface = src.suffix == ".cppm"
-
-            # Combine base flags + effective requirement flags
             seen: set[str] = set(base_flags)
             compile_flags = list(base_flags)
             if context:
@@ -504,73 +529,49 @@ class LlvmToolchain(UnixToolchain):
                 for d in context.defines:
                     compile_flags.append(f"-D{d}")
 
-            entry: dict[str, object] = {
-                "src": str(src.resolve()).replace("\\", "/"),
-                "obj": str(obj_node.path.relative_to(build_dir)).replace("\\", "/"),
-                "is_module_interface": is_module_interface,
-                "compiler": compiler_cmd,
-                "compile_flags": compile_flags,
-            }
-            if is_module_interface:
-                entry["pcm"] = f"{moddir}/{src.stem}.pcm"
-            manifest.append(entry)
+            specs.append(
+                TuScanSpec(
+                    src=src.resolve(),
+                    obj_rel=str(obj_node.path.relative_to(build_dir)).replace(
+                        "\\", "/"
+                    ),
+                    compiler=compiler_cmd,
+                    compile_flags=compile_flags,
+                )
+            )
 
-        manifest_path.write_text(json.dumps(manifest, indent=2))
-        logger.debug("Wrote C++ module manifest to %s", manifest_path)
+        results = scan_translation_units(
+            specs, scanner="clang-scan-deps", scanner_style="clang"
+        )
+        module_to_pcm = build_module_map(results, moddir, ".pcm")
 
-        # Inject -fprebuilt-module-path into ALL cxx/cxx_module compile contexts
-        # (happens before command expansion, so context.flags is mutable)
-        modpath_flag = f"-fprebuilt-module-path={moddir}"
-        for _, obj_node in all_cxx_pairs:
-            bi = getattr(obj_node, "_build_info", None)
-            if bi:
-                context = bi.get("context")
-                if context is not None and hasattr(context, "flags"):
-                    if modpath_flag not in context.flags:
-                        context.flags.append(modpath_flag)
-
-        # Inject -fmodule-output=... for module interface files
-        for src, obj_node in cxx_module_pairs:
-            bi = getattr(obj_node, "_build_info", None)
-            if bi:
-                context = bi.get("context")
-                if context is not None and hasattr(context, "flags"):
-                    pcm_path = f"{moddir}/{src.stem}.pcm"
-                    module_out_flag = f"-fmodule-output={pcm_path}"
-                    if module_out_flag not in context.flags:
-                        context.flags.append(module_out_flag)
-
-        # Create source file nodes for scanner dependencies
-        all_sources = [src for src, _ in all_cxx_pairs]
-        source_nodes = [project.node(src) for src in all_sources]
-
-        # Create the dyndep scanner build node
-        dyndep_node = project.node(dyndep_path)
-        dyndep_node.depends(source_nodes)
-        dyndep_node._build_info = {
-            "tool": "cxx_scanner",
-            "command_var": "scancmd",
-            "description": "SCAN C++ modules",
-            "sources": source_nodes,
-            "command": [
-                sys.executable,
-                "-m",
-                "pcons.toolchains.cxx_module_scanner",
-                "--manifest",
-                "cxx.manifest.json",
-                "--out",
-                "cxx_modules.dyndep",
-                "--mod-dir",
-                moddir,
-            ],
+        # For each module-providing TU (interfaces, partition interfaces,
+        # internal partitions), inject -x c++-module and -fmodule-output.
+        spec_to_obj = {
+            id(spec): obj_node
+            for spec, (_, obj_node) in zip(specs, all_cxx_pairs, strict=True)
         }
+        for r in results:
+            if not r.is_module_provider:
+                continue
+            obj_node = spec_to_obj[id(r.spec)]
+            bi = getattr(obj_node, "_build_info", None)
+            if bi is None:
+                continue
+            context = bi.get("context")
+            if context is None or not hasattr(context, "flags"):
+                continue
+            pcm_path = module_to_pcm[r.logical_name]
+            module_out_flag = f"-fmodule-output={pcm_path}"
+            if module_out_flag not in context.flags:
+                context.flags.append(module_out_flag)
+            if "-x" not in context.flags:
+                context.flags.extend(["-x", "c++-module"])
 
-        # Register dyndep node with environment so generator writes its build statement
-        if first_env is not None:
-            first_env.register_node(dyndep_node)
+        write_dyndep_from_results(results, module_to_pcm, dyndep_path)
+        logger.debug("Wrote C++ module dyndep to %s", dyndep_path)
 
-        # Attach dyndep to all CXX and CXX_MODULE object nodes
-        dyndep_rel = "cxx_modules.dyndep"
+        dyndep_node = project.node(dyndep_path)
         for _, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             if bi is not None:

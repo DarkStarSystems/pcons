@@ -66,6 +66,18 @@ class ToolchainContext(Protocol):
 # =============================================================================
 
 
+CXX_MODULE_INTERFACE_SUFFIXES: frozenset[str] = frozenset(
+    {".cppm", ".ixx", ".cxxm", ".c++m"}
+)
+"""File suffixes recognized as C++20 module interface units.
+
+Includes Microsoft's `.ixx`, Clang's `.cppm`/`.cxxm`/`.c++m`. Both LLVM and
+MSVC toolchains accept any of these — the compiler is forced into C++ module
+mode via toolchain-specific flags (`/TP /interface` for MSVC, `-x c++-module`
+for clang) regardless of which extension the user picks.
+"""
+
+
 @dataclass
 class SourceHandler:
     """Describes how a toolchain handles a source file type.

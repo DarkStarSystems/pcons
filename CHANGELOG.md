@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Recognize `.ixx`, `.cxxm`, `.c++m` as C++20 module interface units** (in addition to existing `.cppm`). MSVC's preferred `.ixx` extension now works out of the box. The LLVM toolchain forces clang into module mode with `-x c++-module` so any of these extensions compile correctly with clang as well.
+
+### Changed
+
+- **C++20 module compilation is now scan-driven, not extension-driven.** The C++ module scanner (`cl /scanDependencies` for MSVC, `clang-scan-deps` for LLVM) now runs at *configure* time, and its P1689R5 output drives per-source flag injection. This means partition units that live in `.cpp` files (e.g., a partition interface `export module M:P;` or an internal partition `module M:P;`) are detected and compiled correctly even though their extension doesn't mark them as modules. The MSVC toolchain now emits `/internalPartition` (instead of `/interface`, which is incompatible) for partition implementation units that the scanner reports with `is-interface: false`. IFC/PCM filenames are derived from the logical module name, so partitions like `M:P` resolve to `<moddir>/M-P.ifc`. The Ninja `dyndep` file is generated once at configure time; the build-time scanner build node is gone.
+
 ## [0.14.1] - 2026-04-15
 
 ### Added

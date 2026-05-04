@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.llvm."""
 
+import pytest
+
 from pcons.configure.platform import Platform, get_platform
 from pcons.toolchains.llvm import (
     ClangCCompiler,
@@ -244,6 +246,15 @@ class TestLlvmSourceHandlers:
         tc = LlvmToolchain()
         handler = tc.get_source_handler(".xyz")
         assert handler is None
+
+    @pytest.mark.parametrize("suffix", [".cppm", ".ixx", ".cxxm", ".c++m"])
+    def test_source_handler_module_interface(self, suffix):
+        """All recognized C++20 module-interface extensions map to cxx_module."""
+        tc = LlvmToolchain()
+        handler = tc.get_source_handler(suffix)
+        assert handler is not None
+        assert handler.tool_name == "cxx"
+        assert handler.language == "cxx_module"
 
 
 class TestMetalCompiler:

@@ -56,6 +56,7 @@ import json
 import subprocess
 import sys
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -162,6 +163,202 @@ def run_scan_deps_msvc(
         return None
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+# =============================================================================
+# Configure-time API: TU scan specs, results, and dyndep generation.
+#
+# Used by toolchains' after_resolve() to invoke the scanner inline (instead
+# of at build time via Ninja). Configure-time scanning lets the scanner
+# output drive flag injection (e.g., /internalPartition for partition
+# implementation units), since Ninja dyndep can only modify deps/outputs,
+# not flags. Build-time entry-points (write_dyndep, main) remain for
+# debugging and any external callers.
+# =============================================================================
+
+
+@dataclass
+class TuScanSpec:
+    """Inputs to scan a single translation unit.
+
+    Attributes:
+        src: Absolute path to the source file.
+        obj_rel: Object file path relative to the build directory.
+        compiler: Compiler executable (e.g., "clang++", "cl.exe").
+        compile_flags: Compiler flags including any module-related flags
+            that the scanner needs to see (-x c++-module, /interface, etc.).
+    """
+
+    src: Path
+    obj_rel: str
+    compiler: str
+    compile_flags: list[str] = field(default_factory=list)
+
+
+@dataclass
+class TuScanResult:
+    """Parsed P1689R5 scan output for a single translation unit.
+
+    Properties expose the bits of the scan output that drive flag injection
+    and dyndep generation, hiding the JSON shape.
+    """
+
+    spec: TuScanSpec
+    p1689: dict[str, Any] | None  # None if the scan failed
+
+    @property
+    def _primary_provides(self) -> dict[str, Any] | None:
+        """First entry in rules[0].provides, or None if this isn't a module-providing TU."""
+        if self.p1689 is None:
+            return None
+        rules = self.p1689.get("rules", [])
+        if not isinstance(rules, list) or not rules:
+            return None
+        first_rule = rules[0]
+        if not isinstance(first_rule, dict):
+            return None
+        provides = first_rule.get("provides", [])
+        if not isinstance(provides, list) or not provides:
+            return None
+        first = provides[0]
+        return first if isinstance(first, dict) else None
+
+    @property
+    def is_module_provider(self) -> bool:
+        """True if this TU produces a module (interface or partition impl)."""
+        return self._primary_provides is not None
+
+    @property
+    def is_interface(self) -> bool:
+        """True for primary interfaces and partition interfaces.
+
+        False for internal partition implementation units (which on MSVC
+        require the /internalPartition flag). Per P1689R5 the field defaults
+        to True if absent.
+        """
+        prov = self._primary_provides
+        if prov is None:
+            return False
+        return bool(prov.get("is-interface", True))
+
+    @property
+    def logical_name(self) -> str:
+        """Logical module name (e.g., "jt.Math" or "jt.Math:BigUInt.Impl")."""
+        prov = self._primary_provides
+        if prov is None:
+            return ""
+        name = prov.get("logical-name", "")
+        return name if isinstance(name, str) else ""
+
+    @property
+    def required_logical_names(self) -> list[str]:
+        """Logical names of all imported modules across all rules."""
+        if self.p1689 is None:
+            return []
+        rules = self.p1689.get("rules", [])
+        if not isinstance(rules, list):
+            return []
+        names: list[str] = []
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+            requires = rule.get("requires", [])
+            if not isinstance(requires, list):
+                continue
+            for req in requires:
+                if not isinstance(req, dict):
+                    continue
+                ln = req.get("logical-name", "")
+                if isinstance(ln, str) and ln:
+                    names.append(ln)
+        return names
+
+
+def module_file_for(logical_name: str, mod_dir: str, extension: str) -> str:
+    """Compute the IFC/PCM path for a given logical module name.
+
+    Replaces ':' with '-' so partition names produce valid filenames
+    (e.g., "jt.Math:BigUInt.Impl" -> "{mod_dir}/jt.Math-BigUInt.Impl.ifc").
+    """
+    safe = logical_name.replace(":", "-")
+    return f"{mod_dir}/{safe}{extension}"
+
+
+def scan_translation_units(
+    specs: list[TuScanSpec],
+    scanner: str,
+    scanner_style: str = "clang",
+) -> list[TuScanResult]:
+    """Run the scanner on each TU and return parsed results.
+
+    Args:
+        specs: Per-TU scan inputs.
+        scanner: Path to clang-scan-deps (clang style) or cl.exe (msvc style).
+        scanner_style: "clang" or "msvc".
+
+    Returns:
+        One TuScanResult per spec, in order. result.p1689 is None if scanning
+        that TU failed (a warning is written to stderr by the runner).
+    """
+    results: list[TuScanResult] = []
+    for spec in specs:
+        if scanner_style == "msvc":
+            p1689 = run_scan_deps_msvc(spec.compiler, spec.compile_flags, str(spec.src))
+        else:
+            p1689 = run_scan_deps(
+                scanner,
+                spec.compiler,
+                spec.compile_flags,
+                str(spec.src),
+                spec.obj_rel,
+            )
+        results.append(TuScanResult(spec=spec, p1689=p1689))
+    return results
+
+
+def build_module_map(
+    results: list[TuScanResult],
+    mod_dir: str,
+    extension: str,
+) -> dict[str, str]:
+    """Build logical-name -> module-file-path map from scan results."""
+    mapping: dict[str, str] = {}
+    for r in results:
+        if r.is_module_provider:
+            mapping[r.logical_name] = module_file_for(
+                r.logical_name, mod_dir, extension
+            )
+    return mapping
+
+
+def write_dyndep_from_results(
+    results: list[TuScanResult],
+    module_to_pcm: dict[str, str],
+    out_path: str | Path,
+) -> None:
+    """Write a Ninja dyndep file from pre-computed scan results.
+
+    For each TU:
+      - implicit outputs are the IFC/PCM files this TU provides
+      - implicit inputs are the IFC/PCM files this TU imports
+    """
+    lines = ["ninja_dyndep_version = 1", ""]
+    for r in results:
+        provides_pcms: list[str] = []
+        if r.is_module_provider and r.logical_name in module_to_pcm:
+            provides_pcms.append(module_to_pcm[r.logical_name])
+
+        requires_pcms: list[str] = []
+        for ln in r.required_logical_names:
+            if ln in module_to_pcm:
+                requires_pcms.append(module_to_pcm[ln])
+
+        implicit_out = " | " + " ".join(provides_pcms) if provides_pcms else ""
+        implicit_in = " | " + " ".join(requires_pcms) if requires_pcms else ""
+        lines.append(f"build {r.spec.obj_rel}{implicit_out}: dyndep{implicit_in}")
+        lines.append("")
+
+    Path(out_path).write_text("\n".join(lines), encoding="utf-8")
 
 
 def write_dyndep(

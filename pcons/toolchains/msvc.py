@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +14,7 @@ from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.tools.tool import BaseTool
-from pcons.tools.toolchain import ToolchainContext
+from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES, ToolchainContext
 
 logger = logging.getLogger(__name__)
 
@@ -571,10 +569,10 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         return True
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Extend base MSVC handler to support C++20 module interface units (.cppm)."""
+        """Extend base MSVC handler to recognize C++20 module interface units."""
         from pcons.tools.toolchain import SourceHandler
 
-        if suffix == ".cppm":
+        if suffix in CXX_MODULE_INTERFACE_SUFFIXES:
             # No depfile for module interfaces: module deps are handled by dyndep.
             return SourceHandler("cxx", "cxx_module", ".obj", None, None)
         return super().get_source_handler(suffix)
@@ -584,15 +582,38 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         project: Project,
         source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
     ) -> None:
-        """Set up Ninja dyndep for C++20 module dependencies (MSVC).
+        """Configure C++20 module compilation (MSVC).
 
-        Mirrors LlvmToolchain.after_resolve() but uses MSVC flags:
-        - /scanDependencies:<file> for dependency scanning (P1689R5)
-        - /interface /ifcOutput <path> to produce .ifc alongside .obj
-        - /ifcSearchDir <dir> so importers can find precompiled modules
+        Runs `cl.exe /scanDependencies` at configure time on every C++ TU in
+        any target that uses modules, then drives flag injection from the
+        scan output rather than from file extension. This handles partition
+        units that live in `.cpp` files (interface partitions and internal
+        partitions both) and lets us inject `/internalPartition` exactly
+        when the scanner reports `provides[].is-interface == false`.
+
+        Per-TU flag injection:
+          - module-providing TU: `/TP /interface /ifcOutput <ifc>`
+          - internal partition unit (provides + is-interface=false):
+            also `/internalPartition`
+        Project-wide:
+          - `/ifcSearchDir <moddir>` on every C++ TU so importers find IFCs
+
+        The Ninja dyndep file is written directly here (no build-time scan
+        rule). Its provides/requires come from the scan output and use IFC
+        paths derived from logical module names (so partitions resolve).
         """
+        from pcons.toolchains.cxx_module_scanner import (
+            TuScanSpec,
+            build_module_map,
+            scan_translation_units,
+            write_dyndep_from_results,
+        )
+
         cxx_module_pairs = source_obj_by_language.get("cxx_module", [])
         if not cxx_module_pairs:
+            # No file-extension-tagged module units — skip scanning entirely.
+            # Targets that put partition units only in .cpp files won't be
+            # picked up; users must include at least one .cppm/.ixx/etc.
             return
 
         cxx_pairs = source_obj_by_language.get("cxx", [])
@@ -600,10 +621,9 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
         build_dir = project.build_dir
         moddir = "cxx_modules"
-        manifest_path = build_dir / "cxx.manifest.json"
         dyndep_path = build_dir / "cxx_modules.dyndep"
+        dyndep_rel = "cxx_modules.dyndep"
 
-        # Get environment and compiler command from first cxx_module object node
         first_env = None
         _, first_obj = cxx_module_pairs[0]
         build_info = getattr(first_obj, "_build_info", None)
@@ -617,14 +637,34 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / moddir).mkdir(exist_ok=True)
 
-        # Build manifest entries
-        manifest = []
+        # Inject /ifcSearchDir on all C++ TUs so importers find IFCs.
+        for _, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi:
+                context = bi.get("context")
+                if context is not None and hasattr(context, "flags"):
+                    if "/ifcSearchDir" not in context.flags:
+                        context.flags.extend(["/ifcSearchDir", moddir])
+
+        # Pre-flag every extension-tagged module unit with /TP so cl.exe
+        # treats the file as C++ during scan and compile (.cppm isn't a
+        # native MSVC C++ extension; .ixx is). We deliberately do NOT add
+        # /interface here — that's a per-TU decision driven by the scan
+        # output (interface units get /interface, internal partition
+        # implementations get /internalPartition; the two are incompatible).
+        for _, obj_node in cxx_module_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi:
+                context = bi.get("context")
+                if context is not None and hasattr(context, "flags"):
+                    if "/TP" not in context.flags:
+                        context.flags.append("/TP")
+
+        # Build per-TU scan specs using the now-flag-injected compile flags.
+        specs: list[TuScanSpec] = []
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
-            is_module_interface = src.suffix == ".cppm"
-
-            # Combine base flags + effective requirement flags (MSVC-style prefixes)
             seen: set[str] = set(base_flags)
             compile_flags = list(base_flags)
             if context:
@@ -637,83 +677,63 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                 for d in context.defines:
                     compile_flags.append(f"/D{d}")
 
-            # For module interfaces, /TP and /interface are needed so the
-            # scanner (cl.exe /scanDependencies) detects what module is provided.
-            scan_flags = list(compile_flags)
-            if is_module_interface and "/interface" not in scan_flags:
-                scan_flags = ["/TP", "/interface"] + scan_flags
+            specs.append(
+                TuScanSpec(
+                    src=src.resolve(),
+                    obj_rel=str(obj_node.path.relative_to(build_dir)).replace(
+                        "\\", "/"
+                    ),
+                    compiler=compiler_cmd,
+                    compile_flags=compile_flags,
+                )
+            )
 
-            entry: dict[str, object] = {
-                "src": str(src.resolve()).replace("\\", "/"),
-                "obj": str(obj_node.path.relative_to(build_dir)).replace("\\", "/"),
-                "is_module_interface": is_module_interface,
-                "compiler": compiler_cmd,
-                "compile_flags": scan_flags,
-            }
-            if is_module_interface:
-                entry["ifc"] = f"{moddir}/{src.stem}.ifc"
-            manifest.append(entry)
+        # Run cl.exe /scanDependencies on each TU. Failures (e.g. compiler
+        # not on PATH) leave that result with p1689=None — propagated as
+        # "not a module provider" so the build doesn't get an /ifcOutput it
+        # can't satisfy. Errors are logged to stderr by the runner.
+        results = scan_translation_units(
+            specs, scanner=compiler_cmd, scanner_style="msvc"
+        )
 
-        manifest_path.write_text(json.dumps(manifest, indent=2))
-        logger.debug("Wrote C++ module manifest to %s", manifest_path)
+        # Build logical-name -> IFC path map (handles partitions: ':' -> '-').
+        module_to_ifc = build_module_map(results, moddir, ".ifc")
 
-        # Inject /ifcSearchDir into ALL cxx/cxx_module compile contexts
-        for _, obj_node in all_cxx_pairs:
-            bi = getattr(obj_node, "_build_info", None)
-            if bi:
-                context = bi.get("context")
-                if context is not None and hasattr(context, "flags"):
-                    if "/ifcSearchDir" not in context.flags:
-                        context.flags.extend(["/ifcSearchDir", moddir])
-
-        # Inject /interface /ifcOutput for module interface files
-        for src, obj_node in cxx_module_pairs:
-            bi = getattr(obj_node, "_build_info", None)
-            if bi:
-                context = bi.get("context")
-                if context is not None and hasattr(context, "flags"):
-                    ifc_path = f"{moddir}/{src.stem}.ifc"
-                    if "/interface" not in context.flags:
-                        # /TP forces C++ compilation for .cppm (unrecognized extension)
-                        context.flags.extend(
-                            ["/TP", "/interface", "/ifcOutput", ifc_path]
-                        )
-
-        # Create source file nodes for scanner dependencies
-        all_sources = [src for src, _ in all_cxx_pairs]
-        source_nodes = [project.node(src) for src in all_sources]
-
-        # Create the dyndep scanner build node
-        dyndep_node = project.node(dyndep_path)
-        dyndep_node.depends(source_nodes)
-        dyndep_node._build_info = {
-            "tool": "cxx_scanner",
-            "command_var": "scancmd",
-            "description": "SCAN C++ modules",
-            "sources": source_nodes,
-            "command": [
-                sys.executable,
-                "-m",
-                "pcons.toolchains.cxx_module_scanner",
-                "--manifest",
-                "cxx.manifest.json",
-                "--out",
-                "cxx_modules.dyndep",
-                "--mod-dir",
-                moddir,
-                "--scanner-style",
-                "msvc",
-                "--scanner",
-                compiler_cmd,
-            ],
+        # Now inject per-TU module flags driven by the scan output.
+        # A TU is a module provider iff scan reports a non-empty provides[].
+        # An *internal* partition (is-interface=false) needs /internalPartition.
+        spec_to_obj = {
+            id(spec): obj_node
+            for spec, (_, obj_node) in zip(specs, all_cxx_pairs, strict=True)
         }
+        for r in results:
+            if not r.is_module_provider:
+                continue
+            obj_node = spec_to_obj[id(r.spec)]
+            bi = getattr(obj_node, "_build_info", None)
+            if bi is None:
+                continue
+            context = bi.get("context")
+            if context is None or not hasattr(context, "flags"):
+                continue
+            ifc_path = module_to_ifc[r.logical_name]
+            if "/ifcOutput" in context.flags:
+                continue
+            # /interface and /internalPartition are mutually exclusive (D8016).
+            # Choose based on whether the scanner reported this as an interface.
+            if "/TP" not in context.flags:
+                context.flags.append("/TP")
+            if r.is_interface:
+                context.flags.extend(["/interface", "/ifcOutput", ifc_path])
+            else:
+                context.flags.extend(["/internalPartition", "/ifcOutput", ifc_path])
 
-        # Register dyndep node with environment
-        if first_env is not None:
-            first_env.register_node(dyndep_node)
+        # Write the dyndep file at configure time and reference it as an
+        # implicit input on each obj. No build-time scan rule needed.
+        write_dyndep_from_results(results, module_to_ifc, dyndep_path)
+        logger.debug("Wrote C++ module dyndep to %s", dyndep_path)
 
-        # Attach dyndep to all CXX and CXX_MODULE object nodes
-        dyndep_rel = "cxx_modules.dyndep"
+        dyndep_node = project.node(dyndep_path)
         for _, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             if bi is not None:

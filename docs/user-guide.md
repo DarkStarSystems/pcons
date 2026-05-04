@@ -1136,6 +1136,7 @@ Pcons toolchains support various source file types beyond standard C/C++:
 |-----------|-------------|------------|
 | `.c` | C source | All |
 | `.cpp`, `.cxx`, `.cc` | C++ source | All |
+| `.cppm`, `.ixx`, `.cxxm`, `.c++m` | C++20 module interface unit | LLVM, MSVC |
 | `.m` | Objective-C | LLVM |
 | `.mm` | Objective-C++ | LLVM |
 | `.s` | Assembly (preprocessed) | GCC, LLVM |

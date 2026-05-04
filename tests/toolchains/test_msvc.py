@@ -3,6 +3,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from pcons.configure.platform import get_platform
 from pcons.core.builder import MultiOutputBuilder, OutputGroup
 from pcons.core.environment import Environment
@@ -394,6 +396,19 @@ class TestMsvcSourceHandlers:
         tc = MsvcToolchain()
         handler = tc.get_source_handler(".xyz")
         assert handler is None
+
+    @pytest.mark.parametrize("suffix", [".cppm", ".ixx", ".cxxm", ".c++m"])
+    def test_source_handler_module_interface(self, suffix):
+        """All recognized C++20 module-interface extensions map to cxx_module."""
+        tc = MsvcToolchain()
+        handler = tc.get_source_handler(suffix)
+        assert handler is not None
+        assert handler.tool_name == "cxx"
+        assert handler.language == "cxx_module"
+        assert handler.object_suffix == ".obj"
+        # Module interfaces use dyndep, not per-source depfiles
+        assert handler.depfile is None
+        assert handler.deps_style is None
 
 
 class TestMsvcLinkerAcceptsRes:
