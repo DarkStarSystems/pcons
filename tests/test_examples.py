@@ -267,6 +267,40 @@ def should_skip(config: dict[str, Any]) -> str | None:
         if not os.environ.get(var):
             return f"Required environment variable '{var}' not set"
 
+    # Check whether `import std;` is supported by the toolchain pcons would
+    # pick. On Windows we expect MSVC (which has its own std-module path);
+    # there we just check that cl.exe is on PATH. On macOS/Linux we expect
+    # clang, and we probe for libc++.modules.json — Apple Clang and many
+    # libstdc++ installs don't ship it (skip), while brew LLVM and recent
+    # libc++ packages do.
+    if skip_config.get("requires_libcxx_std_module"):
+        if current_platform == "windows":
+            if shutil.which("cl.exe") is None and shutil.which("cl") is None:
+                return "cl.exe not on PATH — run vcvars64.bat first"
+        else:
+            clang = shutil.which("clang++") or shutil.which("clang")
+            if clang is None:
+                return "clang not found (needed for libc++ std module check)"
+            try:
+                proc = subprocess.run(
+                    [
+                        clang,
+                        "-stdlib=libc++",
+                        "-print-file-name=c++/libc++.modules.json",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+            except OSError:
+                return "could not invoke clang to probe libc++ std module"
+            out = proc.stdout.strip()
+            if not out or out == "c++/libc++.modules.json" or not Path(out).is_file():
+                return (
+                    "libc++.modules.json not available — `import std;` on clang "
+                    "needs Homebrew LLVM (macOS) or libc++-dev (Linux)"
+                )
+
     return None
 
 

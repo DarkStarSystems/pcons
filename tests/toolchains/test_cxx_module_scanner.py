@@ -22,6 +22,7 @@ from pcons.toolchains.cxx_module_scanner import (
     run_scan_deps,
     run_scan_deps_msvc,
     select_modules_scope,
+    wire_std_into_targets,
     write_dyndep_from_results,
 )
 
@@ -260,3 +261,96 @@ class TestScannerNotFound:
         )
         with pytest.raises(CxxModuleScannerNotFound, match="vcvars64"):
             run_scan_deps_msvc("cl.exe", ["/std:c++20"], "C:/x/y.cpp")
+
+
+class _FakeNode:
+    """Minimal stand-in for FileNode for wire_std_into_targets tests."""
+
+    def __init__(self) -> None:
+        self.explicit_deps: list[_FakeNode] = []
+
+
+class _FakeTarget:
+    def __init__(
+        self, intermediates: list[_FakeNode], outputs: list[_FakeNode]
+    ) -> None:
+        self.intermediate_nodes = intermediates
+        self.output_nodes = outputs
+
+
+class _FakeProject:
+    def __init__(self, targets: list[_FakeTarget]) -> None:
+        self.targets = targets
+
+
+class TestWireStdIntoTargets:
+    """The shared helper that links synthesized std-module .obj/.o files
+    into every target whose TUs `import std;` (or `import std.compat;`).
+
+    Toolchain-agnostic: the same logic is correct for MSVC and clang.
+    """
+
+    def test_links_std_into_importing_target(self) -> None:
+        consumer_obj = _FakeNode()  # this TU's `import std;` requirement
+        target_output = _FakeNode()
+        target = _FakeTarget(intermediates=[consumer_obj], outputs=[target_output])
+        project = _FakeProject(targets=[target])
+
+        std_obj = _FakeNode()
+        std_obj_nodes = {"std": std_obj}
+
+        consumer_spec = _spec("consumer.o")
+        results = [
+            TuScanResult(
+                spec=consumer_spec,
+                p1689={"rules": [{"requires": [{"logical-name": "std"}]}]},
+            )
+        ]
+        spec_to_obj = {id(consumer_spec): consumer_obj}
+
+        wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+
+        assert std_obj in target.intermediate_nodes
+        assert std_obj in target_output.explicit_deps
+
+    def test_skips_targets_that_do_not_import_std(self) -> None:
+        consumer_obj = _FakeNode()
+        target_output = _FakeNode()
+        target = _FakeTarget(intermediates=[consumer_obj], outputs=[target_output])
+        project = _FakeProject(targets=[target])
+
+        std_obj = _FakeNode()
+        std_obj_nodes = {"std": std_obj}
+
+        consumer_spec = _spec("consumer.o")
+        # No `requires` — this TU doesn't import std.
+        results = [TuScanResult(spec=consumer_spec, p1689={"rules": [{}]})]
+        spec_to_obj = {id(consumer_spec): consumer_obj}
+
+        wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+        assert std_obj not in target.intermediate_nodes
+        assert std_obj not in target_output.explicit_deps
+
+    def test_idempotent(self) -> None:
+        # Running twice must not duplicate the std obj on the target.
+        consumer_obj = _FakeNode()
+        target_output = _FakeNode()
+        target = _FakeTarget(intermediates=[consumer_obj], outputs=[target_output])
+        project = _FakeProject(targets=[target])
+
+        std_obj = _FakeNode()
+        std_obj_nodes = {"std": std_obj}
+
+        consumer_spec = _spec("consumer.o")
+        results = [
+            TuScanResult(
+                spec=consumer_spec,
+                p1689={"rules": [{"requires": [{"logical-name": "std"}]}]},
+            )
+        ]
+        spec_to_obj = {id(consumer_spec): consumer_obj}
+
+        wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+        wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+        assert target.intermediate_nodes.count(std_obj) == 1
+        assert target_output.explicit_deps.count(std_obj) == 1

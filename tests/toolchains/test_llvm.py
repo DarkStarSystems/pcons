@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.llvm."""
 
+from pathlib import Path
+
 import pytest
 
 from pcons.configure.platform import Platform, get_platform
@@ -381,3 +383,164 @@ class TestLlvmCompileFlagsForTargetType:
         flags = tc.get_compile_flags_for_target_type("program")
         assert "-fPIC" not in flags
         assert flags == []
+
+
+class TestLibcxxModulesManifest:
+    """Tests for libc++ std-module manifest discovery and parsing.
+
+    We don't run a real clang here — we monkeypatch subprocess.run to
+    return canned output so the tests work even on machines without
+    a libc++.modules.json available (e.g. Apple Clang).
+    """
+
+    def test_finds_manifest_path(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from pcons.toolchains.llvm import _find_libcxx_modules_manifest
+
+        manifest = tmp_path / "libc++.modules.json"
+        manifest.write_text("{}", encoding="utf-8")
+
+        class _Result:
+            returncode = 0
+            stdout = f"{manifest}\n"
+            stderr = ""
+
+        captured: dict[str, list[str]] = {}
+
+        def _fake_run(cmd: list[str], **_kwargs: object) -> _Result:
+            captured["cmd"] = cmd
+            return _Result()
+
+        monkeypatch.setattr("pcons.toolchains.llvm.subprocess.run", _fake_run)
+        found = _find_libcxx_modules_manifest("clang++", ["-std=c++23"])
+        assert found == manifest
+        # Must query with -stdlib=libc++ since user didn't pass one.
+        assert "-stdlib=libc++" in captured["cmd"]
+        assert "-print-file-name=c++/libc++.modules.json" in captured["cmd"]
+
+    def test_returns_none_when_compiler_echoes_query(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Clang's -print-file-name echoes the query unchanged when it
+        # doesn't find the file (Apple Clang's behavior for the std
+        # module manifest). That must surface as "no manifest".
+        from pcons.toolchains.llvm import _find_libcxx_modules_manifest
+
+        class _Result:
+            returncode = 0
+            stdout = "c++/libc++.modules.json\n"
+            stderr = ""
+
+        monkeypatch.setattr(
+            "pcons.toolchains.llvm.subprocess.run",
+            lambda *_a, **_k: _Result(),
+        )
+        assert _find_libcxx_modules_manifest("clang++", []) is None
+
+    def test_returns_none_when_compiler_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.toolchains.llvm import _find_libcxx_modules_manifest
+
+        def _enoent(*_a: object, **_k: object) -> None:
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr("pcons.toolchains.llvm.subprocess.run", _enoent)
+        assert _find_libcxx_modules_manifest("clang++", []) is None
+
+    def test_passes_through_user_stdlib(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # If the user is on libstdc++ (or any non-libc++ stdlib), we ask
+        # the compiler about *their* stdlib, not libc++.
+        from pcons.toolchains.llvm import _find_libcxx_modules_manifest
+
+        manifest = tmp_path / "modules.json"
+        manifest.write_text("{}", encoding="utf-8")
+
+        class _Result:
+            returncode = 0
+            stdout = f"{manifest}\n"
+            stderr = ""
+
+        captured: dict[str, list[str]] = {}
+
+        def _fake_run(cmd: list[str], **_kw: object) -> _Result:
+            captured["cmd"] = cmd
+            return _Result()
+
+        monkeypatch.setattr("pcons.toolchains.llvm.subprocess.run", _fake_run)
+        _find_libcxx_modules_manifest("clang++", ["-stdlib=libstdc++"])
+        assert "-stdlib=libstdc++" in captured["cmd"]
+        assert "-stdlib=libc++" not in captured["cmd"]
+
+    def test_parse_resolves_relative_paths(self, tmp_path: Path) -> None:
+        # The manifest stores paths relative to its own directory; the
+        # parser must resolve them to absolute paths.
+        from pcons.toolchains.llvm import _parse_libcxx_manifest
+
+        share = tmp_path / "share" / "libc++" / "v1"
+        share.mkdir(parents=True)
+        (share / "std.cppm").write_text("// std module\n", encoding="utf-8")
+        (share / "std.compat.cppm").write_text("// std.compat\n", encoding="utf-8")
+
+        manifest_dir = tmp_path / "lib" / "c++"
+        manifest_dir.mkdir(parents=True)
+        manifest = manifest_dir / "libc++.modules.json"
+        import json as _json
+
+        manifest.write_text(
+            _json.dumps(
+                {
+                    "version": 1,
+                    "modules": [
+                        {
+                            "logical-name": "std",
+                            "source-path": "../../share/libc++/v1/std.cppm",
+                            "local-arguments": {
+                                "system-include-directories": ["../../share/libc++/v1"]
+                            },
+                        },
+                        {
+                            "logical-name": "std.compat",
+                            "source-path": "../../share/libc++/v1/std.compat.cppm",
+                            "local-arguments": {
+                                "system-include-directories": ["../../share/libc++/v1"]
+                            },
+                        },
+                    ],
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        modules = _parse_libcxx_manifest(manifest)
+        assert set(modules.keys()) == {"std", "std.compat"}
+        assert modules["std"]["source-path"] == (share / "std.cppm").resolve()
+        assert modules["std"]["system-include-directories"] == [share.resolve()]
+
+    def test_parse_skips_malformed_entries(self, tmp_path: Path) -> None:
+        import json as _json
+
+        from pcons.toolchains.llvm import _parse_libcxx_manifest
+
+        manifest = tmp_path / "libc++.modules.json"
+        manifest.write_text(
+            _json.dumps(
+                {
+                    "modules": [
+                        {"logical-name": "std"},  # missing source-path
+                        {"source-path": "x.cppm"},  # missing logical-name
+                        {
+                            "logical-name": "std",
+                            "source-path": "x.cppm",
+                        },  # ok, no local-arguments
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        modules = _parse_libcxx_manifest(manifest)
+        assert list(modules.keys()) == ["std"]
+        assert modules["std"]["system-include-directories"] == []

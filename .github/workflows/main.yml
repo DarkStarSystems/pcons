@@ -225,8 +225,11 @@ jobs:
         run: echo "$(brew --prefix llvm@18)/bin" >> $GITHUB_PATH
       - name: Install dependencies
         run: uv python install 3.12 && uv sync
+      - name: Install libc++ for `import std;` (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y libc++-18-dev libc++abi-18-dev
       - name: Run C++20 modules example tests
-        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules" -v
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules or 30_cxx_partitions or 31_cxx_modules_optin or 32_cxx_import_std" -v
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:

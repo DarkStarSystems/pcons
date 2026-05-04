@@ -1,0 +1,23 @@
+# Test configuration for the cxx_import_std example
+
+[test]
+description = "C++23 import std; — clang+libc++ and MSVC paths"
+
+expected_outputs = [
+    "build/obj.hello/src/Greet.cppm.o",
+    "build/obj.hello/src/main.cpp.o",
+    "build/hello",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_exit_code = 0, expect_output_contains = "Hello, modules!" },
+]
+
+[skip]
+requires = ["clang-scan-deps", "clang++"]
+# clang `import std;` needs libc++.modules.json — Apple Clang doesn't ship it.
+# On macOS this means brew LLVM; on Linux a recent libc++. The custom check
+# probes the available clang and skips when the manifest can't be located.
+requires_libcxx_std_module = true
+generators = ["xcode", "make"]

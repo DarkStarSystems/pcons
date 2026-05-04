@@ -636,6 +636,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             build_module_map,
             scan_translation_units,
             select_modules_scope,
+            wire_std_into_targets,
             write_dyndep_from_results,
         )
 
@@ -789,7 +790,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         # every target whose TUs import them, so the standard module's
         # explicit-instantiation symbols resolve at link time.
         if std_obj_nodes:
-            self._wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+            wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
 
     def _inject_std_module_builds(
         self,
@@ -907,40 +908,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             std_obj_nodes[logical] = std_obj_node
 
         return std_obj_nodes
-
-    def _wire_std_into_targets(
-        self,
-        project: Project,
-        results: list[Any],
-        spec_to_obj: dict[int, FileNode],
-        std_obj_nodes: dict[str, FileNode],
-    ) -> None:
-        """Add std/std.compat .obj files to the link inputs of importing targets.
-
-        Detects, per project target, whether any of its TUs require `std` or
-        `std.compat`, and appends the corresponding synthesized .obj to the
-        target's intermediate_nodes (so the link rule sees it) and its
-        output nodes' explicit_deps (so the build graph has the dependency).
-        """
-        # Reverse map: obj_node id -> scan result, for lookups below.
-        obj_id_to_required: dict[int, set[str]] = {}
-        for r in results:
-            obj_node = spec_to_obj.get(id(r.spec))
-            if obj_node is None:
-                continue
-            obj_id_to_required[id(obj_node)] = set(r.required_logical_names)
-
-        for target in project.targets:
-            target_required: set[str] = set()
-            for obj_node in target.intermediate_nodes:
-                target_required.update(obj_id_to_required.get(id(obj_node), set()))
-            for logical, std_obj_node in std_obj_nodes.items():
-                if logical in target_required:
-                    if std_obj_node not in target.intermediate_nodes:
-                        target.intermediate_nodes.append(std_obj_node)
-                    for output_node in target.output_nodes:
-                        if std_obj_node not in output_node.explicit_deps:
-                            output_node.explicit_deps.append(std_obj_node)
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply build variant with MSVC flags.

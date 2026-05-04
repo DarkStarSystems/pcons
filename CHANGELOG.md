@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`import std;` / `import std.compat;` on clang/libc++.** Brings the LLVM toolchain to parity with MSVC (shipped in 0.15.0). When the scanner reports a TU requiring `std`, pcons queries the available clang for `libc++.modules.json` (`clang++ -stdlib=libc++ -print-file-name=c++/libc++.modules.json`), parses it to find `std.cppm` and the system include directories, synthesizes a build node that compiles the std module with the user's `-std=` / `-stdlib=` flags, and links the resulting `.o` into every target whose TUs import `std`. Requires Homebrew LLVM on macOS (Apple Clang doesn't ship the manifest yet) or libc++-dev (≥ 18) on Linux.
+- **New example `32_cxx_import_std`**: a C++23 program built with `import std;` — exercises the std-module wiring on both MSVC and clang/libc++. Self-skips on platforms without a usable std module.
+
+### Refactor
+
+- `wire_std_into_targets` (the helper that links the synthesized std-module `.o`/`.obj` into every importing target) moved from `pcons/toolchains/msvc.py` to `pcons/toolchains/cxx_module_scanner.py` so both toolchains share one implementation.
+
 ## [0.15.0] - 2026-05-04
 
 ### Added

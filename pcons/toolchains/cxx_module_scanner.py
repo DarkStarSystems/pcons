@@ -437,6 +437,43 @@ def build_module_map(
     return mapping
 
 
+def wire_std_into_targets(
+    project: Any,
+    results: list[TuScanResult],
+    spec_to_obj: dict[int, Any],
+    std_obj_nodes: dict[str, Any],
+) -> None:
+    """Add std/std.compat .obj files to the link inputs of importing targets.
+
+    For every project target, looks at which `import std;` / `import std.compat;`
+    requirements its TUs have (via the scan results) and appends the
+    corresponding synthesized std-module .obj to the target's
+    intermediate_nodes (so the link rule sees it) and to its output nodes'
+    explicit_deps (so the build graph has the dependency).
+
+    Toolchain-agnostic: works for both MSVC (.obj files) and clang (.o files)
+    so long as the caller supplied a {logical_name: obj_node} map.
+    """
+    obj_id_to_required: dict[int, set[str]] = {}
+    for r in results:
+        obj_node = spec_to_obj.get(id(r.spec))
+        if obj_node is None:
+            continue
+        obj_id_to_required[id(obj_node)] = set(r.required_logical_names)
+
+    for target in project.targets:
+        target_required: set[str] = set()
+        for obj_node in target.intermediate_nodes:
+            target_required.update(obj_id_to_required.get(id(obj_node), set()))
+        for logical, std_obj_node in std_obj_nodes.items():
+            if logical in target_required:
+                if std_obj_node not in target.intermediate_nodes:
+                    target.intermediate_nodes.append(std_obj_node)
+                for output_node in target.output_nodes:
+                    if std_obj_node not in output_node.explicit_deps:
+                        output_node.explicit_deps.append(std_obj_node)
+
+
 def write_dyndep_from_results(
     results: list[TuScanResult],
     module_to_pcm: dict[str, str],

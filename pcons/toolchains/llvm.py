@@ -3,19 +3,21 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import TYPE_CHECKING
+import subprocess
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.environment import Environment
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from pcons.core.builder import Builder
     from pcons.core.node import FileNode
     from pcons.core.project import Project
@@ -23,6 +25,64 @@ if TYPE_CHECKING:
     from pcons.tools.toolchain import SourceHandler
 
 logger = logging.getLogger(__name__)
+
+
+def _find_libcxx_modules_manifest(
+    compiler_cmd: str, base_flags: list[str]
+) -> Path | None:
+    """Locate `libc++.modules.json` via `clang -print-file-name`.
+
+    libc++ ships a JSON manifest that points at `std.cppm` /
+    `std.compat.cppm` and the system include directories required to
+    compile them. We let the compiler tell us where it is — works for any
+    libc++ install (Homebrew, apt, vendored).
+
+    Returns the manifest path if found, or None if the toolchain doesn't
+    ship one (Apple Clang ≤ 21 is the most common case; users need
+    Homebrew LLVM there).
+    """
+    cmd = [compiler_cmd]
+    user_stdlib_flags = [f for f in base_flags if f.startswith("-stdlib=")]
+    if user_stdlib_flags:
+        cmd.extend(user_stdlib_flags)
+    else:
+        cmd.append("-stdlib=libc++")
+    cmd.append("-print-file-name=c++/libc++.modules.json")
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return None
+    if proc.returncode != 0:
+        return None
+    out = proc.stdout.strip()
+    # When the file isn't found, clang echoes the query string back unchanged.
+    if not out or out == "c++/libc++.modules.json":
+        return None
+    p = Path(out)
+    return p if p.is_file() else None
+
+
+def _parse_libcxx_manifest(manifest: Path) -> dict[str, dict[str, Any]]:
+    """Parse `libc++.modules.json` into `{logical_name: {source-path, sys-includes}}`.
+
+    Resolves `source-path` and `system-include-directories` to absolute
+    paths (the manifest stores them relative to its own directory).
+    """
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    base = manifest.parent
+    out: dict[str, dict[str, Any]] = {}
+    for entry in data.get("modules", []) or []:
+        ln = entry.get("logical-name")
+        sp = entry.get("source-path")
+        if not ln or not sp:
+            continue
+        local = entry.get("local-arguments") or {}
+        sys_inc = local.get("system-include-directories") or []
+        out[str(ln)] = {
+            "source-path": (base / sp).resolve(),
+            "system-include-directories": [(base / d).resolve() for d in sys_inc],
+        }
+    return out
 
 
 class ClangCCompiler(BaseTool):
@@ -464,6 +524,7 @@ class LlvmToolchain(UnixToolchain):
             build_module_map,
             scan_translation_units,
             select_modules_scope,
+            wire_std_into_targets,
             write_dyndep_from_results,
         )
 
@@ -543,6 +604,16 @@ class LlvmToolchain(UnixToolchain):
         results = scan_translation_units(
             specs, scanner="clang-scan-deps", scanner_style="clang"
         )
+
+        # `import std;` / `import std.compat;` support: if any TU requires
+        # the standard library module, locate libc++'s std.cppm via the
+        # manifest the compiler ships and synthesize a build node for it.
+        # Appended to `results` so build_module_map() registers it and the
+        # dyndep file lists the .pcm as an implicit output.
+        std_obj_nodes = self._inject_clang_std_module_builds(
+            project, build_dir, moddir, compiler_cmd, base_flags, results, first_env
+        )
+
         module_to_pcm = build_module_map(results, moddir, ".pcm")
 
         # For each module-providing TU (interfaces, partition interfaces,
@@ -553,6 +624,10 @@ class LlvmToolchain(UnixToolchain):
         }
         for r in results:
             if not r.is_module_provider:
+                continue
+            # Skip synthetic std-module entries — their flags are already in
+            # the literal command list, not in a CompileLinkContext.
+            if id(r.spec) not in spec_to_obj:
                 continue
             obj_node = spec_to_obj[id(r.spec)]
             bi = getattr(obj_node, "_build_info", None)
@@ -577,6 +652,151 @@ class LlvmToolchain(UnixToolchain):
             if bi is not None:
                 bi["dyndep"] = dyndep_rel
             obj_node.implicit_deps.append(dyndep_node)
+        for std_obj_node in std_obj_nodes.values():
+            std_bi = std_obj_node._build_info
+            assert std_bi is not None  # set in _inject_clang_std_module_builds
+            std_bi["dyndep"] = dyndep_rel
+            std_obj_node.implicit_deps.append(dyndep_node)
+
+        if std_obj_nodes:
+            wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+
+    def _inject_clang_std_module_builds(
+        self,
+        project: Project,
+        build_dir: Path,
+        moddir: str,
+        compiler_cmd: str,
+        base_flags: list[str],
+        results: list[Any],
+        first_env: Environment | None,
+    ) -> dict[str, FileNode]:
+        """Synthesize build nodes for `import std;` / `import std.compat;` (clang).
+
+        If the scan reports that any TU requires the `std` or `std.compat`
+        logical module, locate libc++'s `libc++.modules.json` (via
+        `-print-file-name`), find the corresponding `.cppm` source and the
+        system include dirs, and create a build node that compiles them
+        with the user's `-std=` / `-stdlib=` flags. A synthetic
+        TuScanResult is appended to `results` so the dyndep file declares
+        the resulting `.pcm` as an implicit output.
+
+        Returns:
+            Dict mapping logical module name -> std obj FileNode for the
+            modules that were synthesized.
+        """
+        from pcons.toolchains.cxx_module_scanner import TuScanResult, TuScanSpec
+
+        required_logical_names: set[str] = set()
+        for r in results:
+            for ln in r.required_logical_names:
+                required_logical_names.add(ln)
+
+        wanted = required_logical_names & {"std", "std.compat"}
+        if not wanted:
+            return {}
+
+        manifest = _find_libcxx_modules_manifest(compiler_cmd, base_flags)
+        if manifest is None:
+            raise RuntimeError(
+                "`import std;` was used, but pcons could not locate libc++'s "
+                "C++ standard-library module manifest. Tried\n"
+                f"    {compiler_cmd} -stdlib=libc++ "
+                "-print-file-name=c++/libc++.modules.json\n"
+                "and got no usable path. On macOS, install Homebrew LLVM "
+                "(`brew install llvm`) — Apple Clang doesn't ship the std "
+                "module yet. On Linux, install a recent libc++ that includes "
+                "`libc++.modules.json` (LLVM ≥ 18). Alternatively use a "
+                "different toolchain (MSVC works on Windows)."
+            )
+        modules = _parse_libcxx_manifest(manifest)
+
+        # Carry the user's -std and -stdlib (and a few related) flags onto
+        # the std-module compile so the PCM is ABI-compatible with importer
+        # code. The std module needs at least C++20.
+        carry_prefixes = ("-std=", "-stdlib=", "-fexperimental-library", "--target=")
+        passthrough = [f for f in base_flags if f.startswith(carry_prefixes)]
+        # GCC-style "-target X86_64..." pair flag — keep both halves.
+        i = 0
+        while i < len(base_flags):
+            if base_flags[i] == "-target" and i + 1 < len(base_flags):
+                passthrough.extend([base_flags[i], base_flags[i + 1]])
+                i += 2
+            else:
+                i += 1
+        if not any(f.startswith("-std=") for f in passthrough):
+            passthrough.insert(0, "-std=c++20")
+        if not any(f.startswith("-stdlib=") for f in passthrough):
+            passthrough.append("-stdlib=libc++")
+
+        std_obj_nodes: dict[str, FileNode] = {}
+        for logical in sorted(wanted):
+            if logical not in modules:
+                logger.warning(
+                    "import %s requested but not in libc++ manifest %s; skipping",
+                    logical,
+                    manifest,
+                )
+                continue
+            entry = modules[logical]
+            cppm_path: Path = entry["source-path"]
+            sys_includes: list[Path] = entry["system-include-directories"]
+            if not cppm_path.is_file():
+                logger.warning(
+                    "import %s: manifest pointed at %s which doesn't exist; skipping",
+                    logical,
+                    cppm_path,
+                )
+                continue
+
+            pcm_rel = f"{moddir}/{logical}.pcm"
+            obj_rel = f"{moddir}/{logical}.o"
+            obj_path = build_dir / obj_rel
+
+            std_obj_node = project.node(obj_path)
+            cmd_list: list[str] = [
+                compiler_cmd,
+                *passthrough,
+                # `std` starts with a reserved identifier — clang warns by default.
+                "-Wno-reserved-module-identifier",
+                "-Wno-reserved-identifier",
+                *(f"-isystem{d}" for d in sys_includes),
+                "-x",
+                "c++-module",
+                f"-fmodule-output={pcm_rel}",
+                "-c",
+                str(cppm_path),
+                "-o",
+                obj_rel,
+            ]
+            std_obj_node._build_info = {
+                "tool": "cxx",
+                "command_var": "stdmodcmd",
+                "description": f"CXX {logical} module",
+                "sources": [project.node(cppm_path)],
+                "command": cmd_list,
+            }
+            if first_env is not None:
+                first_env.register_node(std_obj_node)
+
+            synthetic_spec = TuScanSpec(
+                src=cppm_path,
+                obj_rel=obj_rel,
+                compiler=compiler_cmd,
+                compile_flags=[],
+            )
+            synthetic_p1689 = {
+                "rules": [
+                    {
+                        "primary-output": obj_rel,
+                        "provides": [{"logical-name": logical, "is-interface": True}],
+                    }
+                ]
+            }
+            results.append(TuScanResult(spec=synthetic_spec, p1689=synthetic_p1689))
+            std_obj_nodes[logical] = std_obj_node
+
+        return std_obj_nodes
 
 
 # =============================================================================
