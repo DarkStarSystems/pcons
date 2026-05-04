@@ -1145,6 +1145,36 @@ Pcons toolchains support various source file types beyond standard C/C++:
 | `.rc` | Windows resource | MSVC, Clang-CL |
 | `.metal` | Metal shaders (macOS) | LLVM |
 
+#### C++20 modules
+
+When a target has at least one source whose extension is in
+`{.cppm, .ixx, .cxxm, .c++m}`, pcons runs the C++ module scanner
+(`cl /scanDependencies` for MSVC, `clang-scan-deps` for LLVM/Clang) on
+every C++ TU in that target at configure time, and uses the P1689R5
+output to inject the right compile flags (`/interface` vs
+`/internalPartition` on MSVC, `-fmodule-output` and `-x c++-module` on
+clang) and to produce the Ninja `dyndep` file that orders compilations.
+Partition units that live in `.cpp` files (interface partitions like
+`export module M:P;` or internal partitions like `module M:P;`) are
+detected from the scan output and handled correctly.
+
+If your project has *no* sources with one of those extensions but still
+uses C++ modules — e.g. fmtlib's `src/fmt.cc` (primary interface in
+`.cc`), or a target whose only module use is `import std;` — opt in
+explicitly:
+
+```python
+env = project.Environment(toolchain=find_c_toolchain(prefer=["msvc"]))
+env.cxx.modules = True
+env.cxx.flags.extend(["/std:c++latest", "/EHsc"])
+project.Program("hello", env, sources=["main.cpp"])  # main.cpp does `import std;`
+```
+
+`import std;` and `import std.compat;` work out of the box on MSVC:
+pcons synthesizes a build node for `%VCToolsInstallDir%/modules/std.ixx`
+(or `std.compat.ixx`), wires its `.ifc` into the dyndep file, and adds
+the resulting `.obj` to every importing target's link inputs.
+
 These are handled automatically when you add sources to a target:
 
 ```python

@@ -16,6 +16,7 @@ from pcons.toolchains.cxx_module_scanner import (
     TuScanSpec,
     build_module_map,
     module_file_for,
+    select_modules_scope,
     write_dyndep_from_results,
 )
 
@@ -149,3 +150,75 @@ class TestWriteDyndep:
         out = tmp_path / "deps.dyndep"
         write_dyndep_from_results(results, m, out)
         assert "std" not in out.read_text()
+
+
+class _FakeCxxNamespace:
+    """Stand-in for env.cxx with just the `modules` attribute the helper reads."""
+
+    def __init__(self, modules: bool) -> None:
+        self.modules = modules
+
+
+class _FakeEnv:
+    def __init__(self, modules: bool) -> None:
+        self.cxx = _FakeCxxNamespace(modules)
+
+
+class _FakeObj:
+    """Stand-in FileNode-ish duck-type for select_modules_scope."""
+
+    def __init__(self, env: _FakeEnv) -> None:
+        self._build_info = {"env": env}
+
+
+class TestSelectModulesScope:
+    def test_no_module_extensions_no_optin_skips(self) -> None:
+        env = _FakeEnv(modules=False)
+        obj = _FakeObj(env)
+        # cxx_pairs only — no .cppm/.ixx, env didn't opt in.
+        scope = select_modules_scope({"cxx": [(Path("/src/main.cpp"), obj)]})
+        assert scope == ([], [])
+
+    def test_extension_implicit_optin_includes_cxx_pairs(self) -> None:
+        env = _FakeEnv(modules=False)
+        mod_obj = _FakeObj(env)
+        cxx_obj = _FakeObj(env)
+        # The .cppm in this env qualifies; sibling .cpp files in the same
+        # env come along so partition units in .cpp can be detected.
+        m_pairs, c_pairs = select_modules_scope(
+            {
+                "cxx_module": [(Path("/src/MyMod.cppm"), mod_obj)],
+                "cxx": [(Path("/src/Helper.cpp"), cxx_obj)],
+            }
+        )
+        assert len(m_pairs) == 1
+        assert len(c_pairs) == 1
+
+    def test_explicit_optin_without_extensions(self) -> None:
+        env = _FakeEnv(modules=True)
+        cxx_obj = _FakeObj(env)
+        m_pairs, c_pairs = select_modules_scope(
+            {"cxx": [(Path("/src/main.cpp"), cxx_obj)]}
+        )
+        assert m_pairs == []
+        assert len(c_pairs) == 1
+
+    def test_other_envs_filtered_out(self) -> None:
+        # Two envs in the same project — only one opted in. The other env's
+        # TUs must NOT be scanned (would slow the build and may produce
+        # spurious flags).
+        env_modules = _FakeEnv(modules=True)
+        env_plain = _FakeEnv(modules=False)
+        m_obj = _FakeObj(env_modules)
+        p_obj = _FakeObj(env_plain)
+        m_pairs, c_pairs = select_modules_scope(
+            {
+                "cxx": [
+                    (Path("/m.cpp"), m_obj),
+                    (Path("/p.cpp"), p_obj),
+                ],
+            }
+        )
+        assert m_pairs == []
+        assert len(c_pairs) == 1
+        assert c_pairs[0][1] is m_obj

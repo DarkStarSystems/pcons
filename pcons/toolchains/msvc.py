@@ -204,6 +204,7 @@ class MsvcCxxCompiler(MsvcCompiler):
             "includes": [],
             "dprefix": "/D",
             "defines": [],
+            "modules": False,  # set True to enable C++20 module scanning
             "depflags": ["/showIncludes"],
             "objcmd": [
                 "$cxx.cmd",
@@ -634,18 +635,16 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             TuScanSpec,
             build_module_map,
             scan_translation_units,
+            select_modules_scope,
             write_dyndep_from_results,
         )
 
-        cxx_module_pairs = source_obj_by_language.get("cxx_module", [])
-        if not cxx_module_pairs:
-            # No file-extension-tagged module units — skip scanning entirely.
-            # Targets that put partition units only in .cpp files won't be
-            # picked up; users must include at least one .cppm/.ixx/etc.
-            return
-
-        cxx_pairs = source_obj_by_language.get("cxx", [])
+        # Restrict scanning to envs that opted in (extension-driven or
+        # explicit `env.cxx.modules = True`). If no env qualifies, skip.
+        cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
         all_cxx_pairs = cxx_module_pairs + cxx_pairs
+        if not all_cxx_pairs:
+            return
 
         build_dir = project.build_dir
         moddir = "cxx_modules"
@@ -653,7 +652,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         dyndep_rel = "cxx_modules.dyndep"
 
         first_env = None
-        _, first_obj = cxx_module_pairs[0]
+        _, first_obj = all_cxx_pairs[0]
         build_info = getattr(first_obj, "_build_info", None)
         if build_info:
             first_env = build_info.get("env")

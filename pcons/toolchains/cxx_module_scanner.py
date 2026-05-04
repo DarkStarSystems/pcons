@@ -284,6 +284,64 @@ def module_file_for(logical_name: str, mod_dir: str, extension: str) -> str:
     return f"{mod_dir}/{safe}{extension}"
 
 
+def select_modules_scope(
+    source_obj_by_language: dict[str, list[tuple[Path, Any]]],
+) -> tuple[list[tuple[Path, Any]], list[tuple[Path, Any]]]:
+    """Filter C++ TUs to those in envs that have module scanning enabled.
+
+    A C++ environment opts in to module scanning either:
+      - Implicitly: the env has at least one source whose suffix is in
+        CXX_MODULE_INTERFACE_SUFFIXES (so the resolver tagged it as
+        `cxx_module`). This preserves the historical "drop a `.cppm`
+        in the target and pcons figures it out" behavior.
+      - Explicitly: `env.cxx.modules = True`. Use this when your module
+        units live in `.cpp`/`.cc` files (e.g., fmt's primary interface
+        in `.cc`, or a target whose only module use is `import std;`).
+
+    Returns:
+        (cxx_module_pairs, cxx_pairs) restricted to qualifying envs. If
+        no env qualifies, both lists are empty and the toolchain's
+        after_resolve should early-return.
+    """
+    cxx_module_pairs = source_obj_by_language.get("cxx_module", []) or []
+    cxx_pairs = source_obj_by_language.get("cxx", []) or []
+
+    qualifying_env_ids: set[int] = set()
+
+    # Implicit opt-in: any env with an extension-tagged module source.
+    for _, obj_node in cxx_module_pairs:
+        bi = getattr(obj_node, "_build_info", None)
+        if bi is None:
+            continue
+        env = bi.get("env")
+        if env is not None:
+            qualifying_env_ids.add(id(env))
+
+    # Explicit opt-in: env.cxx.modules == True.
+    for _, obj_node in list(cxx_module_pairs) + list(cxx_pairs):
+        bi = getattr(obj_node, "_build_info", None)
+        if bi is None:
+            continue
+        env = bi.get("env")
+        if env is None:
+            continue
+        cxx = getattr(env, "cxx", None)
+        if cxx is not None and bool(getattr(cxx, "modules", False)):
+            qualifying_env_ids.add(id(env))
+
+    def _belongs(obj_node: Any) -> bool:
+        bi = getattr(obj_node, "_build_info", None)
+        if bi is None:
+            return False
+        env = bi.get("env")
+        return env is not None and id(env) in qualifying_env_ids
+
+    return (
+        [pair for pair in cxx_module_pairs if _belongs(pair[1])],
+        [pair for pair in cxx_pairs if _belongs(pair[1])],
+    )
+
+
 def scan_translation_units(
     specs: list[TuScanSpec],
     scanner: str,

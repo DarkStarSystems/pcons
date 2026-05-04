@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Recognize `.ixx`, `.cxxm`, `.c++m` as C++20 module interface units** (in addition to existing `.cppm`). MSVC's preferred `.ixx` extension now works out of the box. The LLVM toolchain forces clang into module mode with `-x c++-module` so any of these extensions compile correctly with clang as well.
 - **`import std;` / `import std.compat;` on MSVC.** When the scanner reports a TU requiring the `std` or `std.compat` logical module, pcons synthesizes a build node for `%VCToolsInstallDir%/modules/std.ixx` (or `std.compat.ixx`), wires its `.ifc` into the dyndep file so importers compile correctly, and adds the resulting `.obj` to the link inputs of every target whose TUs import it. The user's `/std:*` flag (default `/std:c++latest`) is propagated to the std-module compile.
+- **`env.cxx.modules = True` opt-in for module scanning.** Targets whose module units live in `.cpp`/`.cc` files (e.g., fmtlib's `src/fmt.cc` — its primary interface) or whose only module use is `import std;` from a `.cpp` file can now request scanning explicitly. The historical extension-driven trigger (any source with a `.cppm`/`.ixx`/`.cxxm`/`.c++m` extension auto-enables scanning for that env) is preserved as the default, and scanning is restricted per-env so unrelated targets in the same project don't pay the scan cost.
 - **New example `30_cxx_partitions`**: primary interface in `.cppm`, partition interface in `.cpp` (`export module M:P;`), internal partition in `.cpp` (`module M:P;`), module implementation unit, and a consumer. Exercises the scan-driven module detection on both LLVM and MSVC.
+- **New example `31_cxx_modules_optin`**: target whose primary module interface lives in a `.cpp` file, opting in via `env.cxx.modules = True`. Documents the fmtlib-style layout.
 
 ### Changed
 
