@@ -15,6 +15,7 @@ import pytest
 
 from pcons.toolchains.cxx_module_scanner import (
     CxxModuleScannerNotFound,
+    StdModuleFlagSpec,
     TuScanResult,
     TuScanSpec,
     build_module_map,
@@ -22,6 +23,7 @@ from pcons.toolchains.cxx_module_scanner import (
     run_scan_deps,
     run_scan_deps_msvc,
     select_modules_scope,
+    select_std_module_flags,
     wire_std_into_targets,
     write_dyndep_from_results,
 )
@@ -354,3 +356,118 @@ class TestWireStdIntoTargets:
         wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
         assert target.intermediate_nodes.count(std_obj) == 1
         assert target_output.explicit_deps.count(std_obj) == 1
+
+
+_CLANG_LIKE_SPEC = StdModuleFlagSpec(
+    exact=frozenset({"-frtti", "-fno-rtti", "-fexperimental-library"}),
+    prefixes=("-std=", "-stdlib=", "-isysroot="),
+    paired=frozenset({"-target", "-isysroot"}),
+    define_prefix="-D",
+    define_glob_prefixes=("_LIBCPP_",),
+)
+
+
+_MSVC_LIKE_SPEC = StdModuleFlagSpec(
+    exact=frozenset({"/MD", "/MDd", "/MT", "/MTd", "/EHsc", "/GR-"}),
+    prefixes=("/std:", "/Zc:", "/arch:"),
+    paired=frozenset(),
+    define_prefix="/D",
+    define_glob_prefixes=("_HAS_", "_ITERATOR_DEBUG_LEVEL"),
+)
+
+
+class TestSelectStdModuleFlags:
+    """Picks ABI-affecting flags from a user's compile flags so the
+    std-module compile and consumer TUs agree on the std library's ABI.
+
+    Mismatches here range from silent corruption (mismatched RTTI) to
+    iterator heap corruption (`_ITERATOR_DEBUG_LEVEL`) — the spec is
+    load-bearing.
+    """
+
+    def test_clang_minimum_set(self) -> None:
+        # User flags carry the things every std-module compile needs.
+        out = select_std_module_flags(
+            ["-std=c++23", "-stdlib=libc++", "-O2", "-Wall", "-fno-rtti"],
+            _CLANG_LIKE_SPEC,
+        )
+        assert "-std=c++23" in out
+        assert "-stdlib=libc++" in out
+        assert "-fno-rtti" in out
+        # Optimization and warning flags are not ABI-relevant; they must
+        # NOT propagate (or `-Werror` would turn libc++'s deliberate
+        # warnings into hard errors).
+        assert "-O2" not in out
+        assert "-Wall" not in out
+
+    def test_libcxx_define_propagates(self) -> None:
+        # `_LIBCPP_HARDENING_MODE` is the canonical example: the std
+        # module must be compiled with the same value as consumer TUs,
+        # otherwise libc++ ABI varies between them.
+        out = select_std_module_flags(
+            [
+                "-std=c++23",
+                "-D_LIBCPP_HARDENING_MODE=fast",
+                "-DAPP_VERSION=42",
+                "-DFOO",
+            ],
+            _CLANG_LIKE_SPEC,
+        )
+        assert "-D_LIBCPP_HARDENING_MODE=fast" in out
+        # User-app defines unrelated to libc++ must NOT propagate — they
+        # could break the std-module compile or change preprocessor state.
+        assert "-DAPP_VERSION=42" not in out
+        assert "-DFOO" not in out
+
+    def test_paired_flag_carries_value_token(self) -> None:
+        # GCC-style `-target X86_64-...` and `-isysroot /sdk/path`: both
+        # halves must propagate together, in order.
+        out = select_std_module_flags(
+            ["-std=c++23", "-target", "x86_64-apple-darwin", "-O2"],
+            _CLANG_LIKE_SPEC,
+        )
+        i_target = out.index("-target")
+        assert out[i_target + 1] == "x86_64-apple-darwin"
+
+    def test_paired_flag_at_end_is_dropped(self) -> None:
+        # If a paired flag appears as the last token (no value), drop it
+        # rather than spilling off the end.
+        out = select_std_module_flags(["-target"], _CLANG_LIKE_SPEC)
+        assert out == []
+
+    def test_msvc_runtime_library_propagates(self) -> None:
+        # `/MDd` vs `/MD` is the canonical MSVC ABI footgun: a debug-CRT
+        # consumer linked with a release-CRT std module is undefined
+        # behavior. The spec MUST carry it.
+        out = select_std_module_flags(
+            ["/std:c++latest", "/MDd", "/Zc:char8_t-", "/Wall", "/O2"],
+            _MSVC_LIKE_SPEC,
+        )
+        assert "/std:c++latest" in out
+        assert "/MDd" in out
+        assert "/Zc:char8_t-" in out
+        assert "/Wall" not in out
+        assert "/O2" not in out
+
+    def test_msvc_iterator_debug_level_propagates(self) -> None:
+        # `_ITERATOR_DEBUG_LEVEL` mismatch corrupts the heap. Must propagate.
+        out = select_std_module_flags(
+            ["/std:c++latest", "/D_ITERATOR_DEBUG_LEVEL=2", "/DUSER_FOO=1"],
+            _MSVC_LIKE_SPEC,
+        )
+        assert "/D_ITERATOR_DEBUG_LEVEL=2" in out
+        assert "/DUSER_FOO=1" not in out
+
+    def test_preserves_input_order(self) -> None:
+        # Order matters for prefixes that override later (e.g., the user
+        # writing `-stdlib=libstdc++` after pcons inserts `-stdlib=libc++`).
+        out = select_std_module_flags(
+            ["-stdlib=libc++", "-std=c++20", "-D_LIBCPP_FOO=1", "-frtti"],
+            _CLANG_LIKE_SPEC,
+        )
+        assert out == [
+            "-stdlib=libc++",
+            "-std=c++20",
+            "-D_LIBCPP_FOO=1",
+            "-frtti",
+        ]

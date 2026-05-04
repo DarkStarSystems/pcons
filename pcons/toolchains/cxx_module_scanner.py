@@ -437,6 +437,77 @@ def build_module_map(
     return mapping
 
 
+@dataclass
+class StdModuleFlagSpec:
+    """Categorizes which user flags to carry onto the `import std;` compile.
+
+    The standard-library module's `.pcm` / `.ifc` is consumed by user TUs,
+    so it must agree with them on every flag that affects ABI or what
+    the standard library's headers expose. Build systems can't pass *all*
+    user flags (some break the std-module compile — `-Werror`, user
+    `-I`s, unrelated `-D`s) so we filter:
+
+    Attributes:
+        exact: full-flag matches that are pure passthrough
+            (e.g. ``"-fno-rtti"``).
+        prefixes: flag prefixes that carry a value as one token
+            (e.g. ``("-std=", "-stdlib=", "-isysroot=")``).
+        paired: flags that take the value as the *next* token
+            (e.g. ``{"-target", "-isysroot"}`` — passed as
+            ``-target X``).
+        define_prefix: the toolchain's define flag prefix (``"-D"`` or
+            ``"/D"``); used together with ``define_glob_prefixes`` to
+            select user defines that must propagate.
+        define_glob_prefixes: macro-name prefixes whose ``-Dfoo[=...]``
+            invocations carry through. Used for stdlib feature-test
+            macros — ``("_LIBCPP_",)`` for libc++, ``("_HAS_",
+            "_ITERATOR_DEBUG_LEVEL", "_CONTAINER_DEBUG_LEVEL")`` for
+            MSVC's STL.
+    """
+
+    exact: frozenset[str]
+    prefixes: tuple[str, ...]
+    paired: frozenset[str]
+    define_prefix: str
+    define_glob_prefixes: tuple[str, ...]
+
+
+def select_std_module_flags(
+    base_flags: list[str], spec: StdModuleFlagSpec
+) -> list[str]:
+    """Pick ABI-affecting flags from the user's compile flags.
+
+    Walks ``base_flags`` once. Per the spec, copies exact-match flags,
+    prefix-match flags (with their values), pair flags (with the
+    following token), and stdlib-relevant ``-D`` defines. Order is
+    preserved.
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(base_flags):
+        f = base_flags[i]
+        if f in spec.exact:
+            out.append(f)
+            i += 1
+            continue
+        if spec.prefixes and f.startswith(spec.prefixes):
+            out.append(f)
+            i += 1
+            continue
+        if f in spec.paired and i + 1 < len(base_flags):
+            out.extend([f, base_flags[i + 1]])
+            i += 2
+            continue
+        if spec.define_prefix and f.startswith(spec.define_prefix):
+            macro = f[len(spec.define_prefix) :]
+            if spec.define_glob_prefixes and macro.startswith(
+                spec.define_glob_prefixes
+            ):
+                out.append(f)
+        i += 1
+    return out
+
+
 def wire_std_into_targets(
     project: Any,
     results: list[TuScanResult],

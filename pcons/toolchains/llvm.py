@@ -67,8 +67,22 @@ def _parse_libcxx_manifest(manifest: Path) -> dict[str, dict[str, Any]]:
 
     Resolves `source-path` and `system-include-directories` to absolute
     paths (the manifest stores them relative to its own directory).
+
+    Refuses unknown manifest versions: the libc++ team has reserved
+    ``version`` for breaking format changes (``revision`` is for
+    additive ones we can ignore). If the version doesn't match what
+    pcons knows, we raise — silently misparsing a future format would
+    produce hard-to-diagnose downstream failures.
     """
     data = json.loads(manifest.read_text(encoding="utf-8"))
+    version = data.get("version")
+    if version is not None and version != 1:
+        raise RuntimeError(
+            f"libc++ modules manifest at {manifest} declares version "
+            f"{version!r}, but pcons only knows version 1. The format may "
+            "have changed in your libc++; please update pcons or file an "
+            "issue with the manifest contents."
+        )
     base = manifest.parent
     out: dict[str, dict[str, Any]] = {}
     for entry in data.get("modules", []) or []:
@@ -83,6 +97,66 @@ def _parse_libcxx_manifest(manifest: Path) -> dict[str, dict[str, Any]]:
             "system-include-directories": [(base / d).resolve() for d in sys_inc],
         }
     return out
+
+
+# ABI-affecting flags that must match between the std-module compile and
+# the user's TUs that import it. Mismatches here range from silent ABI
+# corruption (e.g. -frtti vs -fno-rtti) to link errors (e.g. exception
+# model). Adapted from CMake's `cmake-cxxmodules` propagation list +
+# libc++ documentation; expand if a user reports a mismatch we missed.
+def _clang_std_module_flag_spec() -> Any:
+    """Build the clang/libc++ flag-passthrough spec lazily.
+
+    Defined as a function so the import order doesn't force the scanner
+    module to be loaded at llvm.py import time (it's an implementation
+    detail).
+    """
+    from pcons.toolchains.cxx_module_scanner import StdModuleFlagSpec
+
+    return StdModuleFlagSpec(
+        # Exception/RTTI model, libc++ experimental switch, common ABI knobs.
+        exact=frozenset(
+            {
+                "-fexceptions",
+                "-fno-exceptions",
+                "-frtti",
+                "-fno-rtti",
+                "-fexperimental-library",
+                "-fno-experimental-library",
+                "-pthread",
+                "-fopenmp",
+                "-stdlib=libc++",
+                "-stdlib=libstdc++",
+                "-m32",
+                "-m64",
+            }
+        ),
+        # `-std=c++23`, `-stdlib=libc++`, `-isysroot=/p`, `-arch=x86_64`,
+        # `-march=...`, `--target=...`, plus a handful of ABI-relevant
+        # flags that take a value attached to the prefix.
+        prefixes=(
+            "-std=",
+            "-stdlib=",
+            "--target=",
+            "-isysroot=",
+            "--sysroot=",
+            "-march=",
+            "-mcpu=",
+            "-mtune=",
+            "-arch=",
+        ),
+        # GCC-style two-token spellings — Apple Clang in particular uses
+        # `-isysroot /path` and `-arch x86_64` rather than the
+        # equals-attached form.
+        paired=frozenset({"-target", "-isysroot", "-arch", "--sysroot"}),
+        # Pass user `-D_LIBCPP_*` defines: the std module is sensitive to
+        # libc++ feature-test / configuration macros (e.g.
+        # `_LIBCPP_HARDENING_MODE`, `_LIBCPP_ENABLE_EXPERIMENTAL`).
+        # `__GLIBCXX__` is included for forward-compat in case libstdc++
+        # ever ships its own modules manifest.
+        define_prefix="-D",
+        define_glob_prefixes=("_LIBCPP_", "__GLIBCXX_"),
+    )
 
 
 class ClangCCompiler(BaseTool):
@@ -711,19 +785,22 @@ class LlvmToolchain(UnixToolchain):
             )
         modules = _parse_libcxx_manifest(manifest)
 
-        # Carry the user's -std and -stdlib (and a few related) flags onto
-        # the std-module compile so the PCM is ABI-compatible with importer
-        # code. The std module needs at least C++20.
-        carry_prefixes = ("-std=", "-stdlib=", "-fexperimental-library", "--target=")
-        passthrough = [f for f in base_flags if f.startswith(carry_prefixes)]
-        # GCC-style "-target X86_64..." pair flag — keep both halves.
-        i = 0
-        while i < len(base_flags):
-            if base_flags[i] == "-target" and i + 1 < len(base_flags):
-                passthrough.extend([base_flags[i], base_flags[i + 1]])
-                i += 2
-            else:
-                i += 1
+        # Pick ABI-affecting flags from the user's compile flags AND from
+        # env.cxx.defines (where users typically put `_LIBCPP_HARDENING_MODE`
+        # and other libc++ feature-test macros).
+        from pcons.toolchains.cxx_module_scanner import select_std_module_flags
+
+        cxx_tool = getattr(first_env, "cxx", None) if first_env else None
+        env_defines = list(getattr(cxx_tool, "defines", None) or [])
+        dprefix = str(getattr(cxx_tool, "dprefix", "-D") or "-D")
+        all_user_flags = list(base_flags) + [f"{dprefix}{d}" for d in env_defines]
+
+        passthrough = select_std_module_flags(
+            all_user_flags, _clang_std_module_flag_spec()
+        )
+        # The std module needs at least C++20 and libc++; if the user
+        # didn't say, default sensibly so the std-module compile doesn't
+        # fail in a confusing way.
         if not any(f.startswith("-std=") for f in passthrough):
             passthrough.insert(0, "-std=c++20")
         if not any(f.startswith("-stdlib=") for f in passthrough):
@@ -757,9 +834,12 @@ class LlvmToolchain(UnixToolchain):
             cmd_list: list[str] = [
                 compiler_cmd,
                 *passthrough,
-                # `std` starts with a reserved identifier — clang warns by default.
+                # `std` starts with a reserved identifier and libc++'s
+                # std.cppm uses reserved user-defined literals; both
+                # warn under -Werror unless suppressed.
                 "-Wno-reserved-module-identifier",
                 "-Wno-reserved-identifier",
+                "-Wno-reserved-user-defined-literal",
                 *(f"-isystem{d}" for d in sys_includes),
                 "-x",
                 "c++-module",

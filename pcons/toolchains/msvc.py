@@ -89,6 +89,78 @@ def _find_msvc_modules_dir() -> Path | None:
     return None
 
 
+# ABI-affecting flags that must match between the std-module compile and
+# user TUs that import it. The big-ticket items on MSVC are the runtime
+# library (`/MD` vs `/MDd` etc. — Microsoft's STL changes ABI based on
+# this), `_ITERATOR_DEBUG_LEVEL`, and `/Zc:*` conformance flags. Adapted
+# from MSVC's STL configuration documentation; expand if a user reports
+# a mismatch we missed.
+def _msvc_std_module_flag_spec() -> Any:
+    """Build the MSVC flag-passthrough spec lazily.
+
+    Defined as a function to avoid circular imports between this module
+    and ``cxx_module_scanner``.
+    """
+    from pcons.toolchains.cxx_module_scanner import StdModuleFlagSpec
+
+    return StdModuleFlagSpec(
+        # Runtime-library, exception model, RTTI, conformance, coroutines,
+        # CLR — all flip ABI for Microsoft's STL.
+        exact=frozenset(
+            {
+                "/MD",
+                "/MDd",
+                "/MT",
+                "/MTd",
+                "/EHs",
+                "/EHsc",
+                "/EHa",
+                "/EHr",
+                "/EHs-",
+                "/EHsc-",
+                "/EHa-",
+                "/GR",
+                "/GR-",
+                "/permissive",
+                "/permissive-",
+                "/await",
+                "/await:strict",
+                "/clr",
+                "/clr:pure",
+                "/clr:safe",
+                "/clr:netcore",
+                "/bigobj",
+            }
+        ),
+        # `/std:c++latest`, `/Zc:char8_t-`, `/arch:AVX2`, etc. — values
+        # are attached to the prefix.
+        prefixes=(
+            "/std:",
+            "/Zc:",
+            "/arch:",
+            "--target=",
+        ),
+        # MSVC very rarely uses GCC-style paired flags (clang-cl
+        # accepts `--target X` though).
+        paired=frozenset({"--target"}),
+        # User defines that configure Microsoft's STL must propagate.
+        # `_ITERATOR_DEBUG_LEVEL` and `_CONTAINER_DEBUG_LEVEL` must match
+        # between std.ifc and consumers or you get heap-corrupting iter
+        # mismatches. `_HAS_*` toggles language-version-conditional
+        # features. `_CRT_*` configures the CRT itself. `_LIBCPP_*` is
+        # included on the off-chance someone uses libc++ on Windows.
+        define_prefix="/D",
+        define_glob_prefixes=(
+            "_HAS_",
+            "_ITERATOR_DEBUG_LEVEL",
+            "_CONTAINER_DEBUG_LEVEL",
+            "_SECURE_SCL",
+            "_CRT_",
+            "_LIBCPP_",
+        ),
+    )
+
+
 def _find_msvc_bin_dir() -> Path | None:
     """Find the MSVC bin directory via vswhere.
 
@@ -837,16 +909,25 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                 "or that vswhere can locate the VS install."
             )
 
-        # Carry the user's /std:* (and any other passthrough flags) onto the
-        # std-module compile so the IFC is compatible with importer code.
-        passthrough = [
-            f for f in base_flags if f.startswith(("/std:", "/EHsc", "/MD", "/MT"))
-        ]
-        # /std:c++latest is the safest default if the user didn't specify;
-        # the std module needs at least C++23.
+        # Pick ABI-affecting flags from env.cxx.flags AND env.cxx.defines.
+        # Microsoft's STL is very ABI-sensitive: a `/MDd` consumer linked
+        # against a `/MD`-built std.obj is undefined behavior, and a
+        # mismatched `_ITERATOR_DEBUG_LEVEL` corrupts the heap.
+        from pcons.toolchains.cxx_module_scanner import select_std_module_flags
+
+        cxx_tool = getattr(first_env, "cxx", None) if first_env else None
+        env_defines = list(getattr(cxx_tool, "defines", None) or [])
+        dprefix = str(getattr(cxx_tool, "dprefix", "/D") or "/D")
+        all_user_flags = list(base_flags) + [f"{dprefix}{d}" for d in env_defines]
+
+        passthrough = select_std_module_flags(
+            all_user_flags, _msvc_std_module_flag_spec()
+        )
+        # The std module needs at least C++23. /std:c++latest is the
+        # safest default; /EHsc is required for std module compilation.
         if not any(f.startswith("/std:") for f in passthrough):
             passthrough.insert(0, "/std:c++latest")
-        if "/EHsc" not in passthrough:
+        if not any(f in {"/EHs", "/EHsc", "/EHa"} for f in passthrough):
             passthrough.append("/EHsc")
 
         std_obj_nodes: dict[str, FileNode] = {}

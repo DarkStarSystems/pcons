@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`import std;` / `import std.compat;` on clang/libc++.** Brings the LLVM toolchain to parity with MSVC (shipped in 0.15.0). When the scanner reports a TU requiring `std`, pcons queries the available clang for `libc++.modules.json` (`clang++ -stdlib=libc++ -print-file-name=c++/libc++.modules.json`), parses it to find `std.cppm` and the system include directories, synthesizes a build node that compiles the std module with the user's `-std=` / `-stdlib=` flags, and links the resulting `.o` into every target whose TUs import `std`. Requires Homebrew LLVM on macOS (Apple Clang doesn't ship the manifest yet) or libc++-dev (≥ 18) on Linux.
 - **New example `32_cxx_import_std`**: a C++23 program built with `import std;` — exercises the std-module wiring on both MSVC and clang/libc++. Self-skips on platforms without a usable std module.
 
+### Improved
+
+- **ABI-flag passthrough on the std-module compile.** Both MSVC and clang now categorize the user's compile flags into a passthrough spec (`select_std_module_flags` in `cxx_module_scanner`) and carry only the ABI-affecting ones onto the std-module build:
+  - On clang: `-std=`, `-stdlib=`, `-fexceptions`/`-fno-exceptions`, `-frtti`/`-fno-rtti`, `-fexperimental-library`, `-isysroot`, `--target=`, `-arch`, `-march=`, plus any user `-D_LIBCPP_*` define (so `_LIBCPP_HARDENING_MODE` and similar libc++ feature-test macros stay in sync between std.pcm and consumers).
+  - On MSVC: `/MD`, `/MDd`, `/MT`, `/MTd` (runtime library — was a real ABI footgun previously), `/EHs*`, `/GR`/`/GR-`, `/permissive`/`/permissive-`, `/await*`, `/clr*`, `/Zc:*`, `/std:*`, `/arch:*`, plus user `/D_HAS_*`, `/D_ITERATOR_DEBUG_LEVEL`, `/D_CONTAINER_DEBUG_LEVEL`, `/D_SECURE_SCL`, `/D_CRT_*` defines (so iterator debug level matches between std.ifc and consumers — mismatches here corrupt the heap).
+  - User defines also get pulled from `env.cxx.defines`, not only `env.cxx.flags`.
+- **Reject unknown libc++ manifest versions.** `libc++.modules.json` declares `version` for breaking format changes; pcons now refuses to parse a future version rather than silently misinterpret it.
+- **Suppress `-Wreserved-user-defined-literal`** on the clang std-module compile (libc++'s `std.cppm` uses reserved UDLs that would fail under user `-Werror`).
+
 ### Refactor
 
 - `wire_std_into_targets` (the helper that links the synthesized std-module `.o`/`.obj` into every importing target) moved from `pcons/toolchains/msvc.py` to `pcons/toolchains/cxx_module_scanner.py` so both toolchains share one implementation.

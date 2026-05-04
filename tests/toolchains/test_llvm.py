@@ -544,3 +544,36 @@ class TestLibcxxModulesManifest:
         modules = _parse_libcxx_manifest(manifest)
         assert list(modules.keys()) == ["std"]
         assert modules["std"]["system-include-directories"] == []
+
+    def test_parse_rejects_unknown_version(self, tmp_path: Path) -> None:
+        # libc++ reserved `version` for breaking format changes. If the
+        # manifest declares a version we don't know, refuse rather than
+        # silently misparse — a future format could put `source-path`
+        # somewhere else, and we'd happily build the wrong file.
+        import json as _json
+
+        from pcons.toolchains.llvm import _parse_libcxx_manifest
+
+        manifest = tmp_path / "libc++.modules.json"
+        manifest.write_text(
+            _json.dumps({"version": 2, "modules": []}), encoding="utf-8"
+        )
+        with pytest.raises(RuntimeError, match="version"):
+            _parse_libcxx_manifest(manifest)
+
+    def test_parse_accepts_missing_version_field(self, tmp_path: Path) -> None:
+        # A manifest with no `version` field is treated as legacy — accept
+        # it. (Some early LLVM packages shipped this shape.)
+        import json as _json
+
+        from pcons.toolchains.llvm import _parse_libcxx_manifest
+
+        manifest = tmp_path / "libc++.modules.json"
+        manifest.write_text(
+            _json.dumps(
+                {"modules": [{"logical-name": "std", "source-path": "x.cppm"}]}
+            ),
+            encoding="utf-8",
+        )
+        modules = _parse_libcxx_manifest(manifest)
+        assert list(modules.keys()) == ["std"]
