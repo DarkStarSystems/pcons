@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-05-04
+
 ### Added
 
 - **`import std;` / `import std.compat;` on clang/libc++.** Brings the LLVM toolchain to parity with MSVC (shipped in 0.15.0). When the scanner reports a TU requiring `std`, pcons queries the available clang for `libc++.modules.json` (`clang++ -stdlib=libc++ -print-file-name=c++/libc++.modules.json`), parses it to find `std.cppm` and the system include directories, synthesizes a build node that compiles the std module with the user's `-std=` / `-stdlib=` flags, and links the resulting `.o` into every target whose TUs import `std`. Requires Homebrew LLVM on macOS (Apple Clang doesn't ship the manifest yet) or libc++-dev (≥ 18) on Linux.
@@ -794,7 +796,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/DarkStarSystems/pcons/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/DarkStarSystems/pcons/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/DarkStarSystems/pcons/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/DarkStarSystems/pcons/compare/v0.13.0...v0.14.0
