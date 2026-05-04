@@ -252,7 +252,7 @@ jobs:
       - name: Build package
         run: uv build
       - name: Sign distributions with Sigstore
-        uses: sigstore/gh-action-sigstore-python@f514d46b907ebcd5bedc05145c03b69c1edd8b46 # v3.0.0
+        uses: sigstore/gh-action-sigstore-python@04cffa1d795717b140764e8b640de88853c92acc # v3.3.0
         with:
           inputs: ./dist/*.tar.gz ./dist/*.whl
           upload-signing-artifacts: false
