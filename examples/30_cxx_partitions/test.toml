@@ -1,0 +1,22 @@
+# Test configuration for the cxx_partitions example
+
+[test]
+description = "C++20 module partitions: interface partition + internal partition + module impl unit, all in .cpp files"
+
+expected_outputs = [
+    "build/obj.hello/src/Calc.cppm.o",
+    "build/obj.hello/src/Constants.cpp.o",
+    "build/obj.hello/src/Helpers.cpp.o",
+    "build/obj.hello/src/Calc_impl.cpp.o",
+    "build/obj.hello/src/main.cpp.o",
+    "build/hello",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_exit_code = 0 },
+]
+
+[skip]
+requires = ["clang-scan-deps", "clang++"]
+generators = ["xcode", "make"]

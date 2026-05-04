@@ -108,6 +108,11 @@ class BuildInfo(TypedDict, total=False):
     # These are written as Ninja build-level variables
     variables: dict[str, str]
 
+    # Ninja dyndep file path (relative to build dir) for build statements
+    # whose dynamic dependencies live in an external dyndep file. Used by
+    # the C++ module and Fortran module scanners.
+    dyndep: str
+
     # Environment reference for command expansion
     # Used by resolver to expand command templates
     env: Any  # Environment, but avoid circular import

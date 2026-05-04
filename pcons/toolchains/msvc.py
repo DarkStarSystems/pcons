@@ -61,6 +61,34 @@ def _find_msvc_install() -> Path | None:
     return None
 
 
+def _find_msvc_modules_dir() -> Path | None:
+    """Find the MSVC C++ standard library modules directory.
+
+    Microsoft ships `std.ixx` and `std.compat.ixx` under
+    `%VCToolsInstallDir%/modules/`. We try, in order:
+        1. The VCToolsInstallDir env var (set by vcvars64.bat).
+        2. vswhere → VC/Tools/MSVC/<version>/modules/.
+    Returns None if no `std.ixx` is found.
+    """
+    env_root = os.environ.get("VCToolsInstallDir")
+    if env_root:
+        modules = Path(env_root) / "modules"
+        if (modules / "std.ixx").exists():
+            return modules
+
+    vs_path = _find_msvc_install()
+    if vs_path is None:
+        return None
+    vc_tools = vs_path / "VC" / "Tools" / "MSVC"
+    if not vc_tools.exists():
+        return None
+    for version_dir in sorted(vc_tools.iterdir(), reverse=True):
+        modules = version_dir / "modules"
+        if (modules / "std.ixx").exists():
+            return modules
+    return None
+
+
 def _find_msvc_bin_dir() -> Path | None:
     """Find the MSVC bin directory via vswhere.
 
@@ -696,6 +724,15 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             specs, scanner=compiler_cmd, scanner_style="msvc"
         )
 
+        # `import std;`/`import std.compat;` support: if any TU requires the
+        # standard library module, synthesize a build node for it from
+        # %VCToolsInstallDir%/modules/std.ixx. The synthetic TU is appended
+        # to `results` so build_module_map() registers it and the dyndep
+        # file declares the .ifc as an implicit output.
+        std_obj_nodes = self._inject_std_module_builds(
+            project, build_dir, moddir, compiler_cmd, base_flags, results, first_env
+        )
+
         # Build logical-name -> IFC path map (handles partitions: ':' -> '-').
         module_to_ifc = build_module_map(results, moddir, ".ifc")
 
@@ -708,6 +745,10 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         }
         for r in results:
             if not r.is_module_provider:
+                continue
+            # Skip synthetic std-module entries — their flags are already in
+            # the literal command list, not in a CompileLinkContext.
+            if id(r.spec) not in spec_to_obj:
                 continue
             obj_node = spec_to_obj[id(r.spec)]
             bi = getattr(obj_node, "_build_info", None)
@@ -739,6 +780,168 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             if bi is not None:
                 bi["dyndep"] = dyndep_rel
             obj_node.implicit_deps.append(dyndep_node)
+        for std_obj_node in std_obj_nodes.values():
+            std_bi = std_obj_node._build_info
+            assert std_bi is not None  # set in _inject_std_module_builds
+            std_bi["dyndep"] = dyndep_rel
+            std_obj_node.implicit_deps.append(dyndep_node)
+
+        # Add the synthesized std/std.compat .obj files to the link inputs of
+        # every target whose TUs import them, so the standard module's
+        # explicit-instantiation symbols resolve at link time.
+        if std_obj_nodes:
+            self._wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+
+    def _inject_std_module_builds(
+        self,
+        project: Project,
+        build_dir: Path,
+        moddir: str,
+        compiler_cmd: str,
+        base_flags: list[str],
+        results: list[Any],
+        first_env: Environment | None,
+    ) -> dict[str, FileNode]:
+        """Synthesize build nodes for `import std;` / `import std.compat;`.
+
+        If the scan reports that any TU requires the `std` or `std.compat`
+        logical module, locate Microsoft's `std.ixx` / `std.compat.ixx`
+        under `%VCToolsInstallDir%/modules/`, create a build node that
+        compiles them, and append a synthetic TuScanResult to `results` so
+        the dyndep file declares the corresponding .ifc as an implicit
+        output.
+
+        Returns:
+            Dict mapping logical module name -> std obj FileNode for
+            modules that were synthesized. Caller is responsible for
+            wiring these into target link inputs.
+        """
+        from pcons.toolchains.cxx_module_scanner import TuScanResult, TuScanSpec
+
+        required_logical_names: set[str] = set()
+        for r in results:
+            for ln in r.required_logical_names:
+                required_logical_names.add(ln)
+
+        wanted = required_logical_names & {"std", "std.compat"}
+        if not wanted:
+            return {}
+
+        std_modules_dir = _find_msvc_modules_dir()
+        if std_modules_dir is None:
+            raise RuntimeError(
+                "`import std;` was used, but pcons could not locate "
+                "Microsoft's STL modules directory. It expects "
+                "`%VCToolsInstallDir%/modules/std.ixx` to exist; ensure "
+                "VCToolsInstallDir is set (typically by running vcvars64.bat) "
+                "or that vswhere can locate the VS install."
+            )
+
+        # Carry the user's /std:* (and any other passthrough flags) onto the
+        # std-module compile so the IFC is compatible with importer code.
+        passthrough = [
+            f for f in base_flags if f.startswith(("/std:", "/EHsc", "/MD", "/MT"))
+        ]
+        # /std:c++latest is the safest default if the user didn't specify;
+        # the std module needs at least C++23.
+        if not any(f.startswith("/std:") for f in passthrough):
+            passthrough.insert(0, "/std:c++latest")
+        if "/EHsc" not in passthrough:
+            passthrough.append("/EHsc")
+
+        std_obj_nodes: dict[str, FileNode] = {}
+        for logical in sorted(wanted):
+            ixx_name = "std.ixx" if logical == "std" else "std.compat.ixx"
+            ixx_path = std_modules_dir / ixx_name
+            if not ixx_path.exists():
+                logger.warning(
+                    "import %s was requested but %s does not exist; skipping",
+                    logical,
+                    ixx_path,
+                )
+                continue
+
+            ifc_rel = f"{moddir}/{logical}.ifc"
+            obj_rel = f"{moddir}/{logical}.obj"
+            obj_path = build_dir / obj_rel
+
+            std_obj_node = project.node(obj_path)
+            std_obj_node._build_info = {
+                "tool": "cxx",
+                "command_var": "stdmodcmd",
+                "description": f"CXX {logical} module",
+                "sources": [project.node(ixx_path)],
+                "command": [
+                    compiler_cmd,
+                    "/nologo",
+                    *passthrough,
+                    "/c",
+                    "/TP",
+                    "/interface",
+                    "/ifcOutput",
+                    ifc_rel,
+                    f"/Fo{obj_rel}",
+                    str(ixx_path).replace("\\", "/"),
+                ],
+            }
+            if first_env is not None:
+                first_env.register_node(std_obj_node)
+
+            # Synthesize a TuScanResult so build_module_map() picks up `std`
+            # and write_dyndep_from_results() emits a `build <obj> | <ifc>`
+            # entry for it.
+            synthetic_spec = TuScanSpec(
+                src=ixx_path,
+                obj_rel=obj_rel,
+                compiler=compiler_cmd,
+                compile_flags=[],
+            )
+            synthetic_p1689 = {
+                "rules": [
+                    {
+                        "primary-output": obj_rel,
+                        "provides": [{"logical-name": logical, "is-interface": True}],
+                    }
+                ]
+            }
+            results.append(TuScanResult(spec=synthetic_spec, p1689=synthetic_p1689))
+            std_obj_nodes[logical] = std_obj_node
+
+        return std_obj_nodes
+
+    def _wire_std_into_targets(
+        self,
+        project: Project,
+        results: list[Any],
+        spec_to_obj: dict[int, FileNode],
+        std_obj_nodes: dict[str, FileNode],
+    ) -> None:
+        """Add std/std.compat .obj files to the link inputs of importing targets.
+
+        Detects, per project target, whether any of its TUs require `std` or
+        `std.compat`, and appends the corresponding synthesized .obj to the
+        target's intermediate_nodes (so the link rule sees it) and its
+        output nodes' explicit_deps (so the build graph has the dependency).
+        """
+        # Reverse map: obj_node id -> scan result, for lookups below.
+        obj_id_to_required: dict[int, set[str]] = {}
+        for r in results:
+            obj_node = spec_to_obj.get(id(r.spec))
+            if obj_node is None:
+                continue
+            obj_id_to_required[id(obj_node)] = set(r.required_logical_names)
+
+        for target in project.targets:
+            target_required: set[str] = set()
+            for obj_node in target.intermediate_nodes:
+                target_required.update(obj_id_to_required.get(id(obj_node), set()))
+            for logical, std_obj_node in std_obj_nodes.items():
+                if logical in target_required:
+                    if std_obj_node not in target.intermediate_nodes:
+                        target.intermediate_nodes.append(std_obj_node)
+                    for output_node in target.output_nodes:
+                        if std_obj_node not in output_node.explicit_deps:
+                            output_node.explicit_deps.append(std_obj_node)
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply build variant with MSVC flags.
