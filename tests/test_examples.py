@@ -267,41 +267,113 @@ def should_skip(config: dict[str, Any]) -> str | None:
         if not os.environ.get(var):
             return f"Required environment variable '{var}' not set"
 
-    # Check whether `import std;` is supported by the toolchain pcons would
-    # pick. On Windows we expect MSVC (which has its own std-module path);
-    # there we just check that cl.exe is on PATH. On macOS/Linux we expect
-    # clang, and we probe for libc++.modules.json — Apple Clang and many
-    # libstdc++ installs don't ship it (skip), while brew LLVM and recent
-    # libc++ packages do.
-    if skip_config.get("requires_libcxx_std_module"):
-        if current_platform == "windows":
-            if shutil.which("cl.exe") is None and shutil.which("cl") is None:
-                return "cl.exe not on PATH — run vcvars64.bat first"
-        else:
-            clang = shutil.which("clang++") or shutil.which("clang")
-            if clang is None:
-                return "clang not found (needed for libc++ std module check)"
-            try:
-                proc = subprocess.run(
-                    [
-                        clang,
-                        "-stdlib=libc++",
-                        "-print-file-name=c++/libc++.modules.json",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    check=False,
-                )
-            except OSError:
-                return "could not invoke clang to probe libc++ std module"
-            out = proc.stdout.strip()
-            if not out or out == "c++/libc++.modules.json" or not Path(out).is_file():
-                return (
-                    "libc++.modules.json not available — `import std;` on clang "
-                    "needs Homebrew LLVM (macOS) or libc++-dev (Linux)"
-                )
+    def _check_msvc_module_support() -> bool | str:
+        """On Windows we expect MSVC (which has its own std-module path).
+        There we just check that cl.exe is on PATH.
+        """
+        if shutil.which("cl.exe") is None and shutil.which("cl") is None:
+            return "cl.exe not on PATH — run vcvars64.bat first"
 
-    return None
+    def _check_libcxx_std_module_support() -> bool | str:
+        """Check for libc++ std module support.
+        Check clang is on PATH and use internal manifest lookup
+        to check for libc++ std module support.
+        """
+        clang = shutil.which("clang++") or shutil.which("clang")
+        if clang is None:
+            return "clang not found (needed for libc++ std module check)"
+        from pcons.toolchains.llvm import _find_libcxx_modules_manifest
+
+        if _find_libcxx_modules_manifest(clang, []) is None:
+            return "libc++.modules.json not found - libc++ std module support requires Homebrew LLVM (macOS) or libc++-dev (Linux)"
+
+    def _check_gcc_std_module_support() -> bool | str:
+        """Check for GCC std module support.
+        Check g++ is on PATH and use internal source lookup
+        to check for GCC std module support.
+        """
+        gxx = shutil.which("g++")
+        if gxx is None:
+            return "g++ not found (needed for GCC std module check)"
+        from pcons.toolchains.gcc import _find_gcc_std_module_source
+
+        if _find_gcc_std_module_source(gxx, "std", []) is None:
+            return "GCC std module support requires GCC 15+ with libstdc++"
+
+    # check for C++ std module support if required by the test config
+    if skip_config.get("requires_cxx_std_module"):
+        toolchain = config.get("toolchain")
+        if toolchain is None:
+            # toolchain not specified:
+            #   - On Windows, assume MSVC
+            #   - On MacOs, assume clang
+            #   - On Linux, check for gcc then clang
+            if current_platform == "windows":
+                if (check := _check_msvc_module_support()) is not None:
+                    return check
+            elif current_platform == "darwin":
+                if (check := _check_libcxx_std_module_support()) is not None:
+                    return check
+            else:  # assume linux
+                if (check := _check_gcc_std_module_support()) is not None:
+                    return check
+                if (check := _check_libcxx_std_module_support()) is not None:
+                    return check
+        else:
+            if toolchain == "msvc":
+                if (check := _check_msvc_module_support()) is not None:
+                    return check
+            elif toolchain == "llvm":
+                if (check := _check_libcxx_std_module_support()) is not None:
+                    return check
+            elif toolchain == "gcc":
+                if (check := _check_gcc_std_module_support()) is not None:
+                    return check
+    return None  # not skipped
+
+
+def _toolchain_is_available(toolchain: str, current_platform: str) -> bool:
+    """Check whether a requested toolchain is available on this host."""
+    if toolchain == "msvc":
+        return current_platform == "windows" and (
+            shutil.which("cl.exe") is not None or shutil.which("cl") is not None
+        )
+
+    if toolchain == "llvm":
+        clang = shutil.which("clang++") or shutil.which("clang")
+        if clang is None:
+            return False
+        return True
+
+    if toolchain == "gcc":
+        gxx = shutil.which("g++")
+        if gxx is None:
+            return False
+        return True
+
+    return False
+
+
+def get_requested_toolchains(config: dict[str, Any]) -> list[str | None]:
+    """Get requested toolchains for the current platform from test config."""
+    current_platform = platform.system().lower()
+    test_config = config.get("test", {})
+
+    toolchains_table = config.get("toolchains")
+    if isinstance(toolchains_table, dict):
+        requested_toolchains = toolchains_table.get(current_platform)
+    else:
+        requested_toolchains = get_platform_value(test_config, "toolchains")
+
+    # Backward-compatible fallback to toolchains_<platform> in [test]
+    if requested_toolchains is None:
+        requested_toolchains = get_platform_value(test_config, "toolchains")
+
+    if requested_toolchains is None:
+        single_toolchain = get_platform_value(test_config, "toolchain")
+        return [single_toolchain] if single_toolchain else [None]
+
+    return list(requested_toolchains)
 
 
 def adapt_outputs_for_generator(
@@ -441,6 +513,7 @@ def _run_generate(
     generator: str,
     test_config: dict[str, Any],
     variant: str | None = None,
+    variables: dict[str, str] | None = None,
 ) -> None:
     """Run the build script to generate build files.
 
@@ -451,6 +524,7 @@ def _run_generate(
         generator: Generator name.
         test_config: Test configuration dict.
         variant: Optional variant name (e.g., "debug", "release").
+        variables: Optional build variables (KEY=value) for the build script.
     """
     if invocation == "direct":
         from pcons.cli import run_script
@@ -458,7 +532,11 @@ def _run_generate(
         build_script = work_dir / "pcons-build.py"
         try:
             exit_code, _projects = run_script(
-                build_script, build_dir, generator=generator, variant=variant
+                build_script,
+                build_dir,
+                variables=variables,
+                generator=generator,
+                variant=variant,
             )
             if exit_code != 0:
                 variant_msg = f" (variant={variant})" if variant else ""
@@ -468,6 +546,8 @@ def _run_generate(
             pytest.fail(f"pcons-build.py raised {type(e).__name__}: {e}{variant_msg}")
     else:
         cmd = [sys.executable, "-m", "pcons"]
+        if variables:
+            cmd.extend([f"{k}={v}" for k, v in variables.items()])
         env = {
             **os.environ,
             "PCONS_BUILD_DIR": str(build_dir),
@@ -496,6 +576,7 @@ def run_example(
     tmp_path: Path,
     invocation: str = "direct",
     generator: str = "ninja",
+    toolchain: str | None = None,
 ) -> None:
     """Run a single example project.
 
@@ -508,8 +589,10 @@ def run_example(
         generator: Which generator to use:
             - "ninja": Generate build.ninja
             - "make": Generate Makefile
+        toolchain: Optional toolchain name to pass as TOOLCHAIN build variable.
     """
     config = load_test_config(example_dir)
+    config["toolchain"] = toolchain
     test_config = config.get("test", {})
 
     # Check skip conditions
@@ -541,9 +624,26 @@ def run_example(
 
     # Check for variants (CMake-style: run the script once per variant)
     variants = test_config.get("variants", [None])
+    current_platform = platform.system().lower()
+
+    if toolchain is not None and not _toolchain_is_available(
+        toolchain, current_platform
+    ):
+        pytest.skip(f"Requested toolchain '{toolchain}' is not available on this host")
+
+    build_dir.mkdir(parents=True, exist_ok=True)
+    tc_vars = {"TOOLCHAIN": toolchain} if toolchain else None
 
     for variant in variants:
-        _run_generate(work_dir, build_dir, invocation, generator, test_config, variant)
+        _run_generate(
+            work_dir,
+            build_dir,
+            invocation,
+            generator,
+            test_config,
+            variant,
+            variables=tc_vars,
+        )
 
     # For variant builds, collect all variant build dirs for the build step
     variant_build_dirs = (
@@ -797,27 +897,59 @@ EXAMPLES = discover_examples()
 INVOCATIONS = ["direct", "cli"]
 
 
-@pytest.mark.parametrize("generator", GENERATORS, ids=GENERATORS)
-@pytest.mark.parametrize("invocation", INVOCATIONS, ids=INVOCATIONS)
+def build_example_params() -> list[pytest.ParameterSet]:
+    """Build a complete pytest parameter matrix, including toolchains."""
+    params: list[pytest.ParameterSet] = []
+
+    for example_dir in EXAMPLES:
+        config = load_test_config(example_dir)
+        requested_toolchains = get_requested_toolchains(config)
+
+        for invocation in INVOCATIONS:
+            for generator in GENERATORS:
+                for toolchain in requested_toolchains:
+                    test_id = f"{example_dir.name}-{invocation}-{generator}"
+                    if toolchain:
+                        test_id = f"{test_id}-{toolchain}"
+                    params.append(
+                        pytest.param(
+                            example_dir,
+                            invocation,
+                            generator,
+                            toolchain,
+                            id=test_id,
+                        )
+                    )
+
+    return params
+
+
+EXAMPLE_PARAMS = build_example_params()
+
+
 @pytest.mark.parametrize(
-    "example_dir",
-    EXAMPLES,
-    ids=[e.name for e in EXAMPLES],
+    ("example_dir", "invocation", "generator", "toolchain"),
+    EXAMPLE_PARAMS,
 )
 def test_example(
-    example_dir: Path, tmp_path: Path, invocation: str, generator: str
+    example_dir: Path,
+    tmp_path: Path,
+    invocation: str,
+    generator: str,
+    toolchain: str | None,
 ) -> None:
     """Run an example project end-to-end.
 
     Tests combinations of:
     - Invocation methods: direct (python pcons-build.py), cli (python -m pcons)
-    - Generators: ninja (build.ninja), make (Makefile)
+    - Generators: ninja (build.ninja), make (Makefile), xcode
+    - Toolchains: from each example's test configuration
     """
-    run_example(example_dir, tmp_path, invocation, generator)
+    run_example(example_dir, tmp_path, invocation, generator, toolchain)
 
 
 # If no examples found, create a placeholder test
-if not EXAMPLES:
+if not EXAMPLE_PARAMS:
 
     def test_no_examples() -> None:
         """Placeholder when no examples are found."""
