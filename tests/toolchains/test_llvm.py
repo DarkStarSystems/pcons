@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.llvm."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -417,7 +418,10 @@ class TestLibcxxModulesManifest:
         assert found == manifest
         # Must query with -stdlib=libc++ since user didn't pass one.
         assert "-stdlib=libc++" in captured["cmd"]
-        assert "-print-file-name=c++/libc++.modules.json" in captured["cmd"]
+        assert any(
+            re.search(r"-print-file-name=(c++/)?libc\+\+.modules.json", cmd)
+            for cmd in captured["cmd"]
+        )
 
     def test_returns_none_when_compiler_echoes_query(
         self, monkeypatch: pytest.MonkeyPatch

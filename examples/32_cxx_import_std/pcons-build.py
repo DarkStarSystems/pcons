@@ -37,6 +37,7 @@ if toolchain.name == "msvc":
     env.cxx.flags.extend(["/std:c++latest", "/EHsc", "/permissive-"])
 elif toolchain.name == "llvm":
     env.cxx.flags.extend(["-std=c++23", "-stdlib=libc++"])
+    env.link.libs.append("c++")
 else:
     env.cxx.flags.append("-std=c++23")
 

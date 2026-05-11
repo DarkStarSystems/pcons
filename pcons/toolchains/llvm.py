@@ -47,19 +47,27 @@ def _find_libcxx_modules_manifest(
         cmd.extend(user_stdlib_flags)
     else:
         cmd.append("-stdlib=libc++")
-    cmd.append("-print-file-name=c++/libc++.modules.json")
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
-    except FileNotFoundError:
-        return None
-    if proc.returncode != 0:
-        return None
-    out = proc.stdout.strip()
-    # When the file isn't found, clang echoes the query string back unchanged.
-    if not out or out == "c++/libc++.modules.json":
-        return None
-    p = Path(out)
-    return p if p.is_file() else None
+    candidates = (
+        "libc++.modules.json",
+        "c++/libc++.modules.json",
+    )
+    for candidate in candidates:
+        cmd_copy = list(cmd)
+        cmd_copy.append(f"-print-file-name={candidate}")
+        try:
+            proc = subprocess.run(cmd_copy, capture_output=True, text=True, check=False)
+        except FileNotFoundError:
+            continue
+        if proc.returncode != 0:
+            continue
+        out = proc.stdout.strip()
+        # When the file isn't found, clang echoes the query string back unchanged.
+        if not out or out == candidate:
+            continue
+        p = Path(out)
+        if p.is_file():
+            return p.resolve()
+    return None
 
 
 def _parse_libcxx_manifest(manifest: Path) -> dict[str, dict[str, Any]]:
