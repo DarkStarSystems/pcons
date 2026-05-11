@@ -8,7 +8,7 @@ This exercises pcons's standard-library module support across toolchains:
   - On clang/libc++, pcons consults `libc++.modules.json` (queried via
     `clang++ -stdlib=libc++ -print-file-name=c++/libc++.modules.json`),
     locates `std.cppm`, builds it, and links the resulting `.o`.
-  - On GCC/libstdc++ (>= 14), pcons probes `#include <bits/std.cc>` via
+  - On GCC/libstdc++ (>= 15), pcons probes `#include <bits/std.cc>` via
     `-E -x c++ - -H`, compiles the discovered source with `-fmodules`,
     and links the resulting `.o`. GCC writes `gcm.cache/std.gcm` next to
     the build directory automatically.

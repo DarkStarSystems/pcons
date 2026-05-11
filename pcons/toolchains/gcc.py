@@ -426,7 +426,7 @@ class GccToolchain(UnixToolchain):
     def __init__(self) -> None:
         super().__init__("gcc")
 
-    def get_source_handler(self, suffix: str) -> Any:
+    def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, including C++20 module interfaces."""
         from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
 
@@ -435,8 +435,6 @@ class GccToolchain(UnixToolchain):
             return handler
 
         if suffix in CXX_MODULE_INTERFACE_SUFFIXES:
-            from pcons.tools.toolchain import SourceHandler
-
             return SourceHandler(
                 "cxx", "cxx_module", ".o", TargetPath(suffix=".d"), "gcc"
             )
@@ -467,7 +465,7 @@ class GccToolchain(UnixToolchain):
                 all module-participating object nodes.
             6. Wires the std object into link inputs of importing targets.
 
-        Requires GCC 14+ (which ships ``bits/std.cc`` as part of libstdc++).
+        Requires GCC 15+ (which ships ``bits/std.cc`` as part of libstdc++).
         """
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
@@ -568,7 +566,7 @@ class GccToolchain(UnixToolchain):
         # std/std.compat provides/requires relationships accurately.
         if std_obj_nodes:
             std_specs: list[TuScanSpec] = []
-            for logical, std_obj_node in std_obj_nodes.items():
+            for _logical, std_obj_node in std_obj_nodes.items():
                 std_bi = std_obj_node._build_info
                 assert std_bi is not None
                 std_src = std_bi["sources"][0].path
@@ -665,8 +663,8 @@ class GccToolchain(UnixToolchain):
                     f"'bits/{'std.cc' if logical == 'std' else 'std.compat.cc'}' "
                     f"via GCC include tracing:\n"
                     f"    {compiler_cmd} ... -E -x c++ - -H  (with #include <bits/...>)\n"
-                    f"Requires GCC 14+ with libstdc++ headers installed. "
-                    f"On Ubuntu/Debian: apt install gcc g++ libstdc++-14-dev"
+                    f"Requires GCC 15+ with libstdc++ headers installed. "
+                    f"On Ubuntu/Debian: apt install gcc g++ libstdc++-15-dev"
                 )
 
             obj_rel = f"{moddir}/{logical}.o"
@@ -726,7 +724,7 @@ class GccToolchain(UnixToolchain):
 # Registration
 # =============================================================================
 
-from pcons.tools.toolchain import toolchain_registry  # noqa: E402
+from pcons.tools.toolchain import SourceHandler, toolchain_registry  # noqa: E402
 
 toolchain_registry.register(
     GccToolchain,
