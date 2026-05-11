@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.toolchains.gcc."""
 
+from pathlib import Path
+
+import pytest
+
 from pcons.configure.platform import Platform
 from pcons.toolchains.gcc import (
     GccArchiver,
@@ -298,3 +302,181 @@ class TestGccCompileFlagsForTargetType:
         tc = GccToolchain()
         flags = tc.get_compile_flags_for_target_type("interface")
         assert flags == []
+
+
+class TestGccModuleInterfaceSourceHandler:
+    """Tests for GccToolchain.get_source_handler with C++20 module interfaces."""
+
+    @pytest.mark.parametrize("suffix", [".cppm", ".ixx", ".cxxm", ".c++m"])
+    def test_module_interface_suffixes(self, suffix: str) -> None:
+        from pcons.core.subst import TargetPath
+
+        tc = GccToolchain()
+        handler = tc.get_source_handler(suffix)
+        assert handler is not None
+        assert handler.tool_name == "cxx"
+        assert handler.language == "cxx_module"
+        assert handler.object_suffix == ".o"
+        assert handler.depfile == TargetPath(suffix=".d")
+        assert handler.deps_style == "gcc"
+
+    def test_regular_cpp_not_cxx_module(self) -> None:
+        tc = GccToolchain()
+        handler = tc.get_source_handler(".cpp")
+        assert handler is not None
+        assert handler.language == "cxx"
+
+    def test_unknown_suffix_returns_none(self) -> None:
+        tc = GccToolchain()
+        assert tc.get_source_handler(".xyz") is None
+
+
+class TestFindGccStdModuleSource:
+    """Tests for _find_gcc_std_module_source."""
+
+    def test_resolves_std_cc_from_include_trace(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from pcons.toolchains.gcc import _find_gcc_std_module_source
+
+        std_cc = tmp_path / "usr" / "include" / "c++" / "16.1.1" / "bits" / "std.cc"
+        std_cc.parent.mkdir(parents=True)
+        std_cc.write_text("// std module\n", encoding="utf-8")
+
+        captured: dict[str, object] = {}
+
+        def _fake_run(cmd: list[str], **kw: object) -> object:
+            captured["cmd"] = cmd
+            captured["input"] = kw.get("input")
+            return type("R", (), {"stdout": "", "stderr": f". {std_cc}\n"})()
+
+        monkeypatch.setattr("pcons.toolchains.gcc.subprocess.run", _fake_run)
+        found = _find_gcc_std_module_source("g++", "std", [])
+        assert captured["input"] == "#include <bits/std.cc>\n"
+        assert captured["cmd"] == ["g++", "-E", "-x", "c++", "-", "-H"]
+        assert found == std_cc
+
+    def test_resolves_std_compat_cc_from_direct_include_probe(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from pcons.toolchains.gcc import _find_gcc_std_module_source
+
+        compat_cc = (
+            tmp_path / "usr" / "include" / "c++" / "16.1.1" / "bits" / "std.compat.cc"
+        )
+        compat_cc.parent.mkdir(parents=True)
+        compat_cc.write_text("// std.compat module\n", encoding="utf-8")
+
+        def _fake_run(_cmd: list[str], **_kw: object) -> object:
+            return type("R", (), {"stdout": "", "stderr": f". {compat_cc}\n"})()
+
+        monkeypatch.setattr("pcons.toolchains.gcc.subprocess.run", _fake_run)
+        found = _find_gcc_std_module_source("g++", "std.compat", [])
+        assert found == compat_cc
+
+    def test_returns_none_when_compiler_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.toolchains.gcc import _find_gcc_std_module_source
+
+        def _fake_run(*_a: object, **_k: object) -> None:
+            raise FileNotFoundError(2, "No such file or directory")
+
+        monkeypatch.setattr("pcons.toolchains.gcc.subprocess.run", _fake_run)
+        assert _find_gcc_std_module_source("g++", "std", []) is None
+
+    def test_returns_none_when_path_not_in_output(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.toolchains.gcc import _find_gcc_std_module_source
+
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def _fake_run(cmd: list[str], **_kw: object) -> _Result:
+            return _Result()
+
+        monkeypatch.setattr("pcons.toolchains.gcc.subprocess.run", _fake_run)
+        assert _find_gcc_std_module_source("g++", "std", []) is None
+
+    def test_forwards_base_flags_to_direct_include_probe(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from pcons.toolchains.gcc import _find_gcc_std_module_source
+
+        std_cc = tmp_path / "usr" / "include" / "c++" / "16.1.1" / "bits" / "std.cc"
+        std_cc.parent.mkdir(parents=True)
+        std_cc.write_text("// std module\n", encoding="utf-8")
+
+        captured: dict[str, object] = {}
+
+        def _fake_run(cmd: list[str], **_kw: object) -> object:
+            captured["cmd"] = cmd
+            return type("R", (), {"stdout": "", "stderr": f". {std_cc}\n"})()
+
+        monkeypatch.setattr("pcons.toolchains.gcc.subprocess.run", _fake_run)
+        found = _find_gcc_std_module_source(
+            "g++", "std", ["--sysroot=/x", "-std=c++23"]
+        )
+        assert found == std_cc
+        assert captured["cmd"] == [
+            "g++",
+            "--sysroot=/x",
+            "-std=c++23",
+            "-E",
+            "-x",
+            "c++",
+            "-",
+            "-H",
+        ]
+
+
+class TestGccStdModuleFlagSpec:
+    """Tests for _gcc_std_module_flag_spec and select_std_module_flags."""
+
+    def test_carries_std_flag(self) -> None:
+        from pcons.toolchains.cxx_module_scanner import select_std_module_flags
+        from pcons.toolchains.gcc import _gcc_std_module_flag_spec
+
+        flags = ["-std=c++23", "-O2", "-Wall"]
+        result = select_std_module_flags(flags, _gcc_std_module_flag_spec())
+        assert "-std=c++23" in result
+        assert "-O2" not in result
+        assert "-Wall" not in result
+
+    def test_carries_march(self) -> None:
+        from pcons.toolchains.cxx_module_scanner import select_std_module_flags
+        from pcons.toolchains.gcc import _gcc_std_module_flag_spec
+
+        flags = ["-std=c++20", "-march=native", "-Wextra"]
+        result = select_std_module_flags(flags, _gcc_std_module_flag_spec())
+        assert "-march=native" in result
+        assert "-Wextra" not in result
+
+    def test_carries_glibcxx_defines(self) -> None:
+        from pcons.toolchains.cxx_module_scanner import select_std_module_flags
+        from pcons.toolchains.gcc import _gcc_std_module_flag_spec
+
+        flags = [
+            "-std=c++23",
+            "-D_GLIBCXX_DEBUG=1",
+            "-DNDEBUG",
+            "-D__GLIBCXX_SOMETHING=1",
+        ]
+        result = select_std_module_flags(flags, _gcc_std_module_flag_spec())
+        assert "-D_GLIBCXX_DEBUG=1" in result
+        assert "-D__GLIBCXX_SOMETHING=1" in result
+        # NDEBUG is not a libstdc++ feature-test macro — don't carry it
+        assert "-DNDEBUG" not in result
+
+    def test_carries_exception_flags(self) -> None:
+        from pcons.toolchains.cxx_module_scanner import select_std_module_flags
+        from pcons.toolchains.gcc import _gcc_std_module_flag_spec
+
+        flags = ["-fno-exceptions", "-fno-rtti", "-pthread"]
+        result = select_std_module_flags(flags, _gcc_std_module_flag_spec())
+        assert "-fno-exceptions" in result
+        assert "-fno-rtti" in result
+        assert "-pthread" in result

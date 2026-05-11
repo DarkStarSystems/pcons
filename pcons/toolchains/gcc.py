@@ -10,7 +10,10 @@ Provides GCC-based C and C++ compilation toolchain including:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+import subprocess
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
@@ -20,7 +23,92 @@ from pcons.tools.tool import BaseTool
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
+    from pcons.core.environment import Environment
+    from pcons.core.node import FileNode
+    from pcons.core.project import Project
     from pcons.core.toolconfig import ToolConfig
+
+logger = logging.getLogger(__name__)
+
+
+def _gcc_std_module_flag_spec() -> Any:
+    """Build the GCC/libstdc++ flag-passthrough spec for std-module compiles.
+
+    ABI-affecting flags that must match between the std-module compile and
+    the user TUs that import it. Mirrors the clang spec but without
+    -stdlib= (not a GCC flag) and with GCC-specific ABI knobs.
+    """
+    from pcons.toolchains.cxx_module_scanner import StdModuleFlagSpec
+
+    return StdModuleFlagSpec(
+        exact=frozenset(
+            {
+                "-fexceptions",
+                "-fno-exceptions",
+                "-frtti",
+                "-fno-rtti",
+                "-pthread",
+                "-fopenmp",
+                "-m32",
+                "-m64",
+            }
+        ),
+        prefixes=(
+            "-std=",
+            "--target=",
+            "--sysroot=",
+            "-march=",
+            "-mcpu=",
+            "-mtune=",
+        ),
+        paired=frozenset({"-target", "--sysroot"}),
+        # Pass user -D_GLIBCXX_* / -D__GLIBCXX_* defines: libstdc++ uses
+        # these for hardening, debug modes, etc. that affect module ABI.
+        define_prefix="-D",
+        define_glob_prefixes=("_GLIBCXX_", "__GLIBCXX_"),
+    )
+
+
+def _find_gcc_std_module_source(
+    compiler_cmd: str,
+    logical: str,
+    base_flags: list[str],
+) -> Path | None:
+    """Locate bits/std.cc (or bits/std.compat.cc) from GCC include tracing.
+
+    GCC's p1689 scan output does not carry the standard-library source path.
+    Probe the active C++ include root using ``-E -x c++ - -H`` and derive the
+    module source from that include root.
+    """
+
+    source_name = "std.cc" if logical == "std" else "std.compat.cc"
+    filename = f"bits/{source_name}"
+
+    try:
+        proc = subprocess.run(
+            [
+                compiler_cmd,
+                *base_flags,
+                "-E",
+                "-x",
+                "c++",
+                "-",
+                "-H",
+            ],
+            input=f"#include <{filename}>\n",
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return None
+
+    for line in proc.stderr.splitlines():
+        line = line.strip()
+        if not line.startswith(". "):
+            continue
+        return Path(line[2:])
+    return None
 
 
 class GccCCompiler(BaseTool):
@@ -337,6 +425,278 @@ class GccToolchain(UnixToolchain):
 
     def __init__(self) -> None:
         super().__init__("gcc")
+
+    def get_source_handler(self, suffix: str) -> Any:
+        """Return handler for source file suffix, including C++20 module interfaces."""
+        from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
+
+        handler = super().get_source_handler(suffix)
+        if handler is not None:
+            return handler
+
+        if suffix in CXX_MODULE_INTERFACE_SUFFIXES:
+            from pcons.tools.toolchain import SourceHandler
+
+            return SourceHandler(
+                "cxx", "cxx_module", ".o", TargetPath(suffix=".d"), "gcc"
+            )
+
+        return None
+
+    def after_resolve(
+        self,
+        project: Project,
+        source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
+    ) -> None:
+        """Configure `import std;` / `import std.compat;` support for GCC.
+
+        Triggered when module scanning is enabled — either implicitly (the
+        env has a C++ module-interface source such as ``.cppm``) or
+        explicitly (``env.cxx.modules = True``). The method:
+
+            1. Uses GCC's p1689 scanner mode (``-fdeps-format=p1689r5``)
+                to discover module provides/requires for each TU.
+            2. Locates the corresponding ``bits/std.cc`` /
+                ``bits/std.compat.cc`` source via the preprocessor.
+            3. Synthesizes a build node that compiles the std module with
+                ``-fmodules``.  GCC automatically places the resulting
+                ``std.gcm`` in ``gcm.cache/`` relative to the build dir,
+                where Ninja runs.
+            4. Adds ``-fmodules`` to every qualifying C++ TU.
+            5. Writes Ninja dyndep from the scan results and attaches it to
+                all module-participating object nodes.
+            6. Wires the std object into link inputs of importing targets.
+
+        Requires GCC 14+ (which ships ``bits/std.cc`` as part of libstdc++).
+        """
+        from pcons.toolchains.cxx_module_scanner import (
+            TuScanSpec,
+            build_module_map,
+            scan_translation_units,
+            select_modules_scope,
+            wire_std_into_targets,
+            write_dyndep_from_results,
+        )
+
+        cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
+        all_cxx_pairs = cxx_module_pairs + cxx_pairs
+        if not all_cxx_pairs:
+            return
+
+        build_dir = project.build_dir
+        moddir = "cxx_modules"
+        dyndep_path = build_dir / "cxx_modules.dyndep"
+        dyndep_rel = "cxx_modules.dyndep"
+        (build_dir / moddir).mkdir(parents=True, exist_ok=True)
+
+        first_env = None
+        _, first_obj = all_cxx_pairs[0]
+        build_info = getattr(first_obj, "_build_info", None)
+        if build_info:
+            first_env = build_info.get("env")
+
+        cxx_tool = getattr(first_env, "cxx", None) if first_env else None
+        compiler_cmd = str(getattr(cxx_tool, "cmd", "g++") or "g++")
+        base_flags = list(getattr(cxx_tool, "flags", None) or [])
+
+        # Enable modules for all participating C++ TUs.
+        modules_flag = "-fmodules"
+        for _, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi is None:
+                continue
+            context = bi.get("context")
+            if context is not None and hasattr(context, "flags"):
+                if modules_flag not in context.flags:
+                    context.flags.append(modules_flag)
+            # Let dyndep drive module dependencies for these TUs. GCC depfiles
+            # conflict with module implicit outputs on Ninja for these edges.
+            bi["deps_style"] = None
+            bi["depfile"] = None
+
+        # Build per-TU scan specs and run GCC p1689 scanning.
+        specs: list[TuScanSpec] = []
+        spec_to_obj: dict[int, FileNode] = {}
+        for src, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            context = bi.get("context") if bi else None
+            seen: set[str] = set(base_flags)
+            compile_flags = list(base_flags)
+            if modules_flag not in seen:
+                compile_flags.append(modules_flag)
+                seen.add(modules_flag)
+            if context:
+                for f in context.flags:
+                    if f not in seen:
+                        compile_flags.append(f)
+                        seen.add(f)
+                for inc in context.includes:
+                    compile_flags.append(f"-I{inc}")
+                for d in context.defines:
+                    compile_flags.append(f"-D{d}")
+
+            spec = TuScanSpec(
+                src=src.resolve(),
+                obj_rel=str(obj_node.path.relative_to(build_dir)).replace("\\", "/"),
+                compiler=compiler_cmd,
+                compile_flags=compile_flags,
+            )
+            specs.append(spec)
+            spec_to_obj[id(spec)] = obj_node
+
+        results = scan_translation_units(
+            specs, scanner=compiler_cmd, scanner_style="gcc"
+        )
+
+        required_logical_names: set[str] = set()
+        for r in results:
+            required_logical_names.update(r.required_logical_names)
+        std_wanted = required_logical_names & {"std", "std.compat"}
+
+        std_obj_nodes = self._inject_gcc_std_module_builds(
+            project,
+            build_dir,
+            moddir,
+            compiler_cmd,
+            base_flags,
+            std_wanted,
+            first_env,
+            cxx_tool,
+        )
+
+        # Scan synthesized std module sources too, so dyndep can capture
+        # std/std.compat provides/requires relationships accurately.
+        if std_obj_nodes:
+            std_specs: list[TuScanSpec] = []
+            for logical, std_obj_node in std_obj_nodes.items():
+                std_bi = std_obj_node._build_info
+                assert std_bi is not None
+                std_src = std_bi["sources"][0].path
+                std_obj_rel = str(std_obj_node.path.relative_to(build_dir)).replace(
+                    "\\", "/"
+                )
+                std_spec = TuScanSpec(
+                    src=std_src,
+                    obj_rel=std_obj_rel,
+                    compiler=compiler_cmd,
+                    compile_flags=[*base_flags, modules_flag],
+                )
+                std_specs.append(std_spec)
+                spec_to_obj[id(std_spec)] = std_obj_node
+
+            results.extend(
+                scan_translation_units(
+                    std_specs,
+                    scanner=compiler_cmd,
+                    scanner_style="gcc",
+                )
+            )
+
+        module_to_gcm = build_module_map(results, "gcm.cache", ".gcm")
+        write_dyndep_from_results(results, module_to_gcm, dyndep_path)
+        logger.debug("Wrote GCC C++ module dyndep to %s", dyndep_path)
+
+        dyndep_node = project.node(dyndep_path)
+        for _, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if bi is not None:
+                bi["dyndep"] = dyndep_rel
+            if dyndep_node not in obj_node.implicit_deps:
+                obj_node.implicit_deps.append(dyndep_node)
+        for std_obj_node in std_obj_nodes.values():
+            std_bi = std_obj_node._build_info
+            assert std_bi is not None
+            std_bi["dyndep"] = dyndep_rel
+            if dyndep_node not in std_obj_node.implicit_deps:
+                std_obj_node.implicit_deps.append(dyndep_node)
+
+        if std_obj_nodes:
+            wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+
+    def _inject_gcc_std_module_builds(
+        self,
+        project: Project,
+        build_dir: Path,
+        moddir: str,
+        compiler_cmd: str,
+        base_flags: list[str],
+        wanted: set[str],
+        first_env: Environment | None,
+        cxx_tool: Any,
+    ) -> dict[str, FileNode]:
+        """Synthesize build nodes for ``import std;`` / ``import std.compat;`` (GCC).
+
+        For each logical module name in *wanted* (``"std"`` or
+        ``"std.compat"``):
+
+        * Locates the corresponding libstdc++ source via the preprocessor.
+        * Creates a build node that compiles it with ``-fmodules`` and the
+          user's ABI-affecting flags.  GCC automatically writes
+          ``gcm.cache/<logical>.gcm`` next to the build directory CWD.
+
+        Returns a ``{logical_name: obj_node}`` dict for the modules that
+        were successfully synthesized.
+        """
+        from pcons.toolchains.cxx_module_scanner import (
+            select_std_module_flags,
+        )
+
+        if not wanted:
+            return {}
+
+        # Carry ABI-affecting flags onto the std-module compile.
+        env_defines = list(getattr(cxx_tool, "defines", None) or [])
+        dprefix = str(getattr(cxx_tool, "dprefix", "-D") or "-D")
+        all_user_flags = list(base_flags) + [f"{dprefix}{d}" for d in env_defines]
+
+        passthrough = select_std_module_flags(
+            all_user_flags, _gcc_std_module_flag_spec()
+        )
+        if not any(f.startswith("-std=") for f in passthrough):
+            passthrough.insert(0, "-std=c++23")
+
+        std_obj_nodes: dict[str, FileNode] = {}
+        for logical in sorted(wanted):
+            src_path = _find_gcc_std_module_source(compiler_cmd, logical, base_flags)
+            if src_path is None:
+                raise RuntimeError(
+                    f"`import {logical};` was used, but pcons could not locate "
+                    f"the GCC standard-library module source. Tried resolving "
+                    f"'bits/{'std.cc' if logical == 'std' else 'std.compat.cc'}' "
+                    f"via GCC include tracing:\n"
+                    f"    {compiler_cmd} ... -E -x c++ - -H  (with #include <bits/...>)\n"
+                    f"Requires GCC 14+ with libstdc++ headers installed. "
+                    f"On Ubuntu/Debian: apt install gcc g++ libstdc++-14-dev"
+                )
+
+            obj_rel = f"{moddir}/{logical}.o"
+            obj_path = build_dir / obj_rel
+
+            std_obj_node = project.node(obj_path)
+            cmd_list: list[str] = [
+                compiler_cmd,
+                *passthrough,
+                "-fmodules",
+                "-x",
+                "c++",
+                str(src_path),
+                "-c",
+                "-o",
+                obj_rel,
+            ]
+            std_obj_node._build_info = {
+                "tool": "cxx",
+                "command_var": "stdmodcmd",
+                "description": f"CXX {logical} module",
+                "sources": [project.node(src_path)],
+                "command": cmd_list,
+            }
+            if first_env is not None:
+                first_env.register_node(std_obj_node)
+
+            std_obj_nodes[logical] = std_obj_node
+
+        return std_obj_nodes
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

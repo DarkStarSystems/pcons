@@ -8,25 +8,37 @@ This exercises pcons's standard-library module support across toolchains:
   - On clang/libc++, pcons consults `libc++.modules.json` (queried via
     `clang++ -stdlib=libc++ -print-file-name=c++/libc++.modules.json`),
     locates `std.cppm`, builds it, and links the resulting `.o`.
+  - On GCC/libstdc++ (>= 14), pcons probes `#include <bits/std.cc>` via
+    `-E -x c++ - -H`, compiles the discovered source with `-fmodules`,
+    and links the resulting `.o`. GCC writes `gcm.cache/std.gcm` next to
+    the build directory automatically.
 
 The user code itself is portable: a single-module library that exposes
 `greet()`, and a `main` that uses `std::println` (C++23). Both files use
 `import std;` — pcons + the toolchain do the rest.
 """
 
-from pcons import Project
+from pcons import Project, get_var
 from pcons.toolchains import find_c_toolchain
 
 project = Project("cxx_import_std")
-# Prefer MSVC on Windows (its `import std;` lives in std.ixx and works
-# out of the box). Elsewhere, prefer LLVM/Clang with libc++.
-toolchain = find_c_toolchain(prefer=["msvc", "llvm"])
+
+# Optional override: pcons build TOOLCHAIN=gcc|llvm|msvc
+toolchain_override = get_var("TOOLCHAIN")
+if toolchain_override:
+    toolchain = find_c_toolchain(prefer=[toolchain_override])
+else:
+    # Prefer MSVC on Windows (its `import std;` lives in std.ixx and works
+    # out of the box). Elsewhere, prefer LLVM/Clang with libc++, then GCC.
+    toolchain = find_c_toolchain(prefer=["msvc", "llvm", "gcc"])
 env = project.Environment(toolchain=toolchain)
 
 if toolchain.name == "msvc":
     env.cxx.flags.extend(["/std:c++latest", "/EHsc", "/permissive-"])
-else:
+elif toolchain.name == "llvm":
     env.cxx.flags.extend(["-std=c++23", "-stdlib=libc++"])
+else:
+    env.cxx.flags.append("-std=c++23")
 
 project.Program(
     "hello",

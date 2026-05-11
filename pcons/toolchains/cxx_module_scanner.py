@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 """C++20 module dependency scanner for Ninja dyndep.
 
-Supports two scanner styles:
+Supports three scanner styles:
 - "clang": uses clang-scan-deps (P1689R5 format); manifest uses "pcm" key
 - "msvc":  uses cl.exe /scanDependencies <file> (P1689R5 format); manifest uses "ifc" key
+- "gcc":   uses g++ with -fdeps-format=p1689r5 and reads a deps JSON file
 
 Run as:
     python -m pcons.toolchains.cxx_module_scanner \\
@@ -181,6 +182,92 @@ def run_scan_deps_msvc(
         ) from e
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+def run_scan_deps_gcc(
+    compiler: str,
+    compile_flags: list[str],
+    src: str,
+    obj: str,
+) -> dict[str, Any] | None:
+    """Run GCC p1689 scan and return parsed JSON.
+
+    Args:
+        compiler: Path/name of g++.
+        compile_flags: List of compiler flags (e.g. ["-std=c++23"]).
+        src: Absolute path to the source file.
+        obj: Object file path relative to the build directory.
+
+    Returns:
+        Parsed P1689R5 JSON dict, or None on failure.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f_deps:
+        deps_json = f_deps.name
+    with tempfile.NamedTemporaryFile(suffix=".d", delete=False) as f_depfile:
+        depfile = f_depfile.name
+    with tempfile.NamedTemporaryFile(suffix=".ii", delete=False) as f_pp:
+        preprocessed = f_pp.name
+
+    try:
+        cmd = [compiler]
+        cmd += compile_flags
+        cmd += [
+            "-E",
+            "-x",
+            "c++",
+            src,
+            "-MT",
+            obj,
+            "-MD",
+            "-MF",
+            depfile,
+            "-fmodules",
+            f"-fdeps-file={deps_json}",
+            f"-fdeps-target={obj}",
+            "-fdeps-format=p1689r5",
+            "-o",
+            preprocessed,
+        ]
+
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            print(
+                f"Warning: GCC p1689 scan failed for {src}: {result.stderr}",
+                file=sys.stderr,
+            )
+            return None
+
+        try:
+            return json.loads(Path(deps_json).read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            print(
+                f"Warning: could not parse GCC p1689 output for {src}: {e}",
+                file=sys.stderr,
+            )
+            return None
+        except OSError as e:
+            print(
+                f"Warning: could not read GCC p1689 output for {src}: {e}",
+                file=sys.stderr,
+            )
+            return None
+    except FileNotFoundError as e:
+        raise CxxModuleScannerNotFound(
+            f"GCC compiler '{compiler}' not found on PATH.\n"
+            "  C++20 module scanning needs g++ with p1689 support.\n"
+            "  Install hints:\n"
+            "    Ubuntu/Deb:   apt install g++\n"
+            "    Fedora/RHEL:  dnf install gcc-c++\n"
+            "    macOS:        brew install gcc"
+        ) from e
+    finally:
+        Path(deps_json).unlink(missing_ok=True)
+        Path(depfile).unlink(missing_ok=True)
+        Path(preprocessed).unlink(missing_ok=True)
 
 
 # =============================================================================
@@ -410,6 +497,13 @@ def scan_translation_units(
     for spec in specs:
         if scanner_style == "msvc":
             p1689 = run_scan_deps_msvc(spec.compiler, spec.compile_flags, str(spec.src))
+        elif scanner_style == "gcc":
+            p1689 = run_scan_deps_gcc(
+                spec.compiler,
+                spec.compile_flags,
+                str(spec.src),
+                spec.obj_rel,
+            )
         else:
             p1689 = run_scan_deps(
                 scanner,
@@ -746,8 +840,8 @@ def main() -> int:
     parser.add_argument(
         "--scanner-style",
         default="clang",
-        choices=["clang", "msvc"],
-        help="Scanner style: 'clang' (clang-scan-deps) or 'msvc' (cl.exe) (default: clang)",
+        choices=["clang", "msvc", "gcc"],
+        help="Scanner style: 'clang' (clang-scan-deps), 'msvc' (cl.exe), or 'gcc' (default: clang)",
     )
     args = parser.parse_args()
 
