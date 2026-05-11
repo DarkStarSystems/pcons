@@ -781,7 +781,7 @@ class LlvmToolchain(UnixToolchain):
                 "(`brew install llvm`) — Apple Clang doesn't ship the std "
                 "module yet. On Linux, install a recent libc++ that includes "
                 "`libc++.modules.json` (LLVM ≥ 18). Alternatively use a "
-                "different toolchain (MSVC works on Windows, GCC ≥ 14 works on Linux)."
+                "different toolchain (MSVC works on Windows, GCC ≥ 15 works on Linux)."
             )
         modules = _parse_libcxx_manifest(manifest)
 
