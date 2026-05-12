@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Rust via cargo: `project.CargoBuild()`.** Builds a Rust crate as a `staticlib`, `cdylib`, or `bin` by invoking `cargo build` with `restat=True`, then wraps the result as an `ImportedTarget` so C/C++ consumers can `.link()` it normally. Cargo handles intra-Rust incremental rebuilds; Ninja relinks downstream C/C++ when (and only when) the resulting artifact actually changes. Optional `generate_header=` runs `cbindgen` to produce the C header. New `examples/43_rust_cxx_hybrid/` shows a Rust staticlib linked into a C++ program over a hand-written FFI header, and `examples/44_rust_cxx_cbindgen/` generates the header with cbindgen.
+- **Rust via cargo: `project.CargoBuild()`.** Builds a Rust crate as a `staticlib`, `cdylib`, or `bin` by invoking `cargo build` with `restat=True`, then wraps the result as an `ImportedTarget` so C/C++ consumers can `.link()` it normally. Cargo handles intra-Rust incremental rebuilds; Ninja relinks downstream C/C++ when (and only when) the resulting artifact actually changes. Optional `generate_header=` runs `cbindgen` to produce the C header — pcons wires the header as an implicit dep of consumer compile steps automatically (so `.link()` alone is enough; no manual `.depends()` needed). New `examples/43_rust_cxx_hybrid/` (hand-written FFI header) and `examples/44_rust_cxx_cbindgen/` (cbindgen-generated header) show both styles.
+- **Transitive deps with mixed outputs.** `target.link(dep)` now correctly handles deps whose `output_nodes` contain both library files and other artifacts (e.g., a code generator that produces both a `.a` and a `.h`). Library-shaped outputs go on the link command line; everything else flows through as an implicit dep of the consumer's compile and link steps, so generated headers exist before `cpp` runs without the user having to add a separate `.depends()` call.
 
 ## [0.20.0] - 2026-06-16
 

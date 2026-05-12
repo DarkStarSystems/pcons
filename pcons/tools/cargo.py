@@ -26,7 +26,6 @@ Example:
 
 from __future__ import annotations
 
-import shlex
 import sys
 import tomllib
 from collections.abc import Sequence
@@ -206,16 +205,17 @@ class CargoBuildBuilder:
             cargo_cmd.extend(["--target", target_triple])
         cargo_cmd.extend(extra_args)
 
-        cargo_shell = " ".join(shlex.quote(c) for c in cargo_cmd)
-
         rust_sources = _collect_rust_sources(manifest_dir)
 
+        # Pass the command as a list so pcons treats each element as a
+        # single token. Shell-quoting individual tokens would wrap pcons
+        # specials like $TARGET in single quotes and prevent expansion.
         cargo_target = env.Command(
             name=f"{name}_cargo",
             target=artifact_path,
             source=None,
             depends=rust_sources,
-            command=cargo_shell,
+            command=cargo_cmd,
             restat=True,
         )
 
@@ -239,14 +239,13 @@ class CargoBuildBuilder:
                 "$TARGET",
                 str(manifest_dir),
             ]
-            cbindgen_shell = " ".join(shlex.quote(c) for c in cbindgen_cmd)
 
             cbindgen_target = env.Command(
                 name=f"{name}_cbindgen",
                 target=header_path,
                 source=None,
                 depends=[cbindgen_config, *rust_sources],
-                command=cbindgen_shell,
+                command=cbindgen_cmd,
                 restat=True,
             )
 

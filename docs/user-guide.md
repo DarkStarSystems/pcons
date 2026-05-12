@@ -222,7 +222,7 @@ app = project.Program("app", env, sources=["src/main.cpp"])
 app.link(rust_core)                # -L/-l propagate automatically
 ```
 
-See `examples/36_rust_cxx_hybrid/` for a complete end-to-end example. Other foreign build tools can be wired up the same way using `env.Command(restat=True)`.
+Pass `generate_header="rust/cbindgen.toml"` to also run cbindgen and emit a C header from the Rust sources — pcons wires the header as an implicit dep of consumer compile steps, so the header exists before any `#include` is processed. See `examples/36_rust_cxx_hybrid/` (hand-written FFI header) and `examples/37_rust_cxx_cbindgen/` (cbindgen-generated header) for end-to-end examples. Other foreign build tools can be wired up the same way using `env.Command(restat=True)`.
 
 ### Builder Types
 
