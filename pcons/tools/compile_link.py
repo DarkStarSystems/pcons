@@ -34,6 +34,23 @@ if TYPE_CHECKING:
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
 
+# Suffixes for files that belong on a C/C++ link command line.
+# Anything not in this set produced by a transitively-linked dep
+# (typically a generated header) is treated as a build-order dep,
+# not a link input.
+_LINK_INPUT_SUFFIXES = frozenset(
+    {".a", ".lib", ".o", ".obj", ".so", ".dylib", ".dll", ".tbd"}
+)
+
+
+def _is_link_input(path: Path) -> bool:
+    """True if `path` should be passed to the linker as an input."""
+    if path.suffix in _LINK_INPUT_SUFFIXES:
+        return True
+    # Versioned shared libs: libfoo.so.1.2.3, libfoo.1.dylib, etc.
+    return ".so" in path.suffixes or ".dylib" in path.suffixes
+
+
 class CompileLinkFactory:
     """Factory for compile-then-link targets (Program, Library, etc.).
 
@@ -511,11 +528,28 @@ class CompileLinkFactory:
         auxiliary_inputs = builder_data.get("auxiliary_inputs", [])
         auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
 
-        dep_libs = self._collect_dependency_outputs(target)
+        dep_outputs = self._collect_dependency_outputs(target)
+        dep_libs = [d for d in dep_outputs if _is_link_input(d.path)]
+        dep_aux = [d for d in dep_outputs if not _is_link_input(d.path)]
         if dep_libs:
             dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
             if dep_libs:
                 output_node.depends(dep_libs)
+
+        # Non-link outputs from transitive deps (e.g., a generated
+        # header produced by a code generator that also produces a
+        # library, like cargo + cbindgen). The link step must wait on
+        # them but they don't belong on the link command line; the
+        # consumer's compile steps must also wait on them so the
+        # generated header exists by the time the compiler runs.
+        if dep_aux:
+            for aux in dep_aux:
+                if aux not in output_node.implicit_deps:
+                    output_node.implicit_deps.append(aux)
+            for inter in target.intermediate_nodes:
+                for aux in dep_aux:
+                    if aux not in inter.implicit_deps:
+                        inter.implicit_deps.append(aux)
 
         if auxiliary_inputs:
             linker_input_nodes = [node for node, _, _ in auxiliary_inputs]
