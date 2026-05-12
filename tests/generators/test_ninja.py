@@ -434,7 +434,12 @@ class TestNinjaSrcDir:
         assert "$SRCDIR" not in content
 
     def test_command_depends_in_ninja(self, tmp_path):
-        """Command with depends= generates implicit deps in ninja."""
+        """Command with depends= generates implicit deps in ninja.
+
+        Source-file deps live outside the build dir, so they must be
+        emitted with the $topdir/ prefix — ninja runs from the build
+        dir and otherwise can't find them.
+        """
         project = Project("test", root_dir=tmp_path, build_dir="build")
         env = project.Environment()
 
@@ -450,13 +455,14 @@ class TestNinjaSrcDir:
         gen.generate(project)
 
         content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
-        # Both deps should appear after | in the build statement
+        # Both deps should appear after | in the build statement,
+        # each prefixed with $topdir/ since they're source files.
         for line in content.splitlines():
             if "build output.txt:" in line:
                 assert "| " in line
                 after_pipe = line.split("| ", 1)[1]
-                assert "gen.py" in after_pipe
-                assert "config.yaml" in after_pipe
+                assert "$topdir/tools/gen.py" in after_pipe
+                assert "$topdir/config.yaml" in after_pipe
                 break
         else:
             raise AssertionError("build output.txt line not found")
