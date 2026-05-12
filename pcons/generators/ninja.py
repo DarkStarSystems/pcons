@@ -500,13 +500,13 @@ class NinjaGenerator(BaseGenerator):
 
         explicit_deps = " ".join(explicit_deps_list)
 
-        # Implicit dependencies (from node.implicit_deps)
+        # Implicit dependencies (from node.implicit_deps).
+        # Source files (those not produced by any rule) need $topdir/
+        # since ninja runs from the build dir; build outputs do not.
         implicit_deps = ""
         if node.implicit_deps:
             implicit = " ".join(
-                self._escape_output_path(d.path)
-                for d in node.implicit_deps
-                if isinstance(d, FileNode)
+                get_dep_path(d) for d in node.implicit_deps if isinstance(d, FileNode)
             )
             if implicit:
                 implicit_deps = f" | {implicit}"
