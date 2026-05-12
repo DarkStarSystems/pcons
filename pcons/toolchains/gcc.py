@@ -17,7 +17,8 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
-from pcons.core.subst import SourcePath, TargetPath
+from pcons.core.node import FileNode
+from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 
@@ -454,6 +455,81 @@ class GccLinker(BaseTool):
         return ToolConfig("link", cmd=str(gcc.path))
 
 
+def _build_scan_node(
+    project: Project,
+    src: Path,
+    obj_node: FileNode,
+    compile_flags: list[str],
+    compiler_cmd: str,
+    build_dir: Path,
+    modules_flag: str,
+) -> FileNode:
+    """Generate the scan target and its build information."""
+    obj_path = obj_node.path
+    scan_path = obj_path.with_suffix(obj_path.suffix + ".scan")
+    depfile_path = scan_path.with_suffix(scan_path.suffix + ".d")
+    scan_node = FileNode(str(scan_path), defined_at=obj_node.defined_at)
+
+    # Filter out -fmodules from scan (GCC emits extra make-rules that Ninja rejects)
+    scan_flags = [f for f in compile_flags if f != modules_flag]
+
+    def ninja_relativize(path: str) -> str:
+        """Convert project-relative path to topdir-relative."""
+        return f"$topdir/{path}"
+
+    normalized_flags: list[str] = []
+    for f in scan_flags:
+        if f.startswith("-I") and len(f) > 2:
+            inc = f[2:]
+            if not inc.startswith("$"):
+                inc_path = project._path_resolver.make_project_relative(Path(inc))
+                token = PathToken(
+                    prefix="-I",
+                    path=str(inc_path),
+                    path_type="project",
+                )
+                normalized_flags.append(token.relativize(ninja_relativize))
+            else:
+                normalized_flags.append(f)
+        else:
+            normalized_flags.append(f)
+
+    # Paths for command execution
+    scan_rel = str(scan_path.relative_to(build_dir)).replace("\\", "/")
+    depfile_rel = str(depfile_path.relative_to(build_dir)).replace("\\", "/")
+    depfile_dir = str(Path(depfile_rel).parent)
+    rel_src = src
+    if hasattr(project, "_path_resolver"):
+        rel_src = project._path_resolver.make_project_relative(src)
+        if not rel_src.startswith("../") and not rel_src.startswith("./"):
+            rel_src = f"$topdir/{rel_src}"
+
+    # Build scan command
+    scan_cmd = (
+        # create the output directory
+        f"mkdir -p {depfile_dir}"
+        # generate the depfile
+        f" && {compiler_cmd} -E -MD -MT {scan_rel} -MF {depfile_rel} "
+        + " ".join(normalized_flags)
+        + f" {rel_src} >/dev/null"
+        # create/update stamp file
+        f" && touch {scan_rel}"
+    )
+
+    from pcons.core.node import BuildInfo
+
+    scan_node._build_info = BuildInfo(
+        tool="cxx_scan",
+        command=scan_cmd,
+        sources=[project.node(src)],
+        depfile=PathToken(suffix=".d"),
+        deps_style="gcc",
+        description=f"SCAN {src}",
+    )
+
+    return scan_node
+
+
 class GccToolchain(UnixToolchain):
     """GCC toolchain for C and C++ development.
 
@@ -560,6 +636,8 @@ class GccToolchain(UnixToolchain):
         # Build per-TU scan specs and run GCC p1689 scanning.
         specs: list[TuScanSpec] = []
         spec_to_obj: dict[int, FileNode] = {}
+        module_src_paths = {src for src, _ in cxx_module_pairs}
+
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
@@ -577,6 +655,24 @@ class GccToolchain(UnixToolchain):
                     compile_flags.append(f"-I{inc}")
                 for d in context.defines:
                     compile_flags.append(f"-D{d}")
+
+            # For module interfaces, insert a scan step to generate the depfile.
+            if src in module_src_paths:
+                scan_node = _build_scan_node(
+                    project,
+                    src,
+                    obj_node,
+                    compile_flags,
+                    compiler_cmd,
+                    build_dir,
+                    modules_flag,
+                )
+
+                if hasattr(project, "intermediate_nodes"):
+                    project.intermediate_nodes.append(scan_node)
+                if first_env is not None:
+                    first_env.register_node(scan_node)
+                obj_node.implicit_deps.append(scan_node)
 
             spec = TuScanSpec(
                 src=src.resolve(),
