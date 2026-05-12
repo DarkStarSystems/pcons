@@ -208,6 +208,22 @@ env.latex.engine = "xelatex"
 env.latex.flags.append("-shell-escape")
 ```
 
+**Rust** crates can be built via cargo and linked into a C/C++ program with `project.CargoBuild()`. Pcons treats `cargo build` as a black-box sub-build (cargo handles intra-Rust incremental compilation) and wraps the resulting library so consumers can `.link()` it like any other dependency:
+
+```python
+rust_core = project.CargoBuild(
+    "rust_core",
+    env,
+    manifest="rust/Cargo.toml",
+    crate_type="staticlib",       # or "cdylib", "bin"
+    profile="release",
+)
+app = project.Program("app", env, sources=["src/main.cpp"])
+app.link(rust_core)                # -L/-l propagate automatically
+```
+
+See `examples/36_rust_cxx_hybrid/` for a complete end-to-end example. Other foreign build tools can be wired up the same way using `env.Command(restat=True)`.
+
 ### Builder Types
 
 All builders are accessible as methods on `Project`:

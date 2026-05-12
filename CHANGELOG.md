@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rust via cargo: `project.CargoBuild()`.** Builds a Rust crate as a `staticlib`, `cdylib`, or `bin` by invoking `cargo build` with `restat=True`, then wraps the result as an `ImportedTarget` so C/C++ consumers can `.link()` it normally. Cargo handles intra-Rust incremental rebuilds; Ninja relinks downstream C/C++ when (and only when) the resulting artifact actually changes. Optional `generate_header=` runs `cbindgen` to produce the C header. New `examples/36_rust_cxx_hybrid/` shows a Rust staticlib linked into a C++ program over a hand-written FFI header.
+
+### Fixed
+
+- **Ninja generator: `$topdir/` prefix on implicit-dep source paths.** `env.Command(depends=[...])` entries that pointed at files outside the build directory were emitted as bare paths, so ninja (running from the build dir) couldn't find them. Now routed through the same helper that already handles explicit deps correctly.
+
 ## [0.16.0] - 2026-05-04
 
 ### Added
