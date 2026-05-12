@@ -1,0 +1,52 @@
+# Test configuration for the cxx_modules example
+
+[test]
+description = "Demonstrates C++20 named modules with Ninja dyndep ordering"
+
+expected_outputs = [
+    "build/obj.hello/src/mod1.cppm.o",
+    "build/obj.hello/src/mod2.cppm.o",
+    "build/obj.hello/src/main.cpp.o",
+    "build/hello",
+]
+
+[toolchains]
+linux = ["gcc", "llvm"]
+darwin = ["llvm"]
+windows = ["msvc"]
+
+[verify]
+commands = [{ run = "./build/hello", expect_exit_code = 0 }]
+
+
+[[rebuild]]
+description = "Touching mod1.cppm triggers rebuild of mod1, main, and the final executable"
+touch = "src/mod1.cppm"
+expect_rebuild = [
+    "obj.hello/src/mod1.cppm.o",
+    "obj.hello/src/main.cpp.o",
+    "hello",
+]
+
+[[rebuild]]
+description = "Touching mod2.cppm triggers rebuild of mod2, main, and the final executable"
+touch = "src/mod2.cppm"
+expect_rebuild = [
+    "obj.hello/src/mod2.cppm.o",
+    "obj.hello/src/main.cpp.o",
+    "hello",
+]
+
+[[rebuild]]
+description = "Touching MyHeader.hpp triggers rebuild of mod1, mod2, main, and the final executable"
+touch = "src/MyHeader.hpp"
+expect_rebuild = [
+    "obj.hello/src/mod1.cppm.o",
+    "obj.hello/src/mod2.cppm.o",
+    "obj.hello/src/main.cpp.o",
+    "hello",
+]
+
+[skip]
+requires = ["clang-scan-deps", "clang++"]
+generators = ["xcode", "make"]
