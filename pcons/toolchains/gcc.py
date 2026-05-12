@@ -43,23 +43,63 @@ def _gcc_std_module_flag_spec() -> Any:
     return StdModuleFlagSpec(
         exact=frozenset(
             {
+                # Exceptions / RTTI
                 "-fexceptions",
                 "-fno-exceptions",
                 "-frtti",
                 "-fno-rtti",
+                # Threading / parallelism
                 "-pthread",
                 "-fopenmp",
+                # Data model / ABI width
                 "-m32",
                 "-m64",
+                # Layout / type ABI
+                "-fshort-enums",
+                "-fshort-wchar",
+                "-fpack-struct",
+                "-funsigned-char",
+                "-fsigned-char",
+                "-funsigned-bitfields",
+                "-mms-bitfields",
+                # Visibility / symbol ABI
+                "-fvisibility-inlines-hidden",
+                # Floating point ABI
+                "-msoft-float",
+                "-mhard-float",
+                # Experimental language features
+                "-fimplicit-constexpr",
+                "-freflection",
+                "-fcontracts",
+                # Debug / sanitizer ABI modifiers
+                "-fno-semantic-interposition",
+                "-flto",
             }
         ),
         prefixes=(
+            # Language / dialect
             "-std=",
+            # Target / sysroot
             "--target=",
             "--sysroot=",
+            # CPU / architecture / ABI
             "-march=",
             "-mcpu=",
             "-mtune=",
+            "-mabi=",
+            "-mfpmath=",
+            "-mfloat-abi=",
+            # C++ ABI
+            "-fabi-version=",
+            "-fabi-compat-version=",
+            # Visibility
+            "-fvisibility=",
+            # TLS ABI
+            "-ftls-model=",
+            # Warnings affecting ABI diagnostics
+            "-Wabi=",
+            # Sanitizers
+            "-fsanitize=",
         ),
         paired=frozenset({"-target", "--sysroot"}),
         # Pass user -D_GLIBCXX_* / -D__GLIBCXX_* defines: libstdc++ uses
@@ -100,15 +140,20 @@ def _find_gcc_std_module_source(
             text=True,
             check=True,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError):
+        lines = proc.stderr.splitlines()
+        line = lines[0] if lines else ""
+    except FileNotFoundError:
         return None
+    except subprocess.CalledProcessError as e:
+        # note: the command may fail, with an error looking like 'module control-line cannot be in included file'
+        #       but we still have the resolution at the first line
+        lines = e.stderr.splitlines()
+        line = lines[0] if lines else ""
 
-    for line in proc.stderr.splitlines():
-        line = line.strip()
-        if not line.startswith(". "):
-            continue
-        return Path(line[2:])
-    return None
+    line = line.strip()
+    if not line.startswith(". "):
+        return None
+    return Path(line[2:])
 
 
 class GccCCompiler(BaseTool):
