@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Rust via cargo: `project.CargoBuild()`.** Builds a Rust crate as a `staticlib`, `cdylib`, or `bin` by invoking `cargo build` with `restat=True`, then wraps the result as an `ImportedTarget` so C/C++ consumers can `.link()` it normally. Cargo handles intra-Rust incremental rebuilds; Ninja relinks downstream C/C++ when (and only when) the resulting artifact actually changes. Optional `generate_header=` runs `cbindgen` to produce the C header. New `examples/43_rust_cxx_hybrid/` shows a Rust staticlib linked into a C++ program over a hand-written FFI header, and `examples/44_rust_cxx_cbindgen/` generates the header with cbindgen.
+
 ## [0.20.0] - 2026-06-16
 
 ### Added
