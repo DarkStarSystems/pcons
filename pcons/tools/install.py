@@ -198,7 +198,7 @@ class InstallNodeFactory(PendingSourceFactory):
         sources use copycmd.
         """
         # Normalize destination directory using PathResolver
-        path_resolver = self.project.path_resolver
+        path_resolver = target.path_resolver
         dest_dir = path_resolver.normalize_target_path(
             dest_dir, target_name=target.name
         )
@@ -261,7 +261,7 @@ class InstallNodeFactory(PendingSourceFactory):
         dest_path = dest_dir / source_path.name
 
         # Stamp file for ninja tracking
-        stamps_dir = self.project.build_dir / ".stamps"
+        stamps_dir = target.build_dir / ".stamps"
         stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
         stamp_path = stamps_dir / stamp_name
 
@@ -275,7 +275,7 @@ class InstallNodeFactory(PendingSourceFactory):
 
         # Build destination path relative to build directory
         try:
-            rel_dest = dest_path.relative_to(self.project.build_dir)
+            rel_dest = dest_path.relative_to(target.build_dir)
         except ValueError:
             rel_dest = dest_path
 
@@ -318,7 +318,7 @@ class InstallNodeFactory(PendingSourceFactory):
             )
 
         # Normalize destination path using PathResolver
-        path_resolver = self.project.path_resolver
+        path_resolver = target.path_resolver
         dest = path_resolver.normalize_target_path(dest, target_name=target.name)
 
         source_node = sources[0]
@@ -359,7 +359,7 @@ class InstallNodeFactory(PendingSourceFactory):
             )
 
         # Normalize destination directory using PathResolver
-        path_resolver = self.project.path_resolver
+        path_resolver = target.path_resolver
         dest_dir = path_resolver.normalize_target_path(
             dest_dir, target_name=target.name
         )
@@ -371,7 +371,7 @@ class InstallNodeFactory(PendingSourceFactory):
         dest_path = dest_dir / source_path.name
 
         # Put stamp files in a dedicated .stamps directory
-        stamps_dir = self.project.build_dir / ".stamps"
+        stamps_dir = target.build_dir / ".stamps"
         stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
         stamp_path = stamps_dir / stamp_name
 
@@ -386,7 +386,7 @@ class InstallNodeFactory(PendingSourceFactory):
 
         # Build the destination path relative to build directory for the command
         try:
-            rel_dest = dest_path.relative_to(self.project.build_dir)
+            rel_dest = dest_path.relative_to(target.build_dir)
         except ValueError:
             rel_dest = dest_path
 

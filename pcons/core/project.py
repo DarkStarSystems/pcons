@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -82,7 +84,12 @@ class Project(_ProjectBuilders):
         "_found_packages",
         "_package_finder_chain",
         "defined_at",
+        "_parent",
+        "_subdir",
     )
+
+    __current: Project | None = None
+    __top_level: Project | None = None
 
     def __init__(
         self,
@@ -137,11 +144,51 @@ class Project(_ProjectBuilders):
         self._found_packages: dict[tuple[str, str | None, tuple[str, ...]], Target] = {}
         self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
         self.defined_at = defined_at or get_caller_location()
+        self._subdir = None
 
         # Auto-register with global registry (for CLI access)
         from pcons import _register_project
 
         _register_project(self)
+
+        if Project.__current is not None:
+            self._parent = Project.__current
+        else:
+            self._parent = None
+
+        Project.__current = self
+        if Project.__top_level is None:
+            Project.__top_level = self
+
+    @staticmethod
+    def current() -> Project | None:
+        return Project.__current
+
+    @staticmethod
+    def top_level() -> Project | None:
+        return Project.__top_level
+
+    @property
+    def is_top_level(self) -> bool:
+        return self == Project.top_level()
+
+    @property
+    def current_dir(self) -> Path:
+        """Get the current directory for this project, taking subdirs into account."""
+        if self._subdir:
+            return self.root_dir / self._subdir
+        return self.root_dir
+
+    @contextmanager
+    def _enter_subdir(self, subdir: str) -> Generator[None, None, None]:
+        """Context manager for entering a subdirectory in the project."""
+        old_subdir = self._subdir
+        self._subdir = subdir if old_subdir is None else f"{old_subdir}/{subdir}"
+        try:
+            yield
+        finally:
+            self._subdir = old_subdir
+            Project.__current = self
 
     @property
     def config(self) -> Any:
@@ -156,7 +203,10 @@ class Project(_ProjectBuilders):
     @property
     def path_resolver(self) -> PathResolver:
         """Get the path resolver for this project."""
-        return self._path_resolver
+        if self._subdir:
+            return self._path_resolver.subdir(self._subdir)
+        else:
+            return self._path_resolver
 
     def Environment(
         self,
@@ -199,7 +249,7 @@ class Project(_ProjectBuilders):
         """
         if path.is_absolute():
             try:
-                return path.relative_to(self.root_dir)
+                return path.relative_to(self.current_dir)
             except ValueError:
                 return path  # External path
         return Path(os.path.normpath(path))
@@ -772,7 +822,6 @@ class Project(_ProjectBuilders):
         from pcons.packages.imported import ImportedTarget
 
         target = ImportedTarget.from_package(pkg, components=components)
-        target._project = self
         self.add_target(target)
         self._found_packages[cache_key] = target
         return target

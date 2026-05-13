@@ -197,7 +197,6 @@ def create_universal_binary(
         from pcons.core.environment import Environment
 
         env = Environment()
-        env._project = project
 
     # Create the lipo command
     # The command uses $SOURCES and $TARGET (generator-agnostic variables)

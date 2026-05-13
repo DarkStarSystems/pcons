@@ -396,7 +396,6 @@ class TestXcodeGeneratorInstallDir:
         install_dir_target = Target("install_assets", target_type="interface")
         install_dir_target._builder_name = "InstallDir"
         install_dir_target._builder_data = {"dest_dir": "dist"}
-        install_dir_target._project = project
 
         # Create source directory node
         source = FileNode(Path("assets"))
@@ -448,7 +447,6 @@ class TestXcodeGeneratorArchive:
             "compression": "gzip",
             "base_dir": ".",
         }
-        tar_target._project = project
 
         # Create source file nodes
         source1 = FileNode(Path("src/file1.c"))
@@ -495,7 +493,6 @@ class TestXcodeGeneratorArchive:
             "output": str(tmp_path / "archive.zip"),
             "base_dir": ".",
         }
-        zip_target._project = project
 
         # Create source file node
         source = FileNode(Path("docs/readme.txt"))
@@ -538,7 +535,6 @@ class TestXcodeGeneratorInstallDependencies:
 
         # Create a program target
         prog = Target("myapp", target_type="program")
-        prog._project = project
 
         # Add output to program target
         prog_output = FileNode(tmp_path / "myapp")
@@ -550,7 +546,6 @@ class TestXcodeGeneratorInstallDependencies:
         install_target = Target("install_myapp", target_type="interface")
         install_target._builder_name = "Install"
         install_target._builder_data = {"dest_dir": "bin"}
-        install_target._project = project
 
         # Create output node referencing program output
         dest = FileNode(tmp_path / "bin" / "myapp")
@@ -586,7 +581,6 @@ class TestXcodeGeneratorInstallDependencies:
 
         # Create a program target
         prog = Target("myapp", target_type="program")
-        prog._project = project
 
         prog_output = FileNode(tmp_path / "myapp")
         prog.output_nodes.append(prog_output)
@@ -602,7 +596,6 @@ class TestXcodeGeneratorInstallDependencies:
             "compression": "gzip",
             "base_dir": ".",
         }
-        tar_target._project = project
 
         # Create archive node referencing program output
         archive = FileNode(tmp_path / "myapp.tar.gz")

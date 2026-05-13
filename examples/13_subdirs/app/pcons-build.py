@@ -6,49 +6,17 @@ This demonstrates a subdir that depends on another subdir (libfoo).
 Works both standalone and as part of the parent build.
 """
 
-import runpy
-from pathlib import Path
+from pcons import Project
 
-from pcons import Project, find_c_toolchain
+project = Project.current()
+assert project is not None
+env = project.environments[0]
 
-# Load libfoo's build script using runpy
-libfoo_script = Path(__file__).parent.parent / "libfoo" / "pcons-build.py"
-libfoo_module = runpy.run_path(str(libfoo_script))
-build_libfoo = libfoo_module["build_libfoo"]
+libfoo = project.get_target("foo")
+assert libfoo is not None, (
+    "libfoo target not found - ensure libfoo's pcons-build.py is run first"
+)
 
-
-def build_app(project: Project | None = None, build_dir: Path | None = None):
-    """Build app, optionally as part of a parent project.
-
-    Args:
-        project: Parent project, or None for standalone build
-        build_dir: Build output directory (unused, kept for API compat)
-    """
-    this_dir = Path(__file__).parent
-    src_dir = this_dir / "src"
-
-    # Create project if not provided (standalone mode)
-    standalone = project is None
-    if standalone:
-        project = Project("app")
-
-    assert project is not None  # For type checker - always true after above
-
-    # Build libfoo first to get its library target
-    libfoo = build_libfoo(project, build_dir)
-
-    env = project.Environment(toolchain=find_c_toolchain())
-
-    # Build app program, linking to libfoo (gets includes automatically)
-    app = project.Program("app", env)
-    app.add_sources([src_dir / "main.c"])
-    app.link(libfoo)  # Gets libfoo's public.include_dirs automatically
-
-    if standalone:
-        # Generate build file when running standalone
-        project.generate()
-        print(f"Generated {project.build_dir}")
-
-
-if __name__ == "__main__":
-    build_app()
+app = project.Program("app", env)
+app.add_sources(["src/main.c"])
+app.link(libfoo)

@@ -496,7 +496,6 @@ class TestTargetDepends:
 
         project = Project("test", root_dir=tmp_path, build_dir="build")
         target = Target("app")
-        target._project = project
 
         target.depends("tools/codegen.py")
 

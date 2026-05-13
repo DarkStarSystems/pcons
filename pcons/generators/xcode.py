@@ -833,7 +833,7 @@ class XcodeGenerator(BaseGenerator):
 
         env = target._env
 
-        # Collect include directories
+        # Collect include directories (coerce to Path so strings work)
         include_dirs: list[str] = []
         for inc_dir in target.public.include_dirs:
             include_dirs.append(str(self._make_relative_path(Path(inc_dir))))

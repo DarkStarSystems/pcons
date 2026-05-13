@@ -27,28 +27,18 @@ Usage:
   cd app && python pcons-build.py && ninja -C build
 """
 
-import runpy
 from pathlib import Path
 
-from pcons import Project, find_c_toolchain
+from pcons import Project, add_subdirectory, find_c_toolchain
 
 this_dir = Path(__file__).parent
 
 # Create the main project
 project = Project("subdirs_example")
-build_dir = project.build_dir
-
-# Load libfoo's build script using runpy (simpler than importlib.util)
-libfoo_module = runpy.run_path(str(this_dir / "libfoo" / "pcons-build.py"))
-libfoo = libfoo_module["build_libfoo"](project, build_dir)
-
-# Build the app, linking to libfoo (gets includes automatically)
-app_src_dir = this_dir / "app" / "src"
 env = project.Environment(toolchain=find_c_toolchain())
 
-app = project.Program("subdirs_demo", env)
-app.add_sources([app_src_dir / "main.c"])
-app.link(libfoo)  # Gets libfoo's public.include_dirs automatically
+# add libfoo and app subdirectories
+add_subdirectory("libfoo")
+add_subdirectory("app")
 
 project.generate()
-print(f"Generated {build_dir}")

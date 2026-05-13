@@ -67,7 +67,6 @@ class ProgramBuilder:
             defined_at=defined_at or get_caller_location(),
         )
         target._env = env
-        target._project = project
         target._builder_name = "Program"
 
         if sources:
@@ -117,7 +116,6 @@ class StaticLibraryBuilder:
             defined_at=defined_at or get_caller_location(),
         )
         target._env = env
-        target._project = project
         target._builder_name = "StaticLibrary"
 
         if sources:
@@ -167,7 +165,6 @@ class SharedLibraryBuilder:
             defined_at=defined_at or get_caller_location(),
         )
         target._env = env
-        target._project = project
         target._builder_name = "SharedLibrary"
 
         if sources:
@@ -217,7 +214,6 @@ class ObjectLibraryBuilder:
             defined_at=defined_at or get_caller_location(),
         )
         target._env = env
-        target._project = project
         target._builder_name = "ObjectLibrary"
 
         if sources:
