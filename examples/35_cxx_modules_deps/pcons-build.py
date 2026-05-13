@@ -11,11 +11,17 @@ Demonstrates:
 from pcons import Project, get_var
 from pcons.toolchains import find_c_toolchain
 
+toolchain = find_c_toolchain(prefer=[get_var("TOOLCHAIN") or "gcc"])
 project = Project("cxx_modules")
-env = project.Environment(
-    toolchain=find_c_toolchain(prefer=[get_var("TOOLCHAIN") or "gcc"])
-)
-env.cxx.flags.append("-std=c++20")
+env = project.Environment(toolchain=toolchain)
+
+if toolchain.name == "msvc":
+    env.cxx.flags.extend(["/std:c++latest", "/EHsc", "/permissive-"])
+elif toolchain.name == "llvm":
+    env.cxx.flags.extend(["-std=c++20", "-stdlib=libc++"])
+    env.link.libs.append("c++")
+else:
+    env.cxx.flags.append("-std=c++20")
 
 hello = project.Program(
     "hello",
