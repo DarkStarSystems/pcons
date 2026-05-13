@@ -674,8 +674,14 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         from pcons.tools.toolchain import SourceHandler
 
         if suffix in CXX_MODULE_INTERFACE_SUFFIXES:
-            # No depfile for module interfaces: module deps are handled by dyndep.
-            return SourceHandler("cxx", "cxx_module", ".obj", None, None)
+            # No depfile (cl.exe doesn't produce make-style depfiles), but
+            # do enable `deps = msvc` so ninja parses /showIncludes output —
+            # otherwise #includes inside the module's global module fragment
+            # (e.g. legacy headers a .cppm pulls in) aren't tracked and
+            # touching one of those headers won't trigger a rebuild.
+            # The cxx_modules.dyndep file handles inter-module ordering;
+            # /showIncludes handles header deps. They're complementary.
+            return SourceHandler("cxx", "cxx_module", ".obj", None, "msvc")
         return super().get_source_handler(suffix)
 
     def after_resolve(
