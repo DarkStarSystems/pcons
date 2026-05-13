@@ -406,9 +406,12 @@ class TestMsvcSourceHandlers:
         assert handler.tool_name == "cxx"
         assert handler.language == "cxx_module"
         assert handler.object_suffix == ".obj"
-        # Module interfaces use dyndep, not per-source depfiles
+        # No make-style depfile (cl.exe doesn't emit one) — but deps_style is
+        # "msvc" so ninja still parses /showIncludes to track #includes inside
+        # the module's global module fragment. Inter-module ordering is
+        # handled by the cxx_modules.dyndep file.
         assert handler.depfile is None
-        assert handler.deps_style is None
+        assert handler.deps_style == "msvc"
 
 
 class TestMsvcLinkerAcceptsRes:
