@@ -44,6 +44,19 @@ class PathResolver:
         else:
             self._resolved_build_dir = (self.project_root / build_dir).resolve()
 
+    def subdir(self, subdir: str) -> PathResolver:
+        """Create a new PathResolver for a subdirectory.
+
+        The new resolver will have both project_root and build_dir adjusted
+        to the subdirectory.
+
+        Args:
+            subdir: The subdirectory name to append.
+        Returns:
+            A new PathResolver instance for the subdirectory.
+        """
+        return PathResolver(self.project_root / subdir, self.build_dir / subdir)
+
     def normalize_target_path(
         self, path: Path | str, *, target_name: str | None = None
     ) -> Path:

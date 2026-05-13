@@ -112,6 +112,22 @@ class EffectiveRequirements:
         )
 
 
+def _resolve_and_add_includes_for(
+    reqs: UsageRequirements, owner: Target
+) -> UsageRequirements:
+    """Resolve include directories in requirements and return a new UsageRequirements."""
+    result = reqs.clone()
+
+    def _update_include(inc: str | Path) -> Path:
+        p = Path(inc) if not isinstance(inc, Path) else inc
+        if owner._subdir and not p.is_absolute():
+            p = Path(owner._subdir) / p
+        return owner.project.path_resolver.canonicalize(p)
+
+    result.include_dirs = [_update_include(inc) for inc in reqs.include_dirs]
+    return result
+
+
 def compute_effective_requirements(
     target: Target,
     env: Environment,
@@ -171,14 +187,14 @@ def compute_effective_requirements(
 
     # Layer 2: Target's own requirements
     # Private: only for this target
-    result.merge(target.private)
+    result.merge(_resolve_and_add_includes_for(target.private, target))
     # Public: also available to this target's own sources (not just consumers)
-    result.merge(target.public)
+    result.merge(_resolve_and_add_includes_for(target.public, target))
 
     # Layer 3: All dependencies' public requirements (transitive)
     # transitive_dependencies() includes direct dependencies via DFS
     for dep in target.transitive_dependencies():
-        result.merge(dep.public)
+        result.merge(_resolve_and_add_includes_for(dep.public, dep))
 
     # Layer 4: Implicit target deps from target.depends(other_target)
     # These propagate public usage requirements (includes, defines) to
@@ -186,7 +202,7 @@ def compute_effective_requirements(
     # to the linker's $in.  Only propagated deps (not output-only).
     if for_compilation:
         for dep in target._implicit_target_deps:
-            result.merge(dep.public)
+            result.merge(_resolve_and_add_includes_for(dep.public, dep))
 
     return result
 

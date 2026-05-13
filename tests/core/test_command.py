@@ -120,6 +120,7 @@ class TestEnvironmentCommand:
     def test_command_with_single_target_and_source(self):
         """Command with single target and source."""
         env = Environment()
+        Project("dummy")
 
         result = env.Command(
             target="output.txt", source="input.txt", command="cp $SOURCE $TARGET"
@@ -544,7 +545,6 @@ class TestTargetAsSources:
 
         # Create a target that uses the generated source
         consumer = Target("consumer", target_type="program")
-        consumer._project = project
         consumer.add_source("main.cpp")
         consumer.add_source(generated)
 

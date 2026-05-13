@@ -218,7 +218,7 @@ class CompileLinkFactory:
 
         Format: ``<build_dir>/obj.<target>/<relative_dir>/<name>.<src_ext><obj_ext>``
         """
-        build_dir = self.project.build_dir
+        build_dir = target.build_dir
         obj_dir = build_dir / f"obj.{target.name}"
 
         handler = self._get_source_handler(source, env)
@@ -229,10 +229,8 @@ class CompileLinkFactory:
             obj_suffix = toolchain.get_object_suffix() if toolchain else ".o"
 
         obj_name = source.name + obj_suffix
-        rel_dir = source.parent
-        parts = [
-            p for p in rel_dir.parts if p not in ("..", "/") and p != rel_dir.anchor
-        ]
+        rel_dir = target.path_resolver.normalize_source_path(source.parent)
+        parts = [p for p in rel_dir.parts if p not in ("..", "/")]
         if parts:
             return obj_dir.joinpath(*parts) / obj_name
         return obj_dir / obj_name
@@ -380,9 +378,8 @@ class CompileLinkFactory:
                 target.name,
             )
             return
-
-        build_dir = self.project.build_dir
-        path_resolver = self.project.path_resolver
+        build_dir = target.build_dir
+        path_resolver = target.path_resolver
 
         lib_name = self._apply_output_naming(target, env, "static_library")
         lib_path = build_dir / path_resolver.normalize_target_path(lib_name)
@@ -416,8 +413,8 @@ class CompileLinkFactory:
             )
             return
 
-        build_dir = self.project.build_dir
-        path_resolver = self.project.path_resolver
+        build_dir = target.build_dir
+        path_resolver = target.path_resolver
 
         lib_name = self._apply_output_naming(target, env, "shared_library")
         lib_path = build_dir / path_resolver.normalize_target_path(lib_name)
@@ -457,8 +454,8 @@ class CompileLinkFactory:
             )
             return
 
-        build_dir = self.project.build_dir
-        path_resolver = self.project.path_resolver
+        build_dir = target.build_dir
+        path_resolver = target.path_resolver
 
         prog_name = self._apply_output_naming(target, env, "program")
         prog_path = build_dir / path_resolver.normalize_target_path(prog_name)

@@ -306,7 +306,6 @@ class TarfileBuilder:
             defined_at=get_caller_location(),
         )
         target._env = env
-        target._project = project
 
         # Set builder metadata
         target._builder_name = "Tarfile"
@@ -372,7 +371,6 @@ class ZipfileBuilder:
             defined_at=get_caller_location(),
         )
         target._env = env
-        target._project = project
 
         # Set builder metadata
         target._builder_name = "Zipfile"

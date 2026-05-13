@@ -7,49 +7,12 @@ This demonstrates a subdir that works both:
 - As subdir: called from parent pcons-build.py
 """
 
-from pathlib import Path
+from pcons import Project
 
-from pcons import Project, find_c_toolchain
-from pcons.core.target import Target
+project = Project.current()
+assert project is not None
+env = project.environments[0]
 
-
-def build_libfoo(
-    project: Project | None = None, build_dir: Path | None = None
-) -> Target:
-    """Build libfoo, optionally as part of a parent project.
-
-    Args:
-        project: Parent project, or None for standalone build
-        build_dir: Build output directory (unused, kept for API compat)
-
-    Returns:
-        The libfoo static library target (with public.include_dirs set)
-    """
-    this_dir = Path(__file__).parent
-    src_dir = this_dir / "src"
-    include_dir = this_dir / "include"
-
-    # Create project if not provided (standalone mode)
-    standalone = project is None
-    if standalone:
-        project = Project("libfoo")
-
-    assert project is not None  # For type checker - always true after above
-
-    env = project.Environment(toolchain=find_c_toolchain())
-
-    # Build static library with public include directory
-    libfoo = project.StaticLibrary("foo", env)
-    libfoo.add_sources([src_dir / "foo.c"])
-    libfoo.public.include_dirs.append(include_dir)
-
-    if standalone:
-        # Generate build file when running standalone
-        project.generate()
-        print(f"Generated {project.build_dir}")
-
-    return libfoo
-
-
-if __name__ == "__main__":
-    build_libfoo()
+libfoo = project.StaticLibrary("foo", env)
+libfoo.add_sources(["src/foo.c"])
+libfoo.public.include_dirs.append("include")

@@ -91,7 +91,6 @@ class GenerateVersionBuilder:
             target_type="command",
             defined_at=get_caller_location(),
         )
-        target._project = project
         target._builder_name = "GenerateVersion"
 
         # Create the output node immediately (not using pending sources)

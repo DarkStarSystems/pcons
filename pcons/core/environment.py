@@ -21,7 +21,6 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 if TYPE_CHECKING:
     from pcons.core._environment_stubs import _EnvironmentStubs
     from pcons.core.node import FileNode, Node
-    from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.tools.toolchain import Toolchain
 else:
@@ -90,7 +89,10 @@ class Environment(_EnvironmentStubs):
             "build_dir": Path("build"),
             "variant": "default",
         }
-        self._project: Project | None = None  # Set by Project when env is created
+        from pcons.core.project import Project
+
+        self._project = Project.current()
+
         self._toolchain = toolchain
         self._additional_toolchains: list[Toolchain] = []
         self._created_nodes: list[Any] = []  # Nodes created by builders
@@ -898,7 +900,6 @@ class Environment(_EnvironmentStubs):
             defined_at=get_caller_location(),
         )
         cmd_target._env = self
-        cmd_target._project = self._project
         cmd_target._builder_name = "Command"
 
         # Register nodes with the environment and add to target

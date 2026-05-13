@@ -25,7 +25,8 @@ if TYPE_CHECKING:
     from pcons.core._usage_requirements_stubs import _UsageRequirementsStubs
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
-    from pcons.core.node import FileNode, Node
+    from pcons.core.node import BuildInfo, FileNode, Node
+    from pcons.core.paths import PathResolver
     from pcons.core.project import Project
 else:
     # At runtime, UsageRequirements inherits from `object`. The mixin only
@@ -200,7 +201,7 @@ class Target:
         # NEW for target-centric build model:
         "target_type",
         "_env",
-        "_project",
+        "__project",
         "intermediate_nodes",
         "output_nodes",
         "_resolved",
@@ -236,6 +237,7 @@ class Target:
         # Implicit target deps with propagate=False (output nodes only,
         # no usage requirement propagation).
         "_implicit_target_deps_output_only",
+        "_subdir",
     )
 
     def __init__(
@@ -267,7 +269,7 @@ class Target:
         self._collected_requirements: UsageRequirements | None = None
         self.target_type: str | None = target_type
         self._env: Environment | None = None
-        self._project: Project | None = None  # Set by Project when target is created
+        self.__project: Project | None = None  # Set by Project when target is created
         self.intermediate_nodes: list[FileNode] = []
         self.output_nodes: list[FileNode] = []
         self._resolved: bool = False
@@ -282,7 +284,7 @@ class Target:
         # Sources that need resolution after main resolve phase
         self._pending_sources: list[Target | Node | Path | str] | None = None
         # Build info for archive and command targets
-        self._build_info: dict[str, Any] | None = None
+        self._build_info: BuildInfo | dict[str, Any] | None = None
         # Generic builder support (extensible builder architecture)
         self._builder_name: str | None = None
         # Builder-specific data dict, initialized to empty dict (not None)
@@ -294,6 +296,53 @@ class Target:
         # Implicit target deps (from target.depends(other_target))
         self._implicit_target_deps: list[Target] = []
         self._implicit_target_deps_output_only: list[Target] = []
+
+        from pcons.core.project import Project
+
+        project = Project.current()
+        if project is not None:
+            self.__project = project
+            self._subdir = project._subdir
+
+            if self._env is None:
+                # default to the last environment in the project, if available
+                self._env = project.environments[-1] if project.environments else None
+        else:
+            self.__project = None
+            self._subdir = None
+            self._env = None
+
+    @property
+    def project(self) -> Project:
+        """Get the project this target belongs to."""
+        if self.__project is None:
+            raise RuntimeError(
+                f"Target '{self.name}' is not associated with any project. "
+                f"Ensure it was created via a Project method like "
+                f"project.Program() or project.Library()."
+            )
+        return self.__project
+
+    # @project.setter
+    # def project(self, project: Project | None) -> None:
+    #     if project is None:
+    #         from pcons.core.project import Project
+
+    #         if Project.current() is not None:
+    #             project = Project.current()
+    #         else:
+    #             return  # skip, some target may not belong to a project (e.g., Command)
+
+    #     if self.__project is not None:
+    #         raise RuntimeError(
+    #             f"Target '{self.name}' is already associated with a project. "
+    #         )
+    #     self.__project = project
+    #     self._subdir = project._subdir
+
+    #     if self._env is None:
+    #         # default to the last environment in the project, if available
+    #         self._env = project.environments[-1] if project.environments else None
 
     @property
     def sources(self) -> list[Node]:
@@ -332,6 +381,25 @@ class Target:
             f"Use add_source() or add_sources() instead. "
             f"Example: target.add_sources({value!r})"
         )
+
+    @property
+    def build_dir(self) -> Path:
+        if self._subdir:
+            return self.project.build_dir / self._subdir
+        return self.project.build_dir
+
+    @property
+    def source_dir(self) -> Path:
+        if self._subdir:
+            return self.project.root_dir / self._subdir
+        return self.project.root_dir
+
+    @property
+    def path_resolver(self) -> PathResolver:
+        """Get the Path resolver for this target's project."""
+        if self._subdir:
+            return self.project.path_resolver.subdir(self._subdir)
+        return self.project.path_resolver
 
     @property
     def nodes(self) -> list[FileNode]:
@@ -442,7 +510,7 @@ class Target:
                     file_list.append(item)
                 else:
                     # str or Path — convert to FileNode via project
-                    project = self._project
+                    project = self.project
                     if project is not None:
                         file_list.append(project.node(item))
                     else:
@@ -554,6 +622,10 @@ class Target:
                     path = Path(source)
                     if not path.is_absolute():
                         source = base_path / path
+                # Only join subdir when source is a string or Path. If it's
+                # already a Node, leave it alone.
+                if self._subdir and isinstance(source, (str, Path)):
+                    source = Path(self._subdir) / source
                 node = self._to_node(source)
                 self._sources.append(node)
         return self
@@ -567,8 +639,8 @@ class Target:
             return source
         path = Path(source)
         # Use project's node() if available for deduplication
-        if self._project is not None:
-            node: Node = self._project.node(path)
+        if self.project is not None:
+            node: Node = self.project.node(path)
             return node
         return FileNode(path)
 
