@@ -668,8 +668,6 @@ class GccToolchain(UnixToolchain):
                     modules_flag,
                 )
 
-                if hasattr(project, "intermediate_nodes"):
-                    project.intermediate_nodes.append(scan_node)
                 if first_env is not None:
                     first_env.register_node(scan_node)
                 obj_node.implicit_deps.append(scan_node)
