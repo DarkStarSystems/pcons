@@ -40,5 +40,3 @@ env = project.Environment(toolchain=find_c_toolchain())
 # add libfoo and app subdirectories
 add_subdirectory("libfoo")
 add_subdirectory("app")
-
-project.generate()
