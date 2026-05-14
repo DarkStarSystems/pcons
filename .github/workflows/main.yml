@@ -228,8 +228,23 @@ jobs:
       - name: Install libc++ for `import std;` (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get install -y libc++-18-dev libc++abi-18-dev
+      - name: Install gcc-15 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y software-properties-common
+          
+          sudo add-apt-repository ppa:ubuntu-toolchain-r/test -y
+          sudo apt-get update
+
+          sudo apt-get install -y gcc-15 g++-15
+
+          sudo update-alternatives --install /usr/bin/gcc gcc \
+            /usr/bin/gcc-15 100
+          sudo update-alternatives --install /usr/bin/g++ g++ \
+            /usr/bin/g++-15 100
       - name: Run C++20 modules example tests
-        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules or 30_cxx_partitions or 31_cxx_modules_optin or 32_cxx_import_std" -v
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules or 30_cxx_partitions or 31_cxx_modules_optin or 32_cxx_import_std or 35_cxx_modules_deps" -v
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
         with:
