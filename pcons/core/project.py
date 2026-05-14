@@ -85,11 +85,18 @@ class Project(_ProjectBuilders):
         "_package_finder_chain",
         "defined_at",
         "_parent",
+        "_children",
         "_subdir",
     )
 
     __current: Project | None = None
     __top_level: Project | None = None
+
+    @staticmethod
+    def _clear_tree() -> None:
+        """Clear the project tree (for testing purposes)."""
+        Project.__current = None
+        Project.__top_level = None
 
     def __init__(
         self,
@@ -115,7 +122,7 @@ class Project(_ProjectBuilders):
             defined_at: Source location where project was created.
         """
         self.name = name
-        if root_dir is None:
+        if root_dir is None and Project.__top_level is None:
             root_dir = os.environ.get("PCONS_SOURCE_DIR")
         if root_dir is None:
             # Infer from the script that called Project()
@@ -126,6 +133,8 @@ class Project(_ProjectBuilders):
         self.root_dir = Path(root_dir) if root_dir else Path.cwd()
         if build_dir is None:
             build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
+        if not self.root_dir.is_absolute():
+            raise ValueError(f"Root directory must be absolute (got: {self.root_dir})")
         bd = Path(build_dir)
         if bd.is_absolute():
             try:
@@ -145,6 +154,7 @@ class Project(_ProjectBuilders):
         self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
         self.defined_at = defined_at or get_caller_location()
         self._subdir = None
+        self._children: list[Project] = []
 
         # Auto-register with global registry (for CLI access)
         from pcons import _register_project
@@ -156,21 +166,45 @@ class Project(_ProjectBuilders):
         else:
             self._parent = None
 
+        if self._parent:
+            self._parent._children.append(self)
+            self.build_dir = self._parent.build_dir
+            # If the child project's root_dir is inside the top-level project,
+            # normalize it so that the child's `root_dir` becomes the top-level
+            # root and `_subdir` holds the relative path under the top-level.
+            top_root = Project.top_level().root_dir
+            rel = self.root_dir.relative_to(top_root)
+            self.root_dir = top_root
+            self._subdir = str(rel)
+            # Recreate the path resolver now that root_dir/build_dir changed
+            self._path_resolver = PathResolver(self.root_dir, self.build_dir)
+
         Project.__current = self
         if Project.__top_level is None:
             Project.__top_level = self
 
     @staticmethod
-    def current() -> Project | None:
+    def current() -> Project:
+        if Project.__current is None:
+            raise ValueError("no project is currently active")
         return Project.__current
 
     @staticmethod
-    def top_level() -> Project | None:
+    def top_level() -> Project:
+        if Project.__top_level is None:
+            raise ValueError("no top-level project is currently active")
         return Project.__top_level
 
     @property
     def is_top_level(self) -> bool:
         return self == Project.top_level()
+
+    @property
+    def parent(self) -> Project:
+        """Get the parent project if this is a subdir, or None if top-level."""
+        if self._parent is None:
+            raise ValueError("This project has no parent (it is top-level).")
+        return self._parent
 
     @property
     def current_dir(self) -> Path:
@@ -321,12 +355,20 @@ class Project(_ProjectBuilders):
         Returns:
             The target, or None if not found.
         """
-        return self._targets.get(name)
+        if (target := self._targets.get(name)) is not None:
+            return target
+        for child in self._children:
+            if (target := child.get_target(name)) is not None:
+                return target
+        return None
 
     @property
     def targets(self) -> list[Target]:
         """Get all registered targets."""
-        return list(self._targets.values())
+        results: list[Target] = list(self._targets.values())
+        for child in self._children:
+            results.extend(child.targets)
+        return results
 
     @property
     def environments(self) -> list[Env]:
@@ -492,8 +534,15 @@ class Project(_ProjectBuilders):
             for source in target.sources:
                 if isinstance(source, FileNode):
                     # Only check source files (not generated files)
-                    if source.builder is None and not source.exists():
-                        errors.append(MissingSourceError(str(source.path)))
+
+                    if source.builder is None:
+                        p = source.path
+                        if not p.is_absolute():
+                            p = Project.top_level().root_dir / p
+                        if not p.exists():
+                            errors.append(
+                                MissingSourceError(str(p), target_name=target.name)
+                            )
 
         return errors
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from pcons.core.builder import BaseBuilder, Builder, CommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode, Node
+from pcons.core.project import Project
 
 
 class TestBuilderProtocol:
@@ -45,6 +46,7 @@ class TestBaseBuilder:
                 return sources
 
         builder = TestBuilder("Test", "test", target_suffixes=[".out"])
+        Project("test_project")
         env = Environment()
 
         # Mix of strings, Paths, and Nodes
@@ -78,6 +80,7 @@ class TestCommandBuilder:
             single_source=True,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmdline = "$cc.cmd -c -o $TARGET $SOURCE"
@@ -99,6 +102,7 @@ class TestCommandBuilder:
             single_source=False,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmdline = "$link.cmd -o $TARGET $SOURCES"
@@ -121,6 +125,7 @@ class TestCommandBuilder:
             single_source=True,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -143,6 +148,7 @@ class TestCommandBuilder:
             single_source=True,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -163,6 +169,7 @@ class TestCommandBuilder:
             single_source=True,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -184,6 +191,7 @@ class TestCommandBuilder:
             single_source=True,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -206,6 +214,7 @@ class TestCommandBuilder:
             single_source=True,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -238,6 +247,7 @@ class TestCommandBuilderDepfile:
             deps_style="gcc",
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -266,6 +276,7 @@ class TestCommandBuilderDepfile:
             deps_style="msvc",
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "cl.exe"
@@ -289,6 +300,7 @@ class TestCommandBuilderDepfile:
             single_source=False,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "gcc"

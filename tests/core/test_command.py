@@ -34,17 +34,20 @@ class TestGenericCommandBuilder:
 
     def test_unique_rule_names(self):
         """Each builder gets a unique rule name."""
+        Project("test_project")
         builder1 = GenericCommandBuilder("cmd1")
         builder2 = GenericCommandBuilder("cmd2")
         assert builder1.rule_name != builder2.rule_name
 
     def test_custom_rule_name(self):
         """Builder can have a custom rule name."""
+        Project("test_project")
         builder = GenericCommandBuilder("cmd", rule_name="my_custom_rule")
         assert builder.rule_name == "my_custom_rule"
 
     def test_requires_explicit_target(self):
         """Builder raises error if no target is provided."""
+        Project("test_project")
         builder = GenericCommandBuilder("echo hello")
         env = Environment()
         with pytest.raises(ValueError, match="requires explicit target"):
@@ -52,6 +55,7 @@ class TestGenericCommandBuilder:
 
     def test_creates_target_node(self):
         """Builder creates target node with proper dependencies."""
+        Project("test_project")
         builder = GenericCommandBuilder("cp $SOURCE $TARGET")
         env = Environment()
 
@@ -64,6 +68,7 @@ class TestGenericCommandBuilder:
 
     def test_target_depends_on_sources(self):
         """Target node depends on all sources."""
+        Project("test_project")
         builder = GenericCommandBuilder("cat $SOURCES > $TARGET")
         env = Environment()
 
@@ -79,6 +84,7 @@ class TestGenericCommandBuilder:
         """Target node contains build info with command."""
         from pcons.core.subst import SourcePath, TargetPath
 
+        Project("test_project")
         builder = GenericCommandBuilder("process $SOURCE > $TARGET")
         env = Environment()
 
@@ -99,6 +105,7 @@ class TestGenericCommandBuilder:
 
     def test_srcdir_preserved_in_tokens(self):
         """$SRCDIR is preserved as a plain string token (generators handle it)."""
+        Project("test_project")
         builder = GenericCommandBuilder("python $SRCDIR/scripts/gen.py $SOURCE $TARGET")
         from pcons.core.subst import SourcePath, TargetPath
 
@@ -119,6 +126,7 @@ class TestEnvironmentCommand:
 
     def test_command_with_single_target_and_source(self):
         """Command with single target and source."""
+        Project("test_project")
         env = Environment()
         Project("dummy")
 
@@ -135,6 +143,7 @@ class TestEnvironmentCommand:
 
     def test_command_with_multiple_sources(self):
         """Command with multiple sources."""
+        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -149,6 +158,7 @@ class TestEnvironmentCommand:
 
     def test_command_with_multiple_targets(self):
         """Command with multiple targets."""
+        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -164,6 +174,7 @@ class TestEnvironmentCommand:
 
     def test_command_with_no_sources(self):
         """Command with no source dependencies."""
+        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -175,6 +186,7 @@ class TestEnvironmentCommand:
 
     def test_command_with_path_objects(self):
         """Command accepts Path objects."""
+        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -188,6 +200,7 @@ class TestEnvironmentCommand:
 
     def test_command_registers_nodes(self):
         """Command registers nodes with environment."""
+        Project("test_project")
         env = Environment()
 
         result = env.Command(target="out.txt", source="in.txt", command="cmd")
@@ -196,6 +209,7 @@ class TestEnvironmentCommand:
 
     def test_command_returns_target(self):
         """Command returns Target object (not list[FileNode])."""
+        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -209,6 +223,7 @@ class TestEnvironmentCommand:
 
     def test_command_name_derived_from_target(self):
         """Command target name is derived from first target file if not specified."""
+        Project("test_project")
         env = Environment()
 
         result = env.Command(target="my_output.txt", source="in.txt", command="cmd")
@@ -217,6 +232,7 @@ class TestEnvironmentCommand:
 
     def test_command_explicit_name(self):
         """Command can have an explicit name."""
+        Project("test_project")
         env = Environment()
 
         result = env.Command(

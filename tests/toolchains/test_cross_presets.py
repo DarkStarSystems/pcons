@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.toolchains.presets import (
     CrossPreset,
     android,
@@ -170,6 +171,7 @@ class TestCrossPresetApplication:
         """UnixToolchain should apply --target flag."""
         from pcons.toolchains.llvm import LlvmToolchain
 
+        Project("test_project")
         env = _make_unix_env()
         toolchain = LlvmToolchain()
 
@@ -187,6 +189,7 @@ class TestCrossPresetApplication:
         """UnixToolchain should apply --sysroot flag."""
         from pcons.toolchains.llvm import LlvmToolchain
 
+        Project("test_project")
         env = _make_unix_env()
         toolchain = LlvmToolchain()
 
@@ -204,6 +207,7 @@ class TestCrossPresetApplication:
         """Extra compile/link flags should be applied."""
         from pcons.toolchains.gcc import GccToolchain
 
+        Project("test_project")
         env = _make_unix_env()
         toolchain = GccToolchain()
 
@@ -222,6 +226,7 @@ class TestCrossPresetApplication:
         """CC/CXX overrides from env_vars should be applied."""
         from pcons.toolchains.gcc import GccToolchain
 
+        Project("test_project")
         env = _make_unix_env()
         toolchain = GccToolchain()
 
@@ -239,6 +244,7 @@ class TestCrossPresetApplication:
         """MsvcCompatibleToolchain should apply /MACHINE flags."""
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
+        Project("test_project")
         env = Environment()
         link = env.add_tool("link")
         link.set("cmd", "link.exe")
@@ -262,6 +268,7 @@ class TestCrossPresetApplication:
         """Environment.apply_cross_preset() should delegate to toolchains."""
         from pcons.toolchains.llvm import LlvmToolchain
 
+        Project("test_project")
         env = _make_unix_env()
         env._toolchain = LlvmToolchain()
 

@@ -6,30 +6,36 @@ from pathlib import Path
 import pytest
 
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.core.toolconfig import ToolConfig
 
 
 class TestEnvironmentBasic:
     def test_creation(self):
+        Project("test_project")
         env = Environment()
         assert env.defined_at is not None
 
     def test_default_build_dir(self):
+        Project("test_project")
         env = Environment()
         assert env.build_dir == Path("build")
 
     def test_set_cross_tool_var(self):
+        Project("test_project")
         env = Environment()
         env.variant = "release"
         assert env.variant == "release"
 
     def test_get_missing_raises(self):
+        Project("test_project")
         env = Environment()
         with pytest.raises(AttributeError) as exc_info:
             _ = env.missing
         assert "missing" in str(exc_info.value)
 
     def test_get_with_default(self):
+        Project("test_project")
         env = Environment()
         assert env.get("missing") is None
         assert env.get("missing", "default") == "default"
@@ -37,12 +43,14 @@ class TestEnvironmentBasic:
 
 class TestEnvironmentTools:
     def test_add_tool(self):
+        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         assert isinstance(cc, ToolConfig)
         assert cc.name == "cc"
 
     def test_add_tool_with_config(self):
+        Project("test_project")
         env = Environment()
         config = ToolConfig("cc", cmd="gcc")
         cc = env.add_tool("cc", config)
@@ -50,6 +58,7 @@ class TestEnvironmentTools:
         assert env.cc.cmd == "gcc"
 
     def test_add_existing_tool_returns_it(self):
+        Project("test_project")
         env = Environment()
         cc1 = env.add_tool("cc")
         cc1.cmd = "gcc"
@@ -58,12 +67,14 @@ class TestEnvironmentTools:
         assert cc2.cmd == "gcc"
 
     def test_has_tool(self):
+        Project("test_project")
         env = Environment()
         assert not env.has_tool("cc")
         env.add_tool("cc")
         assert env.has_tool("cc")
 
     def test_tool_names(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.add_tool("cxx")
@@ -72,12 +83,14 @@ class TestEnvironmentTools:
         assert "cxx" in names
 
     def test_access_tool_via_attribute(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
         assert env.cc.cmd == "gcc"
 
     def test_tool_takes_precedence_over_var(self):
+        Project("test_project")
         env = Environment()
         env.cc = "variable_value"  # Set as variable
         tool_config = env.add_tool("cc")  # Now add tool
@@ -88,12 +101,14 @@ class TestEnvironmentTools:
 
 class TestEnvironmentClone:
     def test_clone_basic(self):
+        Project("test_project")
         env = Environment()
         env.variant = "debug"
         clone = env.clone()
         assert clone.variant == "debug"
 
     def test_clone_is_independent(self):
+        Project("test_project")
         env = Environment()
         env.variant = "debug"
         clone = env.clone()
@@ -103,6 +118,7 @@ class TestEnvironmentClone:
         assert clone.variant == "release"
 
     def test_clone_deep_copies_tools(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -120,12 +136,14 @@ class TestEnvironmentClone:
 
 class TestEnvironmentSubst:
     def test_subst_cross_tool_var(self):
+        Project("test_project")
         env = Environment()
         env.name = "myapp"
         result = env.subst("Building $name")
         assert result == "Building myapp"
 
     def test_subst_tool_var(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -135,12 +153,14 @@ class TestEnvironmentSubst:
         assert "gcc" in result
 
     def test_subst_with_extra(self):
+        Project("test_project")
         env = Environment()
         result = env.subst("Target: $target", target="app.exe")
         assert "Target:" in result
         assert "app.exe" in result
 
     def test_subst_list(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.flags = ["-Wall", "-O2"]
@@ -149,6 +169,7 @@ class TestEnvironmentSubst:
         assert result == ["-Wall", "-O2"]
 
     def test_subst_list_with_string(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.flags = "-Wall -O2"
@@ -157,6 +178,7 @@ class TestEnvironmentSubst:
         assert result == ["-Wall -O2"]
 
     def test_subst_list_string_tokenized(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.flags = "-Wall -O2"
@@ -166,6 +188,7 @@ class TestEnvironmentSubst:
         assert result == ["-Wall -O2", "more", "flags"]
 
     def test_subst_complex(self):
+        Project("test_project")
         # For complex command templates with list variables, use list templates
         env = Environment()
         env.add_tool("cc")
@@ -185,6 +208,7 @@ class TestEnvironmentSubst:
         assert "foo.c" in result
 
     def test_subst_list_template(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -194,6 +218,7 @@ class TestEnvironmentSubst:
         assert result == ["gcc", "-Wall", "-O2", "-c", "file.c"]
 
     def test_subst_with_prefix_function(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -209,6 +234,7 @@ class TestEnvironmentOverride:
 
     def test_override_simple_var(self):
         """Override a simple variable."""
+        Project("test_project")
         env = Environment()
         env.variant = "release"
 
@@ -220,6 +246,7 @@ class TestEnvironmentOverride:
 
     def test_override_tool_setting(self):
         """Override tool settings using double-underscore notation."""
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.flags = ["-Wall"]
@@ -230,6 +257,7 @@ class TestEnvironmentOverride:
 
     def test_override_add_define(self):
         """Common use case: add a specific define for some files."""
+        Project("test_project")
         env = Environment()
         env.add_tool("cxx")
         env.cxx.defines = ["RELEASE"]
@@ -240,6 +268,7 @@ class TestEnvironmentOverride:
 
     def test_override_multiple_settings(self):
         """Override multiple settings at once."""
+        Project("test_project")
         env = Environment()
         env.variant = "release"
         env.add_tool("cc")
@@ -251,6 +280,7 @@ class TestEnvironmentOverride:
 
     def test_override_returns_clone(self):
         """Override returns a cloned environment, not the original."""
+        Project("test_project")
         env = Environment()
         env.variant = "release"
 
@@ -263,6 +293,7 @@ class TestCompilerCache:
 
     def test_auto_detect_skips_when_not_found(self) -> None:
         """Auto-detect should be a no-op when no cache tool is found."""
+        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         cc.set("cmd", "gcc")
@@ -278,6 +309,7 @@ class TestCompilerCache:
         """Explicit tool name should wrap cc and cxx commands."""
         import shutil
 
+        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         cc.set("cmd", "gcc")
@@ -315,6 +347,7 @@ class TestCompilerCache:
         if tool is None:
             pytest.skip("No compiler cache tool available")
 
+        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         cc.set("cmd", f"{tool} gcc")
@@ -337,6 +370,7 @@ class TestCompilerCache:
         if tool is None:
             pytest.skip("No compiler cache tool available")
 
+        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         cc.set("cmd", "gcc")
@@ -347,6 +381,7 @@ class TestCompilerCache:
 
     def test_unknown_tool_warns(self) -> None:
         """Unknown tool name should warn and not modify."""
+        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         cc.set("cmd", "gcc")
@@ -358,6 +393,7 @@ class TestCompilerCache:
         """Explicit tool not in PATH should warn and not modify."""
         import shutil
 
+        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         cc.set("cmd", "gcc")
@@ -376,6 +412,7 @@ class TestCompilerCache:
 
 class TestEnvironmentRepr:
     def test_repr(self):
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         r = repr(env)

@@ -3,6 +3,7 @@
 
 from pcons.core.builder import Builder
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.tools.tool import BaseTool, Tool
 from pcons.tools.toolchain import BaseToolchain, Toolchain
 
@@ -63,6 +64,7 @@ class TestBaseToolchain:
         tc = MockToolchain()
         tc.configure(None)
 
+        Project("test_project")
         env = Environment()
         tc.setup(env)
 

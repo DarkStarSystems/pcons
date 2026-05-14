@@ -17,6 +17,7 @@ import pytest
 
 from pcons.core.builder import CommandBuilder
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain
@@ -142,6 +143,7 @@ class TestExternalTool:
 
     def test_tool_can_setup_environment(self) -> None:
         """Test that the tool can be added to an environment."""
+        Project("test_project")
         env = Environment()
         tool = ConcatTool()
         tool.setup(env)
@@ -154,6 +156,7 @@ class TestExternalTool:
 
     def test_tool_builder_attached_to_environment(self) -> None:
         """Test that builders are attached to the tool namespace."""
+        Project("test_project")
         env = Environment()
         tool = ConcatTool()
         tool.setup(env)
@@ -163,6 +166,7 @@ class TestExternalTool:
 
     def test_builder_creates_node(self, tmp_path: Path) -> None:
         """Test that the builder creates target nodes."""
+        Project("test_project")
         env = Environment()
         env.build_dir = tmp_path
 
@@ -186,6 +190,7 @@ class TestExternalTool:
 
     def test_tool_variables_can_be_modified(self) -> None:
         """Test that tool variables can be customized."""
+        Project("test_project")
         env = Environment()
         tool = ConcatTool()
         tool.setup(env)
@@ -225,6 +230,7 @@ class TestExternalToolchain:
         if not toolchain.configure(None):
             pytest.skip("cat command not available")
 
+        Project("test_project")
         env = Environment(toolchain=toolchain)
 
         # Tool should be available
@@ -237,6 +243,7 @@ class TestMultipleExternalTools:
 
     def test_multiple_tools_in_environment(self) -> None:
         """Test adding multiple custom tools to an environment."""
+        Project("test_project")
         env = Environment()
 
         # Add concat tool
@@ -403,6 +410,7 @@ class TestToolIntegration:
 
     def test_tool_with_variant(self) -> None:
         """Test that external tools work with variants."""
+        Project("test_project")
         env = Environment()
 
         concat = ConcatTool()
@@ -416,6 +424,7 @@ class TestToolIntegration:
 
     def test_tool_environment_clone(self) -> None:
         """Test that cloned environments preserve external tools."""
+        Project("test_project")
         env = Environment()
 
         concat = ConcatTool()
@@ -435,6 +444,7 @@ class TestToolIntegration:
 
     def test_variable_substitution(self) -> None:
         """Test that tool variables work with substitution."""
+        Project("test_project")
         env = Environment()
 
         concat = ConcatTool()

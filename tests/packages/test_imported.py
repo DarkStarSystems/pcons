@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pcons.core.project import Project
 from pcons.packages.description import ComponentDescription, PackageDescription
 from pcons.packages.imported import ImportedTarget
 
@@ -14,6 +15,7 @@ class TestImportedTarget:
 
     def test_create_imported_target(self) -> None:
         """Test creating an imported target directly."""
+        Project("test_project")
         pkg = PackageDescription(
             name="zlib",
             version="1.2.13",
@@ -28,6 +30,7 @@ class TestImportedTarget:
 
     def test_from_package(self) -> None:
         """Test creating from a PackageDescription."""
+        Project("test_project")
         pkg = PackageDescription(
             name="openssl",
             version="3.0",
@@ -43,6 +46,7 @@ class TestImportedTarget:
 
     def test_compile_flags(self) -> None:
         """Test getting compile flags."""
+        Project("test_project")
         pkg = PackageDescription(
             name="test",
             include_dirs=["/opt/test/include"],
@@ -56,6 +60,7 @@ class TestImportedTarget:
 
     def test_link_flags(self) -> None:
         """Test getting link flags."""
+        Project("test_project")
         pkg = PackageDescription(
             name="test",
             library_dirs=["/opt/test/lib"],
@@ -71,6 +76,7 @@ class TestImportedTarget:
 
     def test_include_dirs_as_paths(self) -> None:
         """Test getting include dirs as Path objects."""
+        Project("test_project")
         pkg = PackageDescription(
             name="test",
             include_dirs=["/usr/include", "/opt/include"],
@@ -84,6 +90,7 @@ class TestImportedTarget:
 
     def test_with_components(self) -> None:
         """Test creating with specific components."""
+        Project("test_project")
         pkg = PackageDescription(
             name="boost",
             include_dirs=["/usr/include/boost"],
@@ -103,6 +110,7 @@ class TestImportedTarget:
 
     def test_no_package(self) -> None:
         """Test target with no package returns empty values."""
+        Project("test_project")
         target = ImportedTarget(name="empty")
         assert target.compile_flags == []
         assert target.link_flags == []
@@ -111,6 +119,7 @@ class TestImportedTarget:
 
     def test_repr(self) -> None:
         """Test string representation."""
+        Project("test_project")
         pkg = PackageDescription(name="test", version="1.0")
         target = ImportedTarget.from_package(pkg)
         repr_str = repr(target)
@@ -119,6 +128,7 @@ class TestImportedTarget:
 
     def test_public_requirements_populated(self) -> None:
         """Test that public requirements are populated from package."""
+        Project("test_project")
         pkg = PackageDescription(
             name="test",
             include_dirs=["/opt/test/include"],
@@ -141,6 +151,7 @@ class TestImportedTarget:
 
     def test_public_requirements_frameworks_macos(self) -> None:
         """Test that macOS framework flags are populated in public requirements."""
+        Project("test_project")
         pkg = PackageDescription(
             name="CoreFoundation",
             framework_dirs=["/System/Library/Frameworks"],
@@ -158,6 +169,7 @@ class TestImportedTarget:
 
     def test_public_requirements_with_components(self) -> None:
         """Test public requirements include merged component data."""
+        Project("test_project")
         pkg = PackageDescription(
             name="boost",
             include_dirs=["/usr/include/boost"],
@@ -181,6 +193,7 @@ class TestImportedTarget:
 
     def test_empty_package_no_public_requirements(self) -> None:
         """Test that empty package results in empty public requirements."""
+        Project("test_project")
         pkg = PackageDescription(name="empty")
         target = ImportedTarget.from_package(pkg)
 
@@ -199,6 +212,7 @@ class TestImportedTarget:
         """
         from pcons.core.target import Target
 
+        Project("test_project")
         openssl = ImportedTarget.from_package(
             PackageDescription(
                 name="openssl",

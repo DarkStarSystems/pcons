@@ -122,7 +122,11 @@ def _resolve_and_add_includes_for(
         p = Path(inc) if not isinstance(inc, Path) else inc
         if owner._subdir and not p.is_absolute():
             p = Path(owner._subdir) / p
-        return owner.project.path_resolver.canonicalize(p)
+        # Canonicalize relative to the top-level project's resolver so
+        # generators (which use the top-level resolver) see consistent
+        # project-relative paths for includes coming from subprojects.
+        top = owner.project.top_level()
+        return top.path_resolver.canonicalize(p)
 
     result.include_dirs = [_update_include(inc) for inc in reqs.include_dirs]
     return result

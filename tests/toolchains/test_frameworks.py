@@ -2,6 +2,7 @@
 """Tests for macOS Framework linking support."""
 
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.packages.description import PackageDescription
 from pcons.toolchains.gcc import GccLinker
 from pcons.toolchains.llvm import LlvmLinker
@@ -74,6 +75,7 @@ class TestEnvironmentFramework:
 
     def test_framework_adds_to_link_frameworks(self):
         """Framework() should add to link.frameworks."""
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -84,6 +86,7 @@ class TestEnvironmentFramework:
 
     def test_framework_multiple(self):
         """Framework() should handle multiple frameworks at once."""
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -96,6 +99,7 @@ class TestEnvironmentFramework:
 
     def test_framework_with_dirs(self):
         """Framework() should accept custom search directories."""
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -107,6 +111,7 @@ class TestEnvironmentFramework:
 
     def test_framework_no_duplicates(self):
         """Framework() should not add duplicate frameworks."""
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -118,6 +123,7 @@ class TestEnvironmentFramework:
 
     def test_framework_without_link_tool(self):
         """Framework() should do nothing if link tool doesn't exist."""
+        Project("test_project")
         env = Environment()
         # Don't add link tool
         env.Framework("Foundation")  # Should not raise
@@ -125,6 +131,7 @@ class TestEnvironmentFramework:
 
     def test_framework_creates_lists_if_missing(self):
         """Framework() should create frameworks/frameworkdirs if they don't exist."""
+        Project("test_project")
         env = Environment()
         link = env.add_tool("link")
         # Don't set frameworks/frameworkdirs
@@ -141,6 +148,7 @@ class TestEnvironmentUseWithFrameworks:
 
     def test_use_applies_frameworks(self):
         """use() should apply frameworks from a package."""
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -159,6 +167,7 @@ class TestEnvironmentUseWithFrameworks:
 
     def test_use_no_duplicate_frameworks(self):
         """use() should not add duplicate frameworks."""
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = ["Foundation"]
@@ -295,6 +304,7 @@ class TestFrameworkSubstitution:
 
     def test_framework_substitution_in_progcmd(self):
         """Framework variables should expand correctly in link commands."""
+        Project("test_project")
         env = Environment()
         link = env.add_tool("link")
         link.cmd = "clang"
@@ -333,6 +343,7 @@ class TestFrameworkSubstitution:
 
     def test_empty_frameworks_no_extra_tokens(self):
         """Empty frameworks should not add extra tokens."""
+        Project("test_project")
         env = Environment()
         link = env.add_tool("link")
         link.cmd = "clang"

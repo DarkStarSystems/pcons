@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for CUDA toolchain."""
 
+from pcons.core.project import Project
 from pcons.toolchains import CudaCompiler, CudaToolchain, find_cuda_toolchain
 from pcons.tools.toolchain import SourceHandler
 
@@ -80,6 +81,7 @@ class TestCudaVariants:
         """Debug variant adds debug flags."""
         from pcons.core.environment import Environment
 
+        Project("test_project")
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
         toolchain._configured = True
@@ -103,6 +105,7 @@ class TestCudaVariants:
         """Release variant adds optimization flags."""
         from pcons.core.environment import Environment
 
+        Project("test_project")
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
         toolchain._configured = True
@@ -123,6 +126,7 @@ class TestCudaVariants:
         """Profile variant adds line info for profilers."""
         from pcons.core.environment import Environment
 
+        Project("test_project")
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
         toolchain._configured = True

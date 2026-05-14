@@ -14,6 +14,7 @@ from __future__ import annotations
 import pytest
 
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
 
@@ -23,6 +24,7 @@ class TestGccVariants:
 
     def test_debug_variant(self) -> None:
         """Test GCC debug variant applies correct flags."""
+        Project("test_project")
         env = Environment()
 
         # Set up a mock GCC toolchain (just add the tools manually)
@@ -59,6 +61,7 @@ class TestGccVariants:
 
     def test_release_variant(self) -> None:
         """Test GCC release variant applies correct flags."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -77,6 +80,7 @@ class TestGccVariants:
 
     def test_relwithdebinfo_variant(self) -> None:
         """Test GCC relwithdebinfo variant."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -93,6 +97,7 @@ class TestGccVariants:
 
     def test_minsizerel_variant(self) -> None:
         """Test GCC minsizerel variant."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -108,6 +113,7 @@ class TestGccVariants:
 
     def test_extra_flags(self) -> None:
         """Test extra flags are added."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -123,6 +129,7 @@ class TestGccVariants:
 
     def test_extra_defines(self) -> None:
         """Test extra defines are added (without -D prefix)."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -138,6 +145,7 @@ class TestGccVariants:
 
     def test_unknown_variant(self) -> None:
         """Test unknown variant sets name but no flags."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -152,6 +160,7 @@ class TestGccVariants:
 
     def test_case_insensitive(self) -> None:
         """Test variant names are case-insensitive."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -171,6 +180,7 @@ class TestLlvmVariants:
 
     def test_debug_variant(self) -> None:
         """Test LLVM debug variant."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -189,6 +199,7 @@ class TestLlvmVariants:
 
     def test_release_variant(self) -> None:
         """Test LLVM release variant."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -208,6 +219,7 @@ class TestEnvironmentSetVariant:
 
     def test_set_variant_without_toolchain(self) -> None:
         """Test set_variant without toolchain just sets name."""
+        Project("test_project")
         env = Environment()
 
         env.set_variant("debug")
@@ -217,6 +229,7 @@ class TestEnvironmentSetVariant:
     def test_set_variant_with_toolchain(self) -> None:
         """Test set_variant delegates to toolchain."""
         # Create env with tools set up manually
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -237,6 +250,7 @@ class TestEnvironmentSetVariant:
 
     def test_preserves_existing_flags(self) -> None:
         """Test that set_variant preserves existing flags."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -265,6 +279,7 @@ class TestBaseToolchainVariant:
     def test_base_sets_variant_name(self) -> None:
         """Test base implementation sets variant name."""
 
+        Project("test_project")
         # Can't instantiate abstract class directly, use a concrete one
         # and verify the base behavior (super().apply_variant sets env.variant)
         env = Environment()
@@ -278,6 +293,7 @@ class TestBaseToolchainVariant:
 
     def test_base_rejects_unknown_variant(self) -> None:
         """Test that unknown variant names are rejected with a helpful error."""
+        Project("test_project")
         env = Environment()
 
         toolchain = GccToolchain()

@@ -9,6 +9,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import MultiOutputBuilder, OutputGroup
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
+from pcons.core.project import Project
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.msvc import (
     MsvcAssembler,
@@ -61,6 +62,7 @@ class TestMsvcCompiler:
         builders = cc.builders()
         obj_builder = builders["Object"]
         # Create a mock environment and build a target to check build_info
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "cl.exe"
@@ -180,6 +182,7 @@ class TestMsvcLinker:
         builders = link.builders()
         shared_builder = builders["SharedLibrary"]
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -293,6 +296,7 @@ class TestMsvcResourceCompiler:
         builders = rc.builders()
         res_builder = builders["Resource"]
 
+        Project("test_project")
         env = Environment()
         env.add_tool("rc")
         env.rc.cmd = "rc.exe"
@@ -310,6 +314,7 @@ class TestMsvcResourceCompiler:
         builders = rc.builders()
         res_builder = builders["Resource"]
 
+        Project("test_project")
         env = Environment()
         env.add_tool("rc")
         env.rc.cmd = "rc.exe"
@@ -435,6 +440,7 @@ class TestMsvcAuxiliaryInputHandler:
 
     def test_auxiliary_input_handler_def(self):
         """Test that .def files are recognized as auxiliary inputs."""
+        Project("test_project")
         tc = MsvcToolchain()
         handler = tc.get_auxiliary_input_handler(".def")
         assert handler is not None

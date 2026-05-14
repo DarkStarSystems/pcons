@@ -12,6 +12,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.toolchains.clang_cl import ClangClToolchain
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
@@ -23,6 +24,7 @@ class TestGccTargetArch:
 
     def test_macos_arm64(self) -> None:
         """Test GCC arm64 target on macOS adds -arch flag."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -57,6 +59,7 @@ class TestGccTargetArch:
 
     def test_macos_x86_64(self) -> None:
         """Test GCC x86_64 target on macOS adds -arch flag."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -83,6 +86,7 @@ class TestGccTargetArch:
 
     def test_linux_no_arch_flags(self) -> None:
         """Test GCC on Linux doesn't add -arch flags (requires cross-toolchain)."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -112,6 +116,7 @@ class TestLlvmTargetArch:
 
     def test_macos_arm64(self) -> None:
         """Test LLVM arm64 target on macOS adds -arch flag."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -149,6 +154,7 @@ class TestMsvcTargetArch:
 
     def test_x64_machine_flag(self) -> None:
         """Test MSVC x64 target adds /MACHINE:X64."""
+        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -167,6 +173,7 @@ class TestMsvcTargetArch:
 
     def test_arm64_machine_flag(self) -> None:
         """Test MSVC arm64 target adds /MACHINE:ARM64."""
+        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -185,6 +192,7 @@ class TestMsvcTargetArch:
 
     def test_x86_machine_flag(self) -> None:
         """Test MSVC x86 target adds /MACHINE:X86."""
+        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -198,6 +206,7 @@ class TestMsvcTargetArch:
 
     def test_arm64ec_machine_flag(self) -> None:
         """Test MSVC arm64ec target adds /MACHINE:ARM64EC."""
+        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -211,6 +220,7 @@ class TestMsvcTargetArch:
 
     def test_arch_aliases(self) -> None:
         """Test MSVC architecture aliases are mapped correctly."""
+        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -238,6 +248,7 @@ class TestClangClTargetArch:
 
     def test_x64_target_and_machine(self) -> None:
         """Test Clang-CL x64 target adds --target flag and /MACHINE."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -263,6 +274,7 @@ class TestClangClTargetArch:
 
     def test_arm64_target_and_machine(self) -> None:
         """Test Clang-CL arm64 target adds --target flag and /MACHINE."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -286,6 +298,7 @@ class TestClangClTargetArch:
 
     def test_x86_target_and_machine(self) -> None:
         """Test Clang-CL x86 target adds --target flag and /MACHINE."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -308,6 +321,7 @@ class TestEnvironmentSetTargetArch:
 
     def test_set_target_arch_stores_name(self) -> None:
         """Test set_target_arch stores the architecture name."""
+        Project("test_project")
         env = Environment()
 
         env.set_target_arch("arm64")
@@ -316,6 +330,7 @@ class TestEnvironmentSetTargetArch:
 
     def test_set_target_arch_with_toolchain(self) -> None:
         """Test set_target_arch delegates to toolchain."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -344,6 +359,7 @@ class TestEnvironmentSetTargetArch:
 
     def test_orthogonal_to_variant(self) -> None:
         """Test that set_target_arch is orthogonal to set_variant."""
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -390,6 +406,7 @@ class TestBaseToolchainTargetArch:
             def _configure_tools(self, config: object) -> bool:
                 return True
 
+        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")

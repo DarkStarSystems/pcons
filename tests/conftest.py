@@ -3,6 +3,7 @@
 
 import pytest
 
+from pcons.core.project import Project
 from pcons.toolchains.gcc import (
     GccArchiver,
     GccCCompiler,
@@ -55,3 +56,15 @@ int main(void) {
 """
     )
     return src_file
+
+
+@pytest.fixture(autouse=True)
+def clear_project_tree():
+    """Ensure global Project state is cleared for each test.
+
+    Calls `Project._clear_tree()` before the test and again after to
+    guarantee a clean project registry and avoid cross-test leakage.
+    """
+    Project._clear_tree()
+    yield
+    Project._clear_tree()

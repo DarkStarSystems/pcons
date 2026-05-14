@@ -526,6 +526,9 @@ def _run_generate(
         variant: Optional variant name (e.g., "debug", "release").
         variables: Optional build variables (KEY=value) for the build script.
     """
+    from pcons import Project
+
+    Project._clear_tree()
     if invocation == "direct":
         from pcons.cli import run_script
 

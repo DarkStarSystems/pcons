@@ -132,6 +132,7 @@ class TestMultiToolchainEnvironment:
         cuda_toolchain = MockCudaToolchain()
         cuda_toolchain.configure(None)
 
+        Project("test_project")
         env = Environment(toolchain=c_toolchain)
         assert env.has_tool("cc")
         assert env.has_tool("cxx")
@@ -148,6 +149,7 @@ class TestMultiToolchainEnvironment:
         cuda_toolchain = MockCudaToolchain()
         cuda_toolchain.configure(None)
 
+        Project("test_project")
         env = Environment(toolchain=c_toolchain)
         assert len(env.toolchains) == 1
         assert env.toolchains[0] is c_toolchain
@@ -159,6 +161,7 @@ class TestMultiToolchainEnvironment:
 
     def test_toolchains_property_empty_without_toolchain(self):
         """Test that toolchains returns empty list when no toolchain set."""
+        Project("test_project")
         env = Environment()
         assert env.toolchains == []
 
@@ -170,6 +173,7 @@ class TestMultiToolchainEnvironment:
         cuda_toolchain = MockCudaToolchain()
         cuda_toolchain.configure(None)
 
+        Project("test_project")
         env = Environment(toolchain=c_toolchain)
         env.add_toolchain(cuda_toolchain)
 
@@ -186,6 +190,7 @@ class TestMultiToolchainEnvironment:
         cuda_toolchain = MockCudaToolchain()
         cuda_toolchain.configure(None)
 
+        Project("test_project")
         env = Environment(toolchain=c_toolchain)
         env.add_toolchain(cuda_toolchain)
 
@@ -198,6 +203,7 @@ class TestMultiToolchainEnvironment:
 
     def test_set_variant_no_toolchains(self):
         """Test set_variant works when no toolchains configured."""
+        Project("test_project")
         env = Environment()
         env.set_variant("release")
         assert env.variant == "release"
