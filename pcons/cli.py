@@ -516,7 +516,7 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
         extra_env["PCONS_MERMAID"] = mermaid
 
     # Run build script
-    exit_code, projects = run_script(
+    exit_code, _projects = run_script(
         script,
         build_dir,
         variables=variables,
@@ -529,14 +529,15 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
     if exit_code != 0:
         return exit_code, None
 
-    if not projects:
-        logger.warning("No Project created in build script")
-        return 0, None
+    try:
+        from pcons import Project
 
-    if len(projects) > 1:
-        logger.warning("Multiple Projects created; using first one")
+        top_level_project = Project.top_level()
 
-    return 0, projects[0]
+        return 0, top_level_project
+    except ValueError:
+        logger.error("No Project created in build script")
+        return 1, None
 
 
 def _cmd_generate_wrapper(args: argparse.Namespace) -> int:

@@ -12,6 +12,7 @@ from pcons.core.graph import (
     topological_sort_targets,
 )
 from pcons.core.node import FileNode
+from pcons.core.project import Project
 from pcons.core.target import Target
 
 
@@ -21,11 +22,13 @@ class TestTopologicalSortTargets:
         assert result == []
 
     def test_single_target(self):
+        Project("test_project")
         target = Target("app")
         result = topological_sort_targets([target])
         assert result == [target]
 
     def test_linear_dependency(self):
+        Project("test_project")
         # A depends on B depends on C
         c = Target("C")
         b = Target("B")
@@ -41,6 +44,7 @@ class TestTopologicalSortTargets:
 
     def test_diamond_dependency(self):
         # A depends on B and C, both depend on D
+        Project("test_project")
         d = Target("D")
         b = Target("B")
         b.link(d)
@@ -59,6 +63,7 @@ class TestTopologicalSortTargets:
         assert result.index(c) < result.index(a)
 
     def test_cycle_raises_error(self):
+        Project("test_project")
         a = Target("A")
         b = Target("B")
         a.link(b)
@@ -70,6 +75,7 @@ class TestTopologicalSortTargets:
 
 class TestDetectCycles:
     def test_no_cycle(self):
+        Project("test_project")
         a = Target("A")
         b = Target("B")
         a.link(b)
@@ -78,6 +84,7 @@ class TestDetectCycles:
         assert cycles == []
 
     def test_simple_cycle(self):
+        Project("test_project")
         a = Target("A")
         b = Target("B")
         a.link(b)
@@ -89,6 +96,7 @@ class TestDetectCycles:
         assert "B" in cycles[0]
 
     def test_self_cycle(self):
+        Project("test_project")
         a = Target("A")
         # Self-link is now caught early by link() validation
         with pytest.raises(ValueError, match="cannot link itself"):
@@ -96,6 +104,7 @@ class TestDetectCycles:
 
     def test_multiple_cycles(self):
         # Two separate cycles: A<->B and C<->D
+        Project("test_project")
         a = Target("A")
         b = Target("B")
         a.link(b)
@@ -145,6 +154,7 @@ class TestCollectAllNodes:
         assert nodes == set()
 
     def test_collects_from_single_target(self):
+        Project("test_project")
         target = Target("app")
         src = FileNode("main.c")
         out = FileNode("app")
@@ -157,6 +167,7 @@ class TestCollectAllNodes:
         assert out in nodes
 
     def test_collects_from_dependencies(self):
+        Project("test_project")
         lib = Target("lib")
         lib_src = FileNode("lib.c")
         lib_out = FileNode("lib.o")
@@ -180,11 +191,13 @@ class TestCollectAllNodes:
 
 class TestCollectBuildOrder:
     def test_single_target(self):
+        Project("test_project")
         app = Target("app")
         order = collect_build_order(app)
         assert order == [app]
 
     def test_with_dependencies(self):
+        Project("test_project")
         lib = Target("lib")
         app = Target("app")
         app.link(lib)
@@ -194,6 +207,7 @@ class TestCollectBuildOrder:
         assert order.index(lib) < order.index(app)
 
     def test_diamond_dependency(self):
+        Project("test_project")
         base = Target("base")
         left = Target("left")
         left.link(base)

@@ -9,6 +9,7 @@ import pytest
 from pcons.configure.checks import CheckResult, ToolChecks
 from pcons.configure.config import Configure
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 
 
 class TestCheckResult:
@@ -61,6 +62,7 @@ class TestToolChecksWithCompiler:
     @pytest.fixture
     def setup(self, tmp_path):
         config = Configure(build_dir=tmp_path)
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
 
@@ -225,6 +227,7 @@ class TestToolChecksWithoutCompiler:
 
     def test_no_compiler_configured(self, tmp_path):
         config = Configure(build_dir=tmp_path)
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         # Don't set env.cc.cmd
@@ -237,6 +240,7 @@ class TestToolChecksWithoutCompiler:
 
     def test_cache_key_format(self, tmp_path):
         config = Configure(build_dir=tmp_path)
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"

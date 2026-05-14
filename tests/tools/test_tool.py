@@ -3,6 +3,7 @@
 
 from pcons.core.builder import Builder, CommandBuilder
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.tools.tool import BaseTool, BuilderMethod, Tool
 
 
@@ -57,6 +58,7 @@ class TestBaseTool:
 
     def test_setup_creates_namespace(self):
         tool = MockTool()
+        Project("test_project")
         env = Environment()
 
         tool.setup(env)
@@ -66,6 +68,7 @@ class TestBaseTool:
 
     def test_setup_attaches_builders(self):
         tool = MockTool()
+        Project("test_project")
         env = Environment()
 
         tool.setup(env)
@@ -78,6 +81,7 @@ class TestBaseTool:
 class TestBuilderMethod:
     def test_call_with_string_source(self):
         tool = MockTool()
+        Project("test_project")
         env = Environment()
         tool.setup(env)
 
@@ -87,6 +91,7 @@ class TestBuilderMethod:
 
     def test_call_with_list_sources(self):
         tool = MockTool()
+        Project("test_project")
         env = Environment()
         tool.setup(env)
 
@@ -96,6 +101,7 @@ class TestBuilderMethod:
 
     def test_call_with_no_sources(self):
         tool = MockTool()
+        Project("test_project")
         env = Environment()
         tool.setup(env)
 

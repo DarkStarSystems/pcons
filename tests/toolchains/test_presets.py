@@ -7,12 +7,14 @@ Each toolchain family defines its own flags for each preset.
 from __future__ import annotations
 
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
 
 
 def _make_unix_env() -> Environment:
     """Create an environment with cc, cxx, and link tools."""
+    Project("test_project")
     env = Environment()
     cc = env.add_tool("cc")
     cc.set("cmd", "gcc")
@@ -32,6 +34,7 @@ def _make_unix_env() -> Environment:
 
 def _make_msvc_env() -> Environment:
     """Create an environment with MSVC-style tools."""
+    Project("test_project")
     env = Environment()
     cc = env.add_tool("cc")
     cc.set("cmd", "cl.exe")
@@ -124,6 +127,7 @@ class TestUnixPresets:
 
     def test_preset_without_link_tool(self) -> None:
         """Presets should work even without a link tool."""
+        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         cc.set("flags", [])

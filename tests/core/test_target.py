@@ -4,6 +4,7 @@
 from pathlib import Path
 
 from pcons.core.node import FileNode
+from pcons.core.project import Project
 from pcons.core.target import ImportedTarget, Target, UsageRequirements
 
 
@@ -69,6 +70,7 @@ class TestUsageRequirements:
 
 class TestTarget:
     def test_creation(self):
+        Project("test_project")
         target = Target("mylib")
         assert target.name == "mylib"
         assert target.nodes == []
@@ -76,11 +78,13 @@ class TestTarget:
         assert target.dependencies == []
 
     def test_tracks_source_location(self):
+        Project("test_project")
         target = Target("mylib")
         assert target.defined_at is not None
         assert target.defined_at.lineno > 0
 
     def test_link_adds_dependency(self):
+        Project("test_project")
         lib1 = Target("lib1")
         lib2 = Target("lib2")
         app = Target("app")
@@ -92,6 +96,7 @@ class TestTarget:
         assert lib2 in app.dependencies
 
     def test_link_avoids_duplicates(self):
+        Project("test_project")
         lib = Target("lib")
         app = Target("app")
 
@@ -101,6 +106,7 @@ class TestTarget:
         assert app.dependencies.count(lib) == 1
 
     def test_usage_requirements(self):
+        Project("test_project")
         lib = Target("lib")
         lib.public.include_dirs.append(Path("include"))
         lib.public.defines.append("LIB_API")
@@ -113,6 +119,7 @@ class TestTarget:
     def test_collect_usage_requirements(self):
         """Test transitive requirement collection."""
         # Create a dependency chain: app -> libB -> libA
+        Project("test_project")
         libA = Target("libA")
         libA.public.include_dirs.append(Path("libA/include"))
         libA.public.defines.append("LIBA_API")
@@ -135,6 +142,7 @@ class TestTarget:
 
     def test_collect_usage_requirements_cached(self):
         """Test that collection is cached."""
+        Project("test_project")
         lib = Target("lib")
         app = Target("app")
         app.link(lib)
@@ -146,6 +154,7 @@ class TestTarget:
 
     def test_collect_usage_requirements_invalidated(self):
         """Test that cache is invalidated on new link."""
+        Project("test_project")
         lib1 = Target("lib1")
         lib2 = Target("lib2")
         lib2.public.defines.append("LIB2")
@@ -162,6 +171,7 @@ class TestTarget:
         assert "LIB2" in req2.defines
 
     def test_get_all_languages(self):
+        Project("test_project")
         lib = Target("lib")
         lib.required_languages.add("c")
 
@@ -174,6 +184,7 @@ class TestTarget:
         assert "cxx" in langs
 
     def test_equality_by_name(self):
+        Project("test_project")
         t1 = Target("mylib")
         t2 = Target("mylib")
         t3 = Target("other")
@@ -182,6 +193,7 @@ class TestTarget:
         assert t1 != t3
 
     def test_hashable(self):
+        Project("test_project")
         t1 = Target("mylib")
         t2 = Target("mylib")
 
@@ -191,6 +203,7 @@ class TestTarget:
 
 class TestImportedTarget:
     def test_creation(self):
+        Project("test_project")
         target = ImportedTarget("zlib", version="1.2.11")
         assert target.name == "zlib"
         assert target.is_imported is True
@@ -198,6 +211,7 @@ class TestImportedTarget:
         assert target.version == "1.2.11"
 
     def test_can_have_usage_requirements(self):
+        Project("test_project")
         target = ImportedTarget("zlib")
         target.public.include_dirs.append(Path("/usr/include"))
         target.public.link_libs.append("z")
@@ -206,6 +220,7 @@ class TestImportedTarget:
         assert target.public.link_libs == ["z"]
 
     def test_can_be_dependency(self):
+        Project("test_project")
         zlib = ImportedTarget("zlib")
         zlib.public.link_libs.append("z")
 
@@ -221,6 +236,7 @@ class TestFluentAPI:
 
     def test_link_returns_self(self):
         """link() returns self for chaining."""
+        Project("test_project")
         lib = Target("lib")
         app = Target("app")
 
@@ -231,6 +247,7 @@ class TestFluentAPI:
 
     def test_add_source_returns_self(self, tmp_path):
         """add_source() returns self for chaining."""
+        Project("test_project")
         target = Target("app")
         src = tmp_path / "main.c"
         src.touch()
@@ -242,6 +259,7 @@ class TestFluentAPI:
 
     def test_add_sources_returns_self(self, tmp_path):
         """add_sources() returns self for chaining."""
+        Project("test_project")
         target = Target("app")
         src1 = tmp_path / "main.c"
         src2 = tmp_path / "util.c"
@@ -255,6 +273,7 @@ class TestFluentAPI:
 
     def test_add_sources_with_base(self, tmp_path):
         """add_sources() with base directory works."""
+        Project("test_project")
         target = Target("app")
         src_dir = tmp_path / "src"
         src_dir.mkdir()
@@ -271,6 +290,7 @@ class TestFluentAPI:
 
     def test_public_private_requirements(self):
         """Usage requirements can be set directly on public/private."""
+        Project("test_project")
         target = Target("lib")
 
         target.public.include_dirs.append(Path("include"))
@@ -286,6 +306,7 @@ class TestFluentAPI:
 
     def test_link_chain(self, tmp_path):
         """link() can be chained with other fluent methods."""
+        Project("test_project")
         lib = Target("lib")
         app = Target("app")
         src = tmp_path / "main.c"
@@ -303,6 +324,7 @@ class TestPostBuild:
 
     def test_post_build_adds_command(self):
         """post_build() adds a command to the list."""
+        Project("test_project")
         target = Target("app")
 
         target.post_build("install_name_tool -add_rpath @loader_path $out")
@@ -313,6 +335,7 @@ class TestPostBuild:
 
     def test_post_build_fluent_returns_self(self):
         """post_build() returns self for chaining."""
+        Project("test_project")
         target = Target("app")
 
         result = target.post_build("echo done")
@@ -321,6 +344,7 @@ class TestPostBuild:
 
     def test_post_build_multiple_commands(self):
         """Multiple post_build() calls accumulate commands in order."""
+        Project("test_project")
         target = Target("plugin")
 
         target.post_build("install_name_tool -add_rpath @loader_path $out")
@@ -338,6 +362,7 @@ class TestPostBuild:
 
     def test_post_build_chain_with_other_methods(self, tmp_path):
         """post_build() can be chained with other fluent methods."""
+        Project("test_project")
         target = Target("app")
         src = tmp_path / "main.c"
         src.touch()
@@ -353,6 +378,7 @@ class TestPostBuild:
 
     def test_post_build_empty_by_default(self):
         """Target has no post_build commands by default."""
+        Project("test_project")
         target = Target("app")
 
         post_build_cmds = target._builder_data.get("post_build_commands", [])
@@ -364,6 +390,7 @@ class TestTargetDepends:
 
     def test_depends_with_file_node(self):
         """depends() accepts FileNode objects."""
+        Project("test_project")
         target = Target("app")
         dep = FileNode("tools/codegen.py")
 
@@ -373,6 +400,7 @@ class TestTargetDepends:
 
     def test_depends_with_string_no_project(self):
         """depends() with string creates FileNode when no project."""
+        Project("test_project")
         target = Target("app")
 
         target.depends("tools/codegen.py")
@@ -382,6 +410,7 @@ class TestTargetDepends:
 
     def test_depends_with_target(self):
         """depends() with Target adds to implicit target deps, not link deps."""
+        Project("test_project")
         target = Target("app")
         lib = Target("mylib")
 
@@ -393,6 +422,7 @@ class TestTargetDepends:
 
     def test_depends_mixed_args(self):
         """depends() handles mixed Target and file args."""
+        Project("test_project")
         target = Target("app")
         lib = Target("mylib")
         config = FileNode("config.yaml")
@@ -406,6 +436,7 @@ class TestTargetDepends:
 
     def test_depends_fluent(self):
         """depends() returns self for chaining."""
+        Project("test_project")
         target = Target("app")
 
         result = target.depends("a.txt").depends("b.txt")
@@ -415,8 +446,6 @@ class TestTargetDepends:
 
     def test_depends_applied_during_resolve(self, tmp_path):
         """depends() deps are applied to output nodes during resolve."""
-        from pcons.core.project import Project
-
         project = Project("test", root_dir=tmp_path, build_dir="build")
         env = project.Environment()
 
@@ -437,6 +466,7 @@ class TestTargetDepends:
 
     def test_apply_extra_implicit_deps_propagated(self):
         """Propagated deps go on both object nodes and output nodes."""
+        Project("test_project")
         target = Target("app")
         obj = FileNode("build/main.o")
         exe = FileNode("build/app")
@@ -452,6 +482,7 @@ class TestTargetDepends:
 
     def test_apply_extra_implicit_deps_output_only(self):
         """Output-only deps go on output nodes but not object nodes."""
+        Project("test_project")
         target = Target("app")
         obj = FileNode("build/main.o")
         exe = FileNode("build/app")
@@ -467,6 +498,7 @@ class TestTargetDepends:
 
     def test_depends_propagate_false(self):
         """depends(propagate=False) stores in output-only lists."""
+        Project("test_project")
         target = Target("app")
         lib = Target("mylib")
 
@@ -479,6 +511,7 @@ class TestTargetDepends:
 
     def test_apply_no_duplicates(self):
         """_apply_extra_implicit_deps doesn't add duplicates."""
+        Project("test_project")
         target = Target("app")
         output = FileNode("build/app")
         target.output_nodes.append(output)
@@ -492,8 +525,6 @@ class TestTargetDepends:
 
     def test_depends_with_project(self, tmp_path):
         """depends() uses project.node() when project is available."""
-        from pcons.core.project import Project
-
         project = Project("test", root_dir=tmp_path, build_dir="build")
         target = Target("app")
 

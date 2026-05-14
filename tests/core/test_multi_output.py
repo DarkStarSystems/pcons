@@ -12,6 +12,7 @@ from pcons.core.builder import (
 )
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
+from pcons.core.project import Project
 
 
 class TestOutputSpec:
@@ -180,6 +181,7 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -205,6 +207,7 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -229,6 +232,7 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -252,6 +256,7 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -281,6 +286,7 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -306,6 +312,7 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -335,6 +342,7 @@ class TestMultiOutputBuilderSingleSource:
             single_source=True,
         )
 
+        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "cl.exe"
