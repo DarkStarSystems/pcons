@@ -207,12 +207,16 @@ class CompileLinkContext:
                     if flag not in link_flags:
                         link_flags.append(flag)
 
+        from pcons.core.target import Target
+
         return cls(
             includes=[str(p) for p in effective.includes],
             defines=list(effective.defines),
             flags=list(effective.compile_flags),
             link_flags=link_flags,
-            libs=list(effective.link_libs),
+            # link_libs now can contain both Target instances and strings.
+            # just filter out Target instances, they are handled somewhere else
+            libs=[lib for lib in effective.link_libs if not isinstance(lib, Target)],
             libdirs=[str(p) for p in effective.link_dirs],
             linker_cmd=linker_cmd,
             mode=mode,

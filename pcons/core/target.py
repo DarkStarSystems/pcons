@@ -228,7 +228,7 @@ class Target:
         "name",
         "builder",
         "_sources",
-        "dependencies",
+        "_dependencies",
         "public",
         "private",
         "required_languages",
@@ -297,7 +297,7 @@ class Target:
         self.name = name
         self.builder = builder
         self._sources: list[Node] = []
-        self.dependencies: list[Target] = []
+        self._dependencies: list[Target] = []
         self.public = UsageRequirements()
         self.private = UsageRequirements()
         self.required_languages: set[str] = set()
@@ -358,6 +358,17 @@ class Target:
             The qualified name, in the form "<project>::<target>".
         """
         return f"{self.project.name}::{self.name}"
+
+    @property
+    def dependencies(self):
+        """Get the list of Target dependencies for this target."""
+        linked_public_targets = [
+            t for t in self.public.link_libs if isinstance(t, Target)
+        ]
+        linked_private_targets = [
+            t for t in self.private.link_libs if isinstance(t, Target)
+        ]
+        return (*self._dependencies, *linked_public_targets, *linked_private_targets)
 
     @property
     def sources(self) -> list[Node]:
@@ -456,10 +467,24 @@ class Target:
                 )
             if target is self:
                 raise ValueError(f"Target '{self.name}' cannot link itself.")
-            if target not in self.dependencies:
-                self.dependencies.append(target)
+            if target not in self.public.link_libs:
+                self.public.link_libs.append(target)
         # Invalidate cached requirements
         self._collected_requirements = None
+        return self
+
+    def add_dependency(self, *targets: Target) -> Target:
+        if self._resolved:
+            raise RuntimeError(
+                f"Cannot modify target '{self.name}' after resolve(). "
+                f"Call link() before project.resolve() or project.generate()."
+            )
+        for target in targets:
+            if target not in self._dependencies:
+                self._dependencies.append(target)
+        # Invalidate cached requirements
+        self._collected_requirements = None
+
         return self
 
     def depends(
@@ -573,8 +598,8 @@ class Target:
                 self._pending_sources = []
             self._pending_sources.append(source)
             # Add as dependency to ensure correct build order
-            if source not in self.dependencies:
-                self.dependencies.append(source)
+            if source not in self._dependencies:
+                self._dependencies.append(source)
         else:
             node = self._to_node(source)
             self._sources.append(node)
@@ -630,8 +655,8 @@ class Target:
                     self._pending_sources = []
                 self._pending_sources.append(source)
                 # Add as dependency to ensure correct build order
-                if source not in self.dependencies:
-                    self.dependencies.append(source)
+                if source not in self._dependencies:
+                    self._dependencies.append(source)
             else:
                 if base_path and isinstance(source, (str, Path)):
                     path = Path(source)
@@ -739,7 +764,7 @@ class Target:
 
     def _collect_from_deps(self, result: UsageRequirements, visited: set[str]) -> None:
         """Recursively collect public requirements from dependencies."""
-        for dep in self.dependencies:
+        for dep in self.transitive_dependencies():
             if dep.name in visited:
                 continue
             visited.add(dep.name)
@@ -777,11 +802,16 @@ class Target:
         Returns:
             List of all transitive dependencies (not including self).
         """
-        result: list[Target] = []
+        result: list[Target] = [
+            t for t in self.private.link_libs if isinstance(t, Target)
+        ]
         visited: set[str] = set()
 
         def _collect(target: Target) -> None:
-            for dep in target.dependencies:
+            public_linked_targets = [
+                t for t in target.public.link_libs if isinstance(t, Target)
+            ]
+            for dep in [*target._dependencies, *public_linked_targets]:
                 if dep.name not in visited:
                     visited.add(dep.name)
                     _collect(dep)

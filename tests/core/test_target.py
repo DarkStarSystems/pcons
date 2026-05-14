@@ -103,7 +103,7 @@ class TestTarget:
         assert target.name == "mylib"
         assert target.nodes == []
         assert target.sources == []
-        assert target.dependencies == []
+        assert len(target.dependencies) == 0
 
     def test_tracks_source_location(self, test_project):  # noqa: F811
         target = Target("mylib")

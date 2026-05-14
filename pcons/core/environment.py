@@ -914,7 +914,7 @@ class Environment(_EnvironmentStubs):
             # Add as dependencies to ensure correct build order
             for src_target in target_sources:
                 if src_target not in cmd_target.dependencies:
-                    cmd_target.dependencies.append(src_target)
+                    cmd_target.add_dependency(src_target)
 
         # Apply extra implicit dependencies
         if depends is not None:

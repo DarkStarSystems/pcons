@@ -204,7 +204,7 @@ class TestComputeEffectiveRequirements:
         libB = Target("libB", target_type="static_library")
         libB._env = env
         libB.public.include_dirs.append(Path("libB/include"))
-        libB.link(libA)
+        libB.public.link_libs.append(libA)
 
         target = Target("app", target_type="program")
         target._env = env
