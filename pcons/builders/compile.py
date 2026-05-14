@@ -70,8 +70,7 @@ class ProgramBuilder:
         target._builder_name = "Program"
 
         if sources:
-            source_nodes = _normalize_sources(project, sources)
-            target.add_sources(source_nodes)
+            target.add_sources(sources)
 
         project.add_target(target)
         return target
@@ -119,8 +118,7 @@ class StaticLibraryBuilder:
         target._builder_name = "StaticLibrary"
 
         if sources:
-            source_nodes = _normalize_sources(project, sources)
-            target.add_sources(source_nodes)
+            target.add_sources(sources)
 
         project.add_target(target)
         return target
@@ -168,8 +166,7 @@ class SharedLibraryBuilder:
         target._builder_name = "SharedLibrary"
 
         if sources:
-            source_nodes = _normalize_sources(project, sources)
-            target.add_sources(source_nodes)
+            target.add_sources(sources)
 
         project.add_target(target)
         return target
@@ -217,8 +214,7 @@ class ObjectLibraryBuilder:
         target._builder_name = "ObjectLibrary"
 
         if sources:
-            source_nodes = _normalize_sources(project, sources)
-            target.add_sources(source_nodes)
+            target.add_sources(sources)
 
         project.add_target(target)
         return target
@@ -315,38 +311,3 @@ def _validate_builder_name(name: object, builder_name: str) -> None:
             f"{builder_name}() first argument must be a name string, "
             f"got {type(name).__name__}."
         )
-
-
-def _normalize_sources(
-    project: Project,
-    sources: list[str | Path | Node],
-) -> list[Node]:
-    """Convert source paths/strings to nodes.
-
-    Uses project's node() for deduplication.
-
-    Args:
-        project: Project for node deduplication.
-        sources: List of source files.
-
-    Returns:
-        List of Node objects.
-
-    Raises:
-        TypeError: If sources is a string or bare Path instead of a list.
-    """
-    if isinstance(sources, str):
-        raise TypeError(
-            f'sources must be a list, got a string. Use sources=["{sources}"].'
-        )
-    if isinstance(sources, Path):
-        raise TypeError(
-            f"sources must be a list, got a Path. Use sources=[{sources!r}]."
-        )
-    result: list[Node] = []
-    for src in sources:
-        if isinstance(src, Node):
-            result.append(src)
-        else:
-            result.append(project.node(src))
-    return result
