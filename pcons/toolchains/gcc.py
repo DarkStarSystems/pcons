@@ -497,7 +497,6 @@ def _build_scan_node(
     # Paths for command execution
     scan_rel = str(scan_path.relative_to(build_dir)).replace("\\", "/")
     depfile_rel = str(depfile_path.relative_to(build_dir)).replace("\\", "/")
-    depfile_dir = str(Path(depfile_rel).parent)
     rel_src = src
     if hasattr(project, "_path_resolver"):
         rel_src = project._path_resolver.make_project_relative(src)
@@ -506,14 +505,10 @@ def _build_scan_node(
 
     # Build scan command
     scan_cmd = (
-        # create the output directory
-        f"mkdir -p {depfile_dir}"
         # generate the depfile
-        f" && {compiler_cmd} -E -MD -MT {scan_rel} -MF {depfile_rel} "
+        f"{compiler_cmd} -MM -MT {scan_rel} -MF {depfile_rel} "
         + " ".join(normalized_flags)
-        + f" {rel_src} >/dev/null"
-        # create/update stamp file
-        f" && touch {scan_rel}"
+        + f" {rel_src} && touch {scan_rel}"
     )
 
     from pcons.core.node import BuildInfo
