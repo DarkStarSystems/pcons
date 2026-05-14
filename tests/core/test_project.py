@@ -32,6 +32,17 @@ class TestProjectCreation:
         assert project.defined_at is not None
         assert project.defined_at.lineno > 0
 
+    def test_top_level_project(self):
+        project1 = Project("project1")
+        assert Project.top_level() is project1
+        assert project1.is_top_level
+
+        project2 = Project("project2")
+        assert Project.top_level() is project1
+        assert not project2.is_top_level
+        assert project2 in project1._children
+        assert project2._parent is project1
+
 
 class TestProjectEnvironments:
     def test_create_environment(self):
