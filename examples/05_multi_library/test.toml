@@ -11,7 +11,7 @@ expected_outputs = [
     "build/compile_commands.json",
     "build/deps.mmd",
     "build/libmath.a",
-    "build/libphysics.a",
+    "build/libphysics.so",
     "build/simulator",
 ]
 
@@ -19,8 +19,8 @@ expected_outputs = [
 # Run the built program and check output
 # Commands are Unix-style; automatically adapted for Windows
 commands = [
-    { run = "./build/simulator", expect_stdout = "Kinetic energy:" },
-    { run = "./build/simulator", expect_stdout = "Final position:" },
+    { run = "LD_LIBRARY_PATH=./build ./build/simulator", expect_stdout = "Kinetic energy:" },
+    { run = "LD_LIBRARY_PATH=./build ./build/simulator", expect_stdout = "Final position:" },
 
     # Verify compile_commands.json has entries for all source files
     { run = "cat build/compile_commands.json", expect_stdout = "math_utils.c" },

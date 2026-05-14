@@ -21,19 +21,15 @@ from pcons.generators.mermaid import MermaidGenerator
 # =============================================================================
 
 project = Project("multi_library")
-
-src_dir = project.root_dir / "src"
-include_dir = project.root_dir / "include"
-build_dir = project.build_dir
 env = project.Environment(toolchain=find_c_toolchain())
 
 # -----------------------------------------------------------------------------
 # Library: libmath - low-level math utilities
 # -----------------------------------------------------------------------------
 libmath = project.StaticLibrary("math", env)
-libmath.add_sources([src_dir / "math_utils.c"])
+libmath.add_sources(["src/math_utils.c"])
 # Public includes propagate to consumers
-libmath.public.include_dirs.append(include_dir)
+libmath.public.include_dirs.append("include")
 # Link against libm for math functions (required on Linux, not needed on Windows)
 if sys.platform != "win32":
     libmath.public.link_libs.append("m")
@@ -41,23 +37,21 @@ if sys.platform != "win32":
 # -----------------------------------------------------------------------------
 # Library: libphysics - physics simulation, depends on libmath
 # -----------------------------------------------------------------------------
-libphysics = project.StaticLibrary("physics", env)
-libphysics.add_sources([src_dir / "physics.c"])
+libphysics = project.SharedLibrary("physics", env)
+libphysics.add_sources(["src/physics.c"])
 libphysics.link(libmath)  # Gets libmath's public includes transitively
 
 # -----------------------------------------------------------------------------
 # Program: simulator - main application
 # -----------------------------------------------------------------------------
 simulator = project.Program("simulator", env)
-simulator.add_sources([src_dir / "main.c"])
+simulator.add_sources(["src/main.c"])
 simulator.link(libphysics)  # Gets both libphysics and libmath includes
-
-project.generate()
 
 # Generate Mermaid dependency diagram (after generate, which auto-resolves)
 mermaid_gen = MermaidGenerator(direction="LR")
 mermaid_gen.generate(project)
 
-print(f"Generated {build_dir / 'build.ninja'}")
-print(f"Generated {build_dir / 'compile_commands.json'}")
-print(f"Generated {build_dir / 'deps.mmd'}")
+print("Generated 'build.ninja'")
+print("Generated 'compile_commands.json'")
+print("Generated 'deps.mmd'")
