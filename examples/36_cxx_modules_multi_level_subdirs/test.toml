@@ -1,0 +1,26 @@
+# Test configuration for subdirs example
+
+[test]
+description = "Demonstrates multi-level subdirectories with C++20 named modules"
+
+expected_outputs = [
+    "build/a/aa/libaa.a",
+    "build/a/liba.a",
+    "build/a/a_app",
+    "build/b/bb/libbb.a",
+    "build/b/libb.a",
+    "build/b/b_app",
+    "build/app/app",
+]
+
+
+[verify]
+commands = [
+    { run = "./build/a/a_app", expect_stdout = "" },
+    { run = "./build/b/b_app", expect_stdout = "" },
+    { run = "./build/app/app", expect_stdout = "" },
+]
+
+[skip]
+requires = ["clang-scan-deps", "clang++"]
+generators = ["xcode", "make"]
