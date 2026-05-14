@@ -223,7 +223,17 @@ def run_script(
         }
         exec(code, namespace)
 
-        return 0, pcons.get_registered_projects()
+        # generate
+        try:
+            from pcons import Project
+
+            top_level_project = Project.top_level()
+            top_level_project.generate()
+
+            return 0, pcons.get_registered_projects()
+        except ValueError:
+            logger.error("No Project created in build script")
+            return 1, []
 
     except SystemExit as e:
         # Script called sys.exit()
@@ -529,15 +539,7 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
     if exit_code != 0:
         return exit_code, None
 
-    try:
-        from pcons import Project
-
-        top_level_project = Project.top_level()
-
-        return 0, top_level_project
-    except ValueError:
-        logger.error("No Project created in build script")
-        return 1, None
+    return 0, _projects[0] if _projects else None
 
 
 def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
