@@ -1050,3 +1050,24 @@ class Project(_ProjectBuilders):
             builder_method.__doc__ = create_target.__doc__
 
         return builder_method
+
+
+def get_target(name: str) -> Target:
+    """Convenience function to get a target by name from the top-level project."""
+    root = Project.top_level()
+    target = root.get_target(name)
+    if target is None:
+        raise ValueError(f"Target '{name}' not found in project '{root.name}'")
+    return target
+
+
+def get_targets(*names: str) -> list[Target]:
+    """Convenience function to get multiple targets by name from the top-level project."""
+    root = Project.top_level()
+    targets: list[Target] = []
+    for name in names:
+        target = root.get_target(name)
+        if target is None:
+            raise ValueError(f"Target '{name}' not found in project '{root.name}'")
+        targets.append(target)
+    return targets

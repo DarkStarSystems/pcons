@@ -24,7 +24,7 @@ from pcons.configure.config import Configure  # noqa: E402
 from pcons.configure.config_file import configure_file  # noqa: E402
 from pcons.configure.platform import Platform, get_platform  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
-from pcons.core.project import Project  # noqa: E402, F811
+from pcons.core.project import Project, get_target, get_targets  # noqa: E402, F811
 from pcons.core.subst import PathToken  # noqa: E402
 from pcons.core.test import set_test_properties, set_test_property  # noqa: E402
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
@@ -241,4 +241,6 @@ __all__ = [
     "modules",
     # Misc utilities
     "add_subdirectory",
+    "get_target",
+    "get_targets",
 ]
