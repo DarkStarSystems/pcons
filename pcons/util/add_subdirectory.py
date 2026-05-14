@@ -1,26 +1,24 @@
 import runpy
+from pathlib import Path
 
 from pcons.core.project import Project
 
 
-def add_subdirectory(subdir):
-    """Adds a subdirectory to the project by running its pcons-build.py.
+def add_subdirectory(subdir: str | Path):
+    """Adds a subdirectory to the project.
 
-    The subdir must contain a pcons-build.py that defines a function
-    `build_subdir(build_dir)` which adds targets to the given project.
-
-    Args:
-        project: The parent Project instance to which the subdir will add targets.
-        subdir: Path to the subdirectory containing pcons-build.py.
+    This function looks for a pcons-build.py file in the specified subdirectory and executes it in the context of the current project.
+    This allows you to organize your project into multiple subdirectories,
 
     Returns:
-        The result of the subdir's build function, if any.
+        The loaded module from the subdirectory's pcons-build.py,
+        which can be used to access any variables or functions defined there.
     """
     project = Project.current()
     if project is None:
         raise RuntimeError("add_subdirectory() must be called within a Project context")
 
-    subdir_path = project.root_dir / subdir
+    subdir_path = project.current_dir / subdir
     if not (subdir_path / "pcons-build.py").exists():
         raise FileNotFoundError(f"No pcons-build.py found in {subdir_path}")
 
