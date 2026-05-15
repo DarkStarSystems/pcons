@@ -28,10 +28,15 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pcons.core._project_builder_stubs import _ProjectBuilders
     from pcons.tools.toolchain import Toolchain
+else:
+    # At runtime, builder lookup goes through Project.__getattr__; the
+    # mixin's only purpose is to declare typed methods for static analysis.
+    _ProjectBuilders = object
 
 
-class Project:
+class Project(_ProjectBuilders):
     """Top-level container for a pcons build.
 
     The Project manages:
@@ -864,38 +869,38 @@ class Project:
             f"envs={len(self._environments)})"
         )
 
-    def __getattr__(self, name: str) -> Any:
-        """Dynamic attribute access for registered builders.
+    if not TYPE_CHECKING:
+        # __getattr__ is hidden from type checkers so that unknown attribute
+        # access on a Project is rejected (and typed builder methods from
+        # _ProjectBuilders take effect). At runtime it dispatches registered
+        # builders via the BuilderRegistry. User-registered @builder targets
+        # remain typed as `Any` since they are not in _ProjectBuilders.
+        def __getattr__(self, name: str) -> Any:
+            """Dynamic attribute access for registered builders.
 
-        Allows registered builders to be called as methods on Project instances:
-            project.InstallSymlink(...)  # if InstallSymlink is registered
+            Allows registered builders to be called as methods on Project
+            instances, e.g. `project.InstallSymlink(...)` for a custom
+            `@builder` named "InstallSymlink".
 
-        Args:
-            name: Attribute name to look up.
+            Raises:
+                AttributeError: If the attribute is not a registered builder.
+            """
+            registration = BuilderRegistry.get(name)
+            if registration is not None:
+                if registration.platforms:
+                    import sys
 
-        Returns:
-            A bound method that calls the builder's create_target function.
+                    if sys.platform not in registration.platforms:
+                        raise AttributeError(
+                            f"Builder '{name}' is only available on "
+                            f"{', '.join(registration.platforms)} "
+                            f"(current platform: {sys.platform})"
+                        )
+                return self._make_builder_method(registration)
 
-        Raises:
-            AttributeError: If the attribute is not a registered builder.
-        """
-        # Check if it's a registered builder
-        registration = BuilderRegistry.get(name)
-        if registration is not None:
-            if registration.platforms:
-                import sys
-
-                if sys.platform not in registration.platforms:
-                    raise AttributeError(
-                        f"Builder '{name}' is only available on "
-                        f"{', '.join(registration.platforms)} "
-                        f"(current platform: {sys.platform})"
-                    )
-            return self._make_builder_method(registration)
-
-        raise AttributeError(
-            f"'{type(self).__name__}' object has no attribute '{name}'"
-        )
+            raise AttributeError(
+                f"'{type(self).__name__}' object has no attribute '{name}'"
+            )
 
     def __dir__(self) -> list[str]:
         """Include registered builder names in dir() output.
