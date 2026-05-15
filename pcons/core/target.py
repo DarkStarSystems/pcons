@@ -9,9 +9,11 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Sequence
+from collections import UserList
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias
+from warnings import deprecated
 
 from pcons.core.flags import merge_flags
 
@@ -37,6 +39,35 @@ else:
 
 __all__ = ["SourceSpec", "UsageRequirements", "Target", "ImportedTarget"]
 
+ListLike: TypeAlias = list | UserList
+
+
+class UniqueList(UserList):
+    def __init__(self, initlist: ListLike | None = None):
+        super().__init__(initlist or [])
+
+    def append(self, item):
+        if item not in self.data:
+            self.data.append(item)
+
+    def extend(self, other):
+        for item in other:
+            self.append(item)
+
+
+class ValidatedUniqueList(UniqueList):
+    def __init__(
+        self,
+        initlist: ListLike | None = None,
+        validator: Callable[[Any], bool] | None = None,
+    ):
+        super().__init__(initlist or [])
+        self.validator = validator
+
+    def append(self, item):
+        if self.validator is None or self.validator(item):
+            super().append(item)
+
 
 class UsageRequirements(_UsageRequirementsStubs):
     """Requirements that propagate from a target to its consumers.
@@ -51,23 +82,31 @@ class UsageRequirements(_UsageRequirementsStubs):
     use any names they need (e.g., python_packages, data_schemas).
     """
 
-    _data: dict[str, list]
+    # type hints
+    include_dirs: ListLike[str]
+    defines: ListLike[str]
+    compile_flags: ListLike[str]
+    link_flags: ListLike[str]
+    link_libs: ListLike[str | Target]
+    link_dirs: ListLike[str]
 
-    def __init__(self, **kwargs: list) -> None:
+    _data: dict[str, ListLike]
+
+    def __init__(self, **kwargs: ListLike) -> None:
         object.__setattr__(self, "_data", {})
         for k, v in kwargs.items():
-            self._data[k] = list(v)
+            self._data[k] = v
 
-    def __getattr__(self, name: str) -> list:
+    def __getattr__(self, name: str) -> ListLike:
         """Return the named list, creating it on first access."""
-        data: dict[str, list] = object.__getattribute__(self, "_data")
+        data: dict[str, ListLike] = object.__getattribute__(self, "_data")
         return data.setdefault(name, [])
 
-    def __setattr__(self, name: str, value: list) -> None:  # type: ignore[override]
+    def __setattr__(self, name: str, value: ListLike) -> None:  # type: ignore[override]
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
-            if not isinstance(value, list):
+            if not isinstance(value, (list, UserList)):
                 raise TypeError(
                     f"Usage requirement '{name}' must be a list, "
                     f"got {type(value).__name__}. "
@@ -93,24 +132,24 @@ class UsageRequirements(_UsageRequirementsStubs):
                                If None, uses default (empty set).
         """
         for key, values in other._data.items():
-            if not isinstance(values, list):
+            if not isinstance(values, (list, UserList)):
                 raise TypeError(
                     f"Usage requirement '{key}' must be a list, "
                     f"got {type(values).__name__}. "
                     f'Use target.public.{key} = ["{values}"] or '
                     f'target.public.{key}.append("{values}").'
                 )
-            mine = self._data.setdefault(key, [])
+            mine = self._data.setdefault(key, type(values)())
             merge_flags(mine, values, separated_arg_flags)
 
     def clone(self) -> UsageRequirements:
         """Create a copy of this UsageRequirements."""
         result = UsageRequirements()
         for k, v in self._data.items():
-            result._data[k] = list(v)
+            result._data[k] = type(v)(v)
         return result
 
-    def items(self) -> list[tuple[str, list]]:
+    def items(self) -> list[tuple[str, ListLike]]:
         """Return all (name, list) pairs."""
         return list(self._data.items())
 
@@ -299,7 +338,17 @@ class Target:
         self._sources: list[Node] = []
         self._dependencies: list[Target] = []
         self.public = UsageRequirements()
+        self.public.defines = UniqueList([])
+        self.public.include_dirs = UniqueList([])
+        self.public.link_dirs = UniqueList([])
+        self.public.link_flags = []
+        self.public.link_libs = ValidatedUniqueList([], self.__link_libs_validator)
         self.private = UsageRequirements()
+        self.private.defines = UniqueList([])
+        self.private.include_dirs = UniqueList([])
+        self.private.link_dirs = UniqueList([])
+        self.private.link_flags = []
+        self.private.link_libs = ValidatedUniqueList([], self.__link_libs_validator)
         self.required_languages: set[str] = set()
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
@@ -432,6 +481,14 @@ class Target:
         """All build nodes for this target (intermediate + output)."""
         return self.intermediate_nodes + self.output_nodes
 
+    def __link_libs_validator(self, target: Target) -> bool:
+        if self._resolved:
+            raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
+        if target is self:
+            raise ValueError(f"Target '{self.name}' cannot link itself.")
+        return True
+
+    @deprecated("Use target.{public,private}.link_libs instead")
     def link(self, *targets: Target) -> Target:
         """Add targets as dependencies (fluent API).
 

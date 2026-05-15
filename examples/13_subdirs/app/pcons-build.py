@@ -18,4 +18,4 @@ assert libfoo is not None, (
 
 app = project.Program("app", env)
 app.add_sources(["src/main.c"])
-app.link(libfoo)
+app.public.link_libs.append(libfoo)

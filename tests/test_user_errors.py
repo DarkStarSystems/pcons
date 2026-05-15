@@ -330,8 +330,8 @@ class TestDependencyMistakes:
         project, env = project_env
         lib_a = project.StaticLibrary("liba", env, sources=["src/lib.c"])
         lib_b = project.StaticLibrary("libb", env, sources=["src/main.c"])
-        lib_a.link(lib_b)
-        lib_b.link(lib_a)
+        lib_a.public.link_libs.append(lib_b)
+        lib_b.public.link_libs.append(lib_a)
         errors = project.validate()
         assert any(isinstance(e, DependencyCycleError) for e in errors)
 
@@ -340,8 +340,8 @@ class TestDependencyMistakes:
         project, env = project_env
         lib_a = project.StaticLibrary("liba", env, sources=["src/lib.c"])
         lib_b = project.StaticLibrary("libb", env, sources=["src/main.c"])
-        lib_a.link(lib_b)
-        lib_b.link(lib_a)
+        lib_a.public.link_libs.append(lib_b)
+        lib_b.public.link_libs.append(lib_a)
         with pytest.raises(PconsError):
             project.resolve(strict=True)
 
@@ -350,7 +350,7 @@ class TestDependencyMistakes:
         project, env = project_env
         app = project.Program("app", env, sources=["src/main.c"])
         with pytest.raises((DependencyCycleError, ValueError), match="self|cycle"):
-            app.link(app)
+            app.private.link_libs.append(app)
 
     def test_depends_on_self(self, project_env):
         """Target depends on itself."""
@@ -364,8 +364,8 @@ class TestDependencyMistakes:
         project, env = project_env
         lib = project.StaticLibrary("mylib", env, sources=["src/lib.c"])
         app = project.Program("app", env, sources=["src/main.c"])
-        app.link(lib)
-        app.link(lib)
+        app.private.link_libs.append(lib)
+        app.private.link_libs.append(lib)
         # Should not crash and lib should appear only once
         assert app.dependencies.count(lib) == 1
 
