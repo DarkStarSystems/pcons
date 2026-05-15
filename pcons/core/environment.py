@@ -19,15 +19,22 @@ from pcons.core.toolconfig import ToolConfig
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
+    from pcons.core._environment_stubs import _EnvironmentStubs
     from pcons.core.node import FileNode, Node
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.tools.toolchain import Toolchain
+else:
+    # At runtime, Environment inherits from `object`; tool namespaces and
+    # cross-tool variables are dispatched through __getattr__/__setattr__
+    # as before. The mixin's only purpose is to declare typed names for
+    # static analysis.
+    _EnvironmentStubs = object
 
 logger = logging.getLogger(__name__)
 
 
-class Environment:
+class Environment(_EnvironmentStubs):
     """Build environment with namespaced tool configuration.
 
     Provides namespaced access to tool configuration:

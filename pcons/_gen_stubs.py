@@ -1,19 +1,30 @@
 # SPDX-License-Identifier: MIT
-"""Generate typed builder method stubs for the Project class.
+"""Generate typed-stub mixin classes for pcons's dynamic-attribute classes.
 
-Builders register at runtime via `BuilderRegistry`, dispatched through
-`Project.__getattr__`. That dispatch returns `Any`, so type checkers
-cannot catch typos like `project.Programx(...)`. To fix that without
-duplicating signatures by hand, this module introspects every registered
-`create_target` and writes a typed-stub mixin class to
-`pcons/core/_project_builder_stubs.py`. `Project` inherits from it under
-`TYPE_CHECKING` only; at runtime it inherits from `object` and
-`__getattr__` handles dispatch as before.
+Two pcons classes use `__getattr__` for dispatch and lose static type
+checking as a result:
+
+  - `Project`: builders (Program, StaticLibrary, ...) registered through
+    `BuilderRegistry`. Stub lives at `pcons/core/_project_builder_stubs.py`
+    and is fully introspected from the registry.
+
+  - `Environment`: tool namespaces (cc, cxx, link, install, archive, ...)
+    populated by toolchains and standalone tools. Stub lives at
+    `pcons/core/_environment_stubs.py`. There is no single runtime
+    registry of tool names — each toolchain installs its own set into
+    `env._tools`. The tool list is therefore hardcoded here. See
+    `_ENVIRONMENT_TOOL_NAMES` for how to extend; the freshness test only
+    catches drift between the generator output and the committed file,
+    not omissions in the hardcoded list itself.
+
+The mixin classes are inherited only under `TYPE_CHECKING`; at runtime
+the base class is `object` and the original `__getattr__` dispatches as
+before.
 
 Usage:
-    python -m pcons._gen_stubs              # rewrite the stub file
-    python -m pcons._gen_stubs --check      # exit 1 if file is stale
-    python -m pcons._gen_stubs --print      # write to stdout
+    python -m pcons._gen_stubs              # rewrite all stub files
+    python -m pcons._gen_stubs --check      # exit 1 if any file is stale
+    python -m pcons._gen_stubs --print      # write all to stdout
 """
 
 from __future__ import annotations
@@ -21,13 +32,21 @@ from __future__ import annotations
 import argparse
 import inspect
 import sys
+from collections.abc import Callable
 from inspect import Parameter
 from pathlib import Path
 
 from pcons.builders import register_builtin_builders
 from pcons.core.builder_registry import BuilderRegistry
 
-STUB_FILE_RELPATH = "core/_project_builder_stubs.py"
+
+def _stub_targets() -> dict[str, Callable[[], str]]:
+    """Map of relative path under pcons/ → function that produces the file content."""
+    return {
+        "core/_project_builder_stubs.py": generate_project_builder_stubs,
+        "core/_environment_stubs.py": generate_environment_stubs,
+    }
+
 
 # Annotation names that need rewriting because `Environment` is conventionally
 # imported as `Env` in pcons code (and we want the stub to match).
@@ -109,7 +128,7 @@ def _owner_of(create_target_fn: object) -> type | None:
     return None
 
 
-_FILE_HEADER = '''\
+_PROJECT_FILE_HEADER = '''\
 # SPDX-License-Identifier: MIT
 # ruff: noqa
 # fmt: off
@@ -148,10 +167,10 @@ if TYPE_CHECKING:
 '''
 
 
-def generate_stub_file_content() -> str:
+def generate_project_builder_stubs() -> str:
     """Produce the full content of `_project_builder_stubs.py`."""
     register_builtin_builders()
-    parts: list[str] = [_FILE_HEADER]
+    parts: list[str] = [_PROJECT_FILE_HEADER]
 
     methods: list[str] = []
     for name, reg in sorted(BuilderRegistry.all().items()):
@@ -176,35 +195,115 @@ def generate_stub_file_content() -> str:
     return "".join(parts)
 
 
-def _stub_file_path() -> Path:
-    return Path(__file__).resolve().parent / STUB_FILE_RELPATH
+# Well-known tool namespaces registered on Environment by toolchains and
+# standalone tools. Unlike Project's builders, there is no single runtime
+# registry — each toolchain populates `env._tools` from its own list. Keep
+# this in sync when adding a tool to a toolchain's setup; group by source
+# so it's easy to audit.
+_ENVIRONMENT_TOOL_NAMES: tuple[tuple[str, str], ...] = (
+    # name, comment-source
+    ("cc", "C/C++ toolchains (gcc, llvm, msvc, clang_cl, emscripten, wasi)"),
+    ("cxx", "C/C++ toolchains"),
+    ("ar", "GCC/LLVM/emscripten/wasi/gfortran"),
+    ("link", "all C/C++ and Fortran toolchains"),
+    ("lib", "MSVC and clang-cl"),
+    ("rc", "MSVC and clang-cl (Windows resource compiler)"),
+    ("ml", "MSVC and clang-cl (assembler)"),
+    ("mt", "MSVC (manifest tool)"),
+    ("metal", "LLVM on macOS (Apple Metal shader compiler)"),
+    ("fc", "gfortran"),
+    ("cuda", "CUDA toolchain (added via env.add_toolchain)"),
+    ("cython", "Cython toolchain"),
+    ("cycc", "Cython toolchain"),
+    ("cylink", "Cython toolchain"),
+    ("install", "always set up via Environment._setup_standalone_tools"),
+    ("archive", "always set up via Environment._setup_standalone_tools"),
+)
+
+# Well-known Environment instance variables (initialized in Environment.__init__).
+# Unlike tool namespaces, these are real attribute reads, not `_tools` lookups.
+_ENVIRONMENT_VAR_TYPES: tuple[tuple[str, str], ...] = (
+    ("build_dir", "Path"),
+    ("variant", "str"),
+)
+
+
+def generate_environment_stubs() -> str:
+    """Produce the full content of `_environment_stubs.py`."""
+    lines: list[str] = [
+        "# SPDX-License-Identifier: MIT",
+        "# ruff: noqa",
+        "# fmt: off",
+        '"""Typed stub declarations for Environment\'s tool namespaces and known variables.',
+        "",
+        "GENERATED by `python -m pcons._gen_stubs`. Do not edit by hand.",
+        "",
+        "Each toolchain registers its own subset of tools into `env._tools` at",
+        "setup time; there is no single runtime registry to introspect. The",
+        "tool list is therefore maintained in `_gen_stubs.py`. Adding a new",
+        "tool to a toolchain requires updating `_ENVIRONMENT_TOOL_NAMES` there.",
+        "",
+        "Environment.__getattr__ is intentionally left visible to type checkers",
+        "(returning `Any`), so user-defined cross-tool variables like",
+        "`env.my_flag = ...` continue to work without a type:ignore. Known names",
+        "below are typed more specifically and take precedence.",
+        '"""',
+        "",
+        "from __future__ import annotations",
+        "",
+        "from pathlib import Path",
+        "from typing import TYPE_CHECKING",
+        "",
+        "if TYPE_CHECKING:",
+        "    from pcons.core.toolconfig import ToolConfig",
+        "",
+        "    class _EnvironmentStubs:",
+        '        """Typed mixin for Environment (TYPE_CHECKING-only)."""',
+        "",
+    ]
+    for tool, source in _ENVIRONMENT_TOOL_NAMES:
+        lines.append(f"        {tool}: ToolConfig  # {source}")
+    lines.append("")
+    for var, typ in _ENVIRONMENT_VAR_TYPES:
+        lines.append(f"        {var}: {typ}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _stub_file_path(relpath: str) -> Path:
+    return Path(__file__).resolve().parent / relpath
 
 
 def write_or_check(mode: str) -> int:
-    new_content = generate_stub_file_content()
-    if mode == "print":
-        sys.stdout.write(new_content)
-        return 0
+    targets = _stub_targets()
+    rc = 0
+    for relpath, producer in targets.items():
+        new_content = producer()
+        if mode == "print":
+            sys.stdout.write(f"# === {relpath} ===\n")
+            sys.stdout.write(new_content)
+            sys.stdout.write("\n")
+            continue
 
-    path = _stub_file_path()
-    current = path.read_text() if path.exists() else ""
+        path = _stub_file_path(relpath)
+        current = path.read_text() if path.exists() else ""
 
-    if mode == "check":
-        if current != new_content:
-            sys.stderr.write(
-                f"{path} is out of date with generated builder stubs.\n"
-                f"Run: python -m pcons._gen_stubs\n"
-            )
-            return 1
-        return 0
-    if mode == "write":
-        if current != new_content:
-            path.write_text(new_content)
-            print(f"Updated {path}")
+        if mode == "check":
+            if current != new_content:
+                sys.stderr.write(
+                    f"{path} is out of date with generated stubs.\n"
+                    f"Run: python -m pcons._gen_stubs\n"
+                )
+                rc = 1
+        elif mode == "write":
+            if current != new_content:
+                path.write_text(new_content)
+                print(f"Updated {path}")
+            else:
+                print(f"{path} is up to date.")
         else:
-            print(f"{path} is up to date.")
-        return 0
-    raise ValueError(f"unknown mode: {mode}")
+            raise ValueError(f"unknown mode: {mode}")
+    return rc
 
 
 def main(argv: list[str] | None = None) -> int:
