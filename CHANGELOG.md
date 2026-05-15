@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`import std;` on GCC.** Completes the cross-toolchain trio after MSVC (0.15) and LLVM/libc++ (0.16). The synthesized std module is built once with the user's `-std=` and ABI-sensitive flags carried through, then linked into importers. CI exercises this against gcc-15.
+
+- **`#include` dependency tracking inside C++20 module interface units.** Touching a header `#include`d from a module's global module fragment now rebuilds the module and its consumers on all three toolchains (GCC via a new per-TU scan step, MSVC via `/showIncludes` parsing, LLVM via the existing `-MD -MF`). `cxx_modules.dyndep` still handles inter-module ordering — the two are complementary.
+
+- **New example `35_cxx_modules_deps`**: regression test for module `#include` tracking — two interfaces sharing a header, with rebuild assertions on each input.
+
+### Improved
+
+- **More ABI-sensitive flags carried into GCC's std-module compile**, matching the MSVC/LLVM passthrough behavior shipped in 0.15 / 0.16.
+
+### Fixed
+
+- **Code-generator outputs now reach consuming compile steps.** When target A links target B, non-library outputs from B (e.g., a generated header) were being passed to A's linker as explicit inputs and never reached A's compile steps. They are now routed as implicit deps on both the link and the compiles — so generated headers exist before `cpp` runs, and the linker doesn't choke on a `.h`.
+
+- **Ninja generator: implicit deps emit correct paths.** Source files outside the build dir now get the `$topdir/` prefix needed for ninja to locate them; deps inside the build dir (e.g., a generated `.dyndep` file) emit the build-relative path so they match references like the `dyndep = ...` directive.
+
+- **GCC std-module source lookup** tolerates the include-trace command exiting non-zero with "module control-line cannot be in included file" (the resolution is still on the first stderr line).
+
+- **LLVM `import std;` manifest lookup** now finds both the modern `libc++.modules.json` and the older `c++/libc++.modules.json` layouts.
+
+### Docs
+
+- **README**: pointer to an experimental Rust/Go interop branch (Rust crates linked into C/C++ via `cargo build` + optional `cbindgen`). [File an issue](https://github.com/DarkStarSystems/pcons/issues) if you want it.
+
 ## [0.16.0] - 2026-05-04
 
 ### Added
