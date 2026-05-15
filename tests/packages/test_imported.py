@@ -217,11 +217,11 @@ class TestImportedTarget:
                 defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
             )
         )
-        httplib.link(openssl)
+        httplib.public.link_libs.append(openssl)
 
         # A target that links httplib should get openssl transitively
         app = Target("app")
-        app.link(httplib)
+        app.private.link_libs.append(httplib)
 
         reqs = app.collect_usage_requirements()
         # httplib's own requirements

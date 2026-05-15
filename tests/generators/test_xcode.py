@@ -193,7 +193,7 @@ class TestXcodeGeneratorDependencies:
 
         # Create app that depends on lib
         app = Target("myapp", target_type="program")
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -331,8 +331,8 @@ class TestXcodeGeneratorMultiTarget:
         lib2 = Target("libphysics", target_type="static_library")
         app = Target("app", target_type="program")
 
-        lib2.link(lib1)
-        app.link(lib2)
+        lib2.public.link_libs.append(lib1)
+        app.private.link_libs.append(lib2)
 
         gen = XcodeGenerator()
         gen.generate(project)

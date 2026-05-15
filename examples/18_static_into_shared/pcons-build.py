@@ -30,11 +30,11 @@ core_lib.public.include_dirs.append(src_dir)  # So dependents can #include "core
 # 2. Create shared library from wrapper.c, linking the static library
 #    wrapper.c includes "core.h" which should be found via core_lib's public includes
 wrapper_lib = project.SharedLibrary("wrapper", env, sources=[src_dir / "wrapper.c"])
-wrapper_lib.link(core_lib)
+wrapper_lib.public.link_libs.append(core_lib)
 
 # 3. Create executable that links the shared library
 prog = project.Program("demo", env, sources=[src_dir / "main.c"])
-prog.link(wrapper_lib)
+prog.private.link_libs.append(wrapper_lib)
 
 # install_dir() resolves the conventional subdir from the env's toolchain:
 # shared libs land in "lib" (or "bin" on DLL platforms), archives in "lib",

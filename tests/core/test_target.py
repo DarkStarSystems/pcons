@@ -121,8 +121,8 @@ class TestTarget:
         lib2 = Target("lib2")
         app = Target("app")
 
-        app.link(lib1)
-        app.link(lib2)
+        app.private.link_libs.append(lib1)
+        app.private.link_libs.append(lib2)
 
         assert lib1 in app.dependencies
         assert lib2 in app.dependencies
@@ -131,8 +131,8 @@ class TestTarget:
         lib = Target("lib")
         app = Target("app")
 
-        app.link(lib)
-        app.link(lib)  # Same lib again
+        app.private.link_libs.append(lib)
+        app.private.link_libs.append(lib)  # Same lib again
 
         assert app.dependencies.count(lib) == 1
 
@@ -155,11 +155,11 @@ class TestTarget:
 
         libB = Target("libB")
         libB.public.include_dirs.append(Path("libB/include"))
-        libB.link(libA)
+        libB.public.link_libs.append(libA)
 
         app = Target("app")
         app.private.defines.append("APP_PRIVATE")
-        app.link(libB)
+        app.private.link_libs.append(libB)
 
         requirements = app.collect_usage_requirements()
 
@@ -173,7 +173,7 @@ class TestTarget:
         """Test that collection is cached."""
         lib = Target("lib")
         app = Target("app")
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         req1 = app.collect_usage_requirements()
         req2 = app.collect_usage_requirements()
@@ -186,12 +186,12 @@ class TestTarget:
         lib2 = Target("lib2")
         lib2.public.defines.append("LIB2")
         app = Target("app")
-        app.link(lib1)
+        app.private.link_libs.append(lib1)
 
         req1 = app.collect_usage_requirements()
         assert "LIB2" not in req1.defines
 
-        app.link(lib2)
+        app.private.link_libs.append(lib2)
         req2 = app.collect_usage_requirements()
 
         assert req2 is not req1
@@ -203,7 +203,7 @@ class TestTarget:
 
         app = Target("app")
         app.required_languages.add("cxx")
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         langs = app.get_all_languages()
         assert "c" in langs
@@ -255,7 +255,7 @@ class TestImportedTarget:
         zlib.public.link_libs.append("z")
 
         app = Target("app")
-        app.link(zlib)
+        app.private.link_libs.append(zlib)
 
         requirements = app.collect_usage_requirements()
         assert "z" in requirements.link_libs
@@ -269,7 +269,7 @@ class TestFluentAPI:
         lib = Target("lib")
         app = Target("app")
 
-        result = app.link(lib)
+        result = app.private.link_libs.append(lib)
 
         assert result is app
         assert lib in app.dependencies
@@ -337,7 +337,7 @@ class TestFluentAPI:
         src = tmp_path / "main.c"
         src.touch()
 
-        result = app.add_source(src).link(lib)
+        result = app.add_source(src).private.link_libs.append(lib)
 
         assert result is app
         assert len(app.sources) == 1

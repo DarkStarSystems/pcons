@@ -183,7 +183,7 @@ class TestComputeEffectiveRequirements:
         # Create the target that depends on it
         target = Target("mylib", target_type="static_library")
         target._env = env
-        target.link(dep)
+        target.private.link_libs.append(dep)
 
         effective = compute_effective_requirements(target, env)
 
@@ -208,7 +208,7 @@ class TestComputeEffectiveRequirements:
 
         target = Target("app", target_type="program")
         target._env = env
-        target.link(libB)
+        target.private.link_libs.append(libB)
 
         effective = compute_effective_requirements(target, env)
 
@@ -231,7 +231,7 @@ class TestComputeEffectiveRequirements:
         # Create the target that depends on it
         target = Target("app", target_type="program")
         target._env = env
-        target.link(dep)
+        target.private.link_libs.append(dep)
 
         effective = compute_effective_requirements(target, env)
 

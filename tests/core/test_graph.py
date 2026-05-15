@@ -29,9 +29,9 @@ class TestTopologicalSortTargets:
         # A depends on B depends on C
         c = Target("C")
         b = Target("B")
-        b.link(c)
+        b.private.link_libs.append(c)
         a = Target("A")
-        a.link(b)
+        a.private.link_libs.append(b)
 
         result = topological_sort_targets([a, b, c])
 
@@ -43,12 +43,12 @@ class TestTopologicalSortTargets:
         # A depends on B and C, both depend on D
         d = Target("D")
         b = Target("B")
-        b.link(d)
+        b.private.link_libs.append(d)
         c = Target("C")
-        c.link(d)
+        c.private.link_libs.append(d)
         a = Target("A")
-        a.link(b)
-        a.link(c)
+        a.private.link_libs.append(b)
+        a.private.link_libs.append(c)
 
         result = topological_sort_targets([a, b, c, d])
 
@@ -61,8 +61,8 @@ class TestTopologicalSortTargets:
     def test_cycle_raises_error(self, test_project):  # noqa: F811
         a = Target("A")
         b = Target("B")
-        a.link(b)
-        b.link(a)
+        a.private.link_libs.append(b)
+        b.private.link_libs.append(a)
 
         with pytest.raises(DependencyCycleError):
             topological_sort_targets([a, b])
@@ -72,7 +72,7 @@ class TestDetectCycles:
     def test_no_cycle(self, test_project):  # noqa: F811
         a = Target("A")
         b = Target("B")
-        a.link(b)
+        a.private.link_libs.append(b)
 
         cycles = detect_cycles_in_targets([a, b])
         assert cycles == []
@@ -80,8 +80,8 @@ class TestDetectCycles:
     def test_simple_cycle(self, test_project):  # noqa: F811
         a = Target("A")
         b = Target("B")
-        a.link(b)
-        b.link(a)
+        a.private.link_libs.append(b)
+        b.private.link_libs.append(a)
 
         cycles = detect_cycles_in_targets([a, b])
         assert len(cycles) == 1
@@ -92,19 +92,19 @@ class TestDetectCycles:
         a = Target("A")
         # Self-link is now caught early by link() validation
         with pytest.raises(ValueError, match="cannot link itself"):
-            a.link(a)
+            a.private.link_libs.append(a)
 
     def test_multiple_cycles(self, test_project):  # noqa: F811
         # Two separate cycles: A<->B and C<->D
         a = Target("A")
         b = Target("B")
-        a.link(b)
-        b.link(a)
+        a.private.link_libs.append(b)
+        b.private.link_libs.append(a)
 
         c = Target("C")
         d = Target("D")
-        c.link(d)
-        d.link(c)
+        c.private.link_libs.append(d)
+        d.private.link_libs.append(c)
 
         cycles = detect_cycles_in_targets([a, b, c, d])
         assert len(cycles) == 2
@@ -168,7 +168,7 @@ class TestCollectAllNodes:
         app_out = FileNode("app")
         app.add_source(app_src)
         app.output_nodes.append(app_out)
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         nodes = collect_all_nodes([app])
 
@@ -187,7 +187,7 @@ class TestCollectBuildOrder:
     def test_with_dependencies(self, test_project):  # noqa: F811
         lib = Target("lib")
         app = Target("app")
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         order = collect_build_order(app)
 
@@ -196,12 +196,12 @@ class TestCollectBuildOrder:
     def test_diamond_dependency(self, test_project):  # noqa: F811
         base = Target("base")
         left = Target("left")
-        left.link(base)
+        left.private.link_libs.append(base)
         right = Target("right")
-        right.link(base)
+        right.private.link_libs.append(base)
         top = Target("top")
-        top.link(left)
-        top.link(right)
+        top.private.link_libs.append(left)
+        top.private.link_libs.append(right)
 
         order = collect_build_order(top)
 
