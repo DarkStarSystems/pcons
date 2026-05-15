@@ -355,6 +355,8 @@ class CythonToolchain(BaseToolchain):
             env.cylink.Extension("hello", obj)
     """
 
+    TOOL_NAMES = ("cython", "cycc", "cylink")
+
     def __init__(self) -> None:
         super().__init__("cython")
 

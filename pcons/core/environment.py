@@ -11,7 +11,7 @@ import logging
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.core.debug import trace, trace_value
 from pcons.core.subst import Namespace, subst, to_shell_command
@@ -65,6 +65,11 @@ class Environment(_EnvironmentStubs):
         "_name",
         "defined_at",
     )
+
+    # Standalone tool namespaces installed by `_setup_standalone_tools()`
+    # regardless of which toolchain is active. The generator reads this
+    # when building the Environment typing stub.
+    STANDALONE_TOOL_NAMES: ClassVar[tuple[str, ...]] = ("install", "archive")
 
     def __init__(
         self,

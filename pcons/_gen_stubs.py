@@ -10,8 +10,10 @@ checking as a result:
 
   - `Environment` → `pcons/core/_environment_stubs.py`. Tool namespaces
     (cc, cxx, link, install, archive, ...) populated per-toolchain.
-    There is no single runtime registry, so the tool list is hardcoded
-    here (see `_ENVIRONMENT_TOOL_NAMES`).
+    The list is collected by walking `BaseToolchain.__subclasses__()`
+    and reading each subclass's `TOOL_NAMES: ClassVar[tuple[str, ...]]`,
+    plus `Environment.STANDALONE_TOOL_NAMES` for the always-available
+    install / archive tools.
 
   - `ToolConfig` → `pcons/core/_toolconfig_stubs.py`. Common per-tool
     variables (cmd, flags, includes, ...). Hardcoded; toolchains can
@@ -31,11 +33,13 @@ The mixin classes are inherited only under `TYPE_CHECKING`; at runtime
 the base class is `object` and the original `__getattr__` dispatches as
 before.
 
-Scaling caveat: the freshness test catches drift between the generator
-output and the committed files. It does NOT catch omissions in the
-hardcoded lists (e.g. adding a new tool to a toolchain without updating
-`_ENVIRONMENT_TOOL_NAMES`). A future refactor that adds
-`TOOL_NAMES: ClassVar` to each Toolchain class would close that gap.
+The freshness test catches drift between the generator output and the
+committed files. For Environment, the introspection of `TOOL_NAMES` on
+each Toolchain subclass also catches the case where a new tool is added
+to a toolchain without being added to a hardcoded list. ToolConfig and
+UsageRequirements still rely on hand-maintained lists in this module
+because their variables aren't registered anywhere at runtime — they're
+written to the underlying dict on first access.
 
 Usage:
     python -m pcons._gen_stubs              # rewrite all stub files
@@ -213,37 +217,55 @@ def generate_project_builder_stubs() -> str:
     return "".join(parts)
 
 
-# Well-known tool namespaces registered on Environment by toolchains and
-# standalone tools. Unlike Project's builders, there is no single runtime
-# registry — each toolchain populates `env._tools` from its own list. Keep
-# this in sync when adding a tool to a toolchain's setup; group by source
-# so it's easy to audit.
-_ENVIRONMENT_TOOL_NAMES: tuple[tuple[str, str], ...] = (
-    # name, comment-source
-    ("cc", "C/C++ toolchains (gcc, llvm, msvc, clang_cl, emscripten, wasi)"),
-    ("cxx", "C/C++ toolchains"),
-    ("ar", "GCC/LLVM/emscripten/wasi/gfortran"),
-    ("link", "all C/C++ and Fortran toolchains"),
-    ("lib", "MSVC and clang-cl"),
-    ("rc", "MSVC and clang-cl (Windows resource compiler)"),
-    ("ml", "MSVC and clang-cl (assembler)"),
-    ("mt", "MSVC (manifest tool)"),
-    ("metal", "LLVM on macOS (Apple Metal shader compiler)"),
-    ("fc", "gfortran"),
-    ("cuda", "CUDA toolchain (added via env.add_toolchain)"),
-    ("cython", "Cython toolchain"),
-    ("cycc", "Cython toolchain"),
-    ("cylink", "Cython toolchain"),
-    ("install", "always set up via Environment._setup_standalone_tools"),
-    ("archive", "always set up via Environment._setup_standalone_tools"),
-)
-
 # Well-known Environment instance variables (initialized in Environment.__init__).
 # Unlike tool namespaces, these are real attribute reads, not `_tools` lookups.
 _ENVIRONMENT_VAR_TYPES: tuple[tuple[str, str], ...] = (
     ("build_dir", "Path"),
     ("variant", "str"),
 )
+
+
+def _collect_tool_names() -> list[tuple[str, str]]:
+    """Walk every BaseToolchain subclass and union their TOOL_NAMES.
+
+    Returns a sorted list of (tool_name, comma-joined-source-toolchain-names).
+    Standalone tools installed by Environment._setup_standalone_tools are
+    added separately. The toolchain modules must be imported for their
+    subclasses to be registered with BaseToolchain.__subclasses__().
+    """
+    # Force import of every toolchain that ships with pcons so that its
+    # class is registered as a BaseToolchain subclass. Missing entries here
+    # are the most likely failure mode when adding a new toolchain.
+    import pcons.toolchains.clang_cl  # noqa: F401
+    import pcons.toolchains.cuda  # noqa: F401
+    import pcons.toolchains.cython  # noqa: F401
+    import pcons.toolchains.emscripten  # noqa: F401
+    import pcons.toolchains.gcc  # noqa: F401
+    import pcons.toolchains.gfortran  # noqa: F401
+    import pcons.toolchains.llvm  # noqa: F401
+    import pcons.toolchains.msvc  # noqa: F401
+    import pcons.toolchains.wasi  # noqa: F401
+    from pcons.core.environment import Environment
+    from pcons.tools.toolchain import BaseToolchain
+
+    # tool name → set of toolchain class names that provide it
+    sources: dict[str, set[str]] = {}
+
+    def walk(cls: type) -> None:
+        for sub in cls.__subclasses__():
+            walk(sub)
+            tools = getattr(sub, "TOOL_NAMES", ())
+            for name in tools:
+                sources.setdefault(name, set()).add(sub.__name__)
+
+    walk(BaseToolchain)
+
+    for name in Environment.STANDALONE_TOOL_NAMES:
+        sources.setdefault(name, set()).add(
+            "Environment._setup_standalone_tools (always)"
+        )
+
+    return [(name, ", ".join(sorted(srcs))) for name, srcs in sorted(sources.items())]
 
 
 def _format_attribute_stubs_file(
@@ -296,18 +318,23 @@ def generate_environment_stubs() -> str:
         "\n"
         "GENERATED by `python -m pcons._gen_stubs`. Do not edit by hand.\n"
         "\n"
-        "Each toolchain registers its own subset of tools into `env._tools` at\n"
-        "setup time; there is no single runtime registry to introspect. The\n"
-        "tool list is therefore maintained in `_gen_stubs.py`. Adding a new\n"
-        "tool to a toolchain requires updating `_ENVIRONMENT_TOOL_NAMES` there.\n"
+        "Tool namespaces come from two sources, both introspected at generation\n"
+        "time:\n"
+        "  - Each Toolchain subclass declares `TOOL_NAMES: ClassVar[tuple[...]]`.\n"
+        "  - Environment declares `STANDALONE_TOOL_NAMES` for tools installed\n"
+        "    by `_setup_standalone_tools()` regardless of toolchain.\n"
+        "\n"
+        "Adding a new tool to a toolchain therefore requires only updating that\n"
+        "toolchain's TOOL_NAMES — the freshness test catches the drift.\n"
         "\n"
         "Environment.__getattr__ is intentionally left visible to type checkers\n"
         "(returning `Any`), so user-defined cross-tool variables like\n"
         "`env.my_flag = ...` continue to work without a type:ignore. Known names\n"
         "below are typed more specifically and take precedence."
     )
+    tool_entries = _collect_tool_names()
     entries: Sequence[tuple[str, str, str | None]] = [
-        (tool, "ToolConfig", source) for tool, source in _ENVIRONMENT_TOOL_NAMES
+        (tool, "ToolConfig", source) for tool, source in tool_entries
     ] + [(var, typ, None) for var, typ in _ENVIRONMENT_VAR_TYPES]
     return _format_attribute_stubs_file(
         module_doc=module_doc,

@@ -11,7 +11,7 @@ import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
 from pcons.core.subst import TargetPath
 
@@ -582,6 +582,11 @@ class BaseToolchain(ABC):
     Provides common functionality for toolchains. Subclasses must
     provide the list of tools and configure logic.
     """
+
+    # Tool namespaces this toolchain installs into env._tools at setup.
+    # Concrete subclasses override this; the generator reads it to build
+    # the Environment typing stub.
+    TOOL_NAMES: ClassVar[tuple[str, ...]] = ()
 
     # Default language priorities (higher = stronger).
     # Fortran is NOT listed here so that C/C++ toolchains don't claim

@@ -513,6 +513,8 @@ class LlvmToolchain(UnixToolchain):
     Additionally supports Metal shaders on macOS.
     """
 
+    TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
+
     def __init__(self) -> None:
         super().__init__("llvm")
 

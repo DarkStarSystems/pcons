@@ -265,6 +265,8 @@ class ClangClToolchain(MsvcCompatibleToolchain):
     functionality from MsvcCompatibleToolchain.
     """
 
+    TOOL_NAMES = ("cc", "cxx", "lib", "link", "rc", "ml")
+
     # Clang-CL supports additional GCC-style flags beyond the base MSVC set
     SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
         [
