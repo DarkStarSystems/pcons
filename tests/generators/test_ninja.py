@@ -467,6 +467,46 @@ class TestNinjaSrcDir:
         else:
             raise AssertionError("build output.txt line not found")
 
+    def test_implicit_dep_inside_build_dir_is_bare(self, tmp_path):
+        """Implicit deps inside build_dir must use the build-relative
+        path (no $topdir/ prefix), so they match references like
+        the `dyndep = ...` directive that uses build-relative paths.
+        Regression for cxx_modules failing with
+        "dyndep 'cxx_modules.dyndep' is not an input".
+        """
+        from pcons.core.node import FileNode
+
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="cp $SOURCE $TARGET",
+        )
+        project.resolve()
+
+        # Simulate a toolchain (e.g. C++ modules) that writes a dyndep
+        # file directly to the build dir during after_resolve and adds
+        # it as an implicit dep without setting _build_info.
+        dyndep_node = FileNode("build/cxx_modules.dyndep")
+        for tgt in project.targets:
+            for n in tgt.output_nodes:
+                n.implicit_deps.append(dyndep_node)
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+
+        content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
+        for line in content.splitlines():
+            if "build output.txt:" in line and "| " in line:
+                after_pipe = line.split("| ", 1)[1]
+                assert "cxx_modules.dyndep" in after_pipe
+                assert "$topdir/build/cxx_modules.dyndep" not in after_pipe
+                break
+        else:
+            raise AssertionError("build output.txt line with implicit dep not found")
+
     def test_srcdir_in_middle_of_token(self, tmp_path):
         """$SRCDIR works when embedded in a token (e.g., --config=$SRCDIR/cfg)."""
         project = Project("test", root_dir=tmp_path, build_dir="build")

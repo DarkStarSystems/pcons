@@ -476,6 +476,14 @@ class NinjaGenerator(BaseGenerator):
                 # Build output - make relative to build dir
                 return self._escape_output_path(s.path)
 
+            # Files inside the build dir are build artifacts even when
+            # they have no _build_info — e.g., dyndep files that
+            # toolchains write directly during after_resolve. They must
+            # match the build-relative path used elsewhere (e.g., in the
+            # dyndep = directive), so strip the build prefix here too.
+            if self._is_under_build_dir(s.path):
+                return self._escape_output_path(s.path)
+
             # Source file - try to make relative with $topdir
             rel = self._make_source_relative(s.path)
             if rel is not None:
@@ -773,6 +781,27 @@ class NinjaGenerator(BaseGenerator):
             return path_obj.resolve() == self._output_dir
         except (OSError, ValueError):
             return False
+
+    def _is_under_build_dir(self, path: Path | str) -> bool:
+        """Check if a path is inside the build directory.
+
+        Unlike _is_build_dir_path (which checks equality), this returns
+        True for any path below the build dir — including the dir itself.
+        Used to identify build artifacts that lack _build_info.
+        """
+        if self._output_dir is None:
+            return False
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            try:
+                path_obj.relative_to(self._output_dir)
+                return True
+            except ValueError:
+                return False
+        if self._build_dir_parts:
+            n = len(self._build_dir_parts)
+            return path_obj.parts[:n] == self._build_dir_parts
+        return False
 
     def _relativize_flag_with_path(self, token: str) -> str:
         """Relativize a compiler flag that contains a path.
