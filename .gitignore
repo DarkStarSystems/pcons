@@ -135,3 +135,6 @@ dmypy.json
 # Example build artifacts
 examples/*/Installers/
 .wrangler
+
+# Doc build artifacts
+docs/user-guide.html
