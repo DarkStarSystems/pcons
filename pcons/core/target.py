@@ -874,6 +874,11 @@ class Target:
                     _collect(dep)
                     result.append(dep)
 
+        # collect public libs of private link_libs
+        for t in self.private.link_libs:
+            if isinstance(t, Target):
+                _collect(t)
+
         _collect(self)
         return result
 
