@@ -9,10 +9,18 @@ variable substitution system.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from pcons.core._toolconfig_stubs import _ToolConfigStubs
+else:
+    # At runtime, ToolConfig inherits from `object`. The mixin only provides
+    # typed declarations for static analysis. __getattr__/__setattr__ continue
+    # to dispatch dynamic variables as before.
+    _ToolConfigStubs = object
 
 
-class ToolConfig:
+class ToolConfig(_ToolConfigStubs):
     """Configuration namespace for a single tool.
 
     Provides attribute-style access to tool variables:

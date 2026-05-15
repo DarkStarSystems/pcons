@@ -811,7 +811,8 @@ class XcodeGenerator(BaseGenerator):
             target.private.include_dirs
         )
 
-        for inc_dir in include_dirs:
+        for inc_dir_raw in include_dirs:
+            inc_dir = Path(inc_dir_raw)
             if inc_dir.is_dir():
                 for ext in [".h", ".hpp", ".hxx", ".H", ".hh"]:
                     headers.extend(inc_dir.rglob(f"*{ext}"))
@@ -835,9 +836,9 @@ class XcodeGenerator(BaseGenerator):
         # Collect include directories
         include_dirs: list[str] = []
         for inc_dir in target.public.include_dirs:
-            include_dirs.append(str(self._make_relative_path(inc_dir)))
+            include_dirs.append(str(self._make_relative_path(Path(inc_dir))))
         for inc_dir in target.private.include_dirs:
-            include_dirs.append(str(self._make_relative_path(inc_dir)))
+            include_dirs.append(str(self._make_relative_path(Path(inc_dir))))
 
         if include_dirs:
             self._xcode_project.set_flags(

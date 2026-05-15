@@ -13,13 +13,12 @@ tool to a toolchain requires updating `_ENVIRONMENT_TOOL_NAMES` there.
 Environment.__getattr__ is intentionally left visible to type checkers
 (returning `Any`), so user-defined cross-tool variables like
 `env.my_flag = ...` continue to work without a type:ignore. Known names
-below are typed more specifically and take precedence.
-"""
+below are typed more specifically and take precedence."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pcons.core.toolconfig import ToolConfig
@@ -43,6 +42,5 @@ if TYPE_CHECKING:
         cylink: ToolConfig  # Cython toolchain
         install: ToolConfig  # always set up via Environment._setup_standalone_tools
         archive: ToolConfig  # always set up via Environment._setup_standalone_tools
-
         build_dir: Path
         variant: str
