@@ -43,30 +43,35 @@ ListLike: TypeAlias = list | UserList
 
 
 class UniqueList(UserList):
-    def __init__(self, initlist: ListLike | None = None):
+    def __init__(self, initlist: ListLike | None = None, owner: Target | None = None):
         super().__init__(initlist or [])
+        self.owner = owner
 
     def append(self, item):
         if item not in self.data:
             self.data.append(item)
+        return self.owner
 
     def extend(self, other):
         for item in other:
             self.append(item)
+        return self.owner
 
 
 class ValidatedUniqueList(UniqueList):
     def __init__(
         self,
         initlist: ListLike | None = None,
+        owner: Target | None = None,
         validator: Callable[[Any], bool] | None = None,
     ):
-        super().__init__(initlist or [])
+        super().__init__(initlist, owner)
         self.validator = validator
 
     def append(self, item):
         if self.validator is None or self.validator(item):
-            super().append(item)
+            return super().append(item)
+        return self.owner
 
 
 class UsageRequirements(_UsageRequirementsStubs):
@@ -338,17 +343,21 @@ class Target:
         self._sources: list[Node] = []
         self._dependencies: list[Target] = []
         self.public = UsageRequirements()
-        self.public.defines = UniqueList([])
-        self.public.include_dirs = UniqueList([])
-        self.public.link_dirs = UniqueList([])
+        self.public.defines = UniqueList([], owner=self)
+        self.public.include_dirs = UniqueList([], owner=self)
+        self.public.link_dirs = UniqueList([], owner=self)
         self.public.link_flags = []
-        self.public.link_libs = ValidatedUniqueList([], self.__link_libs_validator)
+        self.public.link_libs = ValidatedUniqueList(
+            [], validator=self.__link_libs_validator, owner=self
+        )
         self.private = UsageRequirements()
-        self.private.defines = UniqueList([])
-        self.private.include_dirs = UniqueList([])
-        self.private.link_dirs = UniqueList([])
+        self.private.defines = UniqueList([], owner=self)
+        self.private.include_dirs = UniqueList([], owner=self)
+        self.private.link_dirs = UniqueList([], owner=self)
         self.private.link_flags = []
-        self.private.link_libs = ValidatedUniqueList([], self.__link_libs_validator)
+        self.private.link_libs = ValidatedUniqueList(
+            [], validator=self.__link_libs_validator, owner=self
+        )
         self.required_languages: set[str] = set()
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
@@ -486,6 +495,8 @@ class Target:
             raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
         if target is self:
             raise ValueError(f"Target '{self.name}' cannot link itself.")
+        # Invalidate cached requirements
+        self._collected_requirements = None
         return True
 
     @deprecated("Use target.{public,private}.link_libs instead")
