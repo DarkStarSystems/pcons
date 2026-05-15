@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-05-15
+
 ### Added
 
 - **`import std;` on GCC.** Completes the cross-toolchain trio after MSVC (0.15) and LLVM/libc++ (0.16). The synthesized std module is built once with the user's `-std=` and ABI-sensitive flags carried through, then linked into importers. CI exercises this against gcc-15.
@@ -822,7 +824,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/DarkStarSystems/pcons/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/DarkStarSystems/pcons/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/DarkStarSystems/pcons/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/DarkStarSystems/pcons/compare/v0.14.0...v0.14.1
