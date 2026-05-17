@@ -11,7 +11,14 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from pcons import Generator, MakefileGenerator, NinjaGenerator, get_var, get_variant
+from pcons import (
+    Generator,
+    MakefileGenerator,
+    MetadataGenerator,
+    NinjaGenerator,
+    get_var,
+    get_variant,
+)
 from pcons.cli import (
     find_command_in_argv,
     find_script,
@@ -193,6 +200,13 @@ class TestGenerator:
 
         gen = Generator()
         assert isinstance(gen, MakefileGenerator)
+
+    def test_generator_metadata(self, monkeypatch) -> None:
+        """Test Generator() supports metadata generator."""
+        monkeypatch.setenv("PCONS_GENERATOR", "metadata")
+
+        gen = Generator()
+        assert isinstance(gen, MetadataGenerator)
 
     def test_generator_case_insensitive(self, monkeypatch) -> None:
         """Test generator names are case-insensitive."""

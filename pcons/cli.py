@@ -977,8 +977,8 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         "-G",
         "--generator",
         metavar="NAME",
-        choices=["ninja", "make", "makefile", "xcode"],
-        help="Generator to use (ninja, make, xcode). Default: ninja",
+        choices=["ninja", "make", "makefile", "metadata", "xcode"],
+        help="Generator to use (ninja, make, metadata, xcode). Default: ninja",
     )
     parser.add_argument(
         "--reconfigure",
