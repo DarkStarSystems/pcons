@@ -27,6 +27,7 @@ from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.core.subst import PathToken  # noqa: E402
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
+from pcons.generators.metadata import MetadataGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.generators.xcode import XcodeGenerator  # noqa: E402
 from pcons.packages.description import PackageDescription  # noqa: E402
@@ -147,13 +148,14 @@ GENERATORS = {
     "ninja": NinjaGenerator,
     "make": MakefileGenerator,
     "makefile": MakefileGenerator,  # Alias
+    "metadata": MetadataGenerator,
     "xcode": XcodeGenerator,
 }
 
 
 def Generator(
     default: str = "ninja",
-) -> NinjaGenerator | MakefileGenerator | XcodeGenerator:
+) -> NinjaGenerator | MakefileGenerator | MetadataGenerator | XcodeGenerator:
     """Get a generator instance based on CLI option or environment.
 
     The generator can be set with:
@@ -170,10 +172,11 @@ def Generator(
         3. default parameter
 
     Args:
-        default: Default generator name if not set ("ninja", "make", or "xcode").
+        default: Default generator name if not set ("ninja", "make", "metadata", or "xcode").
 
     Returns:
-        A generator instance (NinjaGenerator, MakefileGenerator, or XcodeGenerator).
+        A generator instance (NinjaGenerator, MakefileGenerator,
+        MetadataGenerator, or XcodeGenerator).
 
     Raises:
         ValueError: If the generator name is not recognized.
