@@ -72,6 +72,17 @@ class CxxModuleScannerNotFound(RuntimeError):
     """
 
 
+def _write_text_if_changed(path: Path, text: str) -> None:
+    """Write *text* to *path* only when content differs.
+
+    This keeps file mtimes stable across no-op configure runs so Ninja
+    doesn't treat unchanged dyndep files as freshly updated inputs.
+    """
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        return
+    path.write_text(text, encoding="utf-8")
+
+
 def run_scan_deps(
     scanner: str,
     compiler: str,
@@ -657,7 +668,7 @@ def write_dyndep_from_results(
             provides_pcms.append(module_to_pcm[r.logical_name])
 
         requires_pcms: list[str] = []
-        for ln in r.required_logical_names:
+        for ln in sorted(set(r.required_logical_names)):
             if ln in module_to_pcm:
                 requires_pcms.append(module_to_pcm[ln])
 
@@ -666,7 +677,8 @@ def write_dyndep_from_results(
         lines.append(f"build {r.spec.obj_rel}{implicit_out}: dyndep{implicit_in}")
         lines.append("")
 
-    Path(out_path).write_text("\n".join(lines), encoding="utf-8")
+    dyndep_text = "\n".join(lines)
+    _write_text_if_changed(Path(out_path), dyndep_text)
 
 
 def write_dyndep(
@@ -809,7 +821,7 @@ def write_dyndep(
         lines.append("")
 
     dyndep_text = "\n".join(lines)
-    Path(out_path).write_text(dyndep_text, encoding="utf-8")
+    _write_text_if_changed(Path(out_path), dyndep_text)
 
 
 def main() -> int:
