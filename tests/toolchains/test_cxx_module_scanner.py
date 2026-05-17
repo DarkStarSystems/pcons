@@ -159,6 +159,23 @@ class TestWriteDyndep:
         write_dyndep_from_results(results, m, out)
         assert "std" not in out.read_text()
 
+    def test_write_if_unchanged_keeps_mtime(self, tmp_path: Path) -> None:
+        results = [
+            _result("Calc.o", provides_name="Calc", requires=["Calc:Constants"]),
+            _result("Constants.o", provides_name="Calc:Constants"),
+        ]
+        m = build_module_map(results, "mods", ".pcm")
+        out = tmp_path / "deps.dyndep"
+
+        write_dyndep_from_results(results, m, out)
+        first_mtime = out.stat().st_mtime_ns
+
+        # Re-emitting identical content must not rewrite the file.
+        write_dyndep_from_results(results, m, out)
+        second_mtime = out.stat().st_mtime_ns
+
+        assert first_mtime == second_mtime
+
 
 class _FakeCxxNamespace:
     """Stand-in for env.cxx with just the `modules` attribute the helper reads."""
