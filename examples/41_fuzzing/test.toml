@@ -1,0 +1,30 @@
+# Test configuration for the 41_fuzzing example
+
+[test]
+description = "libFuzzer fuzz target with a regression test and a short campaign"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/fuzz_parser",
+    "build/tests.json",
+]
+
+[verify]
+# Run `ninja test`. Both the corpus replay and the 2-second campaign
+# should pass against a clean target.
+commands = [
+    { run = "ninja -C build test", expect_stdout = "tests passed" },
+]
+
+[skip]
+# libFuzzer ships with clang/LLVM.
+require_commands = ["clang"]
+# - Apple's Xcode clang does NOT ship libFuzzer (Homebrew LLVM does, but
+#   it's not assumed in CI). Skip macOS here; the user-guide's "Fuzzing"
+#   section documents the Homebrew setup for local use.
+# - clang-cl on Windows supports libFuzzer but the CRT/ASan DLL setup is
+#   more involved than this small example should carry.
+platforms = ["windows", "darwin"]
+# Xcode generator doesn't emit a `test` phony; the runner is invoked
+# via `pcons test` instead. Skipping keeps the verify command simple.
+generators = ["xcode"]

@@ -1314,6 +1314,120 @@ for CI failure detection.
 You can read it, grep it, and feed it to any other runner you like —
 nothing in the format depends on the pcons runtime.
 
+### Fuzzing
+
+Pcons doesn't have a dedicated fuzz-test builder — a fuzz target is just
+a fuzzer-instrumented `Program` plus one or two `Test`s. The same shape
+works for libFuzzer, AFL++, and Honggfuzz; only the build flags and the
+campaign invocation change. See `examples/41_fuzzing/` for a complete
+libFuzzer harness; the recipes below show the engine-specific bits.
+
+The recommended pattern is two tests per harness:
+
+- a **regression** test that replays a committed seed corpus (fast,
+  deterministic, runs on every commit), and
+- a **campaign** test that actually fuzzes for a bounded wall-clock time
+  (labelled `["fuzz"]` so `pcons test -L fuzz` runs only campaigns and
+  `pcons test -LE fuzz` excludes them).
+
+#### libFuzzer (clang built-in)
+
+Same `LLVMFuzzerTestOneInput` entrypoint; libFuzzer's `main()` is linked
+in by `-fsanitize=fuzzer`.
+
+```python
+fuzz_flags = ["-fsanitize=fuzzer,address", "-g", "-O1"]
+env.cc.flags.extend(fuzz_flags)
+env.link.flags.extend(fuzz_flags)
+
+harness = project.Program("fuzz_parser", env,
+                          sources=["fuzz_parser.c", "parser.c"])
+
+project.Test("parser.regression", harness,
+             args=["-runs=0", corpus_dir], timeout=30)
+project.Test("parser.campaign", harness,
+             args=["-create_missing_dirs=1", "campaign-corpus", corpus_dir,
+                   "-max_total_time=60"],
+             labels=["fuzz"], timeout=90)
+```
+
+```c
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    parse_keyvalue(data, size);
+    return 0;
+}
+```
+
+#### AFL++
+
+The same `LLVMFuzzerTestOneInput` entrypoint works in persistent mode.
+The compiler driver becomes `afl-clang-fast`; the campaign is run by
+`afl-fuzz` rather than the harness binary itself.
+
+```python
+# Easiest setup: run pcons with CC=afl-clang-fast (and CXX=afl-clang-fast++).
+# Or point a custom toolchain at the AFL++ driver explicitly.
+
+harness = project.Program("fuzz_parser", env,
+                          sources=["fuzz_parser.c", "parser.c"])
+
+project.Test("parser.regression", "afl-showmap",
+             args=["-o", "/dev/null", "-i", corpus_dir, "--",
+                   str(harness.output_nodes[0].path), "@@"])
+
+project.Test("parser.campaign", "afl-fuzz",
+             args=["-V", "60", "-i", corpus_dir, "-o", findings_dir,
+                   "--", str(harness.output_nodes[0].path)],
+             labels=["fuzz"], timeout=120)
+```
+
+#### Honggfuzz
+
+Same harness; build with `hfuzz-clang` and link against `libhfuzz.a`. The
+campaign is run by the `honggfuzz` binary.
+
+```python
+# Easiest setup: CC=hfuzz-clang (and CXX=hfuzz-clang++).
+
+harness = project.Program("fuzz_parser", env,
+                          sources=["fuzz_parser.c", "parser.c"])
+
+project.Test("parser.campaign", "honggfuzz",
+             args=["-i", corpus_dir, "-o", findings_dir, "--run_time", "60",
+                   "--", str(harness.output_nodes[0].path)],
+             labels=["fuzz"], timeout=120)
+```
+
+#### Conventions
+
+- Keep the seed corpus in the source tree (committed) and pass it as an
+  absolute path so it resolves correctly from the build directory.
+- For libFuzzer's regression mode, pass `-runs=0` before the corpus dir.
+  Without it, libFuzzer treats the directory as a live corpus and keeps
+  fuzzing instead of exiting.
+- For the campaign, give libFuzzer two corpus paths — a build-relative
+  output dir first (writable; new findings go there) and the seed corpus
+  second (treated read-only). Without this split, the campaign writes
+  every new-coverage input back into the seed corpus and pollutes the
+  source tree.
+- Label fuzz tests `["fuzz"]` so users can filter them on or off.
+- Pair a fast regression test with a slower campaign — CI on every
+  commit runs the regression; nightly CI runs the campaign with a real
+  budget (`-max_total_time=600`, `-V 600`, `--run_time 600`).
+
+#### Platform notes
+
+- **Linux**: works out of the box with a modern clang.
+- **macOS**: Apple's Xcode clang does not ship libFuzzer; install
+  Homebrew LLVM (`brew install llvm`) and use that clang. The
+  `examples/41_fuzzing/pcons-build.py` script also adds an explicit
+  `-L<llvm>/lib/c++` to the link line, because Homebrew's libFuzzer
+  archive references libc++ symbols that resolve only against
+  Homebrew's libc++ — not Apple's SDK libc++.
+- **Windows**: clang-cl supports `-fsanitize=fuzzer,address`, but the
+  CRT and ASan DLL setup is more involved than what fits in a small
+  example.
+
 ---
 
 ## Advanced Topics
