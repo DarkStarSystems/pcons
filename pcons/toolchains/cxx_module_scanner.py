@@ -53,6 +53,7 @@ All paths in the output are relative to the build directory (where Ninja runs).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 import sys
@@ -75,12 +76,24 @@ class CxxModuleScannerNotFound(RuntimeError):
 def _write_text_if_changed(path: Path, text: str) -> None:
     """Write *text* to *path* only when content differs.
 
-    This keeps file mtimes stable across no-op configure runs so Ninja
-    doesn't treat unchanged dyndep files as freshly updated inputs.
+    Fast-path no-op uses a matching ``<path>.sha256`` digest file.
+    If the digest file is missing or stale, use a size check first and
+    only fall back to a byte-for-byte compare for equal-size candidates.
     """
-    if path.exists() and path.read_text(encoding="utf-8") == text:
-        return
-    path.write_text(text, encoding="utf-8")
+    data = text.encode("utf-8")
+    digest = hashlib.sha256(data).digest()
+    digest_file = path.with_suffix(path.suffix + ".sha256")
+
+    if path.exists():
+        if (
+            path.stat().st_size == len(data)
+            and digest_file.exists()
+            and digest_file.read_bytes() == digest
+        ):
+            return
+
+    path.write_bytes(data)
+    digest_file.write_bytes(digest)
 
 
 def run_scan_deps(
