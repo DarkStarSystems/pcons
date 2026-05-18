@@ -1126,6 +1126,196 @@ prefix = get_var('PREFIX', default='/usr/local')
 
 ---
 
+## Testing
+
+Pcons keeps the build-system / test-runner split clean: build scripts
+**declare** tests via `project.Test(...)`, the configure step writes a
+JSON manifest (`<build_dir>/tests.json`), and a separate runner —
+`pcons test` (or `ninja test`) — executes them. This is the same model
+CMake uses with CTest, and it keeps pcons itself out of the business
+of running things at build time.
+
+### Declaring Tests
+
+```python
+test_prog = project.Program("math_test", env,
+                            sources=["src/math.c", "src/test_math.c"])
+
+# Most basic: run the program; pass = exit 0.
+project.Test("math.add", test_prog, args=["add"], labels=["unit", "fast"])
+project.Test("math.mul", test_prog, args=["mul"], labels=["unit", "fast"])
+
+# should_fail=True inverts the exit code (XFAIL-style assertions).
+project.Test("math.expected_failure", test_prog, args=["bad-input"],
+             should_fail=True, labels=["xfail"])
+
+# disabled=True keeps the test in the manifest but always skips it.
+project.Test("math.slow", test_prog, args=["heavy"],
+             labels=["slow"], disabled=True, timeout=60)
+```
+
+The full set of fields (all keyword-only):
+
+| Field | Type | Purpose |
+|---|---|---|
+| `args` | `Sequence[str]` | Arguments passed after the program. |
+| `cwd` | `Path \| str \| None` | Working directory; defaults to the build dir. |
+| `env` | `dict[str, str] \| None` | Extra environment variables for the test process. |
+| `labels` | `Sequence[str]` | Tags for filtering (`unit`, `integration`, `slow`, `fuzz`, ...). |
+| `timeout` | `float \| None` | Seconds before the runner kills the test. |
+| `should_fail` | `bool` | If True, a non-zero exit code is a pass. |
+| `serial` | `bool` | Don't run in parallel with other tests. |
+| `disabled` | `bool` | Record the test but always skip. |
+| `data` | `Sequence[Path \| str]` | Runtime data files (informational in v1). |
+| `depends_on` | `Sequence[str]` | Names of tests that must pass before this one runs. |
+| `discover` | `"gtest" \| "doctest" \| "catch2" \| None` | Expand into one entry per test case in the binary. |
+
+`program` can be a `Target` (the typical case — depending on it ensures
+`ninja test-build` compiles it first), or a `Path` / `str` to an
+existing script or external binary.
+
+### Fixtures and Test Ordering: `depends_on`
+
+`depends_on` lets one test gate another. If a dependency fails (or
+times out, errors, or skips because of its own failed dep), all
+dependent tests are reported as skipped — no point running them.
+
+```python
+# Fixture-style: start a server, run tests against it, stop it.
+start = project.Test("server.start", start_script, labels=["fixture"])
+project.Test("api.list_users", api_test, args=["list-users"],
+             depends_on=["server.start"], labels=["api"])
+project.Test("api.create_user", api_test, args=["create-user"],
+             depends_on=["server.start"], labels=["api"])
+project.Test("server.stop", stop_script, depends_on=["server.start"],
+             labels=["fixture"])
+```
+
+When you filter with `-L` / `-R`, deps of selected tests are
+auto-included so fixtures keep working:
+
+```bash
+pcons test -L api    # still runs server.start (and server.stop)
+```
+
+### Test-Case Discovery: `discover`
+
+For binaries built against GoogleTest, doctest, or Catch2, listing
+every test case in the Python build script is tedious. Set
+`discover=` and the runner queries the binary at run time, expanding
+your single `project.Test()` into one entry per test case:
+
+```python
+unit_tests = project.Program("unit_tests", env, sources=[...])
+project.Test("unit", unit_tests, discover="gtest", labels=["unit"])
+```
+
+Run-time output:
+
+```
+Test project: myproject (84 tests)
+      Start  1: unit.MathSuite.Add
+ 1/84 Test #1: unit.MathSuite.Add ..................... Passed  0.01s
+      Start  2: unit.MathSuite.Subtract
+ 2/84 Test #2: unit.MathSuite.Subtract ................ Passed  0.01s
+ ...
+```
+
+Each case becomes a separate test that:
+
+- Inherits the parent's `labels`, `timeout`, `env`, `cwd`, etc.
+- Runs the binary with the framework's single-case filter
+  (`--gtest_filter=...`, `--test-case=...`, or a positional name).
+- Appears in `--list`, JUnit output, and label/regex filters.
+
+Protocols supported:
+
+| `discover=` | Listing flag | Invocation |
+|---|---|---|
+| `"gtest"` | `--gtest_list_tests` | `<bin> --gtest_filter=Suite.Case` |
+| `"doctest"` | `--list-test-cases --no-version` | `<bin> --test-case="<name>"` |
+| `"catch2"` | `--list-test-names-only` | `<bin> "<name>"` |
+
+If discovery fails (binary missing, framework not cooperative), the
+runner falls back to running the parent as a single test and prints a
+warning. References to the discovered parent in another test's
+`depends_on` are rewritten to wait on every child.
+
+### Tweaking Tests After Creation: `set_test_property`
+
+Sometimes a property depends on context that isn't known at the
+`project.Test()` call site — a slow test that needs a bigger timeout
+under a particular toolchain, a label applied to every test in a
+generated batch. `set_test_property()` / `set_test_properties()`
+update an unresolved test, mirroring CMake's `set_tests_properties()`:
+
+```python
+from pcons import set_test_property, set_test_properties
+
+t = project.Test("slow_one", prog)
+set_test_property(t, "timeout", 600)
+
+# Bulk: one call, many tests, many properties.
+slow_tests = [t1, t2, t3]
+set_test_properties(*slow_tests, timeout=600, labels=["slow"])
+```
+
+Valid property names are the same kwargs accepted by `project.Test()`:
+`args`, `cwd`, `env`, `labels`, `timeout`, `should_fail`, `serial`,
+`disabled`, `data`, `depends_on`, `discover`, `program`.
+
+### Running Tests
+
+```bash
+ninja test                    # build, then run, all tests
+pcons test                    # same effect, runs the test runner directly
+pcons test -L unit            # only run "unit"-labeled tests
+pcons test -L unit -LE slow   # unit, excluding slow
+pcons test -R '^math\.'       # only run tests whose name matches the regex
+pcons test --list             # show what would run, without running
+pcons test -j 1               # serial mode (default: CPU count)
+pcons test --junit out.xml    # emit JUnit XML for CI
+pcons test --stop-on-fail     # stop after the first failure
+pcons test -V                 # verbose: show stderr from failed tests
+```
+
+The runner picks up the manifest from the current build directory (or
+walks upward to find one). Exit code is 0 if every selected test
+passed, non-zero otherwise — which is why `ninja test` "just works"
+for CI failure detection.
+
+### The Test Manifest
+
+`<build_dir>/tests.json` is plain JSON, versioned, and stable:
+
+```json
+{
+  "version": 1,
+  "project": "myproject",
+  "build_dir": "build",
+  "tests": [
+    {
+      "name": "math.add",
+      "command": ["test_math", "add"],
+      "cwd": null,
+      "env": {},
+      "labels": ["unit", "fast"],
+      "timeout": null,
+      "should_fail": false,
+      "serial": false,
+      "disabled": false,
+      "data": [],
+      "defined_at": "pcons-build.py:34"
+    }
+  ]
+}
+```
+
+You can read it, grep it, and feed it to any other runner you like —
+nothing in the format depends on the pcons runtime.
+
+---
+
 ## Advanced Topics
 
 ### Supported Source File Types

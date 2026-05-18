@@ -259,6 +259,20 @@ pcons and Meson are comparable in capability for standard configure checks. pcon
 
 ---
 
+## Testing
+
+All three systems treat tests as first-class build artifacts, but the split between *declaring* tests and *running* them differs.
+
+**pcons** declares tests with `project.Test(name, program, args=..., labels=..., timeout=..., should_fail=..., disabled=..., serial=..., env=..., cwd=..., depends_on=..., discover=...)`. Configure-time emits a versioned JSON manifest at `<build_dir>/tests.json`; `pcons test` (or `ninja test` / `make test`) reads it and runs the tests with parallelism, label/regex filters, JUnit XML output, and CTest-style reporting. `discover="gtest"` / `"doctest"` / `"catch2"` runs the binary's list-cases flag and expands into one entry per case, so you get per-case results without enumerating them in the build script. `depends_on` gates a test on its dependencies — failed deps cause dependents to skip; filtering auto-pulls deps in to preserve fixtures. `set_test_properties(*targets, **props)` mirrors CMake for after-the-fact tweaks. The build system itself never executes a test — same separation as compile/link → ninja. The manifest is open-able JSON, so any external runner (CI scripts, IDE plugins) can consume it without depending on pcons internals.
+
+**Bazel** makes tests a rule type (`cc_test`, `py_test`, etc.) with `size`, `timeout`, `flaky`, `shard_count`, `tags`, `env`, `data`. `bazel test //...` builds and runs in one shot, producing per-test XML. Layered rule sets like `rules_fuzzing` (the `cc_fuzz_test` rule) reuse the same test infrastructure for regression replay, plus separate run/binary targets for actual fuzzing — a good example of how a first-class test concept lets richer features compose on top.
+
+**Meson** uses `test('name', exe, args=..., env=..., suite=..., timeout=..., is_parallel=..., should_fail=..., protocol='exitcode'|'tap'|'gtest'|'rust', depends=...)` and `add_test_setup(...)` for sanitizer / valgrind variants. `meson test` runs them with `--suite`, `--repeat`, `--num-processes`, plus JUnit XML. Build and test are subcommands of one driver.
+
+pcons doesn't (yet) parse per-case output protocols like TAP / gtest XML or implement automatic flaky retry — those are additive on top of the manifest format and can land later without breaking existing CI integrations.
+
+---
+
 ## Build Description Expressiveness & Simplicity
 
 One of pcons's practical advantages is how little code it takes to describe a non-trivial build. Consider a project with two static libraries (`libmath`, `libphysics`) and an executable that links both, with transitive include propagation and debug/release variants.
@@ -382,6 +396,7 @@ pcons and Meson are comparable in line count for simple cases. pcons pulls ahead
 | **Production maturity** | Early (v0.10.x, active dev)                       | Very mature (Google-backed)            | Mature (used by GNOME, Mesa, etc.) |
 | **Wasm support**        | WASI + Emscripten built-in                        | Via custom rules                       | Limited                            |
 | **Compiler caching**    | ccache/sccache wrapper                            | Remote cache built-in                  | ccache integration                 |
+| **Testing**             | `project.Test()` + JSON manifest + `pcons test` / `ninja test` / `make test`; gtest/doctest/catch2 discovery; fixtures via `depends_on` | `cc_test` + `bazel test`        | `test()` + `meson test`            |
 
 ---
 
