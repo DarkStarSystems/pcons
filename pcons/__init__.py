@@ -23,6 +23,7 @@ from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
 from pcons.configure.config_file import configure_file  # noqa: E402
 from pcons.configure.platform import Platform, get_platform  # noqa: E402
+from pcons.core.context import context  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.project import Project, get_target, get_targets  # noqa: E402, F811
 from pcons.core.subst import PathToken  # noqa: E402
@@ -240,6 +241,7 @@ __all__ = [
     # Module system
     "modules",
     # Misc utilities
+    "context",
     "add_subdirectory",
     "get_target",
     "get_targets",

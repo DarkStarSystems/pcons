@@ -6,11 +6,10 @@ This demonstrates a subdir that depends on another subdir (libfoo).
 Works both standalone and as part of the parent build.
 """
 
-from pcons import Project
+from pcons import context
 
-project = Project.current()
-assert project is not None
-env = project.environments[0]
+project = context.current_project
+env = project.default_environment
 
 libfoo = project.get_target("foo")
 assert libfoo is not None, (

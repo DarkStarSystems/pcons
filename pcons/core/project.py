@@ -362,6 +362,17 @@ class Project(_ProjectBuilders):
                 return target
         return None
 
+    def get_targets(self, *names: str) -> list[Target | None]:
+        """Get multiple targets by name.
+
+        Args:
+            *names: Target names.
+
+        Returns:
+            List of targets, or None for names not found.
+        """
+        return [self.get_target(name) for name in names]
+
     @property
     def targets(self) -> list[Target]:
         """Get all registered targets."""
@@ -374,6 +385,17 @@ class Project(_ProjectBuilders):
     def environments(self) -> list[Env]:
         """Get all registered environments."""
         return list(self._environments)
+
+    @property
+    def default_environment(self) -> Env:
+        """Get the default environment (first one registered).
+
+        Raises:
+            ValueError: If no environments have been registered.
+        """
+        if not self._environments:
+            raise ValueError("No environments have been registered in this project.")
+        return self._environments[0]
 
     def Alias(
         self, name: str, *targets: Target | Node | list[Target | Node]

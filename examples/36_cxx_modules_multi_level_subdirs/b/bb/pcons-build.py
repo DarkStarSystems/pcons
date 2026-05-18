@@ -1,5 +1,8 @@
-from pcons import program, static_library
+from pcons import context
 
-bb = static_library("bb").add_sources(["bb.cppm"])
+project = context.current_project
+env = project.default_environment
 
-program("bb_app").add_sources(["bb_main.cpp"]).link(bb)
+bb = project.StaticLibrary("bb", env, sources=["bb.cppm"])
+
+project.Program("bb_app", env, sources=["bb_main.cpp"]).link(bb)
