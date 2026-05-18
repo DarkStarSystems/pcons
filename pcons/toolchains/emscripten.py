@@ -377,6 +377,8 @@ class EmscriptenToolchain(UnixToolchain):
     toolchain will raise ``NotImplementedError``.
     """
 
+    TOOL_NAMES = ("cc", "cxx", "ar", "link")
+
     def __init__(self) -> None:
         super().__init__("emscripten")
         self._emsdk_path: Path | None = None

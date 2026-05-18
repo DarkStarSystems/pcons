@@ -539,6 +539,8 @@ class GccToolchain(UnixToolchain):
     - apply_variant() for debug/release/etc. configurations
     """
 
+    TOOL_NAMES = ("cc", "cxx", "ar", "link")
+
     def __init__(self) -> None:
         super().__init__("gcc")
 

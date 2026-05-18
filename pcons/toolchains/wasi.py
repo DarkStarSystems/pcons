@@ -376,6 +376,8 @@ class WasiToolchain(UnixToolchain):
     will raise ``NotImplementedError``.
     """
 
+    TOOL_NAMES = ("cc", "cxx", "ar", "link")
+
     def __init__(self) -> None:
         super().__init__("wasi")
         self._sdk_path: Path | None = None

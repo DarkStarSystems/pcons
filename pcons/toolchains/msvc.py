@@ -572,6 +572,8 @@ class MsvcToolchain(MsvcCompatibleToolchain):
     Inherits common MSVC-compatible functionality from MsvcCompatibleToolchain.
     """
 
+    TOOL_NAMES = ("cc", "cxx", "lib", "link", "rc", "ml")
+
     def __init__(self) -> None:
         super().__init__("msvc")
 

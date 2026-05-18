@@ -103,6 +103,8 @@ class LatexToolchain(BaseToolchain):
         env.latex.Pdf(build_dir / "paper.pdf", src_dir / "paper.tex")
     """
 
+    TOOL_NAMES = ("latex",)
+
     def __init__(self) -> None:
         super().__init__("latex")
 

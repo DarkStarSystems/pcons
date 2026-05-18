@@ -135,7 +135,9 @@ env = project.Environment(toolchain=find_c_toolchain())
 
 # Use our custom builder to generate a version header
 # This works exactly like built-in builders!
-version_header = project.GenerateVersion(
+# (type: ignore because user-registered @builder methods are not in the
+# generated _ProjectBuilders stub; runtime dispatch via __getattr__.)
+version_header = project.GenerateVersion(  # ty: ignore[unresolved-attribute]  # type: ignore[attr-defined]
     "version.h",
     version="2.1.0",
     app_name="CustomBuilderDemo",

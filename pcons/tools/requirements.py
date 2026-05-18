@@ -64,8 +64,9 @@ class EffectiveRequirements:
             reqs: UsageRequirements to merge in.
         """
         for inc_dir in reqs.include_dirs:
-            if inc_dir not in self.includes:
-                self.includes.append(inc_dir)
+            inc_path = Path(inc_dir) if isinstance(inc_dir, str) else inc_dir
+            if inc_path not in self.includes:
+                self.includes.append(inc_path)
         for define in reqs.defines:
             if define not in self.defines:
                 self.defines.append(define)

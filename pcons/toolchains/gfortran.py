@@ -240,6 +240,8 @@ class GfortranToolchain(UnixToolchain):
     Supports Ninja dyndep for correct Fortran module dependency ordering.
     """
 
+    TOOL_NAMES = ("fc", "ar", "link")
+
     # Include "fortran" with priority 3 so Fortran wins over C/C++ when
     # GfortranToolchain is the primary toolchain.
     @property

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -432,7 +433,7 @@ class InstallBuilder:
     def create_target(
         project: Project,
         dest_dir: Path | str,
-        sources: list[Target | FileNode | Path | str],
+        sources: Sequence[Target | FileNode | Path | str],
         *,
         name: str | None = None,
     ) -> Target:

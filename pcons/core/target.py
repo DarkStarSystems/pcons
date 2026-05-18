@@ -22,16 +22,22 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pcons.core._usage_requirements_stubs import _UsageRequirementsStubs
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode, Node
     from pcons.core.project import Project
+else:
+    # At runtime, UsageRequirements inherits from `object`. The mixin only
+    # provides typed declarations for static analysis. __getattr__ continues
+    # to lazily create per-name lists as before.
+    _UsageRequirementsStubs = object
 
 
 __all__ = ["SourceSpec", "UsageRequirements", "Target", "ImportedTarget"]
 
 
-class UsageRequirements:
+class UsageRequirements(_UsageRequirementsStubs):
     """Requirements that propagate from a target to its consumers.
 
     When target A depends on target B, B's public usage requirements

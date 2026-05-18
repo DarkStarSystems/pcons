@@ -62,6 +62,8 @@ class CudaToolchain(BaseToolchain):
         env.cuda.arch = "sm_86"  # Target specific GPU
     """
 
+    TOOL_NAMES = ("cuda",)
+
     def __init__(self) -> None:
         super().__init__("cuda")
 
