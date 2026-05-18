@@ -111,6 +111,16 @@ known-first-party = ["pcons"]
 [tool.coverage.run]
 source = ["pcons"]
 branch = true
+omit = [
+    # Generated TYPE_CHECKING-only stub mixins. Their class bodies live
+    # under `if TYPE_CHECKING:`, so nothing executes at runtime; reporting
+    # them as 0%-covered is misleading. The generator that produces them
+    # (pcons/_gen_stubs.py) is tested directly.
+    "pcons/core/_project_builder_stubs.py",
+    "pcons/core/_environment_stubs.py",
+    "pcons/core/_toolconfig_stubs.py",
+    "pcons/core/_usage_requirements_stubs.py",
+]
 
 [tool.coverage.report]
 exclude_lines = [
