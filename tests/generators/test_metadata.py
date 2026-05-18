@@ -52,7 +52,7 @@ class TestMetadataGenerator:
         )
         app.output_nodes.append(FileNode("build/app"))
         app.add_source("src/main.c")
-        app.dependencies.append(lib)
+        app.add_dependency(lib)
 
         project.Default(app)
         project.Alias("all", app)
