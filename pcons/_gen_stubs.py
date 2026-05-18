@@ -236,9 +236,13 @@ def _collect_tool_names() -> list[tuple[str, str]]:
     added separately. The toolchain modules must be imported for their
     subclasses to be registered with BaseToolchain.__subclasses__().
     """
-    # Force import of every toolchain that ships with pcons so that its
-    # class is registered as a BaseToolchain subclass. Missing entries here
-    # are the most likely failure mode when adding a new toolchain.
+    # Force import of every toolchain that ships with pcons (core +
+    # contrib) so that its class is registered as a BaseToolchain
+    # subclass. Missing entries here are the most likely failure mode
+    # when adding a new toolchain — the TOOL_NAMES-vs-installed-tools
+    # invariant test in tests/toolchains/ guards the other direction
+    # (toolchain present but TOOL_NAMES out of sync).
+    import pcons.contrib.latex.toolchain  # noqa: F401
     import pcons.toolchains.clang_cl  # noqa: F401
     import pcons.toolchains.cuda  # noqa: F401
     import pcons.toolchains.cython  # noqa: F401

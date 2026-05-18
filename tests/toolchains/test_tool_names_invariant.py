@@ -25,6 +25,7 @@ from __future__ import annotations
 # `_collect_tool_names()` in `pcons/_gen_stubs.py` — the test will fail
 # loudly if a toolchain is here but absent from the generator, or vice
 # versa, because the generated stub will drift.
+import pcons.contrib.latex.toolchain  # noqa: F401
 import pcons.toolchains.clang_cl  # noqa: F401
 import pcons.toolchains.cuda  # noqa: F401
 import pcons.toolchains.cython  # noqa: F401
@@ -38,25 +39,17 @@ from pcons.tools.toolchain import toolchain_registry
 
 
 def _unique_registered_toolchains():
-    """Yield each shipped-core ToolchainEntry once.
+    """Yield each ToolchainEntry once.
 
-    Scoped to `pcons.toolchains.*` to match the generator's scope
-    (`_collect_tool_names` in `pcons/_gen_stubs.py` only imports core
-    toolchains). Contrib toolchains under `pcons.contrib.*` may also
-    register but are not in the Environment stub today; they get a
-    separate invariant when/if the generator picks them up.
-
-    Note: as of writing, `pcons.contrib.latex.toolchain.LatexToolchain`
-    has `TOOL_NAMES = ()` while installing `_tools = {"latex": ...}`.
-    That is the exact drift this test would catch if contrib were in
-    scope; it's filed for a separate follow-up.
+    Covers core (`pcons.toolchains.*`) and contrib (`pcons.contrib.*`)
+    — the same scope the generator's `_collect_tool_names` discovers.
+    The registry maps multiple aliases to the same entry, so we
+    deduplicate by class.
     """
     seen: set[type] = set()
     for entry in toolchain_registry._toolchains.values():
         cls = entry.toolchain_class
         if cls in seen:
-            continue
-        if not cls.__module__.startswith("pcons.toolchains."):
             continue
         seen.add(cls)
         yield entry
@@ -87,6 +80,7 @@ def test_every_builtin_toolchain_tool_names_matches_installed_tools() -> None:
         "EmscriptenToolchain",
         "GccToolchain",
         "GfortranToolchain",
+        "LatexToolchain",
         "LlvmToolchain",
         "MsvcToolchain",
         "WasiToolchain",

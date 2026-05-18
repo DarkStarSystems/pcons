@@ -50,6 +50,7 @@ if TYPE_CHECKING:
         cython: ToolConfig  # CythonToolchain
         fc: ToolConfig  # GfortranToolchain
         install: ToolConfig  # Environment._setup_standalone_tools (always)
+        latex: ToolConfig  # LatexToolchain
         lib: ToolConfig  # ClangClToolchain, MsvcToolchain
         link: ToolConfig  # ClangClToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
         metal: ToolConfig  # LlvmToolchain
