@@ -44,8 +44,10 @@ class MetadataGenerator(BaseGenerator):
             "generator": self.name,
             "project": {
                 "name": project.name,
-                "root_dir": self._normalize_path(project.root_dir, project),
-                "build_dir": str(project.build_dir).replace("\\", "/"),
+                "root_dir": project._path_resolver.make_project_relative(
+                    project.root_dir
+                ),
+                "build_dir": project.build_dir.as_posix(),
             },
             "targets": [
                 self._serialize_target(target, project, default_target_names)
@@ -68,19 +70,21 @@ class MetadataGenerator(BaseGenerator):
     ) -> dict[str, Any]:
         """Serialize one target to metadata."""
         outputs = [
-            self._normalize_path(node.path, project)
+            project._path_resolver.make_project_relative(node.path)
             for node in target.output_nodes
             if isinstance(node, FileNode)
         ]
         sources = [
-            self._normalize_path(node.path, project)
+            project._path_resolver.make_project_relative(node.path)
             for node in target.sources
             if isinstance(node, FileNode)
         ]
         dependencies = sorted({dep.name for dep in target.dependencies})
 
         location: dict[str, Any] = {
-            "file": self._normalize_path(Path(target.defined_at.filename), project),
+            "file": project._path_resolver.make_project_relative(
+                Path(target.defined_at.filename)
+            ),
             "line": target.defined_at.lineno,
         }
         if target.defined_at.function is not None:
@@ -102,7 +106,7 @@ class MetadataGenerator(BaseGenerator):
         entries: list[str] = []
         for node in alias.targets:
             if isinstance(node, FileNode):
-                entries.append(self._normalize_path(node.path, project))
+                entries.append(project._path_resolver.make_project_relative(node.path))
             else:
                 entries.append(node.name)
 
@@ -110,16 +114,3 @@ class MetadataGenerator(BaseGenerator):
             "name": alias_name,
             "entries": entries,
         }
-
-    def _normalize_path(self, path: Path, project: Project) -> str:
-        """Normalize paths for cross-platform JSON metadata.
-
-        Paths under the project root are stored as project-relative paths.
-        External paths remain absolute.
-        """
-        if path.is_absolute():
-            try:
-                path = path.relative_to(project.root_dir)
-            except ValueError:
-                pass
-        return str(path).replace("\\", "/")
