@@ -2,11 +2,11 @@
 # SPDX-License-Identifier: MIT
 """Build script demonstrating multi-level subdirectory builds."""
 
-from pcons import Environment, Project, add_subdirectory, find_c_toolchain, get_var
+from pcons import Project, add_subdirectory, find_c_toolchain, get_var
 
 # Create the main project
-Project("subdirs_example")
-env = Environment(
+project = Project("subdirs_example")
+env = project.Environment(
     toolchain=(toolchain := find_c_toolchain(prefer=[get_var("TOOLCHAIN") or "gcc"]))
 )
 

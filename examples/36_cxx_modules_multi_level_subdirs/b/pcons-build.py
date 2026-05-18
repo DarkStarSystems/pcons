@@ -1,7 +1,9 @@
-from pcons import add_subdirectory, get_target, program, static_library
+from pcons import add_subdirectory, context, get_target
 
-b = static_library("b").add_sources(["b.cppm"])
+project = context.current_project
+env = project.default_environment
+b = project.StaticLibrary("b", env, sources=["b.cppm"])
 
 add_subdirectory("bb")
 
-program("b_app").add_sources(["b_main.cpp"]).link(b, get_target("bb"))
+project.Program("b_app", env, sources=["b_main.cpp"]).link(b, get_target("bb"))

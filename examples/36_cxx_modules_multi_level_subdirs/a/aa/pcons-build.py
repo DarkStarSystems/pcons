@@ -1,3 +1,6 @@
-from pcons import static_library
+from pcons import context
 
-static_library("aa", sources=["aa.cppm"])
+project = context.current_project
+env = project.default_environment
+
+project.StaticLibrary("aa", env, sources=["aa.cppm"])

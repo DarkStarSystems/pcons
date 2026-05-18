@@ -10,11 +10,10 @@ This demonstrates a subdir that works both:
 from pcons import Project
 
 project = Project("libfoo")
-assert project is not None
 
 if not project.is_top_level:
     # take parent environment
-    env = project.parent.environments[-1]
+    env = project.parent.default_environment
 else:
     from pcons import find_c_toolchain
 

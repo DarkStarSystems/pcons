@@ -6,6 +6,10 @@ This demonstrates a subdir that depends on another subdir (libfoo).
 Works both standalone and as part of the parent build.
 """
 
-from pcons import get_targets, program
+from pcons import context
 
-program("app").add_sources(["main.cpp"]).link(*get_targets("a", "aa", "b", "bb"))
+project = context.current_project
+env = project.default_environment
+project.Program("app", env).add_sources(["main.cpp"]).link(
+    *project.get_targets("a", "aa", "b", "bb")
+)
