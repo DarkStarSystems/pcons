@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.node import FileNode
+from pcons.core.test import TestSpec
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
@@ -90,7 +91,7 @@ class MetadataGenerator(BaseGenerator):
         if target.defined_at.function is not None:
             location["function"] = target.defined_at.function
 
-        return {
+        entry: dict[str, Any] = {
             "name": target.name,
             "type": target.target_type or "other",
             "is_default": target.name in default_target_names,
@@ -99,6 +100,28 @@ class MetadataGenerator(BaseGenerator):
             "outputs": outputs,
             "defined_at": location,
         }
+
+        # For Test() targets, embed the resolved TestSpec so IDE
+        # integrations (e.g., the VSCode TestExplorer) have everything
+        # they need to discover, group, and run tests from this one
+        # metadata file — no need to also parse tests.json.
+        spec = target._builder_data.get("spec") if target._builder_data else None
+        if isinstance(spec, TestSpec):
+            entry["test"] = {
+                "name": spec.name,
+                "command": list(spec.command),
+                "cwd": spec.cwd.as_posix() if spec.cwd is not None else None,
+                "env": dict(spec.env),
+                "labels": list(spec.labels),
+                "timeout": spec.timeout,
+                "should_fail": spec.should_fail,
+                "serial": spec.serial,
+                "disabled": spec.disabled,
+                "depends_on": list(spec.depends_on),
+                "discover": spec.discover,
+            }
+
+        return entry
 
     def _serialize_alias(self, alias_name: str, project: Project) -> dict[str, Any]:
         """Serialize one alias to metadata."""
