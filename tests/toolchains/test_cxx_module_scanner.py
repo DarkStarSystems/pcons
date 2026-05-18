@@ -176,6 +176,53 @@ class TestWriteDyndep:
 
         assert first_mtime == second_mtime
 
+    def test_write_creates_digest_file(self, tmp_path: Path) -> None:
+        results = [
+            _result("Calc.o", provides_name="Calc"),
+        ]
+        m = build_module_map(results, "mods", ".pcm")
+        out = tmp_path / "deps.dyndep"
+
+        write_dyndep_from_results(results, m, out)
+
+        digest_file = tmp_path / "deps.dyndep.sha256"
+        assert digest_file.exists()
+        assert len(digest_file.read_bytes()) == 32
+
+    def test_stale_digest_same_content_rewrites(self, tmp_path: Path) -> None:
+        results = [
+            _result("Calc.o", provides_name="Calc"),
+        ]
+        m = build_module_map(results, "mods", ".pcm")
+        out = tmp_path / "deps.dyndep"
+        digest_file = tmp_path / "deps.dyndep.sha256"
+
+        write_dyndep_from_results(results, m, out)
+        first_content = out.read_text(encoding="utf-8")
+
+        digest_file.write_bytes(b"\x00" * 32)
+        write_dyndep_from_results(results, m, out)
+
+        assert out.read_text(encoding="utf-8") == first_content
+        assert digest_file.read_bytes() != b"\x00" * 32
+
+    def test_stale_digest_different_size_rewrites(self, tmp_path: Path) -> None:
+        results = [
+            _result("Calc.o", provides_name="Calc"),
+        ]
+        m = build_module_map(results, "mods", ".pcm")
+        out = tmp_path / "deps.dyndep"
+        digest_file = tmp_path / "deps.dyndep.sha256"
+
+        write_dyndep_from_results(results, m, out)
+        out.write_text("x\n", encoding="utf-8")
+        digest_file.write_bytes(b"bad\n")
+
+        write_dyndep_from_results(results, m, out)
+
+        assert out.read_text(encoding="utf-8").startswith("ninja_dyndep_version = 1")
+        assert len(digest_file.read_bytes()) == 32
+
     def test_deterministic_output_with_result_reordering(self, tmp_path: Path) -> None:
         base_results = [
             _result("Calc.o", provides_name="Calc", requires=["Calc:Constants"]),
