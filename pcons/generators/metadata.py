@@ -58,7 +58,7 @@ class MetadataGenerator(BaseGenerator):
             ],
         }
 
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
             f.write("\n")
 
