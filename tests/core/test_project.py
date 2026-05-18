@@ -119,7 +119,10 @@ class TestProjectTargets:
 
     def test_get_nonexistent_target(self):
         project = Project("myproject")
-        assert project.get_target("missing") is None
+        assert project.get_target("missing", raise_if_missing=False) is None
+
+        with pytest.raises(KeyError):
+            project.get_target("missing", raise_if_missing=True)
 
 
 class TestProjectAliases:

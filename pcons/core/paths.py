@@ -44,7 +44,7 @@ class PathResolver:
         else:
             self._resolved_build_dir = (self.project_root / build_dir).resolve()
 
-    def subdir(self, subdir: str) -> PathResolver:
+    def subdir(self, subdir: str | Path) -> PathResolver:
         """Create a new PathResolver for a subdirectory.
 
         The new resolver will have both project_root and build_dir adjusted

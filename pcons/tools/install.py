@@ -51,7 +51,7 @@ def _deduplicate_target_name(project: Project, base_name: str) -> str:
     """
     target_name = base_name
     counter = 1
-    while project.get_target(target_name) is not None:
+    while project.get_target(target_name, False) is not None:
         target_name = f"{base_name}_{counter}"
         counter += 1
     if target_name != base_name:
