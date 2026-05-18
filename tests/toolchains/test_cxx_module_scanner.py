@@ -25,6 +25,7 @@ from pcons.toolchains.cxx_module_scanner import (
     select_modules_scope,
     select_std_module_flags,
     wire_std_into_targets,
+    write_dyndep,
     write_dyndep_from_results,
 )
 
@@ -238,6 +239,41 @@ class TestWriteDyndep:
         write_dyndep_from_results(list(reversed(base_results)), module_map, out_b)
 
         assert out_a.read_text(encoding="utf-8") == out_b.read_text(encoding="utf-8")
+
+    def test_fallback_to_manifest_mod_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Simulate scanner failure for an interface TU: write_dyndep should
+        # still emit the manifest-provided module file as an implicit output.
+        def _scan_fail(
+            scanner: str,
+            compiler: str,
+            compile_flags: list[str],
+            src: str,
+            obj: str,
+        ) -> None:
+            return None
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps", _scan_fail
+        )
+
+        out = tmp_path / "deps.dyndep"
+        manifest = [
+            {
+                "src": str(tmp_path / "MyMod.cppm"),
+                "obj": "obj/MyMod.o",
+                "is_module_interface": True,
+                "pcm": "mods/MyMod.pcm",
+                "compiler": "clang++",
+                "compile_flags": ["-std=c++20"],
+            }
+        ]
+
+        write_dyndep(manifest, "mods", str(out), "clang-scan-deps", "clang")
+        text = out.read_text(encoding="utf-8")
+        assert "ninja_dyndep_version = 1" in text
+        assert "build obj/MyMod.o | mods/MyMod.pcm: dyndep" in text
 
 
 class _FakeCxxNamespace:
