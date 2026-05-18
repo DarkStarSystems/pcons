@@ -874,7 +874,9 @@ class Project(_ProjectBuilders):
         # access on a Project is rejected (and typed builder methods from
         # _ProjectBuilders take effect). At runtime it dispatches registered
         # builders via the BuilderRegistry. User-registered @builder targets
-        # remain typed as `Any` since they are not in _ProjectBuilders.
+        # are not in _ProjectBuilders, so calls to them appear as unresolved
+        # attributes to type checkers and require a `type: ignore` /
+        # `ty: ignore` at the call site (see examples/15_custom_builder).
         def __getattr__(self, name: str) -> Any:
             """Dynamic attribute access for registered builders.
 

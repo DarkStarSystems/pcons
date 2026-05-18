@@ -17,7 +17,17 @@ toolchain's TOOL_NAMES — the freshness test catches the drift.
 Environment.__getattr__ is intentionally left visible to type checkers
 (returning `Any`), so user-defined cross-tool variables like
 `env.my_flag = ...` continue to work without a type:ignore. Known names
-below are typed more specifically and take precedence."""
+below are typed more specifically and take precedence.
+
+Soundness tradeoff: every tool namespace below is declared as present
+on every Environment, but at runtime `env.cuda` only resolves if a
+CudaToolchain (or similar) actually populated `_tools['cuda']`. A GCC
+env will type-check `env.cuda.flags = [...]` and then AttributeError
+at use. This is a deliberate completion-over-soundness choice: typing
+each name as `ToolConfig | None` would force null-checks on the
+common path where the user already knows which toolchain they
+configured. Treat the declared names as a superset of what any given
+Environment actually carries."""
 
 from __future__ import annotations
 

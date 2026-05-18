@@ -164,7 +164,10 @@ project.py). At runtime, `_ProjectBuilders = object` and builder lookup
 falls through to `Project.__getattr__` as before. The methods here exist
 solely so that type checkers (ty, pyright, mypy) can flag typos like
 `project.Programx(...)` and provide completion. User-registered
-`@builder` targets are not in this file and remain typed as `Any`.
+`@builder` targets are not in this file; because Project's `__getattr__`
+is hidden from type checkers, calls to them appear as unresolved
+attributes and require a `type: ignore` / `ty: ignore` at the call site.
+See examples/15_custom_builder for the canonical pattern.
 
 The class body is nested under `if TYPE_CHECKING:` so that ty does not
 treat the `def Foo(...) -> Target: ...` empty bodies as runtime errors;
@@ -330,7 +333,17 @@ def generate_environment_stubs() -> str:
         "Environment.__getattr__ is intentionally left visible to type checkers\n"
         "(returning `Any`), so user-defined cross-tool variables like\n"
         "`env.my_flag = ...` continue to work without a type:ignore. Known names\n"
-        "below are typed more specifically and take precedence."
+        "below are typed more specifically and take precedence.\n"
+        "\n"
+        "Soundness tradeoff: every tool namespace below is declared as present\n"
+        "on every Environment, but at runtime `env.cuda` only resolves if a\n"
+        "CudaToolchain (or similar) actually populated `_tools['cuda']`. A GCC\n"
+        "env will type-check `env.cuda.flags = [...]` and then AttributeError\n"
+        "at use. This is a deliberate completion-over-soundness choice: typing\n"
+        "each name as `ToolConfig | None` would force null-checks on the\n"
+        "common path where the user already knows which toolchain they\n"
+        "configured. Treat the declared names as a superset of what any given\n"
+        "Environment actually carries."
     )
     tool_entries = _collect_tool_names()
     entries: Sequence[tuple[str, str, str | None]] = [

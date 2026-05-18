@@ -11,7 +11,10 @@ project.py). At runtime, `_ProjectBuilders = object` and builder lookup
 falls through to `Project.__getattr__` as before. The methods here exist
 solely so that type checkers (ty, pyright, mypy) can flag typos like
 `project.Programx(...)` and provide completion. User-registered
-`@builder` targets are not in this file and remain typed as `Any`.
+`@builder` targets are not in this file; because Project's `__getattr__`
+is hidden from type checkers, calls to them appear as unresolved
+attributes and require a `type: ignore` / `ty: ignore` at the call site.
+See examples/15_custom_builder for the canonical pattern.
 
 The class body is nested under `if TYPE_CHECKING:` so that ty does not
 treat the `def Foo(...) -> Target: ...` empty bodies as runtime errors;
