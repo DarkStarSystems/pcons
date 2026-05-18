@@ -219,8 +219,23 @@ class TestMain:
             assert (tmp_path / relpath).exists()
         capsys.readouterr()  # drain stdout
 
-    def test_check_flag_returns_zero_when_fresh(self) -> None:
-        # Real committed stubs are fresh; --check should pass against them.
+    def test_check_flag_returns_zero_when_fresh(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Self-contained: write fresh stubs into tmp_path first, then verify
+        # --check sees them as fresh. Comparing against the committed stubs
+        # would couple this test to whatever state earlier tests left the
+        # in-process BuilderRegistry in — that drift is what
+        # `test_builder_stubs_are_fresh` exists to catch.
+        (tmp_path / "core").mkdir()
+        monkeypatch.setattr(
+            _gen_stubs,
+            "_stub_file_path",
+            lambda relpath: tmp_path / relpath,
+        )
+        assert _gen_stubs.main([]) == 0  # populate
         assert _gen_stubs.main(["--check"]) == 0
 
     def test_print_flag_emits_to_stdout(
