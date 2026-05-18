@@ -223,6 +223,7 @@ __all__ = [
     "Generator",
     "NinjaGenerator",
     "MakefileGenerator",
+    "MetadataGenerator",
     "XcodeGenerator",
     # Toolchain discovery
     "find_c_toolchain",

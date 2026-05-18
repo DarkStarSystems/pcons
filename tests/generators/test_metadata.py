@@ -2,9 +2,8 @@
 """Tests for pcons.generators.metadata."""
 
 import json
-from pathlib import Path
 
-from pcons.core.node import FileNode
+from pcons.core.node import FileNode, Node
 from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.generators.metadata import MetadataGenerator
@@ -42,7 +41,7 @@ class TestMetadataGenerator:
 
         lib = Target("mylib", target_type="static_library")
         lib.output_nodes.append(FileNode("build/libmylib.a"))
-        lib._sources.append(FileNode("src/lib.c"))
+        lib.add_source("src/lib.c")
         project.add_target(lib)
 
         app = Target(
@@ -51,13 +50,18 @@ class TestMetadataGenerator:
             defined_at=SourceLocation(filename="build.py", lineno=10, function=None),
         )
         app.output_nodes.append(FileNode("build/app"))
-        app._sources.append(FileNode("src/main.c"))
+        app.add_source("src/main.c")
         app.dependencies.append(lib)
         project.add_target(app)
 
         project.Default(app)
         project.Alias("all", app)
-        project.Alias("all", Path("file.txt"))
+        project.Alias("all", FileNode("some/file.txt"))
+
+        class IgnoredNode(Node):
+            name = "ignored"
+
+        project.Alias("all", IgnoredNode())  # Should be ignored in metadata
 
         gen = MetadataGenerator()
         gen.generate(project)
@@ -83,5 +87,6 @@ class TestMetadataGenerator:
 
         aliases = {alias["name"]: alias for alias in content["aliases"]}
         assert "all" in aliases
+        assert len(aliases["all"]["entries"]) == 2
         assert "build/app" in aliases["all"]["entries"]
-        assert "file.txt" in aliases["all"]["entries"]
+        assert "some/file.txt" in aliases["all"]["entries"]

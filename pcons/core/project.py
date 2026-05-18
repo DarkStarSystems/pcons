@@ -304,11 +304,16 @@ class Project:
             else:
                 flat.append(t)
         for t in flat:
-            if isinstance(t, Target):
-                # Defer resolution: output_nodes may not be populated until resolve()
-                alias.add_deferred_target(t)
-            else:
-                alias.add_target(t)
+            match t:
+                case Target():
+                    # Defer resolution: output_nodes may not be populated until resolve()
+                    alias.add_deferred_target(t)
+                case Node():
+                    alias.add_target(t)
+                case _:
+                    raise TypeError(
+                        f"Alias targets must be Target, Node, or list of them, got {type(t)}"
+                    )
 
         return alias
 
