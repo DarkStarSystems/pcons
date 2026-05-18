@@ -102,13 +102,14 @@ class MetadataGenerator(BaseGenerator):
 
     def _serialize_alias(self, alias_name: str, project: Project) -> dict[str, Any]:
         """Serialize one alias to metadata."""
+
         alias = project.aliases[alias_name]
         entries: list[str] = []
         for node in alias.targets:
             if isinstance(node, FileNode):
                 entries.append(project._path_resolver.make_project_relative(node.path))
             else:
-                entries.append(node.name)
+                pass  # Ignore for now
 
         return {
             "name": alias_name,

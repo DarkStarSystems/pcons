@@ -427,3 +427,11 @@ class TestAlias:
 
         alias = project.Alias("install", t1, t2)
         assert len(alias._target_refs) == 2
+
+    def test_alias_raises_type_error_for_invalid_target(self, tmp_path):
+        """Alias() should raise TypeError for invalid targets."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        invalid_target = 42
+
+        with pytest.raises(TypeError):
+            project.Alias("install", invalid_target)
