@@ -38,13 +38,27 @@ from pcons.tools.toolchain import toolchain_registry
 
 
 def _unique_registered_toolchains():
-    """Yield each ToolchainEntry once (the registry maps multiple aliases
-    to the same entry)."""
+    """Yield each shipped-core ToolchainEntry once.
+
+    Scoped to `pcons.toolchains.*` to match the generator's scope
+    (`_collect_tool_names` in `pcons/_gen_stubs.py` only imports core
+    toolchains). Contrib toolchains under `pcons.contrib.*` may also
+    register but are not in the Environment stub today; they get a
+    separate invariant when/if the generator picks them up.
+
+    Note: as of writing, `pcons.contrib.latex.toolchain.LatexToolchain`
+    has `TOOL_NAMES = ()` while installing `_tools = {"latex": ...}`.
+    That is the exact drift this test would catch if contrib were in
+    scope; it's filed for a separate follow-up.
+    """
     seen: set[type] = set()
     for entry in toolchain_registry._toolchains.values():
-        if entry.toolchain_class in seen:
+        cls = entry.toolchain_class
+        if cls in seen:
             continue
-        seen.add(entry.toolchain_class)
+        if not cls.__module__.startswith("pcons.toolchains."):
+            continue
+        seen.add(cls)
         yield entry
 
 
