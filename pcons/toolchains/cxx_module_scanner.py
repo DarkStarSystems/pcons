@@ -662,6 +662,7 @@ def write_dyndep_from_results(
       - implicit inputs are the IFC/PCM files this TU imports
     """
     lines = ["ninja_dyndep_version = 1", ""]
+    entries: list[tuple[str, list[str], list[str]]] = []
     for r in results:
         provides_pcms: list[str] = []
         if r.is_module_provider and r.logical_name in module_to_pcm:
@@ -672,9 +673,18 @@ def write_dyndep_from_results(
             if ln in module_to_pcm:
                 requires_pcms.append(module_to_pcm[ln])
 
+        entries.append(
+            (
+                r.spec.obj_rel,
+                sorted(set(provides_pcms)),
+                sorted(set(requires_pcms)),
+            )
+        )
+
+    for obj_rel, provides_pcms, requires_pcms in sorted(entries, key=lambda e: e[0]):
         implicit_out = " | " + " ".join(provides_pcms) if provides_pcms else ""
         implicit_in = " | " + " ".join(requires_pcms) if requires_pcms else ""
-        lines.append(f"build {r.spec.obj_rel}{implicit_out}: dyndep{implicit_in}")
+        lines.append(f"build {obj_rel}{implicit_out}: dyndep{implicit_in}")
         lines.append("")
 
     dyndep_text = "\n".join(lines)
@@ -800,11 +810,17 @@ def write_dyndep(
         if is_interface and not provides_pcms and mod_key in item:
             provides_pcms = [str(item[mod_key])]
 
-        entries.append((obj, provides_pcms, requires_pcms))
+        entries.append(
+            (
+                obj,
+                sorted(set(provides_pcms)),
+                sorted(set(requires_pcms)),
+            )
+        )
 
     # Write dyndep file
     lines = ["ninja_dyndep_version = 1", ""]
-    for obj, provides_pcms, requires_pcms in entries:
+    for obj, provides_pcms, requires_pcms in sorted(entries, key=lambda e: e[0]):
         # Implicit outputs: PCM files produced by this compilation
         if provides_pcms:
             implicit_out = " | " + " ".join(provides_pcms)
