@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **JSON metadata generator (`-G metadata`).** Writes `pcons_metadata.json` describing targets, deps, sources, outputs, and aliases for IDE plugins. See [vscode-pcons](https://github.com/Garcia6l20/vscode-pcons).
+- **IDE-friendly typed stubs for the dynamic builder / environment API.** `project.Programx(...)` is now flagged as a typo, `env.cc.flags` autocompletes, `target.public.include_dirs` carries a real type — all with zero runtime impact. Stubs are generated from the builder registry + each toolchain's new `TOOL_NAMES`; CI checks they stay fresh.
+
+### Fixed
+
+- **C++20 modules rebuilt unnecessarily after a no-op `generate`.** `cxx_module_scanner` now writes dyndep / module-map files only when content actually changes (sidecar sha256), so ninja doesn't cascade-rebuild downstream targets.
+- **C++20 modules: nondeterministic dyndep ordering** could shift between runs and trigger unexpected rebuilds. Entries and per-entry inputs/outputs are now sorted.
+- **Metadata generator**: UTF-8 encoding pinned on file write (Windows round-trip); custom path normalization replaced with the canonical `PathResolver.make_project_relative()`; non-`FileNode` alias entries are ignored.
+- **LaTeX toolchain**: `env.latex` now appears in IDE completion (`LatexToolchain` was missing `TOOL_NAMES`).
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20)
+- Gary Oberbrunner (@garyo)
+
 ## [0.17.0] - 2026-05-15
 
 ### Added
