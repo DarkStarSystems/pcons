@@ -337,3 +337,104 @@ class TestCollectTestSpecs:
         # The program target is also in proj.targets but not a Test.
         non_tests = [t for t in proj.targets if t.target_type != "test"]
         assert all(isinstance(t, Target) for t in non_tests)
+
+
+class TestProgramAsPath:
+    """Test() accepts a path/string program, not only a Target."""
+
+    def test_string_command_path(self, project):
+        proj, _env, _prog = project
+        # External binary referenced by name (e.g., a system tool).
+        t = proj.Test("ext.true", "/bin/true")
+        proj.resolve()
+        spec = t._builder_data["spec"]
+        # The spec's command starts with the path the user gave (perhaps
+        # normalized by the factory's _format_path, which on a path
+        # outside the build dir falls back to str(path)).
+        assert spec.command[0].endswith("true")
+
+    def test_pathlib_path_program(self, project, tmp_path):
+        proj, _env, _prog = project
+        external = tmp_path.parent / "elsewhere" / "tool"
+        t = proj.Test("ext.tool", external)
+        proj.resolve()
+        spec = t._builder_data["spec"]
+        # Outside-build-dir paths trip the ValueError in _format_path and
+        # fall back to the raw string form.
+        assert "tool" in spec.command[0]
+
+
+class TestProgramTargetWithNoOutputs:
+    """Resolve gracefully handles a program target that produced no outputs."""
+
+    def test_no_outputs_logs_and_skips(self, project, caplog):
+        proj, _env, _prog = project
+        # Hand-roll a target that has no output_nodes — exercises the
+        # factory's early-return path without depending on the resolver's
+        # ordering guarantees.
+        empty_prog = Target("never_built", target_type="program")
+        empty_prog.output_nodes = []
+        t = proj.Test("orphan", empty_prog)
+
+        import logging
+
+        from pcons.builders.test import TestNodeFactory
+
+        caplog.set_level(logging.WARNING, logger="pcons.builders.test")
+        TestNodeFactory(proj).resolve(t, None)
+
+        assert "no outputs" in caplog.text
+        # Factory returned early; no spec was finalized.
+        assert "spec" not in t._builder_data
+
+
+class TestSetTestPropertyEdgeCases:
+    """Coverage for the typed-mutation branches and hand-built target path."""
+
+    def test_set_labels_coerces_to_tuple(self, project):
+        proj, _env, prog = project
+        t = proj.Test("t", prog)
+        set_test_property(t, "labels", ["one", "two"])
+        proj.resolve()
+        assert t._builder_data["spec"].labels == ("one", "two")
+
+    def test_set_env_coerces_to_dict(self, project):
+        proj, _env, prog = project
+        t = proj.Test("t", prog)
+        set_test_property(t, "env", {"K": "V"})
+        proj.resolve()
+        assert t._builder_data["spec"].env == {"K": "V"}
+
+    def test_set_args_stringifies(self, project):
+        proj, _env, prog = project
+        t = proj.Test("t", prog)
+        set_test_property(t, "args", [1, "two"])  # ints get str()-ified
+        proj.resolve()
+        # Command is [program_path, *args]; args at indices 1..
+        assert t._builder_data["spec"].command[1:] == ["1", "two"]
+
+    def test_set_data_coerces_to_tuple(self, project, tmp_path):
+        proj, _env, prog = project
+        t = proj.Test("t", prog)
+        set_test_property(t, "data", [tmp_path / "a", tmp_path / "b"])
+        proj.resolve()
+        assert len(t._builder_data["spec"].data) == 2
+
+    def test_set_depends_on_stringifies_each(self, project):
+        proj, _env, prog = project
+        a = proj.Test("a", prog)
+        b = proj.Test("b", prog)
+        set_test_property(b, "depends_on", ["a"])
+        proj.resolve()
+        assert "a" in b._builder_data["spec"].depends_on
+        del a  # quiet linter
+
+    def test_handbuilt_target_without_partial_raises(self, project):
+        # A target that wasn't built by project.Test() has no spec_partial.
+        # set_test_property should refuse, with a clear message.
+        proj, _env, _prog = project
+        bogus = Target("not_a_real_test", target_type="test")
+        bogus._project = proj
+        bogus._builder_data = {}  # no spec_partial
+        with pytest.raises(RuntimeError, match="no partial spec"):
+            set_test_property(bogus, "timeout", 1.0)

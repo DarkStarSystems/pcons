@@ -611,6 +611,238 @@ class TestExpandDiscovered:
         assert parent_map == {}
 
 
+# ----- Manifest loading edge cases -----------------------------------------
+
+
+class TestManifestLoading:
+    def test_find_manifest_returns_none_when_absent(self, tmp_path):
+        # Walking up from an empty directory never finds tests.json.
+        sub = tmp_path / "deep" / "nest"
+        sub.mkdir(parents=True)
+        assert find_manifest(sub) is None
+
+    def test_load_rejects_non_object_root(self, tmp_path):
+        path = tmp_path / "tests.json"
+        path.write_text(json.dumps([{"name": "x"}]))  # array, not object
+        with pytest.raises(ValueError, match="root must be a JSON object"):
+            load_manifest(path)
+
+    def test_load_rejects_non_list_tests(self, tmp_path):
+        path = tmp_path / "tests.json"
+        path.write_text(json.dumps({"version": 1, "tests": "not a list"}))
+        with pytest.raises(ValueError, match="'tests' must be a list"):
+            load_manifest(path)
+
+
+# ----- Color helper --------------------------------------------------------
+
+
+class TestColor:
+    def test_color_disabled_passthrough(self):
+        from pcons.test_runner import _color
+
+        assert _color("hello", "red", enabled=False) == "hello"
+
+    def test_color_enabled_wraps(self):
+        from pcons.test_runner import _color
+
+        out = _color("hello", "red", enabled=True)
+        assert "hello" in out
+        assert out != "hello"  # ANSI escapes were added
+
+
+# ----- Scheduling: stop-on-fail and serial ---------------------------------
+
+
+class TestStopOnFail:
+    def test_remaining_tests_skipped_after_failure(self, tmp_path):
+        good = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        bad = _make_exit_script(tmp_path, "bad.py", "import sys; sys.exit(1)")
+        # Three tests; the first fails, then stop-on-fail should mark the
+        # rest as skipped without running them.
+        tests = [
+            {"name": "a", "command": [str(bad)], "labels": []},
+            {"name": "b", "command": [str(good)], "labels": []},
+            {"name": "c", "command": [str(good)], "labels": []},
+        ]
+        results = run_all(
+            tests,
+            tmp_path,
+            jobs=1,  # serial pass guarantees order
+            stop_on_fail=True,
+            on_start=lambda _t: None,
+            on_finish=lambda _t, _r: None,
+        )
+        by_name = {r.name: r for r in results}
+        assert by_name["a"].status == FAIL
+        # Both subsequent tests should be skipped with the stop message.
+        assert by_name["b"].status == SKIP
+        assert by_name["c"].status == SKIP
+        assert "stopped on prior failure" in by_name["b"].message
+
+
+class TestSerialExclusivity:
+    def test_serial_tests_run_alone(self, tmp_path):
+        # A serial test should be the only thing running while it's active;
+        # other tests wait. We can't observe ordering deterministically with
+        # threads, but we can assert all tests complete and the serial one
+        # is among them. The branch coverage is what matters here.
+        ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        tests = [
+            {"name": "p1", "command": [str(ok)], "labels": []},
+            {"name": "s1", "command": [str(ok)], "labels": [], "serial": True},
+            {"name": "p2", "command": [str(ok)], "labels": []},
+        ]
+        results = run_all(
+            tests,
+            tmp_path,
+            jobs=4,
+            stop_on_fail=False,
+            on_start=lambda _t: None,
+            on_finish=lambda _t, _r: None,
+        )
+        assert {r.name for r in results} == {"p1", "s1", "p2"}
+        assert all(r.status == PASS for r in results)
+
+
+# ----- Discovery warnings (non-fatal paths) -------------------------------
+
+
+class TestDiscoveryEdgeCases:
+    def test_unknown_protocol_warns_and_keeps_as_single(self, tmp_path, capsys):
+        tests = [
+            {
+                "name": "weird",
+                "command": ["/bin/true"],
+                "discover": "unknown_protocol",
+                "labels": [],
+            }
+        ]
+        expanded, parent_map = expand_discovered_tests(tests, tmp_path)
+        err = capsys.readouterr().err
+        assert "unknown discover protocol" in err
+        # The fallback keeps the test as a single entry (warning was logged).
+        assert len(expanded) == 1
+        assert expanded[0]["name"] == "weird"
+        assert parent_map == {}
+
+    def test_no_cases_discovered_warns_and_drops(self, tmp_path, capsys, monkeypatch):
+        # Stub the discoverer to return an empty list.
+        from pcons import test_runner as tr
+
+        monkeypatch.setitem(tr._DISCOVERERS, "doctest", lambda *_: [])
+        # Build a real (no-op) binary so _resolve_program_for_discovery
+        # doesn't fail before the empty-list check.
+        binary = _make_exit_script(
+            tmp_path, "empty_runner.py", "import sys; sys.exit(0)"
+        )
+        tests = [
+            {
+                "name": "empty",
+                "command": [str(binary)],
+                "discover": "doctest",
+                "labels": [],
+            }
+        ]
+        expanded, parent_map = expand_discovered_tests(tests, tmp_path)
+        err = capsys.readouterr().err
+        assert "no cases discovered" in err
+        # The empty parent is dropped entirely.
+        assert expanded == []
+        assert parent_map == {}
+
+
+# ----- JUnit output for error/skipped statuses -----------------------------
+
+
+class TestJUnitErrorAndSkipped:
+    def test_skipped_and_error_emit_elements(self, tmp_path):
+        results = [
+            TestResult(name="ok", status=PASS, duration=0.01, labels=()),
+            TestResult(
+                name="skipme",
+                status=SKIP,
+                message="disabled in manifest",
+                labels=(),
+            ),
+            TestResult(
+                name="boom",
+                status=ERROR,
+                message="exec failed",
+                labels=(),
+            ),
+        ]
+        path = tmp_path / "junit.xml"
+        write_junit(path, "cov_demo", results)
+        root = ET.fromstring(path.read_text())
+        # One <testsuite> with three <testcase> children
+        cases = list(root.iter("testcase"))
+        assert {c.get("name") for c in cases} == {"ok", "skipme", "boom"}
+        # The skipped case has a <skipped> child
+        skip_case = next(c for c in cases if c.get("name") == "skipme")
+        assert skip_case.find("skipped") is not None
+        # The error case has an <error> child with type=error
+        err_case = next(c for c in cases if c.get("name") == "boom")
+        error_el = err_case.find("error")
+        assert error_el is not None
+        assert error_el.get("type") == ERROR
+
+
+# ----- CLI edge paths ------------------------------------------------------
+
+
+class TestCLIEdges:
+    def test_no_tests_matched_message(self, tmp_path, capsys):
+        manifest = _make_manifest(
+            tmp_path,
+            [{"name": "math.add", "command": ["/bin/true"], "labels": ["unit"]}],
+        )
+        rc = main(
+            [
+                "--manifest",
+                str(manifest),
+                "-L",
+                "no-such-label",
+                "--no-color",
+            ]
+        )
+        # Empty selection is a clean exit (nothing failed).
+        assert rc == 0
+        out = capsys.readouterr().out
+        assert "no tests matched" in out
+
+    def test_invalid_json_manifest(self, tmp_path, capsys):
+        manifest = tmp_path / "tests.json"
+        manifest.write_text("{not valid json")
+        rc = main(["--manifest", str(manifest), "--no-color"])
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "failed to read" in err.lower() or "manifest" in err.lower()
+
+    def test_cycle_rejected_with_clear_error(self, tmp_path, capsys):
+        manifest = _make_manifest(
+            tmp_path,
+            [
+                {
+                    "name": "a",
+                    "command": ["/bin/true"],
+                    "labels": [],
+                    "depends_on": ["b"],
+                },
+                {
+                    "name": "b",
+                    "command": ["/bin/true"],
+                    "labels": [],
+                    "depends_on": ["a"],
+                },
+            ],
+        )
+        rc = main(["--manifest", str(manifest), "--no-color"])
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "cycle" in err.lower() or "depends_on" in err.lower()
+
+
 # Skip the executable-script-based tests on Windows: the
 # shebang-execution approach doesn't apply. The CI matrix runs the same
 # tests under WSL/cygwin paths separately if needed.
