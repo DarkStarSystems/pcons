@@ -176,6 +176,22 @@ class TestWriteDyndep:
 
         assert first_mtime == second_mtime
 
+    def test_deterministic_output_with_result_reordering(self, tmp_path: Path) -> None:
+        base_results = [
+            _result("Calc.o", provides_name="Calc", requires=["Calc:Constants"]),
+            _result("Constants.o", provides_name="Calc:Constants"),
+            _result("main.o", requires=["Calc"]),
+        ]
+        module_map = build_module_map(base_results, "mods", ".pcm")
+
+        out_a = tmp_path / "a.dyndep"
+        out_b = tmp_path / "b.dyndep"
+
+        write_dyndep_from_results(base_results, module_map, out_a)
+        write_dyndep_from_results(list(reversed(base_results)), module_map, out_b)
+
+        assert out_a.read_text(encoding="utf-8") == out_b.read_text(encoding="utf-8")
+
 
 class _FakeCxxNamespace:
     """Stand-in for env.cxx with just the `modules` attribute the helper reads."""
