@@ -108,9 +108,26 @@ class TestWriteOrCheck:
         assert "class _EnvironmentStubs" in out
 
     def test_write_mode_no_op_when_fresh(
-        self, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
-        # Committed stubs are fresh, so write should be a no-op for each.
+        # Self-contained: redirect into a tmp_path, populate by running write
+        # once, then call write again and expect no-ops. Comparing against the
+        # committed stubs would couple this test to whether any earlier test
+        # in the suite happened to add a builder to the registry — that drift
+        # is exactly what `test_builder_stubs_are_fresh` is for.
+        (tmp_path / "core").mkdir()
+        monkeypatch.setattr(
+            _gen_stubs,
+            "_stub_file_path",
+            lambda relpath: tmp_path / relpath,
+        )
+
+        _gen_stubs.write_or_check("write")
+        capsys.readouterr()  # drain the populating run
+
         rc = _gen_stubs.write_or_check("write")
         assert rc == 0
         out = capsys.readouterr().out
@@ -253,14 +270,18 @@ class TestUtf8RoundTrip:
 
 
 def test_module_can_be_invoked_with_python_dash_m() -> None:
-    # Exercise `python -m pcons._gen_stubs --check` end-to-end. This covers
-    # the `if __name__ == "__main__":` guard and confirms argv plumbing.
+    # Exercise the `__main__` guard and argv plumbing end-to-end. We use
+    # `--print` rather than `--check` because the latter would fail any
+    # time the committed stubs differ from what the generator produces in
+    # a fresh subprocess — that drift is the job of
+    # `test_builder_stubs_are_fresh`, not this smoke test.
     import subprocess
 
     result = subprocess.run(
-        [sys.executable, "-m", "pcons._gen_stubs", "--check"],
+        [sys.executable, "-m", "pcons._gen_stubs", "--print"],
         cwd=Path(_gen_stubs.__file__).resolve().parents[1],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert "class _ProjectBuilders" in result.stdout
