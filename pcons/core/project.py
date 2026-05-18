@@ -13,7 +13,7 @@ import os
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.environment import Environment as Env
@@ -214,7 +214,7 @@ class Project(_ProjectBuilders):
         return self.root_dir
 
     @contextmanager
-    def _enter_subdir(self, subdir: str) -> Generator[None, None, None]:
+    def _enter_subdir(self, subdir: str | Path) -> Generator[None, None, None]:
         """Context manager for entering a subdirectory in the project."""
         old_subdir = self._subdir
         self._subdir = subdir if old_subdir is None else f"{old_subdir}/{subdir}"
@@ -346,30 +346,49 @@ class Project(_ProjectBuilders):
             )
         self._targets[target.name] = target
 
-    def get_target(self, name: str) -> Target | None:
+    @overload
+    def get_target(
+        self, name: str, raise_if_missing: Literal[True] = ...
+    ) -> Target: ...
+
+    @overload
+    def get_target(
+        self, name: str, raise_if_missing: Literal[False]
+    ) -> Target | None: ...
+
+    def get_target(self, name: str, raise_if_missing: bool = True) -> Target | None:
         """Get a target by name.
 
         Args:
             name: Target name.
+            raise_if_missing: Whether to raise an exception if the target is not found.
 
         Returns:
-            The target, or None if not found.
+            The target, or None if not found and raise_if_missing is False.
+
+        Raises:
+            KeyError: If the target is not found and raise_if_missing is True.
         """
         if (target := self._targets.get(name)) is not None:
             return target
         for child in self._children:
-            if (target := child.get_target(name)) is not None:
+            if (target := child.get_target(name, raise_if_missing=False)) is not None:
                 return target
+        if raise_if_missing:
+            raise KeyError(f"Target '{name}' not found")
         return None
 
-    def get_targets(self, *names: str) -> list[Target | None]:
+    def get_targets(self, *names: str) -> list[Target]:
         """Get multiple targets by name.
 
         Args:
             *names: Target names.
 
         Returns:
-            List of targets, or None for names not found.
+            List of targets.
+
+        Raises:
+            KeyError: If any target is not found.
         """
         return [self.get_target(name) for name in names]
 
