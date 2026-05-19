@@ -39,6 +39,9 @@ if sys.platform != "win32":
 # -----------------------------------------------------------------------------
 libphysics = project.SharedLibrary("physics", env)
 libphysics.add_sources(["src/physics.c"])
+if sys.platform == "win32":
+    # export symbols on Windows
+    libphysics.private.defines.append("PHYSICS_BUILDING_DLL")
 libphysics.link(libmath)  # Gets libmath's public includes transitively
 
 # -----------------------------------------------------------------------------
