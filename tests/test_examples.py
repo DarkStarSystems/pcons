@@ -395,6 +395,10 @@ def adapt_outputs_for_generator(
     Returns:
         List of adapted output paths.
     """
+    # On macOS shared libraries use .dylib regardless of generator
+    if platform.system().lower() == "darwin":
+        outputs = [o[:-3] + ".dylib" if o.endswith(".so") else o for o in outputs]
+
     if generator == "ninja":
         return outputs
 

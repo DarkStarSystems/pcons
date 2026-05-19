@@ -206,6 +206,35 @@ class TestXcodeGeneratorDependencies:
         # Should have dependency objects
         assert "PBXTargetDependency" in content
 
+    def test_library_dep_added_to_link_phase(self, tmp_path):
+        """Test that a library dependency's product is in the frameworks link phase."""
+        project = Project("myapp", build_dir=tmp_path)
+
+        lib = Target("mylib", target_type="static_library")
+        project.add_target(lib)
+
+        app = Target("myapp", target_type="program")
+        app.link(lib)
+        project.add_target(app)
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+
+        content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
+        # A PBXBuildFile referencing the library product must exist
+        assert "PBXBuildFile" in content
+        # The PBXFrameworksBuildPhase for app must reference that PBXBuildFile
+        # (i.e. its "files" list must be non-empty)
+        import re
+
+        frameworks_sections = re.findall(
+            r"PBXFrameworksBuildPhase.*?};", content, re.DOTALL
+        )
+        assert any(
+            "files" in s and re.search(r"files\s*=\s*\(.*\S", s, re.DOTALL)
+            for s in frameworks_sections
+        ), "PBXFrameworksBuildPhase for app has no files (library not linked)"
+
 
 class TestXcodeGeneratorBuildPhases:
     """Tests for build phases."""
