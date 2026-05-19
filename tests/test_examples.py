@@ -50,12 +50,12 @@ def _find_ninja() -> list[str] | None:
 GENERATORS = ["ninja", "make", "xcode"]
 
 
-def adapt_path_for_windows(path: str) -> str:
+def adapt_path_for_windows(path: str, gcc_toolchain: bool = False) -> str:
     """Adapt a Unix-style path for Windows.
 
     Converts:
         ./build/program -> build\\program.exe
-        build/file.o -> build\\file.obj
+        build/file.o -> build\\file.obj (not with gcc_toolchain==True, as GCC on Windows still uses .o)
         build/libfoo.a -> build\\foo.lib
         build/libfoo.so -> build\\foo.dll
         build/program (no extension) -> build\\program.exe
@@ -68,7 +68,7 @@ def adapt_path_for_windows(path: str) -> str:
         path = path[2:]
 
     # Convert extensions
-    if path.endswith(".o"):
+    if path.endswith(".o") and not gcc_toolchain:
         path = path[:-2] + ".obj"
     elif path.endswith(".a"):
         # Convert libfoo.a to foo.lib
@@ -480,6 +480,7 @@ def get_platform_value(
     key: str,
     default: Any = None,
     adapt_for_windows: bool = False,
+    gcc_toolchain: bool = False,
 ) -> Any:
     """Get a platform-specific value from config.
 
@@ -495,7 +496,7 @@ def get_platform_value(
         default: Default value if key not found
         adapt_for_windows: If True and on Windows without a platform-specific
             override, automatically adapt Unix paths/commands
-
+        gcc_toolchain: If True and using GCC toolchain, apply GCC-specific adaptations
     Returns the platform-specific value if available, otherwise the base value.
     """
     current_platform = platform.system().lower()
@@ -511,9 +512,12 @@ def get_platform_value(
     # Optionally adapt for Windows when no override exists
     if adapt_for_windows and IS_WINDOWS and value is not None:
         if isinstance(value, list):
-            return [adapt_path_for_windows(str(v)) for v in value]
+            return [
+                adapt_path_for_windows(str(v), gcc_toolchain=gcc_toolchain)
+                for v in value
+            ]
         elif isinstance(value, str):
-            return adapt_path_for_windows(value)
+            return adapt_path_for_windows(value, gcc_toolchain=gcc_toolchain)
 
     return value
 
@@ -786,7 +790,11 @@ def run_example(
 
     # Check expected outputs exist (auto-adapts for Windows if no override)
     expected_outputs = get_platform_value(
-        test_config, "expected_outputs", [], adapt_for_windows=True
+        test_config,
+        "expected_outputs",
+        [],
+        adapt_for_windows=True,
+        gcc_toolchain=toolchain == "gcc",
     )
     # Adapt expected outputs for the generator being used
     # For xcode, get project name from any generated .xcodeproj
