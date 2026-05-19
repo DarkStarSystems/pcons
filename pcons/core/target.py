@@ -269,7 +269,6 @@ class Target:
         self._collected_requirements: UsageRequirements | None = None
         self.target_type: str | None = target_type
         self._env: Environment | None = None
-        self.__project: Project | None = None  # Set by Project when target is created
         self.intermediate_nodes: list[FileNode] = []
         self.output_nodes: list[FileNode] = []
         self._resolved: bool = False
@@ -300,49 +299,18 @@ class Target:
         from pcons.core.project import Project
 
         project = Project.current()
-        if project is not None:
-            self.__project = project
-            self._subdir = project._subdir
 
-            if self._env is None:
-                # default to the last environment in the project, if available
-                self._env = project.environments[-1] if project.environments else None
-        else:
-            self.__project = None
-            self._subdir = None
-            self._env = None
+        self.__project = project
+        self._subdir = project._subdir
+
+        if self._env is None:
+            # default to the last environment in the project, if available
+            self._env = project.environments[-1] if project.environments else None
 
     @property
     def project(self) -> Project:
         """Get the project this target belongs to."""
-        if self.__project is None:
-            raise RuntimeError(
-                f"Target '{self.name}' is not associated with any project. "
-                f"Ensure it was created via a Project method like "
-                f"project.Program() or project.Library()."
-            )
         return self.__project
-
-    # @project.setter
-    # def project(self, project: Project | None) -> None:
-    #     if project is None:
-    #         from pcons.core.project import Project
-
-    #         if Project.current() is not None:
-    #             project = Project.current()
-    #         else:
-    #             return  # skip, some target may not belong to a project (e.g., Command)
-
-    #     if self.__project is not None:
-    #         raise RuntimeError(
-    #             f"Target '{self.name}' is already associated with a project. "
-    #         )
-    #     self.__project = project
-    #     self._subdir = project._subdir
-
-    #     if self._env is None:
-    #         # default to the last environment in the project, if available
-    #         self._env = project.environments[-1] if project.environments else None
 
     @property
     def sources(self) -> list[Node]:
@@ -632,17 +600,12 @@ class Target:
 
     def _to_node(self, source: Node | Path | str) -> Node:
         """Convert a source specification to a Node."""
-        from pcons.core.node import FileNode
         from pcons.core.node import Node as NodeClass
 
         if isinstance(source, NodeClass):
             return source
         path = Path(source)
-        # Use project's node() if available for deduplication
-        if self.project is not None:
-            node: Node = self.project.node(path)
-            return node
-        return FileNode(path)
+        return self.project.node(path)
 
     def set_option(self, key: str, value: Any) -> Target:
         """Set a builder/toolchain option on this target (fluent API).
