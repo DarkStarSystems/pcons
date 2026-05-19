@@ -43,6 +43,27 @@ class TestProjectCreation:
         assert project2 in project1._children
         assert project2._parent is project1
 
+    def test_root_dir_must_be_absolute(self):
+        with pytest.raises(ValueError):
+            Project("myproject", root_dir="relative/path")
+
+    def test_retrieving_current_project_while_none_is_active_raises_a_value_error(self):
+        with pytest.raises(ValueError):
+            Project.current()
+
+    def test_retrieving_top_level_project_while_none_is_active_raises_a_value_error(
+        self,
+    ):
+        with pytest.raises(ValueError):
+            Project.top_level()
+
+    def test_retrieving_parent_project_while_no_parent_available_raises_a_value_error(
+        self,
+    ):
+        project = Project("testproject")
+        with pytest.raises(ValueError):
+            _ = project.parent
+
 
 class TestProjectEnvironments:
     def test_create_environment(self):
@@ -66,6 +87,18 @@ class TestProjectEnvironments:
 
         assert len(project.environments) == 2
         assert env1 is not env2
+
+    def test_default_environment(self):
+        project = Project("myproject")
+        env1 = project.Environment()
+        project.Environment()
+
+        assert project.default_environment is env1
+
+    def test_missing_default_environment(self):
+        project = Project("myproject")
+        with pytest.raises(ValueError):
+            _ = project.default_environment
 
 
 class TestProjectNodes:
@@ -123,6 +156,32 @@ class TestProjectTargets:
 
         with pytest.raises(KeyError):
             project.get_target("missing", raise_if_missing=True)
+
+    def test_target_lookup(self):
+        root = Project("root")
+        with root._enter_subdir("child1"):
+            child1 = Project("child1")
+            mylib1 = Target("mylib1")
+            child1.add_target(mylib1)
+        with root._enter_subdir("child2"):
+            child2 = Project("child2")
+            mylib2 = Target("mylib2")
+            child2.add_target(mylib2)
+
+        # may we support parent lookup ??? not currently implemented
+        assert child1.get_target("mylib2", raise_if_missing=False) is None
+        assert child2.get_target("mylib1", raise_if_missing=False) is None
+
+        assert child1.get_target("mylib1") is mylib1
+        assert child2.get_target("mylib2") is mylib2
+        assert root.get_target("mylib1") is mylib1
+        assert root.get_target("mylib2") is mylib2
+
+        with pytest.raises(KeyError):
+            child1.get_target("mylib2", raise_if_missing=True)
+
+        with pytest.raises(KeyError):
+            child2.get_target("mylib1", raise_if_missing=True)
 
 
 class TestProjectAliases:

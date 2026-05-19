@@ -22,9 +22,9 @@ class Context:
         """Get a target by name from the current project."""
         return self.current_project.get_target(name)
 
-    def get_targets(self):
+    def get_targets(self, *names: str):
         """Get all targets from the current project."""
-        return self.current_project.get_targets()
+        return self.current_project.get_targets(*names)
 
 
 context = Context()

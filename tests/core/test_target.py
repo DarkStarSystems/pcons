@@ -3,6 +3,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import ImportedTarget, Target, UsageRequirements
@@ -199,6 +201,11 @@ class TestTarget:
 
         targets = {t1, t2}
         assert len(targets) == 1  # Same name = same target
+
+    def test_target_without_project(self):
+        """Test that Target can be created without an active project."""
+        with pytest.raises(ValueError):
+            Target("orphan")
 
 
 class TestImportedTarget:
@@ -533,3 +540,15 @@ class TestTargetDepends:
         dep = target._extra_implicit_deps[0]
         # project.node() canonicalizes the path
         assert dep is project.node("tools/codegen.py")
+
+
+class TestTargetSubdir:
+    def test_directories(self):
+        root = Path.cwd().resolve()
+        project = Project("test_project", root_dir=root, build_dir="/build")
+        with project._enter_subdir("lib"):
+            target = Target("mylib")
+
+        assert target.source_dir == (root / "lib")
+        print(target.build_dir)
+        assert target.build_dir.as_posix() == Path("/build/lib").as_posix()
