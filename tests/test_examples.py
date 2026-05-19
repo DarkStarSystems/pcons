@@ -57,6 +57,7 @@ def adapt_path_for_windows(path: str) -> str:
         ./build/program -> build\\program.exe
         build/file.o -> build\\file.obj
         build/libfoo.a -> build\\foo.lib
+        build/libfoo.so -> build\\foo.dll
         build/program (no extension) -> build\\program.exe
     """
     # Convert forward slashes to backslashes
@@ -76,6 +77,13 @@ def adapt_path_for_windows(path: str) -> str:
         path = re.sub(r"\\lib([^\\]+)\.a$", r"\\\1.lib", path)
         if path.endswith(".a"):  # Didn't match lib prefix
             path = path[:-2] + ".lib"
+    elif path.endswith(".so"):
+        # Convert libfoo.so to foo.dll
+        import re
+
+        path = re.sub(r"\\lib([^\\]+)\.so$", r"\\\1.dll", path)
+        if path.endswith(".so"):  # Didn't match lib prefix
+            path = path[:-3] + ".dll"
 
     # Add .exe to executables (paths in build/ without extension)
     # Check if it's a build output without an extension
