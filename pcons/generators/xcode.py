@@ -92,6 +92,10 @@ class XcodeGenerator(BaseGenerator):
         self._products_group_id: str = ""
         self._sources_group_id: str = ""
         self._topdir: str = ".."  # Relative path from output_dir to project root
+        self._frameworks_phase_ids: dict[
+            str, str
+        ] = {}  # target name -> frameworks phase id
+        self._product_ref_ids: dict[str, str] = {}  # target name -> product file ref id
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate .xcodeproj bundle.
@@ -108,6 +112,8 @@ class XcodeGenerator(BaseGenerator):
         self._pcons_project = project
         self._target_ids = {}
         self._objects = {}
+        self._frameworks_phase_ids = {}
+        self._product_ref_ids = {}
 
         # Compute relative path from output_dir to project root
         # This is used for source file paths in the Xcode project
@@ -172,12 +178,34 @@ class XcodeGenerator(BaseGenerator):
         objects: dict[str, dict[str, Any]] = {}
         target_ids: list[str] = []
 
-        # Create targets first
+        # First pass: create all target objects (populates _product_ref_ids, _frameworks_phase_ids)
         for target in project.targets:
             target_id = self._create_target_objects(target, objects)
             if target_id:
                 target_ids.append(target_id)
                 self._target_ids[target.name] = target_id
+
+        # Second pass: add library deps to the frameworks link phase.
+        # Must be done here, directly on the plain-dict `objects`, BEFORE XcodeProject
+        # is created from the tree — mutations to PBXGenericObject after construction
+        # do not reliably persist in the serialized output.
+        for target in project.targets:
+            frameworks_phase_id = self._frameworks_phase_ids.get(target.name)
+            if not frameworks_phase_id:
+                continue
+            for dep in target.dependencies:
+                dep_type = str(dep.target_type) if dep.target_type else None
+                if dep_type not in ("static_library", "shared_library"):
+                    continue
+                dep_product_ref = self._product_ref_ids.get(dep.name)
+                if not dep_product_ref:
+                    continue
+                build_file_id = _generate_id()
+                objects[build_file_id] = {
+                    "isa": "PBXBuildFile",
+                    "fileRef": dep_product_ref,
+                }
+                objects[frameworks_phase_id]["files"].append(build_file_id)
 
         # Project-level build configurations
         # SYMROOT = "." ensures build products go directly in build dir,
@@ -387,6 +415,10 @@ class XcodeGenerator(BaseGenerator):
             "productReference": product_ref_id,
             "productType": product_type,
         }
+
+        # Store phase and product IDs for later linking setup
+        self._frameworks_phase_ids[target.name] = frameworks_phase_id
+        self._product_ref_ids[target.name] = product_ref_id
 
         return target_id
 
