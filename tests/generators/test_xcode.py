@@ -153,6 +153,32 @@ class TestXcodeGeneratorBuildSettings:
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
         assert "OTHER_CFLAGS" in content
 
+    def test_subdir_include_dirs_resolved(self, tmp_path):
+        """Regression: include dirs from subdirectory targets must be resolved
+        relative to the target's _subdir, not the project root.
+
+        Previously, ``libfoo.public.include_dirs.append("include")`` (set from
+        inside ``libfoo/``) was resolved as ``<project_root>/include`` instead
+        of ``<project_root>/libfoo/include``, causing Xcode builds to fail with
+        'file not found' errors.
+        """
+        project = Project("myapp", build_dir=tmp_path / "build")
+        # Simulate a target that lives in a subdirectory
+        target = Target("foo", target_type="static_library")
+        target._subdir = "libfoo"
+        target.public.include_dirs.append("include")  # relative to libfoo/
+        project.add_target(target)
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+
+        content = (
+            tmp_path / "build" / "myapp.xcodeproj" / "project.pbxproj"
+        ).read_text()
+        # The search path must include libfoo/include, not just include
+        assert "libfoo" in content
+        assert "HEADER_SEARCH_PATHS" in content
+
 
 class TestXcodeGeneratorDependencies:
     """Tests for target dependencies."""

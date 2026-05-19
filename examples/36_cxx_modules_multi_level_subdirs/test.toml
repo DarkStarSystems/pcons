@@ -13,6 +13,10 @@ expected_outputs = [
     "build/app/app",
 ]
 
+[toolchains]
+linux = ["gcc", "llvm"]
+darwin = ["llvm"]
+windows = ["msvc"]
 
 [verify]
 commands = [

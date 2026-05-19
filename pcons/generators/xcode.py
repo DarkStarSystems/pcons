@@ -811,8 +811,9 @@ class XcodeGenerator(BaseGenerator):
             target.private.include_dirs
         )
 
+        path_resolver = target.path_resolver
         for inc_dir_raw in include_dirs:
-            inc_dir = Path(inc_dir_raw)
+            inc_dir = path_resolver.normalize_source_path(inc_dir_raw)
             if inc_dir.is_dir():
                 for ext in [".h", ".hpp", ".hxx", ".H", ".hh"]:
                     headers.extend(inc_dir.rglob(f"*{ext}"))
@@ -833,12 +834,36 @@ class XcodeGenerator(BaseGenerator):
 
         env = target._env
 
-        # Collect include directories (coerce to Path so strings work)
+        # Collect include directories with proper subdir resolution and
+        # transitive dependency propagation. Raw include_dirs from subdirectory
+        # targets (e.g. "include" set inside libfoo/) must be resolved relative
+        # to the target's _subdir, not the project root.
         include_dirs: list[str] = []
-        for inc_dir in target.public.include_dirs:
-            include_dirs.append(str(self._make_relative_path(Path(inc_dir))))
-        for inc_dir in target.private.include_dirs:
-            include_dirs.append(str(self._make_relative_path(Path(inc_dir))))
+        if env is not None:
+            from pcons.tools.requirements import compute_effective_requirements
+
+            eff = compute_effective_requirements(target, env)
+            for inc_path in eff.includes:
+                include_dirs.append(str(self._make_relative_path(inc_path)))
+        else:
+            # Fallback: apply _subdir resolution manually
+            path_resolver = target.path_resolver
+            for inc_dir in target.public.include_dirs:
+                include_dirs.append(
+                    str(
+                        self._make_relative_path(
+                            path_resolver.normalize_source_path(inc_dir)
+                        )
+                    )
+                )
+            for inc_dir in target.private.include_dirs:
+                include_dirs.append(
+                    str(
+                        self._make_relative_path(
+                            path_resolver.normalize_source_path(inc_dir)
+                        )
+                    )
+                )
 
         if include_dirs:
             self._xcode_project.set_flags(
