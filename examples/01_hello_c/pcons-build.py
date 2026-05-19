@@ -8,10 +8,14 @@ This example demonstrates:
 - Automatic resolution and generation
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project, find_c_toolchain, get_var
 
 project = Project("hello_c")
-env = project.Environment(toolchain=find_c_toolchain())
+if (preferred_toolchain := get_var("TOOLCHAIN")) is not None:
+    preferred_toolchain = [preferred_toolchain]
+else:
+    preferred_toolchain = None
+env = project.Environment(toolchain=find_c_toolchain(prefer=preferred_toolchain))
 
 project.Program("hello", env, sources=["src/hello.c"])
 

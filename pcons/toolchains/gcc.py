@@ -503,13 +503,25 @@ def _build_scan_node(
         if not rel_src.startswith("../") and not rel_src.startswith("./"):
             rel_src = f"$topdir/{rel_src}"
 
-    # Build scan command
-    scan_cmd = (
-        # generate the depfile
-        f"{compiler_cmd} -MM -MT {scan_rel} -MF {depfile_rel} "
-        + " ".join(normalized_flags)
-        + f" {rel_src} && touch {scan_rel}"
-    )
+    # Build scan command — two steps: generate depfile, then create stamp file.
+    # On Windows, Ninja spawns processes via CreateProcess without a shell, so
+    # && and touch are not available.  Wrap with cmd /c and use "type nul >"
+    # as the cross-platform stamp-creation equivalent.
+    platform_info = get_platform()
+    flags_str = " ".join(normalized_flags)
+    if platform_info.is_windows:
+        # Back-slash the stamp path for cmd.exe
+        scan_rel_win = scan_rel.replace("/", "\\")
+        scan_cmd = (
+            f'cmd /c "{compiler_cmd} -MM -MT {scan_rel} -MF {depfile_rel}'
+            f" {flags_str} {rel_src}"
+            f' && type nul > {scan_rel_win}"'
+        )
+    else:
+        scan_cmd = (
+            f"{compiler_cmd} -MM -MT {scan_rel} -MF {depfile_rel}"
+            f" {flags_str} {rel_src} && touch {scan_rel}"
+        )
 
     from pcons.core.node import BuildInfo
 
