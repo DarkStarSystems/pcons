@@ -126,5 +126,9 @@ class TestMetadataGenerator:
         assert ts["disabled"] is False
         assert ts["serial"] is False
         assert ts["depends_on"] == []
+        # `data` and `defined_at` are part of the full TestSpec dump so
+        # IDEs (e.g., CodeLens) have the source location for the test.
+        assert ts["data"] == []
+        assert ts["defined_at"] != ""
         # Non-test targets have no `test` key
         assert "test" not in by_name["test_bin"]

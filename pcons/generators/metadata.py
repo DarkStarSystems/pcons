@@ -104,22 +104,13 @@ class MetadataGenerator(BaseGenerator):
         # For Test() targets, embed the resolved TestSpec so IDE
         # integrations (e.g., the VSCode TestExplorer) have everything
         # they need to discover, group, and run tests from this one
-        # metadata file — no need to also parse tests.json.
+        # metadata file — no need to also parse tests.json. The outer
+        # entry's `defined_at` already gives CodeLens-style {file, line};
+        # the embedded spec includes its own stringified defined_at for
+        # diagnostic completeness.
         spec = target._builder_data.get("spec") if target._builder_data else None
         if isinstance(spec, TestSpec):
-            entry["test"] = {
-                "name": spec.name,
-                "command": list(spec.command),
-                "cwd": spec.cwd.as_posix() if spec.cwd is not None else None,
-                "env": dict(spec.env),
-                "labels": list(spec.labels),
-                "timeout": spec.timeout,
-                "should_fail": spec.should_fail,
-                "serial": spec.serial,
-                "disabled": spec.disabled,
-                "depends_on": list(spec.depends_on),
-                "discover": spec.discover,
-            }
+            entry["test"] = spec.to_jsonable()
 
         return entry
 
