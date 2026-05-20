@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 
 from pcons.core.environment import Environment
-from pcons.core.project import Project
 from pcons.toolchains.presets import (
     CrossPreset,
     android,

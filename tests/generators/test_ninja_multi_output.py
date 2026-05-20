@@ -79,7 +79,6 @@ class TestNinjaMultiOutput:
 
         target.output_nodes.extend([dll_node, lib_node, exp_node])
         target.add_source(source_node)
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -135,7 +134,6 @@ class TestNinjaMultiOutput:
         )
 
         target.output_nodes.append(dll_node)
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -191,7 +189,6 @@ class TestNinjaMultiOutput:
         lib_node.builder = dll_node.builder
 
         target.output_nodes.extend([dll_node, lib_node])
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -239,7 +236,6 @@ class TestNinjaSingleOutput:
         )
 
         target.output_nodes.append(exe_node)
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)

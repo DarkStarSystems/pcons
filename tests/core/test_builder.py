@@ -6,7 +6,6 @@ from pathlib import Path
 from pcons.core.builder import BaseBuilder, Builder, CommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode, Node
-from pcons.core.project import Project
 
 
 class TestBuilderProtocol:

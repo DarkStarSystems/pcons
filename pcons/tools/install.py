@@ -465,7 +465,6 @@ class InstallBuilder:
         install_target._builder_data = {"dest_dir": str(dest_dir)}
         install_target._pending_sources = list(sources)
 
-        project.add_target(install_target)
         return install_target
 
 
@@ -524,7 +523,6 @@ class InstallAsBuilder:
         install_target._builder_data = {"dest": str(dest)}
         install_target._pending_sources = [source]
 
-        project.add_target(install_target)
         return install_target
 
 
@@ -572,5 +570,4 @@ class InstallDirBuilder:
         install_target._builder_data = {"dest_dir": str(dest_dir)}
         install_target._pending_sources = [source]
 
-        project.add_target(install_target)
         return install_target

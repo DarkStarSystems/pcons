@@ -11,7 +11,7 @@ from pcons import context
 project = context.current_project
 env = project.default_environment
 
-libfoo = project.get_target("foo")
+libfoo = project.get_target("libfoo::foo")
 assert libfoo is not None, (
     "libfoo target not found - ensure libfoo's pcons-build.py is run first"
 )

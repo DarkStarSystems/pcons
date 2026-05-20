@@ -9,7 +9,6 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import MultiOutputBuilder, OutputGroup
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
-from pcons.core.project import Project
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.msvc import (
     MsvcAssembler,

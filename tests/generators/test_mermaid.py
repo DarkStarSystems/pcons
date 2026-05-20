@@ -57,7 +57,6 @@ class TestMermaidGeneratorGraph:
         target.intermediate_nodes.append(obj)
         target.output_nodes.append(exe)
 
-        project.add_target(target)
 
         gen = MermaidGenerator()
         gen.generate(project)
@@ -100,9 +99,6 @@ class TestMermaidGeneratorGraph:
         app.output_nodes.append(app_exe)
         app.link(libphysics)
 
-        project.add_target(libmath)
-        project.add_target(libphysics)
-        project.add_target(app)
 
         gen = MermaidGenerator()
         gen.generate(project)
@@ -135,10 +131,6 @@ class TestMermaidGeneratorGraph:
         iface = Target("headers", target_type="interface")
         iface.output_nodes.append(FileNode(Path("include/headers")))
 
-        project.add_target(lib)
-        project.add_target(shared)
-        project.add_target(prog)
-        project.add_target(iface)
 
         gen = MermaidGenerator()
         gen.generate(project)
@@ -227,8 +219,6 @@ class TestMermaidGeneratorIntegration:
         app.output_nodes.append(app_exe)
         app.link(libmath)
 
-        project.add_target(libmath)
-        project.add_target(app)
 
         gen = MermaidGenerator()
         gen.generate(project)
@@ -274,9 +264,6 @@ class TestMermaidGeneratorIntegration:
         pkg_output.depends([bundle_dir])
         pkg.output_nodes.append(pkg_output)
 
-        project.add_target(install1)
-        project.add_target(install2)
-        project.add_target(pkg)
 
         gen = MermaidGenerator()
         gen.generate(project)

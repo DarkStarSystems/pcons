@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain

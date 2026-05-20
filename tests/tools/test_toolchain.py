@@ -3,7 +3,6 @@
 
 from pcons.core.builder import Builder
 from pcons.core.environment import Environment
-from pcons.core.project import Project
 from pcons.tools.tool import BaseTool, Tool
 from pcons.tools.toolchain import BaseToolchain, Toolchain
 

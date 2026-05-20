@@ -12,7 +12,6 @@ from pcons.core.builder import (
 )
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
-from pcons.core.project import Project
 
 
 class TestOutputSpec:

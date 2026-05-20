@@ -152,6 +152,42 @@ def _validate_target_name(name: str) -> None:
         )
 
 
+def split_qualified_name(
+    name: str, raise_on_invalid: bool = True
+) -> tuple[str | None, str]:
+    """Split a qualified name into (project, target).
+
+    A qualified name contains a project qualifier, in the form "project::target".
+    If the name is not qualified, returns (None, name).
+
+    Args:
+        name: The qualified or unqualified name to split.
+    Returns:
+        A tuple of (project, target) where project is None if not qualified.
+    """
+    parts = name.split("::")
+    count = len(parts)
+    if count == 2:
+        return parts[0], parts[1]
+    elif count == 1:
+        return None, parts[0]
+    else:
+        if raise_on_invalid:
+            raise ValueError(
+                f"Invalid qualified name: {name!r}. Too many '::' separators."
+            )
+        return None, name
+
+
+def is_qualified_name(name: str) -> bool:
+    """Check if a name is a qualified name.
+
+    A qualified name contains a project qualifier, in the form "project::target".
+    """
+    project, _target = split_qualified_name(name, raise_on_invalid=False)
+    return project is not None
+
+
 class Target:
     """A named build target with usage requirements.
 
@@ -307,10 +343,21 @@ class Target:
             # default to the last environment in the project, if available
             self._env = project.environments[-1] if project.environments else None
 
+        self.__project._add_target(self)
+
     @property
     def project(self) -> Project:
         """Get the project this target belongs to."""
         return self.__project
+
+    @property
+    def qualified_name(self) -> str:
+        """Get the qualified name.
+
+        Returns:
+            The qualified name, in the form "<project>::<target>".
+        """
+        return f"{self.project.name}::{self.name}"
 
     @property
     def sources(self) -> list[Node]:
@@ -759,7 +806,9 @@ class Target:
         if self.output_nodes:
             lines.append(f"  Outputs: {[str(n.path) for n in self.output_nodes]}")
         if self.dependencies:
-            lines.append(f"  Dependencies: {[d.name for d in self.dependencies]}")
+            lines.append(
+                f"  Dependencies: {[d.qualified_name for d in self.dependencies]}"
+            )
         if self.public.include_dirs:
             lines.append(f"  Public includes: {self.public.include_dirs}")
         if self.public.defines:
@@ -767,16 +816,16 @@ class Target:
         return "\n".join(lines)
 
     def __repr__(self) -> str:
-        deps = ", ".join(d.name for d in self.dependencies)
-        return f"Target({self.name!r}, deps=[{deps}])"
+        deps = ", ".join(d.qualified_name for d in self.dependencies)
+        return f"Target({self.qualified_name!r}, deps=[{deps}])"
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Target):
             return NotImplemented
-        return self.name == other.name
+        return self.qualified_name == other.qualified_name
 
     def __hash__(self) -> int:
-        return hash(self.name)
+        return hash(self.qualified_name)
 
 
 class ImportedTarget(Target):

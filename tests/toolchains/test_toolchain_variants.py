@@ -14,7 +14,6 @@ from __future__ import annotations
 import pytest
 
 from pcons.core.environment import Environment
-from pcons.core.project import Project
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
 

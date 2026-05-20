@@ -72,7 +72,6 @@ class ProgramBuilder:
         if sources:
             target.add_sources(sources)
 
-        project.add_target(target)
         return target
 
 
@@ -120,7 +119,6 @@ class StaticLibraryBuilder:
         if sources:
             target.add_sources(sources)
 
-        project.add_target(target)
         return target
 
 
@@ -168,7 +166,6 @@ class SharedLibraryBuilder:
         if sources:
             target.add_sources(sources)
 
-        project.add_target(target)
         return target
 
 
@@ -216,7 +213,6 @@ class ObjectLibraryBuilder:
         if sources:
             target.add_sources(sources)
 
-        project.add_target(target)
         return target
 
 
@@ -253,7 +249,6 @@ class HeaderOnlyLibraryBuilder:
             for inc_dir in include_dirs:
                 target.public.include_dirs.append(Path(inc_dir))
 
-        project.add_target(target)
         return target
 
 

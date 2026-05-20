@@ -317,7 +317,6 @@ class TarfileBuilder:
         }
         target._pending_sources = list(sources) if sources else []
 
-        project.add_target(target)
         return target
 
 
@@ -381,7 +380,6 @@ class ZipfileBuilder:
         }
         target._pending_sources = list(sources) if sources else []
 
-        project.add_target(target)
         return target
 
 

@@ -24,7 +24,7 @@ from pcons.core.graph import (
 )
 from pcons.core.node import AliasNode, DirNode, FileNode, Node
 from pcons.core.paths import PathResolver
-from pcons.core.target import Target
+from pcons.core.target import Target, split_qualified_name
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 logger = logging.getLogger(__name__)
@@ -143,7 +143,7 @@ class Project(_ProjectBuilders):
                 pass  # Out-of-tree build — keep absolute
         self.build_dir = bd
         self._environments: list[Env] = []
-        self._targets: dict[str, Target] = {}
+        self._targets: list[Target] = []
         self._nodes: dict[Path, Node] = {}
         self._aliases: dict[str, AliasNode] = {}
         self._default_targets: list[Target] = []
@@ -329,8 +329,11 @@ class Project(_ProjectBuilders):
             )
         return node
 
-    def add_target(self, target: Target) -> None:
-        """Register a target with the project.
+    def _add_target(self, target: Target) -> None:
+        """Register a target with the project (should not be called directly).
+
+        Only Target should call this method, via Target.__init__,
+        to ensure that targets are registered as soon as they are created.
 
         Args:
             target: Target to register.
@@ -338,25 +341,30 @@ class Project(_ProjectBuilders):
         Raises:
             ValueError: If a target with the same name already exists.
         """
-        if target.name in self._targets:
-            existing = self._targets[target.name]
+        if (
+            existing := self.get_target(
+                target.name, raise_if_missing=False, recursive=False
+            )
+        ) is not None:
             raise ValueError(
                 f"Target '{target.name}' already exists "
                 f"(defined at {existing.defined_at})"
             )
-        self._targets[target.name] = target
+        self._targets.append(target)
 
     @overload
     def get_target(
-        self, name: str, raise_if_missing: Literal[True] = ...
+        self, name: str, raise_if_missing: Literal[True] = ..., recursive: bool = ...
     ) -> Target: ...
 
     @overload
     def get_target(
-        self, name: str, raise_if_missing: Literal[False]
+        self, name: str, raise_if_missing: Literal[False], recursive: bool = ...
     ) -> Target | None: ...
 
-    def get_target(self, name: str, raise_if_missing: bool = True) -> Target | None:
+    def get_target(
+        self, name: str, raise_if_missing: bool = True, recursive: bool = True
+    ) -> Target | None:
         """Get a target by name.
 
         Args:
@@ -369,11 +377,38 @@ class Project(_ProjectBuilders):
         Raises:
             KeyError: If the target is not found and raise_if_missing is True.
         """
-        if (target := self._targets.get(name)) is not None:
-            return target
-        for child in self._children:
-            if (target := child.get_target(name, raise_if_missing=False)) is not None:
-                return target
+
+        project, target_name = split_qualified_name(name)
+        if project is not None:
+            if project == self.name:
+                for target in self._targets:
+                    if target.name == target_name:
+                        return target
+                else:
+                    if raise_if_missing:
+                        raise KeyError(f"Target '{name}' not found")
+                    return None
+        else:
+            for target in self._targets:
+                if target.name == target_name:
+                    return target
+
+        if recursive:
+            targets_found = []
+            for child in self._children:
+                if (
+                    target := child.get_target(name, raise_if_missing=False)
+                ) is not None:
+                    targets_found.append(target)
+            if len(targets_found) > 1:
+                raise KeyError(
+                    f"Multiple targets named '{name}' found in child projects: "
+                    f"{', '.join(t.qualified_name for t in targets_found)}\n"
+                    f"Use qualified names (e.g., '{targets_found[0].qualified_name}') to disambiguate."
+                )
+            if targets_found:
+                return targets_found[0]
+
         if raise_if_missing:
             raise KeyError(f"Target '{name}' not found")
         return None
@@ -395,7 +430,7 @@ class Project(_ProjectBuilders):
     @property
     def targets(self) -> list[Target]:
         """Get all registered targets."""
-        results: list[Target] = list(self._targets.values())
+        results: list[Target] = list(self._targets)
         for child in self._children:
             results.extend(child.targets)
         return results
@@ -469,7 +504,7 @@ class Project(_ProjectBuilders):
                     self._default_targets.append(t)
             elif isinstance(t, str):
                 # Look up by name
-                target = self._targets.get(t)
+                target = self.get_target(t)
                 if target and target not in self._default_targets:
                     self._default_targets.append(target)
 
@@ -485,7 +520,7 @@ class Project(_ProjectBuilders):
 
     def all_nodes(self) -> set[Node]:
         """Collect all nodes from all targets."""
-        return collect_all_nodes(list(self._targets.values()))
+        return collect_all_nodes(self._targets)
 
     def _to_build_relative(self, p: Path) -> Path:
         """Strip the build_dir prefix from a canonicalized path.
@@ -562,7 +597,7 @@ class Project(_ProjectBuilders):
         errors: list[Exception] = []
 
         # Check for dependency cycles
-        cycles = detect_cycles_in_targets(list(self._targets.values()))
+        cycles = detect_cycles_in_targets(self._targets)
         for cycle in cycles:
             from pcons.core.errors import DependencyCycleError
 
@@ -571,7 +606,7 @@ class Project(_ProjectBuilders):
         # Check for missing sources
         from pcons.core.errors import MissingSourceError
 
-        for target in self._targets.values():
+        for target in self._targets:
             for source in target.sources:
                 if isinstance(source, FileNode):
                     # Only check source files (not generated files)
@@ -593,7 +628,7 @@ class Project(_ProjectBuilders):
         Returns:
             Targets sorted so dependencies come before dependents.
         """
-        return topological_sort_targets(list(self._targets.values()))
+        return topological_sort_targets(self._targets)
 
     def print_targets(self) -> None:
         """Print a human-readable summary of all targets.
@@ -604,8 +639,8 @@ class Project(_ProjectBuilders):
         print(f"Build dir: {self.build_dir}")
         print(f"Targets ({len(self._targets)}):")
 
-        for name, target in sorted(self._targets.items()):
-            print(f"  {name} ({target.target_type})")
+        for target in sorted(self._targets):
+            print(f"  {target.name} ({target.target_type})")
             if target.sources:
                 print(f"    sources: {len(target.sources)} files")
             if target.output_nodes:
@@ -912,7 +947,6 @@ class Project(_ProjectBuilders):
         from pcons.packages.imported import ImportedTarget
 
         target = ImportedTarget.from_package(pkg, components=components)
-        self.add_target(target)
         self._found_packages[cache_key] = target
         return target
 
@@ -998,7 +1032,7 @@ class Project(_ProjectBuilders):
         lines.append(f"  Root: {self.root_dir}")
         lines.append(f"  Build: {self.build_dir}")
         lines.append(f"  Targets: {len(self._targets)}")
-        for target in list(self._targets.values())[:5]:
+        for target in self._targets[:5]:
             target_type = target.target_type or "unknown"
             lines.append(f"    - {target.name} ({target_type})")
         if len(self._targets) > 5:

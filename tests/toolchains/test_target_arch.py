@@ -12,7 +12,6 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from pcons.core.environment import Environment
-from pcons.core.project import Project
 from pcons.toolchains.clang_cl import ClangClToolchain
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain

@@ -100,7 +100,6 @@ class TestMakefileBuildStatements:
 
         target.intermediate_nodes.append(output_node)
         target.add_source(source_node)
-        project.add_target(target)
 
         gen = MakefileGenerator()
         gen.generate(project)
@@ -126,7 +125,6 @@ class TestMakefileBuildStatements:
         )
 
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = MakefileGenerator()
         gen.generate(project)
@@ -151,7 +149,6 @@ class TestMakefileBuildStatements:
         )
 
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = MakefileGenerator()
         gen.generate(project)
@@ -169,7 +166,6 @@ class TestMakefileAliases:
         target = Target("mylib")
         output_node = FileNode(tmp_path / "build" / "libmylib.a")
         target.output_nodes.append(output_node)
-        project.add_target(target)
 
         # Create an alias
         project.Alias("all_libs", output_node)
@@ -189,7 +185,6 @@ class TestMakefileDefaultTarget:
         output_node = FileNode(tmp_path / "build" / "app")
         target.output_nodes.append(output_node)
         target._resolved = True
-        project.add_target(target)
 
         gen = MakefileGenerator()
         gen.generate(project)
@@ -227,7 +222,6 @@ class TestMakefileDepfiles:
         )
 
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = MakefileGenerator()
         gen.generate(project)
@@ -259,7 +253,6 @@ class TestMakefileImplicitDeps:
         output_node.implicit_deps.append(header_node)
 
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = MakefileGenerator()
         gen.generate(project)
@@ -303,7 +296,6 @@ class TestMakefilePostBuild:
             "chmod +x $out",
             "echo 'Built $out'",
         ]
-        project.add_target(target)
         project._resolved = True  # Skip auto-resolve since we set up nodes manually
 
         gen = MakefileGenerator()

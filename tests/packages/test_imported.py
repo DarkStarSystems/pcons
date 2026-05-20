@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pcons.core.project import Project
 from pcons.packages.description import ComponentDescription, PackageDescription
 from pcons.packages.imported import ImportedTarget
 

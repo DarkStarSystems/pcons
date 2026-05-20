@@ -69,6 +69,7 @@ def clear_project_tree():
     yield
     Project._clear_tree()
 
+
 @pytest.fixture
 def test_project():
     """Create a default project for testing."""

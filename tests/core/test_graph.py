@@ -12,7 +12,6 @@ from pcons.core.graph import (
     topological_sort_targets,
 )
 from pcons.core.node import FileNode
-from pcons.core.project import Project
 from pcons.core.target import Target
 
 
