@@ -153,6 +153,8 @@ class TestProjectTargets:
         with pytest.raises(KeyError):
             project.get_target("missing", raise_if_missing=True)
 
+
+class TestSubproject:
     def test_target_lookup(self):
         root = Project("root")
         with root._enter_subdir("child1"):
@@ -176,6 +178,13 @@ class TestProjectTargets:
 
         with pytest.raises(KeyError):
             child2.get_target("mylib1", raise_if_missing=True)
+
+    def test_subproject_build_dir_warns(self, test_project):
+        with pytest.warns(
+            UserWarning, match="build_dir argument is ignored for sub-projects"
+        ):
+            with test_project._enter_subdir("child"):
+                Project("child", build_dir="ignored_build")
 
 
 class TestProjectAliases:

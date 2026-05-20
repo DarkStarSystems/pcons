@@ -118,6 +118,7 @@ class Project(_ProjectBuilders):
             build_dir: Directory for build outputs. Defaults to the
                 PCONS_BUILD_DIR environment variable if set (the CLI
                 sets this automatically), otherwise "build".
+                Using it from a sub-project is not currently supported and will be ignored.
             config: Cached configuration from configure phase.
             defined_at: Source location where project was created.
         """
@@ -131,17 +132,6 @@ class Project(_ProjectBuilders):
             if caller_file.exists():
                 root_dir = str(caller_file.parent)
         self.root_dir = Path(root_dir) if root_dir else Path.cwd()
-        if build_dir is None:
-            build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
-        if not self.root_dir.is_absolute():
-            raise ValueError(f"Root directory must be absolute (got: {self.root_dir})")
-        bd = Path(build_dir)
-        if bd.is_absolute():
-            try:
-                bd = bd.relative_to(self.root_dir)
-            except ValueError:
-                pass  # Out-of-tree build — keep absolute
-        self.build_dir = bd
         self._environments: list[Env] = []
         self._targets: list[Target] = []
         self._nodes: dict[Path, Node] = {}
@@ -149,7 +139,6 @@ class Project(_ProjectBuilders):
         self._default_targets: list[Target] = []
         self._config = config
         self._resolved = False
-        self._path_resolver = PathResolver(self.root_dir, self.build_dir)
         self._found_packages: dict[tuple[str, str | None, tuple[str, ...]], Target] = {}
         self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
         self.defined_at = defined_at or get_caller_location()
@@ -167,6 +156,15 @@ class Project(_ProjectBuilders):
             self._parent = None
 
         if self._parent:
+            if build_dir is not None:
+                import warnings
+
+                warnings.warn(
+                    f"Project '{self.name}': build_dir argument is ignored for sub-projects; "
+                    f"using parent project's build_dir '{self._parent.build_dir}' instead.",
+                    UserWarning,
+                    stacklevel=2,
+                )
             self._parent._children.append(self)
             self.build_dir = self._parent.build_dir
             # If the child project's root_dir is inside the top-level project,
@@ -176,8 +174,22 @@ class Project(_ProjectBuilders):
             rel = self.root_dir.relative_to(top_root)
             self.root_dir = top_root
             self._subdir = str(rel)
-            # Recreate the path resolver now that root_dir/build_dir changed
-            self._path_resolver = PathResolver(self.root_dir, self.build_dir)
+        else:
+            if build_dir is None:
+                build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
+            if not self.root_dir.is_absolute():
+                raise ValueError(
+                    f"Root directory must be absolute (got: {self.root_dir})"
+                )
+            bd = Path(build_dir)
+            if bd.is_absolute():
+                try:
+                    bd = bd.relative_to(self.root_dir)
+                except ValueError:
+                    pass  # Out-of-tree build — keep absolute
+            self.build_dir = bd
+
+        self._path_resolver = PathResolver(self.root_dir, self.build_dir)
 
         Project.__current = self
         if Project.__top_level is None:
