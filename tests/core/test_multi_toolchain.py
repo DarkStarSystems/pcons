@@ -124,7 +124,7 @@ class MockCudaToolchain(BaseToolchain):
 class TestMultiToolchainEnvironment:
     """Tests for multi-toolchain Environment methods."""
 
-    def test_add_toolchain(self):
+    def test_add_toolchain(self, test_project):  # noqa: F811
         """Test adding additional toolchains."""
         c_toolchain = MockCToolchain()
         c_toolchain.configure(None)
@@ -132,7 +132,6 @@ class TestMultiToolchainEnvironment:
         cuda_toolchain = MockCudaToolchain()
         cuda_toolchain.configure(None)
 
-        Project("test_project")
         env = Environment(toolchain=c_toolchain)
         assert env.has_tool("cc")
         assert env.has_tool("cxx")
@@ -141,7 +140,7 @@ class TestMultiToolchainEnvironment:
         env.add_toolchain(cuda_toolchain)
         assert env.has_tool("cuda")
 
-    def test_toolchains_property_returns_all(self):
+    def test_toolchains_property_returns_all(self, test_project):  # noqa: F811
         """Test that toolchains property includes primary and additional."""
         c_toolchain = MockCToolchain()
         c_toolchain.configure(None)
@@ -149,7 +148,6 @@ class TestMultiToolchainEnvironment:
         cuda_toolchain = MockCudaToolchain()
         cuda_toolchain.configure(None)
 
-        Project("test_project")
         env = Environment(toolchain=c_toolchain)
         assert len(env.toolchains) == 1
         assert env.toolchains[0] is c_toolchain
@@ -159,13 +157,12 @@ class TestMultiToolchainEnvironment:
         assert env.toolchains[0] is c_toolchain
         assert env.toolchains[1] is cuda_toolchain
 
-    def test_toolchains_property_empty_without_toolchain(self):
+    def test_toolchains_property_empty_without_toolchain(self, test_project):  # noqa: F811
         """Test that toolchains returns empty list when no toolchain set."""
-        Project("test_project")
         env = Environment()
         assert env.toolchains == []
 
-    def test_clone_preserves_additional_toolchains(self):
+    def test_clone_preserves_additional_toolchains(self, test_project):  # noqa: F811
         """Test that clone copies additional toolchains."""
         c_toolchain = MockCToolchain()
         c_toolchain.configure(None)
@@ -173,7 +170,6 @@ class TestMultiToolchainEnvironment:
         cuda_toolchain = MockCudaToolchain()
         cuda_toolchain.configure(None)
 
-        Project("test_project")
         env = Environment(toolchain=c_toolchain)
         env.add_toolchain(cuda_toolchain)
 
@@ -182,7 +178,7 @@ class TestMultiToolchainEnvironment:
         assert cloned.toolchains[0] is c_toolchain
         assert cloned.toolchains[1] is cuda_toolchain
 
-    def test_set_variant_applies_to_all_toolchains(self):
+    def test_set_variant_applies_to_all_toolchains(self, test_project):  # noqa: F811
         """Test that set_variant calls apply_variant on all toolchains."""
         c_toolchain = MockCToolchain()
         c_toolchain.configure(None)
@@ -190,7 +186,6 @@ class TestMultiToolchainEnvironment:
         cuda_toolchain = MockCudaToolchain()
         cuda_toolchain.configure(None)
 
-        Project("test_project")
         env = Environment(toolchain=c_toolchain)
         env.add_toolchain(cuda_toolchain)
 
@@ -201,9 +196,8 @@ class TestMultiToolchainEnvironment:
         assert "-G" in env.cuda.flags
         assert "-g" in env.cuda.flags
 
-    def test_set_variant_no_toolchains(self):
+    def test_set_variant_no_toolchains(self, test_project):  # noqa: F811
         """Test set_variant works when no toolchains configured."""
-        Project("test_project")
         env = Environment()
         env.set_variant("release")
         assert env.variant == "release"

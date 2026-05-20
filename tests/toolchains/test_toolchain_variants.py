@@ -22,9 +22,8 @@ from pcons.toolchains.llvm import LlvmToolchain
 class TestGccVariants:
     """Tests for GCC toolchain variants."""
 
-    def test_debug_variant(self) -> None:
+    def test_debug_variant(self, test_project):  # noqa: F811
         """Test GCC debug variant applies correct flags."""
-        Project("test_project")
         env = Environment()
 
         # Set up a mock GCC toolchain (just add the tools manually)
@@ -59,9 +58,8 @@ class TestGccVariants:
         # Check variant name was set
         assert env.variant == "debug"
 
-    def test_release_variant(self) -> None:
+    def test_release_variant(self, test_project):  # noqa: F811
         """Test GCC release variant applies correct flags."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -78,9 +76,8 @@ class TestGccVariants:
         assert "NDEBUG" in cc.defines
         assert env.variant == "release"
 
-    def test_relwithdebinfo_variant(self) -> None:
+    def test_relwithdebinfo_variant(self, test_project):  # noqa: F811
         """Test GCC relwithdebinfo variant."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -95,9 +92,8 @@ class TestGccVariants:
         assert "-g" in cc.flags
         assert "NDEBUG" in cc.defines
 
-    def test_minsizerel_variant(self) -> None:
+    def test_minsizerel_variant(self, test_project):  # noqa: F811
         """Test GCC minsizerel variant."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -111,9 +107,8 @@ class TestGccVariants:
         assert "-Os" in cc.flags
         assert "NDEBUG" in cc.defines
 
-    def test_extra_flags(self) -> None:
+    def test_extra_flags(self, test_project):  # noqa: F811
         """Test extra flags are added."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -127,9 +122,8 @@ class TestGccVariants:
         assert "-Wall" in cc.flags
         assert "-Wextra" in cc.flags
 
-    def test_extra_defines(self) -> None:
+    def test_extra_defines(self, test_project):  # noqa: F811
         """Test extra defines are added (without -D prefix)."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -143,9 +137,8 @@ class TestGccVariants:
 
         assert "MY_FEATURE" in cc.defines
 
-    def test_unknown_variant(self) -> None:
+    def test_unknown_variant(self, test_project):  # noqa: F811
         """Test unknown variant sets name but no flags."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -158,9 +151,8 @@ class TestGccVariants:
         with pytest.raises(ValueError, match="Unknown variant.*custom"):
             toolchain.apply_variant(env, "custom")
 
-    def test_case_insensitive(self) -> None:
+    def test_case_insensitive(self, test_project):  # noqa: F811
         """Test variant names are case-insensitive."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -178,9 +170,8 @@ class TestGccVariants:
 class TestLlvmVariants:
     """Tests for LLVM/Clang toolchain variants."""
 
-    def test_debug_variant(self) -> None:
+    def test_debug_variant(self, test_project):  # noqa: F811
         """Test LLVM debug variant."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -197,9 +188,8 @@ class TestLlvmVariants:
         assert "DEBUG" in cc.defines
         assert env.variant == "debug"
 
-    def test_release_variant(self) -> None:
+    def test_release_variant(self, test_project):  # noqa: F811
         """Test LLVM release variant."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -217,19 +207,17 @@ class TestLlvmVariants:
 class TestEnvironmentSetVariant:
     """Tests for Environment.set_variant() method."""
 
-    def test_set_variant_without_toolchain(self) -> None:
+    def test_set_variant_without_toolchain(self, test_project):  # noqa: F811
         """Test set_variant without toolchain just sets name."""
-        Project("test_project")
         env = Environment()
 
         env.set_variant("debug")
 
         assert env.variant == "debug"
 
-    def test_set_variant_with_toolchain(self) -> None:
+    def test_set_variant_with_toolchain(self, test_project):  # noqa: F811
         """Test set_variant delegates to toolchain."""
         # Create env with tools set up manually
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -248,9 +236,8 @@ class TestEnvironmentSetVariant:
         assert "-g" in cc.flags
         assert env.variant == "debug"
 
-    def test_preserves_existing_flags(self) -> None:
+    def test_preserves_existing_flags(self, test_project):  # noqa: F811
         """Test that set_variant preserves existing flags."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -276,10 +263,9 @@ class TestEnvironmentSetVariant:
 class TestBaseToolchainVariant:
     """Tests for BaseToolchain default apply_variant."""
 
-    def test_base_sets_variant_name(self) -> None:
+    def test_base_sets_variant_name(self, test_project):  # noqa: F811
         """Test base implementation sets variant name."""
 
-        Project("test_project")
         # Can't instantiate abstract class directly, use a concrete one
         # and verify the base behavior (super().apply_variant sets env.variant)
         env = Environment()
@@ -291,9 +277,8 @@ class TestBaseToolchainVariant:
 
         assert env.variant == "debug"
 
-    def test_base_rejects_unknown_variant(self) -> None:
+    def test_base_rejects_unknown_variant(self, test_project):  # noqa: F811
         """Test that unknown variant names are rejected with a helpful error."""
-        Project("test_project")
         env = Environment()
 
         toolchain = GccToolchain()

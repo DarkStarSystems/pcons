@@ -57,12 +57,11 @@ class TestMsvcCompiler:
         objcmd = vars["objcmd"]
         assert "$cc.depflags" in objcmd
 
-    def test_builder_has_msvc_deps_style(self):
+    def test_builder_has_msvc_deps_style(self, test_project):  # noqa: F811
         cc = MsvcCompiler()
         builders = cc.builders()
         obj_builder = builders["Object"]
         # Create a mock environment and build a target to check build_info
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "cl.exe"
@@ -177,12 +176,11 @@ class TestMsvcLinker:
         assert outputs[2].suffix == ".exp"
         assert outputs[2].implicit is True
 
-    def test_shared_library_returns_output_group(self):
+    def test_shared_library_returns_output_group(self, test_project):  # noqa: F811
         link = MsvcLinker()
         builders = link.builders()
         shared_builder = builders["SharedLibrary"]
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -291,12 +289,11 @@ class TestMsvcResourceCompiler:
         assert ".rc" in res_builder.src_suffixes
         assert ".res" in res_builder.target_suffixes
 
-    def test_resource_builder_creates_node(self):
+    def test_resource_builder_creates_node(self, test_project):  # noqa: F811
         rc = MsvcResourceCompiler()
         builders = rc.builders()
         res_builder = builders["Resource"]
 
-        Project("test_project")
         env = Environment()
         env.add_tool("rc")
         env.rc.cmd = "rc.exe"
@@ -308,13 +305,12 @@ class TestMsvcResourceCompiler:
         assert isinstance(target, FileNode)
         assert target.path == Path("app.res")
 
-    def test_resource_builder_no_depfile(self):
+    def test_resource_builder_no_depfile(self, test_project):  # noqa: F811
         """Resource compiler doesn't generate depfiles."""
         rc = MsvcResourceCompiler()
         builders = rc.builders()
         res_builder = builders["Resource"]
 
-        Project("test_project")
         env = Environment()
         env.add_tool("rc")
         env.rc.cmd = "rc.exe"
@@ -438,9 +434,8 @@ class TestMsvcLinkerAcceptsRes:
 class TestMsvcAuxiliaryInputHandler:
     """Tests for the AuxiliaryInputHandler support in MSVC toolchain."""
 
-    def test_auxiliary_input_handler_def(self):
+    def test_auxiliary_input_handler_def(self, test_project):  # noqa: F811
         """Test that .def files are recognized as auxiliary inputs."""
-        Project("test_project")
         tc = MsvcToolchain()
         handler = tc.get_auxiliary_input_handler(".def")
         assert handler is not None

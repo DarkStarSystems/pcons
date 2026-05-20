@@ -14,7 +14,6 @@ from pcons.toolchains.llvm import LlvmToolchain
 
 def _make_unix_env() -> Environment:
     """Create an environment with cc, cxx, and link tools."""
-    Project("test_project")
     env = Environment()
     cc = env.add_tool("cc")
     cc.set("cmd", "gcc")
@@ -34,7 +33,6 @@ def _make_unix_env() -> Environment:
 
 def _make_msvc_env() -> Environment:
     """Create an environment with MSVC-style tools."""
-    Project("test_project")
     env = Environment()
     cc = env.add_tool("cc")
     cc.set("cmd", "cl.exe")
@@ -55,7 +53,7 @@ def _make_msvc_env() -> Environment:
 class TestUnixPresets:
     """Tests for Unix (GCC/LLVM) preset application."""
 
-    def test_warnings_preset(self) -> None:
+    def test_warnings_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
         toolchain.apply_preset(env, "warnings")
@@ -66,7 +64,7 @@ class TestUnixPresets:
         assert "-Werror" in env.cc.flags
         assert "-Wall" in env.cxx.flags
 
-    def test_sanitize_preset(self) -> None:
+    def test_sanitize_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = LlvmToolchain()
         toolchain.apply_preset(env, "sanitize")
@@ -77,7 +75,7 @@ class TestUnixPresets:
         # Link flags too
         assert "-fsanitize=address,undefined" in env.link.flags
 
-    def test_profile_preset(self) -> None:
+    def test_profile_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
         toolchain.apply_preset(env, "profile")
@@ -86,7 +84,7 @@ class TestUnixPresets:
         assert "-g" in env.cc.flags
         assert "-pg" in env.link.flags
 
-    def test_lto_preset(self) -> None:
+    def test_lto_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
         toolchain.apply_preset(env, "lto")
@@ -95,7 +93,7 @@ class TestUnixPresets:
         assert "-flto" in env.cxx.flags
         assert "-flto" in env.link.flags
 
-    def test_hardened_preset(self) -> None:
+    def test_hardened_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
         toolchain = GccToolchain()
         toolchain.apply_preset(env, "hardened")
@@ -106,7 +104,7 @@ class TestUnixPresets:
         assert "-pie" in env.link.flags
         assert "-Wl,-z,relro,-z,now" in env.link.flags
 
-    def test_unknown_preset_warns(self) -> None:
+    def test_unknown_preset_warns(self, test_project):  # noqa: F811
         """Unknown preset should log a warning but not raise."""
         env = _make_unix_env()
         toolchain = GccToolchain()
@@ -115,7 +113,7 @@ class TestUnixPresets:
         # No flags should be added
         assert len(env.cc.flags) == 0
 
-    def test_multiple_presets_combine(self) -> None:
+    def test_multiple_presets_combine(self, test_project):  # noqa: F811
         """Applying multiple presets should combine flags."""
         env = _make_unix_env()
         toolchain = GccToolchain()
@@ -125,9 +123,8 @@ class TestUnixPresets:
         assert "-Wall" in env.cc.flags
         assert "-fsanitize=address,undefined" in env.cc.flags
 
-    def test_preset_without_link_tool(self) -> None:
+    def test_preset_without_link_tool(self, test_project):  # noqa: F811
         """Presets should work even without a link tool."""
-        Project("test_project")
         env = Environment()
         cc = env.add_tool("cc")
         cc.set("flags", [])
@@ -138,7 +135,7 @@ class TestUnixPresets:
 
         assert "-fsanitize=address,undefined" in env.cc.flags
 
-    def test_preset_via_env_apply_preset(self) -> None:
+    def test_preset_via_env_apply_preset(self, test_project):  # noqa: F811
         """Test the Environment.apply_preset() delegate method."""
         env = _make_unix_env()
         env._toolchain = GccToolchain()
@@ -152,7 +149,7 @@ class TestUnixPresets:
 class TestMsvcPresets:
     """Tests for MSVC-compatible preset application."""
 
-    def test_warnings_preset(self) -> None:
+    def test_warnings_preset(self, test_project):  # noqa: F811
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
         env = _make_msvc_env()
@@ -170,7 +167,7 @@ class TestMsvcPresets:
         assert "/WX" in env.cc.flags
         assert "/W4" in env.cxx.flags
 
-    def test_sanitize_preset(self) -> None:
+    def test_sanitize_preset(self, test_project):  # noqa: F811
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
         env = _make_msvc_env()
@@ -184,7 +181,7 @@ class TestMsvcPresets:
 
         assert "/fsanitize=address" in env.cc.flags
 
-    def test_lto_preset(self) -> None:
+    def test_lto_preset(self, test_project):  # noqa: F811
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
         env = _make_msvc_env()
@@ -199,7 +196,7 @@ class TestMsvcPresets:
         assert "/GL" in env.cc.flags
         assert "/LTCG" in env.link.flags
 
-    def test_hardened_preset(self) -> None:
+    def test_hardened_preset(self, test_project):  # noqa: F811
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
         env = _make_msvc_env()
@@ -216,7 +213,7 @@ class TestMsvcPresets:
         assert "/DYNAMICBASE" in env.link.flags
         assert "/NXCOMPAT" in env.link.flags
 
-    def test_profile_preset(self) -> None:
+    def test_profile_preset(self, test_project):  # noqa: F811
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
         env = _make_msvc_env()
@@ -231,7 +228,7 @@ class TestMsvcPresets:
         # MSVC profile is linker-only
         assert "/PROFILE" in env.link.flags
 
-    def test_unknown_preset_warns(self) -> None:
+    def test_unknown_preset_warns(self, test_project):  # noqa: F811
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
         env = _make_msvc_env()

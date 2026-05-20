@@ -60,11 +60,10 @@ class TestBaseToolchain:
         assert "cc" in tc.tools
         assert "cxx" in tc.tools
 
-    def test_setup(self):
+    def test_setup(self, test_project):  # noqa: F811
         tc = MockToolchain()
         tc.configure(None)
 
-        Project("test_project")
         env = Environment()
         tc.setup(env)
 
