@@ -21,7 +21,7 @@ class TestXcodeGeneratorBasic:
         project = Project("myapp", build_dir=tmp_path)
 
         # Add a minimal target
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -33,7 +33,7 @@ class TestXcodeGeneratorBasic:
     def test_creates_project_pbxproj(self, tmp_path):
         """Test that project.pbxproj file is created."""
         project = Project("myapp", build_dir=tmp_path)
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -54,7 +54,7 @@ class TestXcodeGeneratorTargets:
     def test_program_target(self, tmp_path):
         """Test program target has correct product type."""
         project = Project("myapp", build_dir=tmp_path)
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -66,7 +66,7 @@ class TestXcodeGeneratorTargets:
     def test_static_library_target(self, tmp_path):
         """Test static library target has correct product type."""
         project = Project("mylib", build_dir=tmp_path)
-        target = Target("mylib", target_type="static_library")
+        Target("mylib", target_type="static_library")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -78,7 +78,7 @@ class TestXcodeGeneratorTargets:
     def test_shared_library_target(self, tmp_path):
         """Test shared library target has correct product type."""
         project = Project("mylib", build_dir=tmp_path)
-        target = Target("mylib", target_type="shared_library")
+        Target("mylib", target_type="shared_library")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -90,7 +90,7 @@ class TestXcodeGeneratorTargets:
     def test_interface_target_skipped(self, tmp_path):
         """Test interface-only projects don't create xcodeproj."""
         project = Project("mylib", build_dir=tmp_path)
-        target = Target("headers", target_type="interface")
+        Target("headers", target_type="interface")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -228,7 +228,7 @@ class TestXcodeGeneratorBuildPhases:
     def test_has_sources_phase(self, tmp_path):
         """Test targets have PBXSourcesBuildPhase."""
         project = Project("myapp", build_dir=tmp_path)
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -239,7 +239,7 @@ class TestXcodeGeneratorBuildPhases:
     def test_has_frameworks_phase(self, tmp_path):
         """Test targets have PBXFrameworksBuildPhase."""
         project = Project("myapp", build_dir=tmp_path)
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -254,7 +254,7 @@ class TestXcodeGeneratorConfigurations:
     def test_has_debug_configuration(self, tmp_path):
         """Test project has Debug configuration."""
         project = Project("myapp", build_dir=tmp_path)
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -265,7 +265,7 @@ class TestXcodeGeneratorConfigurations:
     def test_has_release_configuration(self, tmp_path):
         """Test project has Release configuration."""
         project = Project("myapp", build_dir=tmp_path)
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -280,7 +280,7 @@ class TestXcodeGeneratorGroups:
     def test_has_products_group(self, tmp_path):
         """Test project has Products group."""
         project = Project("myapp", build_dir=tmp_path)
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -291,7 +291,7 @@ class TestXcodeGeneratorGroups:
     def test_has_sources_group(self, tmp_path):
         """Test project has Sources group."""
         project = Project("myapp", build_dir=tmp_path)
-        target = Target("myapp", target_type="program")
+        Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -314,7 +314,6 @@ class TestXcodeGeneratorMultiTarget:
 
         lib2.link(lib1)
         app.link(lib2)
-
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -361,7 +360,6 @@ class TestXcodeGeneratorInstall:
         install_target.output_nodes.append(dest)
         install_target._install_nodes = [dest]
 
-
         gen = XcodeGenerator()
         gen.generate(project)
 
@@ -399,7 +397,6 @@ class TestXcodeGeneratorInstall:
 
         install_target.output_nodes.append(dest)
         install_target._install_nodes = [dest]
-
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -441,7 +438,6 @@ class TestXcodeGeneratorInstallDir:
 
         install_dir_target.output_nodes.append(stamp)
         install_dir_target._pending_sources = [source]
-
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -493,7 +489,6 @@ class TestXcodeGeneratorArchive:
         tar_target.output_nodes.append(archive)
         tar_target.output_nodes.append(archive)
 
-
         gen = XcodeGenerator()
         gen.generate(project)
 
@@ -537,7 +532,6 @@ class TestXcodeGeneratorArchive:
         zip_target.output_nodes.append(archive)
         zip_target.output_nodes.append(archive)
 
-
         gen = XcodeGenerator()
         gen.generate(project)
 
@@ -567,7 +561,6 @@ class TestXcodeGeneratorInstallDependencies:
         prog_output = FileNode(tmp_path / "myapp")
         prog.output_nodes.append(prog_output)
 
-
         # Create install target that installs the program
         install_target = Target("install_myapp", target_type="interface")
         install_target._builder_name = "Install"
@@ -584,7 +577,6 @@ class TestXcodeGeneratorInstallDependencies:
 
         install_target.output_nodes.append(dest)
         install_target._install_nodes = [dest]
-
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -610,7 +602,6 @@ class TestXcodeGeneratorInstallDependencies:
         prog_output = FileNode(tmp_path / "myapp")
         prog.output_nodes.append(prog_output)
 
-
         # Create tarfile target that archives the program
         tar_target = Target("bin_archive", target_type="archive")
         tar_target._builder_name = "Tarfile"
@@ -632,7 +623,6 @@ class TestXcodeGeneratorInstallDependencies:
 
         tar_target.output_nodes.append(archive)
         tar_target.output_nodes.append(archive)
-
 
         gen = XcodeGenerator()
         gen.generate(project)
