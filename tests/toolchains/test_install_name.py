@@ -14,24 +14,20 @@ from pcons.toolchains.llvm import LlvmToolchain
 
 
 class TestTargetSetGet:
-    def test_default_is_none(self) -> None:
-        Project("test_project")
+    def test_default_is_none(self, test_project):  # noqa: F811
         t = Target("lib", target_type="shared_library")
         assert t.get_option("install_name") is None
 
-    def test_set_and_get(self) -> None:
-        Project("test_project")
+    def test_set_and_get(self, test_project):  # noqa: F811
         t = Target("lib", target_type="shared_library")
         t.set_option("install_name", "@rpath/libcustom.dylib")
         assert t.get_option("install_name") == "@rpath/libcustom.dylib"
 
-    def test_set_returns_self(self) -> None:
-        Project("test_project")
+    def test_set_returns_self(self, test_project):  # noqa: F811
         t = Target("lib", target_type="shared_library")
         assert t.set_option("install_name", "foo") is t
 
-    def test_get_with_default(self) -> None:
-        Project("test_project")
+    def test_get_with_default(self, test_project):  # noqa: F811
         t = Target("lib", target_type="shared_library")
         assert t.get_option("missing_key", "fallback") == "fallback"
 
@@ -40,13 +36,12 @@ class TestTargetSetGet:
 
 
 def _make_shared_target(name: str = "foo") -> Target:
-    Project("test_project")
     return Target(name, target_type="shared_library")
 
 
 class TestGccInstallName:
     @patch("pcons.toolchains.unix.get_platform")
-    def test_macos_default_install_name(self, mock_platform) -> None:
+    def test_macos_default_install_name(self, mock_platform, test_project):  # noqa: F811
         mock_platform.return_value.is_macos = True
         mock_platform.return_value.is_linux = False
         tc = GccToolchain()
@@ -55,7 +50,7 @@ class TestGccInstallName:
         assert flags == ["-Wl,-install_name,@rpath/libfoo.dylib"]
 
     @patch("pcons.toolchains.unix.get_platform")
-    def test_macos_explicit_install_name(self, mock_platform) -> None:
+    def test_macos_explicit_install_name(self, mock_platform, test_project):  # noqa: F811
         mock_platform.return_value.is_macos = True
         mock_platform.return_value.is_linux = False
         tc = GccToolchain()
@@ -65,7 +60,7 @@ class TestGccInstallName:
         assert flags == ["-Wl,-install_name,/usr/local/lib/libfoo.2.dylib"]
 
     @patch("pcons.toolchains.unix.get_platform")
-    def test_macos_disabled_install_name(self, mock_platform) -> None:
+    def test_macos_disabled_install_name(self, mock_platform, test_project):  # noqa: F811
         mock_platform.return_value.is_macos = True
         mock_platform.return_value.is_linux = False
         tc = GccToolchain()
@@ -75,7 +70,7 @@ class TestGccInstallName:
         assert flags == []
 
     @patch("pcons.toolchains.unix.get_platform")
-    def test_linux_default_soname(self, mock_platform) -> None:
+    def test_linux_default_soname(self, mock_platform, test_project):  # noqa: F811
         mock_platform.return_value.is_macos = False
         mock_platform.return_value.is_linux = True
         tc = GccToolchain()
@@ -84,7 +79,7 @@ class TestGccInstallName:
         assert flags == ["-Wl,-soname,libfoo.so"]
 
     @patch("pcons.toolchains.unix.get_platform")
-    def test_linux_explicit_soname(self, mock_platform) -> None:
+    def test_linux_explicit_soname(self, mock_platform, test_project):  # noqa: F811
         mock_platform.return_value.is_macos = False
         mock_platform.return_value.is_linux = True
         tc = GccToolchain()
@@ -94,7 +89,7 @@ class TestGccInstallName:
         assert flags == ["-Wl,-soname,libfoo.so.2"]
 
     @patch("pcons.toolchains.unix.get_platform")
-    def test_linux_disabled_soname(self, mock_platform) -> None:
+    def test_linux_disabled_soname(self, mock_platform, test_project):  # noqa: F811
         mock_platform.return_value.is_macos = False
         mock_platform.return_value.is_linux = True
         tc = GccToolchain()
@@ -103,15 +98,13 @@ class TestGccInstallName:
         flags = tc.get_link_flags_for_target(target, "libfoo.so", [])
         assert flags == []
 
-    def test_program_gets_no_flags(self) -> None:
-        Project("test_project")
+    def test_program_gets_no_flags(self, test_project):  # noqa: F811
         tc = GccToolchain()
         target = Target("app", target_type="program")
         flags = tc.get_link_flags_for_target(target, "app", [])
         assert flags == []
 
-    def test_static_library_gets_no_flags(self) -> None:
-        Project("test_project")
+    def test_static_library_gets_no_flags(self, test_project):  # noqa: F811
         tc = GccToolchain()
         target = Target("lib", target_type="static_library")
         flags = tc.get_link_flags_for_target(target, "libfoo.a", [])
@@ -120,7 +113,7 @@ class TestGccInstallName:
 
 class TestLlvmInstallName:
     @patch("pcons.toolchains.unix.get_platform")
-    def test_macos_default(self, mock_platform) -> None:
+    def test_macos_default(self, mock_platform, test_project):  # noqa: F811
         mock_platform.return_value.is_macos = True
         mock_platform.return_value.is_linux = False
         tc = LlvmToolchain()

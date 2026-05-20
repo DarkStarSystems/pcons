@@ -127,13 +127,11 @@ class TestFixDylibReferences:
 class TestCreateUniversalBinary:
     """Tests for create_universal_binary function."""
 
-    def test_creates_lipo_command(self):
+    def test_creates_lipo_command(self, test_project):
         """Test that create_universal_binary creates a lipo command target."""
         from pcons.core.node import FileNode
         from pcons.core.project import Project
         from pcons.core.target import Target
-
-        project = Project("test_project")
 
         # Create mock input nodes
         input1 = FileNode(Path("build/arm64/libtest.a"))
@@ -141,7 +139,7 @@ class TestCreateUniversalBinary:
 
         # Create universal binary
         result = create_universal_binary(
-            project,
+            test_project,
             "test_universal",
             inputs=[input1, input2],
             output="build/universal/libtest.a",
@@ -159,16 +157,14 @@ class TestCreateUniversalBinary:
         assert len(result.output_nodes) > 0
         assert result.output_nodes[0].path == Path("build/universal/libtest.a")
 
-    def test_accepts_path_inputs(self):
+    def test_accepts_path_inputs(self, test_project):
         """Test that create_universal_binary accepts Path inputs."""
         from pcons.core.project import Project
         from pcons.core.target import Target
 
-        project = Project("test_project")
-
         # Create using Path inputs
         result = create_universal_binary(
-            project,
+            test_project,
             "test_universal",
             inputs=[
                 Path("build/arm64/libtest.a"),
@@ -181,27 +177,22 @@ class TestCreateUniversalBinary:
         assert len(result.output_nodes) > 0
         assert result.output_nodes[0].path == Path("build/universal/libtest.a")
 
-    def test_raises_on_empty_inputs(self):
+    def test_raises_on_empty_inputs(self, test_project):
         """Test that create_universal_binary raises on empty inputs."""
         from pcons.core.project import Project
 
-        project = Project("test_project")
-
         with pytest.raises(ValueError, match="requires at least one input"):
             create_universal_binary(
-                project,
+                test_project,
                 "test_universal",
                 inputs=[],
                 output="build/universal/libtest.a",
             )
 
-    def test_accepts_target_inputs(self):
+    def test_accepts_target_inputs(self, test_project):
         """Test that create_universal_binary accepts Target inputs."""
         from pcons.core.node import FileNode
-        from pcons.core.project import Project
         from pcons.core.target import Target
-
-        project = Project("test_project")
 
         # Create mock targets with output nodes
         target1 = Target(
@@ -219,7 +210,7 @@ class TestCreateUniversalBinary:
         target2.output_nodes.append(output2)
 
         result = create_universal_binary(
-            project,
+            test_project,
             "test_universal",
             inputs=[target1, target2],
             output="build/universal/libtest.a",

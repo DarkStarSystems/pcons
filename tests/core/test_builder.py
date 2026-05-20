@@ -40,13 +40,12 @@ class TestBaseBuilder:
         assert builder.target_suffixes == [".o"]
         assert builder.language == "c"
 
-    def test_normalize_sources(self):
+    def test_normalize_sources(self, test_project):  # noqa: F811
         class TestBuilder(BaseBuilder):
             def _build(self, env, targets, sources, **kwargs):
                 return sources
 
         builder = TestBuilder("Test", "test", target_suffixes=[".out"])
-        Project("test_project")
         env = Environment()
 
         # Mix of strings, Paths, and Nodes
@@ -70,7 +69,7 @@ class TestCommandBuilder:
         assert builder.name == "Object"
         assert builder.tool_name == "cc"
 
-    def test_single_source_mode(self):
+    def test_single_source_mode(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Object",
             "cc",
@@ -80,7 +79,6 @@ class TestCommandBuilder:
             single_source=True,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmdline = "$cc.cmd -c -o $TARGET $SOURCE"
@@ -92,7 +90,7 @@ class TestCommandBuilder:
         assert len(result) == 2
         assert all(isinstance(n, FileNode) for n in result)
 
-    def test_multi_source_mode(self):
+    def test_multi_source_mode(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Program",
             "link",
@@ -102,7 +100,6 @@ class TestCommandBuilder:
             single_source=False,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmdline = "$link.cmd -o $TARGET $SOURCES"
@@ -115,7 +112,7 @@ class TestCommandBuilder:
         assert isinstance(result[0], FileNode)
         assert result[0].path == Path("app")
 
-    def test_default_target_path(self):
+    def test_default_target_path(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Object",
             "cc",
@@ -125,7 +122,6 @@ class TestCommandBuilder:
             single_source=True,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -138,7 +134,7 @@ class TestCommandBuilder:
         assert isinstance(result[0], FileNode)
         assert result[0].path == Path("out/foo.o")
 
-    def test_explicit_target_path(self):
+    def test_explicit_target_path(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Object",
             "cc",
@@ -148,7 +144,6 @@ class TestCommandBuilder:
             single_source=True,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -159,7 +154,7 @@ class TestCommandBuilder:
         assert isinstance(result[0], FileNode)
         assert result[0].path == Path("custom/output.o")
 
-    def test_target_has_dependencies(self):
+    def test_target_has_dependencies(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Object",
             "cc",
@@ -169,7 +164,6 @@ class TestCommandBuilder:
             single_source=True,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -181,7 +175,7 @@ class TestCommandBuilder:
         target = result[0]
         assert source in target.explicit_deps
 
-    def test_target_has_builder_reference(self):
+    def test_target_has_builder_reference(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Object",
             "cc",
@@ -191,7 +185,6 @@ class TestCommandBuilder:
             single_source=True,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -203,7 +196,7 @@ class TestCommandBuilder:
         assert target.is_target
         assert not target.is_source
 
-    def test_target_has_build_info(self):
+    def test_target_has_build_info(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Object",
             "cc",
@@ -214,7 +207,6 @@ class TestCommandBuilder:
             single_source=True,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -232,7 +224,7 @@ class TestCommandBuilder:
 
 
 class TestCommandBuilderDepfile:
-    def test_depfile_and_deps_style_stored(self):
+    def test_depfile_and_deps_style_stored(self, test_project):  # noqa: F811
         from pcons.core.subst import PathToken, TargetPath
 
         builder = CommandBuilder(
@@ -247,7 +239,6 @@ class TestCommandBuilderDepfile:
             deps_style="gcc",
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"
@@ -264,7 +255,7 @@ class TestCommandBuilderDepfile:
         assert info["depfile"].path == "foo.o"
         assert info["deps_style"] == "gcc"
 
-    def test_msvc_deps_style_no_depfile(self):
+    def test_msvc_deps_style_no_depfile(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Object",
             "cc",
@@ -276,7 +267,6 @@ class TestCommandBuilderDepfile:
             deps_style="msvc",
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "cl.exe"
@@ -290,7 +280,7 @@ class TestCommandBuilderDepfile:
         assert info["depfile"] is None
         assert info["deps_style"] == "msvc"
 
-    def test_no_deps_by_default(self):
+    def test_no_deps_by_default(self, test_project):  # noqa: F811
         builder = CommandBuilder(
             "Program",
             "link",
@@ -300,7 +290,6 @@ class TestCommandBuilderDepfile:
             single_source=False,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "gcc"

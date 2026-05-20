@@ -21,14 +21,12 @@ class TestTopologicalSortTargets:
         result = topological_sort_targets([])
         assert result == []
 
-    def test_single_target(self):
-        Project("test_project")
+    def test_single_target(self, test_project):  # noqa: F811
         target = Target("app")
         result = topological_sort_targets([target])
         assert result == [target]
 
-    def test_linear_dependency(self):
-        Project("test_project")
+    def test_linear_dependency(self, test_project):  # noqa: F811
         # A depends on B depends on C
         c = Target("C")
         b = Target("B")
@@ -42,9 +40,8 @@ class TestTopologicalSortTargets:
         assert result.index(c) < result.index(b)
         assert result.index(b) < result.index(a)
 
-    def test_diamond_dependency(self):
+    def test_diamond_dependency(self, test_project):  # noqa: F811
         # A depends on B and C, both depend on D
-        Project("test_project")
         d = Target("D")
         b = Target("B")
         b.link(d)
@@ -62,8 +59,7 @@ class TestTopologicalSortTargets:
         assert result.index(b) < result.index(a)
         assert result.index(c) < result.index(a)
 
-    def test_cycle_raises_error(self):
-        Project("test_project")
+    def test_cycle_raises_error(self, test_project):  # noqa: F811
         a = Target("A")
         b = Target("B")
         a.link(b)
@@ -74,8 +70,7 @@ class TestTopologicalSortTargets:
 
 
 class TestDetectCycles:
-    def test_no_cycle(self):
-        Project("test_project")
+    def test_no_cycle(self, test_project):  # noqa: F811
         a = Target("A")
         b = Target("B")
         a.link(b)
@@ -83,8 +78,7 @@ class TestDetectCycles:
         cycles = detect_cycles_in_targets([a, b])
         assert cycles == []
 
-    def test_simple_cycle(self):
-        Project("test_project")
+    def test_simple_cycle(self, test_project):  # noqa: F811
         a = Target("A")
         b = Target("B")
         a.link(b)
@@ -95,16 +89,14 @@ class TestDetectCycles:
         assert "A" in cycles[0]
         assert "B" in cycles[0]
 
-    def test_self_cycle(self):
-        Project("test_project")
+    def test_self_cycle(self, test_project):  # noqa: F811
         a = Target("A")
         # Self-link is now caught early by link() validation
         with pytest.raises(ValueError, match="cannot link itself"):
             a.link(a)
 
-    def test_multiple_cycles(self):
+    def test_multiple_cycles(self, test_project):  # noqa: F811
         # Two separate cycles: A<->B and C<->D
-        Project("test_project")
         a = Target("A")
         b = Target("B")
         a.link(b)
@@ -153,8 +145,7 @@ class TestCollectAllNodes:
         nodes = collect_all_nodes([])
         assert nodes == set()
 
-    def test_collects_from_single_target(self):
-        Project("test_project")
+    def test_collects_from_single_target(self, test_project):  # noqa: F811
         target = Target("app")
         src = FileNode("main.c")
         out = FileNode("app")
@@ -166,8 +157,7 @@ class TestCollectAllNodes:
         assert src in nodes
         assert out in nodes
 
-    def test_collects_from_dependencies(self):
-        Project("test_project")
+    def test_collects_from_dependencies(self, test_project):  # noqa: F811
         lib = Target("lib")
         lib_src = FileNode("lib.c")
         lib_out = FileNode("lib.o")
@@ -190,14 +180,12 @@ class TestCollectAllNodes:
 
 
 class TestCollectBuildOrder:
-    def test_single_target(self):
-        Project("test_project")
+    def test_single_target(self, test_project):  # noqa: F811
         app = Target("app")
         order = collect_build_order(app)
         assert order == [app]
 
-    def test_with_dependencies(self):
-        Project("test_project")
+    def test_with_dependencies(self, test_project):  # noqa: F811
         lib = Target("lib")
         app = Target("app")
         app.link(lib)
@@ -206,8 +194,7 @@ class TestCollectBuildOrder:
 
         assert order.index(lib) < order.index(app)
 
-    def test_diamond_dependency(self):
-        Project("test_project")
+    def test_diamond_dependency(self, test_project):  # noqa: F811
         base = Target("base")
         left = Target("left")
         left.link(base)

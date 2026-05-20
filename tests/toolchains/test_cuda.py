@@ -77,11 +77,10 @@ class TestCudaToolchain:
 class TestCudaVariants:
     """Tests for CUDA variant support."""
 
-    def test_apply_debug_variant(self):
+    def test_apply_debug_variant(self, test_project):  # noqa: F811
         """Debug variant adds debug flags."""
         from pcons.core.environment import Environment
 
-        Project("test_project")
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
         toolchain._configured = True
@@ -101,11 +100,10 @@ class TestCudaVariants:
         assert "-g" in env.cuda.flags
         assert "DEBUG" in env.cuda.defines
 
-    def test_apply_release_variant(self):
+    def test_apply_release_variant(self, test_project):  # noqa: F811
         """Release variant adds optimization flags."""
         from pcons.core.environment import Environment
 
-        Project("test_project")
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
         toolchain._configured = True
@@ -122,11 +120,10 @@ class TestCudaVariants:
         # Should NOT have debug flags
         assert "-G" not in env.cuda.flags
 
-    def test_apply_profile_variant(self):
+    def test_apply_profile_variant(self, test_project):  # noqa: F811
         """Profile variant adds line info for profilers."""
         from pcons.core.environment import Environment
 
-        Project("test_project")
         toolchain = CudaToolchain()
         toolchain._tools = {"cuda": CudaCompiler()}
         toolchain._configured = True

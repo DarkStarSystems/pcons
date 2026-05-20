@@ -2,7 +2,6 @@
 """Tests for macOS Framework linking support."""
 
 from pcons.core.environment import Environment
-from pcons.core.project import Project
 from pcons.packages.description import PackageDescription
 from pcons.toolchains.gcc import GccLinker
 from pcons.toolchains.llvm import LlvmLinker
@@ -73,9 +72,8 @@ class TestLlvmLinkerFrameworks:
 class TestEnvironmentFramework:
     """Test env.Framework() convenience method."""
 
-    def test_framework_adds_to_link_frameworks(self):
+    def test_framework_adds_to_link_frameworks(self, test_project):  # noqa: F811
         """Framework() should add to link.frameworks."""
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -84,9 +82,8 @@ class TestEnvironmentFramework:
         env.Framework("Foundation")
         assert "Foundation" in env.link.frameworks
 
-    def test_framework_multiple(self):
+    def test_framework_multiple(self, test_project):  # noqa: F811
         """Framework() should handle multiple frameworks at once."""
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -97,9 +94,8 @@ class TestEnvironmentFramework:
         assert "CoreFoundation" in env.link.frameworks
         assert "Metal" in env.link.frameworks
 
-    def test_framework_with_dirs(self):
+    def test_framework_with_dirs(self, test_project):  # noqa: F811
         """Framework() should accept custom search directories."""
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -109,9 +105,8 @@ class TestEnvironmentFramework:
         assert "MyFramework" in env.link.frameworks
         assert "/custom/frameworks" in env.link.frameworkdirs
 
-    def test_framework_no_duplicates(self):
+    def test_framework_no_duplicates(self, test_project):  # noqa: F811
         """Framework() should not add duplicate frameworks."""
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -121,17 +116,15 @@ class TestEnvironmentFramework:
         env.Framework("Foundation")  # Add again
         assert env.link.frameworks.count("Foundation") == 1
 
-    def test_framework_without_link_tool(self):
+    def test_framework_without_link_tool(self, test_project):  # noqa: F811
         """Framework() should do nothing if link tool doesn't exist."""
-        Project("test_project")
         env = Environment()
         # Don't add link tool
         env.Framework("Foundation")  # Should not raise
         assert not env.has_tool("link")
 
-    def test_framework_creates_lists_if_missing(self):
+    def test_framework_creates_lists_if_missing(self, test_project):  # noqa: F811
         """Framework() should create frameworks/frameworkdirs if they don't exist."""
-        Project("test_project")
         env = Environment()
         link = env.add_tool("link")
         # Don't set frameworks/frameworkdirs
@@ -146,9 +139,8 @@ class TestEnvironmentFramework:
 class TestEnvironmentUseWithFrameworks:
     """Test env.use() with packages that have frameworks."""
 
-    def test_use_applies_frameworks(self):
+    def test_use_applies_frameworks(self, test_project):  # noqa: F811
         """use() should apply frameworks from a package."""
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = []
@@ -165,9 +157,8 @@ class TestEnvironmentUseWithFrameworks:
         assert "Foundation" in env.link.frameworks
         assert "/System/Library/Frameworks" in env.link.frameworkdirs
 
-    def test_use_no_duplicate_frameworks(self):
+    def test_use_no_duplicate_frameworks(self, test_project):  # noqa: F811
         """use() should not add duplicate frameworks."""
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.frameworks = ["Foundation"]
@@ -302,9 +293,8 @@ class TestPairwiseFunction:
 class TestFrameworkSubstitution:
     """Test that framework variables are correctly substituted in linker commands."""
 
-    def test_framework_substitution_in_progcmd(self):
+    def test_framework_substitution_in_progcmd(self, test_project):  # noqa: F811
         """Framework variables should expand correctly in link commands."""
-        Project("test_project")
         env = Environment()
         link = env.add_tool("link")
         link.cmd = "clang"
@@ -341,9 +331,8 @@ class TestFrameworkSubstitution:
         assert "Foundation" in result
         assert "CoreFoundation" in result
 
-    def test_empty_frameworks_no_extra_tokens(self):
+    def test_empty_frameworks_no_extra_tokens(self, test_project):  # noqa: F811
         """Empty frameworks should not add extra tokens."""
-        Project("test_project")
         env = Environment()
         link = env.add_tool("link")
         link.cmd = "clang"

@@ -167,11 +167,10 @@ class TestLinuxCrossPreset:
 class TestCrossPresetApplication:
     """Tests for applying cross-presets to environments via toolchains."""
 
-    def test_unix_apply_triple(self) -> None:
+    def test_unix_apply_triple(self, test_project):  # noqa: F811
         """UnixToolchain should apply --target flag."""
         from pcons.toolchains.llvm import LlvmToolchain
 
-        Project("test_project")
         env = _make_unix_env()
         toolchain = LlvmToolchain()
 
@@ -185,11 +184,10 @@ class TestCrossPresetApplication:
         assert "--target=aarch64-linux-gnu" in env.cc.flags
         assert "--target=aarch64-linux-gnu" in env.cxx.flags
 
-    def test_unix_apply_sysroot(self) -> None:
+    def test_unix_apply_sysroot(self, test_project):  # noqa: F811
         """UnixToolchain should apply --sysroot flag."""
         from pcons.toolchains.llvm import LlvmToolchain
 
-        Project("test_project")
         env = _make_unix_env()
         toolchain = LlvmToolchain()
 
@@ -203,11 +201,10 @@ class TestCrossPresetApplication:
         assert "--sysroot=/opt/sysroot" in env.cc.flags
         assert "--sysroot=/opt/sysroot" in env.link.flags
 
-    def test_unix_apply_extra_flags(self) -> None:
+    def test_unix_apply_extra_flags(self, test_project):  # noqa: F811
         """Extra compile/link flags should be applied."""
         from pcons.toolchains.gcc import GccToolchain
 
-        Project("test_project")
         env = _make_unix_env()
         toolchain = GccToolchain()
 
@@ -222,11 +219,10 @@ class TestCrossPresetApplication:
         assert "-DCUSTOM" in env.cc.flags
         assert "-lcustom" in env.link.flags
 
-    def test_unix_apply_env_vars(self) -> None:
+    def test_unix_apply_env_vars(self, test_project):  # noqa: F811
         """CC/CXX overrides from env_vars should be applied."""
         from pcons.toolchains.gcc import GccToolchain
 
-        Project("test_project")
         env = _make_unix_env()
         toolchain = GccToolchain()
 
@@ -240,11 +236,10 @@ class TestCrossPresetApplication:
         assert env.cc.cmd == "/usr/bin/custom-gcc"
         assert env.cxx.cmd == "/usr/bin/custom-g++"
 
-    def test_msvc_apply_machine(self) -> None:
+    def test_msvc_apply_machine(self, test_project):  # noqa: F811
         """MsvcCompatibleToolchain should apply /MACHINE flags."""
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 
-        Project("test_project")
         env = Environment()
         link = env.add_tool("link")
         link.set("cmd", "link.exe")
@@ -264,11 +259,10 @@ class TestCrossPresetApplication:
 
         assert "/MACHINE:ARM64" in env.link.flags
 
-    def test_env_apply_cross_preset_delegates(self) -> None:
+    def test_env_apply_cross_preset_delegates(self, test_project):  # noqa: F811
         """Environment.apply_cross_preset() should delegate to toolchains."""
         from pcons.toolchains.llvm import LlvmToolchain
 
-        Project("test_project")
         env = _make_unix_env()
         env._toolchain = LlvmToolchain()
 

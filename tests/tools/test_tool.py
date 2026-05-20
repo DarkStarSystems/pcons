@@ -56,9 +56,8 @@ class TestBaseTool:
         builders = tool.builders()
         assert "Compile" in builders
 
-    def test_setup_creates_namespace(self):
+    def test_setup_creates_namespace(self, test_project):  # noqa: F811
         tool = MockTool()
-        Project("test_project")
         env = Environment()
 
         tool.setup(env)
@@ -66,9 +65,8 @@ class TestBaseTool:
         assert env.has_tool("mock")
         assert env.mock.cmd == "mock-compiler"
 
-    def test_setup_attaches_builders(self):
+    def test_setup_attaches_builders(self, test_project):  # noqa: F811
         tool = MockTool()
-        Project("test_project")
         env = Environment()
 
         tool.setup(env)
@@ -79,9 +77,8 @@ class TestBaseTool:
 
 
 class TestBuilderMethod:
-    def test_call_with_string_source(self):
+    def test_call_with_string_source(self, test_project):  # noqa: F811
         tool = MockTool()
-        Project("test_project")
         env = Environment()
         tool.setup(env)
 
@@ -89,9 +86,8 @@ class TestBuilderMethod:
 
         assert len(result) == 1
 
-    def test_call_with_list_sources(self):
+    def test_call_with_list_sources(self, test_project):  # noqa: F811
         tool = MockTool()
-        Project("test_project")
         env = Environment()
         tool.setup(env)
 
@@ -99,9 +95,8 @@ class TestBuilderMethod:
 
         assert len(result) == 2
 
-    def test_call_with_no_sources(self):
+    def test_call_with_no_sources(self, test_project):  # noqa: F811
         tool = MockTool()
-        Project("test_project")
         env = Environment()
         tool.setup(env)
 

@@ -71,22 +71,19 @@ class TestUsageRequirements:
 
 
 class TestTarget:
-    def test_creation(self):
-        Project("test_project")
+    def test_creation(self, test_project):  # noqa: F811
         target = Target("mylib")
         assert target.name == "mylib"
         assert target.nodes == []
         assert target.sources == []
         assert target.dependencies == []
 
-    def test_tracks_source_location(self):
-        Project("test_project")
+    def test_tracks_source_location(self, test_project):  # noqa: F811
         target = Target("mylib")
         assert target.defined_at is not None
         assert target.defined_at.lineno > 0
 
-    def test_link_adds_dependency(self):
-        Project("test_project")
+    def test_link_adds_dependency(self, test_project):  # noqa: F811
         lib1 = Target("lib1")
         lib2 = Target("lib2")
         app = Target("app")
@@ -97,8 +94,7 @@ class TestTarget:
         assert lib1 in app.dependencies
         assert lib2 in app.dependencies
 
-    def test_link_avoids_duplicates(self):
-        Project("test_project")
+    def test_link_avoids_duplicates(self, test_project):  # noqa: F811
         lib = Target("lib")
         app = Target("app")
 
@@ -107,8 +103,7 @@ class TestTarget:
 
         assert app.dependencies.count(lib) == 1
 
-    def test_usage_requirements(self):
-        Project("test_project")
+    def test_usage_requirements(self, test_project):  # noqa: F811
         lib = Target("lib")
         lib.public.include_dirs.append(Path("include"))
         lib.public.defines.append("LIB_API")
@@ -118,10 +113,9 @@ class TestTarget:
         assert lib.public.defines == ["LIB_API"]
         assert lib.private.defines == ["LIB_BUILDING"]
 
-    def test_collect_usage_requirements(self):
+    def test_collect_usage_requirements(self, test_project):  # noqa: F811
         """Test transitive requirement collection."""
         # Create a dependency chain: app -> libB -> libA
-        Project("test_project")
         libA = Target("libA")
         libA.public.include_dirs.append(Path("libA/include"))
         libA.public.defines.append("LIBA_API")
@@ -142,9 +136,8 @@ class TestTarget:
         assert "LIBA_API" in requirements.defines
         assert "APP_PRIVATE" in requirements.defines
 
-    def test_collect_usage_requirements_cached(self):
+    def test_collect_usage_requirements_cached(self, test_project):  # noqa: F811
         """Test that collection is cached."""
-        Project("test_project")
         lib = Target("lib")
         app = Target("app")
         app.link(lib)
@@ -154,9 +147,8 @@ class TestTarget:
 
         assert req1 is req2  # Same object (cached)
 
-    def test_collect_usage_requirements_invalidated(self):
+    def test_collect_usage_requirements_invalidated(self, test_project):  # noqa: F811
         """Test that cache is invalidated on new link."""
-        Project("test_project")
         lib1 = Target("lib1")
         lib2 = Target("lib2")
         lib2.public.defines.append("LIB2")
@@ -172,8 +164,7 @@ class TestTarget:
         assert req2 is not req1
         assert "LIB2" in req2.defines
 
-    def test_get_all_languages(self):
-        Project("test_project")
+    def test_get_all_languages(self, test_project):  # noqa: F811
         lib = Target("lib")
         lib.required_languages.add("c")
 
@@ -185,8 +176,7 @@ class TestTarget:
         assert "c" in langs
         assert "cxx" in langs
 
-    def test_equality_by_name(self):
-        Project("test_project")
+    def test_equality_by_name(self, test_project):  # noqa: F811
         t1 = Target("mylib")
         t2 = Target("mylib")
         t3 = Target("other")
@@ -194,8 +184,7 @@ class TestTarget:
         assert t1 == t2
         assert t1 != t3
 
-    def test_hashable(self):
-        Project("test_project")
+    def test_hashable(self, test_project):  # noqa: F811
         t1 = Target("mylib")
         t2 = Target("mylib")
 
@@ -209,16 +198,14 @@ class TestTarget:
 
 
 class TestImportedTarget:
-    def test_creation(self):
-        Project("test_project")
+    def test_creation(self, test_project):  # noqa: F811
         target = ImportedTarget("zlib", version="1.2.11")
         assert target.name == "zlib"
         assert target.is_imported is True
         assert target.package_name == "zlib"
         assert target.version == "1.2.11"
 
-    def test_can_have_usage_requirements(self):
-        Project("test_project")
+    def test_can_have_usage_requirements(self, test_project):  # noqa: F811
         target = ImportedTarget("zlib")
         target.public.include_dirs.append(Path("/usr/include"))
         target.public.link_libs.append("z")
@@ -226,8 +213,7 @@ class TestImportedTarget:
         assert target.public.include_dirs == [Path("/usr/include")]
         assert target.public.link_libs == ["z"]
 
-    def test_can_be_dependency(self):
-        Project("test_project")
+    def test_can_be_dependency(self, test_project):  # noqa: F811
         zlib = ImportedTarget("zlib")
         zlib.public.link_libs.append("z")
 
@@ -241,9 +227,8 @@ class TestImportedTarget:
 class TestFluentAPI:
     """Tests for fluent API methods."""
 
-    def test_link_returns_self(self):
+    def test_link_returns_self(self, test_project):  # noqa: F811
         """link() returns self for chaining."""
-        Project("test_project")
         lib = Target("lib")
         app = Target("app")
 
@@ -252,9 +237,8 @@ class TestFluentAPI:
         assert result is app
         assert lib in app.dependencies
 
-    def test_add_source_returns_self(self, tmp_path):
+    def test_add_source_returns_self(self, tmp_path, test_project):  # noqa: F811
         """add_source() returns self for chaining."""
-        Project("test_project")
         target = Target("app")
         src = tmp_path / "main.c"
         src.touch()
@@ -264,9 +248,8 @@ class TestFluentAPI:
         assert result is target
         assert len(target.sources) == 1
 
-    def test_add_sources_returns_self(self, tmp_path):
+    def test_add_sources_returns_self(self, tmp_path, test_project):  # noqa: F811
         """add_sources() returns self for chaining."""
-        Project("test_project")
         target = Target("app")
         src1 = tmp_path / "main.c"
         src2 = tmp_path / "util.c"
@@ -278,9 +261,8 @@ class TestFluentAPI:
         assert result is target
         assert len(target.sources) == 2
 
-    def test_add_sources_with_base(self, tmp_path):
+    def test_add_sources_with_base(self, tmp_path, test_project):  # noqa: F811
         """add_sources() with base directory works."""
-        Project("test_project")
         target = Target("app")
         src_dir = tmp_path / "src"
         src_dir.mkdir()
@@ -295,9 +277,8 @@ class TestFluentAPI:
         assert src_dir / "main.c" in paths
         assert src_dir / "util.c" in paths
 
-    def test_public_private_requirements(self):
+    def test_public_private_requirements(self, test_project):  # noqa: F811
         """Usage requirements can be set directly on public/private."""
-        Project("test_project")
         target = Target("lib")
 
         target.public.include_dirs.append(Path("include"))
@@ -311,9 +292,8 @@ class TestFluentAPI:
         assert Path("src") in target.private.include_dirs
         assert "BUILDING_LIB" in target.private.defines
 
-    def test_link_chain(self, tmp_path):
+    def test_link_chain(self, tmp_path, test_project):  # noqa: F811
         """link() can be chained with other fluent methods."""
-        Project("test_project")
         lib = Target("lib")
         app = Target("app")
         src = tmp_path / "main.c"
@@ -329,9 +309,8 @@ class TestFluentAPI:
 class TestPostBuild:
     """Tests for post_build() functionality."""
 
-    def test_post_build_adds_command(self):
+    def test_post_build_adds_command(self, test_project):  # noqa: F811
         """post_build() adds a command to the list."""
-        Project("test_project")
         target = Target("app")
 
         target.post_build("install_name_tool -add_rpath @loader_path $out")
@@ -340,18 +319,16 @@ class TestPostBuild:
         assert len(post_build_cmds) == 1
         assert post_build_cmds[0] == "install_name_tool -add_rpath @loader_path $out"
 
-    def test_post_build_fluent_returns_self(self):
+    def test_post_build_fluent_returns_self(self, test_project):  # noqa: F811
         """post_build() returns self for chaining."""
-        Project("test_project")
         target = Target("app")
 
         result = target.post_build("echo done")
 
         assert result is target
 
-    def test_post_build_multiple_commands(self):
+    def test_post_build_multiple_commands(self, test_project):  # noqa: F811
         """Multiple post_build() calls accumulate commands in order."""
-        Project("test_project")
         target = Target("plugin")
 
         target.post_build("install_name_tool -add_rpath @loader_path $out")
@@ -367,9 +344,8 @@ class TestPostBuild:
         )
         assert post_build_cmds[2] == "codesign --sign - $out"
 
-    def test_post_build_chain_with_other_methods(self, tmp_path):
+    def test_post_build_chain_with_other_methods(self, tmp_path, test_project):  # noqa: F811
         """post_build() can be chained with other fluent methods."""
-        Project("test_project")
         target = Target("app")
         src = tmp_path / "main.c"
         src.touch()
@@ -383,9 +359,8 @@ class TestPostBuild:
         assert len(post_build_cmds) == 1
         assert "DEBUG" in target.private.defines
 
-    def test_post_build_empty_by_default(self):
+    def test_post_build_empty_by_default(self, test_project):  # noqa: F811
         """Target has no post_build commands by default."""
-        Project("test_project")
         target = Target("app")
 
         post_build_cmds = target._builder_data.get("post_build_commands", [])
@@ -395,9 +370,8 @@ class TestPostBuild:
 class TestTargetDepends:
     """Tests for target.depends() implicit dependency support."""
 
-    def test_depends_with_file_node(self):
+    def test_depends_with_file_node(self, test_project):  # noqa: F811
         """depends() accepts FileNode objects."""
-        Project("test_project")
         target = Target("app")
         dep = FileNode("tools/codegen.py")
 
@@ -405,9 +379,8 @@ class TestTargetDepends:
 
         assert dep in target._extra_implicit_deps
 
-    def test_depends_with_string_no_project(self):
+    def test_depends_with_string_no_project(self, test_project):  # noqa: F811
         """depends() with string creates FileNode when no project."""
-        Project("test_project")
         target = Target("app")
 
         target.depends("tools/codegen.py")
@@ -415,9 +388,8 @@ class TestTargetDepends:
         assert len(target._extra_implicit_deps) == 1
         assert target._extra_implicit_deps[0].path == Path("tools/codegen.py")
 
-    def test_depends_with_target(self):
+    def test_depends_with_target(self, test_project):  # noqa: F811
         """depends() with Target adds to implicit target deps, not link deps."""
-        Project("test_project")
         target = Target("app")
         lib = Target("mylib")
 
@@ -427,9 +399,8 @@ class TestTargetDepends:
         assert len(target.dependencies) == 0
         assert len(target._extra_implicit_deps) == 0
 
-    def test_depends_mixed_args(self):
+    def test_depends_mixed_args(self, test_project):  # noqa: F811
         """depends() handles mixed Target and file args."""
-        Project("test_project")
         target = Target("app")
         lib = Target("mylib")
         config = FileNode("config.yaml")
@@ -441,9 +412,8 @@ class TestTargetDepends:
         assert config in target._extra_implicit_deps
         assert len(target._extra_implicit_deps) == 2
 
-    def test_depends_fluent(self):
+    def test_depends_fluent(self, test_project):  # noqa: F811
         """depends() returns self for chaining."""
-        Project("test_project")
         target = Target("app")
 
         result = target.depends("a.txt").depends("b.txt")
@@ -471,9 +441,8 @@ class TestTargetDepends:
         # After resolve, the dep is on the output node
         assert len(cmd.output_nodes[0].implicit_deps) == 1
 
-    def test_apply_extra_implicit_deps_propagated(self):
+    def test_apply_extra_implicit_deps_propagated(self, test_project):  # noqa: F811
         """Propagated deps go on both object nodes and output nodes."""
-        Project("test_project")
         target = Target("app")
         obj = FileNode("build/main.o")
         exe = FileNode("build/app")
@@ -487,9 +456,8 @@ class TestTargetDepends:
         assert dep in obj.implicit_deps
         assert dep in exe.implicit_deps
 
-    def test_apply_extra_implicit_deps_output_only(self):
+    def test_apply_extra_implicit_deps_output_only(self, test_project):  # noqa: F811
         """Output-only deps go on output nodes but not object nodes."""
-        Project("test_project")
         target = Target("app")
         obj = FileNode("build/main.o")
         exe = FileNode("build/app")
@@ -503,9 +471,8 @@ class TestTargetDepends:
         assert dep not in obj.implicit_deps
         assert dep in exe.implicit_deps
 
-    def test_depends_propagate_false(self):
+    def test_depends_propagate_false(self, test_project):  # noqa: F811
         """depends(propagate=False) stores in output-only lists."""
-        Project("test_project")
         target = Target("app")
         lib = Target("mylib")
 
@@ -516,9 +483,8 @@ class TestTargetDepends:
         assert len(target._extra_implicit_deps) == 0
         assert len(target._extra_implicit_deps_output_only) == 1
 
-    def test_apply_no_duplicates(self):
+    def test_apply_no_duplicates(self, test_project):  # noqa: F811
         """_apply_extra_implicit_deps doesn't add duplicates."""
-        Project("test_project")
         target = Target("app")
         output = FileNode("build/app")
         target.output_nodes.append(output)

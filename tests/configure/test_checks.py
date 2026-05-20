@@ -60,9 +60,8 @@ class TestToolChecksWithCompiler:
     """Tests that require a real compiler."""
 
     @pytest.fixture
-    def setup(self, tmp_path):
+    def setup(self, tmp_path, test_project):  # noqa: F811
         config = Configure(build_dir=tmp_path)
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
 
@@ -225,9 +224,8 @@ class TestToolChecksWithCompiler:
 class TestToolChecksWithoutCompiler:
     """Tests that don't require a real compiler."""
 
-    def test_no_compiler_configured(self, tmp_path):
+    def test_no_compiler_configured(self, tmp_path, test_project):  # noqa: F811
         config = Configure(build_dir=tmp_path)
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         # Don't set env.cc.cmd
@@ -238,9 +236,8 @@ class TestToolChecksWithoutCompiler:
         assert result.success is False
         assert "No compiler" in result.output
 
-    def test_cache_key_format(self, tmp_path):
+    def test_cache_key_format(self, tmp_path, test_project):  # noqa: F811
         config = Configure(build_dir=tmp_path)
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "gcc"

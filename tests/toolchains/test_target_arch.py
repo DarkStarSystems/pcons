@@ -22,9 +22,8 @@ from pcons.toolchains.msvc import MsvcToolchain
 class TestGccTargetArch:
     """Tests for GCC toolchain target architecture."""
 
-    def test_macos_arm64(self) -> None:
+    def test_macos_arm64(self, test_project):  # noqa: F811
         """Test GCC arm64 target on macOS adds -arch flag."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -57,9 +56,8 @@ class TestGccTargetArch:
         assert "-arch" in link.flags
         assert "arm64" in link.flags
 
-    def test_macos_x86_64(self) -> None:
+    def test_macos_x86_64(self, test_project):  # noqa: F811
         """Test GCC x86_64 target on macOS adds -arch flag."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -84,9 +82,8 @@ class TestGccTargetArch:
         assert "-arch" in link.flags
         assert "x86_64" in link.flags
 
-    def test_linux_no_arch_flags(self) -> None:
+    def test_linux_no_arch_flags(self, test_project):  # noqa: F811
         """Test GCC on Linux doesn't add -arch flags (requires cross-toolchain)."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -114,9 +111,8 @@ class TestGccTargetArch:
 class TestLlvmTargetArch:
     """Tests for LLVM/Clang toolchain target architecture."""
 
-    def test_macos_arm64(self) -> None:
+    def test_macos_arm64(self, test_project):  # noqa: F811
         """Test LLVM arm64 target on macOS adds -arch flag."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -152,9 +148,8 @@ class TestLlvmTargetArch:
 class TestMsvcTargetArch:
     """Tests for MSVC toolchain target architecture."""
 
-    def test_x64_machine_flag(self) -> None:
+    def test_x64_machine_flag(self, test_project):  # noqa: F811
         """Test MSVC x64 target adds /MACHINE:X64."""
-        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -171,9 +166,8 @@ class TestMsvcTargetArch:
         assert "/MACHINE:X64" in link.flags
         assert "/MACHINE:X64" in lib.flags
 
-    def test_arm64_machine_flag(self) -> None:
+    def test_arm64_machine_flag(self, test_project):  # noqa: F811
         """Test MSVC arm64 target adds /MACHINE:ARM64."""
-        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -190,9 +184,8 @@ class TestMsvcTargetArch:
         assert "/MACHINE:ARM64" in link.flags
         assert "/MACHINE:ARM64" in lib.flags
 
-    def test_x86_machine_flag(self) -> None:
+    def test_x86_machine_flag(self, test_project):  # noqa: F811
         """Test MSVC x86 target adds /MACHINE:X86."""
-        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -204,9 +197,8 @@ class TestMsvcTargetArch:
 
         assert "/MACHINE:X86" in link.flags
 
-    def test_arm64ec_machine_flag(self) -> None:
+    def test_arm64ec_machine_flag(self, test_project):  # noqa: F811
         """Test MSVC arm64ec target adds /MACHINE:ARM64EC."""
-        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -218,9 +210,8 @@ class TestMsvcTargetArch:
 
         assert "/MACHINE:ARM64EC" in link.flags
 
-    def test_arch_aliases(self) -> None:
+    def test_arch_aliases(self, test_project):  # noqa: F811
         """Test MSVC architecture aliases are mapped correctly."""
-        Project("test_project")
         env = Environment()
 
         link = env.add_tool("link")
@@ -246,9 +237,8 @@ class TestMsvcTargetArch:
 class TestClangClTargetArch:
     """Tests for Clang-CL toolchain target architecture."""
 
-    def test_x64_target_and_machine(self) -> None:
+    def test_x64_target_and_machine(self, test_project):  # noqa: F811
         """Test Clang-CL x64 target adds --target flag and /MACHINE."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -272,9 +262,8 @@ class TestClangClTargetArch:
         assert "/MACHINE:X64" in link.flags
         assert "/MACHINE:X64" in lib.flags
 
-    def test_arm64_target_and_machine(self) -> None:
+    def test_arm64_target_and_machine(self, test_project):  # noqa: F811
         """Test Clang-CL arm64 target adds --target flag and /MACHINE."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -296,9 +285,8 @@ class TestClangClTargetArch:
         assert "--target=aarch64-pc-windows-msvc" in cxx.flags
         assert "/MACHINE:ARM64" in link.flags
 
-    def test_x86_target_and_machine(self) -> None:
+    def test_x86_target_and_machine(self, test_project):  # noqa: F811
         """Test Clang-CL x86 target adds --target flag and /MACHINE."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -319,18 +307,16 @@ class TestClangClTargetArch:
 class TestEnvironmentSetTargetArch:
     """Tests for Environment.set_target_arch() method."""
 
-    def test_set_target_arch_stores_name(self) -> None:
+    def test_set_target_arch_stores_name(self, test_project):  # noqa: F811
         """Test set_target_arch stores the architecture name."""
-        Project("test_project")
         env = Environment()
 
         env.set_target_arch("arm64")
 
         assert env.target_arch == "arm64"
 
-    def test_set_target_arch_with_toolchain(self) -> None:
+    def test_set_target_arch_with_toolchain(self, test_project):  # noqa: F811
         """Test set_target_arch delegates to toolchain."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -357,9 +343,8 @@ class TestEnvironmentSetTargetArch:
         assert "arm64" in cc.flags
         assert env.target_arch == "arm64"
 
-    def test_orthogonal_to_variant(self) -> None:
+    def test_orthogonal_to_variant(self, test_project):  # noqa: F811
         """Test that set_target_arch is orthogonal to set_variant."""
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -397,7 +382,7 @@ class TestEnvironmentSetTargetArch:
 class TestBaseToolchainTargetArch:
     """Tests for BaseToolchain default apply_target_arch."""
 
-    def test_base_is_noop(self) -> None:
+    def test_base_is_noop(self, test_project):  # noqa: F811
         """Test base implementation is a no-op (doesn't add flags)."""
         from pcons.tools.toolchain import BaseToolchain
 
@@ -406,7 +391,6 @@ class TestBaseToolchainTargetArch:
             def _configure_tools(self, config: object) -> bool:
                 return True
 
-        Project("test_project")
         env = Environment()
 
         cc = env.add_tool("cc")

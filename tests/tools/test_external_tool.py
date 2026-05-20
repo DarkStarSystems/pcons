@@ -141,9 +141,8 @@ class TestExternalTool:
         assert defaults["cmd"] == "cat"
         assert "bundlecmd" in defaults
 
-    def test_tool_can_setup_environment(self) -> None:
+    def test_tool_can_setup_environment(self, test_project):  # noqa: F811
         """Test that the tool can be added to an environment."""
-        Project("test_project")
         env = Environment()
         tool = ConcatTool()
         tool.setup(env)
@@ -154,9 +153,8 @@ class TestExternalTool:
         # Tool variables should be accessible
         assert env.concat.cmd == "cat"
 
-    def test_tool_builder_attached_to_environment(self) -> None:
+    def test_tool_builder_attached_to_environment(self, test_project):  # noqa: F811
         """Test that builders are attached to the tool namespace."""
-        Project("test_project")
         env = Environment()
         tool = ConcatTool()
         tool.setup(env)
@@ -164,9 +162,8 @@ class TestExternalTool:
         # Builder should be callable via tool namespace
         assert hasattr(env.concat, "Bundle")
 
-    def test_builder_creates_node(self, tmp_path: Path) -> None:
+    def test_builder_creates_node(self, tmp_path: Path, test_project):  # noqa: F811
         """Test that the builder creates target nodes."""
-        Project("test_project")
         env = Environment()
         env.build_dir = tmp_path
 
@@ -188,9 +185,8 @@ class TestExternalTool:
         # Should return a node
         assert target is not None
 
-    def test_tool_variables_can_be_modified(self) -> None:
+    def test_tool_variables_can_be_modified(self, test_project):  # noqa: F811
         """Test that tool variables can be customized."""
-        Project("test_project")
         env = Environment()
         tool = ConcatTool()
         tool.setup(env)
@@ -224,13 +220,12 @@ class TestExternalToolchain:
         if result:
             assert "concat" in toolchain.tools
 
-    def test_environment_with_toolchain(self) -> None:
+    def test_environment_with_toolchain(self, test_project):  # noqa: F811
         """Test creating an environment with the toolchain."""
         toolchain = ConcatToolchain()
         if not toolchain.configure(None):
             pytest.skip("cat command not available")
 
-        Project("test_project")
         env = Environment(toolchain=toolchain)
 
         # Tool should be available
@@ -241,9 +236,8 @@ class TestExternalToolchain:
 class TestMultipleExternalTools:
     """Test combining multiple external tools."""
 
-    def test_multiple_tools_in_environment(self) -> None:
+    def test_multiple_tools_in_environment(self, test_project):  # noqa: F811
         """Test adding multiple custom tools to an environment."""
-        Project("test_project")
         env = Environment()
 
         # Add concat tool
@@ -408,9 +402,8 @@ class TestNinjaGeneration:
 class TestToolIntegration:
     """Test that external tools integrate with the rest of pcons."""
 
-    def test_tool_with_variant(self) -> None:
+    def test_tool_with_variant(self, test_project):  # noqa: F811
         """Test that external tools work with variants."""
-        Project("test_project")
         env = Environment()
 
         concat = ConcatTool()
@@ -422,9 +415,8 @@ class TestToolIntegration:
         assert env.concat.cmd == "cat"
         assert env.variant == "release"
 
-    def test_tool_environment_clone(self) -> None:
+    def test_tool_environment_clone(self, test_project):  # noqa: F811
         """Test that cloned environments preserve external tools."""
-        Project("test_project")
         env = Environment()
 
         concat = ConcatTool()
@@ -442,9 +434,8 @@ class TestToolIntegration:
         env2.concat.flags.append("-v")
         assert "-v" not in env.concat.flags
 
-    def test_variable_substitution(self) -> None:
+    def test_variable_substitution(self, test_project):  # noqa: F811
         """Test that tool variables work with substitution."""
-        Project("test_project")
         env = Environment()
 
         concat = ConcatTool()

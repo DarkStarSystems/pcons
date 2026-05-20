@@ -169,7 +169,7 @@ class TestMultiOutputBuilder:
         )
         assert builder.outputs == outputs
 
-    def test_build_returns_output_group(self):
+    def test_build_returns_output_group(self, test_project):  # noqa: F811
         builder = MultiOutputBuilder(
             "SharedLibrary",
             "link",
@@ -181,7 +181,6 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -194,7 +193,7 @@ class TestMultiOutputBuilder:
         assert result.primary.path == Path("test.dll")
         assert result.import_lib.path == Path("test.lib")
 
-    def test_build_creates_nodes_with_correct_suffixes(self):
+    def test_build_creates_nodes_with_correct_suffixes(self, test_project):  # noqa: F811
         builder = MultiOutputBuilder(
             "SharedLibrary",
             "link",
@@ -207,7 +206,6 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -220,7 +218,7 @@ class TestMultiOutputBuilder:
         assert result.import_lib.path == Path("build/mylib.lib")
         assert result.export_file.path == Path("build/mylib.exp")
 
-    def test_primary_node_has_dependencies(self):
+    def test_primary_node_has_dependencies(self, test_project):  # noqa: F811
         builder = MultiOutputBuilder(
             "SharedLibrary",
             "link",
@@ -232,7 +230,6 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -244,7 +241,7 @@ class TestMultiOutputBuilder:
         assert isinstance(result, OutputGroup)
         assert source in result.primary.explicit_deps
 
-    def test_primary_node_has_build_info(self):
+    def test_primary_node_has_build_info(self, test_project):  # noqa: F811
         builder = MultiOutputBuilder(
             "SharedLibrary",
             "link",
@@ -256,7 +253,6 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -273,7 +269,7 @@ class TestMultiOutputBuilder:
         assert "primary" in info["outputs"]
         assert "import_lib" in info["outputs"]
 
-    def test_output_group_is_iterable_for_backward_compat(self):
+    def test_output_group_is_iterable_for_backward_compat(self, test_project):  # noqa: F811
         """OutputGroup should work with list += operations."""
         builder = MultiOutputBuilder(
             "SharedLibrary",
@@ -286,7 +282,6 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -300,7 +295,7 @@ class TestMultiOutputBuilder:
         nodes.extend(result)
         assert len(nodes) == 2
 
-    def test_secondary_nodes_reference_primary(self):
+    def test_secondary_nodes_reference_primary(self, test_project):  # noqa: F811
         builder = MultiOutputBuilder(
             "SharedLibrary",
             "link",
@@ -312,7 +307,6 @@ class TestMultiOutputBuilder:
             src_suffixes=[".obj"],
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("link")
         env.link.cmd = "link.exe"
@@ -328,7 +322,7 @@ class TestMultiOutputBuilder:
 
 
 class TestMultiOutputBuilderSingleSource:
-    def test_single_source_mode_returns_list(self):
+    def test_single_source_mode_returns_list(self, test_project):  # noqa: F811
         """In single_source mode, returns a flat list for compatibility."""
         builder = MultiOutputBuilder(
             "Object",
@@ -342,7 +336,6 @@ class TestMultiOutputBuilderSingleSource:
             single_source=True,
         )
 
-        Project("test_project")
         env = Environment()
         env.add_tool("cc")
         env.cc.cmd = "cl.exe"

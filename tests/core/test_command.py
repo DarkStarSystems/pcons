@@ -32,30 +32,26 @@ class TestGenericCommandBuilder:
         # $SOURCE and $TARGET are converted to typed markers
         assert builder.command == ["python", "script.py", SourcePath(), TargetPath()]
 
-    def test_unique_rule_names(self):
+    def test_unique_rule_names(self, test_project):  # noqa: F811
         """Each builder gets a unique rule name."""
-        Project("test_project")
         builder1 = GenericCommandBuilder("cmd1")
         builder2 = GenericCommandBuilder("cmd2")
         assert builder1.rule_name != builder2.rule_name
 
-    def test_custom_rule_name(self):
+    def test_custom_rule_name(self, test_project):  # noqa: F811
         """Builder can have a custom rule name."""
-        Project("test_project")
         builder = GenericCommandBuilder("cmd", rule_name="my_custom_rule")
         assert builder.rule_name == "my_custom_rule"
 
-    def test_requires_explicit_target(self):
+    def test_requires_explicit_target(self, test_project):  # noqa: F811
         """Builder raises error if no target is provided."""
-        Project("test_project")
         builder = GenericCommandBuilder("echo hello")
         env = Environment()
         with pytest.raises(ValueError, match="requires explicit target"):
             builder(env, None, ["source.txt"])
 
-    def test_creates_target_node(self):
+    def test_creates_target_node(self, test_project):  # noqa: F811
         """Builder creates target node with proper dependencies."""
-        Project("test_project")
         builder = GenericCommandBuilder("cp $SOURCE $TARGET")
         env = Environment()
 
@@ -66,9 +62,8 @@ class TestGenericCommandBuilder:
         assert result[0].path == Path("output.txt")
         assert result[0].builder is builder
 
-    def test_target_depends_on_sources(self):
+    def test_target_depends_on_sources(self, test_project):  # noqa: F811
         """Target node depends on all sources."""
-        Project("test_project")
         builder = GenericCommandBuilder("cat $SOURCES > $TARGET")
         env = Environment()
 
@@ -80,11 +75,10 @@ class TestGenericCommandBuilder:
         assert source1 in target.explicit_deps
         assert source2 in target.explicit_deps
 
-    def test_build_info_contains_command(self):
+    def test_build_info_contains_command(self, test_project):  # noqa: F811
         """Target node contains build info with command."""
         from pcons.core.subst import SourcePath, TargetPath
 
-        Project("test_project")
         builder = GenericCommandBuilder("process $SOURCE > $TARGET")
         env = Environment()
 
@@ -103,9 +97,8 @@ class TestGenericCommandBuilder:
         ]
         assert target._build_info.get("rule_name") == builder.rule_name
 
-    def test_srcdir_preserved_in_tokens(self):
+    def test_srcdir_preserved_in_tokens(self, test_project):  # noqa: F811
         """$SRCDIR is preserved as a plain string token (generators handle it)."""
-        Project("test_project")
         builder = GenericCommandBuilder("python $SRCDIR/scripts/gen.py $SOURCE $TARGET")
         from pcons.core.subst import SourcePath, TargetPath
 
@@ -124,9 +117,8 @@ class TestEnvironmentCommand:
     list[FileNode], and uses keyword-only arguments.
     """
 
-    def test_command_with_single_target_and_source(self):
+    def test_command_with_single_target_and_source(self, test_project):  # noqa: F811
         """Command with single target and source."""
-        Project("test_project")
         env = Environment()
         Project("dummy")
 
@@ -141,9 +133,8 @@ class TestEnvironmentCommand:
         assert len(result.output_nodes) == 1
         assert result.output_nodes[0].path == Path("output.txt")
 
-    def test_command_with_multiple_sources(self):
+    def test_command_with_multiple_sources(self, test_project):  # noqa: F811
         """Command with multiple sources."""
-        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -156,9 +147,8 @@ class TestEnvironmentCommand:
         output_node = result.output_nodes[0]
         assert len(output_node.explicit_deps) == 3
 
-    def test_command_with_multiple_targets(self):
+    def test_command_with_multiple_targets(self, test_project):  # noqa: F811
         """Command with multiple targets."""
-        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -172,9 +162,8 @@ class TestEnvironmentCommand:
         assert Path("output.h") in paths
         assert Path("output.c") in paths
 
-    def test_command_with_no_sources(self):
+    def test_command_with_no_sources(self, test_project):  # noqa: F811
         """Command with no source dependencies."""
-        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -184,9 +173,8 @@ class TestEnvironmentCommand:
         assert len(result.output_nodes) == 1
         assert len(result.output_nodes[0].explicit_deps) == 0
 
-    def test_command_with_path_objects(self):
+    def test_command_with_path_objects(self, test_project):  # noqa: F811
         """Command accepts Path objects."""
-        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -198,18 +186,16 @@ class TestEnvironmentCommand:
         assert len(result.output_nodes) == 1
         assert result.output_nodes[0].path == Path("build/output.txt")
 
-    def test_command_registers_nodes(self):
+    def test_command_registers_nodes(self, test_project):  # noqa: F811
         """Command registers nodes with environment."""
-        Project("test_project")
         env = Environment()
 
         result = env.Command(target="out.txt", source="in.txt", command="cmd")
 
         assert result.output_nodes[0] in env.created_nodes
 
-    def test_command_returns_target(self):
+    def test_command_returns_target(self, test_project):  # noqa: F811
         """Command returns Target object (not list[FileNode])."""
-        Project("test_project")
         env = Environment()
 
         result = env.Command(
@@ -221,18 +207,16 @@ class TestEnvironmentCommand:
         assert isinstance(result, Target)
         assert all(isinstance(n, FileNode) for n in result.output_nodes)
 
-    def test_command_name_derived_from_target(self):
+    def test_command_name_derived_from_target(self, test_project):  # noqa: F811
         """Command target name is derived from first target file if not specified."""
-        Project("test_project")
         env = Environment()
 
         result = env.Command(target="my_output.txt", source="in.txt", command="cmd")
 
         assert result.name == "my_output"
 
-    def test_command_explicit_name(self):
+    def test_command_explicit_name(self, test_project):  # noqa: F811
         """Command can have an explicit name."""
-        Project("test_project")
         env = Environment()
 
         result = env.Command(

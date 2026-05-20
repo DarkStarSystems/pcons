@@ -13,9 +13,8 @@ from pcons.packages.imported import ImportedTarget
 class TestImportedTarget:
     """Tests for ImportedTarget."""
 
-    def test_create_imported_target(self) -> None:
+    def test_create_imported_target(self, test_project):  # noqa: F811
         """Test creating an imported target directly."""
-        Project("test_project")
         pkg = PackageDescription(
             name="zlib",
             version="1.2.13",
@@ -28,9 +27,8 @@ class TestImportedTarget:
         assert target.is_imported is True
         assert target.package is pkg
 
-    def test_from_package(self) -> None:
+    def test_from_package(self, test_project):  # noqa: F811
         """Test creating from a PackageDescription."""
-        Project("test_project")
         pkg = PackageDescription(
             name="openssl",
             version="3.0",
@@ -44,9 +42,8 @@ class TestImportedTarget:
         assert target.version == "3.0"
         assert target.libraries == ["ssl", "crypto"]
 
-    def test_compile_flags(self) -> None:
+    def test_compile_flags(self, test_project):  # noqa: F811
         """Test getting compile flags."""
-        Project("test_project")
         pkg = PackageDescription(
             name="test",
             include_dirs=["/opt/test/include"],
@@ -58,9 +55,8 @@ class TestImportedTarget:
         assert "-I/opt/test/include" in flags
         assert "-DTEST_LIB" in flags
 
-    def test_link_flags(self) -> None:
+    def test_link_flags(self, test_project):  # noqa: F811
         """Test getting link flags."""
-        Project("test_project")
         pkg = PackageDescription(
             name="test",
             library_dirs=["/opt/test/lib"],
@@ -74,9 +70,8 @@ class TestImportedTarget:
         assert "-ltestlib" in flags
         assert "-Wl,-rpath,/opt/test/lib" in flags
 
-    def test_include_dirs_as_paths(self) -> None:
+    def test_include_dirs_as_paths(self, test_project):  # noqa: F811
         """Test getting include dirs as Path objects."""
-        Project("test_project")
         pkg = PackageDescription(
             name="test",
             include_dirs=["/usr/include", "/opt/include"],
@@ -88,9 +83,8 @@ class TestImportedTarget:
         assert all(isinstance(d, Path) for d in dirs)
         assert Path("/usr/include") in dirs
 
-    def test_with_components(self) -> None:
+    def test_with_components(self, test_project):  # noqa: F811
         """Test creating with specific components."""
-        Project("test_project")
         pkg = PackageDescription(
             name="boost",
             include_dirs=["/usr/include/boost"],
@@ -108,27 +102,24 @@ class TestImportedTarget:
         assert "boost_system" in target.libraries
         assert "boost_filesystem" in target.libraries
 
-    def test_no_package(self) -> None:
+    def test_no_package(self, test_project):  # noqa: F811
         """Test target with no package returns empty values."""
-        Project("test_project")
         target = ImportedTarget(name="empty")
         assert target.compile_flags == []
         assert target.link_flags == []
         assert target.libraries == []
         assert target.version == ""
 
-    def test_repr(self) -> None:
+    def test_repr(self, test_project):  # noqa: F811
         """Test string representation."""
-        Project("test_project")
         pkg = PackageDescription(name="test", version="1.0")
         target = ImportedTarget.from_package(pkg)
         repr_str = repr(target)
         assert "test" in repr_str
         assert "1.0" in repr_str
 
-    def test_public_requirements_populated(self) -> None:
+    def test_public_requirements_populated(self, test_project):  # noqa: F811
         """Test that public requirements are populated from package."""
-        Project("test_project")
         pkg = PackageDescription(
             name="test",
             include_dirs=["/opt/test/include"],
@@ -149,9 +140,8 @@ class TestImportedTarget:
         assert "-L/opt/test/lib" in target.public.link_flags
         assert "-Wl,-rpath,/opt/test/lib" in target.public.link_flags
 
-    def test_public_requirements_frameworks_macos(self) -> None:
+    def test_public_requirements_frameworks_macos(self, test_project):  # noqa: F811
         """Test that macOS framework flags are populated in public requirements."""
-        Project("test_project")
         pkg = PackageDescription(
             name="CoreFoundation",
             framework_dirs=["/System/Library/Frameworks"],
@@ -167,9 +157,8 @@ class TestImportedTarget:
         assert "CoreFoundation" in target.public.link_flags
         assert "Security" in target.public.link_flags
 
-    def test_public_requirements_with_components(self) -> None:
+    def test_public_requirements_with_components(self, test_project):  # noqa: F811
         """Test public requirements include merged component data."""
-        Project("test_project")
         pkg = PackageDescription(
             name="boost",
             include_dirs=["/usr/include/boost"],
@@ -191,9 +180,8 @@ class TestImportedTarget:
         assert "boost_filesystem" in target.public.link_libs
         assert "BOOST_FILESYSTEM" in target.public.defines
 
-    def test_empty_package_no_public_requirements(self) -> None:
+    def test_empty_package_no_public_requirements(self, test_project):  # noqa: F811
         """Test that empty package results in empty public requirements."""
-        Project("test_project")
         pkg = PackageDescription(name="empty")
         target = ImportedTarget.from_package(pkg)
 
@@ -203,7 +191,7 @@ class TestImportedTarget:
         assert target.public.link_libs == []
         assert target.public.link_flags == []
 
-    def test_imported_link_transitive_propagation(self) -> None:
+    def test_imported_link_transitive_propagation(self, test_project):  # noqa: F811
         """ImportedTarget.link() propagates requirements transitively.
 
         When httplib.link(openssl), anything that links httplib should
@@ -212,7 +200,6 @@ class TestImportedTarget:
         """
         from pcons.core.target import Target
 
-        Project("test_project")
         openssl = ImportedTarget.from_package(
             PackageDescription(
                 name="openssl",
