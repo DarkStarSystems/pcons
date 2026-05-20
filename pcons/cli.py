@@ -916,7 +916,7 @@ def find_command_in_argv(argv: list[str]) -> str | None:
 
     Returns the command name if found, None otherwise.
     """
-    valid_commands = {"info", "init", "generate", "build", "clean"}
+    valid_commands = {"info", "init", "generate", "build", "clean", "test"}
     # Options that take a value
     # Note: -C/--directory is consumed before this runs
     options_with_value = {
@@ -932,6 +932,12 @@ def find_command_in_argv(argv: list[str]) -> str | None:
         "--debug",
         "--modules-path",
         "--ninja",
+        "--manifest",
+        "--junit",
+        "-L",
+        "-LE",
+        "-R",
+        "-E",
     }
     i = 0
     while i < len(argv):
@@ -1148,6 +1154,15 @@ def create_full_parser() -> argparse.ArgumentParser:
     )
     clean_parser.set_defaults(func=cmd_clean)
 
+    # pcons test is dispatched in main() before argparse runs (so the
+    # runner can own its own flags). This subparser exists only so that
+    # `pcons --help` lists it; argument parsing is never reached.
+    subparsers.add_parser(
+        "test",
+        help="Run tests declared by project.Test() in pcons-build.py",
+        add_help=False,
+    )
+
     return parser
 
 
@@ -1192,6 +1207,15 @@ def main() -> int:
     # If not, use the default parser (no subcommands) to avoid
     # positional arguments being mistaken for commands
     command = find_command_in_argv(sys.argv[1:])
+
+    # `pcons test` is dispatched directly to the test runner, which has
+    # its own argument parser. This avoids duplicating the runner's flags
+    # (-L, -R, --junit, etc.) in pcons's top-level argparse.
+    if command == "test":
+        from pcons.test_runner import main as test_main
+
+        idx = sys.argv.index("test")
+        return test_main(sys.argv[idx + 1 :])
 
     # Special case: if --help or -h is present without a command,
     # use the full parser so help shows available commands

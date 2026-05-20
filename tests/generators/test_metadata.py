@@ -90,3 +90,45 @@ class TestMetadataGenerator:
         assert len(aliases["all"]["entries"]) == 2
         assert "build/app" in aliases["all"]["entries"]
         assert "some/file.txt" in aliases["all"]["entries"]
+
+    def test_test_target_embeds_testspec(self, tmp_path, gcc_toolchain):
+        """Test() targets get an embedded `test` block for IDE integration."""
+        src = tmp_path / "main.c"
+        src.write_text("int main(void){return 0;}\n")
+
+        project = Project("t", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        prog = project.Program("test_bin", env, sources=[str(src)])
+        project.Test(
+            "math.add",
+            prog,
+            args=["--quick"],
+            labels=["unit", "fast"],
+            timeout=30,
+            should_fail=False,
+        )
+
+        MetadataGenerator().generate(project)
+
+        content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
+        by_name = {t["name"]: t for t in content["targets"]}
+        # The Test() target name is mangled internally; find by type.
+        test_entries = [t for t in content["targets"] if t["type"] == "test"]
+        assert len(test_entries) == 1
+        ts = test_entries[0]["test"]
+        # User-facing name preserved (target name is `test_math.add` but the
+        # spec keeps the friendly form).
+        assert ts["name"] == "math.add"
+        assert ts["command"][-1] == "--quick"
+        assert ts["labels"] == ["unit", "fast"]
+        assert ts["timeout"] == 30
+        assert ts["should_fail"] is False
+        assert ts["disabled"] is False
+        assert ts["serial"] is False
+        assert ts["depends_on"] == []
+        # `data` and `defined_at` are part of the full TestSpec dump so
+        # IDEs (e.g., CodeLens) have the source location for the test.
+        assert ts["data"] == []
+        assert ts["defined_at"] != ""
+        # Non-test targets have no `test` key
+        assert "test" not in by_name["test_bin"]

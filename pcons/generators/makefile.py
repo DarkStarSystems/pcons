@@ -8,6 +8,7 @@ Requires GNU Make 3.80+ for order-only prerequisites.
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
@@ -82,6 +83,7 @@ class MakefileGenerator(BaseGenerator):
             self._write_directory_rules(f)
             self._write_build_rules(f, project)
             self._write_aliases(f, project)
+            self._write_tests(f, project)
             self._write_default_target(f, project)
             self._write_depfile_includes(f)
             self._write_clean_target(f, output_dir)
@@ -106,6 +108,10 @@ class MakefileGenerator(BaseGenerator):
     def _write_phony_declaration(self, f: TextIO, project: Project) -> None:
         """Write .PHONY declaration for all phony targets."""
         phony_targets = ["all", "clean", *project.aliases]
+        # Include test phonies if any Test targets are declared so that
+        # `make test` / `make test-build` are correctly treated as phony.
+        if any(t.target_type == "test" for t in project.targets):
+            phony_targets.extend(["test", "test-build"])
         f.write("# Phony targets\n")
         f.write(f".PHONY: {' '.join(phony_targets)}\n")
         f.write("\n")
@@ -562,6 +568,44 @@ class MakefileGenerator(BaseGenerator):
             )
             if targets:
                 f.write(f"{name}: {targets}\n")
+        f.write("\n")
+
+    def _write_tests(self, f: TextIO, project: Project) -> None:
+        """Emit `test-build` and `test` phony targets if any tests exist.
+
+        ``test-build`` depends on every test program's output node so that
+        ``make test-build`` compiles tests without running them. ``test``
+        invokes the runner (``pcons.test_runner``) and depends on
+        ``test-build`` so things compile first.
+
+        The runner invocation embeds ``sys.executable`` so it finds the
+        pcons package regardless of what ``python`` is on PATH — same
+        reasoning as the Ninja backend.
+        """
+        test_targets = [t for t in project.targets if t.target_type == "test"]
+        if not test_targets:
+            return
+
+        program_outputs: list[str] = []
+        seen: set[str] = set()
+        for test_target in test_targets:
+            for dep in test_target.dependencies:
+                for node in dep.output_nodes:
+                    if isinstance(node, FileNode):
+                        out = self._make_build_relative_path(node.path)
+                        if out not in seen:
+                            seen.add(out)
+                            program_outputs.append(out)
+
+        f.write("# Tests\n")
+        f.write(f"test-build: {' '.join(program_outputs)}\n")
+        # Embed sys.executable so the runner is found in whatever venv
+        # pcons was invoked from. The path is escaped for shell.
+        python_exe = sys.executable.replace("\\", "/")
+        f.write("test: test-build\n")
+        f.write(
+            f"\t{python_exe} -m pcons.test_runner --manifest=tests.json --no-color\n"
+        )
         f.write("\n")
 
     def _write_default_target(self, f: TextIO, project: Project) -> None:

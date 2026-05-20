@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.core.node import FileNode
+from pcons.core.test import TestSpec
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
@@ -90,7 +91,7 @@ class MetadataGenerator(BaseGenerator):
         if target.defined_at.function is not None:
             location["function"] = target.defined_at.function
 
-        return {
+        entry: dict[str, Any] = {
             "name": target.name,
             "type": target.target_type or "other",
             "is_default": target.name in default_target_names,
@@ -99,6 +100,19 @@ class MetadataGenerator(BaseGenerator):
             "outputs": outputs,
             "defined_at": location,
         }
+
+        # For Test() targets, embed the resolved TestSpec so IDE
+        # integrations (e.g., the VSCode TestExplorer) have everything
+        # they need to discover, group, and run tests from this one
+        # metadata file — no need to also parse tests.json. The outer
+        # entry's `defined_at` already gives CodeLens-style {file, line};
+        # the embedded spec includes its own stringified defined_at for
+        # diagnostic completeness.
+        spec = target._builder_data.get("spec") if target._builder_data else None
+        if isinstance(spec, TestSpec):
+            entry["test"] = spec.to_jsonable()
+
+        return entry
 
     def _serialize_alias(self, alias_name: str, project: Project) -> dict[str, Any]:
         """Serialize one alias to metadata."""

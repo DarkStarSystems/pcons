@@ -249,6 +249,26 @@ if TYPE_CHECKING:
             """Create a tar archive from source files/directories."""
             ...
 
+        def Test(
+            self,
+            name: str,
+            program: Target | Path | str,
+            *,
+            args: Sequence[str] = (),
+            cwd: Path | str | None = None,
+            env: dict[str, str] | None = None,
+            labels: Sequence[str] = (),
+            timeout: float | None = None,
+            should_fail: bool = False,
+            serial: bool = False,
+            disabled: bool = False,
+            data: Sequence[Path | str] = (),
+            depends_on: Sequence[str] = (),
+            discover: str | None = None,
+        ) -> Target:
+            """Declare a test to be run by ``pcons test`` (or ``ninja test``)."""
+            ...
+
         def Zipfile(
             self,
             env: Env,

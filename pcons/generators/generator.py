@@ -97,6 +97,13 @@ class BaseGenerator:
 
             CompileCommandsGenerator().generate(project)
 
+        # Write the test manifest if the project declares any tests.
+        # Generator-agnostic: every backend gets it for free. Skipped
+        # silently when there are no Test targets.
+        from pcons.core.test import write_test_manifest
+
+        write_test_manifest(project, output_dir)
+
     def _resolve_output_dir(self, project: Project) -> Path:
         """Compute the output directory from the project.
 

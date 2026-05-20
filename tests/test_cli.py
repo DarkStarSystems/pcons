@@ -761,6 +761,47 @@ class TestCLIArgumentParsing:
         assert "targets" in result.stdout
         assert "--jobs" in result.stdout
 
+    def test_test_subcommand_dispatches_to_runner(self, tmp_path: Path) -> None:
+        """`pcons test` dispatches to pcons.test_runner without argparse."""
+        # Hand-build a manifest so the runner has something to operate on.
+        import json as _json
+
+        manifest = tmp_path / "tests.json"
+        manifest.write_text(
+            _json.dumps(
+                {
+                    "version": 1,
+                    "project": "cli_dispatch",
+                    "build_dir": str(tmp_path),
+                    "tests": [
+                        {
+                            "name": "demo",
+                            "command": ["/bin/true"],
+                            "labels": ["unit"],
+                        }
+                    ],
+                }
+            )
+        )
+        # --list returns 0 without executing; that's enough to confirm
+        # the dispatch path reached the runner.
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pcons.cli",
+                "test",
+                "--manifest",
+                str(manifest),
+                "--list",
+                "--no-color",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0
+        assert "demo" in result.stdout
+
     def test_generate_with_variable(self, tmp_path: Path) -> None:
         """Test pcons generate VAR=value works."""
         # Create a minimal pcons-build.py that just prints the variable

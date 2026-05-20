@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
@@ -102,6 +103,7 @@ class NinjaGenerator(BaseGenerator):
             self._write_rules(f, project)
             self._write_builds(f, project)
             self._write_aliases(f, project)
+            self._write_tests(f, project)
             self._write_defaults(f, project)
 
     def _write_header(self, f: TextIO, project: Project) -> None:
@@ -619,6 +621,63 @@ class NinjaGenerator(BaseGenerator):
             )
             if targets:
                 f.write(f"build {name}: phony {targets}\n")
+        f.write("\n")
+
+    def _write_tests(self, f: TextIO, project: Project) -> None:
+        """Write phony targets and a runner rule for declared tests.
+
+        Emits nothing if the project declared no tests. Otherwise:
+
+        - ``test-build`` is a phony that depends on every test program's
+          output node, so ``ninja test-build`` compiles tests without
+          running them.
+        - ``test`` runs the test runner (``pcons test``) against the
+          manifest written next to ``build.ninja``. The rule uses
+          ``pool = console`` so output streams live to the terminal,
+          and ``test`` depends on ``test-build`` so things compile first.
+
+        The runner invocation deliberately uses ``python -m
+        pcons.test_runner`` rather than the ``pcons`` script: the latter
+        may not be on PATH for users running ``uvx pcons``, and the
+        Python module form works as long as the ``pcons`` package is
+        importable in the active environment.
+        """
+        test_targets = [t for t in project.targets if t.target_type == "test"]
+        if not test_targets:
+            return
+
+        program_outputs: list[str] = []
+        seen: set[str] = set()
+        for test_target in test_targets:
+            for dep in test_target.dependencies:
+                for node in dep.output_nodes:
+                    if isinstance(node, FileNode):
+                        out = self._escape_output_path(node.path)
+                        if out not in seen:
+                            seen.add(out)
+                            program_outputs.append(out)
+
+        f.write("# Tests\n")
+        if program_outputs:
+            f.write(f"build test-build: phony {' '.join(program_outputs)}\n")
+        else:
+            f.write("build test-build: phony\n")
+
+        # Runner rule. `pool = console` keeps stdout/stderr unbuffered
+        # and serial relative to other build steps, which is what you
+        # want when invoking a test runner. We embed the Python used to
+        # run pcons itself so the runner is guaranteed to find the
+        # `pcons` package, even when the user's `python` on PATH is a
+        # different interpreter.
+        python_exe = self._escape_path(sys.executable)
+        f.write("rule pcons_test\n")
+        f.write(
+            f"  command = {python_exe} -m pcons.test_runner "
+            "--manifest=tests.json --no-color\n"
+        )
+        f.write("  pool = console\n")
+        f.write("  description = Running tests\n")
+        f.write("build test: pcons_test | test-build\n")
         f.write("\n")
 
     def _write_defaults(self, f: TextIO, project: Project) -> None:

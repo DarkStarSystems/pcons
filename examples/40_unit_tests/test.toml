@@ -1,0 +1,25 @@
+# Test configuration for the 40_unit_tests example
+
+[test]
+description = "Demonstrates project.Test() builder, the JSON manifest, and `ninja test`"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/obj.test_math/src/math.c.o",
+    "build/obj.test_math/src/test_math.c.o",
+    "build/test_math",
+    "build/tests.json",
+]
+
+[verify]
+# Run `ninja test` and check that the runner's headline output appears.
+commands = [
+    { run = "ninja -C build test", expect_stdout = "tests passed" },
+]
+
+[skip]
+# Works on all platforms with a C compiler. Both Ninja and Makefile
+# generators emit a `test` phony; the Xcode generator doesn't (it has
+# its own scheme for build phases that wouldn't add anything over
+# running `pcons test` directly).
+generators = ["xcode"]

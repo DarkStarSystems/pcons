@@ -26,6 +26,7 @@ from pcons.configure.platform import Platform, get_platform  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.core.subst import PathToken  # noqa: E402
+from pcons.core.test import set_test_properties, set_test_property  # noqa: E402
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
 from pcons.generators.metadata import MetadataGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
@@ -225,6 +226,9 @@ __all__ = [
     "MakefileGenerator",
     "MetadataGenerator",
     "XcodeGenerator",
+    # Test helpers
+    "set_test_property",
+    "set_test_properties",
     # Toolchain discovery
     "find_c_toolchain",
     "find_cuda_toolchain",
