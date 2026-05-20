@@ -66,7 +66,6 @@ class TestCompileCommandsEntries:
         # Use intermediate_nodes for compilation outputs
         target.intermediate_nodes.append(output_node)
         target._sources.append(source_node)
-        project.add_target(target)
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
@@ -100,7 +99,6 @@ class TestCompileCommandsEntries:
 
         # Use intermediate_nodes for compilation outputs
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
@@ -124,7 +122,6 @@ class TestCompileCommandsEntries:
         }
 
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
@@ -154,7 +151,6 @@ class TestCompileCommandsEntries:
         )
 
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
@@ -184,7 +180,6 @@ class TestCompileCommandsEntries:
         )
 
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = CompileCommandsGenerator()
         gen.generate(project)

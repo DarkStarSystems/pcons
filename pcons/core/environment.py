@@ -933,7 +933,6 @@ class Environment(_EnvironmentStubs):
                 counter += 1
             if name != base_name:
                 cmd_target.name = name
-            self._project.add_target(cmd_target)
 
         return cmd_target
 

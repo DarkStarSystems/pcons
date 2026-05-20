@@ -42,7 +42,6 @@ class TestMetadataGenerator:
         lib = Target("mylib", target_type="static_library")
         lib.output_nodes.append(FileNode("build/libmylib.a"))
         lib.add_source("src/lib.c")
-        project.add_target(lib)
 
         app = Target(
             "app",
@@ -52,7 +51,6 @@ class TestMetadataGenerator:
         app.output_nodes.append(FileNode("build/app"))
         app.add_source("src/main.c")
         app.dependencies.append(lib)
-        project.add_target(app)
 
         project.Default(app)
         project.Alias("all", app)

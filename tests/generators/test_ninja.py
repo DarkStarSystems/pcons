@@ -74,7 +74,6 @@ class TestNinjaBuildStatements:
         # Use intermediate_nodes for .o file outputs
         target.intermediate_nodes.append(output_node)
         target._sources.append(source_node)
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -102,7 +101,6 @@ class TestNinjaBuildStatements:
 
         # Use intermediate_nodes for .o file outputs
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -120,7 +118,6 @@ class TestNinjaAliases:
         lib_node = FileNode("build/libmy.a")
         # Use output_nodes for final library outputs
         target.output_nodes.append(lib_node)
-        project.add_target(target)
 
         project.Alias("libs", target)
 
@@ -140,7 +137,6 @@ class TestNinjaDefaults:
         app_node = FileNode("build/app")
         # Use output_nodes for final executable outputs
         target.output_nodes.append(app_node)
-        project.add_target(target)
 
         project.Default(target)
 
@@ -195,7 +191,6 @@ class TestNinjaPostBuild:
         # Use output_nodes for final program outputs
         target.output_nodes.append(output_node)
         target.post_build("install_name_tool -add_rpath @loader_path $out")
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -233,7 +228,6 @@ class TestNinjaPostBuild:
         target.output_nodes.append(output_node)
         target.post_build("install_name_tool -add_rpath @loader_path $out")
         target.post_build("codesign --sign - $out")
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -265,7 +259,6 @@ class TestNinjaPostBuild:
         # Use output_nodes for final program outputs
         target.output_nodes.append(output_node)
         target.post_build("echo Built $out from $in")
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -295,7 +288,6 @@ class TestNinjaPostBuild:
         # Use output_nodes for final program outputs
         target.output_nodes.append(output_node)
         # No post_build() calls
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -334,7 +326,6 @@ class TestNinjaDepsDirectives:
 
         # Use intermediate_nodes for .o file outputs
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -368,7 +359,6 @@ class TestNinjaDepsDirectives:
 
         # Use intermediate_nodes for .obj file outputs
         target.intermediate_nodes.append(output_node)
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)
@@ -398,7 +388,6 @@ class TestNinjaDepsDirectives:
 
         # Use output_nodes for final program outputs
         target.output_nodes.append(output_node)
-        project.add_target(target)
 
         gen = NinjaGenerator()
         gen.generate(project)

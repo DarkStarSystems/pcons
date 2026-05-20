@@ -7,7 +7,6 @@ Each toolchain family defines its own flags for each preset.
 from __future__ import annotations
 
 from pcons.core.environment import Environment
-from pcons.core.project import Project
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
 

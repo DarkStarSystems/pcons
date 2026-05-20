@@ -7,7 +7,13 @@ import pytest
 
 from pcons.core.node import FileNode
 from pcons.core.project import Project
-from pcons.core.target import ImportedTarget, Target, UsageRequirements
+from pcons.core.target import (
+    ImportedTarget,
+    Target,
+    UsageRequirements,
+    is_qualified_name,
+    split_qualified_name,
+)
 
 
 class TestUsageRequirements:
@@ -68,6 +74,27 @@ class TestUsageRequirements:
         # Modifying clone doesn't affect original
         clone.include_dirs.append(Path("other"))
         assert Path("other") not in req.include_dirs
+
+
+class TestQualifiedName:
+    def test_qualified_name(self):
+        assert is_qualified_name("project::target")
+        assert not is_qualified_name("target")
+        assert not is_qualified_name("this::is::invalid")  # Only one '::' allowed
+        with pytest.raises(ValueError):
+            split_qualified_name("this::is::invalid")
+
+        p, n = split_qualified_name("project::target")
+        assert p == "project"
+        assert n == "target"
+
+        p, n = split_qualified_name("target")
+        assert p is None
+        assert n == "target"
+
+    def test_qualified_name_property(self, test_project):  # noqa: F811
+        target = Target("mylib")
+        assert target.qualified_name == "test_project::mylib"
 
 
 class TestTarget:
@@ -178,7 +205,9 @@ class TestTarget:
 
     def test_equality_by_name(self, test_project):  # noqa: F811
         t1 = Target("mylib")
+        t1.name = "fake"
         t2 = Target("mylib")
+        t1.name = "mylib"  # Reset to original name for equality
         t3 = Target("other")
 
         assert t1 == t2
@@ -186,7 +215,9 @@ class TestTarget:
 
     def test_hashable(self, test_project):  # noqa: F811
         t1 = Target("mylib")
+        t1.name = "fake"
         t2 = Target("mylib")
+        t1.name = "mylib"  # Reset to original name for hashing
 
         targets = {t1, t2}
         assert len(targets) == 1  # Same name = same target
@@ -516,5 +547,27 @@ class TestTargetSubdir:
             target = Target("mylib")
 
         assert target.source_dir == (root / "lib")
-        print(target.build_dir)
         assert target.build_dir.as_posix() == Path("/build/lib").as_posix()
+
+        assert target.qualified_name == "test_project::mylib"
+        assert project.get_target("test_project::mylib") == target
+        assert project.get_target("mylib") == target  # Unqualified lookup should work
+
+    def test_collision(self, test_project):
+        with test_project._enter_subdir("lib1"):
+            Project("sub1")
+            target1 = Target("mylib")
+        with test_project._enter_subdir("lib2"):
+            Project("sub2")
+            target2 = Target("mylib")
+
+        assert target1 is not target2
+        assert target1.qualified_name == "sub1::mylib"
+        assert target2.qualified_name == "sub2::mylib"
+
+        assert test_project.get_target("sub1::mylib") == target1
+        assert test_project.get_target("sub2::mylib") == target2
+
+        with pytest.raises(KeyError):
+            # Unqualified lookup should fail due to collision
+            test_project.get_target("mylib")

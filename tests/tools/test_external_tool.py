@@ -264,7 +264,6 @@ class TestNinjaGeneration:
 
     def test_generates_ninja_rule(self, tmp_path: Path) -> None:
         """Test that the tool generates valid ninja rules."""
-        from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
         # Create a project with the concat tool
@@ -320,7 +319,6 @@ class TestNinjaGeneration:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pytest.skip("ninja not available")
 
-        from pcons.core.project import Project
         from pcons.generators.ninja import NinjaGenerator
 
         # === Step 1: Create source files ===

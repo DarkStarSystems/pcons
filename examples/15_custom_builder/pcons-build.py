@@ -119,7 +119,6 @@ class GenerateVersionBuilder:
         target.output_nodes.append(output_node)
         target.nodes.append(output_node)
 
-        project.add_target(target)
         return target
 
 

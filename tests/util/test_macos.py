@@ -130,7 +130,6 @@ class TestCreateUniversalBinary:
     def test_creates_lipo_command(self, test_project):
         """Test that create_universal_binary creates a lipo command target."""
         from pcons.core.node import FileNode
-        from pcons.core.project import Project
         from pcons.core.target import Target
 
         # Create mock input nodes
@@ -159,7 +158,6 @@ class TestCreateUniversalBinary:
 
     def test_accepts_path_inputs(self, test_project):
         """Test that create_universal_binary accepts Path inputs."""
-        from pcons.core.project import Project
         from pcons.core.target import Target
 
         # Create using Path inputs
@@ -179,7 +177,6 @@ class TestCreateUniversalBinary:
 
     def test_raises_on_empty_inputs(self, test_project):
         """Test that create_universal_binary raises on empty inputs."""
-        from pcons.core.project import Project
 
         with pytest.raises(ValueError, match="requires at least one input"):
             create_universal_binary(

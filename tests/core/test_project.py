@@ -134,19 +134,15 @@ class TestProjectTargets:
     def test_add_target(self):
         project = Project("myproject")
         target = Target("mylib")
-        project.add_target(target)
 
         assert target in project.targets
         assert project.get_target("mylib") is target
 
     def test_duplicate_target_raises(self):
-        project = Project("myproject")
-        target1 = Target("mylib")
-        target2 = Target("mylib")
-
-        project.add_target(target1)
+        Project("myproject")
+        Target("mylib")
         with pytest.raises(ValueError) as exc_info:
-            project.add_target(target2)
+            Target("mylib")
 
         assert "already exists" in str(exc_info.value)
 
@@ -162,11 +158,9 @@ class TestProjectTargets:
         with root._enter_subdir("child1"):
             child1 = Project("child1")
             mylib1 = Target("mylib1")
-            child1.add_target(mylib1)
         with root._enter_subdir("child2"):
             child2 = Project("child2")
             mylib2 = Target("mylib2")
-            child2.add_target(mylib2)
 
         # may we support parent lookup ??? not currently implemented
         assert child1.get_target("mylib2", raise_if_missing=False) is None
@@ -189,7 +183,6 @@ class TestProjectAliases:
         project = Project("myproject")
         target = Target("mylib")
         target.output_nodes.append(FileNode("lib.a"))
-        project.add_target(target)
 
         alias = project.Alias("libs", target)
 
@@ -211,7 +204,6 @@ class TestProjectAliases:
         """Alias should pick up target output_nodes even if empty at Alias() time."""
         project = Project("myproject")
         target = Target("install_stuff")
-        project.add_target(target)
 
         # Create alias while target has no nodes at all
         alias = project.Alias("install", target)
@@ -230,7 +222,6 @@ class TestProjectAliases:
         target = Target("mylib")
         node = FileNode("lib.a")
         target.output_nodes.append(node)
-        project.add_target(target)
 
         alias = project.Alias("libs", target)
 
@@ -242,7 +233,6 @@ class TestProjectDefaults:
     def test_set_default_targets(self):
         project = Project("myproject")
         target = Target("app")
-        project.add_target(target)
 
         project.Default(target)
 
@@ -251,7 +241,6 @@ class TestProjectDefaults:
     def test_default_by_name(self):
         project = Project("myproject")
         target = Target("app")
-        project.add_target(target)
 
         project.Default("app")
 
@@ -260,7 +249,6 @@ class TestProjectDefaults:
     def test_default_avoids_duplicates(self):
         project = Project("myproject")
         target = Target("app")
-        project.add_target(target)
 
         project.Default(target)
         project.Default(target)
@@ -277,7 +265,6 @@ class TestProjectValidation:
 
         target = Target("app")
         target.add_source(FileNode(source_file))
-        project.add_target(target)
 
         errors = project.validate()
         assert errors == []
@@ -286,7 +273,6 @@ class TestProjectValidation:
         project = Project("myproject", root_dir=tmp_path)
         target = Target("app")
         target.add_source(FileNode("nonexistent.c"))
-        project.add_target(target)
 
         errors = project.validate()
         assert len(errors) == 1
@@ -298,8 +284,6 @@ class TestProjectValidation:
         b = Target("B")
         a.link(b)
         b.link(a)
-        project.add_target(a)
-        project.add_target(b)
 
         errors = project.validate()
         assert len(errors) > 0
@@ -312,8 +296,6 @@ class TestProjectBuildOrder:
         lib = Target("lib")
         app = Target("app")
         app.link(lib)
-        project.add_target(lib)
-        project.add_target(app)
 
         order = project.build_order()
 
@@ -332,9 +314,6 @@ class TestProjectAllNodes:
         app.add_source(FileNode("main.c"))
         app.output_nodes.append(FileNode("app"))
         app.link(lib)
-
-        project.add_target(lib)
-        project.add_target(app)
 
         nodes = project.all_nodes()
 
@@ -394,7 +373,6 @@ class TestGeneratePcFile:
         target.public.include_dirs.append(Path("include"))
         target.public.defines.append("MYLIB_STATIC")
         target.public.link_libs.append("m")
-        project.add_target(target)
 
         pc = project.generate_pc_file(target, version="2.1.0", description="My lib")
 
@@ -412,7 +390,6 @@ class TestGeneratePcFile:
         """generate_pc_file() doesn't rewrite if content unchanged."""
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         target = Target("foo")
-        project.add_target(target)
 
         pc = project.generate_pc_file(target, version="1.0")
         mtime1 = pc.stat().st_mtime
@@ -439,7 +416,6 @@ class TestGeneratePcFile:
 
         target = Target("mylib")
         target.link(zlib)
-        project.add_target(target)
 
         pc = project.generate_pc_file(target, version="1.0")
         content = pc.read_text()
@@ -452,7 +428,6 @@ class TestGeneratePcFile:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         target = Target("mylib")
         target.public.include_dirs.append(tmp_path / "include")
-        project.add_target(target)
 
         pc = project.generate_pc_file(target, version="1.0")
         content = pc.read_text()
@@ -471,7 +446,6 @@ class TestGeneratePcFile:
         else:
             ext_inc = Path("/opt/external/include")
         target.public.include_dirs.append(ext_inc)
-        project.add_target(target)
 
         pc = project.generate_pc_file(target, version="1.0")
         content = pc.read_text()
@@ -484,8 +458,6 @@ class TestAlias:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         t1 = Target("lib1")
         t2 = Target("lib2")
-        project.add_target(t1)
-        project.add_target(t2)
 
         alias = project.Alias("install", [t1, t2])
         assert len(alias._target_refs) == 2
@@ -495,8 +467,6 @@ class TestAlias:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         t1 = Target("lib1")
         t2 = Target("lib2")
-        project.add_target(t1)
-        project.add_target(t2)
 
         alias = project.Alias("install", t1, t2)
         assert len(alias._target_refs) == 2

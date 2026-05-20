@@ -9,7 +9,6 @@ import pytest
 from pcons.configure.checks import CheckResult, ToolChecks
 from pcons.configure.config import Configure
 from pcons.core.environment import Environment
-from pcons.core.project import Project
 
 
 class TestCheckResult:

@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from pcons.core.environment import Environment
-from pcons.core.project import Project
 from pcons.core.toolconfig import ToolConfig
 
 

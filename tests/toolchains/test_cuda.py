@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Tests for CUDA toolchain."""
 
-from pcons.core.project import Project
 from pcons.toolchains import CudaCompiler, CudaToolchain, find_cuda_toolchain
 from pcons.tools.toolchain import SourceHandler
 
