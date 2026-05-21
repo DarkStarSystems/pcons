@@ -626,6 +626,16 @@ def run_example(
     if invocation == "cli" and test_config.get("build_command"):
         pytest.skip("CLI invocation requires ninja; this example uses custom build")
 
+    # CLI invocation with xcode generator runs xcodebuild automatically, which is macOS-only
+    if (
+        invocation == "cli"
+        and generator == "xcode"
+        and platform.system().lower() != "darwin"
+    ):
+        pytest.skip(
+            "CLI invocation with xcode generator requires xcodebuild (macOS only)"
+        )
+
     # Copy example to temp directory (so we don't pollute the source tree)
     work_dir = tmp_path / example_dir.name
     shutil.copytree(
