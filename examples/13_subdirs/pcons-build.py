@@ -37,6 +37,10 @@ this_dir = Path(__file__).parent
 project = Project("subdirs_example")
 env = project.Environment(toolchain=find_c_toolchain())
 
-# add libfoo and app subdirectories
-add_subdirectory("libfoo")
+# add_subdirectory() returns a SimpleNamespace of all module-level names
+# defined in the subdir's pcons-build.py.  libfoo/pcons-build.py assigns
+# `libfoo = project.StaticLibrary(...)` at module scope, so it is exported.
+libfoo_ns = add_subdirectory("libfoo")
+# libfoo_ns.libfoo is the StaticLibrary target, pass it to dependents if needed.
+
 add_subdirectory("app")

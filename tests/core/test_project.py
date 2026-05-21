@@ -179,12 +179,12 @@ class TestSubproject:
         with pytest.raises(KeyError):
             child2.get_target("mylib1", raise_if_missing=True)
 
-    def test_subproject_build_dir_warns(self, test_project):
+    def test_subproject_build_dir_warns(self, tmp_path, test_project):
         with pytest.warns(
             UserWarning, match="build_dir argument is ignored for sub-projects"
         ):
             with test_project._enter_subdir("child"):
-                Project("child", build_dir="ignored_build")
+                Project("child", build_dir="ignored_build", root_dir=tmp_path / "child")
 
 
 class TestProjectAliases:

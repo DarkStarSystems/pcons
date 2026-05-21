@@ -212,7 +212,6 @@ def builder(
                 target = Target(...)
                 target._builder_name = "InstallSymlink"
                 target._builder_data = {"dest": dest, "source": source}
-                project.add_target(target)
                 return target
 
     Args:
