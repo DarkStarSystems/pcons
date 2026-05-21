@@ -7,17 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-21
+
 ### Added
 
-- **JSON metadata generator (`-G metadata`).** Writes `pcons_metadata.json` describing targets, deps, sources, outputs, and aliases for IDE plugins. See [vscode-pcons](https://github.com/Garcia6l20/vscode-pcons).
-- **IDE-friendly typed stubs for the dynamic builder / environment API.** `project.Programx(...)` is now flagged as a typo, `env.cc.flags` autocompletes, `target.public.include_dirs` carries a real type — all with zero runtime impact. Stubs are generated from the builder registry + each toolchain's new `TOOL_NAMES`; CI checks they stay fresh.
+- **First-class test support.** `project.Test(name, program, ...)` declares tests; `pcons test` (also `ninja test` / `make test`) runs them with parallelism, label/regex filters, JUnit XML, and CTest-style reporting. Supports `depends_on` fixture chains, `should_fail`, `serial`, `timeout`, `disabled`, and `discover="gtest"|"doctest"|"catch2"` which expands one binary into per-case entries at run time. New example `41_fuzzing` + Fuzzing user-guide section cover libFuzzer / AFL++ / Honggfuzz. (PR #29)
+- **`add_subdirectory()`** for CMake-style sub-builds; returns named exports as a `SimpleNamespace` (or specific names you ask for). `Project.current` is restored on exit. New targets auto-attach to the current project, and source/include/object paths resolve relative to the owning subdir.
+- **Nested `Project()` declarations.** A subdirectory can declare its own `Project(...)` (see `13_subdirs`). Combined with `add_subdirectory()`, this is the supported way to compose multi-project trees.
+- **Qualified target names (`project::target`)**: cross-project references disambiguate by qualifying. `Target.qualified_name` is exposed; equality and repr use the qualified form.
+- **`pcons.context`**: global accessor for the current project / environment, intended for tooling and extensions.
+- **`project.get_target()` / `project.get_targets()`** helpers (with a raising and a `None`-returning overload).
+- **Automatic generation.** `pcons-build.py` no longer needs a trailing `project.generate()` — it's invoked implicitly when the script finishes.
+- **JSON metadata generator (`-G metadata`).** Writes `pcons_metadata.json` describing targets, deps, sources, outputs, aliases, and (for `Test()` targets) the full `TestSpec` . Drives IDE plugins like [vscode-pcons](https://github.com/Garcia6l20/vscode-pcons).
+- **IDE-friendly typed stubs for the dynamic builder / environment API.** Improves type checking and autocompletion. Stubs are generated from the builder registry + each toolchain's new `TOOL_NAMES`.
+- **New example `36_cxx_modules_multi_level`**: C++20 modules imported across nested subdirectories.
+
+### Changed
+
+- **BREAKING: `Project(...)` must now be declared before creating any `Target` or `Environment`.** Targets are owned by a project, and the previous implicit-top-level behavior no longer applies.
+- **`target.add_sources(...)` and `Target(sources=...)` now behave identically.** Removed an asymmetric `_normalize_sources` step on the constructor path.
 
 ### Fixed
 
+- **Xcode: static/shared library deps weren't actually linked.** `_setup_dependencies` created `PBXTargetDependency` entries (build ordering) but never added the library product to the consumer target's `PBXFrameworksBuildPhase`, so links failed. Now wired up in a second pass during project-tree construction. Shared library outputs are also rewritten to `.dylib` for the Xcode generator.
+- **Xcode include directories** are now resolved through `target.path_resolver`, so headers in subdirectories work in the generated project.
+- **`05_multi_library` on Windows**: `libphysics` gained dllexport/dllimport handling, and the test harness rewrites `.so` → `.dll` so the example runs cross-platform.
+- **`install._deduplicate_target_name`**: fixed lookup so installing multiple targets with related names no longer collides.
 - **C++20 modules rebuilt unnecessarily after a no-op `generate`.** `cxx_module_scanner` now writes dyndep / module-map files only when content actually changes (sidecar sha256), so ninja doesn't cascade-rebuild downstream targets.
-- **C++20 modules: nondeterministic dyndep ordering** could shift between runs and trigger unexpected rebuilds. Entries and per-entry inputs/outputs are now sorted.
-- **Metadata generator**: UTF-8 encoding pinned on file write (Windows round-trip); custom path normalization replaced with the canonical `PathResolver.make_project_relative()`; non-`FileNode` alias entries are ignored.
-- **LaTeX toolchain**: `env.latex` now appears in IDE completion (`LatexToolchain` was missing `TOOL_NAMES`).
+- **C++20 modules: nondeterministic dyndep ordering** entries are now sorted to prevent triggering unexpected rebuilds.
 
 ### Contributors
 
@@ -841,7 +858,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/DarkStarSystems/pcons/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/DarkStarSystems/pcons/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/DarkStarSystems/pcons/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/DarkStarSystems/pcons/compare/v0.14.1...v0.15.0
