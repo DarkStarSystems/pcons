@@ -110,6 +110,12 @@ class TestTarget:
         assert target.defined_at is not None
         assert target.defined_at.lineno > 0
 
+    def test_tracks_source_dir_is_project_root_dir(self, test_project):
+        target = Target("mylib")
+        assert target.defined_at is not None
+        assert target.defined_at.lineno > 0
+        assert target.source_dir == test_project.root_dir
+
     def test_link_adds_dependency(self, test_project):  # noqa: F811
         lib1 = Target("lib1")
         lib2 = Target("lib2")

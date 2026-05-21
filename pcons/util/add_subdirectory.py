@@ -45,9 +45,6 @@ def add_subdirectory(
           (in order), e.g. ``lib, hdr = add_subdirectory("sub", pick=["lib", "hdr"])``.
     """
     project = Project.current()
-    if project is None:
-        raise RuntimeError("add_subdirectory() must be called within a Project context")
-
     subdir_path = project.current_dir / subdir
     if not (subdir_path / "pcons-build.py").exists():
         raise FileNotFoundError(f"No pcons-build.py found in {subdir_path}")
