@@ -71,7 +71,7 @@ def clear_project_tree():
 
 
 @pytest.fixture
-def test_project():
+def test_project(tmp_path):
     """Create a default project for testing."""
-    project = Project(name="test_project")
+    project = Project(name="test_project", root_dir=tmp_path)
     return project

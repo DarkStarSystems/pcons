@@ -19,6 +19,8 @@ else:
 
     env = project.Environment(toolchain=find_c_toolchain())
 
+# Assigning to a module-level name exports it: the parent can access this
+# target as `ns.libfoo` after `ns = add_subdirectory("libfoo")`.
 libfoo = project.StaticLibrary("foo", env)
 libfoo.add_sources(["src/foo.c"])
 libfoo.public.include_dirs.append("include")

@@ -292,10 +292,10 @@ class TestFluentAPI:
         assert result is target
         assert len(target.sources) == 2
 
-    def test_add_sources_with_base(self, tmp_path, test_project):  # noqa: F811
+    def test_add_sources_with_base(self, test_project):
         """add_sources() with base directory works."""
         target = Target("app")
-        src_dir = tmp_path / "src"
+        src_dir = test_project.root_dir / "src"
         src_dir.mkdir()
         (src_dir / "main.c").touch()
         (src_dir / "util.c").touch()
@@ -305,8 +305,9 @@ class TestFluentAPI:
         assert len(target.sources) == 2
         # Verify paths are resolved correctly
         paths = [n.path for n in target.sources if isinstance(n, FileNode)]
-        assert src_dir / "main.c" in paths
-        assert src_dir / "util.c" in paths
+        rel_src_dir = src_dir.relative_to(test_project.root_dir)
+        assert rel_src_dir / "main.c" in paths
+        assert rel_src_dir / "util.c" in paths
 
     def test_public_private_requirements(self, test_project):  # noqa: F811
         """Usage requirements can be set directly on public/private."""
@@ -555,10 +556,10 @@ class TestTargetSubdir:
 
     def test_collision(self, test_project):
         with test_project._enter_subdir("lib1"):
-            Project("sub1")
+            Project("sub1", root_dir=test_project.root_dir / "lib1")
             target1 = Target("mylib")
         with test_project._enter_subdir("lib2"):
-            Project("sub2")
+            Project("sub2", root_dir=test_project.root_dir / "lib2")
             target2 = Target("mylib")
 
         assert target1 is not target2

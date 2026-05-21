@@ -120,7 +120,6 @@ class TestEnvironmentCommand:
     def test_command_with_single_target_and_source(self, test_project):  # noqa: F811
         """Command with single target and source."""
         env = Environment()
-        Project("dummy")
 
         result = env.Command(
             target="output.txt", source="input.txt", command="cp $SOURCE $TARGET"
