@@ -661,6 +661,16 @@ print("hello")
         assert result.returncode != 0
         assert "No build files found" in result.stderr
 
+    def test_main_entry_point_propagates_exit_code(self, tmp_path: Path) -> None:
+        """__main__.py must call sys.exit(main()) so build failures propagate."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons", "build"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode != 0
+
     def test_pcons_clean_no_ninja(self, tmp_path: Path) -> None:
         """Test pcons clean without build.ninja (should succeed)."""
         result = subprocess.run(
