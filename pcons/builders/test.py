@@ -56,7 +56,7 @@ def _make_internal_target_name(project: Project, user_name: str) -> str:
     base_name = f"test_{sanitized}"
     target_name = base_name
     counter = 1
-    while project.get_target(target_name) is not None:
+    while project.get_target(target_name, raise_if_missing=False) is not None:
         target_name = f"{base_name}_{counter}"
         counter += 1
     return target_name
@@ -222,7 +222,6 @@ class TestBuilder:
             target_type="test",
             defined_at=defined_at or get_caller_location(),
         )
-        target._project = project
         target._builder_name = "Test"
 
         # Partial spec — the factory finalizes the program path during resolve.
@@ -251,5 +250,4 @@ class TestBuilder:
         if isinstance(program, Target):
             target.dependencies.append(program)
 
-        project.add_target(target)
         return target

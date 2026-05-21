@@ -434,7 +434,6 @@ class TestSetTestPropertyEdgeCases:
         # set_test_property should refuse, with a clear message.
         proj, _env, _prog = project
         bogus = Target("not_a_real_test", target_type="test")
-        bogus._project = proj
         bogus._builder_data = {}  # no spec_partial
         with pytest.raises(RuntimeError, match="no partial spec"):
             set_test_property(bogus, "timeout", 1.0)
