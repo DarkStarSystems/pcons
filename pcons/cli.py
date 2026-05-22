@@ -137,7 +137,7 @@ def run_script(
     build_dir: Path,
     variables: dict[str, str] | None = None,
     variant: str | None = None,
-    generator: str | None = None,
+    generator: list[str] | str | None = None,
     reconfigure: bool = False,
     extra_env: dict[str, str] | None = None,
 ) -> tuple[int, list[Project]]:
@@ -187,7 +187,8 @@ def run_script(
         set_env_var("PCONS_VARIANT", variant)
 
     if generator:
-        set_env_var("PCONS_GENERATOR", generator)
+        gen_spec = ":".join(generator) if isinstance(generator, list) else generator
+        set_env_var("PCONS_GENERATOR", gen_spec)
 
     if reconfigure:
         set_env_var("PCONS_RECONFIGURE", "1")
@@ -204,7 +205,7 @@ def run_script(
     if variant:
         logger.debug("  PCONS_VARIANT=%s", variant)
     if generator:
-        logger.debug("  PCONS_GENERATOR=%s", generator)
+        logger.debug("  PCONS_GENERATOR=%s", os.environ["PCONS_GENERATOR"])
 
     # Save and modify sys.path and cwd for script imports
     old_cwd = os.getcwd()
@@ -986,8 +987,9 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         "-G",
         "--generator",
         metavar="NAME",
+        action="append",
         choices=["ninja", "make", "makefile", "metadata", "xcode"],
-        help="Generator to use (ninja, make, metadata, xcode). Default: ninja",
+        help="Generator to use (ninja, make, metadata, xcode). Repeatable. Default: ninja",
     )
     parser.add_argument(
         "--reconfigure",
