@@ -38,18 +38,27 @@ class MetadataGenerator(BaseGenerator):
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / self._output_filename
 
-        default_target_names = {target.name for target in project.default_targets}
-
         metadata: dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": 2,
             "generator": self.name,
-            "project": {
-                "name": project.name,
-                "root_dir": project._path_resolver.make_project_relative(
-                    project.root_dir
-                ),
-                "build_dir": project.build_dir.as_posix(),
-            },
+            "projects": [
+                self._serialize_project(project),
+                *[self._serialize_project(p) for p in project._children],
+            ],
+        }
+
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(metadata, f, indent=2)
+            f.write("\n")
+
+    def _serialize_project(self, project: Project) -> dict[str, Any]:
+        """Serialize project-level metadata."""
+        default_target_names = {target.name for target in project.default_targets}
+        return {
+            "name": project.name,
+            "parent": project.parent.name if not project.is_top_level else None,
+            "root_dir": project._path_resolver.make_project_relative(project.root_dir),
+            "build_dir": project.build_dir.as_posix(),
             "targets": [
                 self._serialize_target(target, project, default_target_names)
                 for target in sorted(project.targets, key=lambda t: t.name)
@@ -58,10 +67,6 @@ class MetadataGenerator(BaseGenerator):
                 self._serialize_alias(name, project) for name in sorted(project.aliases)
             ],
         }
-
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(metadata, f, indent=2)
-            f.write("\n")
 
     def _serialize_target(
         self,
@@ -93,6 +98,8 @@ class MetadataGenerator(BaseGenerator):
 
         entry: dict[str, Any] = {
             "name": target.name,
+            "qualified_name": target.qualified_name,
+            "sub_directory": target._subdir,
             "type": target.target_type or "other",
             "is_default": target.name in default_target_names,
             "dependencies": dependencies,

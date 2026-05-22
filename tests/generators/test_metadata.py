@@ -32,9 +32,8 @@ class TestMetadataGenerator:
         gen.generate(project)
 
         content = json.loads((tmp_path / "pcons_metadata.json").read_text())
-        assert content["schema_version"] == 1
-        assert content["targets"] == []
-        assert content["aliases"] == []
+        assert content["schema_version"] == 2
+        assert content["projects"][0]["name"] == "test"
 
     def test_includes_targets_dependencies_and_aliases(self, tmp_path):
         project = Project("test", root_dir=tmp_path, build_dir="build")
@@ -66,10 +65,12 @@ class TestMetadataGenerator:
 
         content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
 
-        assert content["project"]["name"] == "test"
-        assert content["project"]["build_dir"] == "build"
+        assert content["projects"][0]["name"] == "test"
+        assert content["projects"][0]["build_dir"] == "build"
 
-        by_name = {target["name"]: target for target in content["targets"]}
+        by_name = {
+            target["name"]: target for target in content["projects"][0]["targets"]
+        }
 
         assert by_name["mylib"]["type"] == "static_library"
         assert normalize_path(by_name["mylib"]["sources"][0]) == "src/lib.c"
@@ -83,11 +84,51 @@ class TestMetadataGenerator:
         assert by_name["app"]["defined_at"]["file"] == "build.py"
         assert by_name["app"]["defined_at"]["line"] == 10
 
-        aliases = {alias["name"]: alias for alias in content["aliases"]}
+        aliases = {alias["name"]: alias for alias in content["projects"][0]["aliases"]}
         assert "all" in aliases
         assert len(aliases["all"]["entries"]) == 2
         assert "build/app" in aliases["all"]["entries"]
         assert "some/file.txt" in aliases["all"]["entries"]
+
+    def test_target_qualified_name_and_sub_directory(self, tmp_path):
+        """Targets include qualified_name and sub_directory fields."""
+        project = Project("myproj", root_dir=tmp_path, build_dir="build")
+        app = Target("app", target_type="program")
+        app.output_nodes.append(FileNode("build/app"))
+
+        MetadataGenerator().generate(project)
+
+        content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
+        by_name = {t["name"]: t for t in content["projects"][0]["targets"]}
+        assert by_name["app"]["qualified_name"] == "myproj::app"
+        assert by_name["app"]["sub_directory"] is None
+
+    def test_target_sub_directory_set_in_subdir(self, tmp_path):
+        """Targets created inside _enter_subdir have sub_directory set."""
+        project = Project("myproj", root_dir=tmp_path, build_dir="build")
+        with project._enter_subdir("lib"):
+            lib = Target("mylib", target_type="static_library")
+            lib.output_nodes.append(FileNode("build/lib/libmylib.a"))
+
+        MetadataGenerator().generate(project)
+
+        content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
+        by_name = {t["name"]: t for t in content["projects"][0]["targets"]}
+        assert by_name["mylib"]["sub_directory"] == "lib"
+        assert by_name["mylib"]["qualified_name"] == "myproj::mylib"
+
+    def test_child_projects_in_projects_list(self, tmp_path):
+        """Child projects appear in the projects list with a parent reference."""
+        parent = Project("parent", root_dir=tmp_path, build_dir="build")
+        Project("child", root_dir=tmp_path / "sub")
+
+        MetadataGenerator().generate(parent)
+
+        content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
+        assert len(content["projects"]) == 2
+        proj_by_name = {p["name"]: p for p in content["projects"]}
+        assert proj_by_name["parent"]["parent"] is None
+        assert proj_by_name["child"]["parent"] == "parent"
 
     def test_test_target_embeds_testspec(self, tmp_path, gcc_toolchain):
         """Test() targets get an embedded `test` block for IDE integration."""
@@ -109,9 +150,11 @@ class TestMetadataGenerator:
         MetadataGenerator().generate(project)
 
         content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
-        by_name = {t["name"]: t for t in content["targets"]}
+        by_name = {t["name"]: t for t in content["projects"][0]["targets"]}
         # The Test() target name is mangled internally; find by type.
-        test_entries = [t for t in content["targets"] if t["type"] == "test"]
+        test_entries = [
+            t for t in content["projects"][0]["targets"] if t["type"] == "test"
+        ]
         assert len(test_entries) == 1
         ts = test_entries[0]["test"]
         # User-facing name preserved (target name is `test_math.add` but the
