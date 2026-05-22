@@ -15,6 +15,7 @@ from pcons import (
     Generator,
     MakefileGenerator,
     MetadataGenerator,
+    MultiGenerator,
     NinjaGenerator,
     get_var,
     get_variant,
@@ -222,6 +223,33 @@ class TestGenerator:
         with pytest.raises(ValueError, match="Unknown generator 'unknown'"):
             Generator()
 
+    def test_generator_multi_via_env(self, monkeypatch) -> None:
+        """Test colon-separated PCONS_GENERATOR returns MultiGenerator."""
+        monkeypatch.setenv("PCONS_GENERATOR", "ninja:metadata")
+        monkeypatch.delenv("GENERATOR", raising=False)
+
+        gen = Generator()
+        assert isinstance(gen, MultiGenerator)
+        assert gen.name == "ninja:metadata"
+        assert isinstance(gen._generators[0], NinjaGenerator)
+        assert isinstance(gen._generators[1], MetadataGenerator)
+
+    def test_generator_multi_invalid_raises(self, monkeypatch) -> None:
+        """Test colon-separated PCONS_GENERATOR raises for unknown name."""
+        monkeypatch.setenv("PCONS_GENERATOR", "ninja:unknown")
+
+        with pytest.raises(ValueError, match="Unknown generator 'unknown'"):
+            Generator()
+
+    def test_generator_single_not_wrapped(self, monkeypatch) -> None:
+        """Test a single-name PCONS_GENERATOR is not wrapped in MultiGenerator."""
+        monkeypatch.setenv("PCONS_GENERATOR", "ninja")
+        monkeypatch.delenv("GENERATOR", raising=False)
+
+        gen = Generator()
+        assert not isinstance(gen, MultiGenerator)
+        assert isinstance(gen, NinjaGenerator)
+
 
 class TestParseVariables:
     """Tests for parse_variables function."""
@@ -351,6 +379,29 @@ class TestRunScriptEnvironment:
         assert os.environ["PCONS_GENERATOR"] == "original-generator"
         assert os.environ["CUSTOM_ENV"] == "original-custom"
         assert "PCONS_VARS" not in os.environ
+
+    def test_run_script_generator_list_joins_with_colon(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """run_script with a list of generators sets PCONS_GENERATOR as colon-joined."""
+        import pcons
+
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "import os\n"
+            "from pcons import Project\n"
+            "val = os.environ.get('PCONS_GENERATOR', '')\n"
+            "assert val == 'ninja:metadata', f'Got {val!r}'\n"
+            "Project('demo')\n"
+        )
+
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        pcons._cli_vars = None
+
+        exit_code, _ = run_script(
+            script, tmp_path / "build", generator=["ninja", "metadata"]
+        )
+        assert exit_code == 0
 
     def test_run_script_cleans_up_new_environment_keys(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

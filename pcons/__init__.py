@@ -28,6 +28,7 @@ from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.core.subst import PathToken  # noqa: E402
 from pcons.core.test import set_test_properties, set_test_property  # noqa: E402
+from pcons.generators.generator import MultiGenerator  # noqa: E402
 from pcons.generators.makefile import MakefileGenerator  # noqa: E402
 from pcons.generators.metadata import MetadataGenerator  # noqa: E402
 from pcons.generators.ninja import NinjaGenerator  # noqa: E402
@@ -158,31 +159,42 @@ GENERATORS = {
 
 def Generator(
     default: str = "ninja",
-) -> NinjaGenerator | MakefileGenerator | MetadataGenerator | XcodeGenerator:
+) -> (
+    NinjaGenerator
+    | MakefileGenerator
+    | MetadataGenerator
+    | XcodeGenerator
+    | MultiGenerator
+):
     """Get a generator instance based on CLI option or environment.
 
     The generator can be set with:
-        pcons --generator=make
         pcons -G ninja
+        pcons -G ninja -G metadata
         pcons -G xcode
 
     Or when running directly:
         GENERATOR=make python pcons-build.py
+        PCONS_GENERATOR=ninja:metadata python pcons-build.py
 
     Precedence (highest to lowest):
         1. PCONS_GENERATOR (set by pcons CLI)
         2. GENERATOR environment variable
         3. default parameter
 
+    Multiple generators can be specified with colon-separated names
+    (e.g., ``PCONS_GENERATOR=ninja:metadata``). Each generator runs
+    in order on the same project.
+
     Args:
         default: Default generator name if not set ("ninja", "make", "metadata", or "xcode").
 
     Returns:
-        A generator instance (NinjaGenerator, MakefileGenerator,
-        MetadataGenerator, or XcodeGenerator).
+        A generator instance. When multiple names are given, a MultiGenerator
+        that runs each in sequence.
 
     Raises:
-        ValueError: If the generator name is not recognized.
+        ValueError: If any generator name is not recognized.
 
     Example:
         from pcons import Project, Generator
@@ -191,14 +203,18 @@ def Generator(
         # ... configure project ...
         Generator().generate(project)
     """
-    name = os.environ.get("PCONS_GENERATOR") or os.environ.get("GENERATOR") or default
-    name = name.lower()
+    spec = os.environ.get("PCONS_GENERATOR") or os.environ.get("GENERATOR") or default
+    names = [n.strip().lower() for n in spec.split(":") if n.strip()]
 
-    if name not in GENERATORS:
-        valid = ", ".join(sorted(set(GENERATORS.keys())))
-        raise ValueError(f"Unknown generator '{name}'. Valid options: {valid}")
+    valid = ", ".join(sorted(set(GENERATORS.keys())))
+    for name in names:
+        if name not in GENERATORS:
+            raise ValueError(f"Unknown generator '{name}'. Valid options: {valid}")
 
-    return GENERATORS[name]()
+    instances = [GENERATORS[name]() for name in names]
+    if len(instances) == 1:
+        return instances[0]
+    return MultiGenerator(instances)
 
 
 # Public API exports
@@ -223,6 +239,7 @@ __all__ = [
     "PackageDescription",
     "Project",
     # Generators
+    # Intentionally not exposing MultiGenerator as it's an implementation detail
     "Generator",
     "NinjaGenerator",
     "MakefileGenerator",

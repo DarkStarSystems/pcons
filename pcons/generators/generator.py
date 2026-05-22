@@ -18,6 +18,7 @@ See ``pcons/__init__.py`` for the factory implementation.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -156,3 +157,21 @@ class BaseGenerator:
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.name!r})"
+
+
+class MultiGenerator:
+    """Runs multiple generators in sequence."""
+
+    def __init__(self, generators: Sequence[Generator]) -> None:
+        self._generators = list(generators)
+
+    @property
+    def name(self) -> str:
+        return ":".join(g.name for g in self._generators)
+
+    def generate(self, project: Project) -> None:
+        for gen in self._generators:
+            gen.generate(project)
+
+    def __repr__(self) -> str:
+        return f"MultiGenerator({self.name!r})"
