@@ -45,6 +45,7 @@ class MakefileGenerator(BaseGenerator):
     """
 
     _supports_compile_commands = True
+    _is_build_generator = True
 
     # Characters that need escaping in Makefiles
     # $ -> $$, # -> \#, spaces in targets need escaping

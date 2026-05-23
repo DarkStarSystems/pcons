@@ -19,6 +19,7 @@ from pcons.core.builder import CommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.project import Project
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.generators.generator import BaseGenerator
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import BaseToolchain
 
@@ -288,6 +289,7 @@ class TestNinjaGeneration:
         # Generate ninja file
         generator = NinjaGenerator()
         generator.generate(project)
+        BaseGenerator._generate_pending(project)
 
         # Check that ninja file was created
         ninja_file = tmp_path / "build.ninja"
@@ -352,6 +354,7 @@ class TestNinjaGeneration:
         # === Step 3: Generate ninja file ===
         generator = NinjaGenerator()
         generator.generate(project)
+        BaseGenerator._generate_pending(project)
 
         ninja_file = build_dir / "build.ninja"
         assert ninja_file.exists(), "build.ninja should be generated"

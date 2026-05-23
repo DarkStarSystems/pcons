@@ -6,16 +6,30 @@ from pcons.generators.generator import BaseGenerator, Generator, MultiGenerator
 
 
 class MockGenerator(BaseGenerator):
-    """A mock generator for testing."""
+    """Mock that overrides generate() directly — for protocol tests."""
 
     def __init__(self) -> None:
         super().__init__("mock")
         self.generated = False
         self.last_project: Project | None = None
 
-    def generate(self, project: Project) -> None:
+    def generate(self, project: Project) -> None:  # type: ignore[override]
         self.generated = True
         self.last_project = project
+
+    def _generate_impl(self, _project: Project, _output_dir: object) -> None:  # type: ignore[override]
+        pass
+
+
+class DeferredMockGenerator(BaseGenerator):
+    """Mock that uses _generate_impl — for deferred-execution tests."""
+
+    def __init__(self) -> None:
+        super().__init__("mock")
+        self.executed = False
+
+    def _generate_impl(self, _project: Project, _output_dir: object) -> None:  # type: ignore[override]
+        self.executed = True
 
 
 class TestGeneratorProtocol:
@@ -29,7 +43,7 @@ class TestBaseGenerator:
         gen = MockGenerator()
         assert gen.name == "mock"
 
-    def test_generate_called(self, tmp_path):
+    def test_generate_called(self):
         gen = MockGenerator()
         project = Project("test")
 
@@ -42,6 +56,45 @@ class TestBaseGenerator:
         gen = MockGenerator()
         assert "MockGenerator" in repr(gen)
         assert "mock" in repr(gen)
+
+
+class TestDeferredGenerate:
+    def test_generate_defers_execution(self, tmp_path):
+        gen = DeferredMockGenerator()
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        gen.generate(project)
+
+        assert not gen.executed
+
+    def test_generate_pending_executes(self, tmp_path):
+        gen = DeferredMockGenerator()
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert gen.executed
+
+    def test_generate_pending_clears_queue(self, tmp_path):
+        gen = DeferredMockGenerator()
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        gen.executed = False
+        BaseGenerator._generate_pending(project)
+
+        assert not gen.executed
+
+    def test_generate_pending_uses_top_level_when_no_project_arg(self, tmp_path):
+        gen = DeferredMockGenerator()
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        gen.generate(project)
+        BaseGenerator._generate_pending()  # no arg → resolves top-level project
+
+        assert gen.executed
 
 
 class TestMultiGenerator:
@@ -72,8 +125,11 @@ class TestMultiGenerator:
                 super().__init__(tag)
                 self._tag = tag
 
-            def generate(self, project: Project) -> None:
+            def generate(self, project: Project) -> None:  # type: ignore[override]
                 call_order.append(self._tag)
+
+            def _generate_impl(self, _project: Project, _output_dir: object) -> None:  # type: ignore[override]
+                pass
 
         multi = MultiGenerator([OrderedGen("first"), OrderedGen("second")])
         multi.generate(Project("test"))

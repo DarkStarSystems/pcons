@@ -215,9 +215,12 @@ class TestWrongApiOrder:
         Currently silently generates an empty build file. At minimum
         this should log a warning.
         """
+        from pcons.generators.generator import BaseGenerator
+
         project, env = project_env
         # This succeeds but produces a useless empty build file
         project.generate()
+        BaseGenerator._generate_pending(project)
         # Verify it didn't crash -- the question is whether it SHOULD warn
         assert project._resolved
 

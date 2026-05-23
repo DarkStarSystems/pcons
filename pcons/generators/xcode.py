@@ -79,6 +79,7 @@ class XcodeGenerator(BaseGenerator):
     """
 
     _supports_compile_commands = True
+    _is_build_generator = True
 
     def __init__(self) -> None:
         super().__init__("xcode")

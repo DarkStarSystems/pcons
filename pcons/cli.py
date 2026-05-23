@@ -224,13 +224,13 @@ def run_script(
         }
         exec(code, namespace)
 
-        # generate
+        # Execute any deferred generate requests registered by the build script
         try:
             from pcons import Project
+            from pcons.generators.generator import BaseGenerator
 
-            top_level_project = Project.top_level()
-            top_level_project.generate()
-
+            top_level = Project.top_level()
+            BaseGenerator._generate_pending(top_level)
             return 0, pcons.get_registered_projects()
         except ValueError:
             logger.error("No Project created in build script")

@@ -9,6 +9,7 @@ from pcons.core.builder import GenericCommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
 from pcons.core.project import Project
+from pcons.generators.generator import BaseGenerator
 
 
 class TestGenericCommandBuilder:
@@ -242,6 +243,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Should have a command rule
@@ -263,6 +265,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "build output.txt:" in content
@@ -284,6 +287,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Build statement should list all sources
@@ -304,6 +308,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Build statement should list multiple outputs
@@ -322,6 +327,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "process $in" in content
@@ -340,6 +346,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "> $out" in content
@@ -362,6 +369,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "cat $in > $out" in content
@@ -382,6 +390,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "$source_0" in content
@@ -406,6 +415,7 @@ class TestGenericCommandNinja:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "$target_0" in content
@@ -600,6 +610,7 @@ class TestTargetAsSources:
         # Generate and verify ninja output
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
@@ -661,6 +672,7 @@ class TestCommandDepends:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "build.ninja").read_text()
         # The dep should appear after | (implicit deps section)

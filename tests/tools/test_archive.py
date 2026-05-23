@@ -7,6 +7,7 @@ from pathlib import Path
 
 from pcons.core.project import Project
 from pcons.core.target import Target
+from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
 
 
@@ -261,6 +262,7 @@ class TestArchiveNinjaGeneration:
         project.resolve()
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
@@ -294,6 +296,7 @@ class TestArchiveNinjaGeneration:
         project.resolve()
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
@@ -324,6 +327,7 @@ class TestArchiveNinjaGeneration:
         project.resolve()
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
@@ -356,6 +360,7 @@ class TestArchiveNinjaGeneration:
         project.resolve()
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
 
