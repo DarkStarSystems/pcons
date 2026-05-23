@@ -4,6 +4,7 @@
 import pytest
 
 from pcons.core.project import Project
+from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.gcc import (
     GccArchiver,
     GccCCompiler,
@@ -60,14 +61,12 @@ int main(void) {
 
 @pytest.fixture(autouse=True)
 def clear_project_tree():
-    """Ensure global Project state is cleared for each test.
-
-    Calls `Project._clear_tree()` before the test and again after to
-    guarantee a clean project registry and avoid cross-test leakage.
-    """
+    """Ensure global Project and generator state is cleared for each test."""
     Project._clear_tree()
+    BaseGenerator._clear_pending()
     yield
     Project._clear_tree()
+    BaseGenerator._clear_pending()
 
 
 @pytest.fixture

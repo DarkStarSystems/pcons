@@ -5,6 +5,7 @@ from pcons.core.builder import CommandBuilder
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
+from pcons.generators.generator import BaseGenerator
 from pcons.generators.makefile import MakefileGenerator
 
 
@@ -23,6 +24,7 @@ class TestMakefileGenerator:
         gen = MakefileGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         makefile = tmp_path / "Makefile"
         assert makefile.exists()
@@ -32,6 +34,7 @@ class TestMakefileGenerator:
         gen = MakefileGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "Makefile").read_text()
         assert "myproject" in content
@@ -41,6 +44,7 @@ class TestMakefileGenerator:
         gen = MakefileGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "out" / "Makefile").read_text()
         # Build dir should be the absolute path
@@ -51,6 +55,7 @@ class TestMakefileGenerator:
         gen = MakefileGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "Makefile").read_text()
         assert ".SUFFIXES:" in content
@@ -61,6 +66,7 @@ class TestMakefileGenerator:
         gen = MakefileGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "Makefile").read_text()
         assert ".PHONY:" in content
@@ -72,6 +78,7 @@ class TestMakefileGenerator:
         gen = MakefileGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "Makefile").read_text()
         assert "clean:" in content
@@ -103,6 +110,7 @@ class TestMakefileBuildStatements:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # Check that a build rule exists for the output
@@ -128,6 +136,7 @@ class TestMakefileBuildStatements:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # Directory rule should exist
@@ -152,6 +161,7 @@ class TestMakefileBuildStatements:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # Order-only prerequisite syntax: target: prereqs | order-only
@@ -172,6 +182,7 @@ class TestMakefileAliases:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "Makefile").read_text()
         assert "all_libs:" in content
@@ -188,6 +199,7 @@ class TestMakefileDefaultTarget:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "Makefile").read_text()
         assert ".DEFAULT_GOAL" in content
@@ -225,6 +237,7 @@ class TestMakefileDepfiles:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "Makefile").read_text()
         # Should include .d files for incremental builds
@@ -256,6 +269,7 @@ class TestMakefileImplicitDeps:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # Implicit dep should be in prerequisites
@@ -300,6 +314,7 @@ class TestMakefilePostBuild:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "Makefile").read_text()
         # Post-build commands should be chained with &&
@@ -324,6 +339,7 @@ class TestMakefileSrcDir:
 
         gen = MakefileGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "Makefile").read_text())
         # $SRCDIR should become the absolute project root path

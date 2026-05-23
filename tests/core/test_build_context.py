@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.build_context import CompileLinkContext, MsvcCompileLinkContext
 
 
@@ -361,6 +362,7 @@ class TestNinjaQuoting:
         build_dir = tmp_path / "build"
         generator = NinjaGenerator()
         generator.generate(project)
+        BaseGenerator._generate_pending(project)
 
         # Read ninja file
         ninja_content = (build_dir / "build.ninja").read_text()
@@ -474,6 +476,7 @@ class TestCompileCommandsQuoting:
         build_dir = tmp_path / "build"
         generator = CompileCommandsGenerator()
         generator.generate(project)
+        BaseGenerator._generate_pending(project)
 
         # Read and parse
         cc_file = build_dir / "compile_commands.json"
@@ -548,6 +551,7 @@ class TestEndToEndSpacesInPaths:
         # Generate and verify ninja
         build_dir = tmp_path / "build"
         NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
 
         ninja = (build_dir / "build.ninja").read_text()
 

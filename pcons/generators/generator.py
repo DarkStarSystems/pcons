@@ -4,21 +4,22 @@
 Generators take a configured Project and produce build system files
 (e.g., Ninja, Makefiles, IDE project files).
 
-NOTE: Build scripts should use the ``Generator()`` factory from the
-top-level ``pcons`` package, NOT this Protocol directly::
+NOTE: Build scripts may use the ``Generator()`` factory from the
+top-level ``pcons`` package to register which generator(s) to use::
 
     from pcons import Generator, Project
     project = Project("myapp", build_dir="build")
     # ... define targets ...
-    Generator().generate(project)   # generates Ninja by default
+    Generator().generate(project)   # requests Ninja by default
 
-``Generator()`` auto-resolves the project and defaults to Ninja.
-See ``pcons/__init__.py`` for the factory implementation.
+Actual generation is deferred: it runs when ``BaseGenerator._generate_pending()``
+is called — either by the CLI after executing the build script, or via the
+atexit handler when the script is run directly with ``python pcons-build.py``.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -58,6 +59,17 @@ class BaseGenerator:
 
     _supports_compile_commands: bool = False
 
+    _is_build_generator: bool = False
+    """Whether this generator produces build files (vs. auxiliary files like compile_commands.json).
+    Used to determine whether to mark project as generated.
+    """
+
+    __pending = dict[int, list[Callable[[], None]]]()
+    """Pending generate requests"""
+
+    __atexit_registered = False
+    """Whether the atexit handler has been registered"""
+
     def __init__(self, name: str) -> None:
         """Initialize a generator.
 
@@ -71,39 +83,96 @@ class BaseGenerator:
         return self._name
 
     def generate(self, project: Project, *, compile_commands: bool = True) -> None:
-        """Generate build files.
+        """Register a deferred generate for this project.
 
-        Auto-resolves the project if not already resolved, then
-        calls _generate_impl() which subclasses must implement.
-        The output directory is computed from project.build_dir.
+        Enqueues the generation work to run later — either when
+        ``_generate_pending()`` is called by the CLI, or at process exit
+        via the atexit handler when the script is run directly.
+
+        The output directory is computed from ``project.build_dir``. The
+        project is auto-resolved if not already resolved at the time the
+        generation actually runs.
 
         For build generators (Ninja, Make, Xcode), also auto-generates
-        compile_commands.json for IDE integration unless disabled.
+        ``compile_commands.json`` for IDE integration unless disabled.
 
         Args:
             project: The configured project to generate for.
             compile_commands: If True (default) and this generator supports
-                it, automatically generate compile_commands.json alongside
+                it, automatically generate ``compile_commands.json`` alongside
                 the build files.
         """
-        if not project._resolved:
-            project.resolve()
-        output_dir = self._resolve_output_dir(project)
-        self._generate_impl(project, output_dir)
 
-        if compile_commands and self._supports_compile_commands:
-            from pcons.generators.compile_commands import (
-                CompileCommandsGenerator,
-            )
+        def _generate_later():
+            if not project._resolved:
+                project.resolve()
+            output_dir = self._resolve_output_dir(project)
+            self._generate_impl(project, output_dir)
 
-            CompileCommandsGenerator().generate(project)
+            if compile_commands and self._supports_compile_commands:
+                from pcons.generators.compile_commands import (
+                    CompileCommandsGenerator,
+                )
 
-        # Write the test manifest if the project declares any tests.
-        # Generator-agnostic: every backend gets it for free. Skipped
-        # silently when there are no Test targets.
-        from pcons.core.test import write_test_manifest
+                cc_gen = CompileCommandsGenerator()
+                cc_gen._generate_impl(project, cc_gen._resolve_output_dir(project))
 
-        write_test_manifest(project, output_dir)
+            # Write the test manifest if the project declares any tests.
+            # Generator-agnostic: every backend gets it for free. Skipped
+            # silently when there are no Test targets.
+            from pcons.core.test import write_test_manifest
+
+            write_test_manifest(project, output_dir)
+
+        # Register the actual generation, will be actually executed either by CLI or atexit
+        BaseGenerator.__pending.setdefault(id(project), []).append(_generate_later)
+
+        if self._is_build_generator:
+            # Mark project as generated when a build generator is registered
+            project._mark_generated()
+
+        if not BaseGenerator.__atexit_registered:
+            # Register the atexit handler to run pending generates
+            import atexit
+
+            atexit.register(BaseGenerator._generate_pending)
+            BaseGenerator.__atexit_registered = True
+
+    @staticmethod
+    def _clear_pending() -> None:
+        """Clear all pending generates (for testing)."""
+        BaseGenerator.__pending.clear()
+
+    @staticmethod
+    def _generate_pending(project: Project | None = None) -> None:
+        """Execute and clear pending generate requests for a project.
+
+        If *project* is ``None``, the top-level project is used.  Raises
+        ``ValueError`` if no top-level project exists and *project* was not
+        supplied.  Safe to call when nothing is pending (no-op).
+
+        Args:
+            project: The project whose pending generate requests should be executed.
+                     Defaults to ``Project.top_level()``.
+        """
+        if project is None:
+            from pcons.core.project import Project as _Project
+
+            project = _Project.top_level()
+
+        # ensure project generation is pending, no-op if already marked as generated
+        project.generate()
+
+        pending = BaseGenerator.__pending.pop(id(project), [])
+        for func in pending:
+            func()
+
+        if BaseGenerator.__atexit_registered:
+            # Unregister the atexit handler if there are no more pending generates to avoid running it unnecessarily at exit
+            import atexit
+
+            atexit.unregister(BaseGenerator._generate_pending)
+            BaseGenerator.__atexit_registered = False
 
     def _resolve_output_dir(self, project: Project) -> Path:
         """Compute the output directory from the project.

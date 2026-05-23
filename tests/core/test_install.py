@@ -6,6 +6,7 @@ import pytest
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
+from pcons.generators.generator import BaseGenerator
 
 
 class TestInstall:
@@ -275,6 +276,7 @@ class TestInstallWithNinja:
         # Generate ninja file
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         # Read the generated file
         ninja_file = tmp_path / "build" / "build.ninja"

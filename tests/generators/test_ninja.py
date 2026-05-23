@@ -9,6 +9,7 @@ from pcons.core.builder import CommandBuilder
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
+from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
 
 
@@ -27,6 +28,7 @@ class TestNinjaGenerator:
         gen = NinjaGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         ninja_file = tmp_path / "build.ninja"
         assert ninja_file.exists()
@@ -36,6 +38,7 @@ class TestNinjaGenerator:
         gen = NinjaGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "myproject" in content
@@ -45,6 +48,7 @@ class TestNinjaGenerator:
         gen = NinjaGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "out" / "build.ninja").read_text()
         # builddir is always "." since the ninja file is inside the build directory
@@ -77,6 +81,7 @@ class TestNinjaBuildStatements:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         assert "build build/app.o:" in content
@@ -104,6 +109,7 @@ class TestNinjaBuildStatements:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "rule cc_cmdline" in content
@@ -123,6 +129,7 @@ class TestNinjaAliases:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         assert "build libs: phony" in content
@@ -142,6 +149,7 @@ class TestNinjaDefaults:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # Check for 'all' phony target and user-specified default
@@ -194,6 +202,7 @@ class TestNinjaPostBuild:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # Post-build commands are now baked directly into the rule's command line
@@ -231,6 +240,7 @@ class TestNinjaPostBuild:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # Post-build commands are baked into the rule's command line
@@ -262,6 +272,7 @@ class TestNinjaPostBuild:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
         # $out and $in are left as literals for ninja to expand at build time
@@ -291,6 +302,7 @@ class TestNinjaPostBuild:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Should not have post_build variable
@@ -329,6 +341,7 @@ class TestNinjaDepsDirectives:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "depfile = $out.d" in content
@@ -362,6 +375,7 @@ class TestNinjaDepsDirectives:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         assert "deps = msvc" in content
@@ -391,6 +405,7 @@ class TestNinjaDepsDirectives:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build.ninja").read_text()
         # Should not have any deps directives for linker
@@ -415,6 +430,7 @@ class TestNinjaSrcDir:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "build.ninja").read_text()
         # $SRCDIR should become $topdir in the ninja file
@@ -442,6 +458,7 @@ class TestNinjaSrcDir:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
         # Both deps should appear after | in the build statement,
@@ -485,6 +502,7 @@ class TestNinjaSrcDir:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
         for line in content.splitlines():
@@ -511,6 +529,7 @@ class TestNinjaSrcDir:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "build.ninja").read_text()
         assert "--config=$topdir/my.cfg" in content
@@ -531,6 +550,7 @@ class TestNinjaSrcDir:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "build.ninja").read_text()
         # Find the rule block and verify restat is present
@@ -561,6 +581,7 @@ class TestNinjaSrcDir:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "build.ninja").read_text()
         assert "restat" not in content
@@ -588,6 +609,7 @@ class TestNinjaSrcDir:
         project.resolve()
         ninja_gen = NinjaGenerator()
         ninja_gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
         lines = content.splitlines()

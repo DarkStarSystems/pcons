@@ -7,6 +7,7 @@ from pcons.core.builder import MultiOutputBuilder, OutputSpec
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
+from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
 
 
@@ -82,6 +83,7 @@ class TestNinjaMultiOutput:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
 
@@ -137,6 +139,7 @@ class TestNinjaMultiOutput:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
 
@@ -192,6 +195,7 @@ class TestNinjaMultiOutput:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
 
@@ -239,6 +243,7 @@ class TestNinjaSingleOutput:
 
         gen = NinjaGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build.ninja").read_text())
 

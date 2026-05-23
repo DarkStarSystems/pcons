@@ -6,6 +6,7 @@ import json
 from pcons.core.node import FileNode, Node
 from pcons.core.project import Project
 from pcons.core.target import Target
+from pcons.generators.generator import BaseGenerator
 from pcons.generators.metadata import MetadataGenerator
 from pcons.util.source_location import SourceLocation
 
@@ -21,6 +22,7 @@ class TestMetadataGenerator:
         gen = MetadataGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         assert gen.name == "metadata"
         assert (tmp_path / "pcons_metadata.json").exists()
@@ -30,6 +32,7 @@ class TestMetadataGenerator:
         gen = MetadataGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "pcons_metadata.json").read_text())
         assert content["schema_version"] == 2
@@ -62,6 +65,7 @@ class TestMetadataGenerator:
 
         gen = MetadataGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
 
@@ -97,6 +101,7 @@ class TestMetadataGenerator:
         app.output_nodes.append(FileNode("build/app"))
 
         MetadataGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
         by_name = {t["name"]: t for t in content["projects"][0]["targets"]}
@@ -111,6 +116,7 @@ class TestMetadataGenerator:
             lib.output_nodes.append(FileNode("build/lib/libmylib.a"))
 
         MetadataGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
         by_name = {t["name"]: t for t in content["projects"][0]["targets"]}
@@ -123,6 +129,7 @@ class TestMetadataGenerator:
         Project("child", root_dir=tmp_path / "sub")
 
         MetadataGenerator().generate(parent)
+        BaseGenerator._generate_pending(parent)
 
         content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
         assert len(content["projects"]) == 2
@@ -148,6 +155,7 @@ class TestMetadataGenerator:
         )
 
         MetadataGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
         by_name = {t["name"]: t for t in content["projects"][0]["targets"]}

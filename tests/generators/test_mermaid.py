@@ -6,6 +6,7 @@ from pathlib import Path
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
+from pcons.generators.generator import BaseGenerator
 from pcons.generators.mermaid import MermaidGenerator
 
 
@@ -38,6 +39,7 @@ class TestMermaidGeneratorGraph:
         gen = MermaidGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output = (tmp_path / "deps.mmd").read_text()
         assert "flowchart LR" in output
@@ -59,6 +61,7 @@ class TestMermaidGeneratorGraph:
 
         gen = MermaidGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output = (tmp_path / "deps.mmd").read_text()
         assert "build_myapp" in output
@@ -100,6 +103,7 @@ class TestMermaidGeneratorGraph:
 
         gen = MermaidGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output = (tmp_path / "deps.mmd").read_text()
         assert "build_libmath_a" in output
@@ -131,6 +135,7 @@ class TestMermaidGeneratorGraph:
 
         gen = MermaidGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output = (tmp_path / "deps.mmd").read_text()
         # Static library: rectangle [name]
@@ -151,6 +156,7 @@ class TestMermaidGeneratorDirection:
         project = Project("lr", build_dir=tmp_path)
         gen = MermaidGenerator(direction="LR")
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output = (tmp_path / "deps.mmd").read_text()
         assert "flowchart LR" in output
@@ -160,6 +166,7 @@ class TestMermaidGeneratorDirection:
         project = Project("tb", build_dir=tmp_path)
         gen = MermaidGenerator(direction="TB")
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output = (tmp_path / "deps.mmd").read_text()
         assert "flowchart TB" in output
@@ -218,6 +225,7 @@ class TestMermaidGeneratorIntegration:
 
         gen = MermaidGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output = (tmp_path / "deps.mmd").read_text()
 
@@ -262,6 +270,7 @@ class TestMermaidGeneratorIntegration:
 
         gen = MermaidGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output = (tmp_path / "deps.mmd").read_text()
 

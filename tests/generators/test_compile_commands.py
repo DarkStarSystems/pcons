@@ -10,6 +10,7 @@ from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.generators.compile_commands import CompileCommandsGenerator
+from pcons.generators.generator import BaseGenerator
 
 
 def normalize_path(p: str) -> str:
@@ -27,6 +28,7 @@ class TestCompileCommandsGenerator:
         gen = CompileCommandsGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         output_file = tmp_path / "compile_commands.json"
         assert output_file.exists()
@@ -36,6 +38,7 @@ class TestCompileCommandsGenerator:
         gen = CompileCommandsGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert content == []
@@ -69,6 +72,7 @@ class TestCompileCommandsEntries:
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 1
@@ -102,6 +106,7 @@ class TestCompileCommandsEntries:
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 1
@@ -125,6 +130,7 @@ class TestCompileCommandsEntries:
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 0
@@ -154,6 +160,7 @@ class TestCompileCommandsEntries:
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert content[0]["directory"] == str(tmp_path.absolute())
@@ -183,6 +190,7 @@ class TestCompileCommandsEntries:
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert "command" in content[0]
@@ -197,6 +205,7 @@ class TestCompileCommandsSymlink:
         gen = CompileCommandsGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         link_path = tmp_path / "compile_commands.json"
         assert link_path.is_symlink()
@@ -209,6 +218,7 @@ class TestCompileCommandsSymlink:
         gen = CompileCommandsGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         link_path = tmp_path / "compile_commands.json"
         target = os.readlink(link_path)
@@ -221,7 +231,9 @@ class TestCompileCommandsSymlink:
         gen = CompileCommandsGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
         gen.generate(project)  # Second call should not fail
+        BaseGenerator._generate_pending(project)
 
         link_path = tmp_path / "compile_commands.json"
         assert link_path.is_symlink()
@@ -236,6 +248,7 @@ class TestCompileCommandsSymlink:
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         # Should not have been replaced
         assert not regular_file.is_symlink()
@@ -251,6 +264,7 @@ class TestCompileCommandsSymlink:
 
         gen = CompileCommandsGenerator()
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         # Should have been updated
         target = os.readlink(link_path)
@@ -265,6 +279,7 @@ class TestAutoCompileCommands:
         gen = NinjaGenerator()
 
         gen.generate(project)
+        BaseGenerator._generate_pending(project)
 
         assert (tmp_path / "compile_commands.json").exists()
 
@@ -275,6 +290,7 @@ class TestAutoCompileCommands:
         gen = NinjaGenerator()
 
         gen.generate(project, compile_commands=False)
+        BaseGenerator._generate_pending(project)
 
         assert not (tmp_path / "compile_commands.json").exists()
 
@@ -286,3 +302,4 @@ class TestAutoCompileCommands:
 
         # Should not recurse
         gen.generate(project)
+        BaseGenerator._generate_pending(project)

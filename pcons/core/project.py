@@ -87,6 +87,7 @@ class Project(_ProjectBuilders):
         "_parent",
         "_children",
         "_subdir",
+        "__generated",
     )
 
     __current: Project | None = None
@@ -144,6 +145,7 @@ class Project(_ProjectBuilders):
         self.defined_at = defined_at or get_caller_location()
         self._subdir = None
         self._children: list[Project] = []
+        self.__generated = False
 
         # Auto-register with global registry (for CLI access)
         from pcons import _register_project
@@ -759,6 +761,16 @@ class Project(_ProjectBuilders):
             gen.generate(self)
             logger.info("Wrote %s graph to %s", format_name, output_path_str)
 
+    def _mark_generated(self):
+        """Mark the project build's generation have been requested.
+
+        This is called by generators that produce build files (e.g., Ninja)
+        to indicate that generation has been requested. It prevents multiple
+        generators from running on the same project and allows generate() to
+        be a no-op after the first generation.
+        """
+        self.__generated = True
+
     def generate(self) -> None:
         """Generate build files (convenience method).
 
@@ -769,9 +781,10 @@ class Project(_ProjectBuilders):
         For advanced usage (e.g., disabling compile_commands.json),
         use ``Generator().generate(project)`` directly.
         """
-        from pcons import Generator
+        if not self.__generated:
+            from pcons import Generator
 
-        Generator().generate(self)
+            Generator().generate(self)
 
     def generate_pc_file(
         self,
