@@ -135,7 +135,7 @@ class BaseGenerator:
             # Register the atexit handler to run pending generates
             import atexit
 
-            atexit.register(BaseGenerator._generate_pending)
+            atexit.register(BaseGenerator._generate_pending, _is_atexit=True)
             BaseGenerator.__atexit_registered = True
 
     @staticmethod
@@ -144,7 +144,9 @@ class BaseGenerator:
         BaseGenerator.__pending.clear()
 
     @staticmethod
-    def _generate_pending(project: Project | None = None) -> None:
+    def _generate_pending(
+        project: Project | None = None, *, _is_atexit: bool = False
+    ) -> None:
         """Execute and clear pending generate requests for a project.
 
         If *project* is ``None``, the top-level project is used.  Raises
@@ -155,24 +157,37 @@ class BaseGenerator:
             project: The project whose pending generate requests should be executed.
                      Defaults to ``Project.top_level()``.
         """
-        if project is None:
-            from pcons.core.project import Project as _Project
+        try:
+            if project is None:
+                from pcons.core.project import Project as _Project
 
-            project = _Project.top_level()
+                project = _Project.top_level()
 
-        # ensure project generation is pending, no-op if already marked as generated
-        project.generate()
+            # ensure project generation is pending, no-op if already marked as generated
+            project.generate()
 
-        pending = BaseGenerator.__pending.pop(id(project), [])
-        for func in pending:
-            func()
+            pending = BaseGenerator.__pending.pop(id(project), [])
+            for func in pending:
+                func()
 
-        if BaseGenerator.__atexit_registered:
-            # Unregister the atexit handler if there are no more pending generates to avoid running it unnecessarily at exit
-            import atexit
+            if BaseGenerator.__atexit_registered:
+                # Unregister the atexit handler if there are no more pending generates to avoid running it unnecessarily at exit
+                import atexit
 
-            atexit.unregister(BaseGenerator._generate_pending)
-            BaseGenerator.__atexit_registered = False
+                atexit.unregister(BaseGenerator._generate_pending)
+                BaseGenerator.__atexit_registered = False
+        except Exception as e:
+            import sys
+            import traceback
+
+            if _is_atexit:
+                print(
+                    f"Error during generator execution at exit: {e}\n"
+                    "Traceback (most recent call last):",
+                    file=sys.stderr,
+                )
+                traceback.print_exc()
+            raise
 
     def _resolve_output_dir(self, project: Project) -> Path:
         """Compute the output directory from the project.
