@@ -76,10 +76,10 @@ jobs:
           EOF
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
-        run: uv run pytest --cov=pcons --cov-report=xml --ignore=tests/test_examples.py -k "not 21_msvcup_hello"
+        run: uv run pytest -n auto --cov=pcons --cov-report=xml --ignore=tests/test_examples.py -k "not 21_msvcup_hello"
       - name: Run tests (non-Windows)
         if: runner.os != 'Windows'
-        run: uv run pytest --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
+        run: uv run pytest -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:

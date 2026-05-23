@@ -34,7 +34,7 @@ lint:             ## Run ruff and ty linters.
 
 .PHONY: test
 test:             ## Run tests.
-	uv run pytest
+	uv run pytest -n auto
 
 .PHONY: test-cov
 test-cov:         ## Run tests with coverage report.
