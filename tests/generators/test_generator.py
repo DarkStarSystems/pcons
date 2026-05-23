@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.generators.generator."""
 
+import pytest
+
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator, Generator, MultiGenerator
 
@@ -95,6 +97,38 @@ class TestDeferredGenerate:
         BaseGenerator._generate_pending()  # no arg → resolves top-level project
 
         assert gen.executed
+
+    def test_generate_pending_reraises_on_error(self, tmp_path):
+        class FailingGenerator(BaseGenerator):
+            def __init__(self) -> None:
+                super().__init__("failing")
+
+            def _generate_impl(self, _project: Project, _output_dir: object) -> None:  # type: ignore[override]
+                raise RuntimeError("generation failed")
+
+        gen = FailingGenerator()
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        gen.generate(project)
+
+        with pytest.raises(RuntimeError, match="generation failed"):
+            BaseGenerator._generate_pending(project)
+
+    def test_generate_pending_prints_to_stderr_on_atexit_error(self, tmp_path, capsys):
+        class FailingGenerator(BaseGenerator):
+            def __init__(self) -> None:
+                super().__init__("failing")
+
+            def _generate_impl(self, _project: Project, _output_dir: object) -> None:  # type: ignore[override]
+                raise RuntimeError("atexit failure")
+
+        gen = FailingGenerator()
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        gen.generate(project)
+
+        with pytest.raises(RuntimeError, match="atexit failure"):
+            BaseGenerator._generate_pending(project, _is_atexit=True)
+
+        assert "atexit failure" in capsys.readouterr().err
 
 
 class TestMultiGenerator:
