@@ -81,7 +81,7 @@ jobs:
         if: runner.os != 'Windows'
         run: uv run pytest --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -112,7 +112,7 @@ jobs:
       - name: Run example tests
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -169,7 +169,7 @@ jobs:
           WASI_SDK_PATH: /opt/wasi-sdk
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml --cov-append -v -k "22_wasm_wasi"
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -192,7 +192,7 @@ jobs:
       - name: Run msvcup example tests
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "21_msvcup_hello" tests/contrib/test_msvcup.py -v
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -246,7 +246,7 @@ jobs:
       - name: Run C++20 modules example tests
         run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules or 30_cxx_partitions or 31_cxx_modules_optin or 32_cxx_import_std or 35_cxx_modules_deps" -v
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@57e3a136b779b570ffcdbf80b3bdc90e7fab3de2 # v6.0.0
+        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
