@@ -2,10 +2,14 @@
 """Tests for pcons.toolchains.gcc."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from pcons.configure.platform import Platform
+from pcons.core.node import FileNode
+from pcons.core.project import Project
+from pcons.core.subst import PathToken
 from pcons.toolchains.gcc import (
     GccArchiver,
     GccCCompiler,
@@ -318,7 +322,70 @@ class TestGccModuleInterfaceSourceHandler:
         assert handler.language == "cxx_module"
         assert handler.object_suffix == ".o"
         assert handler.depfile == TargetPath(suffix=".d")
-        assert handler.deps_style == "gcc"
+
+
+class TestGccModulesDepsTracking:
+    def test_after_resolve_keeps_depfile_for_non_module_cpp(self, tmp_path, monkeypatch):
+        """Non-module C++ TUs must keep depfile/deps_style for #include tracking."""
+        tc = GccToolchain()
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+
+        env = SimpleNamespace(
+            cxx=SimpleNamespace(cmd="g++", flags=[]),
+            register_node=lambda _node: None,
+        )
+
+        cxx_obj = FileNode("build/obj/main.cpp.o")
+        cxx_obj._build_info = {
+            "env": env,
+            "context": SimpleNamespace(flags=[], includes=[], defines=[]),
+            "depfile": PathToken(path="build/obj/main.cpp.o", path_type="build", suffix=".d"),
+            "deps_style": "gcc",
+        }
+
+        source_obj_by_language = {
+            "cxx": [(tmp_path / "src" / "main.cpp", cxx_obj)],
+        }
+
+        def fake_select_modules_scope(_source_obj_by_language):
+            # Simulate modules mode where regular C++ TUs are processed even without
+            # an explicit module-interface unit in this particular list.
+            return ([], source_obj_by_language["cxx"])
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.select_modules_scope",
+            fake_select_modules_scope,
+        )
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.scan_translation_units",
+            lambda specs, scanner, scanner_style: [
+                SimpleNamespace(
+                    required_logical_names=set(),
+                    is_module_provider=False,
+                )
+                for _ in specs
+            ],
+        )
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.build_module_map",
+            lambda _results, _mod_dir, _ext: {},
+        )
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.write_dyndep_from_results",
+            lambda _results, _module_map, _out: None,
+        )
+        monkeypatch.setattr(
+            tc,
+            "_inject_gcc_std_module_builds",
+            lambda *_args, **_kwargs: {},
+        )
+
+        tc.after_resolve(project, source_obj_by_language)
+
+        build_info = cxx_obj._build_info
+        assert build_info is not None
+        assert build_info["depfile"] is not None
+        assert build_info["deps_style"] == "gcc"
 
     def test_regular_cpp_not_cxx_module(self) -> None:
         tc = GccToolchain()

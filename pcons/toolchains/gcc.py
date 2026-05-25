@@ -614,10 +614,11 @@ class GccToolchain(UnixToolchain):
         cxx_tool = getattr(first_env, "cxx", None) if first_env else None
         compiler_cmd = str(getattr(cxx_tool, "cmd", "g++") or "g++")
         base_flags = list(getattr(cxx_tool, "flags", None) or [])
+        module_src_paths = {src for src, _ in cxx_module_pairs}
 
         # Enable modules for all participating C++ TUs.
         modules_flag = "-fmodules"
-        for _, obj_node in all_cxx_pairs:
+        for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             if bi is None:
                 continue
@@ -625,16 +626,15 @@ class GccToolchain(UnixToolchain):
             if context is not None and hasattr(context, "flags"):
                 if modules_flag not in context.flags:
                     context.flags.append(modules_flag)
-            # Let dyndep drive module dependencies for these TUs. GCC depfiles
-            # conflict with module implicit outputs on Ninja for these edges.
-            bi["deps_style"] = None
-            bi["depfile"] = None
+            # Keep header depfiles for regular C++ TUs. For module interfaces,
+            # let dyndep drive module dependencies to avoid depfile conflicts.
+            if src in module_src_paths:
+                bi["deps_style"] = None
+                bi["depfile"] = None
 
         # Build per-TU scan specs and run GCC p1689 scanning.
         specs: list[TuScanSpec] = []
         spec_to_obj: dict[int, FileNode] = {}
-        module_src_paths = {src for src, _ in cxx_module_pairs}
-
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
@@ -731,10 +731,14 @@ class GccToolchain(UnixToolchain):
         logger.debug("Wrote GCC C++ module dyndep to %s", dyndep_path)
 
         dyndep_node = project.node(dyndep_path)
-        for _, obj_node in all_cxx_pairs:
+        for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             if bi is not None:
                 bi["dyndep"] = dyndep_rel
+                if src not in module_src_paths:
+                    extra = bi.setdefault("extra_command_flags", [])
+                    if "-Mno-modules" not in extra:
+                        extra.append("-Mno-modules")
             if dyndep_node not in obj_node.implicit_deps:
                 obj_node.implicit_deps.append(dyndep_node)
         for std_obj_node in std_obj_nodes.values():
