@@ -1,0 +1,34 @@
+# Test configuration for a header-rebuild regression in C++ modules mode
+
+[test]
+description = "Header touch should rebuild regular .cpp object even when modules mode is enabled"
+
+expected_outputs = [
+    "build/obj.hello/src/Greet.cppm.o",
+    "build/obj.hello/src/main.cpp.o",
+    "build/hello",
+]
+
+[toolchains]
+linux = ["gcc"]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_exit_code = 0 },
+]
+
+[[rebuild]]
+description = "Touching local.hpp rebuilds main.cpp.o and hello"
+touch = "src/local.hpp"
+expect_rebuild = [
+    "obj.hello/src/main.cpp.o",
+    "hello",
+]
+
+[[rebuild]]
+description = "Rebuild should not rebuild anything when nothing changed"
+expect_no_work = true
+
+[skip]
+generators = ["xcode", "make"]
+requires_cxx_std_module = true
