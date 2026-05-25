@@ -189,13 +189,24 @@ class NinjaGenerator(BaseGenerator):
 
         # Resolve the command string
         command_raw = build_info.get("command")
+        extra_command_flags = build_info.get("extra_command_flags") or []
+
         if command_raw is None:
             command = self._expand_command_fallback(node, build_info, env)
         elif isinstance(command_raw, list):
-            relativized_tokens = self._relativize_command_tokens(command_raw)
+            command_tokens = list(command_raw)
+            for flag in extra_command_flags:
+                if flag not in command_tokens:
+                    command_tokens.append(flag)
+            relativized_tokens = self._relativize_command_tokens(
+                cast(list[str], command_tokens)
+            )
             command = to_shell_command(relativized_tokens, shell="ninja")
         else:
             command = command_raw
+            for flag in extra_command_flags:
+                if f" {flag}" not in command:
+                    command = f"{command} {flag}"
 
         # Append post-build commands
         post_build_suffix = self._get_post_build_suffix(node, target)
@@ -206,7 +217,27 @@ class NinjaGenerator(BaseGenerator):
         if custom_rule_name:
             rule_key = custom_rule_name
         else:
-            cmd_hash = hashlib.md5(command.encode()).hexdigest()[:8]
+            # Rule behavior is affected not only by command text but also by
+            # dependency parsing mode/restat. If we dedupe solely by command,
+            # a module object (no depfile/deps) can accidentally share a rule
+            # with a regular C++ object (gcc depfile), dropping headers tracking.
+            depfile = build_info.get("depfile")
+            deps_style = build_info.get("deps_style")
+            restat = bool(build_info.get("restat"))
+
+            dep_sig = "none"
+            if deps_style == "msvc":
+                dep_sig = "msvc"
+            elif deps_style == "gcc":
+                from pcons.core.subst import PathToken
+
+                if isinstance(depfile, PathToken):
+                    dep_sig = f"gcc:{depfile.suffix}"
+                else:
+                    dep_sig = "gcc"
+
+            hash_body = f"{command}\n{dep_sig}\nrestat:{int(restat)}"
+            cmd_hash = hashlib.md5(hash_body.encode()).hexdigest()[:8]
             rule_key = f"{tool_name}_{command_var}_{cmd_hash}"
 
         return rule_key, command
