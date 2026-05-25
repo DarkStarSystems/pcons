@@ -325,7 +325,9 @@ class TestGccModuleInterfaceSourceHandler:
 
 
 class TestGccModulesDepsTracking:
-    def test_after_resolve_keeps_depfile_for_non_module_cpp(self, tmp_path, monkeypatch):
+    def test_after_resolve_keeps_depfile_for_non_module_cpp(
+        self, tmp_path, monkeypatch
+    ):
         """Non-module C++ TUs must keep depfile/deps_style for #include tracking."""
         tc = GccToolchain()
         project = Project("test", root_dir=tmp_path, build_dir="build")
@@ -339,7 +341,9 @@ class TestGccModulesDepsTracking:
         cxx_obj._build_info = {
             "env": env,
             "context": SimpleNamespace(flags=[], includes=[], defines=[]),
-            "depfile": PathToken(path="build/obj/main.cpp.o", path_type="build", suffix=".d"),
+            "depfile": PathToken(
+                path="build/obj/main.cpp.o", path_type="build", suffix=".d"
+            ),
             "deps_style": "gcc",
         }
 

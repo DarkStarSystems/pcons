@@ -310,6 +310,71 @@ class TestNinjaPostBuild:
 
 
 class TestNinjaDepsDirectives:
+    def test_same_command_but_different_dep_modes_use_distinct_rules(self, tmp_path):
+        """Commands with the same command line but different deps_style should get different rules with correct deps directives."""
+        project = Project("test", root_dir=tmp_path, build_dir=".")
+
+        from pcons.core.subst import PathToken, TargetPath
+
+        target = Target("app")
+
+        module_obj = FileNode("build/mod.cppm.o")
+        module_src = FileNode("src/mod.cppm")
+        module_obj._build_info = {
+            "tool": "cxx",
+            "command_var": "objcmd",
+            "language": "cxx_module",
+            "sources": [module_src],
+            "command": "g++ -c -o $out $in",
+            "depfile": None,
+            "deps_style": None,
+        }
+        module_obj.builder = CommandBuilder(
+            "Object",
+            "cxx",
+            "objcmd",
+            src_suffixes=[".cppm"],
+            target_suffixes=[".o"],
+        )
+
+        regular_obj = FileNode("build/main.cpp.o")
+        regular_src = FileNode("src/main.cpp")
+        regular_obj._build_info = {
+            "tool": "cxx",
+            "command_var": "objcmd",
+            "language": "cxx",
+            "sources": [regular_src],
+            "command": "g++ -c -o $out $in",
+            "depfile": PathToken(
+                path="build/main.cpp.o", path_type="build", suffix=".d"
+            ),
+            "deps_style": "gcc",
+        }
+        regular_obj.builder = CommandBuilder(
+            "Object",
+            "cxx",
+            "objcmd",
+            src_suffixes=[".cpp"],
+            target_suffixes=[".o"],
+            depfile=TargetPath(suffix=".d"),
+            deps_style="gcc",
+        )
+
+        target.intermediate_nodes.extend([module_obj, regular_obj])
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build.ninja").read_text()
+
+        rule_headers = [
+            line for line in content.splitlines() if line.startswith("rule cxx_objcmd_")
+        ]
+        assert len(rule_headers) == 2, content
+        assert "depfile = $out.d" in content
+        assert "deps = gcc" in content
+
     def test_gcc_deps_style_emits_depfile_and_deps(self, tmp_path):
         project = Project("test", root_dir=tmp_path, build_dir=".")
 
