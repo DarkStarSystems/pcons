@@ -7,13 +7,30 @@ and carries "usage requirements" that propagate to consumers (CMake-style).
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
+import sys
+import warnings
 from collections import UserList
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias
-from warnings import deprecated
+
+if sys.version_info >= (3, 13):
+    from warnings import deprecated
+else:
+
+    def deprecated(msg: str):  # type: ignore[no-redef]
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                warnings.warn(f"{func.__name__} is deprecated: {msg}", DeprecationWarning, stacklevel=2)
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
 
 from pcons.core.flags import merge_flags
 
