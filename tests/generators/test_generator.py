@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.generators.generator."""
 
+import os
+
 import pytest
 
 from pcons.core.project import Project
@@ -113,7 +115,13 @@ class TestDeferredGenerate:
         with pytest.raises(RuntimeError, match="generation failed"):
             BaseGenerator._generate_pending(project)
 
-    def test_generate_pending_prints_to_stderr_on_atexit_error(self, tmp_path, capsys):
+    def test_generate_pending_forces_nonzero_exit_on_atexit_error(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """A real generation failure in the atexit hook must report the error
+        and force a nonzero exit. Python ignores exceptions raised at shutdown
+        and would otherwise exit 0, silently hiding the failure."""
+
         class FailingGenerator(BaseGenerator):
             def __init__(self) -> None:
                 super().__init__("failing")
@@ -125,9 +133,20 @@ class TestDeferredGenerate:
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         gen.generate(project)
 
-        with pytest.raises(RuntimeError, match="atexit failure"):
+        # os._exit would kill the test runner; sub a sentinel that records the
+        # code and stops control flow the way a real _exit would.
+        class _Exited(Exception):
+            pass
+
+        def fake_exit(code: int) -> None:
+            raise _Exited(code)
+
+        monkeypatch.setattr(os, "_exit", fake_exit)
+
+        with pytest.raises(_Exited) as exc_info:
             BaseGenerator._generate_pending(project, _is_atexit=True)
 
+        assert exc_info.value.args[0] == 1
         assert "atexit failure" in capsys.readouterr().err
 
 

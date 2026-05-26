@@ -140,8 +140,19 @@ class BaseGenerator:
 
     @staticmethod
     def _clear_pending() -> None:
-        """Clear all pending generates (for testing)."""
+        """Clear all pending generates and drop the atexit hook (for testing).
+
+        Tests that call ``generate()`` register a process-wide atexit handler.
+        Clearing the queue without also unregistering it would leave the hook
+        to fire at interpreter shutdown against an already-torn-down project
+        tree, so cleanup must remove both.
+        """
         BaseGenerator.__pending.clear()
+        if BaseGenerator.__atexit_registered:
+            import atexit
+
+            atexit.unregister(BaseGenerator._generate_pending)
+            BaseGenerator.__atexit_registered = False
 
     @staticmethod
     def _generate_pending(
@@ -149,9 +160,14 @@ class BaseGenerator:
     ) -> None:
         """Execute and clear pending generate requests for a project.
 
-        If *project* is ``None``, the top-level project is used.  Raises
-        ``ValueError`` if no top-level project exists and *project* was not
-        supplied.  Safe to call when nothing is pending (no-op).
+        If *project* is ``None``, the top-level project is used.  When called
+        explicitly (e.g. by the CLI), errors propagate to the caller, which
+        turns them into a nonzero exit status.  When fired from the atexit
+        hook, a missing top-level project (e.g. one torn down by tests) is a
+        silent no-op, but a *real* generation error is reported to stderr and
+        forces a nonzero process exit — Python would otherwise ignore an
+        exception raised at shutdown and still exit 0.  Safe to call when
+        nothing is pending (no-op).
 
         Args:
             project: The project whose pending generate requests should be executed.
@@ -161,7 +177,14 @@ class BaseGenerator:
             if project is None:
                 from pcons.core.project import Project as _Project
 
-                project = _Project.top_level()
+                try:
+                    project = _Project.top_level()
+                except ValueError:
+                    if _is_atexit:
+                        # Project tree was already torn down (e.g. tests
+                        # cleared it); nothing left to generate.
+                        return
+                    raise
 
             # ensure project generation is pending, no-op if already marked as generated
             project.generate()
@@ -181,12 +204,22 @@ class BaseGenerator:
             import traceback
 
             if _is_atexit:
+                # Interpreter shutdown: Python *ignores* exceptions raised from
+                # atexit handlers (and sys.exit too) and would still exit 0, so
+                # re-raising here would silently hide a real generation failure.
+                # Report it and force a nonzero exit. (The benign "no project"
+                # case returns earlier and never reaches here.)
+                import os
+
                 print(
                     f"Error during generator execution at exit: {e}\n"
                     "Traceback (most recent call last):",
                     file=sys.stderr,
                 )
                 traceback.print_exc()
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os._exit(1)
             raise
 
     def _resolve_output_dir(self, project: Project) -> Path:

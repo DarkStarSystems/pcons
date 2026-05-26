@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -81,6 +82,10 @@ class CompileCommandsGenerator(BaseGenerator):
         project root without configuration. If the symlink cannot be
         created (e.g., on Windows without privileges), a warning is logged.
 
+        The link is created atomically (a uniquely-named temp symlink swapped
+        into place with os.replace), so concurrent generate() runs — parallel
+        test workers, or simultaneous pcons invocations — cannot race on it.
+
         Args:
             output_file: Path to the generated compile_commands.json.
             project: The project (used for root_dir).
@@ -88,8 +93,10 @@ class CompileCommandsGenerator(BaseGenerator):
         root_dir = project.root_dir
         link_path = root_dir / "compile_commands.json"
 
-        # If build_dir is the project root, the file is already there
-        if output_file.resolve() == link_path.resolve():
+        # If build_dir is the project root, the file is already there. Compare
+        # the directories — never resolve() the link itself, which can race
+        # (EINVAL) with a concurrent generate() swapping it.
+        if output_file.parent.resolve() == root_dir.resolve():
             return
 
         try:
@@ -98,29 +105,42 @@ class CompileCommandsGenerator(BaseGenerator):
             # On Windows, relpath fails across drive letters
             return
 
-        if link_path.exists() or link_path.is_symlink():
+        # Inspect the existing entry. This is best-effort: a concurrent writer
+        # may be swapping the link, and on macOS a stat/lstat racing a rename
+        # raises EINVAL (which pathlib does not suppress), so tolerate any
+        # OSError and fall through to the atomic swap below.
+        try:
             if link_path.is_symlink():
-                # Check if it already points to the right place
-                existing_target = os.readlink(link_path)
-                if Path(existing_target) == Path(target_path):
-                    return  # Already correct
-                # Wrong target, update it
-                link_path.unlink()
-            else:
-                # Regular file — don't overwrite
+                # Fast path: already pointing where we want.
+                if Path(os.readlink(link_path)) == Path(target_path):
+                    return
+            elif link_path.exists():
+                # A real file the user put there — don't clobber it.
                 logger.warning(
                     "compile_commands.json exists at project root as a "
                     "regular file; not replacing with symlink"
                 )
                 return
+        except OSError:
+            pass
 
+        # Atomic create-or-replace via a unique temp name, so parallel writers
+        # never observe a half-updated link.
+        tmp_link = link_path.with_name(
+            f".compile_commands.json.{os.getpid()}.{uuid.uuid4().hex}"
+        )
         try:
-            link_path.symlink_to(target_path)
+            os.symlink(target_path, tmp_link)
+            os.replace(tmp_link, link_path)
         except OSError as e:
             logger.warning(
                 "Could not create compile_commands.json symlink at project root: %s",
                 e,
             )
+            try:
+                os.unlink(tmp_link)
+            except OSError:
+                pass
 
     def _collect_compile_commands(
         self, target: Target, project: Project
