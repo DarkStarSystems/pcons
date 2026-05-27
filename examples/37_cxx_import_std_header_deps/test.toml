@@ -10,7 +10,10 @@ expected_outputs = [
 ]
 
 [toolchains]
-linux = ["gcc"]
+linux = ["gcc", "llvm"]
+darwin = ["llvm"]
+# GCC on windows (mingw32) does not support 'import std;' yet, so skip it for now
+windows = ["msvc"]
 
 [verify]
 commands = [
