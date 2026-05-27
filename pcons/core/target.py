@@ -13,9 +13,9 @@ import re
 import sys
 import warnings
 from collections import UserList
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 if sys.version_info >= (3, 13):
     from warnings import deprecated
@@ -25,12 +25,17 @@ else:
         def decorator(func):
             @functools.wraps(func)
             def wrapper(*args, **kwargs):
-                warnings.warn(f"{func.__name__} is deprecated: {msg}", DeprecationWarning, stacklevel=2)
+                warnings.warn(
+                    f"{func.__name__} is deprecated: {msg}",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
                 return func(*args, **kwargs)
 
             return wrapper
 
         return decorator
+
 
 from pcons.core.flags import merge_flags
 
@@ -56,39 +61,35 @@ else:
 
 __all__ = ["SourceSpec", "UsageRequirements", "Target", "ImportedTarget"]
 
-ListLike: TypeAlias = list | UserList
+_T = TypeVar("_T")
+ListLike: TypeAlias = list[_T] | UserList[_T]
 
 
-class UniqueList(UserList):
-    def __init__(self, initlist: ListLike | None = None, owner: Target | None = None):
+class UniqueList(UserList[_T]):
+    def __init__(self, initlist: ListLike[_T] | None = None) -> None:
         super().__init__(initlist or [])
-        self.owner = owner
 
-    def append(self, item):
+    def append(self, item: _T):
         if item not in self.data:
             self.data.append(item)
-        return self.owner
 
-    def extend(self, other):
+    def extend(self, other: Iterable[_T]):
         for item in other:
             self.append(item)
-        return self.owner
 
 
-class ValidatedUniqueList(UniqueList):
+class ValidatedUniqueList(UniqueList[_T]):
     def __init__(
         self,
-        initlist: ListLike | None = None,
-        owner: Target | None = None,
-        validator: Callable[[Any], bool] | None = None,
-    ):
-        super().__init__(initlist, owner)
+        initlist: ListLike[_T] | None = None,
+        validator: Callable[[_T], bool] | None = None,
+    ) -> None:
+        super().__init__(initlist)
         self.validator = validator
 
-    def append(self, item):
+    def append(self, item: _T):
         if self.validator is None or self.validator(item):
-            return super().append(item)
-        return self.owner
+            super().append(item)
 
 
 class UsageRequirements(_UsageRequirementsStubs):
@@ -104,27 +105,21 @@ class UsageRequirements(_UsageRequirementsStubs):
     use any names they need (e.g., python_packages, data_schemas).
     """
 
-    # type hints
-    include_dirs: ListLike[str]
-    defines: ListLike[str]
-    compile_flags: ListLike[str]
-    link_flags: ListLike[str]
-    link_libs: ListLike[str | Target]
-    link_dirs: ListLike[str]
+    _data: dict[str, list[Any] | UserList[Any]]
 
-    _data: dict[str, ListLike]
-
-    def __init__(self, **kwargs: ListLike) -> None:
+    def __init__(self, **kwargs: list[Any] | UserList[Any]) -> None:
         object.__setattr__(self, "_data", {})
         for k, v in kwargs.items():
             self._data[k] = v
 
-    def __getattr__(self, name: str) -> ListLike:
+    def __getattr__(self, name: str) -> list[Any] | UserList[Any]:
         """Return the named list, creating it on first access."""
-        data: dict[str, ListLike] = object.__getattribute__(self, "_data")
+        data: dict[str, list[Any] | UserList[Any]] = object.__getattribute__(
+            self, "_data"
+        )
         return data.setdefault(name, [])
 
-    def __setattr__(self, name: str, value: ListLike) -> None:  # type: ignore[override]
+    def __setattr__(self, name: str, value: list[Any] | UserList[Any]) -> None:  # type: ignore[override]
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
@@ -171,7 +166,7 @@ class UsageRequirements(_UsageRequirementsStubs):
             result._data[k] = type(v)(v)
         return result
 
-    def items(self) -> list[tuple[str, ListLike]]:
+    def items(self) -> list[tuple[str, list[Any] | UserList[Any]]]:
         """Return all (name, list) pairs."""
         return list(self._data.items())
 
@@ -360,20 +355,20 @@ class Target:
         self._sources: list[Node] = []
         self._dependencies: list[Target] = []
         self.public = UsageRequirements()
-        self.public.defines = UniqueList([], owner=self)
-        self.public.include_dirs = UniqueList([], owner=self)
-        self.public.link_dirs = UniqueList([], owner=self)
+        self.public.defines = UniqueList([])  # type: ignore
+        self.public.include_dirs = UniqueList([])  # type: ignore
+        self.public.link_dirs = UniqueList([])
         self.public.link_flags = []
-        self.public.link_libs = ValidatedUniqueList(
-            [], validator=self.__link_libs_validator, owner=self
+        self.public.link_libs = ValidatedUniqueList(  # type: ignore
+            [], validator=self.__link_libs_validator
         )
         self.private = UsageRequirements()
-        self.private.defines = UniqueList([], owner=self)
-        self.private.include_dirs = UniqueList([], owner=self)
-        self.private.link_dirs = UniqueList([], owner=self)
+        self.private.defines = UniqueList([])  # type: ignore
+        self.private.include_dirs = UniqueList([])  # type: ignore
+        self.private.link_dirs = UniqueList([])
         self.private.link_flags = []
-        self.private.link_libs = ValidatedUniqueList(
-            [], validator=self.__link_libs_validator, owner=self
+        self.private.link_libs = ValidatedUniqueList(  # type: ignore
+            [], validator=self.__link_libs_validator
         )
         self.required_languages: set[str] = set()
         self.defined_at = defined_at or get_caller_location()

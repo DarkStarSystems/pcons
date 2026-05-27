@@ -254,7 +254,7 @@ class CompileCommandsGenerator(BaseGenerator):
                     parts.append(f"{context.include_prefix}{inc}")
                 for define in context.defines:
                     parts.append(f"{context.define_prefix}{define}")
-                parts.extend(context.flags)
+                parts.extend(str(f) for f in context.flags)
 
         parts.extend(["-o", str(output.path), str(source.path)])
 

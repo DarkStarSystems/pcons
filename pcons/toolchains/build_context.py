@@ -268,10 +268,12 @@ class MsvcCompileLinkContext(CompileLinkContext):
             # MSVC uses full library names (kernel32.lib, not -lkernel32)
             formatted_libs = []
             for lib in self.libs:
-                if lib.endswith(".lib"):
+                if isinstance(lib, str) and lib.endswith(".lib"):
                     formatted_libs.append(lib)
-                else:
+                elif isinstance(lib, str):
                     formatted_libs.append(f"{lib}.lib")
+                else:
+                    formatted_libs.append(lib)
             result["libs"] = formatted_libs
         if self.link_flags:
             # Merge with base flags from env.link.flags (same as base class)
@@ -323,7 +325,7 @@ class MsvcCompileLinkContext(CompileLinkContext):
             defines=list(effective.defines),
             flags=list(effective.compile_flags),
             link_flags=list(effective.link_flags),
-            libs=list(effective.link_libs),
+            libs=[lib for lib in effective.link_libs if not isinstance(lib, Target)],
             libdirs=[str(p) for p in effective.link_dirs],
             linker_cmd=None,
             mode=mode,

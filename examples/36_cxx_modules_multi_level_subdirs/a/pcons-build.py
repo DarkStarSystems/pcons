@@ -7,4 +7,5 @@ a = project.StaticLibrary("a", env, sources=["a.cppm"])
 # pick "aa" variable ("libaa") from the subdirectory aa/pcons-build.py
 (aa,) = add_subdirectory("aa", pick=["aa"])
 
-project.Program("a_app", env, sources=["a_main.cpp"]).link(a, aa)
+a_app = project.Program("a_app", env, sources=["a_main.cpp"])
+a_app.private.link_libs.extend([a, aa])

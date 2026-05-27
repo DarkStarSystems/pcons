@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.core.target."""
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -269,7 +270,9 @@ class TestFluentAPI:
         lib = Target("lib")
         app = Target("app")
 
-        result = app.private.link_libs.append(lib)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            result = app.link(lib)
 
         assert result is app
         assert lib in app.dependencies
@@ -337,7 +340,9 @@ class TestFluentAPI:
         src = tmp_path / "main.c"
         src.touch()
 
-        result = app.add_source(src).private.link_libs.append(lib)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            result = app.add_source(src).link(lib)
 
         assert result is app
         assert len(app.sources) == 1

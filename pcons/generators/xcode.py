@@ -918,8 +918,8 @@ class XcodeGenerator(BaseGenerator):
 
         # Collect compiler flags
         cflags: list[str] = []
-        cflags.extend(target.public.compile_flags)
-        cflags.extend(target.private.compile_flags)
+        cflags.extend(str(f) for f in target.public.compile_flags)
+        cflags.extend(str(f) for f in target.private.compile_flags)
 
         # Get flags from environment if available
         if env is not None:
@@ -946,8 +946,8 @@ class XcodeGenerator(BaseGenerator):
 
         # Collect link flags
         ldflags: list[str] = []
-        ldflags.extend(target.public.link_flags)
-        ldflags.extend(target.private.link_flags)
+        ldflags.extend(str(f) for f in target.public.link_flags)
+        ldflags.extend(str(f) for f in target.private.link_flags)
 
         # Add link libraries as -l flags
         for lib in target.public.link_libs:

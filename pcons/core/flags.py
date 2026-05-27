@@ -15,6 +15,7 @@ as a parameter, allowing toolchain-specific behavior.
 
 from __future__ import annotations
 
+from collections.abc import MutableSequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -172,7 +173,7 @@ def deduplicate_flags(
 
 
 def merge_flags(
-    existing: list[str],
+    existing: MutableSequence[str],
     new: Sequence[str | FlagPair],
     separated_arg_flags: frozenset[str] | None = None,
 ) -> None:

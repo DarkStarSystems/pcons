@@ -20,7 +20,10 @@ from pcons.core.subst import TargetPath
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pcons.core.environment import Environment
+    from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
 
@@ -190,7 +193,7 @@ class UnixToolchain(BaseToolchain):
         self,
         target: Target,
         output_name: str,
-        existing_flags: list[str],
+        existing_flags: Sequence[str | PathToken],
     ) -> list[str]:
         """Return install_name (macOS) or SONAME (Linux) for shared libraries.
 
