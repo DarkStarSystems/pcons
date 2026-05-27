@@ -13,7 +13,7 @@ expected_outputs = [
 [toolchains]
 linux = ["gcc", "llvm"]
 darwin = ["llvm"]
-windows = ["msvc"]
+windows = ["msvc", "gcc"]
 
 [verify]
 commands = [{ run = "./build/hello", expect_exit_code = 0 }]
