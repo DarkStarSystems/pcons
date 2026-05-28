@@ -224,6 +224,7 @@ class CompileCommandsGenerator(BaseGenerator):
 
         # Get the actual compiler command from the environment
         tool_cmd = tool_name
+        flags = []
         if build_info:
             env = build_info.get("env")
             if env is not None:
@@ -232,13 +233,17 @@ class CompileCommandsGenerator(BaseGenerator):
                     cmd = getattr(tool_config, "cmd", None)
                     if cmd:
                         tool_cmd = str(cmd)
+                    if hasattr(tool_config, "flags"):
+                        # Collect flags
+                        flags.extend(str(f) for f in tool_config.flags)
+
         # Fallback to generic names if no env available
         if tool_cmd == "cc":
             tool_cmd = "cc"
         elif tool_cmd == "cxx":
             tool_cmd = "c++"
 
-        parts: list[str] = [tool_cmd, "-c"]
+        parts: list[str] = [tool_cmd, "-c", *flags]
 
         # Add effective requirements from context
         if build_info:
