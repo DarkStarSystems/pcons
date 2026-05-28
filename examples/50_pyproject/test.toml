@@ -21,3 +21,6 @@ commands = [
 [skip]
 platforms = ["windows", "darwin"]
 generators = ["xcode", "make"]
+
+# only run with system Python (development libraries would be missing)
+non_system_python = true

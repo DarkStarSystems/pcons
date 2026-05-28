@@ -1,5 +1,5 @@
 [build-system]
-requires = ["pcons"]
+requires = ["pcons", "conan"]
 build-backend = "pcons.pyproject"
 
 [project]

@@ -267,6 +267,49 @@ def load_test_config(example_dir: Path) -> dict[str, Any]:
         return tomllib.load(f)
 
 
+def _get_python_version(python_exe: str) -> tuple[int, int]:
+    out = subprocess.check_output(
+        [
+            python_exe,
+            "-c",
+            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+        ],
+        text=True,
+    ).strip()
+
+    major, minor = out.split(".")
+    return int(major), int(minor)
+
+
+def check_non_system_python():
+    current_version = sys.version_info[:2]
+
+    # Remove current venv/bin from PATH so we resolve the real system python
+    path_entries = os.environ.get("PATH", "").split(os.pathsep)
+
+    current_bin = os.path.dirname(sys.executable)
+
+    filtered_path = os.pathsep.join(
+        p for p in path_entries if os.path.abspath(p) != os.path.abspath(current_bin)
+    )
+
+    system_python = shutil.which("python3", path=filtered_path)
+
+    if not system_python:
+        return "Could not locate system python"
+
+    system_version = _get_python_version(system_python)
+
+    if current_version != system_version:
+        return (
+            f"Non system python "
+            f"(current: {current_version[0]}.{current_version[1]}, "
+            f"system: {system_version[0]}.{system_version[1]})"
+        )
+
+    return None
+
+
 def should_skip(config: dict[str, Any]) -> str | None:
     """Check if this test should be skipped. Returns skip reason or None."""
     skip_config = config.get("skip", {})
@@ -295,6 +338,11 @@ def should_skip(config: dict[str, Any]) -> str | None:
     for var in require_env:
         if not os.environ.get(var):
             return f"Required environment variable '{var}' not set"
+
+    non_system_python = skip_config.get("non_system_python", False)
+    if non_system_python:
+        if (res := check_non_system_python()) is not None:
+            return res
 
     def _check_msvc_module_support() -> bool | str:
         """On Windows we expect MSVC (which has its own std-module path).
