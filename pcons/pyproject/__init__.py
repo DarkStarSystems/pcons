@@ -138,9 +138,72 @@ def _write_wheel(
         zf.writestr(f"{dist_info}/RECORD", "\n".join(record_lines) + "\n")
 
 
+def _write_editable_wheel(
+    wheel_path: Path,
+    name: str,
+    version: str,
+    build_dir: Path,
+    python_tag: str,
+    abi_tag: str,
+    platform_tag: str,
+) -> None:
+    """Create an editable wheel containing only a .pth file pointing at build_dir.
+
+    When pip installs this wheel, the .pth file is placed in site-packages and
+    processed by Python's site module, which adds build_dir to sys.path.
+    Imports then resolve directly to the compiled extensions in build_dir, so
+    re-running ninja is enough to pick up rebuilt extensions without reinstalling.
+    """
+    dist_info = f"{name}-{version}.dist-info"
+    pth_name = f"_{name}_editable.pth"
+    pth_content = str(build_dir.resolve()) + "\n"
+
+    wheel_meta = (
+        "Wheel-Version: 1.0\n"
+        "Generator: pcons\n"
+        "Root-Is-Purelib: true\n"
+        f"Tag: {python_tag}-{abi_tag}-{platform_tag}\n"
+    )
+    pkg_metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+
+    record: list[tuple[str, str, int]] = []
+
+    with zipfile.ZipFile(wheel_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        pth_bytes = pth_content.encode()
+        zf.writestr(pth_name, pth_bytes)
+        record.append((pth_name, _sha256_record(pth_bytes), len(pth_bytes)))
+
+        wheel_meta_bytes = wheel_meta.encode()
+        arcname = f"{dist_info}/WHEEL"
+        zf.writestr(arcname, wheel_meta_bytes)
+        record.append(
+            (arcname, _sha256_record(wheel_meta_bytes), len(wheel_meta_bytes))
+        )
+
+        pkg_meta_bytes = pkg_metadata.encode()
+        arcname = f"{dist_info}/METADATA"
+        zf.writestr(arcname, pkg_meta_bytes)
+        record.append((arcname, _sha256_record(pkg_meta_bytes), len(pkg_meta_bytes)))
+
+        record_lines = [f"{arc},{h},{sz}" for arc, h, sz in record]
+        record_lines.append(f"{dist_info}/RECORD,,")
+        zf.writestr(f"{dist_info}/RECORD", "\n".join(record_lines) + "\n")
+
+
 # ---------------------------------------------------------------------------
 # PEP 517 hooks
 # ---------------------------------------------------------------------------
+
+__all__ = [
+    "build_editable",
+    "build_sdist",
+    "build_wheel",
+    "get_requires_for_build_editable",
+    "get_requires_for_build_sdist",
+    "get_requires_for_build_wheel",
+    "prepare_metadata_for_build_editable",
+    "prepare_metadata_for_build_wheel",
+]
 
 
 def get_requires_for_build_wheel(
@@ -162,11 +225,7 @@ def get_requires_for_build_editable(
     return []
 
 
-def prepare_metadata_for_build_wheel(
-    metadata_directory: str,
-    config_settings: dict[str, Any] | None = None,
-) -> str:
-    """Write .dist-info directory without building the wheel."""
+def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
     source_dir = Path.cwd()
     meta_dir = Path(metadata_directory)
 
@@ -174,7 +233,10 @@ def prepare_metadata_for_build_wheel(
     project = pyproject.get("project", {})
     name = str(project.get("name", "unknown")).replace("-", "_")
     version = str(project.get("version", "0.0.1"))
+
     python_tag, abi_tag, platform_tag = _wheel_tag()
+    tag = f"{python_tag}-{abi_tag}-{platform_tag}"
+    purelib = "true" if editable else "false"
 
     dist_info_name = f"{name}-{version}.dist-info"
     dist_info_dir = meta_dir / dist_info_name
@@ -183,8 +245,8 @@ def prepare_metadata_for_build_wheel(
     (dist_info_dir / "WHEEL").write_text(
         "Wheel-Version: 1.0\n"
         "Generator: pcons\n"
-        "Root-Is-Purelib: false\n"
-        f"Tag: {python_tag}-{abi_tag}-{platform_tag}\n"
+        f"Root-Is-Purelib: {purelib}\n"
+        f"Tag: {tag}\n"
     )
     (dist_info_dir / "METADATA").write_text(
         f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
@@ -193,12 +255,7 @@ def prepare_metadata_for_build_wheel(
     return dist_info_name
 
 
-def build_wheel(
-    wheel_directory: str,
-    config_settings: dict[str, Any] | None = None,
-    metadata_directory: str | None = None,
-) -> str:
-    """Build a wheel and return its filename."""
+def _build(wheel_directory: str, *, editable: bool) -> str:
     source_dir = Path.cwd()
     wheel_dir = Path(wheel_directory)
     build_dir = source_dir / "build"
@@ -215,27 +272,63 @@ def build_wheel(
     _run_pcons(source_dir, build_dir, variant=variant, variables=variables)
     _run_ninja(build_dir)
 
-    extensions = _find_extensions(build_dir)
-    if not extensions:
-        raise RuntimeError(
-            f"No extension modules (with suffix {sysconfig.get_config_var('EXT_SUFFIX')!r})"
-            f" found in {build_dir}"
-        )
-
     python_tag, abi_tag, platform_tag = _wheel_tag()
     wheel_name = f"{name}-{version}-{python_tag}-{abi_tag}-{platform_tag}.whl"
     wheel_dir.mkdir(parents=True, exist_ok=True)
-    _write_wheel(
-        wheel_dir / wheel_name,
-        name,
-        version,
-        extensions,
-        python_tag,
-        abi_tag,
-        platform_tag,
-    )
+
+    if editable:
+        _write_editable_wheel(
+            wheel_dir / wheel_name,
+            name,
+            version,
+            build_dir,
+            python_tag,
+            abi_tag,
+            platform_tag,
+        )
+    else:
+        extensions = _find_extensions(build_dir)
+        if not extensions:
+            raise RuntimeError(
+                f"No extension modules (with suffix {sysconfig.get_config_var('EXT_SUFFIX')!r})"
+                f" found in {build_dir}"
+            )
+        _write_wheel(
+            wheel_dir / wheel_name,
+            name,
+            version,
+            extensions,
+            python_tag,
+            abi_tag,
+            platform_tag,
+        )
 
     return wheel_name
+
+
+def prepare_metadata_for_build_wheel(
+    metadata_directory: str,
+    config_settings: dict[str, Any] | None = None,
+) -> str:
+    """Write .dist-info directory without building the wheel."""
+    return _prepare_metadata(metadata_directory, editable=False)
+
+
+def build_wheel(
+    wheel_directory: str,
+    config_settings: dict[str, Any] | None = None,
+    metadata_directory: str | None = None,
+) -> str:
+    """Build a wheel and return its filename."""
+    return _build(wheel_directory, editable=False)
+
+
+def prepare_metadata_for_build_editable(
+    metadata_directory: str,
+    config_settings: dict[str, Any] | None = None,
+) -> str:
+    """Write .dist-info for the editable wheel (pure-Python tag, purelib root)."""
+    return _prepare_metadata(metadata_directory, editable=True)
 
 
 def build_editable(
@@ -245,10 +338,11 @@ def build_editable(
 ) -> str:
     """Build an editable wheel.
 
-    Native extensions cannot be made truly editable; we build normally and
-    install the compiled artifact directly, same as build_wheel.
+    Compiles extensions into build_dir, then installs a .pth file that adds
+    build_dir to sys.path.  Re-running ninja in the build directory is enough
+    to pick up rebuilt extensions without reinstalling.
     """
-    return build_wheel(wheel_directory, config_settings, metadata_directory)
+    return _build(wheel_directory, editable=True)
 
 
 def build_sdist(

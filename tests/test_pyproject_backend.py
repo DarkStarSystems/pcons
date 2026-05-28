@@ -435,3 +435,25 @@ class TestBuildEditable:
 
         assert (wheel_dir / filename).exists()
         assert zipfile.is_zipfile(wheel_dir / filename)
+
+    def test_contains_pth_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        src, wheel_dir = self._setup(tmp_path, monkeypatch)
+        _make_fake_extension(src / "build")
+
+        with (
+            patch("pcons.pyproject._run_pcons"),
+            patch("pcons.pyproject._run_ninja"),
+        ):
+            filename = backend.build_editable(str(wheel_dir))
+
+        with zipfile.ZipFile(wheel_dir / filename) as zf:
+            names = zf.namelist()
+            pth_files = [n for n in names if n.endswith(".pth")]
+            assert len(pth_files) == 1
+            pth_content = zf.read(pth_files[0]).decode()
+            assert str((src / "build").resolve()) in pth_content
+            # Extension must NOT be bundled in the editable wheel
+            ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
+            assert not any(n.endswith(ext_suffix) for n in names)

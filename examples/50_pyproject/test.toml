@@ -16,6 +16,7 @@ expected_outputs = [
 commands = [
     { run = "uv sync" },
     { run = "uv run python -c \"import pcons_hello_ext; print(pcons_hello_ext.say_hello('world'))\"", expect_stdout = "Hello, world!" },
+    { run = "uv run python -c \"import pcons_hello_ext; assert 'build' in pcons_hello_ext.__file__, f'Expected extension in build dir (editable install), found: {pcons_hello_ext.__file__}'\"" },
 ]
 
 [skip]
