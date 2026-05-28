@@ -52,6 +52,9 @@ nanobind = packages["nanobind"]
 
 # nanobind is NOT header-only: its runtime must be compiled into each extension.
 # nb_combined.cpp is the amalgamated source recommended for non-CMake builds.
+assert nanobind.package and nanobind.package.prefix, (
+    "Package prefix is required for nanobind"
+)
 nb_combined = Path(nanobind.package.prefix) / "nanobind" / "src" / "nb_combined.cpp"
 assert nb_combined.is_file(), f"Amalgamated source not found at {nb_combined}"
 

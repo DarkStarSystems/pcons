@@ -1,0 +1,23 @@
+# Test configuration for the 50_pyproject example
+
+[test]
+description = "Build a Python extension using the pyproject.toml backend and run its tests"
+
+# Files that should exist after the build
+expected_outputs = [
+    "build/pcons_hello_ext.cpython-*.so",
+]
+
+[verify]
+# uv sync installs pcons from the local checkout (injected by the test runner
+# via [tool.uv.sources]) into an isolated build environment, then builds and
+# installs pcons_hello_ext into the project .venv.  This exercises the full
+# PEP 517 / pcons.pyproject code path.
+commands = [
+    { run = "uv sync" },
+    { run = "uv run python -c \"import pcons_hello_ext; print(pcons_hello_ext.say_hello('world'))\"", expect_stdout = "Hello, world!" },
+]
+
+[skip]
+platforms = ["windows", "darwin"]
+generators = ["xcode", "make"]

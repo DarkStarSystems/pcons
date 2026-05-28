@@ -552,6 +552,44 @@ def get_platform_value(
     return value
 
 
+def _patch_pyproject(work_dir: Path) -> None:
+    """Inject [tool.uv.sources] into a copied example's pyproject.toml.
+
+    When an example declares pcons as a build-system requirement, uv would
+    normally fetch it from PyPI.  During development pcons.pyproject may not
+    yet be published, so we redirect uv to the local checkout by appending a
+    [tool.uv.sources] section with an absolute path.  This only affects the
+    temporary copy; the original example file is left untouched.
+    """
+    pyproject_file = work_dir / "pyproject.toml"
+    if not pyproject_file.exists() or tomllib is None:
+        return
+
+    with open(pyproject_file, "rb") as f:
+        data = tomllib.load(f)
+
+    build_requires: list[str] = data.get("build-system", {}).get("requires", [])
+    needs_pcons = any(
+        req == "pcons" or req.startswith("pcons[") or req.startswith("pcons>=")
+        for req in build_requires
+    )
+    if not needs_pcons:
+        return
+
+    pcons_root = Path(__file__).parent.parent
+    # Append only if not already present (e.g. user pre-configured it)
+    existing_sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+    if "pcons" in existing_sources:
+        return
+
+    with open(pyproject_file, "a") as f:
+        f.write(
+            f"\n# Injected by test runner – points uv to the local pcons checkout\n"
+            f"[tool.uv.sources]\n"
+            f'pcons = {{ path = "{pcons_root}" }}\n'
+        )
+
+
 def _run_generate(
     work_dir: Path,
     build_dir: Path,
@@ -715,6 +753,12 @@ def run_example(
         work_dir,
         ignore=shutil.ignore_patterns("build", "compile_commands.json"),
     )
+
+    # If the example uses pcons as a PEP 517 build backend, inject a
+    # [tool.uv.sources] override pointing to the local pcons checkout so
+    # that `uv sync` (with isolation) installs the dev version rather than
+    # falling back to PyPI (which may not yet have the pcons.pyproject module).
+    _patch_pyproject(work_dir)
 
     build_dir = work_dir / "build"
     build_dir.mkdir(exist_ok=True)
