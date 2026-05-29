@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Reproducer for missing header-triggered rebuild on regular .cpp in modules mode."""
 
+import sys
 import sysconfig
 from pathlib import Path
 
@@ -73,5 +74,15 @@ if toolchain.name in ("gcc", "llvm"):
 pcons_hello_ext.output_prefix = ""
 pcons_hello_ext.output_suffix = sysconfig.get_config_var("EXT_SUFFIX")
 pcons_hello_ext.link(python, nanobind)
+
+subgen = Path(nanobind.package.prefix) / "nanobind" / "stubgen.py"
+assert subgen.is_file(), f"Stub generator not found at {subgen}"
+
+cmd = project.Command(
+    "generate_stubs",
+    env,
+    target=f"{pcons_hello_ext.name}.pyi",
+    command=[sys.executable, str(subgen), "--module", pcons_hello_ext.name],
+).depends(pcons_hello_ext)
 
 project.generate()

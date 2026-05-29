@@ -58,6 +58,11 @@ def _find_extensions(build_dir: Path) -> list[Path]:
     return sorted(build_dir.rglob(f"*{ext_suffix}"))
 
 
+def _find_subs(build_dir: Path) -> list[Path]:
+    """Glob for files matching *pattern* under *build_dir*."""
+    return sorted(build_dir.rglob("*.pyi"))
+
+
 def _run_pcons(
     source_dir: Path,
     build_dir: Path,
@@ -91,7 +96,7 @@ def _write_wheel(
     wheel_path: Path,
     name: str,
     version: str,
-    extensions: list[Path],
+    files: list[Path],
     python_tag: str,
     abi_tag: str,
     platform_tag: str,
@@ -111,10 +116,9 @@ def _write_wheel(
     record: list[tuple[str, str, int]] = []
 
     with zipfile.ZipFile(wheel_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        # Extension modules
-        for ext in extensions:
-            data = ext.read_bytes()
-            arcname = ext.name
+        for file in files:
+            data = file.read_bytes()
+            arcname = file.name
             zf.writestr(arcname, data)
             record.append((arcname, _sha256_record(data), len(data)))
 
@@ -293,11 +297,12 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
                 f"No extension modules (with suffix {sysconfig.get_config_var('EXT_SUFFIX')!r})"
                 f" found in {build_dir}"
             )
+        stubs = _find_subs(build_dir)
         _write_wheel(
             wheel_dir / wheel_name,
             name,
             version,
-            extensions,
+            [*extensions, *stubs],
             python_tag,
             abi_tag,
             platform_tag,
