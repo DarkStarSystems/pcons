@@ -45,7 +45,6 @@ project.Default(hello)
 # --- Installer targets (not built by default) ---
 
 # Tarball of source files and headers
-# Note: output paths are relative to build_dir (consistent with Install, InstallDir)
 src_tarball = project.Tarfile(
     env,
     output="hello-src.tar.gz",
@@ -62,7 +61,9 @@ bin_tarball = project.Tarfile(
 )
 
 # Install target: copy tarballs to ./Installers directory
-install_target = project.Install("Installers", [src_tarball, bin_tarball])
+install_target = project.Install(
+    project.root_dir / "Installers", [src_tarball, bin_tarball]
+)
 
 # Resolve so output_nodes are populated for Alias
 project.resolve()

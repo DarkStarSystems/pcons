@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, overload
 
 if TYPE_CHECKING:
     from pcons.core.project import Project
@@ -72,6 +72,14 @@ def get_registered_projects() -> list[Project]:
 def _clear_registered_projects() -> None:
     """Clear the registry (called by CLI before running a script)."""
     _registered_projects.clear()
+
+
+@overload
+def get_var(name: str) -> str | None: ...
+
+
+@overload
+def get_var(name: str, default: str) -> str: ...
 
 
 def get_var(name: str, default: str | None = None) -> str | None:

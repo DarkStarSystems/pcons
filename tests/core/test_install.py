@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for Project.Install() method."""
 
+from pathlib import Path
+
 import pytest
 
 from pcons.core.node import FileNode
@@ -85,10 +87,11 @@ class TestInstall:
         project.resolve()
 
         # Destination should be in dest_dir with same filename
-        # project.node() canonicalizes paths to be project-root-relative
+        # InstallNodeFactory prevents canonicalization (project.node(..., canonicalizes=False)
+        # in order to preserve the exact destination path specified by the user.
         assert len(install.output_nodes) == 1
         node = install.output_nodes[0]
-        expected = dest_dir.relative_to(tmp_path) / "mylib.so"
+        expected = dest_dir / "mylib.so"
         assert node.path == expected
 
     def test_install_from_target(self, tmp_path):
@@ -118,10 +121,50 @@ class TestInstall:
         project.resolve()
 
         # Should have a node for the library
-        # project.node() canonicalizes paths to be project-root-relative
+        # InstallNodeFactory prevents canonicalization (project.node(..., canonicalizes=False)
+        # in order to preserve the exact destination path specified by the user.
         assert len(install.output_nodes) == 1
-        expected = (tmp_path / "dist" / "lib" / "libmylib.a").relative_to(tmp_path)
+        expected = tmp_path / "dist" / "lib" / "libmylib.a"
         assert install.output_nodes[0].path == expected
+
+    def test_install_non_absolute_dest_uses_pcons_install_prefix(self, tmp_path):
+        """Install uses PCONS_INSTALL_PREFIX as the base install directory."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src_file = tmp_path / "mylib.a"
+        src_file.touch()
+
+        # non-absolute dest paths uses PCONS_INSTALL_PREFIX
+        install = project.Install("lib", [src_file])
+
+        # Resolve to create install nodes
+        project.resolve()
+
+        # Destination should be under PCONS_INSTALL_PREFIX (default: ./dist)
+        expected = tmp_path / "dist" / "lib" / "mylib.a"
+        assert install.output_nodes[0].path == expected
+
+    def test_install_non_absolute_dest_can_be_customized_with_pcons_install_prefix(
+        self, tmp_path, monkeypatch
+    ):
+        """Install uses modified PCONS_INSTALL_PREFIX as the base install directory."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src_file = tmp_path / "mylib.a"
+        src_file.touch()
+
+        with monkeypatch.context() as m:
+            # Set a custom install prefix via environment variable
+            custom_prefix = Path("/opt/myapp")
+            m.setenv("PCONS_INSTALL_PREFIX", str(custom_prefix))
+
+            install = project.Install("lib", [src_file])
+            # Resolve to create install nodes
+            project.resolve()
+
+            # Destination should be under the custom prefix
+            expected = custom_prefix / "lib" / "mylib.a"
+            assert install.output_nodes[0].path == expected
 
     def test_install_target_registered(self, tmp_path):
         """Install target is registered with the project."""
@@ -186,10 +229,9 @@ class TestInstallAs:
         # Resolve to create install nodes
         project.resolve()
 
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
         node = install.output_nodes[0]
-        assert node.path == dest_path.relative_to(tmp_path)
+        assert node.path == dest_path
 
     def test_install_as_from_target(self, tmp_path):
         """InstallAs can install from a Target after resolve."""
@@ -218,7 +260,7 @@ class TestInstallAs:
 
         # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == dest.relative_to(tmp_path)
+        assert install.output_nodes[0].path == dest
 
     def test_install_as_dependency(self, tmp_path):
         """InstallAs destination depends on source after resolve."""
@@ -318,7 +360,7 @@ class TestInstallOrderIndependence:
         assert len(lib.output_nodes) == 0
 
         # Manually add an output node (simulating what resolve would do)
-        lib_node = FileNode(tmp_path / "build" / "libmylib.a")
+        lib_node = FileNode(tmp_path / "dist" / "lib" / "libmylib.a")
         lib.output_nodes.append(lib_node)
         lib._resolved = True
 
@@ -326,9 +368,8 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Install target should now have the installed file
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        expected = (tmp_path / "dist" / "lib" / "libmylib.a").relative_to(tmp_path)
+        expected = tmp_path / "dist" / "lib" / "libmylib.a"
         assert install.output_nodes[0].path == expected
 
     def test_install_as_before_target_definition(self, tmp_path):
@@ -363,9 +404,8 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Should have the installed file with the custom name
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == dest.relative_to(tmp_path)
+        assert install.output_nodes[0].path == dest
 
     def test_install_chain_order_independence(self, tmp_path):
         """Install targets can be chained in any order."""
@@ -393,15 +433,10 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Both should work
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(final_install.output_nodes) == 1
         assert len(intermediate_install.output_nodes) == 1
-        assert final_install.output_nodes[0].path == (
-            final_dir / "mylib.a"
-        ).relative_to(tmp_path)
-        assert intermediate_install.output_nodes[0].path == (
-            intermediate_dir / "mylib.a"
-        ).relative_to(tmp_path)
+        assert final_install.output_nodes[0].path == final_dir / "mylib.a"
+        assert intermediate_install.output_nodes[0].path == intermediate_dir / "mylib.a"
 
     def test_install_file_before_it_exists(self, tmp_path):
         """Install can reference a file path before the file exists."""
@@ -417,9 +452,8 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Should have the install node
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        expected = (tmp_path / "include" / "generated.h").relative_to(tmp_path)
+        expected = tmp_path / "include" / "generated.h"
         assert install.output_nodes[0].path == expected
 
 
@@ -470,14 +504,13 @@ class TestInstallAsValidation:
         src.touch()
 
         # Should work with a single source
-        install = project.InstallAs(tmp_path / "dest" / "renamed.txt", src)
+        expected_dest = tmp_path / "dest" / "renamed.txt"
+        install = project.InstallAs(expected_dest, src)
 
         project.resolve()
 
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        expected = (tmp_path / "dest" / "renamed.txt").relative_to(tmp_path)
-        assert install.output_nodes[0].path == expected
+        assert install.output_nodes[0].path == expected_dest
 
 
 class TestInstallDirectoryAutoDetection:

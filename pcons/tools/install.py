@@ -222,7 +222,7 @@ class InstallNodeFactory(PendingSourceFactory):
             dest_path = dest_dir / file_node.path.name
 
             # Create destination node via project for deduplication
-            dest_node = self.project.node(dest_path)
+            dest_node = self.project.node(dest_path, canonicalize=False)
             dest_node.depends([file_node])
 
             # Store build info referencing env.install.copycmd
@@ -324,7 +324,7 @@ class InstallNodeFactory(PendingSourceFactory):
         source_node = sources[0]
 
         # Create destination node via project for deduplication
-        dest_node = self.project.node(dest)
+        dest_node = self.project.node(dest, canonicalize=False)
         dest_node.depends([source_node])
 
         # Store build info referencing env.install.copycmd
@@ -376,7 +376,7 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_path = stamps_dir / stamp_name
 
         # Create stamp node via project for deduplication (this is what ninja tracks)
-        stamp_node = self.project.node(stamp_path)
+        stamp_node = self.project.node(stamp_path, canonicalize=False)
         # Source directory is the explicit dep (becomes $in for copytree).
         # Child nodes are implicit deps — they trigger rebuilds but don't
         # appear in $in (ninja's | syntax).
@@ -448,10 +448,18 @@ class InstallBuilder:
         Returns:
             A Target representing the install operation.
         """
+        from pcons import get_var
+
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
             project, name or f"install_{dest_dir.name}"
         )
+
+        if not dest_dir.is_absolute():
+            dest_dir = (
+                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
+                / dest_dir
+            )
 
         # Create the install target
         install_target = Target(

@@ -302,7 +302,7 @@ class Project(_ProjectBuilders):
                 return path  # External path
         return Path(os.path.normpath(path))
 
-    def node(self, path: Path | str) -> FileNode:
+    def node(self, path: Path | str, canonicalize=True) -> FileNode:
         """Get or create a file node for a path.
 
         This provides node deduplication - the same path always
@@ -310,11 +310,16 @@ class Project(_ProjectBuilders):
 
         Args:
             path: Path to the file.
+            canonicalize: Whether to canonicalize the path (default: True). If False, the path is used as-is for deduplication.
 
         Returns:
             FileNode for the path.
         """
-        path = self._canonicalize_path(Path(path))
+        if canonicalize:
+            path = self._canonicalize_path(Path(path))
+        else:
+            path = Path(path)
+
         if path not in self._nodes:
             self._nodes[path] = FileNode(path, defined_at=get_caller_location())
         node = self._nodes[path]
@@ -324,16 +329,20 @@ class Project(_ProjectBuilders):
             )
         return node
 
-    def dir_node(self, path: Path | str) -> DirNode:
+    def dir_node(self, path: Path | str, canonicalize=True) -> DirNode:
         """Get or create a directory node for a path.
 
         Args:
             path: Path to the directory.
+            canonicalize: Whether to canonicalize the path (default: True). If False, the path is used as-is for deduplication.
 
         Returns:
             DirNode for the path.
         """
-        path = self._canonicalize_path(Path(path))
+        if canonicalize:
+            path = self._canonicalize_path(Path(path))
+        else:
+            path = Path(path)
         if path not in self._nodes:
             self._nodes[path] = DirNode(path, defined_at=get_caller_location())
         node = self._nodes[path]
