@@ -36,8 +36,13 @@ wrapper_lib.link(core_lib)
 prog = project.Program("demo", env, sources=[src_dir / "main.c"])
 prog.link(wrapper_lib)
 
+installed_libs = project.Install("lib", [core_lib, wrapper_lib])
+installed_bins = project.Install("bin", [prog])
+
 # Resolve to inspect resolved state
 project.resolve()
+
+project.Alias("install", [installed_libs, installed_bins])
 
 # Debug output
 print(f"core_lib output_nodes: {core_lib.output_nodes}")

@@ -9,6 +9,13 @@ expected_outputs = [
     "build/demo",
 ]
 
+# Files that should exist after install
+expected_install_outputs = [
+    "bin/demo",
+    "lib/libcore.a",
+    "lib/libwrapper.so",
+]
+
 [verify]
 # Run the built program and check output
 # core_value() returns 42, wrapper multiplies by 2 = 84

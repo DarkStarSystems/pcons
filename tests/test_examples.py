@@ -12,11 +12,13 @@ Tests both invocation methods:
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import platform
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -201,7 +203,7 @@ def run_rebuild_test(
     # If expect_rebuild: verify each target was rebuilt (substring match)
     expect_rebuild = rebuild_config.get("expect_rebuild", [])
     for expected in expect_rebuild:
-        found = any(expected in target for target in rebuilt_targets)
+        found = any(fnmatch.fnmatch(target, expected) for target in rebuilt_targets)
         if not found:
             pytest.fail(
                 f"Rebuild test '{description}': expected '{expected}' to be rebuilt, "
@@ -211,7 +213,7 @@ def run_rebuild_test(
     # If expect_no_rebuild: verify each target was NOT rebuilt
     expect_no_rebuild = rebuild_config.get("expect_no_rebuild", [])
     for not_expected in expect_no_rebuild:
-        found = any(not_expected in target for target in rebuilt_targets)
+        found = any(fnmatch.fnmatch(target, not_expected) for target in rebuilt_targets)
         if found:
             pytest.fail(
                 f"Rebuild test '{description}': expected '{not_expected}' NOT to be rebuilt, "
@@ -661,7 +663,23 @@ def run_example(
         pytest.skip(f"Requested toolchain '{toolchain}' is not available on this host")
 
     build_dir.mkdir(parents=True, exist_ok=True)
-    tc_vars = {"TOOLCHAIN": toolchain} if toolchain else None
+    tc_vars = {"TOOLCHAIN": toolchain} if toolchain else {}
+
+    # Check expected install outputs exist (auto-adapts for Windows if no override)
+    expected_install_outputs = get_platform_value(
+        test_config, "expected_install_outputs", [], adapt_for_windows=True
+    )
+
+    build_targets = get_platform_value(test_config, "build_targets", [])
+
+    if expected_install_outputs:
+        if "install" not in build_targets:
+            build_targets.append("install")
+
+        install_prefix = tempfile.TemporaryDirectory()
+        tc_vars["PCONS_INSTALL_PREFIX"] = install_prefix.name
+    else:
+        install_prefix = None
 
     for variant in variants:
         _run_generate(
@@ -709,8 +727,6 @@ def run_example(
         if ninja_cmd_base is None:
             pytest.skip("ninja not available")
 
-        build_targets = get_platform_value(test_config, "build_targets", [])
-
         for vbd in variant_build_dirs:
             ninja_file = vbd / "build.ninja"
             if not ninja_file.exists():
@@ -733,8 +749,6 @@ def run_example(
     elif generator == "make":
         if shutil.which("make") is None:
             pytest.skip("make not available")
-
-        build_targets = get_platform_value(test_config, "build_targets", [])
 
         for vbd in variant_build_dirs:
             makefile = vbd / "Makefile"
@@ -808,9 +822,35 @@ def run_example(
         expected_outputs, generator, project_name
     )
     for output in expected_outputs:
-        output_path = work_dir / output
+        if "*" in output:
+            # Handle wildcard outputs (e.g., build/*.o)
+            matches = list(work_dir.glob(output))
+            if not matches:
+                pytest.fail(f"Expected output not found: {output} (no matches)")
+        else:
+            output_path = work_dir / output
+            if not output_path.exists():
+                pytest.fail(f"Expected output not found: {output}")
+
+    for output in expected_install_outputs:
+        assert install_prefix is not None
+        if isinstance(output, list):
+            output = output[0]
+            content = output[1]
+        else:
+            content = None
+        output_path = Path(install_prefix.name) / output
         if not output_path.exists():
-            pytest.fail(f"Expected output not found: {output}")
+            pytest.fail(f"Expected install output not found: {output}")
+        if content is not None:
+            actual_content = output_path.read_text()
+            if content not in actual_content:
+                pytest.fail(
+                    f"Expected '{content}' in installed {output}, got:\n{actual_content}"
+                )
+
+    if install_prefix is not None:
+        install_prefix.cleanup()
 
     # Run verification commands (auto-adapts for Windows if no override)
     verify_config = config.get("verify", {})

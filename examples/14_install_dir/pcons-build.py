@@ -24,12 +24,17 @@ src_dir = project.root_dir
 build_dir = project.build_dir
 
 # Install the assets directory to the build output
-# This copies the entire 'assets' directory tree to 'build/dist/assets'
-# Note: destination is relative to build_dir, so "dist" becomes "build/dist"
-installed_assets = project.InstallDir("dist", src_dir / "assets")
+# This copies the entire 'assets' directory tree to 'PCONS_INSTALL_PREFIX/assets'
+installed_assets = project.InstallDir(".", src_dir / "assets")
 
 # Set as default target
 project.Default(installed_assets)
+
+# Resolve so output_nodes are populated for Alias
+project.resolve()
+
+# Create alias after resolve() so output_nodes are populated
+project.Alias("install", installed_assets)
 
 project.generate()
 

@@ -506,6 +506,8 @@ class InstallAsBuilder:
         Raises:
             BuilderError: If source is a list (use Install() for multiple files).
         """
+        from pcons import get_var
+
         # Validate source is not a list - common user error
         if isinstance(source, (list, tuple)):
             from pcons.core.errors import BuilderError
@@ -518,6 +520,12 @@ class InstallAsBuilder:
 
         dest = Path(dest)
         target_name = _deduplicate_target_name(project, name or f"install_{dest.name}")
+
+        if not dest.is_absolute():
+            dest = (
+                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
+                / dest
+            )
 
         # Create the install target
         install_target = Target(
@@ -561,10 +569,18 @@ class InstallDirBuilder:
         Returns:
             A Target representing the install operation.
         """
+        from pcons import get_var
+
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
             project, name or f"install_dir_{dest_dir.name}"
         )
+
+        if not dest_dir.is_absolute():
+            dest_dir = (
+                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
+                / dest_dir
+            )
 
         # Create the install target
         install_target = Target(

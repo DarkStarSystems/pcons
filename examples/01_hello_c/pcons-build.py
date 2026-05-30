@@ -17,6 +17,15 @@ else:
     preferred_toolchain = None
 env = project.Environment(toolchain=find_c_toolchain(prefer=preferred_toolchain))
 
-project.Program("hello", env, sources=["src/hello.c"])
+hello = project.Program("hello", env, sources=["src/hello.c"])
+
+# Install target: copy binary to $PCONS_INSTALL_PREFIX/bin directory
+bins = project.Install("bin", [hello])
+
+# Resolve so output_nodes are populated for Alias
+project.resolve()
+
+# Create alias after resolve() so output_nodes are populated
+project.Alias("install", bins)
 
 project.generate()
