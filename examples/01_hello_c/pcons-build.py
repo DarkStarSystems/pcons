@@ -11,7 +11,7 @@ This example demonstrates:
 from pcons import Project, find_c_toolchain, get_var
 
 project = Project("hello_c")
-if (preferred_toolchain := get_var("TOOLCHAIN")) is not None:
+if (preferred_toolchain := get_var("TOOLCHAIN", None)) is not None:
     preferred_toolchain = [preferred_toolchain]
 else:
     preferred_toolchain = None
@@ -20,7 +20,7 @@ env = project.Environment(toolchain=find_c_toolchain(prefer=preferred_toolchain)
 hello = project.Program("hello", env, sources=["src/hello.c"])
 
 # Install target: copy binary to $PCONS_INSTALL_PREFIX/bin directory
-bins = project.Install("bin", [hello])
+bins = project.Install(get_var("BINARY_INSTALL_DIR"), [hello], name="install-hello")
 
 # Resolve so output_nodes are populated for Alias
 project.resolve()

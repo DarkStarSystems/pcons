@@ -24,7 +24,7 @@ from pcons.toolchains import find_c_toolchain
 project = Project("cxx_import_std")
 
 # Optional override: pcons build TOOLCHAIN=gcc|llvm|msvc
-toolchain_override = get_var("TOOLCHAIN")
+toolchain_override = get_var("TOOLCHAIN", None)
 if toolchain_override:
     toolchain = find_c_toolchain(prefer=[toolchain_override])
 else:

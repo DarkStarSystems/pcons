@@ -159,6 +159,7 @@ def run_script(
         Tuple of (exit_code, list of registered Projects).
     """
     import pcons
+    import pcons.core.vars
 
     sentinel = object()
     previous_env: dict[str, str | object] = {}
@@ -174,7 +175,7 @@ def run_script(
     pcons._clear_registered_projects()
 
     # Also clear cached CLI vars so they get re-read
-    pcons._cli_vars = None
+    pcons.core.vars._clear_cli_vars()
 
     # Set environment variables (scripts still read these)
     set_env_var("PCONS_BUILD_DIR", str(build_dir.absolute()))

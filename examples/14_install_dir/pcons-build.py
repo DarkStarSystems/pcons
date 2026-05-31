@@ -25,7 +25,11 @@ build_dir = project.build_dir
 
 # Install the assets directory to the build output
 # This copies the entire 'assets' directory tree to 'PCONS_INSTALL_PREFIX/assets'
-installed_assets = project.InstallDir(".", src_dir / "assets")
+installed_assets = project.InstallDir(
+    ".",
+    src_dir / "assets",
+    name="install-assets",
+)
 
 # Set as default target
 project.Default(installed_assets)

@@ -27,6 +27,7 @@ from pcons.cli import (
     run_script,
     setup_logging,
 )
+from pcons.core.vars import _clear_cli_vars
 
 if TYPE_CHECKING:
     pass
@@ -94,20 +95,32 @@ class TestGetVar:
 
     def test_get_var_default(self, monkeypatch) -> None:
         """Test get_var returns default when not set."""
-        # Clear any cached vars
-        import pcons
-
-        pcons._cli_vars = None
+        _clear_cli_vars()
         monkeypatch.delenv("PCONS_VARS", raising=False)
         monkeypatch.delenv("TEST_VAR", raising=False)
 
         assert get_var("TEST_VAR", "default_value") == "default_value"
 
+    def test_get_var_no_default_raises(self, monkeypatch) -> None:
+        """Test get_var raises ValueError when not set and no default."""
+        _clear_cli_vars()
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("TEST_VAR", raising=False)
+
+        with pytest.raises(ValueError):
+            get_var("TEST_VAR")
+
+    def test_get_var_with_none_default(self, monkeypatch) -> None:
+        """Test get_var returns None when default is None."""
+        _clear_cli_vars()
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("TEST_VAR", raising=False)
+
+        assert get_var("TEST_VAR", None) is None
+
     def test_get_var_from_env(self, monkeypatch) -> None:
         """Test get_var reads from environment variable."""
-        import pcons
-
-        pcons._cli_vars = None
+        _clear_cli_vars()
         monkeypatch.delenv("PCONS_VARS", raising=False)
         monkeypatch.setenv("TEST_VAR", "env_value")
 
@@ -115,9 +128,7 @@ class TestGetVar:
 
     def test_get_var_from_pcons_vars(self, monkeypatch) -> None:
         """Test get_var reads from PCONS_VARS JSON."""
-        import pcons
-
-        pcons._cli_vars = None
+        _clear_cli_vars()
         monkeypatch.setenv("PCONS_VARS", '{"TEST_VAR": "cli_value"}')
         monkeypatch.setenv("TEST_VAR", "env_value")  # Should be overridden
 
@@ -355,15 +366,13 @@ class TestRunScriptEnvironment:
         """Pre-existing PCONS environment should be restored after the run."""
         import os
 
-        import pcons
-
         script = tmp_path / "pcons-build.py"
         script.write_text("from pcons import Project\nProject('demo')\n")
 
         monkeypatch.setenv("PCONS_BUILD_DIR", "original-build")
         monkeypatch.setenv("PCONS_GENERATOR", "original-generator")
         monkeypatch.setenv("CUSTOM_ENV", "original-custom")
-        pcons._cli_vars = None
+        _clear_cli_vars()
 
         exit_code, projects = run_script(
             script,
@@ -384,7 +393,6 @@ class TestRunScriptEnvironment:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """run_script with a list of generators sets PCONS_GENERATOR as colon-joined."""
-        import pcons
 
         script = tmp_path / "pcons-build.py"
         script.write_text(
@@ -396,7 +404,7 @@ class TestRunScriptEnvironment:
         )
 
         monkeypatch.delenv("PCONS_GENERATOR", raising=False)
-        pcons._cli_vars = None
+        _clear_cli_vars()
 
         exit_code, _ = run_script(
             script, tmp_path / "build", generator=["ninja", "metadata"]

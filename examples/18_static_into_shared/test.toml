@@ -11,9 +11,9 @@ expected_outputs = [
 
 # Files that should exist after install
 expected_install_outputs = [
-    "bin/demo",
-    "lib/libcore.a",
-    "lib/libwrapper.so",
+    "${BINARY_INSTALL_DIR}/demo",
+    "${ARCHIVE_INSTALL_DIR}/libcore.a",
+    "${LIBRARY_INSTALL_DIR}/libwrapper.so",
 ]
 
 [verify]

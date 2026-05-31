@@ -62,7 +62,9 @@ bin_tarball = project.Tarfile(
 
 # Install target: copy tarballs to ./Installers directory
 install_target = project.Install(
-    project.root_dir / "Installers", [src_tarball, bin_tarball]
+    project.root_dir / "Installers",
+    [src_tarball, bin_tarball],
+    name="install-tarballs",
 )
 
 # Resolve so output_nodes are populated for Alias

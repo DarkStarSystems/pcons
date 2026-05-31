@@ -15,6 +15,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -592,6 +593,20 @@ def _run_generate(
             pytest.fail(f"pcons failed with code {result.returncode}{variant_msg}")
 
 
+_variable_expr = re.compile(r"\$\{([^}]+)\}")
+
+
+def _substitute_variables(path: str) -> str:
+    """Substitute variables in the path string."""
+    from pcons.core.vars import get_var
+
+    def replacer(match: re.Match) -> str:
+        var_name = match.group(1)
+        return get_var(var_name)
+
+    return _variable_expr.sub(replacer, path)
+
+
 def run_example(
     example_dir: Path,
     tmp_path: Path,
@@ -822,6 +837,7 @@ def run_example(
         expected_outputs, generator, project_name
     )
     for output in expected_outputs:
+        output = _substitute_variables(output)
         if "*" in output:
             # Handle wildcard outputs (e.g., build/*.o)
             matches = list(work_dir.glob(output))
@@ -839,6 +855,7 @@ def run_example(
             content = output[1]
         else:
             content = None
+        output = _substitute_variables(output)
         output_path = Path(install_prefix.name) / output
         if not output_path.exists():
             pytest.fail(f"Expected install output not found: {output}")
