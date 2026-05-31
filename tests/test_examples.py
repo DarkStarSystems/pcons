@@ -70,6 +70,10 @@ def adapt_path_for_windows(path: str, gcc_toolchain: bool = False) -> str:
     if path.startswith(".\\"):
         path = path[2:]
 
+    if path.endswith("EXT}"):
+        # Don't adapt if extension variables are used, as they will be substituted later
+        return path
+
     # Convert extensions
     if path.endswith(".o") and not gcc_toolchain:
         path = path[:-2] + ".obj"

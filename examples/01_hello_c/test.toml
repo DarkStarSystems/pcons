@@ -12,7 +12,7 @@ expected_outputs = [
 ]
 
 expected_install_outputs = [
-    "${BINARY_INSTALL_DIR}/hello",
+    "${BINARY_INSTALL_DIR}/hello${BINARY_EXT}",
 ]
 
 [toolchains]

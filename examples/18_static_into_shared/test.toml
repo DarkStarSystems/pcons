@@ -6,14 +6,14 @@ description = "Tests linking a static library into a shared library"
 
 # Files that should exist after the build
 expected_outputs = [
-    "build/demo",
+    "build/demo${BINARY_EXT}",
 ]
 
 # Files that should exist after install
 expected_install_outputs = [
-    "${BINARY_INSTALL_DIR}/demo",
-    "${ARCHIVE_INSTALL_DIR}/libcore.a",
-    "${LIBRARY_INSTALL_DIR}/libwrapper.so",
+    "${BINARY_INSTALL_DIR}/demo${BINARY_EXT}",
+    "${ARCHIVE_INSTALL_DIR}/${LIBRARY_PREFIX}core${ARCHIVE_EXT}",
+    "${LIBRARY_INSTALL_DIR}/${LIBRARY_PREFIX}wrapper${LIBRARY_EXT}",
 ]
 
 [verify]

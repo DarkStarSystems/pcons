@@ -26,8 +26,8 @@ def _posix_specific_vars() -> dict[str, str]:
         "BINARY_EXT": "",
         "LIBRARY_EXT": ".so",
         "OBJECT_EXT": ".o",
+        "ARCHIVE_EXT": ".a",
         "LIBRARY_PREFIX": "lib",
-        "ARCHIVE_SUFFIX": ".a",
         "PATHSEP": ":",
         "LIBRARY_INSTALL_DIR": "lib",
         "ARCHIVE_INSTALL_DIR": "lib",
@@ -47,8 +47,8 @@ def _platform_specific_vars() -> dict[str, str]:
         vars["LIBRARY_EXT"] = ".dll"
         vars["OBJECT_EXT"] = ".obj"
         vars["LIBRARY_EXT"] = ".dll"
+        vars["ARCHIVE_EXT"] = ".lib"
         vars["LIBRARY_PREFIX"] = ""
-        vars["ARCHIVE_SUFFIX"] = ".lib"
         vars["PATHSEP"] = ";"
         vars["LIBRARY_INSTALL_DIR"] = "bin"
         vars["ARCHIVE_INSTALL_DIR"] = "lib"
