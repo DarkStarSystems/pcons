@@ -39,6 +39,20 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
 
 
+def _stamp_name_for(path: Path) -> str:
+    """Convert a path to a flat stamp file name.
+
+    POSIX absolute paths start with "/" which becomes "_".
+    Windows absolute paths start with "C:\", the colon is replaced so they
+    become "_C_..." matching the POSIX pattern.
+    """
+    s = str(path)
+    # Replace Windows drive colon so "C:\..." becomes "_C_..." like POSIX "_/..."
+    if len(s) >= 2 and s[1] == ":":
+        s = "_" + s[0] + s[2:]
+    return s.replace("/", "_").replace("\\", "_") + ".stamp"
+
+
 def _deduplicate_target_name(project: Project, base_name: str) -> str:
     """Generate a unique target name, appending a numeric suffix if needed.
 
@@ -260,9 +274,15 @@ class InstallNodeFactory(PendingSourceFactory):
         source_path = source_node.path
         dest_path = dest_dir / source_path.name
 
+        # Compute dest relative to build dir for a platform-neutral stamp name
+        try:
+            rel_dest = dest_path.relative_to(target.build_dir)
+        except ValueError:
+            rel_dest = dest_path
+
         # Stamp file for ninja tracking
         stamps_dir = target.build_dir / ".stamps"
-        stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
+        stamp_name = _stamp_name_for(rel_dest)
         stamp_path = stamps_dir / stamp_name
 
         stamp_node = self.project.node(stamp_path)
@@ -272,12 +292,6 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_node.depends([source_node])
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
-
-        # Build destination path relative to build directory
-        try:
-            rel_dest = dest_path.relative_to(target.build_dir)
-        except ValueError:
-            rel_dest = dest_path
 
         context = InstallContext.from_target(
             target, env, destdir=str(rel_dest).replace("\\", "/")
@@ -370,9 +384,15 @@ class InstallNodeFactory(PendingSourceFactory):
         # Destination is dest_dir / source directory name
         dest_path = dest_dir / source_path.name
 
+        # Compute dest relative to build dir for a platform-neutral stamp name
+        try:
+            rel_dest = dest_path.relative_to(target.build_dir)
+        except ValueError:
+            rel_dest = dest_path
+
         # Put stamp files in a dedicated .stamps directory
         stamps_dir = target.build_dir / ".stamps"
-        stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
+        stamp_name = _stamp_name_for(rel_dest)
         stamp_path = stamps_dir / stamp_name
 
         # Create stamp node via project for deduplication (this is what ninja tracks)
@@ -383,12 +403,6 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_node.depends([source_node])
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
-
-        # Build the destination path relative to build directory for the command
-        try:
-            rel_dest = dest_path.relative_to(target.build_dir)
-        except ValueError:
-            rel_dest = dest_path
 
         # Create context from target (merges env defaults with target overrides)
         env = self._get_install_env(target)
