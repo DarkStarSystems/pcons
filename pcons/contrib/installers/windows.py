@@ -162,8 +162,8 @@ def create_msix(
     staging_rel = Path(".msix_staging") / name
     manifest_rel = staging_rel / "AppxManifest.xml"
 
-    # Stage source files (Install auto-detects directory sources after resolve)
-    stage_target = project.Install(staging_rel, sources)
+    # Stage source files into build dir
+    stage_target = project.Install(staging_rel, sources, no_prefix=True)
 
     # Generate AppxManifest.xml (use relative path for target)
     manifest_target = env.Command(

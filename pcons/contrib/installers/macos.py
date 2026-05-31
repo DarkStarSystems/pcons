@@ -161,8 +161,8 @@ def create_component_pkg(
     # Stage files to a temporary directory (rel paths are relative to build_dir)
     staging_rel = Path(".pkg_staging") / identifier / "payload"
 
-    # Stage source files (Install auto-detects directory sources after resolve)
-    stage_target = project.Install(staging_rel, sources)
+    # Stage source files into build dir
+    stage_target = project.Install(staging_rel, sources, no_prefix=True)
 
     # Build pkgbuild command (paths relative to build_dir where ninja/make run)
     pkgbuild_args = [
@@ -274,8 +274,13 @@ def create_pkg(
     pkg_rel = staging_base_rel / "packages"
     resources_rel = staging_base_rel / "resources"
 
-    # Stage source files (Install auto-detects directory sources after resolve)
-    stage_target = project.Install(payload_rel, sources, name=f"pkg_payload_{name}")
+    # Stage source files into build dir
+    stage_target = project.Install(
+        payload_rel,
+        sources,
+        name=f"pkg_payload_{name}",
+        no_prefix=True,
+    )
 
     # Check if any source is a .app bundle (needs component plist)
     def is_bundle_source(src: Target | FileNode | Path | str) -> bool:
@@ -376,7 +381,10 @@ def create_pkg(
     ):
         if res_file is not None:
             res_target = project.Install(
-                resources_rel, [res_file], name=f"pkg_resource_{name}_{res_name}"
+                resources_rel,
+                [res_file],
+                name=f"pkg_resource_{name}_{res_name}",
+                no_prefix=True,
             )
             productbuild_deps.append(res_target)
 
@@ -459,8 +467,8 @@ def create_dmg(
     # Stage files to a temporary directory (path relative to build_dir)
     staging_rel = Path(".dmg_staging") / name
 
-    # Stage source files (Install auto-detects directory sources after resolve)
-    stage_target = project.Install(staging_rel, sources)
+    # Stage source files into build dir
+    stage_target = project.Install(staging_rel, sources, no_prefix=True)
 
     # Build hdiutil command (with optional symlink creation)
     # Paths are relative to build_dir where ninja/make run

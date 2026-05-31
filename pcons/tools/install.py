@@ -450,6 +450,7 @@ class InstallBuilder:
         sources: Sequence[Target | FileNode | Path | str],
         *,
         name: str | None = None,
+        no_prefix: bool = False,
     ) -> Target:
         """Create an Install target.
 
@@ -458,6 +459,7 @@ class InstallBuilder:
             dest_dir: Destination directory path.
             sources: Files to install.
             name: Optional name for the install target.
+            no_prefix: If True, do not prepend the install prefix to the destination.
 
         Returns:
             A Target representing the install operation.
@@ -469,7 +471,7 @@ class InstallBuilder:
             project, name or f"install_{dest_dir.name}"
         )
 
-        if not dest_dir.is_absolute():
+        if not no_prefix and not dest_dir.is_absolute():
             dest_dir = (
                 Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
                 / dest_dir
@@ -505,6 +507,7 @@ class InstallAsBuilder:
         source: Target | FileNode | Path | str,
         *,
         name: str | None = None,
+        no_prefix: bool = False,
     ) -> Target:
         """Create an InstallAs target.
 
@@ -513,6 +516,7 @@ class InstallAsBuilder:
             dest: Full destination path (including filename).
             source: Source file.
             name: Optional name for the install target.
+            no_prefix: If True, do not prepend the install prefix to the destination.
 
         Returns:
             A Target representing the install operation.
@@ -535,7 +539,7 @@ class InstallAsBuilder:
         dest = Path(dest)
         target_name = _deduplicate_target_name(project, name or f"install_{dest.name}")
 
-        if not dest.is_absolute():
+        if not no_prefix and not dest.is_absolute():
             dest = (
                 Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
                 / dest
@@ -571,6 +575,7 @@ class InstallDirBuilder:
         source: Target | FileNode | Path | str,
         *,
         name: str | None = None,
+        no_prefix: bool = False,
     ) -> Target:
         """Create an InstallDir target.
 
@@ -579,6 +584,7 @@ class InstallDirBuilder:
             dest_dir: Destination directory.
             source: Source directory.
             name: Optional name for the install target.
+            no_prefix: If True, do not prepend the install prefix to the destination.
 
         Returns:
             A Target representing the install operation.
@@ -590,7 +596,7 @@ class InstallDirBuilder:
             project, name or f"install_dir_{dest_dir.name}"
         )
 
-        if not dest_dir.is_absolute():
+        if not no_prefix and not dest_dir.is_absolute():
             dest_dir = (
                 Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
                 / dest_dir
