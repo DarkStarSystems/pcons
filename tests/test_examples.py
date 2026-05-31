@@ -691,14 +691,14 @@ def run_example(
 
     build_targets = get_platform_value(test_config, "build_targets", [])
 
-    if expected_install_outputs:
-        if "install" not in build_targets:
-            build_targets.append("install")
+    install_prefix = None
+    if generator != "xcode":
+        if expected_install_outputs:
+            if "install" not in build_targets:
+                build_targets.append("install")
 
-        install_prefix = tempfile.TemporaryDirectory()
-        tc_vars["PCONS_INSTALL_PREFIX"] = install_prefix.name
-    else:
-        install_prefix = None
+            install_prefix = tempfile.TemporaryDirectory()
+            tc_vars["PCONS_INSTALL_PREFIX"] = install_prefix.name
 
     for variant in variants:
         _run_generate(
@@ -852,23 +852,25 @@ def run_example(
             if not output_path.exists():
                 pytest.fail(f"Expected output not found: {output}")
 
-    for output in expected_install_outputs:
-        assert install_prefix is not None
-        if isinstance(output, list):
-            output = output[0]
-            content = output[1]
-        else:
-            content = None
-        output = _substitute_variables(output)
-        output_path = Path(install_prefix.name) / output
-        if not output_path.exists():
-            pytest.fail(f"Expected install output not found: {output}")
-        if content is not None:
-            actual_content = output_path.read_text()
-            if content not in actual_content:
-                pytest.fail(
-                    f"Expected '{content}' in installed {output}, got:\n{actual_content}"
-                )
+    if generator != "xcode":
+        # no install on xcode generator, so skip install output checks
+        for output in expected_install_outputs:
+            assert install_prefix is not None
+            if isinstance(output, list):
+                output = output[0]
+                content = output[1]
+            else:
+                content = None
+            output = _substitute_variables(output)
+            output_path = Path(install_prefix.name) / output
+            if not output_path.exists():
+                pytest.fail(f"Expected install output not found: {output}")
+            if content is not None:
+                actual_content = output_path.read_text()
+                if content not in actual_content:
+                    pytest.fail(
+                        f"Expected '{content}' in installed {output}, got:\n{actual_content}"
+                    )
 
     if install_prefix is not None:
         install_prefix.cleanup()
