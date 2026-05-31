@@ -40,13 +40,17 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.contrib.installers._helpers import check_tool
-
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode
     from pcons.core.project import Project
     from pcons.core.target import Target
+
+
+def _check_tool(tool: str, hint: str | None = None) -> str:
+    from pcons.contrib.installers._helpers import check_tool
+
+    return check_tool(tool, hint)
 
 
 # Reserved staging directory prefixes for installer generation.
@@ -144,7 +148,7 @@ def create_component_pkg(
         ToolNotFoundError: If pkgbuild is not found.
         ValueError: If staging path conflicts with existing build outputs.
     """
-    check_tool("pkgbuild", "Install Xcode Command Line Tools: xcode-select --install")
+    _check_tool("pkgbuild", "Install Xcode Command Line Tools: xcode-select --install")
 
     if output is None:
         output = Path(f"{identifier}-{version}.pkg")
@@ -247,8 +251,8 @@ def create_pkg(
         ToolNotFoundError: If pkgbuild or productbuild is not found.
         ValueError: If staging path conflicts with existing build outputs.
     """
-    check_tool("pkgbuild", "Install Xcode Command Line Tools: xcode-select --install")
-    check_tool(
+    _check_tool("pkgbuild", "Install Xcode Command Line Tools: xcode-select --install")
+    _check_tool(
         "productbuild", "Install Xcode Command Line Tools: xcode-select --install"
     )
 
@@ -441,7 +445,7 @@ def create_dmg(
         ToolNotFoundError: If hdiutil is not found.
         ValueError: If staging path conflicts with existing build outputs.
     """
-    check_tool("hdiutil", "hdiutil should be available on macOS")
+    _check_tool("hdiutil", "hdiutil should be available on macOS")
 
     volume_name = volume_name or name
     if output is None:
@@ -500,7 +504,7 @@ def sign_pkg(pkg_path: Path, identity: str) -> list[str]:
     Returns:
         Command list for productsign.
     """
-    check_tool(
+    _check_tool(
         "productsign", "Install Xcode Command Line Tools: xcode-select --install"
     )
 
@@ -539,7 +543,7 @@ def notarize_cmd(
     Returns:
         Command list for notarization.
     """
-    check_tool("xcrun", "Install Xcode Command Line Tools: xcode-select --install")
+    _check_tool("xcrun", "Install Xcode Command Line Tools: xcode-select --install")
 
     if password_keychain_item:
         return [
