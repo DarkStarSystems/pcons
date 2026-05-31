@@ -93,7 +93,6 @@ def adapt_path_for_windows(path: str, gcc_toolchain: bool = False) -> str:
             path = path[:-3] + ".dll"
 
     # Add .exe to executables (paths in build/ without extension)
-    # Check if it's a build output without an extension
     if "\\build\\" in path or path.startswith("build\\"):
         parts = path.rsplit("\\", 1)
         if len(parts) == 2 and "." not in parts[1]:
@@ -153,6 +152,7 @@ def run_rebuild_test(
     work_dir: Path,
     build_dir: Path,
     rebuild_config: dict[str, Any],
+    toolchain: str | None = None,
 ) -> None:
     """Run a single rebuild test scenario.
 
@@ -161,6 +161,7 @@ def run_rebuild_test(
         build_dir: Build output directory
         rebuild_config: Dict with keys like 'description', 'touch', 'expect_rebuild',
                        'expect_no_rebuild', 'expect_no_work'
+        toolchain: Optional toolchain name (used for platform path adaptation)
     """
     description = rebuild_config.get("description", "unnamed rebuild test")
 
@@ -205,8 +206,21 @@ def run_rebuild_test(
                 f"but ninja rebuilt: {rebuilt_targets}"
             )
 
-    # If expect_rebuild: verify each target was rebuilt (substring match)
-    expect_rebuild = rebuild_config.get("expect_rebuild", [])
+    # Adapt expected paths for the current platform
+    gcc_tc = toolchain == "gcc"
+
+    def _adapt(p: str) -> str:
+        if not IS_WINDOWS:
+            return p
+        adapted = adapt_path_for_windows(p, gcc_toolchain=gcc_tc)
+        # Rebuild paths are build-dir-relative bare names (e.g. "hello");
+        # adapt_path_for_windows only adds .exe for build/-prefixed paths.
+        if "\\" not in adapted and "." not in adapted and adapted:
+            adapted += ".exe"
+        return adapted
+
+    # If expect_rebuild: verify each target was rebuilt
+    expect_rebuild = [_adapt(p) for p in rebuild_config.get("expect_rebuild", [])]
     for expected in expect_rebuild:
         found = any(fnmatch.fnmatch(target, expected) for target in rebuilt_targets)
         if not found:
@@ -216,7 +230,7 @@ def run_rebuild_test(
             )
 
     # If expect_no_rebuild: verify each target was NOT rebuilt
-    expect_no_rebuild = rebuild_config.get("expect_no_rebuild", [])
+    expect_no_rebuild = [_adapt(p) for p in rebuild_config.get("expect_no_rebuild", [])]
     for not_expected in expect_no_rebuild:
         found = any(fnmatch.fnmatch(target, not_expected) for target in rebuilt_targets)
         if found:
@@ -519,10 +533,19 @@ def get_platform_value(
     # Optionally adapt for Windows when no override exists
     if adapt_for_windows and IS_WINDOWS and value is not None:
         if isinstance(value, list):
-            return [
-                adapt_path_for_windows(str(v), gcc_toolchain=gcc_toolchain)
-                for v in value
-            ]
+            result = []
+            for v in value:
+                if isinstance(v, list):
+                    # [path, content] pair — adapt only the path (first element)
+                    result.append(
+                        [adapt_path_for_windows(str(v[0]), gcc_toolchain=gcc_toolchain)]
+                        + v[1:]
+                    )
+                else:
+                    result.append(
+                        adapt_path_for_windows(str(v), gcc_toolchain=gcc_toolchain)
+                    )
+            return result
         elif isinstance(value, str):
             return adapt_path_for_windows(value, gcc_toolchain=gcc_toolchain)
 
@@ -857,8 +880,7 @@ def run_example(
         for output in expected_install_outputs:
             assert install_prefix is not None
             if isinstance(output, list):
-                output = output[0]
-                content = output[1]
+                output, content = output[0], output[1]
             else:
                 content = None
             output = _substitute_variables(output)
@@ -983,7 +1005,9 @@ def run_example(
                 pytest.skip("ninja not available for rebuild tests")
 
             for rebuild_config in rebuild_tests:
-                run_rebuild_test(work_dir, build_dir, rebuild_config)
+                run_rebuild_test(
+                    work_dir, build_dir, rebuild_config, toolchain=toolchain
+                )
 
 
 # Discover examples and create test parameters
