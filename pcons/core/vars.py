@@ -79,6 +79,10 @@ def _platform_specific_vars() -> dict[str, str]:
 
 _platform_vars = _platform_specific_vars()
 
+def _reload_platform_vars() -> None:
+    """Reload platform-specific variables. Used for testing purposes."""
+    global _platform_vars
+    _platform_vars = _platform_specific_vars()
 
 def get_cli_var(name: str, default: str | None = None) -> str | None:
     """Get a build variable set on the command line or from environment.
