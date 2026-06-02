@@ -52,10 +52,10 @@ installed_bins = project.Install(
     name="install-binaries",
 )
 
-# Resolve to inspect resolved state
-project.resolve()
-
 project.Alias("install", [installed_libs, installed_archives, installed_bins])
+
+# Resolve to inspect resolved state (debug purposes only)
+project.resolve()
 
 # Debug output
 print(f"core_lib output_nodes: {core_lib.output_nodes}")

@@ -102,8 +102,6 @@ project.Default(hello)
 # Generate build files
 # =============================================================================
 
-project.resolve()
-
 Generator().generate(project)
 
 print(f"Generated {build_dir}")

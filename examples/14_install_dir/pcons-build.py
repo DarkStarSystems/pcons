@@ -34,9 +34,6 @@ installed_assets = project.InstallDir(
 # Set as default target
 project.Default(installed_assets)
 
-# Resolve so output_nodes are populated for Alias
-project.resolve()
-
 # Create alias after resolve() so output_nodes are populated
 project.Alias("install", installed_assets)
 

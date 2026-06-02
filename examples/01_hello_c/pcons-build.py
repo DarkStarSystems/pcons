@@ -22,9 +22,6 @@ hello = project.Program("hello", env, sources=["src/hello.c"])
 # Install target: copy binary to $PCONS_INSTALL_PREFIX/bin directory
 bins = project.Install(get_var("BINARY_INSTALL_DIR"), [hello], name="install-hello")
 
-# Resolve so output_nodes are populated for Alias
-project.resolve()
-
 # Create alias after resolve() so output_nodes are populated
 project.Alias("install", bins)
 
