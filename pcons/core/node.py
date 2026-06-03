@@ -17,7 +17,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -185,6 +185,26 @@ class Node(ABC):
         return f"{self.__class__.__name__}({self.name!r})"
 
 
+PathRole = Literal["source", "build_output", "install_output"]
+"""Tells generators how to render a node's path.
+
+The three roles make the source / build / external trichotomy explicit:
+
+- ``"source"``: an input file, relative to the project root (emitted via
+  ``$topdir`` so it resolves from the build directory).
+- ``"build_output"``: produced under the build directory (emitted relative
+  to it).
+- ``"install_output"``: produced *outside* the build directory, e.g.
+  ``<root>/dist/bin/app``. Emitted like a source (``$topdir``-relative, or
+  absolute only when it falls outside the project root) so build files stay
+  relocatable instead of baking in an absolute install path.
+
+Currently only ``"install_output"`` is set explicitly. A node with role
+``None`` is classified implicitly from whether it has a builder: no builder
+means a source, a builder means a build output.
+"""
+
+
 class FileNode(Node):
     """A node representing a file in the filesystem.
 
@@ -193,26 +213,36 @@ class FileNode(Node):
 
     Attributes:
         path: The path to the file.
+        role: Optional path role. ``None`` (the default) means the node is a
+              normal source or build output, distinguished by whether it has
+              a builder. ``"install_output"`` marks a build output whose path
+              lives outside the build directory (e.g. ``<root>/dist/bin/x``);
+              generators render it relative to the project root (the source
+              relativization) rather than the build directory, so build files
+              stay relocatable.
         _build_info: Builder-specific information for code generation.
                     See BuildInfo TypedDict for documented fields.
     """
 
-    __slots__ = ("path", "_build_info")
+    __slots__ = ("path", "role", "_build_info")
 
     def __init__(
         self,
         path: Path | str,
         *,
+        role: PathRole | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
         """Create a file node.
 
         Args:
             path: Path to the file (will be converted to Path).
+            role: Optional path role, ``None`` by default.
             defined_at: Source location where this node was created.
         """
         super().__init__(defined_at=defined_at)
         self.path = Path(path) if isinstance(path, str) else path
+        self.role: PathRole | None = role
         self._build_info: BuildInfo | None = None
 
     @property
@@ -274,22 +304,25 @@ class DirNode(Node):
         members: Files that belong to this directory (when used as target).
     """
 
-    __slots__ = ("path", "members")
+    __slots__ = ("path", "role", "members")
 
     def __init__(
         self,
         path: Path | str,
         *,
+        role: PathRole | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
         """Create a directory node.
 
         Args:
             path: Path to the directory.
+            role: Optional path role, ``None`` by default.
             defined_at: Source location where this node was created.
         """
         super().__init__(defined_at=defined_at)
         self.path = Path(path) if isinstance(path, str) else path
+        self.role: PathRole | None = role
         self.members: list[FileNode] = []
 
     @property

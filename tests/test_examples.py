@@ -623,13 +623,37 @@ def _run_generate(
 _variable_expr = re.compile(r"\$\{([^}]+)\}")
 
 
+def _example_template_vars() -> dict[str, str]:
+    """Platform-derived substitutions for ``${...}`` placeholders in test.toml."""
+    from pcons.configure.platform import get_platform
+
+    plat = get_platform()
+    # Shared libraries install next to executables on DLL platforms (Windows),
+    # matching Toolchain.get_install_dir("shared_library").
+    shared_install_dir = "bin" if plat.shared_lib_suffix == ".dll" else "lib"
+    return {
+        "BINARY_EXT": plat.exe_suffix,
+        "LIBRARY_EXT": plat.shared_lib_suffix,
+        "ARCHIVE_EXT": plat.static_lib_suffix,
+        "LIBRARY_PREFIX": plat.shared_lib_prefix,
+        "BINARY_INSTALL_DIR": "bin",
+        "LIBRARY_INSTALL_DIR": shared_install_dir,
+        "ARCHIVE_INSTALL_DIR": "lib",
+    }
+
+
 def _substitute_variables(path: str) -> str:
-    """Substitute variables in the path string."""
-    from pcons.core.vars import get_var
+    """Substitute ``${VAR}`` placeholders in an expected-output path."""
+    table = _example_template_vars()
 
     def replacer(match: re.Match) -> str:
         var_name = match.group(1)
-        return get_var(var_name)
+        if var_name not in table:
+            raise KeyError(
+                f"Unknown test.toml template variable: ${{{var_name}}}. "
+                f"Known: {', '.join(sorted(table))}"
+            )
+        return table[var_name]
 
     return _variable_expr.sub(replacer, path)
 

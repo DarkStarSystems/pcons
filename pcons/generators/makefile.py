@@ -217,13 +217,16 @@ class MakefileGenerator(BaseGenerator):
             ]
             output = " ".join(all_outputs)
         else:
-            output = self._make_build_relative_path(node.path)
+            output = self._node_path(node)
 
         # Get source paths - use PathResolver for consistent handling
         # Make runs from build directory (via make -C), so:
         # - Build outputs: strip build_dir prefix
         # - Source files: use absolute paths to work from any directory
         def get_source_path(s: FileNode) -> str:
+            # Install outputs live outside the build dir.
+            if getattr(s, "role", None) == "install_output":
+                return self._node_path(s)
             # Build outputs need build_dir prefix stripped
             if getattr(s, "_build_info", None) is not None or s.is_target:
                 return self._make_build_relative_path(s.path)
@@ -259,7 +262,14 @@ class MakefileGenerator(BaseGenerator):
         order_only: list[str] = []
         output_dir = node.path.parent
         if output_dir != Path(".") and output_dir != Path(""):
-            order_only.append(self._make_build_relative_path(output_dir))
+            if getattr(node, "role", None) == "install_output":
+                # Install dir lives outside the build tree.
+                abs_dir = output_dir
+                if not abs_dir.is_absolute() and self._project_root is not None:
+                    abs_dir = self._project_root / abs_dir
+                order_only.append(self._escape_path(abs_dir))
+            else:
+                order_only.append(self._make_build_relative_path(output_dir))
 
         # Build the target line
         prereq_str = " ".join(prereqs)
@@ -563,9 +573,7 @@ class MakefileGenerator(BaseGenerator):
         for name, alias in project.aliases.items():
             # Alias targets need build_dir prefix stripped since make runs from build_dir
             targets = " ".join(
-                self._make_build_relative_path(t.path)
-                for t in alias.targets
-                if isinstance(t, FileNode)
+                self._node_path(t) for t in alias.targets if isinstance(t, FileNode)
             )
             if targets:
                 f.write(f"{name}: {targets}\n")
@@ -618,15 +626,11 @@ class MakefileGenerator(BaseGenerator):
             if target.output_nodes:
                 for out_node in target.output_nodes:
                     if isinstance(out_node, FileNode):
-                        user_defaults.append(
-                            self._make_build_relative_path(out_node.path)
-                        )
+                        user_defaults.append(self._node_path(out_node))
             else:
                 for target_node in target.nodes:
                     if isinstance(target_node, FileNode):
-                        user_defaults.append(
-                            self._make_build_relative_path(target_node.path)
-                        )
+                        user_defaults.append(self._node_path(target_node))
 
         # Collect all target outputs for 'all'
         all_outputs: list[str] = []
@@ -634,7 +638,7 @@ class MakefileGenerator(BaseGenerator):
             if getattr(target, "_resolved", False):
                 for node in target.output_nodes:
                     if isinstance(node, FileNode):
-                        all_outputs.append(self._make_build_relative_path(node.path))
+                        all_outputs.append(self._node_path(node))
 
         # If no resolved targets, find final nodes from env-created nodes
         if not all_outputs:
@@ -781,6 +785,20 @@ class MakefileGenerator(BaseGenerator):
         """
         path_str = self._strip_build_dir_prefix(path)
         return self.ESCAPE_DOLLAR.sub("$$", path_str)
+
+    def _node_path(self, node: FileNode) -> str:
+        """Render a Makefile path for *node*, honoring its role.
+
+        Install outputs (``role == "install_output"``) live outside the build dir.
+        Since make runs from the build dir (via ``-C``), they must have absolute paths.
+        Keeps them project-relative whenever possible (when install destination is within the project source directory).
+        """
+        if getattr(node, "role", None) == "install_output":
+            p = node.path
+            if not p.is_absolute() and self._project_root is not None:
+                p = self._project_root / p
+            return self._escape_path(p)
+        return self._make_build_relative_path(node.path)
 
     def _process_path_tokens(self, tokens: list) -> list:
         """Process PathToken objects in a command token list.

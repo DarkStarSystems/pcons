@@ -8,7 +8,7 @@ This example demonstrates:
 - Automatic resolution and generation
 """
 
-from pcons import Project, find_c_toolchain, get_var
+from pcons import Project, find_c_toolchain, get_var, install_dir
 
 project = Project("hello_c")
 if (preferred_toolchain := get_var("TOOLCHAIN", None)) is not None:
@@ -19,8 +19,9 @@ env = project.Environment(toolchain=find_c_toolchain(prefer=preferred_toolchain)
 
 hello = project.Program("hello", env, sources=["src/hello.c"])
 
-# Install target: copy binary to $PCONS_INSTALL_PREFIX/bin directory
-bins = project.Install(get_var("BINARY_INSTALL_DIR"), [hello], name="install-hello")
+# Install target: copy binary to $PCONS_INSTALL_PREFIX/bin directory.
+# install_dir() picks the conventional subdir ("bin") from the toolchain.
+bins = project.Install(install_dir(env, "program"), [hello], name="install-hello")
 
 # Create alias after resolve() so output_nodes are populated
 project.Alias("install", bins)

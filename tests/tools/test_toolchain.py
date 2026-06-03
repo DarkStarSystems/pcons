@@ -86,6 +86,36 @@ class TestAuxiliaryInputHandler:
         assert handler is None
 
 
+class TestInstallDir:
+    """Tests for the toolchain-based install-dir convention."""
+
+    def test_program_goes_to_bin(self):
+        tc = MockToolchain()
+        assert tc.get_install_dir("program") == "bin"
+
+    def test_static_library_goes_to_lib(self):
+        tc = MockToolchain()
+        assert tc.get_install_dir("static_library") == "lib"
+
+    def test_shared_library_unix_goes_to_lib(self):
+        """ELF/Mach-O shared libraries (.so/.dylib) install to lib/."""
+
+        class UnixToolchain(MockToolchain):
+            def get_output_suffix(self, target_type: str) -> str:
+                return ".so" if target_type == "shared_library" else ""
+
+        assert UnixToolchain().get_install_dir("shared_library") == "lib"
+
+    def test_shared_library_dll_goes_to_bin(self):
+        """Windows DLLs install next to executables in bin/."""
+
+        class DllToolchain(MockToolchain):
+            def get_output_suffix(self, target_type: str) -> str:
+                return ".dll" if target_type == "shared_library" else ".exe"
+
+        assert DllToolchain().get_install_dir("shared_library") == "bin"
+
+
 class TestLanguagePriority:
     def test_default_priorities(self):
         tc = MockToolchain()

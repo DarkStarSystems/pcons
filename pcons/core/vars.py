@@ -20,71 +20,19 @@ def _clear_cli_vars() -> None:
     _cli_vars = None
 
 
-def _posix_specific_vars() -> dict[str, str]:
-    """Get POSIX-specific variables to inject into the build environment."""
-    return {
-        "BINARY_EXT": "",
-        "LIBRARY_EXT": ".so",
-        "OBJECT_EXT": ".o",
-        "ARCHIVE_EXT": ".a",
-        "LIBRARY_PREFIX": "lib",
-        "PATHSEP": ":",
-        "LIBRARY_INSTALL_DIR": "lib",
-        "ARCHIVE_INSTALL_DIR": "lib",
-        "BINARY_INSTALL_DIR": "bin",
-    }
+@overload
+def get_var(name: str) -> str | None: ...
 
 
-def _platform_specific_vars() -> dict[str, str]:
-    """Get platform-specific variables to inject into the build environment."""
-    import platform
-
-    vars = {}
-    system = platform.system()
-    if system == "Windows":
-        vars["PLATFORM"] = "windows"
-        vars["BINARY_EXT"] = ".exe"
-        vars["LIBRARY_EXT"] = ".dll"
-        vars["OBJECT_EXT"] = ".obj"
-        vars["LIBRARY_EXT"] = ".dll"
-        vars["ARCHIVE_EXT"] = ".lib"
-        vars["LIBRARY_PREFIX"] = ""
-        vars["PATHSEP"] = ";"
-        vars["LIBRARY_INSTALL_DIR"] = "bin"
-        vars["ARCHIVE_INSTALL_DIR"] = "lib"
-        vars["BINARY_INSTALL_DIR"] = "bin"
-    elif system == "Darwin":
-        vars.update(_posix_specific_vars())
-        vars["PLATFORM"] = "macos"
-        vars["LIBRARY_EXT"] = ".dylib"
-    elif system == "Linux":
-        vars.update(_posix_specific_vars())
-        vars["PLATFORM"] = "linux"
-    else:
-        # Fallback to UNIX-style for unknown platforms
-        vars["PLATFORM"] = system.lower()
-        vars.update(_posix_specific_vars())
-
-    vars["HOST_ARCH"] = platform.machine()
-    vars["HOST_OS"] = system.lower()
-
-    # apply environment overrides for platform vars
-    for key in vars.keys():
-        env_value = os.environ.get(key)
-        if env_value is not None:
-            vars[key] = env_value
-
-    return vars
+@overload
+def get_var(name: str, default: str) -> str: ...
 
 
-_platform_vars = _platform_specific_vars()
+@overload
+def get_var(name: str, default: None) -> str | None: ...
 
-def _reload_platform_vars() -> None:
-    """Reload platform-specific variables. Used for testing purposes."""
-    global _platform_vars
-    _platform_vars = _platform_specific_vars()
 
-def get_cli_var(name: str, default: str | None = None) -> str | None:
+def get_var(name: str, default: str | None = None) -> str | None:
     """Get a build variable set on the command line or from environment.
 
     Variables can be set when invoking pcons:
@@ -132,42 +80,6 @@ def get_cli_var(name: str, default: str | None = None) -> str | None:
 
     # Fall back to environment
     return os.environ.get(name, default)
-
-
-class _Missing:
-    pass
-
-
-_MISSING = _Missing()
-
-
-@overload
-def get_var(name: str) -> str: ...
-
-
-@overload
-def get_var(name: str, default: None) -> str | None: ...
-
-
-@overload
-def get_var(name: str, default: str) -> str: ...
-
-
-def get_var(name: str, default: str | None | _Missing = _MISSING) -> str | None:
-    """Get a build variable set on the command line, environment, or platform specific defaults.
-
-    Raises ValueError if the variable is not found and no default is provided.
-    """
-    cli_value = get_cli_var(name)
-    if cli_value is not None:
-        return cli_value
-    value = _platform_vars.get(name, _MISSING)
-    if isinstance(value, _Missing):
-        if isinstance(default, _Missing):
-            raise ValueError(f"Build variable {name!r} is not set")
-        return default  # type: ignore[return-value]  # narrowed: str | None
-    assert isinstance(value, str)
-    return value
 
 
 def get_variant(default: str = "release") -> str:

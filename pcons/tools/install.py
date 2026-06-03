@@ -77,6 +77,46 @@ def _deduplicate_target_name(project: Project, base_name: str) -> str:
     return target_name
 
 
+def install_dir(env: Environment, target_type: str) -> str:
+    """Return the conventional install subdirectory for *target_type*.
+
+    The convention is sourced from the environment's primary toolchain, so it
+    follows the platform that toolchain targets rather than the host OS:
+
+    - ``"program"``: ``bin``
+    - ``"static_library"``: ``lib``
+    - ``"shared_library"``: ``bin`` on DLL platforms (a Windows DLL must sit
+      next to the executable that loads it), ``lib`` elsewhere.
+
+    Pass the result to :meth:`Project.Install` as the destination directory::
+
+        env = project.Environment(toolchain=find_c_toolchain())
+        lib = project.SharedLibrary("foo", env, sources=["foo.c"])
+        project.Install(install_dir(env, "shared_library"), [lib])
+
+    Users who want a different layout can ignore this helper and pass an
+    explicit directory string (e.g. ``project.Install("lib64", [lib])``).
+
+    Args:
+        env: Environment whose toolchain defines the convention.
+        target_type: One of ``"program"``, ``"static_library"``,
+            ``"shared_library"``.
+
+    Returns:
+        The install subdirectory name (relative to the install prefix).
+
+    Raises:
+        ValueError: If *env* has no toolchain.
+    """
+    toolchains = env.toolchains
+    if not toolchains:
+        raise ValueError(
+            "install_dir() requires an environment with a toolchain; "
+            "pass an explicit directory string to Install() instead."
+        )
+    return toolchains[0].get_install_dir(target_type)
+
+
 class InstallTool(StandaloneTool):
     """Tool for file and directory installation operations.
 
@@ -235,8 +275,10 @@ class InstallNodeFactory(PendingSourceFactory):
             # Destination path
             dest_path = dest_dir / file_node.path.name
 
-            # Create destination node via project for deduplication
-            dest_node = self.project.node(dest_path, canonicalize=False)
+            # Create destination node via project for deduplication.
+            # Mark it as an install output so generators render its path
+            # (which may live outside the build dir) relocatably.
+            dest_node = self.project.node(dest_path, role="install_output")
             dest_node.depends([file_node])
 
             # Store build info referencing env.install.copycmd
@@ -337,8 +379,9 @@ class InstallNodeFactory(PendingSourceFactory):
 
         source_node = sources[0]
 
-        # Create destination node via project for deduplication
-        dest_node = self.project.node(dest, canonicalize=False)
+        # Create destination node via project for deduplication.
+        # Mark it as an install output (path may live outside the build dir).
+        dest_node = self.project.node(dest, role="install_output")
         dest_node.depends([source_node])
 
         # Store build info referencing env.install.copycmd
@@ -395,8 +438,11 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_name = _stamp_name_for(rel_dest)
         stamp_path = stamps_dir / stamp_name
 
-        # Create stamp node via project for deduplication (this is what ninja tracks)
-        stamp_node = self.project.node(stamp_path, canonicalize=False)
+        # Create stamp node via project for deduplication (this is what ninja
+        # tracks). The stamp lives under build/.stamps, so it is a normal
+        # build output; the copied tree's destination is handled separately
+        # via the copytree command's destdir argument.
+        stamp_node = self.project.node(stamp_path)
         # Source directory is the explicit dep (becomes $in for copytree).
         # Child nodes are implicit deps — they trigger rebuilds but don't
         # appear in $in (ninja's | syntax).

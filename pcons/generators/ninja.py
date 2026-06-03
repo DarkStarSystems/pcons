@@ -500,11 +500,15 @@ class NinjaGenerator(BaseGenerator):
                 output += " | " + " ".join(implicit_outputs)
         else:
             # Single-output build
-            output = self._escape_output_path(node.path)
+            output = self._output_ref(node)
 
         # Explicit dependencies (sources + library dependencies)
         # For source files, we need to reference them from the build directory
         def get_dep_path(s: FileNode) -> str:
+            # Install outputs live outside the build dir — render relocatably.
+            if getattr(s, "role", None) == "install_output":
+                return self._install_output_ref(s)
+
             # Check if this is a build output (has _build_info from resolver)
             if getattr(s, "_build_info", None) is not None or s.is_target:
                 # Build output - make relative to build dir
@@ -537,8 +541,7 @@ class NinjaGenerator(BaseGenerator):
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                # Use _escape_output_path for build outputs (objects, libraries)
-                explicit_deps_list.append(self._escape_output_path(dep.path))
+                explicit_deps_list.append(self._output_ref(dep))
 
         explicit_deps = " ".join(explicit_deps_list)
 
@@ -647,9 +650,7 @@ class NinjaGenerator(BaseGenerator):
         f.write("# Aliases\n")
         for name, alias in project.aliases.items():
             targets = " ".join(
-                self._escape_output_path(t.path)
-                for t in alias.targets
-                if isinstance(t, FileNode)
+                self._output_ref(t) for t in alias.targets if isinstance(t, FileNode)
             )
             if targets:
                 f.write(f"build {name}: phony {targets}\n")
@@ -684,7 +685,7 @@ class NinjaGenerator(BaseGenerator):
             for dep in test_target.dependencies:
                 for node in dep.output_nodes:
                     if isinstance(node, FileNode):
-                        out = self._escape_output_path(node.path)
+                        out = self._output_ref(node)
                         if out not in seen:
                             seen.add(out)
                             program_outputs.append(out)
@@ -722,13 +723,13 @@ class NinjaGenerator(BaseGenerator):
         for target in project.default_targets:
             for out_node in target.output_nodes:
                 if isinstance(out_node, FileNode):
-                    user_defaults.append(self._escape_output_path(out_node.path))
+                    user_defaults.append(self._output_ref(out_node))
 
         # Collect all target outputs for 'all' target
         for target in project.targets:
             for node in target.output_nodes:
                 if isinstance(node, FileNode):
-                    all_outputs.append(self._escape_output_path(node.path))
+                    all_outputs.append(self._output_ref(node))
 
         if all_outputs:
             # Create 'all' phony target — builds every target in the project
@@ -807,6 +808,28 @@ class NinjaGenerator(BaseGenerator):
     def _escape_output_path(self, path: Path | str) -> str:
         """Make an output path relative to build dir and escape for Ninja."""
         return self._escape_path(self._make_output_relative(path))
+
+    def _install_output_ref(self, node: FileNode) -> str:
+        """Render an install-output node (``role == "install_output"``).
+
+        Such nodes live outside the build dir (e.g. ``<root>/dist/bin/app``).
+        They are emitted like source files (``$topdir/...``) when under the
+        project root, otherwise absolute.
+        """
+        rel = self._make_source_relative(node.path)
+        if rel is not None:
+            return "$topdir/" + self._escape_path(rel)
+        return self._escape_path(node.path)
+
+    def _output_ref(self, node: FileNode) -> str:
+        """Render an output-node reference.
+
+        Build outputs are relative to the build dir.
+        For install outputs see _install_output_ref().
+        """
+        if getattr(node, "role", None) == "install_output":
+            return self._install_output_ref(node)
+        return self._escape_output_path(node.path)
 
     def _make_source_relative(self, path: Path | str) -> str | None:
         """Try to make a source path relative to project root.

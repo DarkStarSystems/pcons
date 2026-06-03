@@ -3,15 +3,11 @@
 
 from __future__ import annotations
 
-import platform
-
-import pytest
-
 from pcons import (
     get_var,
     get_variant,
 )
-from pcons.core.vars import _clear_cli_vars, _reload_platform_vars
+from pcons.core.vars import _clear_cli_vars
 
 
 class TestGetVar:
@@ -25,14 +21,13 @@ class TestGetVar:
 
         assert get_var("TEST_VAR", "default_value") == "default_value"
 
-    def test_get_var_no_default_raises(self, monkeypatch) -> None:
-        """Test get_var raises ValueError when not set and no default."""
+    def test_get_var_no_default_returns_none(self, monkeypatch) -> None:
+        """Test get_var returns None when not set and no default given."""
         _clear_cli_vars()
         monkeypatch.delenv("PCONS_VARS", raising=False)
         monkeypatch.delenv("TEST_VAR", raising=False)
 
-        with pytest.raises(ValueError):
-            get_var("TEST_VAR")
+        assert get_var("TEST_VAR") is None
 
     def test_get_var_with_none_default(self, monkeypatch) -> None:
         """Test get_var returns None when default is None."""
@@ -85,59 +80,3 @@ class TestGetVar:
         monkeypatch.setenv("VARIANT", "debug")
 
         assert get_variant("default") == "release"
-
-
-class TestPlatformVars:
-    """Tests for platform-specific variables."""
-
-    def test_linux_platform_vars(self, monkeypatch) -> None:
-        """Test platform-specific variables are set correctly."""
-        monkeypatch.setattr(platform, "system", lambda: "Linux")
-        _reload_platform_vars()
-        assert get_var("BINARY_EXT") == ""
-        assert get_var("LIBRARY_EXT") == ".so"
-        assert get_var("ARCHIVE_EXT") == ".a"
-        assert get_var("LIBRARY_PREFIX") == "lib"
-        assert get_var("PATHSEP") == ":"
-        assert get_var("LIBRARY_INSTALL_DIR") == "lib"
-        assert get_var("ARCHIVE_INSTALL_DIR") == "lib"
-        assert get_var("BINARY_INSTALL_DIR") == "bin"
-
-    def test_windows_platform_vars(self, monkeypatch) -> None:
-        """Test platform-specific variables for Windows."""
-        monkeypatch.setattr(platform, "system", lambda: "Windows")
-        _reload_platform_vars()
-        assert get_var("BINARY_EXT") == ".exe"
-        assert get_var("LIBRARY_EXT") == ".dll"
-        assert get_var("ARCHIVE_EXT") == ".lib"
-        assert get_var("LIBRARY_PREFIX") == ""
-        assert get_var("PATHSEP") == ";"
-        assert get_var("LIBRARY_INSTALL_DIR") == "bin"
-        assert get_var("ARCHIVE_INSTALL_DIR") == "lib"
-        assert get_var("BINARY_INSTALL_DIR") == "bin"
-
-    def test_macos_platform_vars(self, monkeypatch) -> None:
-        """Test platform-specific variables for macOS."""
-        monkeypatch.setattr(platform, "system", lambda: "Darwin")
-        _reload_platform_vars()
-        assert get_var("BINARY_EXT") == ""
-        assert get_var("LIBRARY_EXT") == ".dylib"
-        assert get_var("ARCHIVE_EXT") == ".a"
-        assert get_var("LIBRARY_PREFIX") == "lib"
-        assert get_var("PATHSEP") == ":"
-        assert get_var("LIBRARY_INSTALL_DIR") == "lib"
-        assert get_var("ARCHIVE_INSTALL_DIR") == "lib"
-        assert get_var("BINARY_INSTALL_DIR") == "bin"
-
-    def test_unknown_platform_vars(self, monkeypatch) -> None:
-        """Test platform-specific variables for unknown platform fallback (assuming POSIX)."""
-        monkeypatch.setattr(platform, "system", lambda: "Unknown")
-        _reload_platform_vars()
-        assert get_var("BINARY_EXT") == ""
-        assert get_var("LIBRARY_EXT") == ".so"
-        assert get_var("ARCHIVE_EXT") == ".a"
-        assert get_var("LIBRARY_PREFIX") == "lib"
-        assert get_var("PATHSEP") == ":"
-        assert get_var("LIBRARY_INSTALL_DIR") == "lib"
-        assert get_var("ARCHIVE_INSTALL_DIR") == "lib"
-        assert get_var("BINARY_INSTALL_DIR") == "bin"

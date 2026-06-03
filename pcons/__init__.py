@@ -43,6 +43,7 @@ from pcons.toolchains import (
     find_fortran_toolchain,
     find_wasi_toolchain,
 )  # noqa: E402
+from pcons.tools.install import install_dir  # noqa: E402
 from pcons.util.add_subdirectory import add_subdirectory  # noqa: E402
 
 register_builtin_builders()
@@ -148,6 +149,8 @@ __all__ = [
     # CLI variable access
     "get_var",
     "get_variant",
+    # Install helpers
+    "install_dir",
     # Project registry (for CLI use)
     "get_registered_projects",
     "_register_project",
