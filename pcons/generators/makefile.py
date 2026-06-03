@@ -123,7 +123,11 @@ class MakefileGenerator(BaseGenerator):
         for target in project.targets:
             for node in self._get_target_build_nodes(target):
                 parent = node.path.parent
-                if parent != Path(".") and parent != Path(""):
+                if (
+                    parent != Path(".")
+                    and parent != Path("")
+                    and node.role != "install_output"
+                ):
                     self._directories.add(parent)
                 # Track depfile directories
                 build_info = getattr(node, "_build_info", None) or {}
@@ -261,15 +265,12 @@ class MakefileGenerator(BaseGenerator):
         # Directories need build_dir prefix stripped since make runs from build_dir
         order_only: list[str] = []
         output_dir = node.path.parent
-        if output_dir != Path(".") and output_dir != Path(""):
-            if getattr(node, "role", None) == "install_output":
-                # Install dir lives outside the build tree.
-                abs_dir = output_dir
-                if not abs_dir.is_absolute() and self._project_root is not None:
-                    abs_dir = self._project_root / abs_dir
-                order_only.append(self._escape_path(abs_dir))
-            else:
-                order_only.append(self._make_build_relative_path(output_dir))
+        if (
+            output_dir != Path(".")
+            and output_dir != Path("")
+            and node.role != "install_output"
+        ):
+            order_only.append(self._make_build_relative_path(output_dir))
 
         # Build the target line
         prereq_str = " ".join(prereqs)
@@ -546,9 +547,11 @@ class MakefileGenerator(BaseGenerator):
         source_paths = " ".join(in_paths)
 
         # Substitute $in and $out
-        # $out uses node.path with build_dir prefix stripped (make runs from build_dir)
+        # $out uses the role-aware output path (build-relative, or absolute for
+        # install outputs) so the recipe writes exactly where the rule target
+        # points (make runs from build_dir).
         command = command.replace("$in", source_paths)
-        command = command.replace("$out", self._strip_build_dir_prefix(node.path))
+        command = command.replace("$out", self._node_out_raw(node))
 
         # Handle depfile if present (also strip build_dir prefix)
         depfile = build_info.get("depfile")
@@ -786,19 +789,29 @@ class MakefileGenerator(BaseGenerator):
         path_str = self._strip_build_dir_prefix(path)
         return self.ESCAPE_DOLLAR.sub("$$", path_str)
 
-    def _node_path(self, node: FileNode) -> str:
-        """Render a Makefile path for *node*, honoring its role.
+    def _node_out_raw(self, node: FileNode) -> str:
+        """Return the unescaped output path for *node*, honoring its role.
 
-        Install outputs (``role == "install_output"``) live outside the build dir.
-        Since make runs from the build dir (via ``-C``), they must have absolute paths.
-        Keeps them project-relative whenever possible (when install destination is within the project source directory).
+        Install outputs (``role == "install_output"``) live outside the build
+        dir; since make runs from the build dir (via ``-C``) they are emitted
+        as absolute paths (anchored at the project root when stored
+        project-relative). All other nodes are build-dir-relative.
+
+        Returned unescaped so it can be used both in rule targets (after
+        ``$``-escaping via :meth:`_node_path`) and in recipe command tokens
+        (which are escaped/quoted separately). The two must agree so make's
+        target matches the path the recipe actually writes.
         """
-        if getattr(node, "role", None) == "install_output":
+        if node.role == "install_output":
             p = node.path
             if not p.is_absolute() and self._project_root is not None:
                 p = self._project_root / p
-            return self._escape_path(p)
-        return self._make_build_relative_path(node.path)
+            return str(p)
+        return self._strip_build_dir_prefix(node.path)
+
+    def _node_path(self, node: FileNode) -> str:
+        """Render a Makefile rule-target path for *node* ($-escaped)."""
+        return self.ESCAPE_DOLLAR.sub("$$", self._node_out_raw(node))
 
     def _process_path_tokens(self, tokens: list) -> list:
         """Process PathToken objects in a command token list.
@@ -927,8 +940,9 @@ class MakefileGenerator(BaseGenerator):
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
                 in_paths.append(get_source_path(dep))
 
-        # Output path (single path)
-        out_path = self._strip_build_dir_prefix(node.path)
+        # Output path (single path), role-aware so install outputs resolve to
+        # their absolute destination, matching the rule target.
+        out_path = self._node_out_raw(node)
 
         # Depfile path - get from build_info (PathToken with suffix)
         depfile = build_info.get("depfile")
