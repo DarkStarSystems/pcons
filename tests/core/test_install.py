@@ -361,6 +361,34 @@ class TestInstallWithNinja:
         assert "build $topdir/dist/lib/mylib.a:" in content
         assert str(tmp_path) not in content
 
+    def test_no_prefix_relative_dest_stays_build_relative(self, tmp_path):
+        """no_prefix install with a relative dest is a build-dir-relative staging
+        path (e.g. the contrib installers), not an external install output.
+        """
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src_file = tmp_path / "app"
+        src_file.touch()
+
+        install = project.Install(".pkg_staging/payload", [src_file], no_prefix=True)
+        project.resolve()
+
+        node = install.output_nodes[0]
+        assert node.role is None
+        assert node.path == Path(".pkg_staging/payload/app")
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        # Emitted build-dir-relative (resolves to build/.pkg_staging/...),
+        # NOT via $topdir.
+        assert "build .pkg_staging/payload/app:" in content
+        assert "$topdir/.pkg_staging" not in content
+
 
 class TestInstallDirHelper:
     """Tests for the install_dir() convenience helper."""

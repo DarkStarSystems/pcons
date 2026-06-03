@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from pcons.core.builder_registry import builder
-from pcons.core.node import BuildInfo, FileNode
+from pcons.core.node import BuildInfo, FileNode, PathRole
 from pcons.core.resolver import PendingSourceFactory
 from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target
@@ -51,6 +51,19 @@ def _stamp_name_for(path: Path) -> str:
     if len(s) >= 2 and s[1] == ":":
         s = "_" + s[0] + s[2:]
     return s.replace("/", "_").replace("\\", "_") + ".stamp"
+
+
+def _install_role(dest: Path) -> PathRole | None:
+    """Return the node role for an install destination.
+    An absolute destination it is an ``"install_output"``.
+    A relative destination is a build-dir-relative staging path (e.g. the ``no_prefix``
+    installers in ``pcons.contrib.installers``), return ``None``.
+
+    ``Path.anchor`` is used rather than ``Path.is_absolute()`` because the
+    latter is platform-dependent: ``Path("/opt/x").is_absolute()`` is False on
+    Windows (no drive), which would misclassify a rooted POSIX-style path.
+    """
+    return "install_output" if dest.anchor else None
 
 
 def _deduplicate_target_name(project: Project, base_name: str) -> str:
@@ -276,9 +289,8 @@ class InstallNodeFactory(PendingSourceFactory):
             dest_path = dest_dir / file_node.path.name
 
             # Create destination node via project for deduplication.
-            # Mark it as an install output so generators render its path
-            # (which may live outside the build dir) relocatably.
-            dest_node = self.project.node(dest_path, role="install_output")
+            # Mark it as an install output only for absolute (outside-build) destinations; see _install_role.
+            dest_node = self.project.node(dest_path, role=_install_role(dest_path))
             dest_node.depends([file_node])
 
             # Store build info referencing env.install.copycmd
@@ -380,8 +392,8 @@ class InstallNodeFactory(PendingSourceFactory):
         source_node = sources[0]
 
         # Create destination node via project for deduplication.
-        # Mark it as an install output (path may live outside the build dir).
-        dest_node = self.project.node(dest, role="install_output")
+        # Mark it as an install output only for absolute (outside-build) destinations; see _install_role.
+        dest_node = self.project.node(dest, role=_install_role(dest))
         dest_node.depends([source_node])
 
         # Store build info referencing env.install.copycmd
