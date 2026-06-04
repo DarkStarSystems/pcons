@@ -16,8 +16,9 @@ BMI via a per-key GCC module mapper file. As a result:
     dialect - so it gets its own interface (`cxx_modules/<hashB>/provider.gcm`).
 
 Status by toolchain:
-  - GCC:  supported (per-key BMI dirs + module mapper files).
-  - Clang/MSVC: not yet wired for cross-target BMI reuse.
+  - GCC:   supported (per-key BMI dirs + module mapper files).
+  - clang: supported (per-key dirs + -fmodule-output / -fprebuilt-module-path).
+  - MSVC:  not yet wired for cross-target BMI reuse.
 """
 
 from pcons import Project, find_c_toolchain, get_var

@@ -14,12 +14,12 @@ expected_outputs = [
     "build/app",
 ]
 
-# Cross-target BMI reuse is currently wired for GCC only
-# (per-key BMI dirs + module mapper files).
+# Cross-target BMI reuse is wired for GCC (per-key BMI dirs + module mapper
+# files) and clang (per-key dirs + -fmodule-output / -fprebuilt-module-path).
 [toolchains]
-linux = ["gcc"]
-darwin = []
-windows = ["gcc"]
+linux = ["gcc", "llvm"]
+darwin = ["llvm"]
+windows = ["gcc", "llvm"]
 
 [verify]
 commands = [
