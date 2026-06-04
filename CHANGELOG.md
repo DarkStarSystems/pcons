@@ -10,14 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Install prefix.** `Install()`, `InstallAs()`, and `InstallDir()` now place relative destinations under an install prefix (default `<project-root>/dist`), settable via `pcons PCONS_INSTALL_PREFIX=...`. Rooted destinations are used as-is; `no_prefix=True` keeps a destination inside the build directory. New `install_dir(env, target_type)` helper returns the toolchain's conventional install subdirectory (`bin` for programs, `lib` for libraries; DLLs go in `bin`). (PR #38)
+- **Multiple generators per run.** `pcons -G ninja -G metadata` (or `PCONS_GENERATOR=ninja:metadata`) runs several generators in one invocation.
 
 ### Changed
 
 - **BREAKING: relative `Install()` destinations no longer land in the build directory.** `Install("lib", ...)` now installs to `<project-root>/dist/lib` instead of `build/lib`. Use `no_prefix=True` for the old behavior.
+- **Metadata generator schema v2:** `pcons_metadata.json` now serializes all projects (not just the top-level one) and includes qualified target names and subdirectories.
+- `Generator().generate(project)` now enqueues generation and runs it once at script exit (or via the CLI), so it can be called anywhere in the script without risking double generation.
 
 ### Fixed
 
-- GCC C++ modules builds now rebuild correctly when headers change: header depfiles are kept for non-module translation units, and Ninja rules are no longer merged across edges with different dependency styles. (PR #38)
+- GCC C++ modules builds now rebuild correctly when headers change: header depfiles are kept for non-module translation units, and Ninja rules are no longer merged across edges with different dependency styles. Module dependency scanning also works on Windows now. (PR #38)
+- `pcons build` now propagates the underlying build tool's exit code (e.g. ninja failures).
+- `compile_commands.json` now includes compile flags set on the environment.
 
 ### Contributors
 
