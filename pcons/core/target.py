@@ -260,9 +260,10 @@ def _make_default_requirements(
     """Create a default UsageRequirements with standard C/C++ fields."""
     reqs = UsageRequirements()
     reqs.defines = UniqueList([])
+    reqs.compile_flags = UniqueList([])
     reqs.include_dirs = UniqueList([])
     reqs.link_dirs = UniqueList([])
-    reqs.link_flags = []
+    reqs.link_flags = UniqueList([])
     reqs.link_libs = ValidatedUniqueList([], validator=link_libs_validator)
     return reqs
 
