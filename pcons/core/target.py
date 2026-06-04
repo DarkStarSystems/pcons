@@ -881,27 +881,26 @@ class Target:
         Returns:
             List of all transitive dependencies (not including self).
         """
-        result: list[Target] = [
-            t for t in self.private.link_libs if isinstance(t, Target)
-        ]
+        result: list[Target] = []
         visited: set[str] = set()
 
-        def _collect(target: Target) -> None:
-            public_linked_targets = [
-                t for t in target.public.link_libs if isinstance(t, Target)
-            ]
-            for dep in [*target._dependencies, *public_linked_targets]:
+        def direct_deps(target: Target, *, include_private: bool) -> list[Target]:
+            # A dependency's *private* link_libs do not propagate to consumers,
+            # so we only follow public ones when recursing.
+            deps = list(target._dependencies)
+            deps += [t for t in target.public.link_libs if isinstance(t, Target)]
+            if include_private:
+                deps += [t for t in target.private.link_libs if isinstance(t, Target)]
+            return deps
+
+        def _collect(target: Target, *, include_private: bool) -> None:
+            for dep in direct_deps(target, include_private=include_private):
                 if dep.name not in visited:
                     visited.add(dep.name)
-                    _collect(dep)
+                    _collect(dep, include_private=False)
                     result.append(dep)
 
-        # collect public libs of private link_libs
-        for t in self.private.link_libs:
-            if isinstance(t, Target):
-                _collect(t)
-
-        _collect(self)
+        _collect(self, include_private=True)
         return result
 
     def __str__(self) -> str:

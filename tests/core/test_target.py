@@ -137,6 +137,33 @@ class TestTarget:
 
         assert app.dependencies.count(lib) == 1
 
+    def test_transitive_deps_no_duplicate_private_and_public(self, test_project):  # noqa: F811
+        common = Target("common")
+        mid = Target("mid")
+        mid.public.link_libs.append(common)
+        app = Target("app")
+        app.private.link_libs.append(common)
+        app.public.link_libs.append(mid)
+
+        deps = app.transitive_dependencies()
+
+        assert deps.count(common) == 1
+        assert set(deps) == {common, mid}
+
+    def test_transitive_deps_order_dependencies_before_dependents(self, test_project):  # noqa: F811
+        # leaf <- mid <- app, where mid is a *private* dep of app.
+        # leaf (and mid's transitively-public leaf) must precede mid.
+        leaf = Target("leaf")
+        mid = Target("mid")
+        mid.public.link_libs.append(leaf)
+        app = Target("app")
+        app.private.link_libs.append(mid)
+
+        deps = app.transitive_dependencies()
+
+        assert set(deps) == {leaf, mid}
+        assert deps.index(leaf) < deps.index(mid)
+
     def test_usage_requirements(self, test_project):  # noqa: F811
         lib = Target("lib")
         lib.public.include_dirs.append(Path("include"))
