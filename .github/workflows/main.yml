@@ -244,7 +244,7 @@ jobs:
           sudo update-alternatives --install /usr/bin/g++ g++ \
             /usr/bin/g++-15 100
       - name: Run C++20 modules example tests
-        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules or 30_cxx_partitions or 31_cxx_modules_optin or 32_cxx_import_std or 35_cxx_modules_deps" -v
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "29_cxx_modules or 30_cxx_partitions or 31_cxx_modules_optin or 32_cxx_import_std or 35_cxx_modules_deps or 39_bmi_compat" -v
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6.0.1
         with:

@@ -18,6 +18,7 @@ from pcons.toolchains.cxx_module_scanner import (
     StdModuleFlagSpec,
     TuScanResult,
     TuScanSpec,
+    bmi_key_for_flags,
     build_module_map,
     module_file_for,
     run_scan_deps,
@@ -26,6 +27,7 @@ from pcons.toolchains.cxx_module_scanner import (
     select_std_module_flags,
     wire_std_into_targets,
     write_dyndep,
+    write_dyndep_entries,
     write_dyndep_from_results,
 )
 
@@ -587,3 +589,83 @@ class TestSelectStdModuleFlags:
             "-D_LIBCPP_FOO=1",
             "-frtti",
         ]
+
+
+class TestBmiKeyForFlags:
+    """A BMI's on-disk directory is keyed by the hash of its BMI-sensitive
+    flags so compatible compiles share one interface and incompatible ones
+    (e.g. different C++ dialects) stay separate.
+    """
+
+    def test_identical_bmi_flags_share_key(self) -> None:
+        a = bmi_key_for_flags(["-std=c++23", "-O2"], _CLANG_LIKE_SPEC)
+        b = bmi_key_for_flags(["-std=c++23", "-O0"], _CLANG_LIKE_SPEC)
+        # -O level is not BMI-sensitive, so the key is the same.
+        assert a == b
+
+    def test_different_dialect_gives_different_key(self) -> None:
+        a = bmi_key_for_flags(["-std=c++23"], _CLANG_LIKE_SPEC)
+        b = bmi_key_for_flags(["-std=c++26"], _CLANG_LIKE_SPEC)
+        assert a != b
+
+    def test_order_independent(self) -> None:
+        a = bmi_key_for_flags(["-std=c++23", "-frtti"], _CLANG_LIKE_SPEC)
+        b = bmi_key_for_flags(["-frtti", "-std=c++23"], _CLANG_LIKE_SPEC)
+        assert a == b
+
+    def test_non_bmi_flags_ignored(self) -> None:
+        # Unrelated includes/defines do not change the key.
+        a = bmi_key_for_flags(["-std=c++23"], _CLANG_LIKE_SPEC)
+        b = bmi_key_for_flags(
+            ["-std=c++23", "-I/some/inc", "-DUSER_FOO=1"], _CLANG_LIKE_SPEC
+        )
+        assert a == b
+
+    def test_key_is_short_hex(self) -> None:
+        key = bmi_key_for_flags(["-std=c++23"], _CLANG_LIKE_SPEC)
+        assert len(key) == 12
+        assert all(c in "0123456789abcdef" for c in key)
+
+
+class TestWriteDyndepEntries:
+    """Per-key dyndep emission: a single logical module can resolve to
+    different BMI paths in different compatibility classes, which a flat
+    {logical: path} map cannot express.
+    """
+
+    def test_keyed_provides_and_requires(self, tmp_path: Path) -> None:
+        out = tmp_path / "x.dyndep"
+        write_dyndep_entries(
+            [
+                (
+                    "obj.lib1/provider.cppm.o",
+                    ["cxx_modules/aaa/provider.gcm"],
+                    [],
+                ),
+                (
+                    "obj.lib1/consumer.cpp.o",
+                    [],
+                    ["cxx_modules/aaa/provider.gcm"],
+                ),
+                (
+                    "obj.lib3/provider.cppm.o",
+                    ["cxx_modules/bbb/provider.gcm"],
+                    [],
+                ),
+            ],
+            out,
+        )
+        text = out.read_text()
+        assert text.startswith("ninja_dyndep_version = 1")
+        assert (
+            "build obj.lib1/provider.cppm.o | cxx_modules/aaa/provider.gcm: dyndep"
+            in text
+        )
+        assert (
+            "build obj.lib3/provider.cppm.o | cxx_modules/bbb/provider.gcm: dyndep"
+            in text
+        )
+        assert (
+            "build obj.lib1/consumer.cpp.o: dyndep | cxx_modules/aaa/provider.gcm"
+            in text
+        )

@@ -599,12 +599,16 @@ class GccToolchain(UnixToolchain):
         """
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
-            build_module_map,
+            _write_text_if_changed,
+            bmi_key_for_flags,
+            module_file_for,
             scan_translation_units,
             select_modules_scope,
             wire_std_into_targets,
-            write_dyndep_from_results,
+            write_dyndep_entries,
         )
+
+        flag_spec = _gcc_std_module_flag_spec()
 
         cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
         all_cxx_pairs = cxx_module_pairs + cxx_pairs
@@ -645,8 +649,13 @@ class GccToolchain(UnixToolchain):
                 bi["depfile"] = None
 
         # Build per-TU scan specs and run GCC p1689 scanning.
+        # obj_key maps each participating object node to the hash of its
+        # BMI-sensitive flags. TUs sharing a key may share one compiled
+        # module interface under cxx_modules/<key>/; TUs with different
+        # keys (e.g. -std=c++23 vs -std=c++26) get separate BMIs.
         specs: list[TuScanSpec] = []
         spec_to_obj: dict[int, FileNode] = {}
+        obj_key: dict[int, str] = {}
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
@@ -689,6 +698,7 @@ class GccToolchain(UnixToolchain):
             )
             specs.append(spec)
             spec_to_obj[id(spec)] = obj_node
+            obj_key[id(obj_node)] = bmi_key_for_flags(compile_flags, flag_spec)
 
         results = scan_translation_units(
             specs, scanner=compiler_cmd, scanner_style="gcc"
@@ -729,6 +739,9 @@ class GccToolchain(UnixToolchain):
                 )
                 std_specs.append(std_spec)
                 spec_to_obj[id(std_spec)] = std_obj_node
+                obj_key[id(std_obj_node)] = bmi_key_for_flags(
+                    std_spec.compile_flags, flag_spec
+                )
 
             results.extend(
                 scan_translation_units(
@@ -738,8 +751,61 @@ class GccToolchain(UnixToolchain):
                 )
             )
 
-        module_to_gcm = build_module_map(results, "gcm.cache", ".gcm")
-        write_dyndep_from_results(results, module_to_gcm, dyndep_path)
+        # Map every module provider to a BMI path under its key's directory,
+        # then write a GCC module mapper file per key. Module interfaces no
+        # longer land in the shared gcm.cache/; each compatibility class owns
+        # cxx_modules/<key>/<module>.gcm, so the same logical module compiled
+        # with incompatible flags never collides on a single output path.
+        def keyed_bmi(logical: str, key: str) -> str:
+            return module_file_for(logical, f"{moddir}/{key}", ".gcm")
+
+        key_to_modules: dict[str, dict[str, str]] = {}
+        provider_obj: dict[tuple[str, str], str] = {}
+        for r in results:
+            if not r.is_module_provider:
+                continue
+            obj_node = spec_to_obj[id(r.spec)]
+            key = obj_key[id(obj_node)]
+            slot = (key, r.logical_name)
+            if slot in provider_obj and provider_obj[slot] != r.spec.obj_rel:
+                raise RuntimeError(
+                    f"Module '{r.logical_name}' is compiled into two different "
+                    f"objects ({provider_obj[slot]} and {r.spec.obj_rel}) with "
+                    f"BMI-equivalent flags, so both would write the same "
+                    f"{keyed_bmi(r.logical_name, key)}. Give them distinct "
+                    f"BMI-sensitive flags or build the interface in one place."
+                )
+            provider_obj[slot] = r.spec.obj_rel
+            key_to_modules.setdefault(key, {})[r.logical_name] = keyed_bmi(
+                r.logical_name, key
+            )
+
+        mapper_flag_for_key: dict[str, str] = {}
+        for key, modules in key_to_modules.items():
+            (build_dir / moddir / key).mkdir(parents=True, exist_ok=True)
+            mapper_rel = f"{moddir}/{key}/modules.modmap"
+            lines = ["$root ."]
+            for logical in sorted(modules):
+                lines.append(f"{logical} {modules[logical]}")
+            _write_text_if_changed(build_dir / mapper_rel, "\n".join(lines) + "\n")
+            mapper_flag_for_key[key] = f"-fmodule-mapper={mapper_rel}"
+
+        # Build a keyed dyndep: each TU's provides/requires resolve to BMIs in
+        # its own compatibility class's directory.
+        entries: list[tuple[str, list[str], list[str]]] = []
+        for r in results:
+            obj_node = spec_to_obj[id(r.spec)]
+            key = obj_key[id(obj_node)]
+            provides: list[str] = []
+            if r.is_module_provider:
+                provides.append(keyed_bmi(r.logical_name, key))
+            requires: list[str] = [
+                keyed_bmi(ln, key)
+                for ln in r.required_logical_names
+                if (key, ln) in provider_obj
+            ]
+            entries.append((r.spec.obj_rel, provides, requires))
+        write_dyndep_entries(entries, dyndep_path)
         logger.debug("Wrote GCC C++ module dyndep to %s", dyndep_path)
 
         dyndep_node = project.node(dyndep_path)
@@ -747,16 +813,22 @@ class GccToolchain(UnixToolchain):
             bi = getattr(obj_node, "_build_info", None)
             if bi is not None:
                 bi["dyndep"] = dyndep_rel
-                if src not in module_src_paths:
-                    extra = bi.setdefault("extra_command_flags", [])
-                    if "-Mno-modules" not in extra:
-                        extra.append("-Mno-modules")
+                extra = bi.setdefault("extra_command_flags", [])
+                mapper_flag = mapper_flag_for_key.get(obj_key[id(obj_node)])
+                if mapper_flag and mapper_flag not in extra:
+                    extra.append(mapper_flag)
+                if src not in module_src_paths and "-Mno-modules" not in extra:
+                    extra.append("-Mno-modules")
             if dyndep_node not in obj_node.implicit_deps:
                 obj_node.implicit_deps.append(dyndep_node)
         for std_obj_node in std_obj_nodes.values():
             std_bi = std_obj_node._build_info
             assert std_bi is not None
             std_bi["dyndep"] = dyndep_rel
+            extra = std_bi.setdefault("extra_command_flags", [])
+            mapper_flag = mapper_flag_for_key.get(obj_key[id(std_obj_node)])
+            if mapper_flag and mapper_flag not in extra:
+                extra.append(mapper_flag)
             if dyndep_node not in std_obj_node.implicit_deps:
                 std_obj_node.implicit_deps.append(dyndep_node)
 

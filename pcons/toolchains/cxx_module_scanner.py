@@ -626,6 +626,26 @@ def select_std_module_flags(
     return out
 
 
+def bmi_key_for_flags(flags: list[str], spec: StdModuleFlagSpec) -> str:
+    """Compute a short hash identifying a BMI-compatibility class.
+
+    A Binary Module Interface (``.gcm`` / ``.pcm`` / ``.ifc``) can only be
+    consumed by translation units compiled with matching BMI-sensitive flags
+    (the C++ dialect, ABI knobs, stdlib feature macros, etc. — exactly the set
+    ``spec`` selects). Two TUs that agree on every such flag may share one
+    compiled module interface; TUs that differ on any of them must each get
+    their own. Keying the BMI's on-disk directory by this hash lets the same
+    module interface be reused across targets when compatible
+    (``cxx_modules/<key>/provider.gcm``) and kept separate when not.
+
+    The hash is order-independent: BMI compatibility does not depend on the
+    order BMI-sensitive flags appear on the command line.
+    """
+    relevant = select_std_module_flags(list(flags), spec)
+    canonical = "\0".join(sorted(relevant))
+    return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
+
+
 def wire_std_into_targets(
     project: Any,
     results: list[TuScanResult],
@@ -674,7 +694,6 @@ def write_dyndep_from_results(
       - implicit outputs are the IFC/PCM files this TU provides
       - implicit inputs are the IFC/PCM files this TU imports
     """
-    lines = ["ninja_dyndep_version = 1", ""]
     entries: list[tuple[str, list[str], list[str]]] = []
     for r in results:
         provides_pcms: list[str] = []
@@ -686,22 +705,35 @@ def write_dyndep_from_results(
             if ln in module_to_pcm:
                 requires_pcms.append(module_to_pcm[ln])
 
-        entries.append(
-            (
-                r.spec.obj_rel,
-                sorted(set(provides_pcms)),
-                sorted(set(requires_pcms)),
-            )
-        )
+        entries.append((r.spec.obj_rel, provides_pcms, requires_pcms))
 
+    write_dyndep_entries(entries, out_path)
+
+
+def write_dyndep_entries(
+    entries: list[tuple[str, list[str], list[str]]],
+    out_path: str | Path,
+) -> None:
+    """Write a Ninja dyndep file from pre-resolved (obj, provides, requires).
+
+    Each entry is ``(obj_rel, provides_paths, requires_paths)`` where the
+    provides/requires are build-dir-relative BMI paths. Toolchains that map
+    one logical module name to different BMI paths per compatibility class
+    (GCC's per-key ``cxx_modules/<key>/`` layout) build entries directly,
+    since a single ``{logical: path}`` map cannot express that.
+    """
+    lines = ["ninja_dyndep_version = 1", ""]
     for obj_rel, provides_pcms, requires_pcms in sorted(entries, key=lambda e: e[0]):
-        implicit_out = " | " + " ".join(provides_pcms) if provides_pcms else ""
-        implicit_in = " | " + " ".join(requires_pcms) if requires_pcms else ""
+        implicit_out = (
+            " | " + " ".join(sorted(set(provides_pcms))) if provides_pcms else ""
+        )
+        implicit_in = (
+            " | " + " ".join(sorted(set(requires_pcms))) if requires_pcms else ""
+        )
         lines.append(f"build {obj_rel}{implicit_out}: dyndep{implicit_in}")
         lines.append("")
 
-    dyndep_text = "\n".join(lines)
-    _write_text_if_changed(Path(out_path), dyndep_text)
+    _write_text_if_changed(Path(out_path), "\n".join(lines))
 
 
 def write_dyndep(

@@ -113,6 +113,11 @@ class BuildInfo(TypedDict, total=False):
     # the C++ module and Fortran module scanners.
     dyndep: str
 
+    # Extra command-line flags appended verbatim to the build command, after
+    # template expansion. Used by the GCC C++ module path to attach
+    # -fmodule-mapper=/-Mno-modules to specific object compiles.
+    extra_command_flags: list[str]
+
     # Environment reference for command expansion
     # Used by resolver to expand command templates
     env: Any  # Environment, but avoid circular import

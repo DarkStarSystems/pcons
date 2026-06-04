@@ -605,12 +605,15 @@ class LlvmToolchain(UnixToolchain):
         """
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
-            build_module_map,
+            bmi_key_for_flags,
+            module_file_for,
             scan_translation_units,
             select_modules_scope,
             wire_std_into_targets,
-            write_dyndep_from_results,
+            write_dyndep_entries,
         )
+
+        flag_spec = _clang_std_module_flag_spec()
 
         cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
         all_cxx_pairs = cxx_module_pairs + cxx_pairs
@@ -635,16 +638,6 @@ class LlvmToolchain(UnixToolchain):
         build_dir.mkdir(parents=True, exist_ok=True)
         (build_dir / moddir).mkdir(exist_ok=True)
 
-        # -fprebuilt-module-path on every C++ TU so importers find PCMs.
-        modpath_flag = f"-fprebuilt-module-path={moddir}"
-        for _, obj_node in all_cxx_pairs:
-            bi = getattr(obj_node, "_build_info", None)
-            if bi:
-                context = bi.get("context")
-                if context is not None and hasattr(context, "flags"):
-                    if modpath_flag not in context.flags:
-                        context.flags.append(modpath_flag)
-
         # Pre-flag extension-tagged module units with -x c++-module so the
         # scanner sees them as modules (clang doesn't recognize .ixx natively).
         # The scan output may identify *additional* TUs (e.g., partition units
@@ -657,8 +650,13 @@ class LlvmToolchain(UnixToolchain):
                     if "-x" not in context.flags:
                         context.flags.extend(["-x", "c++-module"])
 
-        # Build per-TU scan specs.
+        # Build per-TU scan specs. obj_key maps each participating object to a
+        # hash of its BMI-sensitive flags: PCMs live under cxx_modules/<key>/
+        # so the same logical module compiled with incompatible flags (e.g.
+        # -std=c++23 vs -std=c++26) never writes to a single shared path.
         specs: list[TuScanSpec] = []
+        spec_to_obj: dict[int, FileNode] = {}
+        obj_key: dict[int, str] = {}
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
@@ -674,16 +672,15 @@ class LlvmToolchain(UnixToolchain):
                 for d in context.defines:
                     compile_flags.append(f"-D{d}")
 
-            specs.append(
-                TuScanSpec(
-                    src=src.resolve(),
-                    obj_rel=str(obj_node.path.relative_to(build_dir)).replace(
-                        "\\", "/"
-                    ),
-                    compiler=compiler_cmd,
-                    compile_flags=compile_flags,
-                )
+            spec = TuScanSpec(
+                src=src.resolve(),
+                obj_rel=str(obj_node.path.relative_to(build_dir)).replace("\\", "/"),
+                compiler=compiler_cmd,
+                compile_flags=compile_flags,
             )
+            specs.append(spec)
+            spec_to_obj[id(spec)] = obj_node
+            obj_key[id(obj_node)] = bmi_key_for_flags(compile_flags, flag_spec)
 
         results = scan_translation_units(
             specs, scanner="clang-scan-deps", scanner_style="clang"
@@ -692,20 +689,28 @@ class LlvmToolchain(UnixToolchain):
         # `import std;` / `import std.compat;` support: if any TU requires
         # the standard library module, locate libc++'s std.cppm via the
         # manifest the compiler ships and synthesize a build node for it.
-        # Appended to `results` so build_module_map() registers it and the
-        # dyndep file lists the .pcm as an implicit output.
+        # Appended to `results` so the dyndep file lists the .pcm as an
+        # implicit output. The synthesized std build is keyed like any other
+        # module (cxx_modules/<key>/std.pcm) so it matches its importers.
         std_obj_nodes = self._inject_clang_std_module_builds(
-            project, build_dir, moddir, compiler_cmd, base_flags, results, first_env
+            project,
+            build_dir,
+            moddir,
+            compiler_cmd,
+            base_flags,
+            results,
+            first_env,
+            flag_spec,
+            obj_key,
+            spec_to_obj,
         )
 
-        module_to_pcm = build_module_map(results, moddir, ".pcm")
+        def keyed_bmi(logical: str, key: str) -> str:
+            return module_file_for(logical, f"{moddir}/{key}", ".pcm")
 
-        # For each module-providing TU (interfaces, partition interfaces,
-        # internal partitions), inject -x c++-module and -fmodule-output.
-        spec_to_obj = {
-            id(spec): obj_node
-            for spec, (_, obj_node) in zip(specs, all_cxx_pairs, strict=True)
-        }
+        # For each module-providing TU (interfaces, partition interfaces, internal partitions),
+        # inject -x c++-module and a keyed -fmodule-output.
+        provider_obj: dict[tuple[str, str], str] = {}
         for r in results:
             if not r.is_module_provider:
                 continue
@@ -714,20 +719,64 @@ class LlvmToolchain(UnixToolchain):
             if id(r.spec) not in spec_to_obj:
                 continue
             obj_node = spec_to_obj[id(r.spec)]
+            key = obj_key[id(obj_node)]
+            slot = (key, r.logical_name)
+            if slot in provider_obj and provider_obj[slot] != r.spec.obj_rel:
+                raise RuntimeError(
+                    f"Module '{r.logical_name}' is compiled into two different "
+                    f"objects ({provider_obj[slot]} and {r.spec.obj_rel}) with "
+                    f"BMI-equivalent flags, so both would write the same "
+                    f"{keyed_bmi(r.logical_name, key)}. Give them distinct "
+                    f"BMI-sensitive flags or build the interface in one place."
+                )
+            provider_obj[slot] = r.spec.obj_rel
             bi = getattr(obj_node, "_build_info", None)
             if bi is None:
                 continue
             context = bi.get("context")
             if context is None or not hasattr(context, "flags"):
                 continue
-            pcm_path = module_to_pcm[r.logical_name]
-            module_out_flag = f"-fmodule-output={pcm_path}"
+            module_out_flag = f"-fmodule-output={keyed_bmi(r.logical_name, key)}"
             if module_out_flag not in context.flags:
                 context.flags.append(module_out_flag)
             if "-x" not in context.flags:
                 context.flags.extend(["-x", "c++-module"])
 
-        write_dyndep_from_results(results, module_to_pcm, dyndep_path)
+        # Every participating TU searches its own key's directory for the PCMs
+        # it imports. All of a TU's imports share its BMI-sensitive flags, so
+        # one -fprebuilt-module-path per key suffices.
+        for _, obj_node in all_cxx_pairs:
+            bi = getattr(obj_node, "_build_info", None)
+            if not bi:
+                continue
+            context = bi.get("context")
+            if context is None or not hasattr(context, "flags"):
+                continue
+            modpath = f"-fprebuilt-module-path={moddir}/{obj_key[id(obj_node)]}"
+            if modpath not in context.flags:
+                context.flags.append(modpath)
+
+        for key in set(obj_key.values()):
+            (build_dir / moddir / key).mkdir(parents=True, exist_ok=True)
+
+        # Keyed dyndep: each TU's provides/requires resolve to PCMs in its own
+        # compatibility class's directory.
+        entries: list[tuple[str, list[str], list[str]]] = []
+        for r in results:
+            obj_node = spec_to_obj.get(id(r.spec))
+            if obj_node is None:
+                continue
+            key = obj_key[id(obj_node)]
+            provides: list[str] = []
+            if r.is_module_provider:
+                provides.append(keyed_bmi(r.logical_name, key))
+            requires: list[str] = [
+                keyed_bmi(ln, key)
+                for ln in r.required_logical_names
+                if (key, ln) in provider_obj
+            ]
+            entries.append((r.spec.obj_rel, provides, requires))
+        write_dyndep_entries(entries, dyndep_path)
         logger.debug("Wrote C++ module dyndep to %s", dyndep_path)
 
         dyndep_node = project.node(dyndep_path)
@@ -754,6 +803,9 @@ class LlvmToolchain(UnixToolchain):
         base_flags: list[str],
         results: list[Any],
         first_env: Environment | None,
+        flag_spec: Any,
+        obj_key: dict[int, str],
+        spec_to_obj: dict[int, FileNode],
     ) -> dict[str, FileNode]:
         """Synthesize build nodes for `import std;` / `import std.compat;` (clang).
 
@@ -769,7 +821,11 @@ class LlvmToolchain(UnixToolchain):
             Dict mapping logical module name -> std obj FileNode for the
             modules that were synthesized.
         """
-        from pcons.toolchains.cxx_module_scanner import TuScanResult, TuScanSpec
+        from pcons.toolchains.cxx_module_scanner import (
+            TuScanResult,
+            TuScanSpec,
+            bmi_key_for_flags,
+        )
 
         required_logical_names: set[str] = set()
         for r in results:
@@ -816,6 +872,12 @@ class LlvmToolchain(UnixToolchain):
         if not any(f.startswith("-stdlib=") for f in passthrough):
             passthrough.append("-stdlib=libc++")
 
+        # The std module's BMI is keyed like any other, its key is derived from
+        # the same BMI-sensitive flags its importers use, so they resolve it
+        # from the same cxx_modules/<key>/ directory.
+        std_key = bmi_key_for_flags(passthrough, flag_spec)
+        std_moddir = f"{moddir}/{std_key}"
+
         std_obj_nodes: dict[str, FileNode] = {}
         for logical in sorted(wanted):
             if logical not in modules:
@@ -836,7 +898,7 @@ class LlvmToolchain(UnixToolchain):
                 )
                 continue
 
-            pcm_rel = f"{moddir}/{logical}.pcm"
+            pcm_rel = f"{std_moddir}/{logical}.pcm"
             obj_rel = f"{moddir}/{logical}.o"
             obj_path = build_dir / obj_rel
 
@@ -851,6 +913,8 @@ class LlvmToolchain(UnixToolchain):
                 "-Wno-reserved-identifier",
                 "-Wno-reserved-user-defined-literal",
                 *(f"-isystem{d}" for d in sys_includes),
+                # std.compat imports std, let it find the keyed std.pcm.
+                f"-fprebuilt-module-path={std_moddir}",
                 "-x",
                 "c++-module",
                 f"-fmodule-output={pcm_rel}",
@@ -884,6 +948,8 @@ class LlvmToolchain(UnixToolchain):
                 ]
             }
             results.append(TuScanResult(spec=synthetic_spec, p1689=synthetic_p1689))
+            obj_key[id(std_obj_node)] = std_key
+            spec_to_obj[id(synthetic_spec)] = std_obj_node
             std_obj_nodes[logical] = std_obj_node
 
         return std_obj_nodes

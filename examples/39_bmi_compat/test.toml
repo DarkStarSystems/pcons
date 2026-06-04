@@ -1,0 +1,36 @@
+# Test configuration for the bmi_compat example
+
+[test]
+description = "C++20 module interface (BMI) reuse across targets, keyed by BMI-sensitive flags"
+
+expected_outputs = [
+    "build/obj.lib1/provider.cppm.o",
+    "build/obj.lib1/consumer.cpp.o",
+    "build/obj.lib3/provider.cppm.o",
+    "build/obj.lib3/consumer.cpp.o",
+    "build/liblib1.a",
+    "build/liblib2.a",
+    "build/liblib3.a",
+    "build/app",
+]
+
+# Cross-target BMI reuse is wired for GCC (per-key BMI dirs + module mapper
+# files), clang (per-key dirs + -fmodule-output / -fprebuilt-module-path), and
+# MSVC (per-key dirs + /ifcOutput / /ifcSearchDir).
+[toolchains]
+linux = ["gcc", "llvm"]
+darwin = ["llvm"]
+windows = ["gcc", "llvm", "msvc"]
+
+[verify]
+commands = [
+    { run = "./build/app", expect_exit_code = 0, expect_output_contains = "answer = 42" },
+]
+
+[[rebuild]]
+description = "No rebuild when nothing changed"
+expect_no_work = true
+
+[skip]
+requires = ["clang-scan-deps", "clang++"]
+generators = ["xcode", "make"]
