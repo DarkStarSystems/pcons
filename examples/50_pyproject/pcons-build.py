@@ -7,7 +7,8 @@ import sysconfig
 from pathlib import Path
 
 from pcons import ImportedTarget, Project, get_var, get_variant, install_dir
-from pcons.packages.finders import ConanFinder, PkgConfigFinder
+from pcons.packages.description import PackageDescription
+from pcons.packages.finders import ConanFinder
 from pcons.toolchains import find_c_toolchain
 
 project = Project("hello_python")
@@ -28,10 +29,19 @@ elif toolchain.name == "llvm":
 else:
     env.cxx.flags.append("-std=c++23")
 
-pkg_config = PkgConfigFinder()
-python_desc = pkg_config.find("python3", version=">=3.11")
-assert python_desc is not None, "Python development files not found via pkg-config"
-python = ImportedTarget.from_package(python_desc)
+# Discover Python's dev headers from the *running* interpreter via sysconfig,
+# rather than pkg-config.
+python = ImportedTarget.from_package(
+    PackageDescription(
+        name="python3",
+        version=sysconfig.get_python_version(),
+        include_dirs=[
+            sysconfig.get_path("include"),
+            sysconfig.get_path("platinclude"),
+        ],
+        found_by="sysconfig",
+    )
+)
 
 conan = ConanFinder(
     conanfile=project.root_dir / "conanfile.txt",
