@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for Project.Install() method."""
 
+from pathlib import Path
+
 import pytest
 
 from pcons.core.node import FileNode
@@ -84,12 +86,13 @@ class TestInstall:
         # Nodes are created during resolve
         project.resolve()
 
-        # Destination should be in dest_dir with same filename
-        # project.node() canonicalizes paths to be project-root-relative
+        # Install destinations are first-class "install_output" nodes; their
+        # paths are canonicalized (project-root-relative when under the root)
+        # and tagged so generators render them relocatably.
         assert len(install.output_nodes) == 1
         node = install.output_nodes[0]
-        expected = dest_dir.relative_to(tmp_path) / "mylib.so"
-        assert node.path == expected
+        assert node.path == Path("bundle/Contents/MacOS/mylib.so")
+        assert node.role == "install_output"
 
     def test_install_from_target(self, tmp_path):
         """Install can install output files from a Target after resolve."""
@@ -117,11 +120,53 @@ class TestInstall:
         # Resolve to create install nodes
         project.resolve()
 
-        # Should have a node for the library
-        # project.node() canonicalizes paths to be project-root-relative
+        # Should have a node for the library, canonicalized relative to the
+        # project root and tagged as an install output.
         assert len(install.output_nodes) == 1
-        expected = (tmp_path / "dist" / "lib" / "libmylib.a").relative_to(tmp_path)
-        assert install.output_nodes[0].path == expected
+        assert install.output_nodes[0].path == Path("dist/lib/libmylib.a")
+        assert install.output_nodes[0].role == "install_output"
+
+    def test_install_non_absolute_dest_uses_pcons_install_prefix(self, tmp_path):
+        """Install uses PCONS_INSTALL_PREFIX as the base install directory."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src_file = tmp_path / "mylib.a"
+        src_file.touch()
+
+        # non-absolute dest paths uses PCONS_INSTALL_PREFIX
+        install = project.Install("lib", [src_file])
+
+        # Resolve to create install nodes
+        project.resolve()
+
+        # Destination should be under PCONS_INSTALL_PREFIX (default: <root>/dist),
+        # canonicalized relative to the project root.
+        assert install.output_nodes[0].path == Path("dist/lib/mylib.a")
+        assert install.output_nodes[0].role == "install_output"
+
+    def test_install_non_absolute_dest_can_be_customized_with_pcons_install_prefix(
+        self, tmp_path, monkeypatch
+    ):
+        """Install uses modified PCONS_INSTALL_PREFIX as the base install directory."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src_file = tmp_path / "mylib.a"
+        src_file.touch()
+
+        with monkeypatch.context() as m:
+            # Set a custom install prefix via environment variable
+            custom_prefix = Path("/opt/myapp")
+            m.setenv("PCONS_INSTALL_PREFIX", str(custom_prefix))
+
+            install = project.Install("lib", [src_file])
+            # Resolve to create install nodes
+            project.resolve()
+
+            # The custom prefix is outside the project root, so the install
+            # path stays absolute (it cannot be made root-relative).
+            expected = custom_prefix / "lib" / "mylib.a"
+            assert install.output_nodes[0].path == expected
+            assert install.output_nodes[0].role == "install_output"
 
     def test_install_target_registered(self, tmp_path):
         """Install target is registered with the project."""
@@ -186,10 +231,10 @@ class TestInstallAs:
         # Resolve to create install nodes
         project.resolve()
 
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
         node = install.output_nodes[0]
-        assert node.path == dest_path.relative_to(tmp_path)
+        assert node.path == Path("bundle/Contents/MacOS/plugin.ofx")
+        assert node.role == "install_output"
 
     def test_install_as_from_target(self, tmp_path):
         """InstallAs can install from a Target after resolve."""
@@ -218,7 +263,8 @@ class TestInstallAs:
 
         # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == dest.relative_to(tmp_path)
+        assert install.output_nodes[0].path == Path("bundle/plugin.ofx")
+        assert install.output_nodes[0].role == "install_output"
 
     def test_install_as_dependency(self, tmp_path):
         """InstallAs destination depends on source after resolve."""
@@ -291,6 +337,86 @@ class TestInstallWithNinja:
         # Should have a build statement for the installed file
         assert "mylib.a" in content
 
+    def test_install_output_rendered_relocatably(self, tmp_path):
+        """Install destinations under the project root render via $topdir."""
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src_file = tmp_path / "mylib.a"
+        src_file.touch()
+
+        # Default prefix (<root>/dist) keeps the destination under the root.
+        project.Install("lib", [src_file])
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        # The install output is emitted relative to the project root ($topdir),
+        # not baked in as an absolute path, so the build file stays relocatable.
+        assert "build $topdir/dist/lib/mylib.a:" in content
+        assert str(tmp_path) not in content
+
+    def test_no_prefix_relative_dest_stays_build_relative(self, tmp_path):
+        """no_prefix install with a relative dest is a build-dir-relative staging
+        path (e.g. the contrib installers), not an external install output.
+        """
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        src_file = tmp_path / "app"
+        src_file.touch()
+
+        install = project.Install(".pkg_staging/payload", [src_file], no_prefix=True)
+        project.resolve()
+
+        node = install.output_nodes[0]
+        assert node.role is None
+        assert node.path == Path(".pkg_staging/payload/app")
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        # Emitted build-dir-relative (resolves to build/.pkg_staging/...),
+        # NOT via $topdir.
+        assert "build .pkg_staging/payload/app:" in content
+        assert "$topdir/.pkg_staging" not in content
+
+
+class TestInstallDirHelper:
+    """Tests for the install_dir() convenience helper."""
+
+    def test_install_dir_uses_toolchain_convention(self, tmp_path):
+        from pcons import install_dir
+        from pcons.toolchains import find_c_toolchain
+
+        try:
+            toolchain = find_c_toolchain()
+        except RuntimeError:
+            pytest.skip("No C toolchain available")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=toolchain)
+
+        assert install_dir(env, "program") == "bin"
+        assert install_dir(env, "static_library") == "lib"
+
+    def test_install_dir_requires_toolchain(self, tmp_path):
+        from pcons import install_dir
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()  # no toolchain
+
+        with pytest.raises(ValueError):
+            install_dir(env, "program")
+
 
 class TestInstallOrderIndependence:
     """Tests that Install/InstallAs work regardless of declaration order."""
@@ -318,7 +444,7 @@ class TestInstallOrderIndependence:
         assert len(lib.output_nodes) == 0
 
         # Manually add an output node (simulating what resolve would do)
-        lib_node = FileNode(tmp_path / "build" / "libmylib.a")
+        lib_node = FileNode(tmp_path / "dist" / "lib" / "libmylib.a")
         lib.output_nodes.append(lib_node)
         lib._resolved = True
 
@@ -326,10 +452,9 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Install target should now have the installed file
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        expected = (tmp_path / "dist" / "lib" / "libmylib.a").relative_to(tmp_path)
-        assert install.output_nodes[0].path == expected
+        assert install.output_nodes[0].path == Path("dist/lib/libmylib.a")
+        assert install.output_nodes[0].role == "install_output"
 
     def test_install_as_before_target_definition(self, tmp_path):
         """InstallAs can reference a target before its output_nodes are populated."""
@@ -363,9 +488,9 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Should have the installed file with the custom name
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        assert install.output_nodes[0].path == dest.relative_to(tmp_path)
+        assert install.output_nodes[0].path == Path("bundle/plugin.ofx")
+        assert install.output_nodes[0].role == "install_output"
 
     def test_install_chain_order_independence(self, tmp_path):
         """Install targets can be chained in any order."""
@@ -393,9 +518,9 @@ class TestInstallOrderIndependence:
         project.resolve()
 
         # Both should work
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(final_install.output_nodes) == 1
         assert len(intermediate_install.output_nodes) == 1
+        # Paths are canonicalized relative to the project root.
         assert final_install.output_nodes[0].path == (
             final_dir / "mylib.a"
         ).relative_to(tmp_path)
@@ -416,11 +541,9 @@ class TestInstallOrderIndependence:
         # Resolve (file still doesn't exist, but that's OK for generation)
         project.resolve()
 
-        # Should have the install node
-        # project.node() canonicalizes paths to be project-root-relative
+        # Should have the install node (path canonicalized relative to root)
         assert len(install.output_nodes) == 1
-        expected = (tmp_path / "include" / "generated.h").relative_to(tmp_path)
-        assert install.output_nodes[0].path == expected
+        assert install.output_nodes[0].path == Path("include/generated.h")
 
 
 class TestInstallAsValidation:
@@ -470,14 +593,13 @@ class TestInstallAsValidation:
         src.touch()
 
         # Should work with a single source
-        install = project.InstallAs(tmp_path / "dest" / "renamed.txt", src)
+        expected_dest = tmp_path / "dest" / "renamed.txt"
+        install = project.InstallAs(expected_dest, src)
 
         project.resolve()
 
-        # project.node() canonicalizes paths to be project-root-relative
         assert len(install.output_nodes) == 1
-        expected = (tmp_path / "dest" / "renamed.txt").relative_to(tmp_path)
-        assert install.output_nodes[0].path == expected
+        assert install.output_nodes[0].path == expected_dest.relative_to(tmp_path)
 
 
 class TestInstallDirectoryAutoDetection:

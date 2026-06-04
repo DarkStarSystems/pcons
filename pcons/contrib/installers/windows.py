@@ -30,8 +30,6 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.contrib.installers._helpers import ToolNotFoundError
-
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode
@@ -124,6 +122,8 @@ def create_msix(
     """
     makeappx = _find_sdk_tool("MakeAppx.exe")
     if makeappx is None:
+        from pcons.contrib.installers._helpers import ToolNotFoundError
+
         raise ToolNotFoundError(
             "MakeAppx.exe",
             "Install Windows SDK: https://developer.microsoft.com/windows/downloads/windows-sdk/",
@@ -162,8 +162,8 @@ def create_msix(
     staging_rel = Path(".msix_staging") / name
     manifest_rel = staging_rel / "AppxManifest.xml"
 
-    # Stage source files (Install auto-detects directory sources after resolve)
-    stage_target = project.Install(staging_rel, sources)
+    # Stage source files into build dir
+    stage_target = project.Install(staging_rel, sources, no_prefix=True)
 
     # Generate AppxManifest.xml (use relative path for target)
     manifest_target = env.Command(
@@ -229,6 +229,8 @@ def create_msix(
     if sign_cert is not None:
         signtool = _find_sdk_tool("SignTool.exe")
         if signtool is None:
+            from pcons.contrib.installers._helpers import ToolNotFoundError
+
             raise ToolNotFoundError(
                 "SignTool.exe",
                 "Install Windows SDK for code signing support",

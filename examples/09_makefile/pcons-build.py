@@ -27,9 +27,6 @@ hello = project.Program("hello", env)
 hello.add_sources([src_dir / "hello.c"])
 hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
-# Resolve targets (computes effective requirements, creates nodes)
-project.resolve()
-
 # Generate Makefile (instead of Ninja)
 generator = MakefileGenerator()
 generator.generate(project)

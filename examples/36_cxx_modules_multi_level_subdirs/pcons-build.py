@@ -7,7 +7,7 @@ from pcons import Project, add_subdirectory, find_c_toolchain, get_var
 # Create the main project
 project = Project("subdirs_example")
 env = project.Environment(
-    toolchain=(toolchain := find_c_toolchain(prefer=[get_var("TOOLCHAIN") or "gcc"]))
+    toolchain=(toolchain := find_c_toolchain(prefer=[get_var("TOOLCHAIN", "gcc")]))
 )
 
 if toolchain.name == "msvc":

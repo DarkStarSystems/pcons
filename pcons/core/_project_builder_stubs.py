@@ -121,6 +121,7 @@ if TYPE_CHECKING:
             sources: Sequence[Target | FileNode | Path | str],
             *,
             name: str | None = None,
+            no_prefix: bool = False,
         ) -> Target:
             """Install files to a destination directory."""
             ...
@@ -131,6 +132,7 @@ if TYPE_CHECKING:
             source: Target | FileNode | Path | str,
             *,
             name: str | None = None,
+            no_prefix: bool = False,
         ) -> Target:
             """Install a file to a specific destination path."""
             ...
@@ -141,6 +143,7 @@ if TYPE_CHECKING:
             source: Target | FileNode | Path | str,
             *,
             name: str | None = None,
+            no_prefix: bool = False,
         ) -> Target:
             """Install a directory tree to a destination."""
             ...

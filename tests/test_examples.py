@@ -12,11 +12,14 @@ Tests both invocation methods:
 
 from __future__ import annotations
 
+import fnmatch
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -67,6 +70,10 @@ def adapt_path_for_windows(path: str, gcc_toolchain: bool = False) -> str:
     if path.startswith(".\\"):
         path = path[2:]
 
+    if path.endswith("EXT}"):
+        # Don't adapt if extension variables are used, as they will be substituted later
+        return path
+
     # Convert extensions
     if path.endswith(".o") and not gcc_toolchain:
         path = path[:-2] + ".obj"
@@ -86,7 +93,6 @@ def adapt_path_for_windows(path: str, gcc_toolchain: bool = False) -> str:
             path = path[:-3] + ".dll"
 
     # Add .exe to executables (paths in build/ without extension)
-    # Check if it's a build output without an extension
     if "\\build\\" in path or path.startswith("build\\"):
         parts = path.rsplit("\\", 1)
         if len(parts) == 2 and "." not in parts[1]:
@@ -146,6 +152,7 @@ def run_rebuild_test(
     work_dir: Path,
     build_dir: Path,
     rebuild_config: dict[str, Any],
+    toolchain: str | None = None,
 ) -> None:
     """Run a single rebuild test scenario.
 
@@ -154,6 +161,7 @@ def run_rebuild_test(
         build_dir: Build output directory
         rebuild_config: Dict with keys like 'description', 'touch', 'expect_rebuild',
                        'expect_no_rebuild', 'expect_no_work'
+        toolchain: Optional toolchain name (used for platform path adaptation)
     """
     description = rebuild_config.get("description", "unnamed rebuild test")
 
@@ -198,10 +206,23 @@ def run_rebuild_test(
                 f"but ninja rebuilt: {rebuilt_targets}"
             )
 
-    # If expect_rebuild: verify each target was rebuilt (substring match)
-    expect_rebuild = rebuild_config.get("expect_rebuild", [])
+    # Adapt expected paths for the current platform
+    gcc_tc = toolchain == "gcc"
+
+    def _adapt(p: str) -> str:
+        if not IS_WINDOWS:
+            return p
+        adapted = adapt_path_for_windows(p, gcc_toolchain=gcc_tc)
+        # Rebuild paths are build-dir-relative bare names (e.g. "hello");
+        # adapt_path_for_windows only adds .exe for build/-prefixed paths.
+        if "\\" not in adapted and "." not in adapted and adapted:
+            adapted += ".exe"
+        return adapted
+
+    # If expect_rebuild: verify each target was rebuilt
+    expect_rebuild = [_adapt(p) for p in rebuild_config.get("expect_rebuild", [])]
     for expected in expect_rebuild:
-        found = any(expected in target for target in rebuilt_targets)
+        found = any(fnmatch.fnmatch(target, expected) for target in rebuilt_targets)
         if not found:
             pytest.fail(
                 f"Rebuild test '{description}': expected '{expected}' to be rebuilt, "
@@ -209,9 +230,9 @@ def run_rebuild_test(
             )
 
     # If expect_no_rebuild: verify each target was NOT rebuilt
-    expect_no_rebuild = rebuild_config.get("expect_no_rebuild", [])
+    expect_no_rebuild = [_adapt(p) for p in rebuild_config.get("expect_no_rebuild", [])]
     for not_expected in expect_no_rebuild:
-        found = any(not_expected in target for target in rebuilt_targets)
+        found = any(fnmatch.fnmatch(target, not_expected) for target in rebuilt_targets)
         if found:
             pytest.fail(
                 f"Rebuild test '{description}': expected '{not_expected}' NOT to be rebuilt, "
@@ -512,10 +533,19 @@ def get_platform_value(
     # Optionally adapt for Windows when no override exists
     if adapt_for_windows and IS_WINDOWS and value is not None:
         if isinstance(value, list):
-            return [
-                adapt_path_for_windows(str(v), gcc_toolchain=gcc_toolchain)
-                for v in value
-            ]
+            result = []
+            for v in value:
+                if isinstance(v, list):
+                    # [path, content] pair — adapt only the path (first element)
+                    result.append(
+                        [adapt_path_for_windows(str(v[0]), gcc_toolchain=gcc_toolchain)]
+                        + v[1:]
+                    )
+                else:
+                    result.append(
+                        adapt_path_for_windows(str(v), gcc_toolchain=gcc_toolchain)
+                    )
+            return result
         elif isinstance(value, str):
             return adapt_path_for_windows(value, gcc_toolchain=gcc_toolchain)
 
@@ -590,6 +620,44 @@ def _run_generate(
             pytest.fail(f"pcons failed with code {result.returncode}{variant_msg}")
 
 
+_variable_expr = re.compile(r"\$\{([^}]+)\}")
+
+
+def _example_template_vars() -> dict[str, str]:
+    """Platform-derived substitutions for ``${...}`` placeholders in test.toml."""
+    from pcons.configure.platform import get_platform
+
+    plat = get_platform()
+    # Shared libraries install next to executables on DLL platforms (Windows),
+    # matching Toolchain.get_install_dir("shared_library").
+    shared_install_dir = "bin" if plat.shared_lib_suffix == ".dll" else "lib"
+    return {
+        "BINARY_EXT": plat.exe_suffix,
+        "LIBRARY_EXT": plat.shared_lib_suffix,
+        "ARCHIVE_EXT": plat.static_lib_suffix,
+        "LIBRARY_PREFIX": plat.shared_lib_prefix,
+        "BINARY_INSTALL_DIR": "bin",
+        "LIBRARY_INSTALL_DIR": shared_install_dir,
+        "ARCHIVE_INSTALL_DIR": "lib",
+    }
+
+
+def _substitute_variables(path: str) -> str:
+    """Substitute ``${VAR}`` placeholders in an expected-output path."""
+    table = _example_template_vars()
+
+    def replacer(match: re.Match) -> str:
+        var_name = match.group(1)
+        if var_name not in table:
+            raise KeyError(
+                f"Unknown test.toml template variable: ${{{var_name}}}. "
+                f"Known: {', '.join(sorted(table))}"
+            )
+        return table[var_name]
+
+    return _variable_expr.sub(replacer, path)
+
+
 def run_example(
     example_dir: Path,
     tmp_path: Path,
@@ -661,7 +729,23 @@ def run_example(
         pytest.skip(f"Requested toolchain '{toolchain}' is not available on this host")
 
     build_dir.mkdir(parents=True, exist_ok=True)
-    tc_vars = {"TOOLCHAIN": toolchain} if toolchain else None
+    tc_vars = {"TOOLCHAIN": toolchain} if toolchain else {}
+
+    # Check expected install outputs exist (auto-adapts for Windows if no override)
+    expected_install_outputs = get_platform_value(
+        test_config, "expected_install_outputs", [], adapt_for_windows=True
+    )
+
+    build_targets = get_platform_value(test_config, "build_targets", [])
+
+    install_prefix = None
+    if generator != "xcode":
+        if expected_install_outputs:
+            if "install" not in build_targets:
+                build_targets.append("install")
+
+            install_prefix = tempfile.TemporaryDirectory()
+            tc_vars["PCONS_INSTALL_PREFIX"] = install_prefix.name
 
     for variant in variants:
         _run_generate(
@@ -709,8 +793,6 @@ def run_example(
         if ninja_cmd_base is None:
             pytest.skip("ninja not available")
 
-        build_targets = get_platform_value(test_config, "build_targets", [])
-
         for vbd in variant_build_dirs:
             ninja_file = vbd / "build.ninja"
             if not ninja_file.exists():
@@ -733,8 +815,6 @@ def run_example(
     elif generator == "make":
         if shutil.which("make") is None:
             pytest.skip("make not available")
-
-        build_targets = get_platform_value(test_config, "build_targets", [])
 
         for vbd in variant_build_dirs:
             makefile = vbd / "Makefile"
@@ -808,9 +888,38 @@ def run_example(
         expected_outputs, generator, project_name
     )
     for output in expected_outputs:
-        output_path = work_dir / output
-        if not output_path.exists():
-            pytest.fail(f"Expected output not found: {output}")
+        output = _substitute_variables(output)
+        if "*" in output:
+            # Handle wildcard outputs (e.g., build/*.o)
+            matches = list(work_dir.glob(output))
+            if not matches:
+                pytest.fail(f"Expected output not found: {output} (no matches)")
+        else:
+            output_path = work_dir / output
+            if not output_path.exists():
+                pytest.fail(f"Expected output not found: {output}")
+
+    if generator != "xcode":
+        # no install on xcode generator, so skip install output checks
+        for output in expected_install_outputs:
+            assert install_prefix is not None
+            if isinstance(output, list):
+                output, content = output[0], output[1]
+            else:
+                content = None
+            output = _substitute_variables(output)
+            output_path = Path(install_prefix.name) / output
+            if not output_path.exists():
+                pytest.fail(f"Expected install output not found: {output}")
+            if content is not None:
+                actual_content = output_path.read_text()
+                if content not in actual_content:
+                    pytest.fail(
+                        f"Expected '{content}' in installed {output}, got:\n{actual_content}"
+                    )
+
+    if install_prefix is not None:
+        install_prefix.cleanup()
 
     # Run verification commands (auto-adapts for Windows if no override)
     verify_config = config.get("verify", {})
@@ -920,7 +1029,9 @@ def run_example(
                 pytest.skip("ninja not available for rebuild tests")
 
             for rebuild_config in rebuild_tests:
-                run_rebuild_test(work_dir, build_dir, rebuild_config)
+                run_rebuild_test(
+                    work_dir, build_dir, rebuild_config, toolchain=toolchain
+                )
 
 
 # Discover examples and create test parameters

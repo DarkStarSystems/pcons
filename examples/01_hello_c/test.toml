@@ -11,6 +11,10 @@ expected_outputs = [
     "build/hello",
 ]
 
+expected_install_outputs = [
+    "${BINARY_INSTALL_DIR}/hello${BINARY_EXT}",
+]
+
 [toolchains]
 linux = ["gcc", "llvm"]
 darwin = ["llvm"]

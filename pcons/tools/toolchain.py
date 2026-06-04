@@ -456,6 +456,14 @@ class Toolchain(Protocol):
         """
         ...
 
+    def get_install_dir(self, target_type: str) -> str:
+        """Return the conventional install subdirectory for a target type.
+
+        E.g., "bin" for programs, "lib" for static libraries, and "bin" or
+        "lib" for shared libraries depending on the target platform.
+        """
+        ...
+
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
         """Return additional compile flags needed for the target type."""
         ...
@@ -933,6 +941,28 @@ class BaseToolchain(ABC):
         elif target_type == "shared_library":
             return plat.shared_lib_suffix
         return plat.exe_suffix
+
+    def get_install_dir(self, target_type: str) -> str:
+        """Return the conventional install subdirectory for a target type.
+
+        The convention follows the platform this toolchain targets:
+
+        - programs go in ``bin``
+        - static libraries (and archives) go in ``lib``
+        - shared libraries go in ``bin`` when the toolchain produces Windows
+          DLLs (a ``.dll`` must sit next to the executable that loads it), and
+          in ``lib`` otherwise (ELF ``.so`` / Mach-O ``.dylib``).
+
+        Override in subclasses for non-standard layouts (e.g. ``lib64``).
+        """
+        if target_type == "program":
+            return "bin"
+        if target_type == "shared_library":
+            if self.get_output_suffix("shared_library") == ".dll":
+                return "bin"
+            return "lib"
+        # static_library and anything else (archives, data) default to lib.
+        return "lib"
 
     def get_static_library_name(self, name: str) -> str:
         """Return filename for a static library."""

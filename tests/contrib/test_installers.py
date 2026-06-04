@@ -313,6 +313,61 @@ class TestWindowsInstallers:
             assert "MakeAppx" in path
 
 
+class TestWindowsInstallersErrors:
+    """Tests for error handling in Windows installer creation."""
+
+    def test_create_msix_without_makeappx(self, monkeypatch) -> None:
+        """Test that _find_sdk_tool raises if tool is not found."""
+        from pcons.contrib.installers import windows
+        from pcons.contrib.installers._helpers import ToolNotFoundError
+
+        # Monkeypatch _find_sdk_tool to always return None
+        def _mock_find_sdk_tool(tool_name: str) -> str | None:
+            if tool_name == "MakeAppx.exe":
+                return None
+            else:
+                return "sometool.exe"
+
+        monkeypatch.setattr(windows, "_find_sdk_tool", _mock_find_sdk_tool)
+        project = Project("test_msix_error")
+        env = project.Environment()
+        with pytest.raises(ToolNotFoundError, match="MakeAppx.exe"):
+            windows.create_msix(
+                project=project,
+                env=env,
+                name="TestApp",
+                version="1.0.0",
+                publisher="CN=Test Publisher",
+                sources=[],
+            )
+
+    def test_create_msix_with_signing_but_no_signtool(self, monkeypatch) -> None:
+        """Test that _find_sdk_tool raises if SignTool.exe is not found when signing."""
+        from pcons.contrib.installers import windows
+        from pcons.contrib.installers._helpers import ToolNotFoundError
+
+        # Monkeypatch _find_sdk_tool to return None for SignTool.exe
+        def _mock_find_sdk_tool(tool_name: str) -> str | None:
+            if tool_name == "SignTool.exe":
+                return None
+            else:
+                return "sometool.exe"
+
+        monkeypatch.setattr(windows, "_find_sdk_tool", _mock_find_sdk_tool)
+        project = Project("test_msix_sign_error")
+        env = project.Environment()
+        with pytest.raises(ToolNotFoundError, match="SignTool.exe"):
+            windows.create_msix(
+                project=project,
+                env=env,
+                name="TestApp",
+                version="1.0.0",
+                publisher="CN=Test Publisher",
+                sources=[],
+                sign_cert=Path("dummy_cert.pfx"),
+            )
+
+
 class TestInstallersCLI:
     """Tests for the _helpers CLI interface."""
 

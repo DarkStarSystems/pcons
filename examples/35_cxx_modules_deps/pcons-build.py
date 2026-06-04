@@ -11,7 +11,7 @@ Demonstrates:
 from pcons import Project, get_var
 from pcons.toolchains import find_c_toolchain
 
-toolchain = find_c_toolchain(prefer=[get_var("TOOLCHAIN") or "gcc"])
+toolchain = find_c_toolchain(prefer=[get_var("TOOLCHAIN", None) or "gcc"])
 project = Project("cxx_modules")
 env = project.Environment(toolchain=toolchain)
 

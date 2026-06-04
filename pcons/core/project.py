@@ -22,7 +22,7 @@ from pcons.core.graph import (
     detect_cycles_in_targets,
     topological_sort_targets,
 )
-from pcons.core.node import AliasNode, DirNode, FileNode, Node
+from pcons.core.node import AliasNode, DirNode, FileNode, Node, PathRole
 from pcons.core.paths import PathResolver
 from pcons.core.target import Target, split_qualified_name
 from pcons.util.source_location import SourceLocation, get_caller_location
@@ -302,7 +302,7 @@ class Project(_ProjectBuilders):
                 return path  # External path
         return Path(os.path.normpath(path))
 
-    def node(self, path: Path | str) -> FileNode:
+    def node(self, path: Path | str, *, role: PathRole | None = None) -> FileNode:
         """Get or create a file node for a path.
 
         This provides node deduplication - the same path always
@@ -310,37 +310,50 @@ class Project(_ProjectBuilders):
 
         Args:
             path: Path to the file.
+            role: Optional path role recorded on the node (see FileNode).
+                ``"install_output"`` marks a build output that lives outside
+                the build directory so generators render it relocatably.
 
         Returns:
             FileNode for the path.
         """
         path = self._canonicalize_path(Path(path))
+
         if path not in self._nodes:
-            self._nodes[path] = FileNode(path, defined_at=get_caller_location())
+            self._nodes[path] = FileNode(
+                path, role=role, defined_at=get_caller_location()
+            )
         node = self._nodes[path]
         if not isinstance(node, FileNode):
             raise TypeError(
                 f"Path {path} is registered as {type(node).__name__}, not FileNode"
             )
+        if role is not None:
+            node.role = role
         return node
 
-    def dir_node(self, path: Path | str) -> DirNode:
+    def dir_node(self, path: Path | str, *, role: PathRole | None = None) -> DirNode:
         """Get or create a directory node for a path.
 
         Args:
             path: Path to the directory.
+            role: Optional path role recorded on the node (see FileNode).
 
         Returns:
             DirNode for the path.
         """
         path = self._canonicalize_path(Path(path))
         if path not in self._nodes:
-            self._nodes[path] = DirNode(path, defined_at=get_caller_location())
+            self._nodes[path] = DirNode(
+                path, role=role, defined_at=get_caller_location()
+            )
         node = self._nodes[path]
         if not isinstance(node, DirNode):
             raise TypeError(
                 f"Path {path} is registered as {type(node).__name__}, not DirNode"
             )
+        if role is not None:
+            node.role = role
         return node
 
     def _add_target(self, target: Target) -> None:

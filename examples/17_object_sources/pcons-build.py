@@ -49,7 +49,7 @@ prog.add_sources(
     ]
 )
 
-# Resolve to inspect resolved state
+# Resolve to inspect resolved state (debug purposes only)
 project.resolve()
 
 # Check what happened

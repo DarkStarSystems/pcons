@@ -12,7 +12,7 @@ Expected: core.h is found via public include propagation,
 and core_value() from static lib is available in shared lib.
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project, find_c_toolchain, install_dir
 
 # Create project
 project = Project("static_into_shared")
@@ -36,7 +36,28 @@ wrapper_lib.link(core_lib)
 prog = project.Program("demo", env, sources=[src_dir / "main.c"])
 prog.link(wrapper_lib)
 
-# Resolve to inspect resolved state
+# install_dir() resolves the conventional subdir from the env's toolchain:
+# shared libs land in "lib" (or "bin" on DLL platforms), archives in "lib",
+# programs in "bin".
+installed_libs = project.Install(
+    install_dir(env, "shared_library"),
+    [wrapper_lib],
+    name="install-libraries",
+)
+installed_archives = project.Install(
+    install_dir(env, "static_library"),
+    [core_lib],
+    name="install-archives",
+)
+installed_bins = project.Install(
+    install_dir(env, "program"),
+    [prog],
+    name="install-binaries",
+)
+
+project.Alias("install", [installed_libs, installed_archives, installed_bins])
+
+# Resolve to inspect resolved state (debug purposes only)
 project.resolve()
 
 # Debug output

@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from pcons.core.builder_registry import builder
-from pcons.core.node import BuildInfo, FileNode
+from pcons.core.node import BuildInfo, FileNode, PathRole
 from pcons.core.resolver import PendingSourceFactory
 from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.core.target import Target
@@ -37,6 +37,42 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.project import Project
+
+
+def _stamp_name_for(path: Path) -> str:
+    """Convert a path to a flat stamp file name.
+
+    POSIX absolute paths start with "/" which becomes "_".
+    Windows absolute paths start with "C:\", the colon is replaced so they
+    become "_C_..." matching the POSIX pattern.
+    """
+    s = str(path)
+    # Replace Windows drive colon so "C:\..." becomes "_C_..." like POSIX "_/..."
+    if len(s) >= 2 and s[1] == ":":
+        s = "_" + s[0] + s[2:]
+    return s.replace("/", "_").replace("\\", "_") + ".stamp"
+
+
+def _is_rooted(dest: Path) -> bool:
+    """Return whether *dest* is rooted (has a drive and/or a leading separator).
+
+    ``Path.anchor`` is used rather than ``Path.is_absolute()`` because the
+    latter is platform-dependent: ``Path("/opt/x").is_absolute()`` is False on
+    Windows (no drive), which would misclassify a rooted POSIX-style path.
+    """
+    return bool(dest.anchor)
+
+
+def _install_role(dest: Path) -> PathRole | None:
+    """Return the node role for an install destination.
+
+    A rooted destination lives outside the build tree, so it is an
+    ``"install_output"``.
+    A relative destination is a build-dir-relative staging path
+    (e.g. the ``no_prefix`` installers in ``pcons.contrib.installers``),
+    for which ``None`` is returned.
+    """
+    return "install_output" if _is_rooted(dest) else None
 
 
 def _deduplicate_target_name(project: Project, base_name: str) -> str:
@@ -61,6 +97,46 @@ def _deduplicate_target_name(project: Project, base_name: str) -> str:
             target_name,
         )
     return target_name
+
+
+def install_dir(env: Environment, target_type: str) -> str:
+    """Return the conventional install subdirectory for *target_type*.
+
+    The convention is sourced from the environment's primary toolchain, so it
+    follows the platform that toolchain targets rather than the host OS:
+
+    - ``"program"``: ``bin``
+    - ``"static_library"``: ``lib``
+    - ``"shared_library"``: ``bin`` on DLL platforms (a Windows DLL must sit
+      next to the executable that loads it), ``lib`` elsewhere.
+
+    Pass the result to :meth:`Project.Install` as the destination directory::
+
+        env = project.Environment(toolchain=find_c_toolchain())
+        lib = project.SharedLibrary("foo", env, sources=["foo.c"])
+        project.Install(install_dir(env, "shared_library"), [lib])
+
+    Users who want a different layout can ignore this helper and pass an
+    explicit directory string (e.g. ``project.Install("lib64", [lib])``).
+
+    Args:
+        env: Environment whose toolchain defines the convention.
+        target_type: One of ``"program"``, ``"static_library"``,
+            ``"shared_library"``.
+
+    Returns:
+        The install subdirectory name (relative to the install prefix).
+
+    Raises:
+        ValueError: If *env* has no toolchain.
+    """
+    toolchains = env.toolchains
+    if not toolchains:
+        raise ValueError(
+            "install_dir() requires an environment with a toolchain; "
+            "pass an explicit directory string to Install() instead."
+        )
+    return toolchains[0].get_install_dir(target_type)
 
 
 class InstallTool(StandaloneTool):
@@ -221,8 +297,9 @@ class InstallNodeFactory(PendingSourceFactory):
             # Destination path
             dest_path = dest_dir / file_node.path.name
 
-            # Create destination node via project for deduplication
-            dest_node = self.project.node(dest_path)
+            # Create destination node via project for deduplication.
+            # Mark it as an install output only for absolute (outside-build) destinations; see _install_role.
+            dest_node = self.project.node(dest_path, role=_install_role(dest_path))
             dest_node.depends([file_node])
 
             # Store build info referencing env.install.copycmd
@@ -260,9 +337,15 @@ class InstallNodeFactory(PendingSourceFactory):
         source_path = source_node.path
         dest_path = dest_dir / source_path.name
 
+        # Compute dest relative to build dir for a platform-neutral stamp name
+        try:
+            rel_dest = dest_path.relative_to(target.build_dir)
+        except ValueError:
+            rel_dest = dest_path
+
         # Stamp file for ninja tracking
         stamps_dir = target.build_dir / ".stamps"
-        stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
+        stamp_name = _stamp_name_for(rel_dest)
         stamp_path = stamps_dir / stamp_name
 
         stamp_node = self.project.node(stamp_path)
@@ -272,12 +355,6 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_node.depends([source_node])
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
-
-        # Build destination path relative to build directory
-        try:
-            rel_dest = dest_path.relative_to(target.build_dir)
-        except ValueError:
-            rel_dest = dest_path
 
         context = InstallContext.from_target(
             target, env, destdir=str(rel_dest).replace("\\", "/")
@@ -323,8 +400,9 @@ class InstallNodeFactory(PendingSourceFactory):
 
         source_node = sources[0]
 
-        # Create destination node via project for deduplication
-        dest_node = self.project.node(dest)
+        # Create destination node via project for deduplication.
+        # Mark it as an install output only for absolute (outside-build) destinations; see _install_role.
+        dest_node = self.project.node(dest, role=_install_role(dest))
         dest_node.depends([source_node])
 
         # Store build info referencing env.install.copycmd
@@ -370,12 +448,21 @@ class InstallNodeFactory(PendingSourceFactory):
         # Destination is dest_dir / source directory name
         dest_path = dest_dir / source_path.name
 
+        # Compute dest relative to build dir for a platform-neutral stamp name
+        try:
+            rel_dest = dest_path.relative_to(target.build_dir)
+        except ValueError:
+            rel_dest = dest_path
+
         # Put stamp files in a dedicated .stamps directory
         stamps_dir = target.build_dir / ".stamps"
-        stamp_name = str(dest_path).replace("/", "_").replace("\\", "_") + ".stamp"
+        stamp_name = _stamp_name_for(rel_dest)
         stamp_path = stamps_dir / stamp_name
 
-        # Create stamp node via project for deduplication (this is what ninja tracks)
+        # Create stamp node via project for deduplication (this is what ninja
+        # tracks). The stamp lives under build/.stamps, so it is a normal
+        # build output; the copied tree's destination is handled separately
+        # via the copytree command's destdir argument.
         stamp_node = self.project.node(stamp_path)
         # Source directory is the explicit dep (becomes $in for copytree).
         # Child nodes are implicit deps — they trigger rebuilds but don't
@@ -383,12 +470,6 @@ class InstallNodeFactory(PendingSourceFactory):
         stamp_node.depends([source_node])
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
-
-        # Build the destination path relative to build directory for the command
-        try:
-            rel_dest = dest_path.relative_to(target.build_dir)
-        except ValueError:
-            rel_dest = dest_path
 
         # Create context from target (merges env defaults with target overrides)
         env = self._get_install_env(target)
@@ -436,6 +517,7 @@ class InstallBuilder:
         sources: Sequence[Target | FileNode | Path | str],
         *,
         name: str | None = None,
+        no_prefix: bool = False,
     ) -> Target:
         """Create an Install target.
 
@@ -444,14 +526,23 @@ class InstallBuilder:
             dest_dir: Destination directory path.
             sources: Files to install.
             name: Optional name for the install target.
+            no_prefix: If True, do not prepend the install prefix to the destination.
 
         Returns:
             A Target representing the install operation.
         """
+        from pcons import get_var
+
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
             project, name or f"install_{dest_dir.name}"
         )
+
+        if not no_prefix and not _is_rooted(dest_dir):
+            dest_dir = (
+                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
+                / dest_dir
+            )
 
         # Create the install target
         install_target = Target(
@@ -483,6 +574,7 @@ class InstallAsBuilder:
         source: Target | FileNode | Path | str,
         *,
         name: str | None = None,
+        no_prefix: bool = False,
     ) -> Target:
         """Create an InstallAs target.
 
@@ -491,6 +583,7 @@ class InstallAsBuilder:
             dest: Full destination path (including filename).
             source: Source file.
             name: Optional name for the install target.
+            no_prefix: If True, do not prepend the install prefix to the destination.
 
         Returns:
             A Target representing the install operation.
@@ -498,6 +591,8 @@ class InstallAsBuilder:
         Raises:
             BuilderError: If source is a list (use Install() for multiple files).
         """
+        from pcons import get_var
+
         # Validate source is not a list - common user error
         if isinstance(source, (list, tuple)):
             from pcons.core.errors import BuilderError
@@ -510,6 +605,12 @@ class InstallAsBuilder:
 
         dest = Path(dest)
         target_name = _deduplicate_target_name(project, name or f"install_{dest.name}")
+
+        if not no_prefix and not _is_rooted(dest):
+            dest = (
+                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
+                / dest
+            )
 
         # Create the install target
         install_target = Target(
@@ -541,6 +642,7 @@ class InstallDirBuilder:
         source: Target | FileNode | Path | str,
         *,
         name: str | None = None,
+        no_prefix: bool = False,
     ) -> Target:
         """Create an InstallDir target.
 
@@ -549,14 +651,23 @@ class InstallDirBuilder:
             dest_dir: Destination directory.
             source: Source directory.
             name: Optional name for the install target.
+            no_prefix: If True, do not prepend the install prefix to the destination.
 
         Returns:
             A Target representing the install operation.
         """
+        from pcons import get_var
+
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
             project, name or f"install_dir_{dest_dir.name}"
         )
+
+        if not no_prefix and not _is_rooted(dest_dir):
+            dest_dir = (
+                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
+                / dest_dir
+            )
 
         # Create the install target
         install_target = Target(
