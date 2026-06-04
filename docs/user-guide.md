@@ -1482,6 +1482,15 @@ pcons synthesizes a build node for `%VCToolsInstallDir%/modules/std.ixx`
 (or `std.compat.ixx`), wires its `.ifc` into the dyndep file, and adds
 the resulting `.obj` to every importing target's link inputs.
 
+Compiled module interfaces (BMIs — `.gcm` / `.pcm` / `.ifc`) are only
+consumable by translation units built with matching BMI-sensitive flags
+(C++ dialect, ABI options, stdlib feature macros). pcons keys each BMI by
+a hash of those flags and stores it under
+`<build_dir>/cxx_modules/<hash>/`, so targets that compile a module
+interface with compatible flags share one BMI, while targets using an
+incompatible dialect (say `-std=c++23` vs `-std=c++26`) transparently get
+their own. See `examples/39_bmi_compat`.
+
 These are handled automatically when you add sources to a target:
 
 ```python

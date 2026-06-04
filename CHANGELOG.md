@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Install prefix.** `Install()`, `InstallAs()`, and `InstallDir()` now place relative destinations under an install prefix (default `<project-root>/dist`), settable via `pcons PCONS_INSTALL_PREFIX=...`. Rooted destinations are used as-is; `no_prefix=True` keeps a destination inside the build directory. New `install_dir(env, target_type)` helper returns the toolchain's conventional install subdirectory (`bin` for programs, `lib` for libraries; DLLs go in `bin`). (PR #38)
 - **Multiple generators per run.** `pcons -G ninja -G metadata` (or `PCONS_GENERATOR=ninja:metadata`) runs several generators in one invocation.
+- **C++20 module interfaces can be reused across targets.** Compiled module interfaces (`.gcm`/`.pcm`/`.ifc`) are keyed by a hash of their BMI-sensitive flags (C++ dialect, ABI options, stdlib feature macros) and stored under `cxx_modules/<hash>/`. Targets compiling a module interface with compatible flags share one BMI; targets with an incompatible dialect get their own. Previously, using the same module interface in more than one target failed with a duplicate-rule error. Works on GCC, clang, and MSVC; see `examples/39_bmi_compat`. (PR #39)
 
 ### Changed
 
@@ -21,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - GCC C++ modules builds now rebuild correctly when headers change: header depfiles are kept for non-module translation units, and Ninja rules are no longer merged across edges with different dependency styles. Module dependency scanning also works on Windows now. (PR #38)
+- Object-file reuse is now keyed by the compiler command as well as the compile flags. Previously, the same source compiled by two different compilers (or per-env `cmd` overrides) with otherwise identical flags would incorrectly share one object file.
 - `pcons build` now propagates the underlying build tool's exit code (e.g. ninja failures).
 - `compile_commands.json` now includes compile flags set on the environment.
 
