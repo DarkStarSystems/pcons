@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-06-04
+
 ### Added
 
 - **Install prefix.** `Install()`, `InstallAs()`, and `InstallDir()` now place relative destinations under an install prefix (default `<project-root>/dist`), settable via `pcons PCONS_INSTALL_PREFIX=...`. Rooted destinations are used as-is; `no_prefix=True` keeps a destination inside the build directory. New `install_dir(env, target_type)` helper returns the toolchain's conventional install subdirectory (`bin` for programs, `lib` for libraries; DLLs go in `bin`). (PR #38)
@@ -881,7 +883,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/DarkStarSystems/pcons/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/DarkStarSystems/pcons/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/DarkStarSystems/pcons/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/DarkStarSystems/pcons/compare/v0.15.0...v0.16.0

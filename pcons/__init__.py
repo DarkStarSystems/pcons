@@ -51,7 +51,7 @@ register_builtin_builders()
 # Import modules namespace to make pcons.modules accessible
 from pcons import modules as modules  # noqa: E402, F401
 
-__version__ = "0.18.0"
+__version__ = "0.19.0"
 
 # Global registry for Project instances
 _registered_projects: list[Project] = []
