@@ -16,11 +16,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.flags import get_separated_arg_flags_from_toolchains, merge_flags
-from pcons.core.target import Target
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
-    from pcons.core.target import UsageRequirements
+    from pcons.core.subst import PathToken
+    from pcons.core.target import Target, UsageRequirements
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +48,8 @@ class EffectiveRequirements:
 
     includes: list[Path] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
-    compile_flags: list[str] = field(default_factory=list)
-    link_flags: list[str] = field(default_factory=list)
+    compile_flags: list[str | PathToken] = field(default_factory=list)
+    link_flags: list[str | PathToken] = field(default_factory=list)
     link_libs: list[str | Target] = field(default_factory=list)
     link_dirs: list[Path] = field(default_factory=list)
     separated_arg_flags: frozenset[str] = field(default_factory=frozenset)
@@ -72,17 +72,11 @@ class EffectiveRequirements:
             if define not in self.defines:
                 self.defines.append(define)
         # Use flag-aware merge for compile and link flags
-        merge_flags(
-            self.compile_flags,
-            [str(f) for f in reqs.compile_flags],
-            self.separated_arg_flags,
-        )
-        merge_flags(
-            self.link_flags, [str(f) for f in reqs.link_flags], self.separated_arg_flags
-        )
+        merge_flags(self.compile_flags, reqs.compile_flags, self.separated_arg_flags)
+        merge_flags(self.link_flags, reqs.link_flags, self.separated_arg_flags)
         for lib in reqs.link_libs:
             if lib not in self.link_libs:
-                self.link_libs.append(str(lib) if not isinstance(lib, Target) else lib)
+                self.link_libs.append(lib)
         for lib_dir in reqs.link_dirs:
             dir_path = Path(lib_dir) if isinstance(lib_dir, str) else lib_dir
             if dir_path not in self.link_dirs:

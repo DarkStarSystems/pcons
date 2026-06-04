@@ -918,6 +918,8 @@ class XcodeGenerator(BaseGenerator):
 
         # Collect compiler flags
         cflags: list[str] = []
+        # PathToken flags fall back to their plain string form here; the Xcode
+        # generator does not do $topdir-style relativization (unlike ninja).
         cflags.extend(str(f) for f in target.public.compile_flags)
         cflags.extend(str(f) for f in target.private.compile_flags)
 

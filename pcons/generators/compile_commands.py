@@ -254,6 +254,8 @@ class CompileCommandsGenerator(BaseGenerator):
                     parts.append(f"{context.include_prefix}{inc}")
                 for define in context.defines:
                     parts.append(f"{context.define_prefix}{define}")
+                # PathToken flags fall back to their plain string form; the
+                # compile_commands generator does not relativize like ninja.
                 parts.extend(str(f) for f in context.flags)
 
         parts.extend(["-o", str(output.path), str(source.path)])

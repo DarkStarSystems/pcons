@@ -413,12 +413,12 @@ _USAGE_REQUIREMENT_TYPES: tuple[tuple[str, str, str | None], ...] = (
     (
         "compile_flags",
         "MutableSequence[str | PathToken]",
-        "flags propagated to dependents (strings + path tokens)",
+        "flags propagated to dependents (strings, or PathToken for embedded paths)",
     ),
     (
         "link_flags",
         "MutableSequence[str | PathToken]",
-        "flags propagated to dependents (strings + path tokens)",
+        "flags propagated to dependents (strings, or PathToken for embedded paths)",
     ),
     (
         "defines",
@@ -427,8 +427,8 @@ _USAGE_REQUIREMENT_TYPES: tuple[tuple[str, str, str | None], ...] = (
     ),
     (
         "link_libs",
-        "MutableSequence[str | Target | PathToken]",
-        "libraries propagated to dependents (str + Target + path tokens)",
+        "MutableSequence[str | Target]",
+        "libraries propagated to dependents (names or Target objects)",
     ),
 )
 

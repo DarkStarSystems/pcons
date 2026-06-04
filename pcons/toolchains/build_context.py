@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+    from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.tools.requirements import EffectiveRequirements
 
@@ -54,8 +55,8 @@ class CompileLinkContext:
 
     includes: list[str] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
-    flags: list[str] = field(default_factory=list)
-    link_flags: list[str] = field(default_factory=list)
+    flags: list[str | PathToken] = field(default_factory=list)
+    link_flags: list[str | PathToken] = field(default_factory=list)
     libs: list[str] = field(default_factory=list)
     libdirs: list[str] = field(default_factory=list)
     linker_cmd: str | None = None  # Override for link.cmd (e.g., "clang++" for C++)

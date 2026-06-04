@@ -473,7 +473,7 @@ class Toolchain(Protocol):
         self,
         target: Target,
         output_name: str,
-        existing_flags: list[str],
+        existing_flags: Sequence[str | PathToken],
     ) -> list[str]:
         """Return additional link flags for a specific target.
 

@@ -85,6 +85,30 @@ class TestEffectiveRequirementsMerge:
 
         assert eff.includes == [Path("inc1"), Path("inc2"), Path("inc3")]
 
+    def test_merge_preserves_pathtoken_in_flags(self):
+        """PathToken flags must survive merge as objects, not be stringified."""
+        from pcons.core.subst import PathToken
+
+        compile_tok = PathToken(prefix="-I", path="src/inc", path_type="project")
+        link_tok = PathToken(
+            prefix="-Wl,-force_load,", path="libs/libfoo.a", path_type="project"
+        )
+        eff = EffectiveRequirements()
+        usage = UsageRequirements(
+            compile_flags=[compile_tok],
+            link_flags=[link_tok],
+        )
+        eff.merge(usage)
+
+        # The exact PathToken object is preserved (not a stringified copy).
+        assert compile_tok in eff.compile_flags
+        assert link_tok in eff.link_flags
+        # And relativization still works on the preserved token.
+        assert (
+            link_tok.relativize(lambda p: f"$topdir/{p}")
+            == "-Wl,-force_load,$topdir/libs/libfoo.a"
+        )
+
 
 class TestEffectiveRequirementsHashable:
     def test_as_hashable_tuple(self):
