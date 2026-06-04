@@ -8,6 +8,27 @@ expected_outputs = [
     "build/pcons_hello_ext.cpython-*.so",
 ]
 
+[verify.variables]
+
+test_editable_script = """import pcons_hello_ext
+print(pcons_hello_ext.say_hello('world'))
+assert 'build' in pcons_hello_ext.__file__, f'Expected extension in build dir (editable install), found: {pcons_hello_ext.__file__}'
+"""
+
+test_wheel_script = """import pcons_hello_ext
+print(pcons_hello_ext.say_hello('world'))
+assert 'site-packages' in pcons_hello_ext.__file__, f'Expected installed (non-editable) extension in site-packages, found: {pcons_hello_ext.__file__}'
+"""
+
+# The sdist must ship a spec-required PKG-INFO and every source needed to
+# rebuild (recursively, including src/), not just the top-level files.
+test_sdist_script = """import tarfile, glob
+ns = tarfile.open(glob.glob('dist/*.tar.gz')[0]).getnames()
+assert any(n.endswith('/PKG-INFO') for n in ns), f'PKG-INFO missing from sdist: {ns}'
+assert any(n.endswith('src/hello.cpp') for n in ns), f'hello.cpp missing from sdist: {ns}'
+assert any(n.endswith('src/hello.hpp') for n in ns), f'hello.hpp missing from sdist: {ns}'
+"""
+
 [verify]
 # Two install paths are exercised, both driving the full PEP 517 / pcons.pyproject
 # code path. pcons is installed from the local checkout (injected by the test
@@ -20,8 +41,7 @@ expected_outputs = [
 commands = [
     # --- editable install ---
     { run = "uv sync" },
-    { run = "uv run python -c \"import pcons_hello_ext; print(pcons_hello_ext.say_hello('world'))\"", expect_stdout = "Hello, world!" },
-    { run = "uv run python -c \"import pcons_hello_ext; assert 'build' in pcons_hello_ext.__file__, f'Expected extension in build dir (editable install), found: {pcons_hello_ext.__file__}'\"" },
+    { run = "uv run python -c \"${test_editable_script}\"", expect_stdout = "Hello, world!" },
 
     # --- real (non-editable) install from a built wheel ---
     # Build a wheel and install it into the project .venv, replacing the editable
@@ -32,8 +52,11 @@ commands = [
     { run = "uv build --wheel" },
     { run = "uv pip uninstall --python .venv pcons_hello_ext" },
     { run = "uv pip install --python .venv dist/*.whl" },
-    { run = "uv run --no-sync python -c \"import pcons_hello_ext; print(pcons_hello_ext.say_hello('world'))\"", expect_stdout = "Hello, world!" },
-    { run = "uv run --no-sync python -c \"import pcons_hello_ext; assert 'site-packages' in pcons_hello_ext.__file__, f'Expected installed (non-editable) extension in site-packages, found: {pcons_hello_ext.__file__}'\"" },
+    { run = "uv run --no-sync python -c \"${test_wheel_script}\"", expect_stdout = "Hello, world!" },
+
+    # --- source distribution ---
+    { run = "uv build --sdist" },
+    { run = "uv run --no-sync python -c \"${test_sdist_script}\"" },
 ]
 
 [skip]

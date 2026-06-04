@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
 import shutil
 import sys
 import sysconfig
@@ -79,6 +80,44 @@ def _render_metadata(name: str, version: str, project: dict[str, Any]) -> str:
     for dep in project.get("dependencies", []):
         lines.append(f"Requires-Dist: {dep}")
     return "\n".join(lines) + "\n"
+
+
+# Directories never shipped in an sdist: build outputs, VCS data and tooling
+# caches. Matched by name at any depth, so e.g. a nested __pycache__ is skipped.
+_SDIST_EXCLUDE_DIRS = frozenset(
+    {
+        "build",
+        "dist",
+        ".git",
+        ".venv",
+        "venv",
+        "__pycache__",
+        ".ruff_cache",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".tox",
+        ".eggs",
+        "node_modules",
+    }
+)
+
+
+def _sdist_files(source_dir: Path) -> list[Path]:
+    """Return every source file to ship in the sdist, recursively.
+
+    Walks the whole project tree (so package subdirectories like ``src/`` are
+    included, not just top-level files) and skips build artifacts, VCS data and
+    tooling caches listed in :data:`_SDIST_EXCLUDE_DIRS`.
+    """
+    files = []
+    for path in source_dir.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(source_dir)
+        if any(part in _SDIST_EXCLUDE_DIRS for part in rel.parts):
+            continue
+        files.append(path)
+    return sorted(files)
 
 
 def _wheel_tag() -> tuple[str, str, str]:
@@ -445,10 +484,18 @@ def build_sdist(
     sdist_dir.mkdir(parents=True, exist_ok=True)
 
     prefix = f"{name}-{version}"
+    # PKG-INFO uses the core-metadata format, same content as the wheel METADATA.
+    pkg_info = _render_metadata(name, version, project).encode()
+    files = _sdist_files(source_dir)
+
     with tarfile.open(sdist_dir / sdist_name, "w:gz") as tf:
-        for pattern in ("*.py", "*.cpp", "*.c", "*.h", "*.toml", "*.txt", "*.md"):
-            for f in source_dir.glob(pattern):
-                if f.is_file():
-                    tf.add(f, arcname=f"{prefix}/{f.name}")
+        # The sdist spec requires a PKG-INFO at the root of the tree.
+        info = tarfile.TarInfo(f"{prefix}/PKG-INFO")
+        info.size = len(pkg_info)
+        tf.addfile(info, io.BytesIO(pkg_info))
+
+        for f in files:
+            arcname = f"{prefix}/{f.relative_to(source_dir).as_posix()}"
+            tf.add(f, arcname=arcname)
 
     return sdist_name

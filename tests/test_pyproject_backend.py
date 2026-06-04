@@ -132,9 +132,7 @@ class TestRenderMetadata:
         assert "Version: 1.0" in meta
 
     def test_requires_python(self) -> None:
-        meta = backend._render_metadata(
-            "mypkg", "1.0", {"requires-python": ">=3.11"}
-        )
+        meta = backend._render_metadata("mypkg", "1.0", {"requires-python": ">=3.11"})
         assert "Requires-Python: >=3.11" in meta
 
     def test_dependencies_become_requires_dist(self) -> None:
@@ -503,6 +501,60 @@ class TestBuildSdist:
         monkeypatch.chdir(tmp_path)
         result = backend.build_sdist(str(tmp_path / "dist"))
         assert result == "my_pkg-1.0.tar.gz"
+
+    def test_includes_nested_source_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tarfile
+
+        _make_pyproject(tmp_path, '[project]\nname = "mypkg"\nversion = "0.1"\n')
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "hello.cpp").write_text("int main() {}\n")
+        (tmp_path / "src" / "hello.hpp").write_text("#pragma once\n")
+        monkeypatch.chdir(tmp_path)
+        filename = backend.build_sdist(str(tmp_path / "dist"))
+        with tarfile.open(tmp_path / "dist" / filename) as tf:
+            names = tf.getnames()
+        # The old top-level-only globs dropped these; they must be present now.
+        assert "mypkg-0.1/src/hello.cpp" in names
+        assert "mypkg-0.1/src/hello.hpp" in names
+
+    def test_contains_pkg_info(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tarfile
+
+        _make_pyproject(
+            tmp_path,
+            '[project]\nname = "mypkg"\nversion = "0.1"\nrequires-python = ">=3.11"\n',
+        )
+        monkeypatch.chdir(tmp_path)
+        filename = backend.build_sdist(str(tmp_path / "dist"))
+        with tarfile.open(tmp_path / "dist" / filename) as tf:
+            member = tf.extractfile("mypkg-0.1/PKG-INFO")
+            assert member is not None
+            pkg_info = member.read().decode()
+        assert "Metadata-Version:" in pkg_info
+        assert "Name: mypkg" in pkg_info
+        assert "Version: 0.1" in pkg_info
+        assert "Requires-Python: >=3.11" in pkg_info
+
+    def test_excludes_build_artifacts(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import tarfile
+
+        _make_pyproject(tmp_path, '[project]\nname = "mypkg"\nversion = "0.1"\n')
+        (tmp_path / "build").mkdir()
+        (tmp_path / "build" / "artifact.o").write_bytes(b"junk")
+        (tmp_path / "__pycache__").mkdir()
+        (tmp_path / "__pycache__" / "x.pyc").write_bytes(b"junk")
+        monkeypatch.chdir(tmp_path)
+        filename = backend.build_sdist(str(tmp_path / "dist"))
+        with tarfile.open(tmp_path / "dist" / filename) as tf:
+            names = tf.getnames()
+        assert not any("artifact.o" in n for n in names)
+        assert not any(".pyc" in n for n in names)
 
 
 # ---------------------------------------------------------------------------
