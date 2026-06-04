@@ -11,7 +11,9 @@ from pcons.core.project import Project
 from pcons.core.target import (
     ImportedTarget,
     Target,
+    UniqueList,
     UsageRequirements,
+    ValidatedUniqueList,
     is_qualified_name,
     split_qualified_name,
 )
@@ -75,6 +77,54 @@ class TestUsageRequirements:
         # Modifying clone doesn't affect original
         clone.include_dirs.append(Path("other"))
         assert Path("other") not in req.include_dirs
+
+    def test_assignment_preserves_unique_list_type(self):
+        """Assigning a plain list keeps an existing UniqueList's type and dedup."""
+        req = UsageRequirements()
+        req.defines = UniqueList(["A"])
+        original = req.defines
+
+        # Reassign with a plain list (including a duplicate).
+        req.defines = ["B", "C", "C"]
+
+        # Same list object is reused (cleared + extended, not replaced)...
+        assert req.defines is original
+        assert isinstance(req.defines, UniqueList)
+        # ...so dedup behavior still applies to the new contents.
+        assert req.defines == ["B", "C"]
+
+    def test_assignment_preserves_validator(self):
+        """Assigning to a ValidatedUniqueList keeps validation on new contents."""
+        req = UsageRequirements()
+        req.link_libs = ValidatedUniqueList([], validator=lambda x: x != "bad")
+        original = req.link_libs
+
+        req.link_libs = ["good", "bad", "ok"]
+
+        assert req.link_libs is original
+        assert isinstance(req.link_libs, ValidatedUniqueList)
+        # The validator rejects "bad" even on full reassignment.
+        assert req.link_libs == ["good", "ok"]
+
+    def test_assignment_replaces_contents(self):
+        """Reassignment replaces the old contents rather than appending."""
+        req = UsageRequirements()
+        req.defines = UniqueList(["OLD"])
+
+        req.defines = ["NEW"]
+
+        assert req.defines == ["NEW"]
+
+    def test_assignment_to_plain_list_replaces_object(self):
+        """When the existing value is a plain list, assignment replaces it."""
+        req = UsageRequirements(defines=["A"])
+        assert not isinstance(req.defines, UniqueList)
+
+        new_list = ["B"]
+        req.defines = new_list
+
+        # Plain lists are replaced outright (no clear/extend).
+        assert req.defines is new_list
 
 
 class TestQualifiedName:

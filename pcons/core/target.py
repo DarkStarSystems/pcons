@@ -130,7 +130,15 @@ class UsageRequirements(_UsageRequirementsStubs):
                     f"Use target.public.{name}.append(value) to add items, "
                     f"or target.public.{name} = [value] to replace."
                 )
-            self._data[name] = value
+            existing = self._data.get(name)
+            if isinstance(existing, UserList):
+                # preserve behavior of existing list type (e.g., UniqueList, ValidatedUniqueList) on assignment,
+                # by clearing and extending it instead of replacing it.
+                # This allows users to replace an entire list while keeping dedup/validation behavior.
+                existing.clear()
+                existing.extend(value)
+            else:
+                self._data[name] = value
 
     def merge(
         self,
