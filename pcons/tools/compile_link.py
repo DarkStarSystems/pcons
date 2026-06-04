@@ -68,7 +68,7 @@ class CompileLinkFactory:
 
     def __init__(self, project: Project) -> None:
         self.project = project
-        self._object_cache: dict[tuple[Path, tuple], FileNode] = {}
+        self._object_cache: dict[tuple[Path, str, tuple], FileNode] = {}
         # Maps language -> list of (source_path, obj_node) pairs.
         # Populated by _create_object_node(); passed to toolchain after_resolve() hooks.
         self._source_obj_by_language: dict[str, list[tuple[Path, FileNode]]] = {}
@@ -257,8 +257,9 @@ class CompileLinkFactory:
     ) -> FileNode | None:
         """Create object file node with effective requirements in build_info.
 
-        Implements object caching: if the same source is compiled with the
-        same effective requirements, the same object node is reused.
+        Implements object caching: if the same source is compiled by the same
+        compiler command with the same effective requirements, the same object
+        node is reused.
         """
         handler = self._get_source_handler(source.path, env)
         if handler is None:
@@ -269,8 +270,12 @@ class CompileLinkFactory:
         deps_style = handler.deps_style
         command_var = handler.command_var
 
+        # Key the cache by the compiler command as well as the flags: the same
+        # source built by a different compiler (another toolchain, or a per-env
+        # cmd override) must not share an object file.
+        tool_cmd = str(getattr(getattr(env, tool_name, None), "cmd", tool_name))
         effective_hash = effective.as_hashable_tuple()
-        cache_key = (source.path.resolve(), effective_hash)
+        cache_key = (source.path.resolve(), tool_cmd, effective_hash)
 
         if cache_key in self._object_cache:
             return self._object_cache[cache_key]

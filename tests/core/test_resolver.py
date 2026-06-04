@@ -212,14 +212,39 @@ class TestResolverObjectCaching:
         resolver = Resolver(project)
         resolver.resolve()
 
-        # Note: Objects are NOT cached when targets are different because
-        # they go in different output directories by design.
-        # The cache key includes the effective requirements hash,
-        # but the output path includes the target name.
-        # This is correct behavior - each target gets its own objects
-        # even if the flags are identical.
+        # Same source + same compiler + same effective requirements:
+        # both targets share one object node (compiled once).
         assert target1._resolved
         assert target2._resolved
+        assert target1.intermediate_nodes[0] is target2.intermediate_nodes[0]
+
+    def test_object_not_shared_across_compilers(self, tmp_path, gcc_toolchain):
+        """Same source and flags but a different compiler must not share objects."""
+        src_file = tmp_path / "common.c"
+        src_file.write_text("void common() {}")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env1 = project.Environment(toolchain=gcc_toolchain)
+        env1.add_tool("cc")
+        env1.cc.objcmd = "$cc.cmd -c $SOURCE -o $TARGET"
+        env1.cc.cmd = "gcc"
+
+        env2 = project.Environment(toolchain=gcc_toolchain)
+        env2.add_tool("cc")
+        env2.cc.objcmd = "$cc.cmd -c $SOURCE -o $TARGET"
+        env2.cc.cmd = "clang"
+
+        target1 = project.StaticLibrary("lib1", env1, sources=[str(src_file)])
+        target2 = project.StaticLibrary("lib2", env2, sources=[str(src_file)])
+
+        resolver = Resolver(project)
+        resolver.resolve()
+
+        obj1 = target1.intermediate_nodes[0]
+        obj2 = target2.intermediate_nodes[0]
+        assert obj1 is not obj2
+        assert obj1._build_info["env"] is env1
+        assert obj2._build_info["env"] is env2
 
 
 class TestResolverTargetTypes:
