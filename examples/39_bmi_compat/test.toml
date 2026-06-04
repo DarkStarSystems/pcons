@@ -15,11 +15,12 @@ expected_outputs = [
 ]
 
 # Cross-target BMI reuse is wired for GCC (per-key BMI dirs + module mapper
-# files) and clang (per-key dirs + -fmodule-output / -fprebuilt-module-path).
+# files), clang (per-key dirs + -fmodule-output / -fprebuilt-module-path), and
+# MSVC (per-key dirs + /ifcOutput / /ifcSearchDir).
 [toolchains]
 linux = ["gcc", "llvm"]
 darwin = ["llvm"]
-windows = ["gcc", "llvm"]
+windows = ["gcc", "llvm", "msvc"]
 
 [verify]
 commands = [

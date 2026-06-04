@@ -414,6 +414,163 @@ class TestMsvcSourceHandlers:
         assert handler.deps_style == "msvc"
 
 
+class TestMsvcModulesBmiKeying:
+    """after_resolve keys each module interface (.ifc) by a hash of its
+    BMI-sensitive flags, so the same logical module compiled with incompatible
+    flags (e.g. /std:c++23 vs /std:c++latest) lands in distinct
+    cxx_modules/<key>/ directories instead of colliding on one path.
+    """
+
+    def _make_obj(self, env, rel_path, flags):
+        from types import SimpleNamespace
+
+        obj = FileNode(rel_path)
+        obj._build_info = {
+            "env": env,
+            "context": SimpleNamespace(flags=list(flags), includes=[], defines=[]),
+        }
+        return obj
+
+    def test_incompatible_dialects_get_separate_ifc_dirs(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        from pcons.core.project import Project
+
+        monkeypatch.chdir(tmp_path)
+        tc = MsvcToolchain()
+        project = Project("bmi", root_dir=tmp_path, build_dir="build")
+
+        env = SimpleNamespace(
+            cxx=SimpleNamespace(cmd="cl.exe", flags=["/nologo"], defines=[]),
+            register_node=lambda _node: None,
+        )
+
+        # Two libraries provide the same logical module 'provider' but with
+        # BMI-incompatible dialects, plus a consumer for each.
+        prov23 = self._make_obj(env, "build/obj.lib1/provider.cppm.obj", ["/std:c++23"])
+        cons23 = self._make_obj(env, "build/obj.lib1/consumer.cpp.obj", ["/std:c++23"])
+        prov26 = self._make_obj(
+            env, "build/obj.lib3/provider.cppm.obj", ["/std:c++latest"]
+        )
+        cons26 = self._make_obj(
+            env, "build/obj.lib3/consumer.cpp.obj", ["/std:c++latest"]
+        )
+
+        module_pairs = [
+            (tmp_path / "provider.cppm", prov23),
+            (tmp_path / "provider.cppm", prov26),
+        ]
+        cxx_pairs = [
+            (tmp_path / "consumer.cpp", cons23),
+            (tmp_path / "consumer.cpp", cons26),
+        ]
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.select_modules_scope",
+            lambda _s: (module_pairs, cxx_pairs),
+        )
+
+        def fake_scan(specs, scanner, scanner_style):
+            out = []
+            for s in specs:
+                is_provider = str(s.src).endswith(".cppm")
+                out.append(
+                    SimpleNamespace(
+                        spec=s,
+                        is_module_provider=is_provider,
+                        is_interface=is_provider,
+                        logical_name="provider" if is_provider else "",
+                        required_logical_names=set() if is_provider else {"provider"},
+                    )
+                )
+            return out
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.scan_translation_units", fake_scan
+        )
+
+        tc.after_resolve(project, {"cxx": [], "cxx_module": []})
+
+        # The two providers must resolve to different keyed .ifc paths.
+        def ifc_of(obj):
+            flags = obj._build_info["context"].flags
+            i = flags.index("/ifcOutput")
+            return flags[i + 1]
+
+        ifc23 = ifc_of(prov23)
+        ifc26 = ifc_of(prov26)
+        assert ifc23 != ifc26
+        assert ifc23.startswith("cxx_modules/") and ifc23.endswith("/provider.ifc")
+        assert ifc26.startswith("cxx_modules/") and ifc26.endswith("/provider.ifc")
+
+        # Each consumer searches its own key's directory (the same one its
+        # provider writes into).
+        def searchdir_of(obj):
+            flags = obj._build_info["context"].flags
+            i = flags.index("/ifcSearchDir")
+            return flags[i + 1]
+
+        assert searchdir_of(cons23) == ifc23.rsplit("/", 1)[0]
+        assert searchdir_of(cons26) == ifc26.rsplit("/", 1)[0]
+        assert searchdir_of(cons23) != searchdir_of(cons26)
+
+        # The keyed dyndep wires each consumer to the provider in its own class.
+        dyndep = (tmp_path / "build" / "cxx_modules.dyndep").read_text()
+        assert f"build obj.lib1/consumer.cpp.obj: dyndep | {ifc23}" in dyndep
+        assert f"build obj.lib3/consumer.cpp.obj: dyndep | {ifc26}" in dyndep
+        assert f"build obj.lib1/provider.cppm.obj | {ifc23}: dyndep" in dyndep
+        assert f"build obj.lib3/provider.cppm.obj | {ifc26}: dyndep" in dyndep
+
+    def test_compatible_compiles_share_one_ifc_path(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        from pcons.core.project import Project
+
+        monkeypatch.chdir(tmp_path)
+        tc = MsvcToolchain()
+        project = Project("bmi", root_dir=tmp_path, build_dir="build")
+
+        env = SimpleNamespace(
+            cxx=SimpleNamespace(cmd="cl.exe", flags=["/nologo"], defines=[]),
+            register_node=lambda _node: None,
+        )
+
+        # Same dialect, two targets: they may share one compiled interface, so
+        # only one of them carries the /ifcOutput (the second is collapsed).
+        prov_a = self._make_obj(env, "build/obj.lib1/provider.cppm.obj", ["/std:c++23"])
+        prov_b = self._make_obj(env, "build/obj.lib2/provider.cppm.obj", ["/std:c++23"])
+        module_pairs = [
+            (tmp_path / "provider.cppm", prov_a),
+            (tmp_path / "provider.cppm", prov_b),
+        ]
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.select_modules_scope",
+            lambda _s: (module_pairs, []),
+        )
+
+        def fake_scan(specs, scanner, scanner_style):
+            return [
+                SimpleNamespace(
+                    spec=s,
+                    is_module_provider=True,
+                    is_interface=True,
+                    logical_name="provider",
+                    required_logical_names=set(),
+                )
+                for s in specs
+            ]
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.scan_translation_units", fake_scan
+        )
+
+        # Two distinct objects providing the same module with BMI-equivalent
+        # flags would both write the same keyed .ifc - that's a hard error.
+        with pytest.raises(RuntimeError, match="BMI-equivalent flags"):
+            tc.after_resolve(project, {"cxx": [], "cxx_module": []})
+
+
 class TestMsvcLinkerAcceptsRes:
     def test_program_builder_accepts_res(self):
         """Test that Program builder accepts .res files."""
