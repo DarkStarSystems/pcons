@@ -120,6 +120,58 @@ class TestSha256Record:
 
 
 # ---------------------------------------------------------------------------
+# _render_metadata
+# ---------------------------------------------------------------------------
+
+
+class TestRenderMetadata:
+    def test_minimal(self) -> None:
+        meta = backend._render_metadata("mypkg", "1.0", {})
+        assert "Metadata-Version: 2.1" in meta
+        assert "Name: mypkg" in meta
+        assert "Version: 1.0" in meta
+
+    def test_requires_python(self) -> None:
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"requires-python": ">=3.11"}
+        )
+        assert "Requires-Python: >=3.11" in meta
+
+    def test_dependencies_become_requires_dist(self) -> None:
+        meta = backend._render_metadata(
+            "mypkg",
+            "1.0",
+            {"dependencies": ["requests>=2", "rich; python_version >= '3.8'"]},
+        )
+        assert "Requires-Dist: requests>=2" in meta
+        assert "Requires-Dist: rich; python_version >= '3.8'" in meta
+
+    def test_unsupported_field_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="optional-dependencies"):
+            backend._render_metadata(
+                "mypkg", "1.0", {"optional-dependencies": {"test": ["pytest"]}}
+            )
+
+    def test_error_lists_every_unsupported_field(self) -> None:
+        with pytest.raises(RuntimeError) as exc:
+            backend._render_metadata(
+                "mypkg",
+                "1.0",
+                {"description": "hi", "scripts": {"cli": "mypkg:main"}},
+            )
+        message = str(exc.value)
+        assert "description" in message
+        assert "scripts" in message
+
+    def test_empty_unsupported_field_is_ignored(self) -> None:
+        # A present-but-empty field (e.g. dynamic = []) is not a dropped value.
+        meta = backend._render_metadata(
+            "mypkg", "1.0", {"description": "", "keywords": []}
+        )
+        assert "Name: mypkg" in meta
+
+
+# ---------------------------------------------------------------------------
 # _write_wheel
 # ---------------------------------------------------------------------------
 
@@ -134,6 +186,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
+            backend._render_metadata("mypkg", "1.0", {}),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -149,6 +202,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
+            backend._render_metadata("mypkg", "1.0", {}),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -168,6 +222,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
+            backend._render_metadata("mypkg", "1.0", {}),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -187,6 +242,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
+            backend._render_metadata("mypkg", "1.0", {}),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -205,6 +261,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
+            backend._render_metadata("mypkg", "1.0", {}),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -221,6 +278,7 @@ class TestWriteWheel:
             "1.0",
             [ext],
             tmp_path / "build",
+            backend._render_metadata("mypkg", "1.0", {}),
             "cp314",
             "cp314",
             "linux_x86_64",
@@ -245,6 +303,7 @@ class TestWriteWheel:
             "1.0",
             [root / "mypkg" / "__init__.py", ext],
             root,
+            backend._render_metadata("mypkg", "1.0", {}),
             "cp314",
             "cp314",
             "linux_x86_64",

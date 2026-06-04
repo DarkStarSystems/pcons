@@ -37,6 +37,50 @@ def _load_pyproject(source_dir: Path) -> dict[str, Any]:
         return tomllib.load(f)
 
 
+# PEP 621 [project] fields the backend renders into METADATA.
+# Any other non-dynamic field present in [project]
+# is rejected rather than silently dropped,
+# so a package never installs with metadata that quietly lost its
+# dependencies, entry points, license, etc.
+_HONORED_PROJECT_FIELDS = frozenset(
+    {"name", "version", "requires-python", "dependencies"}
+)
+
+
+def _render_metadata(name: str, version: str, project: dict[str, Any]) -> str:
+    """Render the wheel METADATA file from the ``[project]`` table.
+
+    Honors ``Name``, ``Version``, ``Requires-Python`` and ``Requires-Dist``.
+    PEP 621 requires the backend to honor every non-dynamic ``[project]`` field,
+    so any other field present (``description``, ``readme``, ``license``,
+    ``authors``, ``optional-dependencies``, entry points, ...) raises instead of
+    being silently dropped.
+    """
+    unsupported = sorted(
+        field
+        for field, value in project.items()
+        if field not in _HONORED_PROJECT_FIELDS and value
+    )
+    if unsupported:
+        raise RuntimeError(
+            "pcons build backend cannot yet honor these pyproject [project] "
+            f"fields and refuses to drop them silently: {', '.join(unsupported)}. "
+            "Remove them, or add support in pcons.pyproject."
+        )
+
+    lines = [
+        "Metadata-Version: 2.1",
+        f"Name: {name}",
+        f"Version: {version}",
+    ]
+    requires_python = project.get("requires-python")
+    if requires_python:
+        lines.append(f"Requires-Python: {requires_python}")
+    for dep in project.get("dependencies", []):
+        lines.append(f"Requires-Dist: {dep}")
+    return "\n".join(lines) + "\n"
+
+
 def _wheel_tag() -> tuple[str, str, str]:
     """Return (python_tag, abi_tag, platform_tag) for the running interpreter."""
     vi = sys.version_info
@@ -92,6 +136,7 @@ def _write_wheel(
     version: str,
     files: list[Path],
     root: Path,
+    metadata: str,
     python_tag: str,
     abi_tag: str,
     platform_tag: str,
@@ -99,6 +144,7 @@ def _write_wheel(
     """Create the .whl file (a zip) at *wheel_path*.
 
     *root* is the staging directory that serves as the site-packages image, the structure is preserved.
+    *metadata* is the rendered dist-info/METADATA text (see :func:`_render_metadata`).
     """
     dist_info = f"{name}-{version}.dist-info"
 
@@ -108,7 +154,7 @@ def _write_wheel(
         "Root-Is-Purelib: false\n"
         f"Tag: {python_tag}-{abi_tag}-{platform_tag}\n"
     )
-    pkg_metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+    pkg_metadata = metadata
 
     # (arcname, hash, size) for RECORD
     record: list[tuple[str, str, int]] = []
@@ -145,6 +191,7 @@ def _write_editable_wheel(
     name: str,
     version: str,
     build_dir: Path,
+    metadata: str,
     python_tag: str,
     abi_tag: str,
     platform_tag: str,
@@ -155,6 +202,8 @@ def _write_editable_wheel(
     processed by Python's site module, which adds build_dir to sys.path.
     Imports then resolve directly to the compiled extensions in build_dir, so
     re-running ninja is enough to pick up rebuilt extensions without reinstalling.
+
+    *metadata* is the rendered dist-info/METADATA text (see :func:`_render_metadata`).
     """
     dist_info = f"{name}-{version}.dist-info"
     pth_name = f"_{name}_editable.pth"
@@ -166,7 +215,7 @@ def _write_editable_wheel(
         "Root-Is-Purelib: true\n"
         f"Tag: {python_tag}-{abi_tag}-{platform_tag}\n"
     )
-    pkg_metadata = f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
+    pkg_metadata = metadata
 
     record: list[tuple[str, str, int]] = []
 
@@ -250,9 +299,7 @@ def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
         f"Root-Is-Purelib: {purelib}\n"
         f"Tag: {tag}\n"
     )
-    (dist_info_dir / "METADATA").write_text(
-        f"Metadata-Version: 2.1\nName: {name}\nVersion: {version}\n"
-    )
+    (dist_info_dir / "METADATA").write_text(_render_metadata(name, version, project))
 
     return dist_info_name
 
@@ -277,6 +324,10 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
     wheel_name = f"{name}-{version}-{python_tag}-{abi_tag}-{platform_tag}.whl"
     wheel_dir.mkdir(parents=True, exist_ok=True)
 
+    # Render (and validate) metadata up front so an unsupported [project] field
+    # fails the build before any compilation happens.
+    metadata = _render_metadata(name, version, project)
+
     if editable:
         _run_pcons(source_dir, build_dir, variant=variant, variables=variables or None)
         _run_ninja(build_dir)
@@ -285,6 +336,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
             name,
             version,
             build_dir,
+            metadata,
             python_tag,
             abi_tag,
             platform_tag,
@@ -326,6 +378,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
             version,
             staged,
             staging_dir,
+            metadata,
             python_tag,
             abi_tag,
             platform_tag,
