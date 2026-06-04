@@ -364,10 +364,11 @@ class TestGccModulesDepsTracking:
             "pcons.toolchains.cxx_module_scanner.scan_translation_units",
             lambda specs, scanner, scanner_style: [
                 SimpleNamespace(
+                    spec=s,
                     required_logical_names=set(),
                     is_module_provider=False,
                 )
-                for _ in specs
+                for s in specs
             ],
         )
         monkeypatch.setattr(
