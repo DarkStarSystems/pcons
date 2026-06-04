@@ -156,11 +156,21 @@ class UsageRequirements(_UsageRequirementsStubs):
                     f'Use target.public.{key} = ["{values}"] or '
                     f'target.public.{key}.append("{values}").'
                 )
+            # Reuse the source list's concrete type so dedup behaviour carries over.
+            # A ValidatedUniqueList is rebuilt without its validator: the
+            # validator is bound to the owning Target (self-link / post-resolve checks),
+            # and merge() only targets a detached snapshot, so it has nothing to guard.
             mine = self._data.setdefault(key, type(values)())
             merge_flags(mine, values, separated_arg_flags)
 
     def clone(self) -> UsageRequirements:
-        """Create a copy of this UsageRequirements."""
+        """Create a copy of this UsageRequirements.
+
+        Each list keeps its concrete type (so dedup behaviour is preserved), but
+        a ValidatedUniqueList is rebuilt without its validator. That validator is
+        bound to the owning Target. A clone is a detached snapshot that is read,
+        not user-mutated, so the owner-specific guard does not apply to it.
+        """
         result = UsageRequirements()
         for k, v in self._data.items():
             result._data[k] = type(v)(v)
