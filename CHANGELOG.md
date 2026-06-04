@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Install prefix.** `Install()`, `InstallAs()`, and `InstallDir()` now place relative destinations under an install prefix (default `<project-root>/dist`), settable via `pcons PCONS_INSTALL_PREFIX=...`. Rooted destinations are used as-is; `no_prefix=True` keeps a destination inside the build directory. New `install_dir(env, target_type)` helper returns the toolchain's conventional install subdirectory (`bin` for programs, `lib` for libraries; DLLs go in `bin`). (PR #38)
+
+### Changed
+
+- **BREAKING: relative `Install()` destinations no longer land in the build directory.** `Install("lib", ...)` now installs to `<project-root>/dist/lib` instead of `build/lib`. Use `no_prefix=True` for the old behavior.
+
+### Fixed
+
+- GCC C++ modules builds now rebuild correctly when headers change: header depfiles are kept for non-module translation units, and Ninja rules are no longer merged across edges with different dependency styles. (PR #38)
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20)
+
 ## [0.18.0] - 2026-05-21
 
 ### Added

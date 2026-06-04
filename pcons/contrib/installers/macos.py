@@ -48,6 +48,9 @@ if TYPE_CHECKING:
 
 
 def _check_tool(tool: str, hint: str | None = None) -> str:
+    # Deferred import: importing _helpers at module scope triggers a runpy
+    # "found in sys.modules after import of package" RuntimeWarning when a
+    # build script is run via `python -m`.
     from pcons.contrib.installers._helpers import check_tool
 
     return check_tool(tool, hint)

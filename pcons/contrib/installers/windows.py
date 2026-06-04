@@ -122,6 +122,8 @@ def create_msix(
     """
     makeappx = _find_sdk_tool("MakeAppx.exe")
     if makeappx is None:
+        # Deferred import: avoids a runpy double-import RuntimeWarning when a
+        # build script is run via `python -m` (see macos.py:_check_tool).
         from pcons.contrib.installers._helpers import ToolNotFoundError
 
         raise ToolNotFoundError(

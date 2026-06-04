@@ -23,7 +23,7 @@ hello = project.Program("hello", env, sources=["src/hello.c"])
 # install_dir() picks the conventional subdir ("bin") from the toolchain.
 bins = project.Install(install_dir(env, "program"), [hello], name="install-hello")
 
-# Create alias after resolve() so output_nodes are populated
+# "ninja install" (or "make install") runs the install target
 project.Alias("install", bins)
 
 project.generate()

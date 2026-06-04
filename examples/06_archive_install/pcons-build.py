@@ -67,7 +67,6 @@ install_target = project.Install(
     name="install-tarballs",
 )
 
-# Create alias after resolve() so output_nodes are populated
 project.Alias("install", install_target)
 
 project.generate()

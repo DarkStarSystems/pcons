@@ -316,18 +316,21 @@ Pcons uses consistent path conventions throughout:
 
 - **Source paths** (inputs): Relative to the project root directory
 - **Target paths** (outputs): Relative to the build directory
+- **Install destinations**: Relative to the install prefix (`PCONS_INSTALL_PREFIX`, default `<project-root>/dist`) — see [Installing Files](#installing-files)
 - **Absolute paths**: Pass through unchanged
 
 This means you don't need to prefix output paths with `build_dir`:
 
 ```python
-# Good: paths are relative to build_dir
-project.Install("dist/lib", [mylib])
+# Good: output paths are relative to build_dir
 project.Tarfile(env, output="packages/release.tar.gz", ...)
-project.InstallDir("dist", src_dir / "assets")
+
+# Install destinations are relative to the install prefix (default: dist/)
+project.Install("lib", [mylib])              # -> <root>/dist/lib/
+project.InstallDir(".", src_dir / "assets")  # -> <root>/dist/assets/
 
 # Not needed: build_dir prefix is implicit
-# project.Install(build_dir / "dist/lib", [mylib])  # Unnecessary
+# project.Tarfile(env, output=build_dir / "packages/release.tar.gz", ...)  # Unnecessary
 ```
 
 If you accidentally include the build directory name in a relative path (e.g., `"build/dist"`), pcons will warn you but keep the path as-is, in case you intentionally want a `build/` subdirectory inside the build directory.
@@ -1677,19 +1680,40 @@ pcons generate --graph=deps.dot      # DOT format
 
 ### Installing Files
 
-Copy files to destination directories (paths are relative to `build_dir`):
+Copy files to destination directories. Relative destinations are placed under
+the **install prefix**, which defaults to `<project-root>/dist` and can be
+overridden with the `PCONS_INSTALL_PREFIX` variable:
+
+```bash
+pcons PCONS_INSTALL_PREFIX=/usr/local
+```
+
+Absolute (rooted) destinations are used as-is. Pass `no_prefix=True` to keep a
+relative destination inside the build directory instead (useful for staging).
 
 ```python
 # Install library and headers (Install takes a list of sources)
-project.Install("dist/lib", [mylib])
-project.Install("dist/include", header_nodes)
+project.Install("lib", [mylib])            # -> <prefix>/lib/
+project.Install("include", header_nodes)   # -> <prefix>/include/
 
 # Install with rename (InstallAs takes a single source, not a list)
 project.InstallAs("bundle/plugin.ofx", plugin_lib)
 
 # Install an entire directory tree (recursive copy)
-# Copies src_dir/assets/* to build/dist/assets/*
-project.InstallDir("dist", src_dir / "assets")
+# Copies src_dir/assets/* to <prefix>/assets/*
+project.InstallDir(".", src_dir / "assets")
+```
+
+The `install_dir()` helper returns the conventional install subdirectory for a
+target type, following the conventions of the platform the environment's
+toolchain targets (`bin` for programs, `lib` for libraries — except DLLs, which
+go in `bin` next to the executables that load them):
+
+```python
+from pcons import install_dir
+
+exe = project.Program("hello", env, sources=["src/hello.c"])
+project.Install(install_dir(env, "program"), [exe])   # -> <prefix>/bin/
 ```
 
 **Note:** `Install()` accepts a list of sources and copies each to the destination directory. `InstallAs()` takes exactly one source and copies it to the specified path (with optional rename). If you need to install multiple files with renaming, use multiple `InstallAs()` calls.
