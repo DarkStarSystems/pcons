@@ -53,17 +53,6 @@ def _sha256_record(data: bytes) -> str:
     return f"sha256={digest}"
 
 
-def _find_extensions(build_dir: Path) -> list[Path]:
-    """Glob for compiled extension modules under *build_dir*."""
-    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
-    return sorted(build_dir.rglob(f"*{ext_suffix}"))
-
-
-def _find_subs(build_dir: Path) -> list[Path]:
-    """Glob for files matching *pattern* under *build_dir*."""
-    return sorted(build_dir.rglob("*.pyi"))
-
-
 def _run_pcons(
     source_dir: Path,
     build_dir: Path,
@@ -310,19 +299,24 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
         _run_pcons(source_dir, build_dir, variant=variant, variables=variables)
         _run_ninja(build_dir, targets=[install_target])
 
-        extensions = _find_extensions(staging_dir)
-        if not extensions:
+        # The staging directory IS the wheel payload: package everything the
+        # install target put there (the extension(s), stubs, and any dependent
+        # shared libraries it pulled in), not just files matching a pattern.
+        staged = sorted(p for p in staging_dir.rglob("*") if p.is_file())
+
+        ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
+
+        if ext_suffix and not any(p.name.endswith(ext_suffix) for p in staged):
             raise RuntimeError(
-                f"No extension modules (with suffix {sysconfig.get_config_var('EXT_SUFFIX')!r})"
+                f"No extension modules (with suffix {ext_suffix!r})"
                 f" found in staging directory {staging_dir} after building"
                 f" install-target {install_target!r}"
             )
-        stubs = _find_subs(staging_dir)
         _write_wheel(
             wheel_dir / wheel_name,
             name,
             version,
-            [*extensions, *stubs],
+            staged,
             python_tag,
             abi_tag,
             platform_tag,

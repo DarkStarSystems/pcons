@@ -6,7 +6,7 @@ import sys
 import sysconfig
 from pathlib import Path
 
-from pcons import ImportedTarget, Project, get_var, get_variant
+from pcons import ImportedTarget, Project, get_var, get_variant, install_dir
 from pcons.packages.finders import ConanFinder, PkgConfigFinder
 from pcons.toolchains import find_c_toolchain
 
@@ -62,18 +62,27 @@ assert nb_combined.is_file(), f"Amalgamated source not found at {nb_combined}"
 pcons_hello_ext = project.SharedLibrary(
     "pcons_hello_ext",
     env,
-    sources=["module.cpp", nb_combined],
+    sources=["src/module.cpp", nb_combined],
 )
 if toolchain.name in ("gcc", "llvm"):
     pcons_hello_ext.private.compile_flags.extend(
         ["-fvisibility=hidden", "-fno-strict-aliasing"]
     )
 
+hello_lib = project.SharedLibrary("hello_lib", env, sources=["src/hello.cpp"])
+hello_lib.public.include_dirs.append("src")
+
+if toolchain.name in ("gcc", "llvm"):
+    # use $ORIGIN rpath to avoid LD_LIBRARY_PATH patching in tests
+    # and to allow the extension to find the library
+    # when installed in a different location (e.g. site-packages)
+    pcons_hello_ext.private.link_flags.append("-Wl,-rpath,$$ORIGIN")
+
 # Python extensions must not have the "lib" prefix and must use the platform suffix
 # e.g. pcons_hello_ext.cpython-314-x86_64-linux-gnu.so
 pcons_hello_ext.output_prefix = ""
 pcons_hello_ext.output_suffix = sysconfig.get_config_var("EXT_SUFFIX")
-pcons_hello_ext.link(python, nanobind)
+pcons_hello_ext.link(python, nanobind, hello_lib)
 
 subgen = Path(nanobind.package.prefix) / "nanobind" / "stubgen.py"
 assert subgen.is_file(), f"Stub generator not found at {subgen}"
@@ -88,7 +97,11 @@ cmd = project.Command(
 # Stage the extension and its stubs for packaging. The pyproject build backend
 # points PCONS_INSTALL_PREFIX at a staging directory and builds the "install"
 # alias, then packages whatever lands there into the wheel.
-install = project.Install(".", [pcons_hello_ext, cmd], name="install")
+install = project.Install(
+    install_dir(env, "shared_library"),
+    [pcons_hello_ext, hello_lib, cmd],
+    name="install",
+)
 project.Alias("install", install)
 
 project.generate()

@@ -34,6 +34,16 @@ def _make_fake_extension(build_dir: Path, name: str = "myext") -> Path:
     return ext
 
 
+def _stage_extension_side_effect(build_dir: Path, targets: list[str] | None = None):
+    """Stand-in for _run_ninja that stages a fake extension into the wheel dir.
+
+    The non-editable wheel build packages whatever the install target copies
+    into ``build/.wheel-staging``, this mimics that so build_wheel tests don't
+    need a real ninja run.
+    """
+    _make_fake_extension(build_dir / ".wheel-staging")
+
+
 # ---------------------------------------------------------------------------
 # _load_pyproject
 # ---------------------------------------------------------------------------
@@ -107,35 +117,6 @@ class TestSha256Record:
     def test_no_padding(self) -> None:
         result = backend._sha256_record(b"x")
         assert "=" not in result.split("sha256=", 1)[1]
-
-
-# ---------------------------------------------------------------------------
-# _find_extensions
-# ---------------------------------------------------------------------------
-
-
-class TestFindExtensions:
-    def test_finds_extension(self, tmp_path: Path) -> None:
-        ext = _make_fake_extension(tmp_path / "build")
-        found = backend._find_extensions(tmp_path / "build")
-        assert ext in found
-
-    def test_recursive(self, tmp_path: Path) -> None:
-        subdir = tmp_path / "build" / "obj"
-        ext = _make_fake_extension(subdir)
-        found = backend._find_extensions(tmp_path / "build")
-        assert ext in found
-
-    def test_empty_when_none(self, tmp_path: Path) -> None:
-        (tmp_path / "build").mkdir()
-        assert backend._find_extensions(tmp_path / "build") == []
-
-    def test_ignores_other_files(self, tmp_path: Path) -> None:
-        build = tmp_path / "build"
-        build.mkdir()
-        (build / "output.o").write_bytes(b"obj")
-        (build / "libfoo.a").write_bytes(b"archive")
-        assert backend._find_extensions(build) == []
 
 
 # ---------------------------------------------------------------------------
@@ -283,16 +264,23 @@ class TestBuildWheel:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         src, wheel_dir = self._setup(tmp_path, monkeypatch)
-        _ext = _make_fake_extension(src / "build")
 
         with (
             patch("pcons.pyproject._run_pcons") as mock_pcons,
-            patch("pcons.pyproject._run_ninja"),
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ),
         ):
             result = backend.build_wheel(str(wheel_dir))
 
         mock_pcons.assert_called_once_with(
-            src, src / "build", variant="release", variables={"TC": "gcc"}
+            src,
+            src / "build",
+            variant="release",
+            variables={
+                "TC": "gcc",
+                "PCONS_INSTALL_PREFIX": str(src / "build" / ".wheel-staging"),
+            },
         )
         python_tag, abi_tag, platform_tag = backend._wheel_tag()
         assert result == f"mypkg-0.1-{python_tag}-{abi_tag}-{platform_tag}.whl"
@@ -301,11 +289,12 @@ class TestBuildWheel:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         src, wheel_dir = self._setup(tmp_path, monkeypatch)
-        _make_fake_extension(src / "build")
 
         with (
             patch("pcons.pyproject._run_pcons"),
-            patch("pcons.pyproject._run_ninja"),
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ),
         ):
             filename = backend.build_wheel(str(wheel_dir))
 
@@ -316,17 +305,21 @@ class TestBuildWheel:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         src, wheel_dir = self._setup(tmp_path, monkeypatch)
-        _make_fake_extension(src / "build")
 
         with (
             patch("pcons.pyproject._run_pcons") as mock_pcons,
-            patch("pcons.pyproject._run_ninja"),
+            patch(
+                "pcons.pyproject._run_ninja", side_effect=_stage_extension_side_effect
+            ),
         ):
             backend.build_wheel(str(wheel_dir))
 
         _, kwargs = mock_pcons.call_args
         assert kwargs["variant"] == "release"
-        assert kwargs["variables"] == {"TC": "gcc"}
+        assert kwargs["variables"] == {
+            "TC": "gcc",
+            "PCONS_INSTALL_PREFIX": str(src / "build" / ".wheel-staging"),
+        }
 
     def test_no_extensions_raises(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
