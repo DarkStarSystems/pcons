@@ -7,6 +7,10 @@ name = "pcons_hello_ext"
 version = "0.0.1"
 requires-python = ">=3.11"
 
+[tool.uv]
+# Prevent from using uv bundled Python, and use the system Python instead.
+python-preference = "only-system"
+
 [tool.pcons]
 variant = "release"
 # The install target to use for building the wheel.
