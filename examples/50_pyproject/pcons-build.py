@@ -85,4 +85,10 @@ cmd = project.Command(
     command=[sys.executable, str(subgen), "--module", pcons_hello_ext.name],
 ).depends(pcons_hello_ext)
 
+# Stage the extension and its stubs for packaging. The pyproject build backend
+# points PCONS_INSTALL_PREFIX at a staging directory and builds the "install"
+# alias, then packages whatever lands there into the wheel.
+install = project.Install(".", [pcons_hello_ext, cmd], name="install")
+project.Alias("install", install)
+
 project.generate()

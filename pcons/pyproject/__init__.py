@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import shutil
 import sys
 import sysconfig
 import zipfile
@@ -83,11 +84,15 @@ def _run_pcons(
         raise RuntimeError(f"pcons-build.py exited with code {exit_code}")
 
 
-def _run_ninja(build_dir: Path) -> None:
-    """Run ninja in *build_dir* via pcons.cli.run_ninja."""
+def _run_ninja(build_dir: Path, targets: list[str] | None = None) -> None:
+    """Run ninja in *build_dir* via pcons.cli.run_ninja.
+
+    If *targets* is given, only those ninja targets are built (e.g. an
+    ``install`` alias), otherwise everything is built.
+    """
     from pcons.cli import run_ninja
 
-    exit_code = run_ninja(build_dir)
+    exit_code = run_ninja(build_dir, targets=targets)
     if exit_code != 0:
         raise RuntimeError(f"ninja exited with code {exit_code}")
 
@@ -271,16 +276,17 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
 
     pcons_cfg = pyproject.get("tool", {}).get("pcons", {})
     variant = pcons_cfg.get("variant")
-    variables = pcons_cfg.get("variables") or None
-
-    _run_pcons(source_dir, build_dir, variant=variant, variables=variables)
-    _run_ninja(build_dir)
+    variables = dict(pcons_cfg.get("variables") or {})
+    # Ninja target (alias) that stages the files to package into the wheel.
+    install_target = str(pcons_cfg.get("install-target", "wheel"))
 
     python_tag, abi_tag, platform_tag = _wheel_tag()
     wheel_name = f"{name}-{version}-{python_tag}-{abi_tag}-{platform_tag}.whl"
     wheel_dir.mkdir(parents=True, exist_ok=True)
 
     if editable:
+        _run_pcons(source_dir, build_dir, variant=variant, variables=variables or None)
+        _run_ninja(build_dir)
         _write_editable_wheel(
             wheel_dir / wheel_name,
             name,
@@ -291,13 +297,27 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
             platform_tag,
         )
     else:
-        extensions = _find_extensions(build_dir)
+        # Install the project into a clean staging directory, then package the
+        # extension modules and stubs that land there.  Pointing
+        # PCONS_INSTALL_PREFIX at the staging dir makes the project's Install
+        # targets copy their outputs into it; running the install-target alias
+        # builds and stages exactly what belongs in the wheel.
+        staging_dir = build_dir / ".wheel-staging"
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir)
+        variables["PCONS_INSTALL_PREFIX"] = str(staging_dir)
+
+        _run_pcons(source_dir, build_dir, variant=variant, variables=variables)
+        _run_ninja(build_dir, targets=[install_target])
+
+        extensions = _find_extensions(staging_dir)
         if not extensions:
             raise RuntimeError(
                 f"No extension modules (with suffix {sysconfig.get_config_var('EXT_SUFFIX')!r})"
-                f" found in {build_dir}"
+                f" found in staging directory {staging_dir} after building"
+                f" install-target {install_target!r}"
             )
-        stubs = _find_subs(build_dir)
+        stubs = _find_subs(staging_dir)
         _write_wheel(
             wheel_dir / wheel_name,
             name,

@@ -9,14 +9,31 @@ expected_outputs = [
 ]
 
 [verify]
-# uv sync installs pcons from the local checkout (injected by the test runner
-# via [tool.uv.sources]) into an isolated build environment, then builds and
-# installs pcons_hello_ext into the project .venv.  This exercises the full
-# PEP 517 / pcons.pyproject code path.
+# Two install paths are exercised, both driving the full PEP 517 / pcons.pyproject
+# code path. pcons is installed from the local checkout (injected by the test
+# runner via [tool.uv.sources]) into an isolated build environment.
+#
+# 1. Editable install (build_editable): uv sync drops a .pth pointing at the
+#    project build/ dir, so the imported extension lives under build/.
+# 2. Real install (build_wheel): uv build produces a wheel via the staging dir,
+#    which is installed into the venv, the extension then lives in site-packages.
 commands = [
+    # --- editable install ---
     { run = "uv sync" },
     { run = "uv run python -c \"import pcons_hello_ext; print(pcons_hello_ext.say_hello('world'))\"", expect_stdout = "Hello, world!" },
     { run = "uv run python -c \"import pcons_hello_ext; assert 'build' in pcons_hello_ext.__file__, f'Expected extension in build dir (editable install), found: {pcons_hello_ext.__file__}'\"" },
+
+    # --- real (non-editable) install from a built wheel ---
+    # Build a wheel and install it into the project .venv, replacing the editable
+    # install (whose .pth would otherwise shadow the wheel in site-packages).
+    # `--python .venv` pins uv pip to the project venv: under `uv run pytest`
+    # the inherited VIRTUAL_ENV points at the pcons repo venv,
+    # which uv pip would otherwise target instead.
+    { run = "uv build --wheel" },
+    { run = "uv pip uninstall --python .venv pcons_hello_ext" },
+    { run = "uv pip install --python .venv dist/*.whl" },
+    { run = "uv run --no-sync python -c \"import pcons_hello_ext; print(pcons_hello_ext.say_hello('world'))\"", expect_stdout = "Hello, world!" },
+    { run = "uv run --no-sync python -c \"import pcons_hello_ext; assert 'site-packages' in pcons_hello_ext.__file__, f'Expected installed (non-editable) extension in site-packages, found: {pcons_hello_ext.__file__}'\"" },
 ]
 
 [skip]

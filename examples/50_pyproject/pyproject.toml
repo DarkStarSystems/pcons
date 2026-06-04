@@ -9,4 +9,9 @@ requires-python = ">=3.11"
 
 [tool.pcons]
 variant = "release"
-# variables = { TOOLCHAIN = "gcc" }
+# The install target to use for building the wheel.
+# If not specified, the default "wheel" target will be used.
+install-target = "install"
+
+# Optional variables to pass to pcons for building.
+# variables = { BUILD_TESTS = "OFF" } # example
