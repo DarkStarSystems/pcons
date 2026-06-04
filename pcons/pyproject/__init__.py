@@ -91,11 +91,15 @@ def _write_wheel(
     name: str,
     version: str,
     files: list[Path],
+    root: Path,
     python_tag: str,
     abi_tag: str,
     platform_tag: str,
 ) -> None:
-    """Create the .whl file (a zip) at *wheel_path*."""
+    """Create the .whl file (a zip) at *wheel_path*.
+
+    *root* is the staging directory that serves as the site-packages image, the structure is preserved.
+    """
     dist_info = f"{name}-{version}.dist-info"
 
     wheel_meta = (
@@ -112,7 +116,7 @@ def _write_wheel(
     with zipfile.ZipFile(wheel_path, "w", zipfile.ZIP_DEFLATED) as zf:
         for file in files:
             data = file.read_bytes()
-            arcname = file.name
+            arcname = file.relative_to(root).as_posix()
             zf.writestr(arcname, data)
             record.append((arcname, _sha256_record(data), len(data)))
 
@@ -295,6 +299,10 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
         if staging_dir.exists():
             shutil.rmtree(staging_dir)
         variables["PCONS_INSTALL_PREFIX"] = str(staging_dir)
+        # Signal the build script that this is a wheel build so it can lay out
+        # its Install() targets as the site-packages image,
+        # eg.: install to the root of the prefix rather than the usual bin/lib convention.
+        variables["PCONS_BUILD_WHEEL"] = "1"
 
         _run_pcons(source_dir, build_dir, variant=variant, variables=variables)
         _run_ninja(build_dir, targets=[install_target])
@@ -317,6 +325,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
             name,
             version,
             staged,
+            staging_dir,
             python_tag,
             abi_tag,
             platform_tag,

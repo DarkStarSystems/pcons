@@ -107,8 +107,17 @@ cmd = project.Command(
 # Stage the extension and its stubs for packaging. The pyproject build backend
 # points PCONS_INSTALL_PREFIX at a staging directory and builds the "install"
 # alias, then packages whatever lands there into the wheel.
+# When building a wheel the backend sets PCONS_BUILD_WHEEL:
+# the staging dir is then the site-packages image, so we install to its root (".")
+# to place the extension and stubs at the top level where Python will import them.
+# Otherwise we follow the usual bin/lib convention.
+if get_var("PCONS_BUILD_WHEEL"):
+    install_destination = "."
+else:
+    install_destination = install_dir(env, "shared_library")
+
 install = project.Install(
-    install_dir(env, "shared_library"),
+    install_destination,
     [pcons_hello_ext, hello_lib, cmd],
     name="install",
 )

@@ -129,7 +129,14 @@ class TestWriteWheel:
         ext = _make_fake_extension(tmp_path / "build")
         wheel_path = tmp_path / "out.whl"
         backend._write_wheel(
-            wheel_path, "mypkg", "1.0", [ext], "cp314", "cp314", "linux_x86_64"
+            wheel_path,
+            "mypkg",
+            "1.0",
+            [ext],
+            tmp_path / "build",
+            "cp314",
+            "cp314",
+            "linux_x86_64",
         )
         assert zipfile.is_zipfile(wheel_path)
 
@@ -137,7 +144,14 @@ class TestWriteWheel:
         ext = _make_fake_extension(tmp_path / "build")
         wheel_path = tmp_path / "out.whl"
         backend._write_wheel(
-            wheel_path, "mypkg", "1.0", [ext], "cp314", "cp314", "linux_x86_64"
+            wheel_path,
+            "mypkg",
+            "1.0",
+            [ext],
+            tmp_path / "build",
+            "cp314",
+            "cp314",
+            "linux_x86_64",
         )
         with zipfile.ZipFile(wheel_path) as zf:
             names = zf.namelist()
@@ -149,7 +163,14 @@ class TestWriteWheel:
         ext = _make_fake_extension(tmp_path / "build")
         wheel_path = tmp_path / "out.whl"
         backend._write_wheel(
-            wheel_path, "mypkg", "1.0", [ext], "cp314", "cp314", "linux_x86_64"
+            wheel_path,
+            "mypkg",
+            "1.0",
+            [ext],
+            tmp_path / "build",
+            "cp314",
+            "cp314",
+            "linux_x86_64",
         )
         with zipfile.ZipFile(wheel_path) as zf:
             wheel_meta = zf.read("mypkg-1.0.dist-info/WHEEL").decode()
@@ -161,7 +182,14 @@ class TestWriteWheel:
         ext = _make_fake_extension(tmp_path / "build")
         wheel_path = tmp_path / "out.whl"
         backend._write_wheel(
-            wheel_path, "mypkg", "1.0", [ext], "cp314", "cp314", "linux_x86_64"
+            wheel_path,
+            "mypkg",
+            "1.0",
+            [ext],
+            tmp_path / "build",
+            "cp314",
+            "cp314",
+            "linux_x86_64",
         )
         with zipfile.ZipFile(wheel_path) as zf:
             metadata = zf.read("mypkg-1.0.dist-info/METADATA").decode()
@@ -172,7 +200,14 @@ class TestWriteWheel:
         ext = _make_fake_extension(tmp_path / "build", name="myext")
         wheel_path = tmp_path / "out.whl"
         backend._write_wheel(
-            wheel_path, "mypkg", "1.0", [ext], "cp314", "cp314", "linux_x86_64"
+            wheel_path,
+            "mypkg",
+            "1.0",
+            [ext],
+            tmp_path / "build",
+            "cp314",
+            "cp314",
+            "linux_x86_64",
         )
         with zipfile.ZipFile(wheel_path) as zf:
             assert ext.name in zf.namelist()
@@ -181,7 +216,14 @@ class TestWriteWheel:
         ext = _make_fake_extension(tmp_path / "build")
         wheel_path = tmp_path / "out.whl"
         backend._write_wheel(
-            wheel_path, "mypkg", "1.0", [ext], "cp314", "cp314", "linux_x86_64"
+            wheel_path,
+            "mypkg",
+            "1.0",
+            [ext],
+            tmp_path / "build",
+            "cp314",
+            "cp314",
+            "linux_x86_64",
         )
         with zipfile.ZipFile(wheel_path) as zf:
             record = zf.read("mypkg-1.0.dist-info/RECORD").decode()
@@ -190,6 +232,27 @@ class TestWriteWheel:
         assert "mypkg-1.0.dist-info/METADATA" in record
         # RECORD entry for itself must have no hash
         assert "mypkg-1.0.dist-info/RECORD,," in record
+
+    def test_preserves_package_directory_structure(self, tmp_path: Path) -> None:
+        root = tmp_path / "build" / ".wheel-staging"
+        (root / "mypkg").mkdir(parents=True)
+        (root / "mypkg" / "__init__.py").write_text("from ._ext import *\n")
+        ext = _make_fake_extension(root / "mypkg", name="_ext")
+        wheel_path = tmp_path / "out.whl"
+        backend._write_wheel(
+            wheel_path,
+            "mypkg",
+            "1.0",
+            [root / "mypkg" / "__init__.py", ext],
+            root,
+            "cp314",
+            "cp314",
+            "linux_x86_64",
+        )
+        with zipfile.ZipFile(wheel_path) as zf:
+            names = zf.namelist()
+        assert "mypkg/__init__.py" in names
+        assert f"mypkg/{ext.name}" in names
 
 
 # ---------------------------------------------------------------------------
@@ -280,6 +343,7 @@ class TestBuildWheel:
             variables={
                 "TC": "gcc",
                 "PCONS_INSTALL_PREFIX": str(src / "build" / ".wheel-staging"),
+                "PCONS_BUILD_WHEEL": "1",
             },
         )
         python_tag, abi_tag, platform_tag = backend._wheel_tag()
@@ -319,6 +383,7 @@ class TestBuildWheel:
         assert kwargs["variables"] == {
             "TC": "gcc",
             "PCONS_INSTALL_PREFIX": str(src / "build" / ".wheel-staging"),
+            "PCONS_BUILD_WHEEL": "1",
         }
 
     def test_no_extensions_raises(
