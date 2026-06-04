@@ -96,15 +96,15 @@ class TestUsageRequirements:
     def test_assignment_preserves_validator(self):
         """Assigning to a ValidatedUniqueList keeps validation on new contents."""
         req = UsageRequirements()
-        req.link_libs = ValidatedUniqueList([], validator=lambda x: x != "bad")
-        original = req.link_libs
 
-        req.link_libs = ["good", "bad", "ok"]
+        def __bad_raises(item):
+            if item == "bad":
+                raise ValueError("bad item not allowed")
 
-        assert req.link_libs is original
-        assert isinstance(req.link_libs, ValidatedUniqueList)
-        # The validator rejects "bad" even on full reassignment.
-        assert req.link_libs == ["good", "ok"]
+        req.link_libs = ValidatedUniqueList([], on_append=__bad_raises)
+
+        with pytest.raises(ValueError, match="bad item not allowed"):
+            req.link_libs = ["good", "bad", "ok"]
 
     def test_assignment_replaces_contents(self):
         """Reassignment replaces the old contents rather than appending."""

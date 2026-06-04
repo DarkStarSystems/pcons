@@ -82,14 +82,15 @@ class ValidatedUniqueList(UniqueList[_T]):
     def __init__(
         self,
         initlist: ListLike[_T] | None = None,
-        validator: Callable[[_T], bool] | None = None,
+        on_append: Callable[[_T], None] | None = None,
     ) -> None:
         super().__init__(initlist)
-        self.validator = validator
+        self._on_append = on_append
 
     def append(self, item: _T):
-        if self.validator is None or self.validator(item):
-            super().append(item)
+        if self._on_append is not None:
+            self._on_append(item)
+        super().append(item)
 
 
 class UsageRequirements(_UsageRequirementsStubs):
@@ -103,6 +104,13 @@ class UsageRequirements(_UsageRequirementsStubs):
     define its own requirement names. C/C++ toolchains use include_dirs,
     defines, compile_flags, link_flags, link_libs. Other toolchains can
     use any names they need (e.g., python_packages, data_schemas).
+
+    A field may use a special list type (``UniqueList`` dedup, or
+    ``ValidatedUniqueList`` whose ``on_append`` hook enforces invariants and
+    invalidates caches). Whole-list assignment preserves those semantics:
+    ``__setattr__`` replaces an existing list's *contents* in place (clear +
+    extend through ``append``), so ``reqs.link_libs = [a, b]`` behaves like
+    repeated ``.append()`` instead of swapping in a plain list.
     """
 
     _data: dict[str, list[Any] | UserList[Any]]
@@ -132,9 +140,9 @@ class UsageRequirements(_UsageRequirementsStubs):
                 )
             existing = self._data.get(name)
             if isinstance(existing, UserList):
-                # preserve behavior of existing list type (e.g., UniqueList, ValidatedUniqueList) on assignment,
-                # by clearing and extending it instead of replacing it.
-                # This allows users to replace an entire list while keeping dedup/validation behavior.
+                # Replace contents in place so the existing list type's
+                # behavior (UniqueList dedup, ValidatedUniqueList.on_append)
+                # is preserved across assignment.
                 existing.clear()
                 existing.extend(value)
             else:
@@ -263,7 +271,7 @@ def is_qualified_name(name: str) -> bool:
 
 
 def _make_default_requirements(
-    link_libs_validator: Callable[[Any], bool],
+    link_libs_validator: Callable[[Any], None],
 ) -> UsageRequirements:
     """Create a default UsageRequirements with standard C/C++ fields."""
     reqs = UsageRequirements()
@@ -272,7 +280,7 @@ def _make_default_requirements(
     reqs.include_dirs = UniqueList([])
     reqs.link_dirs = UniqueList([])
     reqs.link_flags = UniqueList([])
-    reqs.link_libs = ValidatedUniqueList([], validator=link_libs_validator)
+    reqs.link_libs = ValidatedUniqueList([], on_append=link_libs_validator)
     return reqs
 
 
@@ -520,14 +528,13 @@ class Target:
         """All build nodes for this target (intermediate + output)."""
         return self.intermediate_nodes + self.output_nodes
 
-    def __link_libs_validator(self, target: Target) -> bool:
+    def __link_libs_validator(self, target: Target):
         if self._resolved:
             raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
         if target is self:
             raise ValueError(f"Target '{self.name}' cannot link itself.")
         # Invalidate cached requirements
         self._collected_requirements = None
-        return True
 
     @deprecated("Use target.{public,private}.link_libs instead")
     def link(self, *targets: Target) -> Target:
