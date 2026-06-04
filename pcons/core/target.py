@@ -557,7 +557,7 @@ class Target:
         if self._resolved:
             raise RuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
-                f"Call link() before project.resolve() or project.generate()."
+                f"Add link_libs before project.resolve() or project.generate()."
             )
         for target in targets:
             if isinstance(target, (list, tuple)):
@@ -579,10 +579,27 @@ class Target:
         return self
 
     def add_dependency(self, *targets: Target) -> Target:
+        """Add Targets as build dependencies of this target.
+
+        Each becomes a full dependency: it is included in
+        ``transitive_dependencies()`` and ``dependencies``, so its public
+        usage requirements propagate here. Unlike ``link_libs``, this does not
+        treat the targets as libraries to link, use ``target.{public,private}
+        .link_libs`` for that. Duplicates are ignored.
+
+        Args:
+            *targets: Targets to depend on.
+
+        Returns:
+            self for method chaining.
+
+        Raises:
+            RuntimeError: If called after the target has been resolved.
+        """
         if self._resolved:
             raise RuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
-                f"Call link() before project.resolve() or project.generate()."
+                f"Add dependencies before project.resolve() or project.generate()."
             )
         for target in targets:
             if target not in self._dependencies:
