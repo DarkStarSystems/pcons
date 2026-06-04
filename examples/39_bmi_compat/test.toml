@@ -32,4 +32,5 @@ description = "No rebuild when nothing changed"
 expect_no_work = true
 
 [skip]
+requires = ["clang-scan-deps", "clang++"]
 generators = ["xcode", "make"]

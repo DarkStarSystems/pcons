@@ -38,14 +38,13 @@ else:
 env = project.Environment(toolchain=toolchain)
 
 # Pick a shared dialect and a BMI-incompatible "breaker" dialect per toolchain.
-# MSVC needs /std: (and /EHsc to compile modules); GCC/clang use -std=.
 if toolchain.name == "msvc":
     env.cxx.flags.append("/EHsc")
     shared_dialect = ["/std:c++20"]
     breaker_dialect = ["/std:c++latest"]
 else:
-    shared_dialect = ["-std=c++23"]
-    breaker_dialect = ["-std=c++26"]
+    shared_dialect = ["-std=c++20"]
+    breaker_dialect = ["-std=c++23"]
 
 # lib1 and lib2: identical flags -> share one compiled interface.
 lib1 = project.StaticLibrary("lib1", env, sources=["provider.cppm", "consumer.cpp"])
