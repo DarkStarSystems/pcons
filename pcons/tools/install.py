@@ -53,17 +53,26 @@ def _stamp_name_for(path: Path) -> str:
     return s.replace("/", "_").replace("\\", "_") + ".stamp"
 
 
-def _install_role(dest: Path) -> PathRole | None:
-    """Return the node role for an install destination.
-    An absolute destination it is an ``"install_output"``.
-    A relative destination is a build-dir-relative staging path (e.g. the ``no_prefix``
-    installers in ``pcons.contrib.installers``), return ``None``.
+def _is_rooted(dest: Path) -> bool:
+    """Return whether *dest* is rooted (has a drive and/or a leading separator).
 
     ``Path.anchor`` is used rather than ``Path.is_absolute()`` because the
     latter is platform-dependent: ``Path("/opt/x").is_absolute()`` is False on
     Windows (no drive), which would misclassify a rooted POSIX-style path.
     """
-    return "install_output" if dest.anchor else None
+    return bool(dest.anchor)
+
+
+def _install_role(dest: Path) -> PathRole | None:
+    """Return the node role for an install destination.
+
+    A rooted destination lives outside the build tree, so it is an
+    ``"install_output"``.
+    A relative destination is a build-dir-relative staging path
+    (e.g. the ``no_prefix`` installers in ``pcons.contrib.installers``),
+    for which ``None`` is returned.
+    """
+    return "install_output" if _is_rooted(dest) else None
 
 
 def _deduplicate_target_name(project: Project, base_name: str) -> str:
@@ -529,7 +538,7 @@ class InstallBuilder:
             project, name or f"install_{dest_dir.name}"
         )
 
-        if not no_prefix and not dest_dir.is_absolute():
+        if not no_prefix and not _is_rooted(dest_dir):
             dest_dir = (
                 Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
                 / dest_dir
@@ -597,7 +606,7 @@ class InstallAsBuilder:
         dest = Path(dest)
         target_name = _deduplicate_target_name(project, name or f"install_{dest.name}")
 
-        if not no_prefix and not dest.is_absolute():
+        if not no_prefix and not _is_rooted(dest):
             dest = (
                 Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
                 / dest
@@ -654,7 +663,7 @@ class InstallDirBuilder:
             project, name or f"install_dir_{dest_dir.name}"
         )
 
-        if not no_prefix and not dest_dir.is_absolute():
+        if not no_prefix and not _is_rooted(dest_dir):
             dest_dir = (
                 Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
                 / dest_dir
