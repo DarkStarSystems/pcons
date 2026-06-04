@@ -244,6 +244,19 @@ def is_qualified_name(name: str) -> bool:
     return project is not None
 
 
+def _make_default_requirements(
+    link_libs_validator: Callable[[Any], bool],
+) -> UsageRequirements:
+    """Create a default UsageRequirements with standard C/C++ fields."""
+    reqs = UsageRequirements()
+    reqs.defines = UniqueList([])
+    reqs.include_dirs = UniqueList([])
+    reqs.link_dirs = UniqueList([])
+    reqs.link_flags = []
+    reqs.link_libs = ValidatedUniqueList([], validator=link_libs_validator)
+    return reqs
+
+
 class Target:
     """A named build target with usage requirements.
 
@@ -354,22 +367,8 @@ class Target:
         self.builder = builder
         self._sources: list[Node] = []
         self._dependencies: list[Target] = []
-        self.public = UsageRequirements()
-        self.public.defines = UniqueList([])  # type: ignore
-        self.public.include_dirs = UniqueList([])  # type: ignore
-        self.public.link_dirs = UniqueList([])
-        self.public.link_flags = []
-        self.public.link_libs = ValidatedUniqueList(  # type: ignore
-            [], validator=self.__link_libs_validator
-        )
-        self.private = UsageRequirements()
-        self.private.defines = UniqueList([])  # type: ignore
-        self.private.include_dirs = UniqueList([])  # type: ignore
-        self.private.link_dirs = UniqueList([])
-        self.private.link_flags = []
-        self.private.link_libs = ValidatedUniqueList(  # type: ignore
-            [], validator=self.__link_libs_validator
-        )
+        self.public = _make_default_requirements(self.__link_libs_validator)
+        self.private = _make_default_requirements(self.__link_libs_validator)
         self.required_languages: set[str] = set()
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
