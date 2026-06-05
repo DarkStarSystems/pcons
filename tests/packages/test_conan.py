@@ -380,11 +380,35 @@ Libs: -L${libdir} -ltest -lpthread
         assert pkg is not None
         assert pkg.name == "test"
         assert pkg.version == "1.2.3"
+        assert pkg.prefix == "/usr/local"
         assert "/usr/local/include" in pkg.include_dirs
         assert "TEST_DEFINE" in pkg.defines
         assert "/usr/local/lib" in pkg.library_dirs
         assert "test" in pkg.libraries
         assert "pthread" in pkg.libraries
+
+    def test_parse_single_pc_file_quoted_paths(self, tmp_path: Path) -> None:
+        """Conan's PkgConfigDeps quotes path values, quotes must be stripped."""
+        pc_file = tmp_path / "nanobind.pc"
+        pc_file.write_text(
+            """prefix=C:/Users/me/.conan2/p/nanob123/p
+libdir=${prefix}/lib
+includedir=${prefix}/nanobind/include
+
+Name: nanobind
+Version: 2.12.0
+Libs: -L"${libdir}"
+Cflags: -I"${includedir}"
+"""
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        pkg = finder._parse_single_pc_file(pc_file)
+
+        assert pkg is not None
+        assert pkg.prefix == "C:/Users/me/.conan2/p/nanob123/p"
+        assert pkg.include_dirs == ["C:/Users/me/.conan2/p/nanob123/p/nanobind/include"]
+        assert pkg.library_dirs == ["C:/Users/me/.conan2/p/nanob123/p/lib"]
 
     def test_parse_pc_files_manually(self, tmp_path: Path) -> None:
         """Test manual .pc file parsing."""

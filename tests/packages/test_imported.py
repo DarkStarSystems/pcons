@@ -136,7 +136,9 @@ class TestImportedTarget:
         assert "TEST_DEFINE" in target.public.defines
         assert "-DEXTRA_FLAG" in target.public.compile_flags
         assert "testlib" in target.public.link_libs
-        assert "-L/opt/test/lib" in target.public.link_flags
+        # Library dirs propagate as link_dirs so the consuming toolchain can
+        # apply the right prefix (-L for GCC/Clang, /LIBPATH: for MSVC).
+        assert Path("/opt/test/lib") in target.public.link_dirs
         assert "-Wl,-rpath,/opt/test/lib" in target.public.link_flags
 
     def test_public_requirements_frameworks_macos(self, test_project):  # noqa: F811
@@ -229,4 +231,6 @@ class TestImportedTarget:
         assert Path("/usr/include/openssl") in reqs.include_dirs
         assert "ssl" in reqs.link_libs
         assert "crypto" in reqs.link_libs
-        assert "-L/usr/lib" in reqs.link_flags
+        # Library dirs propagate as link_dirs
+        # (the toolchain applies -L or /LIBPATH:), not as pre-prefixed link_flags.
+        assert Path("/usr/lib") in reqs.link_dirs

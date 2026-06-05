@@ -28,12 +28,12 @@ else:
 env = project.Environment(toolchain=toolchain)
 
 if toolchain.name in ("msvc"):
-    env.cxx.flags.extend(["/std:c++23", "/EHsc", "/permissive-"])
+    env.cxx.flags.extend(["/std:c++20", "/EHsc", "/permissive-"])
 elif toolchain.name == "llvm":
-    env.cxx.flags.extend(["-std=c++23", "-stdlib=libc++"])
+    env.cxx.flags.extend(["-std=c++20", "-stdlib=libc++"])
     env.link.libs.append("c++")
 else:
-    env.cxx.flags.append("-std=c++23")
+    env.cxx.flags.append("-std=c++20")
 
 # Discover Python's dev headers from the *running* interpreter via sysconfig,
 # rather than pkg-config.
@@ -50,7 +50,9 @@ if sys.platform == "win32":
     libname = f"python{sys.version_info.major}{sys.version_info.minor}"
     if sysconfig.get_config_var("Py_GIL_DISABLED"):
         libname += "t"  # free-threaded builds link pythonNNt.lib
-    py_libraries = [libname]
+    # MSVC link.exe takes libraries as filenames (python314.lib), not -l names;
+    # a bare stem would be treated as python314.obj.
+    py_libraries = [f"{libname}.lib"]
 
 python = ImportedTarget.from_package(
     PackageDescription(
@@ -119,6 +121,7 @@ if toolchain.name in ("gcc", "llvm"):
 
 hello_lib = project.SharedLibrary("hello_lib", env, sources=["src/hello.cpp"])
 hello_lib.public.include_dirs.append("src")
+hello_lib.private.defines.append("HELLO_LIB_EXPORTS")
 
 # Python extensions must not have the "lib" prefix and must use the platform suffix
 # e.g. pcons_hello_ext.cpython-314-x86_64-linux-gnu.so

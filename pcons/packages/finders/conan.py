@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shlex
 import shutil
 import subprocess
 from pathlib import Path
@@ -660,8 +661,65 @@ class ConanFinder(BaseFinder):
             if pkg is not None:
                 packages[pkg.name] = pkg
 
+        # Resolve Requires: transitively and fold each required package's flags into the dependent.
+        # Real pkg-config does this when emitting
+        # --cflags/--libs (e.g. nanobind Requires tsl-robin-map, so building
+        # against nanobind must see robin-map's include dir).
+        # The manual parser sees each .pc in isolation, so we replicate the merge here.
+        self._merge_transitive_requires(packages)
+
         self._packages = packages
         return packages
+
+    @staticmethod
+    def _merge_transitive_requires(
+        packages: dict[str, PackageDescription],
+    ) -> None:
+        """Fold each package's transitive Requires flags into it, in place."""
+
+        def closure(name: str, seen: set[str]) -> list[str]:
+            ordered: list[str] = []
+            pkg = packages.get(name)
+            if pkg is None:
+                return ordered
+            for dep in pkg.dependencies:
+                if dep in seen or dep not in packages:
+                    continue
+                seen.add(dep)
+                ordered.append(dep)
+                ordered.extend(closure(dep, seen))
+            return ordered
+
+        def dedupe(seq: list[str]) -> list[str]:
+            seen: set[str] = set()
+            out: list[str] = []
+            for item in seq:
+                if item not in seen:
+                    seen.add(item)
+                    out.append(item)
+            return out
+
+        for name, pkg in packages.items():
+            dep_names = closure(name, {name})
+            if not dep_names:
+                continue
+            deps = [packages[d] for d in dep_names]
+            pkg.include_dirs = dedupe(
+                pkg.include_dirs + [d for dep in deps for d in dep.include_dirs]
+            )
+            pkg.library_dirs = dedupe(
+                pkg.library_dirs + [d for dep in deps for d in dep.library_dirs]
+            )
+            pkg.libraries = dedupe(
+                pkg.libraries + [d for dep in deps for d in dep.libraries]
+            )
+            pkg.defines = dedupe(pkg.defines + [d for dep in deps for d in dep.defines])
+            pkg.compile_flags = dedupe(
+                pkg.compile_flags + [f for dep in deps for f in dep.compile_flags]
+            )
+            pkg.link_flags = dedupe(
+                pkg.link_flags + [f for dep in deps for f in dep.link_flags]
+            )
 
     def _parse_single_pc_file(self, pc_file: Path) -> PackageDescription | None:
         """Parse a single .pc file.
@@ -682,6 +740,7 @@ class ConanFinder(BaseFinder):
         version = ""
         cflags = ""
         libs = ""
+        requires_raw = ""
 
         for line in content.splitlines():
             line = line.strip()
@@ -707,6 +766,10 @@ class ConanFinder(BaseFinder):
                     cflags = value
                 elif key == "libs":
                     libs = value
+                elif key in ("requires", "requires.private"):
+                    # Accumulate both public and private requires,
+                    # pkg-config merges the cflags/libs of both into its output.
+                    requires_raw = f"{requires_raw} {value}".strip()
 
         # Substitute variables recursively in cflags and libs
         def substitute_vars(s: str, max_iterations: int = 10) -> str:
@@ -723,16 +786,35 @@ class ConanFinder(BaseFinder):
         cflags = substitute_vars(cflags)
         libs = substitute_vars(libs)
 
+        def strip_quotes(value: str) -> str:
+            """Remove a single pair of surrounding matching quotes.
+
+            Conan's PkgConfigDeps generator quotes path values (e.g. ``-I"${includedir}"``).
+            Real pkg-config strips these, the manual fallback parser must too,
+            otherwise the leading quote defeats absolute-path detection downstream.
+            """
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                return value[1:-1]
+            return value
+
+        # Tokenize with shlex (posix=False keeps backslashes literal for
+        # Windows paths) so quoted values containing spaces stay intact.
+        def tokenize(s: str) -> list[str]:
+            try:
+                return shlex.split(s, posix=False)
+            except ValueError:
+                return s.split()
+
         # Parse cflags
         include_dirs: list[str] = []
         defines: list[str] = []
         compile_flags: list[str] = []
 
-        for flag in cflags.split():
+        for flag in tokenize(cflags):
             if flag.startswith("-I"):
-                include_dirs.append(flag[2:])
+                include_dirs.append(strip_quotes(flag[2:]))
             elif flag.startswith("-D"):
-                defines.append(flag[2:])
+                defines.append(strip_quotes(flag[2:]))
             else:
                 compile_flags.append(flag)
 
@@ -741,13 +823,29 @@ class ConanFinder(BaseFinder):
         libraries: list[str] = []
         link_flags: list[str] = []
 
-        for flag in libs.split():
+        for flag in tokenize(libs):
             if flag.startswith("-L"):
-                library_dirs.append(flag[2:])
+                library_dirs.append(strip_quotes(flag[2:]))
             elif flag.startswith("-l"):
-                libraries.append(flag[2:])
+                libraries.append(strip_quotes(flag[2:]))
             else:
                 link_flags.append(flag)
+
+        # Parse Requires names.
+        # Entries are separated by commas/whitespace and
+        # may carry a version constraint (e.g. "foo >= 1.2"),
+        # keep only names.
+        dependencies: list[str] = []
+        operators = {"=", "<", ">", "<=", ">=", "!="}
+        expect_version = False
+        for token in requires_raw.replace(",", " ").split():
+            if expect_version:
+                expect_version = False
+                continue
+            if token in operators:
+                expect_version = True
+                continue
+            dependencies.append(token)
 
         return PackageDescription(
             name=name,
@@ -758,6 +856,8 @@ class ConanFinder(BaseFinder):
             defines=defines,
             compile_flags=compile_flags,
             link_flags=link_flags,
+            dependencies=dependencies,
+            prefix=variables.get("prefix", ""),
             found_by="conan",
         )
 

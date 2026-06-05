@@ -76,6 +76,10 @@ class EffectiveRequirements:
         for lib in reqs.link_libs:
             if lib not in self.link_libs:
                 self.link_libs.append(lib)
+        for lib_dir in reqs.link_dirs:
+            dir_path = Path(lib_dir) if isinstance(lib_dir, str) else lib_dir
+            if dir_path not in self.link_dirs:
+                self.link_dirs.append(dir_path)
 
     def as_hashable_tuple(self) -> tuple:
         """Return hashable representation for caching.
