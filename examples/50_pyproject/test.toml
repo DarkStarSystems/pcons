@@ -60,6 +60,6 @@ commands = [
 ]
 
 [skip]
-platforms = ["windows", "darwin"]
+platforms = ["windows"]
 generators = ["xcode", "make"]
 
