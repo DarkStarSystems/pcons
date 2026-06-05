@@ -455,8 +455,7 @@ Cflags: -I/opt/bar/include
         build/<build_type>/generators (single-config) or build/generators
         (multi-config, i.e. MSVC on Windows). Discovery previously only looked
         at the former, so on Windows nothing was found and the package dict came
-        back empty (KeyError 'nanobind' on use). pkg-config is also typically
-        unavailable on Windows, so this exercises the manual-parse fallback too.
+        back empty (KeyError 'nanobind' on use).
         """
         gen_dir = tmp_path / gen_relpath
         gen_dir.mkdir(parents=True)
@@ -468,16 +467,51 @@ Cflags: -I/opt/nanobind/include
         )
 
         finder = ConanFinder(output_folder=tmp_path)
-        # Force the pkg-config-unavailable fallback (the Windows situation).
-        with patch(
-            "pcons.packages.finders.conan.PkgConfigFinder.is_available",
-            return_value=False,
-        ):
-            packages = finder._parse_pkgconfig_files()
+        packages = finder._parse_pkgconfig_files()
 
         assert "nanobind" in packages
         assert packages["nanobind"].version == "2.12.0"
         assert "/opt/nanobind/include" in packages["nanobind"].include_dirs
+
+    def test_parse_is_independent_of_system_pkgconfig(self, tmp_path: Path) -> None:
+        """Conan .pc files are parsed deterministically, not via pkg-config.
+
+        Regression: GitHub's windows-latest runners carry Strawberry Perl's old
+        pkg-config on PATH, and it failed to resolve nanobind's transitive
+        ``Requires`` — silently dropping the package (KeyError 'nanobind'
+        downstream). The same build worked on machines with no pkg-config. The
+        finder must parse its own generated files itself so the result is the
+        same everywhere, including merging transitive Requires and stripping the
+        quotes Conan puts around paths.
+        """
+        gen = tmp_path / "build" / "generators"
+        gen.mkdir(parents=True)
+        (gen / "nanobind.pc").write_text(
+            "prefix=/p/nanobind\n"
+            "includedir=${prefix}/include\n"
+            "Name: nanobind\n"
+            "Version: 2.12.0\n"
+            'Cflags: -I"${includedir}"\n'
+            "Requires: tsl-robin-map\n"
+        )
+        (gen / "tsl-robin-map.pc").write_text(
+            "prefix=/p/robin\n"
+            "includedir=${prefix}/include\n"
+            "Name: tsl-robin-map\n"
+            "Version: 1.4.0\n"
+            'Cflags: -I"${includedir}"\n'
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        packages = finder._parse_pkgconfig_files()
+
+        assert "nanobind" in packages
+        nb = packages["nanobind"]
+        # Own include dir, with Conan's surrounding quotes stripped.
+        assert "/p/nanobind/include" in nb.include_dirs
+        # Transitive include from tsl-robin-map merged in (what pkg-config
+        # --cflags would have done).
+        assert "/p/robin/include" in nb.include_dirs
 
 
 class TestConanFinderFind:

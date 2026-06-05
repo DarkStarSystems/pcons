@@ -19,7 +19,6 @@ from typing import TYPE_CHECKING, Any
 from pcons.configure.platform import get_platform
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.base import BaseFinder
-from pcons.packages.finders.pkgconfig import PkgConfigFinder
 
 if TYPE_CHECKING:
     from pcons.configure.config import Configure
@@ -562,16 +561,25 @@ class ConanFinder(BaseFinder):
         return self._parse_pkgconfig_files()
 
     def _parse_pkgconfig_files(self) -> dict[str, PackageDescription]:
-        """Parse all .pc files in the output folder.
+        """Parse the .pc files Conan's PkgConfigDeps generator produced.
 
-        Automatically searches cmake_layout subfolders if no .pc files found
-        in the main output folder.
+        Conan fully controls these files, so we parse them directly rather
+        than shelling out to a system pkg-config. Relying on pkg-config made
+        the result depend on whether one happens to be installed and on which
+        implementation it is: GitHub's windows-latest runners carry Strawberry
+        Perl's old pkg-config on PATH, and it fails to resolve nanobind's
+        transitive ``Requires`` — silently dropping the package, which
+        surfaces later as ``KeyError 'nanobind'`` — whereas the same build
+        works on machines with no pkg-config because the manual parser runs
+        instead. One deterministic, cross-platform path removes that
+        fragility.
+
+        Automatically searches cmake_layout subfolders if no .pc files are in
+        the main output folder.
 
         Returns:
             Dict mapping package names to PackageDescription objects.
         """
-        packages: dict[str, PackageDescription] = {}
-
         # Find the directory containing .pc files. With cmake_layout their
         # location depends on whether the CMake generator is single- or
         # multi-config:
@@ -588,54 +596,7 @@ class ConanFinder(BaseFinder):
             if candidates:
                 pc_dir = candidates[0]
 
-        if not list(pc_dir.glob("*.pc")):
-            # No .pc files found anywhere
-            self._packages = packages
-            return packages
-
-        # Create a PkgConfigFinder that searches in the pc_dir
-        # Set PKG_CONFIG_PATH environment for pkg-config
-        old_pkg_config_path = os.environ.get("PKG_CONFIG_PATH", "")
-        try:
-            # Prepend our pc_dir to PKG_CONFIG_PATH
-            new_path = str(pc_dir)
-            if old_pkg_config_path:
-                new_path = f"{new_path}{os.pathsep}{old_pkg_config_path}"
-            os.environ["PKG_CONFIG_PATH"] = new_path
-
-            finder = PkgConfigFinder()
-            if not finder.is_available():
-                # Fallback to manual parsing if pkg-config is not available
-                # (common on Windows). Parse the directory we just located the
-                # .pc files in, not self.output_folder — with cmake_layout they
-                # live in build/<build_type>/generators/, not the root.
-                return self._parse_pc_files_manually(pc_dir)
-
-            # Find all .pc files
-            for pc_file in pc_dir.glob("*.pc"):
-                pkg_name = pc_file.stem
-                # Skip private files (those with - in name that are components)
-                # but only if the base package also exists
-                if "-" in pkg_name:
-                    base_name = pkg_name.rsplit("-", 1)[0]
-                    base_pc = pc_dir / f"{base_name}.pc"
-                    if base_pc.exists():
-                        continue  # Skip, this is a component
-
-                pkg = finder.find(pkg_name)
-                if pkg is not None:
-                    pkg.found_by = "conan"
-                    packages[pkg_name] = pkg
-
-        finally:
-            # Restore original PKG_CONFIG_PATH
-            if old_pkg_config_path:
-                os.environ["PKG_CONFIG_PATH"] = old_pkg_config_path
-            elif "PKG_CONFIG_PATH" in os.environ:
-                del os.environ["PKG_CONFIG_PATH"]
-
-        self._packages = packages
-        return packages
+        return self._parse_pc_files_manually(pc_dir)
 
     def _parse_pc_files_manually(
         self, pc_dir: Path | None = None
