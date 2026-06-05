@@ -79,8 +79,9 @@ if toolchain.name in ("gcc", "llvm"):
         ["-fvisibility=hidden", "-fno-strict-aliasing"]
     )
 
-hello_lib = project.SharedLibrary("hello_lib", env, sources=["src/hello.cpp"])
-hello_lib.public.include_dirs.append("src")
+if sys.platform == "darwin":
+    # A Python extension leaves the CPython C-API symbols (Py*) undefined
+    pcons_hello_ext.private.link_flags.append("-Wl,-undefined,dynamic_lookup")
 
 if toolchain.name in ("gcc", "llvm"):
     # Add an rpath relative to the extension itself so it finds hello_lib
@@ -92,6 +93,9 @@ if toolchain.name in ("gcc", "llvm"):
     # - Mach-O uses @loader_path.
     rpath_origin = "@loader_path" if sys.platform == "darwin" else "$$ORIGIN"
     pcons_hello_ext.private.link_flags.append(f"-Wl,-rpath,{rpath_origin}")
+
+hello_lib = project.SharedLibrary("hello_lib", env, sources=["src/hello.cpp"])
+hello_lib.public.include_dirs.append("src")
 
 # Python extensions must not have the "lib" prefix and must use the platform suffix
 # e.g. pcons_hello_ext.cpython-314-x86_64-linux-gnu.so
