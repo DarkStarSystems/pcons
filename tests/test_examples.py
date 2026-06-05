@@ -424,9 +424,18 @@ def adapt_outputs_for_generator(
     Returns:
         List of adapted output paths.
     """
-    # On macOS shared libraries use .dylib regardless of generator
+    # On macOS plain shared libraries use .dylib regardless of generator, but
+    # Python extension modules keep .so (CPython's EXT_SUFFIX is e.g. .cpython-314-darwin.so).
     if platform.system().lower() == "darwin":
-        outputs = [o[:-3] + ".dylib" if o.endswith(".so") else o for o in outputs]
+
+        def _is_py_ext(path: str) -> bool:
+            base = path.rsplit("/", 1)[-1]
+            return any(m in base for m in (".cpython-", ".abi3.", ".pypy"))
+
+        outputs = [
+            o[:-3] + ".dylib" if o.endswith(".so") and not _is_py_ext(o) else o
+            for o in outputs
+        ]
 
     if generator == "ninja":
         return outputs
