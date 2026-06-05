@@ -576,18 +576,20 @@ def _patch_pyproject(work_dir: Path) -> None:
     if not needs_pcons:
         return
 
-    pcons_root = Path(__file__).parent.parent
-    # Append only if not already present (e.g. user pre-configured it)
+    # Leave a user-configured pcons source untouched.
     existing_sources = data.get("tool", {}).get("uv", {}).get("sources", {})
     if "pcons" in existing_sources:
         return
 
-    with open(pyproject_file, "a") as f:
-        f.write(
-            f"\n# Injected by test runner – points uv to the local pcons checkout\n"
-            f"[tool.uv.sources]\n"
-            f'pcons = {{ path = "{pcons_root}" }}\n'
-        )
+    import tomli_w
+
+    pcons_root = Path(__file__).parent.parent
+    data.setdefault("tool", {}).setdefault("uv", {}).setdefault("sources", {})[
+        "pcons"
+    ] = {"path": str(pcons_root)}
+
+    with open(pyproject_file, "wb") as f:
+        tomli_w.dump(data, f)
 
 
 def _run_generate(
