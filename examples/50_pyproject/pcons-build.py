@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Reproducer for missing header-triggered rebuild on regular .cpp in modules mode."""
+"""Build a nanobind Python extension, packaged via the pcons.pyproject backend."""
 
 import sys
 import sysconfig

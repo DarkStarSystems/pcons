@@ -169,6 +169,33 @@ class TestRenderMetadata:
         assert "Name: mypkg" in meta
 
 
+class TestNameVersion:
+    def test_returns_name_and_version(self) -> None:
+        assert backend._name_version({"name": "mypkg", "version": "1.0"}) == (
+            "mypkg",
+            "1.0",
+        )
+
+    def test_normalizes_hyphen_to_underscore(self) -> None:
+        assert backend._name_version({"name": "my-pkg", "version": "1.0"})[0] == (
+            "my_pkg"
+        )
+
+    def test_missing_name_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="name"):
+            backend._name_version({"version": "1.0"})
+
+    def test_missing_version_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="version"):
+            backend._name_version({"name": "mypkg"})
+
+    def test_missing_both_raises_listing_both(self) -> None:
+        with pytest.raises(RuntimeError) as exc:
+            backend._name_version({})
+        message = str(exc.value)
+        assert "name" in message and "version" in message
+
+
 # ---------------------------------------------------------------------------
 # _write_wheel
 # ---------------------------------------------------------------------------
@@ -317,11 +344,44 @@ class TestWriteWheel:
 # ---------------------------------------------------------------------------
 
 
-def test_get_requires_for_build_wheel_empty() -> None:
+def test_get_requires_for_build_wheel_needs_ninja_when_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(backend.shutil, "which", lambda _: None)
+    assert backend.get_requires_for_build_wheel() == ["ninja"]
+
+
+def test_get_requires_for_build_wheel_skips_ninja_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(backend.shutil, "which", lambda _: "/usr/bin/ninja")
     assert backend.get_requires_for_build_wheel() == []
 
 
+def test_get_requires_honors_ninja_override_on_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # NINJA points at an alternative runner resolvable on PATH: ninja is
+    # available even though plain "ninja" is not.
+    monkeypatch.setenv("NINJA", "n2")
+    monkeypatch.setattr(
+        backend.shutil, "which", lambda name: "/usr/bin/n2" if name == "n2" else None
+    )
+    assert backend.get_requires_for_build_wheel() == []
+
+
+def test_get_requires_provisions_ninja_when_override_unresolvable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # NINJA names something that isn't on PATH and isn't an absolute path, and
+    # plain "ninja" is absent too: provision the wheel.
+    monkeypatch.setenv("NINJA", "n2")
+    monkeypatch.setattr(backend.shutil, "which", lambda _: None)
+    assert backend.get_requires_for_build_wheel() == ["ninja"]
+
+
 def test_get_requires_for_build_sdist_empty() -> None:
+    # An sdist never runs ninja, so it must not pull it in even when absent.
     assert backend.get_requires_for_build_sdist() == []
 
 
@@ -562,7 +622,17 @@ class TestBuildSdist:
 # ---------------------------------------------------------------------------
 
 
-def test_get_requires_for_build_editable_empty() -> None:
+def test_get_requires_for_build_editable_needs_ninja_when_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(backend.shutil, "which", lambda _: None)
+    assert backend.get_requires_for_build_editable() == ["ninja"]
+
+
+def test_get_requires_for_build_editable_skips_ninja_when_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(backend.shutil, "which", lambda _: "/usr/bin/ninja")
     assert backend.get_requires_for_build_editable() == []
 
 

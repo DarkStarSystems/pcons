@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import os
 import shutil
 import sys
 import sysconfig
@@ -36,6 +37,38 @@ def _load_pyproject(source_dir: Path) -> dict[str, Any]:
 
     with open(pyproject, "rb") as f:
         return tomllib.load(f)
+
+
+def _name_version(project: dict[str, Any]) -> tuple[str, str]:
+    """Return the (normalized name, version) from the ``[project]`` table.
+
+    Both are required: a missing or empty ``name``/``version`` raises an error.
+    """
+    name = project.get("name")
+    version = project.get("version")
+    missing = [f for f, v in (("name", name), ("version", version)) if not v]
+    if missing:
+        raise RuntimeError(
+            "pyproject.toml [project] is missing required "
+            f"{' and '.join(missing)}. pcons cannot build a distribution "
+            "without it."
+        )
+    return str(name).replace("-", "_"), str(version)
+
+
+def _ninja_requirement() -> list[str]:
+    """Ask the frontend to install ninja if the build won't otherwise find it.
+
+    The build shells out to ninja, so request the ninja wheel unless one is
+    already reachable: a plain ``ninja`` on PATH, or a ``NINJA`` override naming
+    a runner on PATH or an absolute path.
+    """
+    override = os.environ.get("NINJA")
+    if override and (shutil.which(override) or Path(override).is_absolute()):
+        return []
+    if shutil.which("ninja"):
+        return []
+    return ["ninja"]
 
 
 # PEP 621 [project] fields the backend renders into METADATA.
@@ -299,20 +332,25 @@ __all__ = [
 def get_requires_for_build_wheel(
     config_settings: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Return extra requirements needed to build the wheel."""
-    return []
+    """Return extra requirements needed to build the wheel.
+
+    The build runs ninja, so request it when it isn't already on PATH.
+    """
+    return _ninja_requirement()
 
 
 def get_requires_for_build_sdist(
     config_settings: dict[str, Any] | None = None,
 ) -> list[str]:
+    # An sdist is just a tarball of sources; no ninja (or anything) needed.
     return []
 
 
 def get_requires_for_build_editable(
     config_settings: dict[str, Any] | None = None,
 ) -> list[str]:
-    return []
+    """The editable build runs ninja too; request it when it isn't on PATH."""
+    return _ninja_requirement()
 
 
 def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
@@ -321,8 +359,7 @@ def _prepare_metadata(metadata_directory: str, *, editable: bool) -> str:
 
     pyproject = _load_pyproject(source_dir)
     project = pyproject.get("project", {})
-    name = str(project.get("name", "unknown")).replace("-", "_")
-    version = str(project.get("version", "0.0.1"))
+    name, version = _name_version(project)
 
     python_tag, abi_tag, platform_tag = _wheel_tag()
     tag = f"{python_tag}-{abi_tag}-{platform_tag}"
@@ -350,8 +387,7 @@ def _build(wheel_directory: str, *, editable: bool) -> str:
 
     pyproject = _load_pyproject(source_dir)
     project = pyproject.get("project", {})
-    name = str(project.get("name", "unknown")).replace("-", "_")
-    version = str(project.get("version", "0.0.1"))
+    name, version = _name_version(project)
 
     pcons_cfg = pyproject.get("tool", {}).get("pcons", {})
     variant = pcons_cfg.get("variant")
@@ -477,8 +513,7 @@ def build_sdist(
 
     pyproject = _load_pyproject(source_dir)
     project = pyproject.get("project", {})
-    name = str(project.get("name", "unknown")).replace("-", "_")
-    version = str(project.get("version", "0.0.1"))
+    name, version = _name_version(project)
 
     sdist_name = f"{name}-{version}.tar.gz"
     sdist_dir.mkdir(parents=True, exist_ok=True)

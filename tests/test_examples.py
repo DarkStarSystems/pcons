@@ -267,20 +267,6 @@ def load_test_config(example_dir: Path) -> dict[str, Any]:
         return tomllib.load(f)
 
 
-def _get_python_version(python_exe: str) -> tuple[int, int]:
-    out = subprocess.check_output(
-        [
-            python_exe,
-            "-c",
-            "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
-        ],
-        text=True,
-    ).strip()
-
-    major, minor = out.split(".")
-    return int(major), int(minor)
-
-
 def should_skip(config: dict[str, Any]) -> str | None:
     """Check if this test should be skipped. Returns skip reason or None."""
     skip_config = config.get("skip", {})
