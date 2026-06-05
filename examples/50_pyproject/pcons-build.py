@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Build a nanobind Python extension, packaged via the pcons.pyproject backend."""
 
+import os
 import sys
 import sysconfig
 from pathlib import Path
@@ -16,13 +17,18 @@ project = Project("hello_python")
 toolchain_override = get_var("TOOLCHAIN")
 if toolchain_override:
     toolchain = find_c_toolchain(prefer=[toolchain_override])
+elif sys.platform == "win32":
+    # MSVC-ABI compilers only. The extension links the MSVC-built CPython
+    # (pythonNN.lib) and must match its ABI, so a GNU-driver clang (pcons's
+    # "llvm" toolchain, which may be on PATH) is not suitable here.
+    toolchain = find_c_toolchain(prefer=["msvc"])
 else:
-    toolchain = find_c_toolchain(prefer=["gcc", "llvm", "msvc"])
+    toolchain = find_c_toolchain(prefer=["gcc", "llvm"])
 
 env = project.Environment(toolchain=toolchain)
 
-if toolchain.name == "msvc":
-    env.cxx.flags.extend(["/std:c++latest", "/EHsc", "/permissive-"])
+if toolchain.name in ("msvc"):
+    env.cxx.flags.extend(["/std:c++23", "/EHsc", "/permissive-"])
 elif toolchain.name == "llvm":
     env.cxx.flags.extend(["-std=c++23", "-stdlib=libc++"])
     env.link.libs.append("c++")
@@ -31,6 +37,21 @@ else:
 
 # Discover Python's dev headers from the *running* interpreter via sysconfig,
 # rather than pkg-config.
+#
+# On Windows the linker must resolve every symbol, so we also link CPython's
+# import library (pythonNN.lib, in <base_prefix>/libs). On Linux/macOS the Py*
+# symbols are deliberately left undefined and resolved by the interpreter at
+# import time (see the macOS dynamic-lookup handling below), so no Python
+# library is linked there.
+py_library_dirs: list[str] = []
+py_libraries: list[str] = []
+if sys.platform == "win32":
+    py_library_dirs = [os.path.join(sys.base_prefix, "libs")]
+    libname = f"python{sys.version_info.major}{sys.version_info.minor}"
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        libname += "t"  # free-threaded builds link pythonNNt.lib
+    py_libraries = [libname]
+
 python = ImportedTarget.from_package(
     PackageDescription(
         name="python3",
@@ -39,6 +60,8 @@ python = ImportedTarget.from_package(
             sysconfig.get_path("include"),
             sysconfig.get_path("platinclude"),
         ],
+        library_dirs=py_library_dirs,
+        libraries=py_libraries,
         found_by="sysconfig",
     )
 )

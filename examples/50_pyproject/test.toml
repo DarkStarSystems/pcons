@@ -7,6 +7,10 @@ description = "Build a Python extension using the pyproject.toml backend and run
 expected_outputs = [
     "build/pcons_hello_ext.cpython-*.so",
 ]
+# On Windows the extension suffix is e.g. .cp314-win_amd64.pyd (not .so/.dll).
+expected_outputs_windows = [
+    "build/pcons_hello_ext.cp*.pyd",
+]
 
 [verify.variables]
 
@@ -51,7 +55,10 @@ commands = [
     # which uv pip would otherwise target instead.
     { run = "uv build --wheel" },
     { run = "uv pip uninstall --python .venv pcons_hello_ext" },
-    { run = "uv pip install --python .venv dist/*.whl" },
+    # Install the freshly built wheel by name from dist/, rather than globbing
+    # dist/*.whl: the glob isn't expanded by cmd.exe on Windows. --no-index keeps
+    # it offline (the package has no runtime deps).
+    { run = "uv pip install --python .venv --no-index --find-links dist pcons_hello_ext" },
     { run = "uv run --no-sync python -c \"${test_wheel_script}\"", expect_stdout = "Hello, world!" },
 
     # --- source distribution ---
@@ -60,6 +67,6 @@ commands = [
 ]
 
 [skip]
-platforms = ["windows"]
+platforms = []
 generators = ["xcode", "make"]
 
