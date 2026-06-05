@@ -2210,6 +2210,102 @@ ninja -C build installers  # Build installer packages
 
 For a complete working example, see `examples/19_installers/`.
 
+### Building Python Packages (PEP 517 Backend)
+
+!!! warning "Experimental"
+    The `pcons.pyproject` backend is new and marked experimental: the
+    `[tool.pcons]` keys and the `PCONS_BUILD_WHEEL` convention described below
+    may still change based on feedback.
+
+Pcons includes a [PEP 517](https://peps.python.org/pep-0517/) build backend,
+so a Python package with native extensions can use pcons as its build system
+directly from `pyproject.toml` — `pip install`, `uv sync`, `uv build`, and
+editable installs all work with no extra tooling:
+
+```toml
+[build-system]
+requires = ["pcons"]
+build-backend = "pcons.pyproject"
+
+[project]
+name = "mypkg"
+version = "1.0.0"
+requires-python = ">=3.11"
+
+[tool.pcons]
+variant = "release"          # optional: pcons variant to build
+install-target = "install"   # alias to build for wheels (default: "wheel")
+# variables = { SOME_VAR = "value" }  # optional: extra pcons variables
+```
+
+#### How wheels are built
+
+When a frontend (pip, uv, ...) asks for a wheel, the backend:
+
+1. Runs your `pcons-build.py` with `PCONS_INSTALL_PREFIX` pointing at a clean
+   staging directory, and `PCONS_BUILD_WHEEL=1` (see below).
+2. Runs ninja on the `install-target` alias, so your `Install()` targets copy
+   their outputs into the staging directory.
+3. Packages **everything in the staging directory, preserving its directory
+   structure**, into the wheel.
+
+The staging directory is the **site-packages image**: the tree your install
+target creates there is exactly the tree users get in `site-packages`.
+
+#### The `PCONS_BUILD_WHEEL` variable
+
+This is where the build script comes in. A normal `ninja install` should
+follow the usual `bin`/`lib` conventions, but a wheel build needs a
+package-shaped layout (`mypkg/__init__.py`, `mypkg/_ext.so`, ...) at the
+staging root. The backend sets the variable `PCONS_BUILD_WHEEL=1` during wheel
+builds so one build script can serve both:
+
+```python
+from pcons import get_var, install_dir
+
+if get_var("PCONS_BUILD_WHEEL"):
+    # Wheel build: the install prefix is the site-packages image.
+    # Lay files out exactly as they should appear after installation.
+    dest = "."
+else:
+    # Normal install: usual bin/lib conventions.
+    dest = install_dir(env, "shared_library")
+
+project.Install(dest, [my_extension], name="install")
+```
+
+If your build script ignores `PCONS_BUILD_WHEEL` and installs to `lib/`, the
+wheel will build and install, but won't have the correct dir layout. Always check the variable in
+any script that feeds the backend.
+
+#### Editable installs
+
+`pip install -e .` / `uv sync` (PEP 660) skips the staging step entirely: the
+backend builds the project and writes a wheel containing only a `.pth` file
+that puts the **build directory** on `sys.path`. Imports resolve directly to
+the compiled extensions in `build/`, so after editing C++ sources, re-running
+`ninja` is enough — no reinstall needed. (`PCONS_BUILD_WHEEL` is *not* set for
+editable builds.)
+
+#### Metadata and sdists
+
+The backend honors the PEP 621 `[project]` fields `name`, `version`,
+`requires-python`, and `dependencies` (emitted as `Requires-Dist`). Any other
+non-empty `[project]` field raises an error rather than being silently
+dropped from the wheel's metadata — remove the field or file an issue.
+`name` and `version` are required.
+
+`build_sdist` ships the whole source tree (recursively, excluding build
+output, VCS data, and tool caches) plus the spec-required `PKG-INFO`.
+
+Ninja is requested automatically as a build requirement in isolated builds
+when it isn't already on PATH (a `NINJA` environment variable override is
+respected).
+
+For a complete working example — a [nanobind](https://nanobind.readthedocs.io/)
+C++ extension using Conan, exercising editable installs, wheel builds, and
+sdists via `uv` — see `examples/50_pyproject/`.
+
 ### macOS Framework Linking
 
 On macOS, link against system frameworks using `env.Framework()`:

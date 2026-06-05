@@ -9,7 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Python packaging: PEP 517 build backend (experimental).** Python extension packages can now use pcons as their build system directly from `pyproject.toml` (`build-backend = "pcons.pyproject"`). Supports building wheels, editable installs (PEP 660 — imports resolve to the build directory, so `ninja` alone picks up changes), and sdists. Honors PEP 621 `[project]` metadata (`requires-python`, `dependencies`). Ninja is requested automatically in isolated builds when not already on PATH. Configure via `[tool.pcons]` (`variant`, `variables`, `install-target`); see the user guide and `examples/50_pyproject` (a nanobind C++ extension with Conan, exercising the full `uv sync` workflow). Marked experimental: the `[tool.pcons]` keys and the `PCONS_BUILD_WHEEL` convention may still change. (PR #37)
 - Importing a C++20 module whose compiled interface exists only under different BMI-sensitive flags is now a clear configure-time error (naming the module, the importer, and the fix), instead of a confusing compiler error at build time.
+
+### Fixed
+
+- On macOS, toolchain auto-detection no longer mistakes Apple's `gcc` shim (which is actually clang) for a real GCC. `find_c_toolchain(prefer=["gcc"])` now falls through to the next available toolchain instead of configuring clang with GCC assumptions. (PR #37)
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20)
 
 ## [0.19.0] - 2026-06-04
 
