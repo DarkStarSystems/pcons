@@ -19,6 +19,53 @@ from pcons.toolchains.gcc import (
 )
 
 
+class TestGccIsAvailable:
+    """`_gcc_is_available` must reject the Apple Clang `gcc` shim on macOS."""
+
+    def test_rejects_clang_shim(self, monkeypatch):
+        from pcons.toolchains import gcc
+
+        monkeypatch.setattr(gcc.shutil, "which", lambda _cmd: "/usr/bin/gcc")
+        monkeypatch.setattr(
+            gcc.subprocess,
+            "run",
+            lambda *a, **k: SimpleNamespace(
+                stdout="Apple clang version 17.0.0 (clang-1700.0.13.3)\n",
+                returncode=0,
+            ),
+        )
+        assert gcc._gcc_is_available() is False
+
+    def test_accepts_real_gcc(self, monkeypatch):
+        from pcons.toolchains import gcc
+
+        monkeypatch.setattr(gcc.shutil, "which", lambda _cmd: "/usr/bin/gcc")
+        monkeypatch.setattr(
+            gcc.subprocess,
+            "run",
+            lambda *a, **k: SimpleNamespace(
+                stdout="gcc (GCC) 14.2.1 20240805\n", returncode=0
+            ),
+        )
+        assert gcc._gcc_is_available() is True
+
+    def test_missing_gcc(self, monkeypatch):
+        from pcons.toolchains import gcc
+
+        monkeypatch.setattr(gcc.shutil, "which", lambda _cmd: None)
+        assert gcc._gcc_is_available() is False
+
+    def test_probe_failure_assumes_usable(self, monkeypatch):
+        from pcons.toolchains import gcc
+
+        def _boom(*_a, **_k):
+            raise OSError("cannot exec")
+
+        monkeypatch.setattr(gcc.shutil, "which", lambda _cmd: "/usr/bin/gcc")
+        monkeypatch.setattr(gcc.subprocess, "run", _boom)
+        assert gcc._gcc_is_available() is True
+
+
 class TestGccCCompiler:
     def test_creation(self):
         cc = GccCCompiler()

@@ -424,9 +424,18 @@ def adapt_outputs_for_generator(
     Returns:
         List of adapted output paths.
     """
-    # On macOS shared libraries use .dylib regardless of generator
+    # On macOS plain shared libraries use .dylib regardless of generator, but
+    # Python extension modules keep .so (CPython's EXT_SUFFIX is e.g. .cpython-314-darwin.so).
     if platform.system().lower() == "darwin":
-        outputs = [o[:-3] + ".dylib" if o.endswith(".so") else o for o in outputs]
+
+        def _is_py_ext(path: str) -> bool:
+            base = path.rsplit("/", 1)[-1]
+            return any(m in base for m in (".cpython-", ".abi3.", ".pypy"))
+
+        outputs = [
+            o[:-3] + ".dylib" if o.endswith(".so") and not _is_py_ext(o) else o
+            for o in outputs
+        ]
 
     if generator == "ninja":
         return outputs
@@ -552,6 +561,46 @@ def get_platform_value(
     return value
 
 
+def _patch_pyproject(work_dir: Path) -> None:
+    """Inject [tool.uv.sources] into a copied example's pyproject.toml.
+
+    When an example declares pcons as a build-system requirement, uv would
+    normally fetch it from PyPI.  During development pcons.pyproject may not
+    yet be published, so we redirect uv to the local checkout by appending a
+    [tool.uv.sources] section with an absolute path.  This only affects the
+    temporary copy; the original example file is left untouched.
+    """
+    pyproject_file = work_dir / "pyproject.toml"
+    if not pyproject_file.exists() or tomllib is None:
+        return
+
+    with open(pyproject_file, "rb") as f:
+        data = tomllib.load(f)
+
+    build_requires: list[str] = data.get("build-system", {}).get("requires", [])
+    needs_pcons = any(
+        req == "pcons" or req.startswith("pcons[") or req.startswith("pcons>=")
+        for req in build_requires
+    )
+    if not needs_pcons:
+        return
+
+    # Leave a user-configured pcons source untouched.
+    existing_sources = data.get("tool", {}).get("uv", {}).get("sources", {})
+    if "pcons" in existing_sources:
+        return
+
+    import tomli_w
+
+    pcons_root = Path(__file__).parent.parent
+    data.setdefault("tool", {}).setdefault("uv", {}).setdefault("sources", {})[
+        "pcons"
+    ] = {"path": str(pcons_root)}
+
+    with open(pyproject_file, "wb") as f:
+        tomli_w.dump(data, f)
+
+
 def _run_generate(
     work_dir: Path,
     build_dir: Path,
@@ -642,9 +691,16 @@ def _example_template_vars() -> dict[str, str]:
     }
 
 
-def _substitute_variables(path: str) -> str:
-    """Substitute ``${VAR}`` placeholders in an expected-output path."""
+def _substitute_variables(path: str, extra: dict[str, str] | None = None) -> str:
+    """Substitute ``${VAR}`` placeholders in a string.
+
+    *extra* supplies example-defined variables from the ``[test.variables]``
+    section, which take precedence over the built-in platform-derived ones and
+    let a test.toml factor out long inline scripts (see ``examples/50_pyproject``).
+    """
     table = _example_template_vars()
+    if extra:
+        table = {**table, **extra}
 
     def replacer(match: re.Match) -> str:
         var_name = match.group(1)
@@ -715,6 +771,12 @@ def run_example(
         work_dir,
         ignore=shutil.ignore_patterns("build", "compile_commands.json"),
     )
+
+    # If the example uses pcons as a PEP 517 build backend, inject a
+    # [tool.uv.sources] override pointing to the local pcons checkout so
+    # that `uv sync` (with isolation) installs the dev version rather than
+    # falling back to PyPI (which may not yet have the pcons.pyproject module).
+    _patch_pyproject(work_dir)
 
     build_dir = work_dir / "build"
     build_dir.mkdir(exist_ok=True)
@@ -928,10 +990,18 @@ def run_example(
     has_platform_override = f"commands_{current_platform}" in verify_config
     verify_commands = get_platform_value(verify_config, "commands", [])
 
+    # Example-defined [test.variables] are available as ${name} placeholders in
+    # verify commands, letting a test.toml factor out long inline scripts.
+    test_variables = verify_config.get("variables", {})
+
     for cmd_config in verify_commands:
         run_cmd = cmd_config.get("run")
         if not run_cmd:
             continue
+
+        # Expand ${...} placeholders (platform vars + [test.variables]) before
+        # any command adaptation or path resolution.
+        run_cmd = _substitute_variables(run_cmd, extra=test_variables)
 
         # Adapt command for Windows if no platform-specific override exists
         if IS_WINDOWS and not has_platform_override:

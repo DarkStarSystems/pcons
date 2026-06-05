@@ -1,0 +1,8 @@
+[requires]
+nanobind/2.12.0
+
+[generators]
+PkgConfigDeps
+
+[layout]
+cmake_layout
