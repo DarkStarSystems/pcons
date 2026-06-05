@@ -602,7 +602,9 @@ class GccToolchain(UnixToolchain):
             TuScanSpec,
             _write_text_if_changed,
             bmi_key_for_flags,
-            module_file_for,
+            build_keyed_entries,
+            keyed_bmi_path,
+            map_module_providers,
             scan_translation_units,
             select_modules_scope,
             wire_std_into_targets,
@@ -757,28 +759,13 @@ class GccToolchain(UnixToolchain):
         # longer land in the shared gcm.cache/; each compatibility class owns
         # cxx_modules/<key>/<module>.gcm, so the same logical module compiled
         # with incompatible flags never collides on a single output path.
-        def keyed_bmi(logical: str, key: str) -> str:
-            return module_file_for(logical, f"{moddir}/{key}", ".gcm")
-
+        provider_obj = map_module_providers(
+            results, spec_to_obj, obj_key, moddir, ".gcm"
+        )
         key_to_modules: dict[str, dict[str, str]] = {}
-        provider_obj: dict[tuple[str, str], str] = {}
-        for r in results:
-            if not r.is_module_provider:
-                continue
-            obj_node = spec_to_obj[id(r.spec)]
-            key = obj_key[id(obj_node)]
-            slot = (key, r.logical_name)
-            if slot in provider_obj and provider_obj[slot] != r.spec.obj_rel:
-                raise RuntimeError(
-                    f"Module '{r.logical_name}' is compiled into two different "
-                    f"objects ({provider_obj[slot]} and {r.spec.obj_rel}) with "
-                    f"BMI-equivalent flags, so both would write the same "
-                    f"{keyed_bmi(r.logical_name, key)}. Give them distinct "
-                    f"BMI-sensitive flags or build the interface in one place."
-                )
-            provider_obj[slot] = r.spec.obj_rel
-            key_to_modules.setdefault(key, {})[r.logical_name] = keyed_bmi(
-                r.logical_name, key
+        for (key, logical), _obj in provider_obj.items():
+            key_to_modules.setdefault(key, {})[logical] = keyed_bmi_path(
+                logical, moddir, key, ".gcm"
             )
 
         mapper_flag_for_key: dict[str, str] = {}
@@ -793,19 +780,9 @@ class GccToolchain(UnixToolchain):
 
         # Build a keyed dyndep: each TU's provides/requires resolve to BMIs in
         # its own compatibility class's directory.
-        entries: list[tuple[str, list[str], list[str]]] = []
-        for r in results:
-            obj_node = spec_to_obj[id(r.spec)]
-            key = obj_key[id(obj_node)]
-            provides: list[str] = []
-            if r.is_module_provider:
-                provides.append(keyed_bmi(r.logical_name, key))
-            requires: list[str] = [
-                keyed_bmi(ln, key)
-                for ln in r.required_logical_names
-                if (key, ln) in provider_obj
-            ]
-            entries.append((r.spec.obj_rel, provides, requires))
+        entries = build_keyed_entries(
+            results, spec_to_obj, obj_key, provider_obj, moddir, ".gcm"
+        )
         write_dyndep_entries(entries, dyndep_path)
         logger.debug("Wrote GCC C++ module dyndep to %s", dyndep_path)
 

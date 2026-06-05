@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Importing a C++20 module whose compiled interface exists only under different BMI-sensitive flags is now a clear configure-time error (naming the module, the importer, and the fix), instead of a confusing compiler error at build time.
+
 ## [0.19.0] - 2026-06-04
 
 ### Added

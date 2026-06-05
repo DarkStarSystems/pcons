@@ -710,6 +710,104 @@ def write_dyndep_from_results(
     write_dyndep_entries(entries, out_path)
 
 
+def keyed_bmi_path(logical_name: str, moddir: str, key: str, extension: str) -> str:
+    """BMI path for a logical module in its compatibility class's directory.
+
+    E.g. ``keyed_bmi_path("provider", "cxx_modules", "49eea...", ".pcm")`` ->
+    ``cxx_modules/49eea.../provider.pcm``.
+    """
+    return module_file_for(logical_name, f"{moddir}/{key}", extension)
+
+
+def map_module_providers(
+    results: list[TuScanResult],
+    spec_to_obj: dict[int, Any],
+    obj_key: dict[int, str],
+    moddir: str,
+    bmi_ext: str,
+) -> dict[tuple[str, str], str]:
+    """Map ``(bmi_key, logical_name)`` -> providing object path.
+
+    Walks the module-providing scan results and records which object compiles
+    each logical module within each BMI-compatibility class. Raises
+    RuntimeError if two *different* objects provide the same module with
+    BMI-equivalent flags — both would write the same keyed BMI path.
+
+    Results whose spec is not registered in ``spec_to_obj`` are skipped.
+    """
+    provider_obj: dict[tuple[str, str], str] = {}
+    for r in results:
+        if not r.is_module_provider:
+            continue
+        obj_node = spec_to_obj.get(id(r.spec))
+        if obj_node is None:
+            continue
+        key = obj_key[id(obj_node)]
+        slot = (key, r.logical_name)
+        if slot in provider_obj and provider_obj[slot] != r.spec.obj_rel:
+            raise RuntimeError(
+                f"Module '{r.logical_name}' is compiled into two different "
+                f"objects ({provider_obj[slot]} and {r.spec.obj_rel}) with "
+                f"BMI-equivalent flags, so both would write the same "
+                f"{keyed_bmi_path(r.logical_name, moddir, key, bmi_ext)}. "
+                f"Give them distinct BMI-sensitive flags or build the "
+                f"interface in one place."
+            )
+        provider_obj[slot] = r.spec.obj_rel
+    return provider_obj
+
+
+def build_keyed_entries(
+    results: list[TuScanResult],
+    spec_to_obj: dict[int, Any],
+    obj_key: dict[int, str],
+    provider_obj: dict[tuple[str, str], str],
+    moddir: str,
+    bmi_ext: str,
+) -> list[tuple[str, list[str], list[str]]]:
+    """Build dyndep entries with provides/requires keyed per compatibility class.
+
+    Each TU's provided and required modules resolve to BMI paths in its own
+    class's ``cxx_modules/<key>/`` directory (a BMI is only consumable by TUs
+    whose BMI-sensitive flags match).
+
+    Raises RuntimeError if a TU imports a module whose compiled interface
+    exists only in *other* compatibility classes — the import could never be
+    satisfied, and the compile-time error would be far less clear. Imports of
+    modules not provided anywhere in the project are passed through silently
+    (they may be satisfied externally).
+    """
+    entries: list[tuple[str, list[str], list[str]]] = []
+    provided_anywhere = {logical for _, logical in provider_obj}
+    for r in results:
+        obj_node = spec_to_obj.get(id(r.spec))
+        if obj_node is None:
+            continue
+        key = obj_key[id(obj_node)]
+        provides: list[str] = []
+        if r.is_module_provider:
+            provides.append(keyed_bmi_path(r.logical_name, moddir, key, bmi_ext))
+        requires: list[str] = []
+        for ln in r.required_logical_names:
+            if (key, ln) in provider_obj:
+                requires.append(keyed_bmi_path(ln, moddir, key, bmi_ext))
+            elif ln in provided_anywhere:
+                others = sorted(
+                    obj for (_, logical), obj in provider_obj.items() if logical == ln
+                )
+                raise RuntimeError(
+                    f"Module '{ln}' is imported by {r.spec.obj_rel}, but its "
+                    f"compiled interface is only built with different "
+                    f"BMI-sensitive flags (by {', '.join(others)}). A module "
+                    f"interface is only consumable by TUs whose BMI-sensitive "
+                    f"flags (C++ dialect, ABI options) match. Compile the "
+                    f"interface with this TU's flags too (e.g. add its source "
+                    f"to the importing target), or align the targets' flags."
+                )
+        entries.append((r.spec.obj_rel, provides, requires))
+    return entries
+
+
 def write_dyndep_entries(
     entries: list[tuple[str, list[str], list[str]]],
     out_path: str | Path,

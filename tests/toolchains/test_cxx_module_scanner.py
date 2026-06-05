@@ -19,7 +19,9 @@ from pcons.toolchains.cxx_module_scanner import (
     TuScanResult,
     TuScanSpec,
     bmi_key_for_flags,
+    build_keyed_entries,
     build_module_map,
+    map_module_providers,
     module_file_for,
     run_scan_deps,
     run_scan_deps_msvc,
@@ -669,3 +671,93 @@ class TestWriteDyndepEntries:
             "build obj.lib1/consumer.cpp.o: dyndep | cxx_modules/aaa/provider.gcm"
             in text
         )
+
+
+def _keyed_setup(
+    *entries: tuple[TuScanResult, str],
+) -> tuple[list[TuScanResult], dict[int, object], dict[int, str]]:
+    """Build (results, spec_to_obj, obj_key) from (result, bmi_key) pairs."""
+    results: list[TuScanResult] = []
+    spec_to_obj: dict[int, object] = {}
+    obj_key: dict[int, str] = {}
+    for r, key in entries:
+        obj_node = object()  # stand-in for a FileNode; only identity matters
+        results.append(r)
+        spec_to_obj[id(r.spec)] = obj_node
+        obj_key[id(obj_node)] = key
+    return results, spec_to_obj, obj_key
+
+
+class TestMapModuleProviders:
+    def test_maps_providers_per_key(self) -> None:
+        results, spec_to_obj, obj_key = _keyed_setup(
+            (_result("obj.lib1/provider.cppm.o", provides_name="provider"), "aaa"),
+            (_result("obj.lib3/provider.cppm.o", provides_name="provider"), "bbb"),
+            (_result("obj.lib1/consumer.cpp.o", requires=["provider"]), "aaa"),
+        )
+        providers = map_module_providers(
+            results, spec_to_obj, obj_key, "cxx_modules", ".gcm"
+        )
+        assert providers == {
+            ("aaa", "provider"): "obj.lib1/provider.cppm.o",
+            ("bbb", "provider"): "obj.lib3/provider.cppm.o",
+        }
+
+    def test_same_class_collision_raises(self) -> None:
+        results, spec_to_obj, obj_key = _keyed_setup(
+            (_result("obj.lib1/provider.cppm.o", provides_name="provider"), "aaa"),
+            (_result("obj.lib2/other.cppm.o", provides_name="provider"), "aaa"),
+        )
+        with pytest.raises(RuntimeError, match="two different objects"):
+            map_module_providers(results, spec_to_obj, obj_key, "cxx_modules", ".gcm")
+
+    def test_unregistered_spec_skipped(self) -> None:
+        r = _result("obj.lib1/provider.cppm.o", provides_name="provider")
+        providers = map_module_providers([r], {}, {}, "cxx_modules", ".gcm")
+        assert providers == {}
+
+
+class TestBuildKeyedEntries:
+    def test_provides_and_requires_keyed_per_class(self) -> None:
+        results, spec_to_obj, obj_key = _keyed_setup(
+            (_result("obj.lib1/provider.cppm.o", provides_name="provider"), "aaa"),
+            (_result("obj.lib1/consumer.cpp.o", requires=["provider"]), "aaa"),
+        )
+        providers = map_module_providers(
+            results, spec_to_obj, obj_key, "cxx_modules", ".pcm"
+        )
+        entries = build_keyed_entries(
+            results, spec_to_obj, obj_key, providers, "cxx_modules", ".pcm"
+        )
+        assert entries == [
+            ("obj.lib1/provider.cppm.o", ["cxx_modules/aaa/provider.pcm"], []),
+            ("obj.lib1/consumer.cpp.o", [], ["cxx_modules/aaa/provider.pcm"]),
+        ]
+
+    def test_import_with_provider_only_in_other_class_raises(self) -> None:
+        results, spec_to_obj, obj_key = _keyed_setup(
+            (_result("obj.lib1/provider.cppm.o", provides_name="provider"), "aaa"),
+            (_result("obj.lib3/consumer.cpp.o", requires=["provider"]), "bbb"),
+        )
+        providers = map_module_providers(
+            results, spec_to_obj, obj_key, "cxx_modules", ".pcm"
+        )
+        with pytest.raises(RuntimeError) as exc:
+            build_keyed_entries(
+                results, spec_to_obj, obj_key, providers, "cxx_modules", ".pcm"
+            )
+        msg = str(exc.value)
+        assert "'provider'" in msg
+        assert "obj.lib3/consumer.cpp.o" in msg
+        assert "obj.lib1/provider.cppm.o" in msg
+
+    def test_import_of_external_module_passed_through(self) -> None:
+        # A module not provided anywhere in the project may be satisfied
+        # externally; no entry and no error.
+        results, spec_to_obj, obj_key = _keyed_setup(
+            (_result("obj.lib1/consumer.cpp.o", requires=["vendor.sdk"]), "aaa"),
+        )
+        entries = build_keyed_entries(
+            results, spec_to_obj, obj_key, {}, "cxx_modules", ".pcm"
+        )
+        assert entries == [("obj.lib1/consumer.cpp.o", [], [])]

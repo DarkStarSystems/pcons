@@ -606,7 +606,9 @@ class LlvmToolchain(UnixToolchain):
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
             bmi_key_for_flags,
-            module_file_for,
+            build_keyed_entries,
+            keyed_bmi_path,
+            map_module_providers,
             scan_translation_units,
             select_modules_scope,
             wire_std_into_targets,
@@ -705,12 +707,14 @@ class LlvmToolchain(UnixToolchain):
             spec_to_obj,
         )
 
-        def keyed_bmi(logical: str, key: str) -> str:
-            return module_file_for(logical, f"{moddir}/{key}", ".pcm")
+        # Detect same-class provider collisions and map each (key, module) to
+        # its providing object.
+        provider_obj = map_module_providers(
+            results, spec_to_obj, obj_key, moddir, ".pcm"
+        )
 
         # For each module-providing TU (interfaces, partition interfaces, internal partitions),
         # inject -x c++-module and a keyed -fmodule-output.
-        provider_obj: dict[tuple[str, str], str] = {}
         for r in results:
             if not r.is_module_provider:
                 continue
@@ -720,23 +724,14 @@ class LlvmToolchain(UnixToolchain):
                 continue
             obj_node = spec_to_obj[id(r.spec)]
             key = obj_key[id(obj_node)]
-            slot = (key, r.logical_name)
-            if slot in provider_obj and provider_obj[slot] != r.spec.obj_rel:
-                raise RuntimeError(
-                    f"Module '{r.logical_name}' is compiled into two different "
-                    f"objects ({provider_obj[slot]} and {r.spec.obj_rel}) with "
-                    f"BMI-equivalent flags, so both would write the same "
-                    f"{keyed_bmi(r.logical_name, key)}. Give them distinct "
-                    f"BMI-sensitive flags or build the interface in one place."
-                )
-            provider_obj[slot] = r.spec.obj_rel
             bi = getattr(obj_node, "_build_info", None)
             if bi is None:
                 continue
             context = bi.get("context")
             if context is None or not hasattr(context, "flags"):
                 continue
-            module_out_flag = f"-fmodule-output={keyed_bmi(r.logical_name, key)}"
+            pcm_path = keyed_bmi_path(r.logical_name, moddir, key, ".pcm")
+            module_out_flag = f"-fmodule-output={pcm_path}"
             if module_out_flag not in context.flags:
                 context.flags.append(module_out_flag)
             if "-x" not in context.flags:
@@ -761,21 +756,9 @@ class LlvmToolchain(UnixToolchain):
 
         # Keyed dyndep: each TU's provides/requires resolve to PCMs in its own
         # compatibility class's directory.
-        entries: list[tuple[str, list[str], list[str]]] = []
-        for r in results:
-            obj_node = spec_to_obj.get(id(r.spec))
-            if obj_node is None:
-                continue
-            key = obj_key[id(obj_node)]
-            provides: list[str] = []
-            if r.is_module_provider:
-                provides.append(keyed_bmi(r.logical_name, key))
-            requires: list[str] = [
-                keyed_bmi(ln, key)
-                for ln in r.required_logical_names
-                if (key, ln) in provider_obj
-            ]
-            entries.append((r.spec.obj_rel, provides, requires))
+        entries = build_keyed_entries(
+            results, spec_to_obj, obj_key, provider_obj, moddir, ".pcm"
+        )
         write_dyndep_entries(entries, dyndep_path)
         logger.debug("Wrote C++ module dyndep to %s", dyndep_path)
 
