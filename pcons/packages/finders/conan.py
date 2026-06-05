@@ -571,16 +571,21 @@ class ConanFinder(BaseFinder):
         """
         packages: dict[str, PackageDescription] = {}
 
-        # Find the directory containing .pc files
-        # Conan with cmake_layout puts them in build/{build_type}/generators/
+        # Find the directory containing .pc files. With cmake_layout their
+        # location depends on whether the CMake generator is single- or
+        # multi-config:
+        #   single-config (Make/Ninja, e.g. gcc):  build/<build_type>/generators/
+        #   multi-config (MSVC/Xcode):              build/generators/
+        # Search recursively rather than enumerating layouts, so any future
+        # layout is handled too. Prefer a directory literally named "generators".
         pc_dir = self.output_folder
         if not list(pc_dir.glob("*.pc")):
-            # Check cmake_layout subfolders
-            for build_type in ["Release", "Debug", "RelWithDebInfo", "MinSizeRel"]:
-                candidate = self.output_folder / "build" / build_type / "generators"
-                if candidate.exists() and list(candidate.glob("*.pc")):
-                    pc_dir = candidate
-                    break
+            candidates = sorted(
+                {p.parent for p in self.output_folder.rglob("*.pc")},
+                key=lambda d: (d.name != "generators", str(d)),
+            )
+            if candidates:
+                pc_dir = candidates[0]
 
         if not list(pc_dir.glob("*.pc")):
             # No .pc files found anywhere
@@ -600,7 +605,10 @@ class ConanFinder(BaseFinder):
             finder = PkgConfigFinder()
             if not finder.is_available():
                 # Fallback to manual parsing if pkg-config is not available
-                return self._parse_pc_files_manually()
+                # (common on Windows). Parse the directory we just located the
+                # .pc files in, not self.output_folder — with cmake_layout they
+                # live in build/<build_type>/generators/, not the root.
+                return self._parse_pc_files_manually(pc_dir)
 
             # Find all .pc files
             for pc_file in pc_dir.glob("*.pc"):
@@ -628,17 +636,26 @@ class ConanFinder(BaseFinder):
         self._packages = packages
         return packages
 
-    def _parse_pc_files_manually(self) -> dict[str, PackageDescription]:
+    def _parse_pc_files_manually(
+        self, pc_dir: Path | None = None
+    ) -> dict[str, PackageDescription]:
         """Parse .pc files manually when pkg-config is not available.
 
         This is a fallback that parses the basic structure of .pc files.
+
+        Args:
+            pc_dir: Directory containing the .pc files. Defaults to the output
+                folder; callers that located the files in a cmake_layout
+                subfolder should pass that directory.
 
         Returns:
             Dict mapping package names to PackageDescription objects.
         """
         packages: dict[str, PackageDescription] = {}
+        if pc_dir is None:
+            pc_dir = self.output_folder
 
-        for pc_file in self.output_folder.glob("*.pc"):
+        for pc_file in pc_dir.glob("*.pc"):
             pkg = self._parse_single_pc_file(pc_file)
             if pkg is not None:
                 packages[pkg.name] = pkg

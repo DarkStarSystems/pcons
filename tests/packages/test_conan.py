@@ -413,6 +413,48 @@ Cflags: -I/opt/bar/include
         assert "bar" in packages["bar"].libraries
         assert "/opt/bar/include" in packages["bar"].include_dirs
 
+    @pytest.mark.parametrize(
+        "gen_relpath",
+        [
+            # single-config (Make/Ninja, e.g. gcc): build/<build_type>/generators
+            "build/Release/generators",
+            # multi-config (MSVC/Xcode): build/generators — the Windows layout
+            "build/generators",
+        ],
+    )
+    def test_parse_discovers_pc_files_across_cmake_layouts(
+        self, tmp_path: Path, gen_relpath: str
+    ) -> None:
+        """.pc files must be found in whichever generators/ subfolder they land.
+
+        Regression: cmake_layout puts the generated .pc files in
+        build/<build_type>/generators (single-config) or build/generators
+        (multi-config, i.e. MSVC on Windows). Discovery previously only looked
+        at the former, so on Windows nothing was found and the package dict came
+        back empty (KeyError 'nanobind' on use). pkg-config is also typically
+        unavailable on Windows, so this exercises the manual-parse fallback too.
+        """
+        gen_dir = tmp_path / gen_relpath
+        gen_dir.mkdir(parents=True)
+        (gen_dir / "nanobind.pc").write_text(
+            """Name: nanobind
+Version: 2.12.0
+Cflags: -I/opt/nanobind/include
+"""
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        # Force the pkg-config-unavailable fallback (the Windows situation).
+        with patch(
+            "pcons.packages.finders.conan.PkgConfigFinder.is_available",
+            return_value=False,
+        ):
+            packages = finder._parse_pkgconfig_files()
+
+        assert "nanobind" in packages
+        assert packages["nanobind"].version == "2.12.0"
+        assert "/opt/nanobind/include" in packages["nanobind"].include_dirs
+
 
 class TestConanFinderFind:
     """Tests for find() method."""
