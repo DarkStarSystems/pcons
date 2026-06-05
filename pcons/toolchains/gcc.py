@@ -11,6 +11,7 @@ Provides GCC-based C and C++ compilation toolchain including:
 from __future__ import annotations
 
 import logging
+import shutil
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -950,6 +951,32 @@ class GccToolchain(UnixToolchain):
 
 from pcons.tools.toolchain import SourceHandler, toolchain_registry  # noqa: E402
 
+
+def _gcc_is_available() -> bool:
+    """Check whether a *real* GCC is available as ``gcc``.
+
+    On Github-hosted macOS runners, gcc is a shim to apple-clang,
+    we should not treat it as a real GCC.
+    """
+    gcc = shutil.which("gcc")
+    if gcc is None:
+        return False
+
+    try:
+        result = subprocess.run(
+            [gcc, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        # assume it's usable for now
+        return True
+
+    # On Github-hosted macOS runners, gcc is a shim to apple-clang, let refuse it.
+    return "clang" not in result.stdout.lower()
+
+
 toolchain_registry.register(
     GccToolchain,
     aliases=["gcc", "gnu"],
@@ -959,4 +986,5 @@ toolchain_registry.register(
     platforms=["linux", "darwin", "win32"],
     description="GNU Compiler Collection (gcc/g++)",
     finder="find_c_toolchain()",
+    is_available=_gcc_is_available,
 )
