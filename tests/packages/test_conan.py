@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -288,6 +289,34 @@ Cflags: -I${includedir}
             assert pkg.name == "zlib"
             assert pkg.found_by == "conan"
 
+    def test_install_raises_when_nothing_parses(self, tmp_path: Path) -> None:
+        """Install must fail when conan succeeds but no .pc files are found."""
+        conanfile = tmp_path / "conanfile.txt"
+        conanfile.write_text("[requires]\nzlib/1.3\n")
+
+        output_folder = tmp_path / "deps"
+        output_folder.mkdir()
+
+        finder = ConanFinder(
+            conanfile=conanfile,
+            output_folder=output_folder,
+        )
+        finder.sync_profile()
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        with (
+            patch.object(finder, "is_available", return_value=True),
+            patch("subprocess.run", side_effect=mock_run),
+            pytest.raises(RuntimeError, match=re.escape(str(output_folder))),
+        ):
+            finder.install()
+
 
 class TestConanFinderCaching:
     """Tests for caching functionality."""
@@ -380,11 +409,35 @@ Libs: -L${libdir} -ltest -lpthread
         assert pkg is not None
         assert pkg.name == "test"
         assert pkg.version == "1.2.3"
+        assert pkg.prefix == "/usr/local"
         assert "/usr/local/include" in pkg.include_dirs
         assert "TEST_DEFINE" in pkg.defines
         assert "/usr/local/lib" in pkg.library_dirs
         assert "test" in pkg.libraries
         assert "pthread" in pkg.libraries
+
+    def test_parse_single_pc_file_quoted_paths(self, tmp_path: Path) -> None:
+        """Conan's PkgConfigDeps quotes path values, quotes must be stripped."""
+        pc_file = tmp_path / "nanobind.pc"
+        pc_file.write_text(
+            """prefix=C:/Users/me/.conan2/p/nanob123/p
+libdir=${prefix}/lib
+includedir=${prefix}/nanobind/include
+
+Name: nanobind
+Version: 2.12.0
+Libs: -L"${libdir}"
+Cflags: -I"${includedir}"
+"""
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        pkg = finder._parse_single_pc_file(pc_file)
+
+        assert pkg is not None
+        assert pkg.prefix == "C:/Users/me/.conan2/p/nanob123/p"
+        assert pkg.include_dirs == ["C:/Users/me/.conan2/p/nanob123/p/nanobind/include"]
+        assert pkg.library_dirs == ["C:/Users/me/.conan2/p/nanob123/p/lib"]
 
     def test_parse_pc_files_manually(self, tmp_path: Path) -> None:
         """Test manual .pc file parsing."""
@@ -412,6 +465,82 @@ Cflags: -I/opt/bar/include
         assert packages["bar"].version == "2.0"
         assert "bar" in packages["bar"].libraries
         assert "/opt/bar/include" in packages["bar"].include_dirs
+
+    @pytest.mark.parametrize(
+        "gen_relpath",
+        [
+            # single-config (Make/Ninja, e.g. gcc): build/<build_type>/generators
+            "build/Release/generators",
+            # multi-config (MSVC/Xcode): build/generators — the Windows layout
+            "build/generators",
+        ],
+    )
+    def test_parse_discovers_pc_files_across_cmake_layouts(
+        self, tmp_path: Path, gen_relpath: str
+    ) -> None:
+        """.pc files must be found in whichever generators/ subfolder they land.
+
+        Regression: cmake_layout puts the generated .pc files in
+        build/<build_type>/generators (single-config) or build/generators
+        (multi-config, i.e. MSVC on Windows). Discovery previously only looked
+        at the former, so on Windows nothing was found and the package dict came
+        back empty (KeyError 'nanobind' on use).
+        """
+        gen_dir = tmp_path / gen_relpath
+        gen_dir.mkdir(parents=True)
+        (gen_dir / "nanobind.pc").write_text(
+            """Name: nanobind
+Version: 2.12.0
+Cflags: -I/opt/nanobind/include
+"""
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        packages = finder._parse_pkgconfig_files()
+
+        assert "nanobind" in packages
+        assert packages["nanobind"].version == "2.12.0"
+        assert "/opt/nanobind/include" in packages["nanobind"].include_dirs
+
+    def test_parse_is_independent_of_system_pkgconfig(self, tmp_path: Path) -> None:
+        """Conan .pc files are parsed deterministically, not via pkg-config.
+
+        Regression: GitHub's windows-latest runners carry Strawberry Perl's old
+        pkg-config on PATH, and it failed to resolve nanobind's transitive
+        ``Requires`` — silently dropping the package (KeyError 'nanobind'
+        downstream). The same build worked on machines with no pkg-config. The
+        finder must parse its own generated files itself so the result is the
+        same everywhere, including merging transitive Requires and stripping the
+        quotes Conan puts around paths.
+        """
+        gen = tmp_path / "build" / "generators"
+        gen.mkdir(parents=True)
+        (gen / "nanobind.pc").write_text(
+            "prefix=/p/nanobind\n"
+            "includedir=${prefix}/include\n"
+            "Name: nanobind\n"
+            "Version: 2.12.0\n"
+            'Cflags: -I"${includedir}"\n'
+            "Requires: tsl-robin-map\n"
+        )
+        (gen / "tsl-robin-map.pc").write_text(
+            "prefix=/p/robin\n"
+            "includedir=${prefix}/include\n"
+            "Name: tsl-robin-map\n"
+            "Version: 1.4.0\n"
+            'Cflags: -I"${includedir}"\n'
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        packages = finder._parse_pkgconfig_files()
+
+        assert "nanobind" in packages
+        nb = packages["nanobind"]
+        # Own include dir, with Conan's surrounding quotes stripped.
+        assert "/p/nanobind/include" in nb.include_dirs
+        # Transitive include from tsl-robin-map merged in (what pkg-config
+        # --cflags would have done).
+        assert "/p/robin/include" in nb.include_dirs
 
 
 class TestConanFinderFind:

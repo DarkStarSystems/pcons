@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Build a nanobind Python extension, packaged via the pcons.pyproject backend."""
 
+import os
 import sys
 import sysconfig
 from pathlib import Path
@@ -16,21 +17,43 @@ project = Project("hello_python")
 toolchain_override = get_var("TOOLCHAIN")
 if toolchain_override:
     toolchain = find_c_toolchain(prefer=[toolchain_override])
+elif sys.platform == "win32":
+    # MSVC-ABI compilers only. The extension links the MSVC-built CPython
+    # (pythonNN.lib) and must match its ABI, so a GNU-driver clang (pcons's
+    # "llvm" toolchain, which may be on PATH) is not suitable here.
+    toolchain = find_c_toolchain(prefer=["msvc"])
 else:
-    toolchain = find_c_toolchain(prefer=["gcc", "llvm", "msvc"])
+    toolchain = find_c_toolchain(prefer=["gcc", "llvm"])
 
 env = project.Environment(toolchain=toolchain)
 
 if toolchain.name == "msvc":
-    env.cxx.flags.extend(["/std:c++latest", "/EHsc", "/permissive-"])
+    env.cxx.flags.extend(["/std:c++20", "/EHsc", "/permissive-"])
 elif toolchain.name == "llvm":
-    env.cxx.flags.extend(["-std=c++23", "-stdlib=libc++"])
+    env.cxx.flags.extend(["-std=c++20", "-stdlib=libc++"])
     env.link.libs.append("c++")
 else:
-    env.cxx.flags.append("-std=c++23")
+    env.cxx.flags.append("-std=c++20")
 
 # Discover Python's dev headers from the *running* interpreter via sysconfig,
 # rather than pkg-config.
+#
+# On Windows the linker must resolve every symbol, so we also link CPython's
+# import library (pythonNN.lib, in <base_prefix>/libs). On Linux/macOS the Py*
+# symbols are deliberately left undefined and resolved by the interpreter at
+# import time (see the macOS dynamic-lookup handling below), so no Python
+# library is linked there.
+py_library_dirs: list[str] = []
+py_libraries: list[str] = []
+if sys.platform == "win32":
+    py_library_dirs = [os.path.join(sys.base_prefix, "libs")]
+    libname = f"python{sys.version_info.major}{sys.version_info.minor}"
+    if sysconfig.get_config_var("Py_GIL_DISABLED"):
+        libname += "t"  # free-threaded builds link pythonNNt.lib
+    # MSVC link.exe takes libraries as filenames (python314.lib), not -l names;
+    # a bare stem would be treated as python314.obj.
+    py_libraries = [f"{libname}.lib"]
+
 python = ImportedTarget.from_package(
     PackageDescription(
         name="python3",
@@ -39,6 +62,8 @@ python = ImportedTarget.from_package(
             sysconfig.get_path("include"),
             sysconfig.get_path("platinclude"),
         ],
+        library_dirs=py_library_dirs,
+        libraries=py_libraries,
         found_by="sysconfig",
     )
 )
@@ -96,6 +121,7 @@ if toolchain.name in ("gcc", "llvm"):
 
 hello_lib = project.SharedLibrary("hello_lib", env, sources=["src/hello.cpp"])
 hello_lib.public.include_dirs.append("src")
+hello_lib.private.defines.append("HELLO_LIB_EXPORTS")
 
 # Python extensions must not have the "lib" prefix and must use the platform suffix
 # e.g. pcons_hello_ext.cpython-314-x86_64-linux-gnu.so

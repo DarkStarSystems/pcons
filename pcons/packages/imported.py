@@ -96,10 +96,8 @@ class ImportedTarget(Target):
         for lib in package.libraries:
             self.public.link_libs.append(lib)
 
-        # Library directories go into link_flags as -L prefixed
-        # (UsageRequirements doesn't have link_dirs, only link_flags)
         for lib_dir in package.library_dirs:
-            self.public.link_flags.append(f"-L{lib_dir}")
+            self.public.link_dirs.append(Path(lib_dir))
 
         # Framework directories and frameworks (macOS)
         for fw_dir in package.framework_dirs:
