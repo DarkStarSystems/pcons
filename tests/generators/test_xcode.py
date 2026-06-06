@@ -234,6 +234,38 @@ class TestXcodeGeneratorDependencies:
             for s in frameworks_sections
         ), "PBXFrameworksBuildPhase for app has no files (library not linked)"
 
+    def test_target_lib_not_stringified_into_ldflags(self, tmp_path):
+        """Library Target deps must not leak into OTHER_LDFLAGS as -l flags."""
+        project = Project("myapp", build_dir=tmp_path)
+
+        lib = Target("mylib", target_type="static_library")
+        app = Target("myapp", target_type="program")
+        app.private.link_libs.append(lib)
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
+        # "Type: static_library" only appears via Target.__str__, i.e. if a
+        # Target object leaked into a stringified flag.
+        assert "Type: static_library" not in content
+        assert "-lTarget" not in content
+
+    def test_string_libs_become_l_flags(self, tmp_path):
+        """Non-Target (system) libs in link_libs must still become -l flags."""
+        project = Project("myapp", build_dir=tmp_path)
+
+        app = Target("myapp", target_type="program")
+        app.private.link_libs.append("m")
+
+        gen = XcodeGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
+        assert "-lm" in content
+
 
 class TestXcodeGeneratorBuildPhases:
     """Tests for build phases."""

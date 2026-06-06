@@ -946,16 +946,22 @@ class XcodeGenerator(BaseGenerator):
                 target_name=target.name,
             )
 
+        from pcons.core.target import Target
+
         # Collect link flags
         ldflags: list[str] = []
         ldflags.extend(str(f) for f in target.public.link_flags)
         ldflags.extend(str(f) for f in target.private.link_flags)
 
-        # Add link libraries as -l flags
+        # Add link libraries as -l flags.Target instances (library deps) are
+        # handled separately via the frameworks link phase / dependency graph,
+        # so only string/system libs become -l flags here.
         for lib in target.public.link_libs:
-            ldflags.append(f"-l{lib}")
+            if not isinstance(lib, Target):
+                ldflags.append(f"-l{lib}")
         for lib in target.private.link_libs:
-            ldflags.append(f"-l{lib}")
+            if not isinstance(lib, Target):
+                ldflags.append(f"-l{lib}")
 
         if ldflags:
             self._xcode_project.set_flags(
