@@ -558,7 +558,15 @@ class ConanFinder(BaseFinder):
         self._save_cache_key()
 
         # Parse the generated .pc files
-        return self._parse_pkgconfig_files()
+        packages = self._parse_pkgconfig_files()
+        if not packages:
+            raise RuntimeError(
+                f"Conan install succeeded but no packages were parsed. "
+                f"No .pc files found under {self.output_folder}. "
+                f"Check that the conanfile declares dependencies and that "
+                f"the PkgConfigDeps generator produced output."
+            )
+        return packages
 
     def _parse_pkgconfig_files(self) -> dict[str, PackageDescription]:
         """Parse the .pc files Conan's PkgConfigDeps generator produced.

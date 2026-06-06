@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -287,6 +288,34 @@ Cflags: -I${includedir}
             pkg = packages["zlib"]
             assert pkg.name == "zlib"
             assert pkg.found_by == "conan"
+
+    def test_install_raises_when_nothing_parses(self, tmp_path: Path) -> None:
+        """Install must fail when conan succeeds but no .pc files are found."""
+        conanfile = tmp_path / "conanfile.txt"
+        conanfile.write_text("[requires]\nzlib/1.3\n")
+
+        output_folder = tmp_path / "deps"
+        output_folder.mkdir()
+
+        finder = ConanFinder(
+            conanfile=conanfile,
+            output_folder=output_folder,
+        )
+        finder.sync_profile()
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        with (
+            patch.object(finder, "is_available", return_value=True),
+            patch("subprocess.run", side_effect=mock_run),
+            pytest.raises(RuntimeError, match=re.escape(str(output_folder))),
+        ):
+            finder.install()
 
 
 class TestConanFinderCaching:
