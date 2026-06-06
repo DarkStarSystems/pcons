@@ -269,10 +269,14 @@ def _make_default_requirements(
     """Create a default UsageRequirements with standard C/C++ fields."""
     reqs = UsageRequirements()
     reqs.defines = UniqueList([])
-    reqs.compile_flags = UniqueList([])
     reqs.include_dirs = UniqueList([])
     reqs.link_dirs = UniqueList([])
-    reqs.link_flags = UniqueList([])
+    # compile_flags/link_flags are plain lists, NOT UniqueList: token-level
+    # dedup corrupts paired flags (-framework Foo -framework Bar, -Xlinker, -arch,
+    # repeated -L/-F). Flag dedup is pair-aware and happens via merge_flags() when
+    # usage requirements are merged. Direct appends are preserved verbatim.
+    reqs.compile_flags = []
+    reqs.link_flags = []
     reqs.link_libs = ValidatedUniqueList([], on_append=link_libs_validator)
     return reqs
 

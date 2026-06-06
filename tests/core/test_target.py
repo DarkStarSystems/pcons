@@ -240,6 +240,19 @@ class TestTarget:
         assert lib.public.defines == ["LIB_API"]
         assert lib.private.defines == ["LIB_BUILDING"]
 
+    def test_paired_flags_not_deduped_by_token(self, test_project):  # noqa: F811
+        # compile_flags/link_flags must preserve repeated tokens of paired
+        # flags: -framework Foo -framework Bar, -arch x86_64 -arch arm64.
+        # Token-level dedup (UniqueList) would drop the second flag token.
+        lib = Target("lib")
+        for tok in ("-framework", "Foo", "-framework", "Bar"):
+            lib.public.link_flags.append(tok)
+        for tok in ("-arch", "x86_64", "-arch", "arm64"):
+            lib.public.compile_flags.append(tok)
+
+        assert lib.public.link_flags == ["-framework", "Foo", "-framework", "Bar"]
+        assert lib.public.compile_flags == ["-arch", "x86_64", "-arch", "arm64"]
+
     def test_collect_usage_requirements(self, test_project):  # noqa: F811
         """Test transitive requirement collection."""
         # Create a dependency chain: app -> libB -> libA
