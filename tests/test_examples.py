@@ -691,16 +691,9 @@ def _example_template_vars() -> dict[str, str]:
     }
 
 
-def _substitute_variables(path: str, extra: dict[str, str] | None = None) -> str:
-    """Substitute ``${VAR}`` placeholders in a string.
-
-    *extra* supplies example-defined variables from the ``[test.variables]``
-    section, which take precedence over the built-in platform-derived ones and
-    let a test.toml factor out long inline scripts (see ``examples/50_pyproject``).
-    """
+def _substitute_variables(path: str) -> str:
+    """Substitute ``${VAR}`` platform-derived placeholders in a string."""
     table = _example_template_vars()
-    if extra:
-        table = {**table, **extra}
 
     def replacer(match: re.Match) -> str:
         var_name = match.group(1)
@@ -990,18 +983,14 @@ def run_example(
     has_platform_override = f"commands_{current_platform}" in verify_config
     verify_commands = get_platform_value(verify_config, "commands", [])
 
-    # Example-defined [test.variables] are available as ${name} placeholders in
-    # verify commands, letting a test.toml factor out long inline scripts.
-    test_variables = verify_config.get("variables", {})
-
     for cmd_config in verify_commands:
         run_cmd = cmd_config.get("run")
         if not run_cmd:
             continue
 
-        # Expand ${...} placeholders (platform vars + [test.variables]) before
-        # any command adaptation or path resolution.
-        run_cmd = _substitute_variables(run_cmd, extra=test_variables)
+        # Expand ${...} platform placeholders before any command adaptation
+        # or path resolution.
+        run_cmd = _substitute_variables(run_cmd)
 
         # Adapt command for Windows if no platform-specific override exists
         if IS_WINDOWS and not has_platform_override:

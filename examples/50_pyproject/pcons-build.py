@@ -27,7 +27,7 @@ else:
 
 env = project.Environment(toolchain=toolchain)
 
-if toolchain.name in ("msvc"):
+if toolchain.name == "msvc":
     env.cxx.flags.extend(["/std:c++20", "/EHsc", "/permissive-"])
 elif toolchain.name == "llvm":
     env.cxx.flags.extend(["-std=c++20", "-stdlib=libc++"])
