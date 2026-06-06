@@ -230,6 +230,31 @@ class TestTarget:
         assert set(deps) == {leaf, mid}
         assert deps.index(leaf) < deps.index(mid)
 
+    def test_transitive_link_deps_follow_static_lib_private_deps(self, test_project):  # noqa: F811
+        # exe -> libA (static, public) -> libB (static, PRIVATE).
+        # A static archive does not link its deps in, so libB must reach the
+        # final link line even though it is a private dep of libA.
+        libB = Target("libB", target_type="static_library")
+        libA = Target("libA", target_type="static_library")
+        libA.private.link_libs.append(libB)
+        exe = Target("exe", target_type="program")
+        exe.private.link_libs.append(libA)
+
+        # Usage-requirement propagation must NOT pull in libB.
+        assert set(exe.transitive_dependencies()) == {libA}
+        # Link-input collection must include libB.
+        assert set(exe.transitive_dependencies(for_link=True)) == {libA, libB}
+
+    def test_transitive_link_deps_stop_at_shared_lib(self, test_project):  # noqa: F811
+        # A shared library resolves its own private deps, so libB stays hidden.
+        libB = Target("libB", target_type="static_library")
+        libA = Target("libA", target_type="shared_library")
+        libA.private.link_libs.append(libB)
+        exe = Target("exe", target_type="program")
+        exe.private.link_libs.append(libA)
+
+        assert set(exe.transitive_dependencies(for_link=True)) == {libA}
+
     def test_usage_requirements(self, test_project):  # noqa: F811
         lib = Target("lib")
         lib.public.include_dirs.append(Path("include"))

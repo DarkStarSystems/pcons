@@ -615,7 +615,7 @@ class CompileLinkFactory:
         import sys
 
         result: list[FileNode] = []
-        for dep in target.transitive_dependencies():
+        for dep in target.transitive_dependencies(for_link=True):
             for node in dep.output_nodes:
                 if sys.platform == "win32" and dep.target_type == "shared_library":
                     build_info = getattr(node, "_build_info", {})

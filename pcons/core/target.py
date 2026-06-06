@@ -912,11 +912,20 @@ class Target:
 
         return languages
 
-    def transitive_dependencies(self) -> list[Target]:
+    def transitive_dependencies(self, *, for_link: bool = False) -> list[Target]:
         """Return all dependencies transitively (DFS, no duplicates).
 
         Returns dependencies in the order they are discovered via DFS,
         which means dependencies are listed before their dependents.
+
+        Args:
+            for_link: When True, collect link inputs rather than propagated
+                usage requirements. A static library does not link its own
+                dependencies in, so its *private* link_libs must still reach
+                the final link line.
+                This follows private link_libs through static-library targets.
+                Usage-requirement propagation (for_link=False) never follows
+                private deps.
 
         Returns:
             List of all transitive dependencies (not including self).
@@ -937,7 +946,11 @@ class Target:
             for dep in direct_deps(target, include_private=include_private):
                 if dep.name not in visited:
                     visited.add(dep.name)
-                    _collect(dep, include_private=False)
+                    # A static library's private link deps are not baked into the
+                    # archive, so they must follow through to the link line. Shared
+                    # libraries and other targets resolve their own private deps.
+                    recurse_private = for_link and dep.target_type == "static_library"
+                    _collect(dep, include_private=recurse_private)
                     result.append(dep)
 
         _collect(self, include_private=True)
