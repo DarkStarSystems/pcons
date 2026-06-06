@@ -165,13 +165,6 @@ class UsageRequirements(_UsageRequirementsStubs):
                                If None, uses default (empty set).
         """
         for key, values in other._data.items():
-            if not isinstance(values, (list, UserList)):
-                raise TypeError(
-                    f"Usage requirement '{key}' must be a list, "
-                    f"got {type(values).__name__}. "
-                    f'Use target.public.{key} = ["{values}"] or '
-                    f'target.public.{key}.append("{values}").'
-                )
             # Reuse the source list's concrete type so dedup behaviour carries over.
             # A ValidatedUniqueList is rebuilt without its validator: the
             # validator is bound to the owning Target (self-link / post-resolve checks),

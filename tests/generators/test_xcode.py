@@ -238,9 +238,11 @@ class TestXcodeGeneratorDependencies:
         """Library Target deps must not leak into OTHER_LDFLAGS as -l flags."""
         project = Project("myapp", build_dir=tmp_path)
 
-        lib = Target("mylib", target_type="static_library")
+        pub_lib = Target("publib", target_type="static_library")
+        priv_lib = Target("privlib", target_type="static_library")
         app = Target("myapp", target_type="program")
-        app.private.link_libs.append(lib)
+        app.public.link_libs.append(pub_lib)
+        app.private.link_libs.append(priv_lib)
 
         gen = XcodeGenerator()
         gen.generate(project)
@@ -253,18 +255,23 @@ class TestXcodeGeneratorDependencies:
         assert "-lTarget" not in content
 
     def test_string_libs_become_l_flags(self, tmp_path):
-        """Non-Target (system) libs in link_libs must still become -l flags."""
+        """Non-Target (system) libs in link_libs must still become -l flags.
+
+        Covers both the public and private link_libs branches.
+        """
         project = Project("myapp", build_dir=tmp_path)
 
         app = Target("myapp", target_type="program")
-        app.private.link_libs.append("m")
+        app.public.link_libs.append("pubsys")
+        app.private.link_libs.append("privsys")
 
         gen = XcodeGenerator()
         gen.generate(project)
         BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "myapp.xcodeproj" / "project.pbxproj").read_text()
-        assert "-lm" in content
+        assert "-lpubsys" in content
+        assert "-lprivsys" in content
 
 
 class TestXcodeGeneratorBuildPhases:

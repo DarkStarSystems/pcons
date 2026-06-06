@@ -36,6 +36,21 @@ class TestUsageRequirements:
         assert req.link_libs == ["foo"]
         assert req.defines == ["DEBUG"]
 
+    def test_items_returns_all_pairs(self):
+        req = UsageRequirements(
+            include_dirs=[Path("include")],
+            defines=["DEBUG"],
+        )
+
+        items = dict(req.items())
+
+        # items() exposes each populated requirement list keyed by name.
+        assert items["include_dirs"] == [Path("include")]
+        assert items["defines"] == ["DEBUG"]
+        # The return value is a list of (name, list) tuples.
+        assert isinstance(req.items(), list)
+        assert all(isinstance(pair, tuple) and len(pair) == 2 for pair in req.items())
+
     def test_merge(self):
         req1 = UsageRequirements(
             include_dirs=[Path("inc1")],
@@ -106,14 +121,15 @@ class TestUsageRequirements:
         with pytest.raises(ValueError, match="bad item not allowed"):
             req.link_libs = ["good", "bad", "ok"]
 
-    def test_assignment_replaces_contents(self):
-        """Reassignment replaces the old contents rather than appending."""
+    def test_protected_assignment_bypasses(self):
+        """Protected assignment (`req._some_protected_stuff`) bypasses the rules."""
         req = UsageRequirements()
-        req.defines = UniqueList(["OLD"])
+        req._some_protected_stuff = UniqueList(["OLD"])
 
-        req.defines = ["NEW"]
+        req._some_protected_stuff = ["NEW"]
 
-        assert req.defines == ["NEW"]
+        assert req._some_protected_stuff == ["NEW"]
+        assert isinstance(req._some_protected_stuff, list)
 
     def test_assignment_to_plain_list_replaces_object(self):
         """When the existing value is a plain list, assignment replaces it."""
@@ -353,6 +369,18 @@ class TestFluentAPI:
 
         assert result is app
         assert lib in app.dependencies
+
+    def test_link_avoids_duplicates(self, test_project):  # noqa: F811
+        """link() does not add the same target to public.link_libs twice."""
+        lib = Target("lib")
+        app = Target("app")
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            app.link(lib)
+            app.link(lib)  # same lib again — must be ignored
+
+        assert app.public.link_libs.count(lib) == 1
 
     def test_add_source_returns_self(self, tmp_path, test_project):  # noqa: F811
         """add_source() returns self for chaining."""
@@ -626,6 +654,93 @@ class TestTargetDepends:
         dep = target._extra_implicit_deps[0]
         # project.node() canonicalizes the path
         assert dep is project.node("tools/codegen.py")
+
+
+class TestTargetAddDependency:
+    """Tests for target.add_dependency()."""
+
+    def test_adds_single_dependency(self, test_project):  # noqa: F811
+        """add_dependency() records the target as a build dependency."""
+        app = Target("app")
+        lib = Target("lib")
+
+        app.add_dependency(lib)
+
+        assert lib in app._dependencies
+        assert lib in app.dependencies
+
+    def test_returns_self_for_chaining(self, test_project):  # noqa: F811
+        """add_dependency() returns self for fluent chaining."""
+        app = Target("app")
+        a = Target("a")
+        b = Target("b")
+
+        result = app.add_dependency(a).add_dependency(b)
+
+        assert result is app
+        assert app._dependencies == [a, b]
+
+    def test_adds_multiple_in_one_call(self, test_project):  # noqa: F811
+        """add_dependency() accepts several targets at once."""
+        app = Target("app")
+        a = Target("a")
+        b = Target("b")
+
+        app.add_dependency(a, b)
+
+        assert app._dependencies == [a, b]
+
+    def test_ignores_duplicates(self, test_project):  # noqa: F811
+        """add_dependency() ignores already-present targets."""
+        app = Target("app")
+        lib = Target("lib")
+
+        app.add_dependency(lib)
+        app.add_dependency(lib, lib)
+
+        assert app._dependencies.count(lib) == 1
+
+    def test_not_treated_as_link_lib(self, test_project):  # noqa: F811
+        """add_dependency() does not add the target as a library to link."""
+        app = Target("app")
+        lib = Target("lib")
+
+        app.add_dependency(lib)
+
+        assert lib not in app.public.link_libs
+        assert lib not in app.private.link_libs
+
+    def test_propagates_to_transitive_dependencies(self, test_project):  # noqa: F811
+        """Dependencies added via add_dependency() are transitively collected."""
+        app = Target("app")
+        lib = Target("lib")
+        sublib = Target("sublib")
+
+        lib.add_dependency(sublib)
+        app.add_dependency(lib)
+
+        transitive = app.transitive_dependencies()
+        assert lib in transitive
+        assert sublib in transitive
+
+    def test_invalidates_cached_requirements(self, test_project):  # noqa: F811
+        """add_dependency() clears the collected-requirements cache."""
+        app = Target("app")
+        lib = Target("lib")
+        app._collected_requirements = UsageRequirements()  # pretend a cache exists
+
+        app.add_dependency(lib)
+
+        assert app._collected_requirements is None
+
+    def test_raises_after_resolve(self, test_project):  # noqa: F811
+        """add_dependency() fails once the target is resolved."""
+        app = Target("app")
+        lib = Target("lib")
+        app._resolved = True
+
+        with pytest.raises(RuntimeError, match="after resolve"):
+            app.add_dependency(lib)
 
 
 class TestTargetSubdir:
