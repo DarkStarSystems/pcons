@@ -1183,3 +1183,55 @@ class TestResolverCxxLinker:
         assert "context" not in lib_node._build_info, (
             "Static library build_info should not have a context"
         )
+
+
+class TestLinkInputOrder:
+    """Link inputs must list dependents before their dependencies.
+
+    Left-to-right linkers (GNU ld) only resolve symbols from archives
+    that appear after the object/archive that needs them, so a library
+    must precede the libraries it depends on. Pins the reversed() in
+    CompileLinkFactory._collect_dependency_outputs (PR #41).
+    """
+
+    def _make_sources(self, tmp_path):
+        (tmp_path / "a.c").write_text("void a(void) {}\n")
+        (tmp_path / "b.c").write_text("void b(void) {}\n")
+        (tmp_path / "main.c").write_text("int main(void) { return 0; }\n")
+
+    def _link_input_names(self, target):
+        return [d.path.name for d in target.output_nodes[0].explicit_deps]
+
+    def test_static_chain_dependents_before_dependencies(self, tmp_path, gcc_toolchain):
+        """exe -> libA -> libB (public): libA.a must precede libB.a."""
+        self._make_sources(tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        lib_b = project.StaticLibrary("b", env, sources=["b.c"])
+        lib_a = project.StaticLibrary("a", env, sources=["a.c"])
+        lib_a.public.link_libs.append(lib_b)
+        exe = project.Program("exe", env, sources=["main.c"])
+        exe.private.link_libs.append(lib_a)
+        project.resolve()
+
+        names = self._link_input_names(exe)
+        assert names.index("liba.a") < names.index("libb.a"), names
+
+    def test_static_lib_private_dep_on_link_line_and_ordered(
+        self, tmp_path, gcc_toolchain
+    ):
+        """exe -> libA -> libB (PRIVATE): libB.a still links, after libA.a."""
+        self._make_sources(tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        lib_b = project.StaticLibrary("b", env, sources=["b.c"])
+        lib_a = project.StaticLibrary("a", env, sources=["a.c"])
+        lib_a.private.link_libs.append(lib_b)
+        exe = project.Program("exe", env, sources=["main.c"])
+        exe.private.link_libs.append(lib_a)
+        project.resolve()
+
+        names = self._link_input_names(exe)
+        assert names.index("liba.a") < names.index("libb.a"), names
