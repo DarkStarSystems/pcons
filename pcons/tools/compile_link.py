@@ -611,11 +611,15 @@ class CompileLinkFactory:
 
         For SharedLibrary dependencies on Windows, returns the import library
         (.lib) instead of the DLL (.dll) since that's what the linker needs.
+
+        transitive_dependencies() lists dependencies before dependents. Static
+        linkers (GNU ld) resolve symbols left-to-right and need the reverse:
+        a library must precede the libraries it depends on, so we reverse here.
         """
         import sys
 
         result: list[FileNode] = []
-        for dep in target.transitive_dependencies():
+        for dep in reversed(target.transitive_dependencies(for_link=True)):
             for node in dep.output_nodes:
                 if sys.platform == "win32" and dep.target_type == "shared_library":
                     build_info = getattr(node, "_build_info", {})

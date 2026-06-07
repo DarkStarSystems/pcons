@@ -38,8 +38,15 @@ test:             ## Run tests.
 
 .PHONY: test-cov
 test-cov:         ## Run tests with coverage report.
-	uv run pytest --cov=pcons --cov-report=html --cov-report=xml
+	uv run pytest --cov=pcons --cov-branch --cov-report=html --cov-report=xml
 	@echo "Coverage report: htmlcov/index.html"
+
+.PHONY: test-cov-main-diff
+test-cov-main-diff: test-cov   ## Show coverage diff with main branch.
+	uvx diff-cover coverage.xml --compare-branch=origin/main \
+		--format html:htmlcov/main-diff-cover.html \
+		--format markdown:htmlcov/main-diff-cover.md
+	@echo "Coverage diff report: htmlcov/main-diff-cover.html and htmlcov/main-diff-cover.md"
 
 .PHONY: watch
 watch:            ## Run tests on every change.

@@ -89,7 +89,7 @@ class TestMermaidGeneratorGraph:
         physics_obj.depends([physics_src])
         libphysics.intermediate_nodes.append(physics_obj)
         libphysics.output_nodes.append(physics_lib)
-        libphysics.link(libmath)
+        libphysics.public.link_libs.append(libmath)
 
         # Create app depending on libphysics
         app = Target("app", target_type="program")
@@ -99,7 +99,7 @@ class TestMermaidGeneratorGraph:
         app_obj.depends([app_src])
         app.intermediate_nodes.append(app_obj)
         app.output_nodes.append(app_exe)
-        app.link(libphysics)
+        app.private.link_libs.append(libphysics)
 
         gen = MermaidGenerator()
         gen.generate(project)
@@ -221,7 +221,7 @@ class TestMermaidGeneratorIntegration:
         app_obj.depends([app_src])
         app.intermediate_nodes.append(app_obj)
         app.output_nodes.append(app_exe)
-        app.link(libmath)
+        app.private.link_libs.append(libmath)
 
         gen = MermaidGenerator()
         gen.generate(project)

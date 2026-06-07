@@ -5,4 +5,5 @@ env = project.default_environment
 
 bb = project.StaticLibrary("bb", env, sources=["bb.cppm"])
 
-project.Program("bb_app", env, sources=["bb_main.cpp"]).link(bb)
+bb_app = project.Program("bb_app", env, sources=["bb_main.cpp"])
+bb_app.private.link_libs.extend([bb])

@@ -7,11 +7,35 @@ and carries "usage requirements" that propagate to consumers (CMake-style).
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
-from collections.abc import Sequence
+import sys
+import warnings
+from collections import UserList
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
+
+if sys.version_info >= (3, 13):
+    from warnings import deprecated
+else:
+
+    def deprecated(msg: str):  # type: ignore[no-redef]
+        def decorator(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                warnings.warn(
+                    f"{func.__name__} is deprecated: {msg}",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                return func(*args, **kwargs)
+
+            return wrapper
+
+        return decorator
+
 
 from pcons.core.flags import merge_flags
 
@@ -37,6 +61,37 @@ else:
 
 __all__ = ["SourceSpec", "UsageRequirements", "Target", "ImportedTarget"]
 
+_T = TypeVar("_T")
+ListLike: TypeAlias = list[_T] | UserList[_T]
+
+
+class UniqueList(UserList[_T]):
+    def __init__(self, initlist: ListLike[_T] | None = None) -> None:
+        super().__init__(initlist or [])
+
+    def append(self, item: _T):
+        if item not in self.data:
+            self.data.append(item)
+
+    def extend(self, other: Iterable[_T]):
+        for item in other:
+            self.append(item)
+
+
+class ValidatedUniqueList(UniqueList[_T]):
+    def __init__(
+        self,
+        initlist: ListLike[_T] | None = None,
+        on_append: Callable[[_T], None] | None = None,
+    ) -> None:
+        super().__init__(initlist)
+        self._on_append = on_append
+
+    def append(self, item: _T):
+        if self._on_append is not None:
+            self._on_append(item)
+        super().append(item)
+
 
 class UsageRequirements(_UsageRequirementsStubs):
     """Requirements that propagate from a target to its consumers.
@@ -49,32 +104,49 @@ class UsageRequirements(_UsageRequirementsStubs):
     define its own requirement names. C/C++ toolchains use include_dirs,
     defines, compile_flags, link_flags, link_libs. Other toolchains can
     use any names they need (e.g., python_packages, data_schemas).
+
+    A field may use a special list type (``UniqueList`` dedup, or
+    ``ValidatedUniqueList`` whose ``on_append`` hook enforces invariants and
+    invalidates caches). Whole-list assignment preserves those semantics:
+    ``__setattr__`` replaces an existing list's *contents* in place (clear +
+    extend through ``append``), so ``reqs.link_libs = [a, b]`` behaves like
+    repeated ``.append()`` instead of swapping in a plain list.
     """
 
-    _data: dict[str, list]
+    _data: dict[str, list[Any] | UserList[Any]]
 
-    def __init__(self, **kwargs: list) -> None:
+    def __init__(self, **kwargs: list[Any] | UserList[Any]) -> None:
         object.__setattr__(self, "_data", {})
         for k, v in kwargs.items():
-            self._data[k] = list(v)
+            self._data[k] = v
 
-    def __getattr__(self, name: str) -> list:
+    def __getattr__(self, name: str) -> list[Any] | UserList[Any]:
         """Return the named list, creating it on first access."""
-        data: dict[str, list] = object.__getattribute__(self, "_data")
+        data: dict[str, list[Any] | UserList[Any]] = object.__getattribute__(
+            self, "_data"
+        )
         return data.setdefault(name, [])
 
-    def __setattr__(self, name: str, value: list) -> None:  # type: ignore[override]
+    def __setattr__(self, name: str, value: list[Any] | UserList[Any]) -> None:  # type: ignore[override]
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
-            if not isinstance(value, list):
+            if not isinstance(value, (list, UserList)):
                 raise TypeError(
                     f"Usage requirement '{name}' must be a list, "
                     f"got {type(value).__name__}. "
                     f"Use target.public.{name}.append(value) to add items, "
                     f"or target.public.{name} = [value] to replace."
                 )
-            self._data[name] = value
+            existing = self._data.get(name)
+            if isinstance(existing, UserList):
+                # Replace contents in place so the existing list type's
+                # behavior (UniqueList dedup, ValidatedUniqueList.on_append)
+                # is preserved across assignment.
+                existing.clear()
+                existing.extend(value)
+            else:
+                self._data[name] = value
 
     def merge(
         self,
@@ -93,24 +165,27 @@ class UsageRequirements(_UsageRequirementsStubs):
                                If None, uses default (empty set).
         """
         for key, values in other._data.items():
-            if not isinstance(values, list):
-                raise TypeError(
-                    f"Usage requirement '{key}' must be a list, "
-                    f"got {type(values).__name__}. "
-                    f'Use target.public.{key} = ["{values}"] or '
-                    f'target.public.{key}.append("{values}").'
-                )
-            mine = self._data.setdefault(key, [])
+            # Reuse the source list's concrete type so dedup behaviour carries over.
+            # A ValidatedUniqueList is rebuilt without its validator: the
+            # validator is bound to the owning Target (self-link / post-resolve checks),
+            # and merge() only targets a detached snapshot, so it has nothing to guard.
+            mine = self._data.setdefault(key, type(values)())
             merge_flags(mine, values, separated_arg_flags)
 
     def clone(self) -> UsageRequirements:
-        """Create a copy of this UsageRequirements."""
+        """Create a copy of this UsageRequirements.
+
+        Each list keeps its concrete type (so dedup behaviour is preserved), but
+        a ValidatedUniqueList is rebuilt without its validator. That validator is
+        bound to the owning Target. A clone is a detached snapshot that is read,
+        not user-mutated, so the owner-specific guard does not apply to it.
+        """
         result = UsageRequirements()
         for k, v in self._data.items():
-            result._data[k] = list(v)
+            result._data[k] = type(v)(v)
         return result
 
-    def items(self) -> list[tuple[str, list]]:
+    def items(self) -> list[tuple[str, list[Any] | UserList[Any]]]:
         """Return all (name, list) pairs."""
         return list(self._data.items())
 
@@ -188,6 +263,24 @@ def is_qualified_name(name: str) -> bool:
     return project is not None
 
 
+def _make_default_requirements(
+    link_libs_validator: Callable[[Any], None],
+) -> UsageRequirements:
+    """Create a default UsageRequirements with standard C/C++ fields."""
+    reqs = UsageRequirements()
+    reqs.defines = UniqueList([])
+    reqs.include_dirs = UniqueList([])
+    reqs.link_dirs = UniqueList([])
+    # compile_flags/link_flags are plain lists, NOT UniqueList: token-level
+    # dedup corrupts paired flags (-framework Foo -framework Bar, -Xlinker, -arch,
+    # repeated -L/-F). Flag dedup is pair-aware and happens via merge_flags() when
+    # usage requirements are merged. Direct appends are preserved verbatim.
+    reqs.compile_flags = []
+    reqs.link_flags = []
+    reqs.link_libs = ValidatedUniqueList([], on_append=link_libs_validator)
+    return reqs
+
+
 class Target:
     """A named build target with usage requirements.
 
@@ -228,7 +321,7 @@ class Target:
         "name",
         "builder",
         "_sources",
-        "dependencies",
+        "_dependencies",
         "public",
         "private",
         "required_languages",
@@ -297,9 +390,9 @@ class Target:
         self.name = name
         self.builder = builder
         self._sources: list[Node] = []
-        self.dependencies: list[Target] = []
-        self.public = UsageRequirements()
-        self.private = UsageRequirements()
+        self._dependencies: list[Target] = []
+        self.public = _make_default_requirements(self.__link_libs_validator)
+        self.private = _make_default_requirements(self.__link_libs_validator)
         self.required_languages: set[str] = set()
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
@@ -358,6 +451,17 @@ class Target:
             The qualified name, in the form "<project>::<target>".
         """
         return f"{self.project.name}::{self.name}"
+
+    @property
+    def dependencies(self):
+        """Get the list of Target dependencies for this target."""
+        linked_public_targets = [
+            t for t in self.public.link_libs if isinstance(t, Target)
+        ]
+        linked_private_targets = [
+            t for t in self.private.link_libs if isinstance(t, Target)
+        ]
+        return (*self._dependencies, *linked_public_targets, *linked_private_targets)
 
     @property
     def sources(self) -> list[Node]:
@@ -421,6 +525,15 @@ class Target:
         """All build nodes for this target (intermediate + output)."""
         return self.intermediate_nodes + self.output_nodes
 
+    def __link_libs_validator(self, target: Target):
+        if self._resolved:
+            raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
+        if target is self:
+            raise ValueError(f"Target '{self.name}' cannot link itself.")
+        # Invalidate cached requirements
+        self._collected_requirements = None
+
+    @deprecated("Use target.{public,private}.link_libs instead")
     def link(self, *targets: Target) -> Target:
         """Add targets as dependencies (fluent API).
 
@@ -441,7 +554,7 @@ class Target:
         if self._resolved:
             raise RuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
-                f"Call link() before project.resolve() or project.generate()."
+                f"Add link_libs before project.resolve() or project.generate()."
             )
         for target in targets:
             if isinstance(target, (list, tuple)):
@@ -456,10 +569,41 @@ class Target:
                 )
             if target is self:
                 raise ValueError(f"Target '{self.name}' cannot link itself.")
-            if target not in self.dependencies:
-                self.dependencies.append(target)
+            if target not in self.public.link_libs:
+                self.public.link_libs.append(target)
         # Invalidate cached requirements
         self._collected_requirements = None
+        return self
+
+    def add_dependency(self, *targets: Target) -> Target:
+        """Add Targets as build dependencies of this target.
+
+        Each becomes a full dependency: it is included in
+        ``transitive_dependencies()`` and ``dependencies``, so its public
+        usage requirements propagate here. Unlike ``link_libs``, this does not
+        treat the targets as libraries to link, use ``target.{public,private}
+        .link_libs`` for that. Duplicates are ignored.
+
+        Args:
+            *targets: Targets to depend on.
+
+        Returns:
+            self for method chaining.
+
+        Raises:
+            RuntimeError: If called after the target has been resolved.
+        """
+        if self._resolved:
+            raise RuntimeError(
+                f"Cannot modify target '{self.name}' after resolve(). "
+                f"Add dependencies before project.resolve() or project.generate()."
+            )
+        for target in targets:
+            if target not in self._dependencies:
+                self._dependencies.append(target)
+        # Invalidate cached requirements
+        self._collected_requirements = None
+
         return self
 
     def depends(
@@ -573,8 +717,8 @@ class Target:
                 self._pending_sources = []
             self._pending_sources.append(source)
             # Add as dependency to ensure correct build order
-            if source not in self.dependencies:
-                self.dependencies.append(source)
+            if source not in self._dependencies:
+                self._dependencies.append(source)
         else:
             node = self._to_node(source)
             self._sources.append(node)
@@ -630,8 +774,8 @@ class Target:
                     self._pending_sources = []
                 self._pending_sources.append(source)
                 # Add as dependency to ensure correct build order
-                if source not in self.dependencies:
-                    self.dependencies.append(source)
+                if source not in self._dependencies:
+                    self._dependencies.append(source)
             else:
                 if base_path and isinstance(source, (str, Path)):
                     path = Path(source)
@@ -739,7 +883,7 @@ class Target:
 
     def _collect_from_deps(self, result: UsageRequirements, visited: set[str]) -> None:
         """Recursively collect public requirements from dependencies."""
-        for dep in self.dependencies:
+        for dep in self.transitive_dependencies():
             if dep.name in visited:
                 continue
             visited.add(dep.name)
@@ -768,11 +912,20 @@ class Target:
 
         return languages
 
-    def transitive_dependencies(self) -> list[Target]:
+    def transitive_dependencies(self, *, for_link: bool = False) -> list[Target]:
         """Return all dependencies transitively (DFS, no duplicates).
 
         Returns dependencies in the order they are discovered via DFS,
         which means dependencies are listed before their dependents.
+
+        Args:
+            for_link: When True, collect link inputs rather than propagated
+                usage requirements. A static library does not link its own
+                dependencies in, so its *private* link_libs must still reach
+                the final link line.
+                This follows private link_libs through static-library targets.
+                Usage-requirement propagation (for_link=False) never follows
+                private deps.
 
         Returns:
             List of all transitive dependencies (not including self).
@@ -780,14 +933,27 @@ class Target:
         result: list[Target] = []
         visited: set[str] = set()
 
-        def _collect(target: Target) -> None:
-            for dep in target.dependencies:
+        def direct_deps(target: Target, *, include_private: bool) -> list[Target]:
+            # A dependency's *private* link_libs do not propagate to consumers,
+            # so we only follow public ones when recursing.
+            deps = list(target._dependencies)
+            deps += [t for t in target.public.link_libs if isinstance(t, Target)]
+            if include_private:
+                deps += [t for t in target.private.link_libs if isinstance(t, Target)]
+            return deps
+
+        def _collect(target: Target, *, include_private: bool) -> None:
+            for dep in direct_deps(target, include_private=include_private):
                 if dep.name not in visited:
                     visited.add(dep.name)
-                    _collect(dep)
+                    # A static library's private link deps are not baked into the
+                    # archive, so they must follow through to the link line. Shared
+                    # libraries and other targets resolve their own private deps.
+                    recurse_private = for_link and dep.target_type == "static_library"
+                    _collect(dep, include_private=recurse_private)
                     result.append(dep)
 
-        _collect(self)
+        _collect(self, include_private=True)
         return result
 
     def __str__(self) -> str:

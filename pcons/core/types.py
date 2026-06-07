@@ -137,7 +137,7 @@ class TargetLike(Protocol):
         """Add targets as dependencies."""
         ...
 
-    def transitive_dependencies(self) -> list[Any]:
+    def transitive_dependencies(self, *, for_link: bool = False) -> list[Any]:
         """Return all dependencies transitively."""
         ...
 

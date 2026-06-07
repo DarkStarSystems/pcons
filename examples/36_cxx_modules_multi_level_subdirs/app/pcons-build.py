@@ -10,6 +10,5 @@ from pcons import context
 
 project = context.current_project
 env = project.default_environment
-project.Program("app", env).add_sources(["main.cpp"]).link(
-    *context.get_targets("a", "aa", "b", "bb")
-)
+app = project.Program("app", env, sources=["main.cpp"])
+app.private.link_libs.extend(context.get_targets("a", "aa", "b", "bb"))

@@ -60,6 +60,6 @@ lib3.private.compile_flags.extend(breaker_dialect)
 # A program to prove the shared interface links and runs end to end.
 app = project.Program("app", env, sources=["main.cpp"])
 app.private.compile_flags.extend(shared_dialect)
-app.link(lib1)
+app.private.link_libs.append(lib1)
 
 project.generate()

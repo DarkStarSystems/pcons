@@ -127,7 +127,7 @@ hello_lib.private.defines.append("HELLO_LIB_EXPORTS")
 # e.g. pcons_hello_ext.cpython-314-x86_64-linux-gnu.so
 pcons_hello_ext.output_prefix = ""
 pcons_hello_ext.output_suffix = sysconfig.get_config_var("EXT_SUFFIX")
-pcons_hello_ext.link(python, nanobind, hello_lib)
+pcons_hello_ext.private.link_libs.extend([python, nanobind, hello_lib])
 
 subgen = Path(nanobind.package.prefix) / "nanobind" / "stubgen.py"
 assert subgen.is_file(), f"Stub generator not found at {subgen}"

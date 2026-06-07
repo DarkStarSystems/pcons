@@ -7,4 +7,5 @@ b = project.StaticLibrary("b", env, sources=["b.cppm"])
 # load the subdirectory's pcons-build.py as SimpleNamespace (with all variables defined in it)
 s = add_subdirectory("bb")
 
-project.Program("b_app", env, sources=["b_main.cpp"]).link(b, s.bb)
+b_app = project.Program("b_app", env, sources=["b_main.cpp"])
+b_app.private.link_libs.extend([b, s.bb])

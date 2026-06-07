@@ -139,7 +139,7 @@ class TestResolverTransitiveRequirements:
 
         # Create app that links to library
         app = project.Program("myapp", env, sources=[str(app_src)])
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         project.resolve()
 
@@ -170,7 +170,7 @@ class TestResolverHeaderOnlyLibrary:
 
         # Create app that uses header-only library
         app = project.Program("myapp", env, sources=[str(src_file)])
-        app.link(header_lib)
+        app.private.link_libs.append(header_lib)
 
         project.resolve()
 
@@ -1173,7 +1173,7 @@ class TestResolverCxxLinker:
         imported = ImportedTarget.from_package(pkg)
 
         lib = project.StaticLibrary("mylib", env, sources=[str(src_file)])
-        lib.link(imported)
+        lib.public.link_libs.append(imported)
         project.resolve()
 
         assert lib._resolved

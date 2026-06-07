@@ -69,7 +69,10 @@ class TestWrongArgumentTypes:
         """User passes a string library name instead of a Target object."""
         project, env = project_env
         app = project.Program("app", env, sources=["src/main.c"])
-        with pytest.raises(TypeError, match="[Tt]arget"):
+        with (
+            pytest.raises(TypeError, match="[Tt]arget"),
+            pytest.warns(DeprecationWarning, match="link"),
+        ):
             app.link("mylib")
 
     def test_link_list_instead_of_varargs(self, project_env):
@@ -77,7 +80,7 @@ class TestWrongArgumentTypes:
         project, env = project_env
         lib = project.StaticLibrary("mylib", env, sources=["src/lib.c"])
         app = project.Program("app", env, sources=["src/main.c"])
-        with pytest.raises(TypeError):
+        with pytest.raises(TypeError), pytest.warns(DeprecationWarning, match="link"):
             app.link([lib])
 
     def test_add_sources_string_not_list(self, project_env):
@@ -252,7 +255,7 @@ class TestWrongApiOrder:
         project.resolve()
         # Linking after resolve should warn or raise
         with pytest.raises((PconsError, RuntimeError), match="resolve"):
-            app.link(lib)
+            app.public.link_libs.append(lib)
 
     def test_modify_flags_before_resolve_is_ok(self, project_env):
         """Modifying flags after target creation but before resolve is valid.
@@ -330,8 +333,8 @@ class TestDependencyMistakes:
         project, env = project_env
         lib_a = project.StaticLibrary("liba", env, sources=["src/lib.c"])
         lib_b = project.StaticLibrary("libb", env, sources=["src/main.c"])
-        lib_a.link(lib_b)
-        lib_b.link(lib_a)
+        lib_a.public.link_libs.append(lib_b)
+        lib_b.public.link_libs.append(lib_a)
         errors = project.validate()
         assert any(isinstance(e, DependencyCycleError) for e in errors)
 
@@ -340,8 +343,8 @@ class TestDependencyMistakes:
         project, env = project_env
         lib_a = project.StaticLibrary("liba", env, sources=["src/lib.c"])
         lib_b = project.StaticLibrary("libb", env, sources=["src/main.c"])
-        lib_a.link(lib_b)
-        lib_b.link(lib_a)
+        lib_a.public.link_libs.append(lib_b)
+        lib_b.public.link_libs.append(lib_a)
         with pytest.raises(PconsError):
             project.resolve(strict=True)
 
@@ -350,7 +353,7 @@ class TestDependencyMistakes:
         project, env = project_env
         app = project.Program("app", env, sources=["src/main.c"])
         with pytest.raises((DependencyCycleError, ValueError), match="self|cycle"):
-            app.link(app)
+            app.private.link_libs.append(app)
 
     def test_depends_on_self(self, project_env):
         """Target depends on itself."""
@@ -364,10 +367,18 @@ class TestDependencyMistakes:
         project, env = project_env
         lib = project.StaticLibrary("mylib", env, sources=["src/lib.c"])
         app = project.Program("app", env, sources=["src/main.c"])
-        app.link(lib)
-        app.link(lib)
+        app.private.link_libs.append(lib)
+        app.private.link_libs.append(lib)
         # Should not crash and lib should appear only once
         assert app.dependencies.count(lib) == 1
+
+    def test_link_now_deprecated(self, project_env):
+        """Using the old link() method should raise a DeprecationWarning."""
+        project, env = project_env
+        lib = project.StaticLibrary("mylib", env, sources=["src/lib.c"])
+        app = project.Program("app", env, sources=["src/main.c"])
+        with pytest.warns(DeprecationWarning, match="link"):
+            app.link(lib)
 
 
 # =============================================================================

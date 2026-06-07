@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+    from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.tools.requirements import EffectiveRequirements
 
@@ -54,8 +55,8 @@ class CompileLinkContext:
 
     includes: list[str] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
-    flags: list[str] = field(default_factory=list)
-    link_flags: list[str] = field(default_factory=list)
+    flags: list[str | PathToken] = field(default_factory=list)
+    link_flags: list[str | PathToken] = field(default_factory=list)
     libs: list[str] = field(default_factory=list)
     libdirs: list[str] = field(default_factory=list)
     linker_cmd: str | None = None  # Override for link.cmd (e.g., "clang++" for C++)
@@ -207,12 +208,16 @@ class CompileLinkContext:
                     if flag not in link_flags:
                         link_flags.append(flag)
 
+        from pcons.core.target import Target
+
         return cls(
             includes=[str(p) for p in effective.includes],
             defines=list(effective.defines),
             flags=list(effective.compile_flags),
             link_flags=link_flags,
-            libs=list(effective.link_libs),
+            # link_libs now can contain both Target instances and strings.
+            # just filter out Target instances, they are handled somewhere else
+            libs=[lib for lib in effective.link_libs if not isinstance(lib, Target)],
             libdirs=[str(p) for p in effective.link_dirs],
             linker_cmd=linker_cmd,
             mode=mode,
@@ -264,10 +269,12 @@ class MsvcCompileLinkContext(CompileLinkContext):
             # MSVC uses full library names (kernel32.lib, not -lkernel32)
             formatted_libs = []
             for lib in self.libs:
-                if lib.endswith(".lib"):
+                if isinstance(lib, str) and lib.endswith(".lib"):
                     formatted_libs.append(lib)
-                else:
+                elif isinstance(lib, str):
                     formatted_libs.append(f"{lib}.lib")
+                else:
+                    formatted_libs.append(lib)
             result["libs"] = formatted_libs
         if self.link_flags:
             # Merge with base flags from env.link.flags (same as base class)
@@ -319,7 +326,7 @@ class MsvcCompileLinkContext(CompileLinkContext):
             defines=list(effective.defines),
             flags=list(effective.compile_flags),
             link_flags=list(effective.link_flags),
-            libs=list(effective.link_libs),
+            libs=[lib for lib in effective.link_libs if not isinstance(lib, Target)],
             libdirs=[str(p) for p in effective.link_dirs],
             linker_cmd=None,
             mode=mode,

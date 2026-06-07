@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import shutil
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
@@ -17,6 +17,7 @@ from pcons.core.subst import TargetPath
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
+    from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.tools.tool import BaseTool, Tool
 
@@ -472,7 +473,7 @@ class Toolchain(Protocol):
         self,
         target: Target,
         output_name: str,
-        existing_flags: list[str],
+        existing_flags: Sequence[str | PathToken],
     ) -> list[str]:
         """Return additional link flags for a specific target.
 
@@ -996,7 +997,7 @@ class BaseToolchain(ABC):
         self,
         target: Target,
         output_name: str,
-        existing_flags: list[str],
+        existing_flags: Sequence[str | PathToken],
     ) -> list[str]:
         """Return additional link flags for a specific target.
 

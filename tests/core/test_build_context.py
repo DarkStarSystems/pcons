@@ -142,6 +142,33 @@ class TestCompileLinkContext:
             assert flags.count("-fsanitize=address") == 1
             assert "-pthread" in flags
 
+    def test_toolchain_injected_flag_deduplicated(self) -> None:
+        """Toolchain-injected link flags already present are not duplicated."""
+        from pcons.tools.requirements import EffectiveRequirements
+
+        class _StubToolchain:
+            def get_link_flags_for_target(self, target, output_name, existing_flags):
+                # "-Wl,-soname,libfoo.so" duplicates an existing flag; "-Wl,-z" is new.
+                return ["-Wl,-soname,libfoo.so", "-Wl,-z"]
+
+        class _StubEnv:
+            _toolchain = _StubToolchain()
+
+            def has_tool(self, name: str) -> bool:
+                return False
+
+        effective = EffectiveRequirements(link_flags=["-Wl,-soname,libfoo.so"])
+        ctx = CompileLinkContext.from_effective_requirements(
+            effective,
+            mode="link",
+            env=_StubEnv(),  # type: ignore[arg-type]
+            target=object(),  # type: ignore[arg-type]
+            output_name="libfoo.so",
+        )
+
+        assert ctx.link_flags.count("-Wl,-soname,libfoo.so") == 1
+        assert "-Wl,-z" in ctx.link_flags
+
     def test_compile_overrides_merge_with_env_flags(self) -> None:
         """Verify compile flags are merged with env.{tool}.flags.
 
@@ -274,6 +301,25 @@ class TestMsvcCompileLinkContext:
 
         # MSVC adds .lib suffix if missing
         assert overrides["libs"] == ["kernel32.lib", "user32.lib"]
+
+    def test_msvc_link_overrides_passes_through_non_string_libs(self) -> None:
+        """Non-string libs (e.g. PathToken) are passed through unchanged.
+
+        Only plain string lib names get the .lib suffix logic,
+        other token types must be forwarded as-is.
+        """
+        from pcons.core.subst import PathToken
+
+        token = PathToken(prefix="", path="vendor/foo.lib", path_type="project")
+        ctx = MsvcCompileLinkContext(
+            libs=["kernel32", token],
+            mode="link",
+        )
+        overrides = ctx.get_env_overrides()
+
+        libs = overrides["libs"]
+        assert "kernel32.lib" in libs  # string gets .lib suffix
+        assert token in libs  # token forwarded unchanged
 
     def test_msvc_link_overrides_merge_with_env_link_flags(self) -> None:
         """Verify MSVC link_flags are merged with env.link.flags.

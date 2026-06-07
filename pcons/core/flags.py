@@ -15,12 +15,15 @@ as a parameter, allowing toolchain-specific behavior.
 
 from __future__ import annotations
 
+from collections.abc import MutableSequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
     from typing import Any
+
+    from pcons.core.subst import PathToken
 
 
 @dataclass(frozen=True)
@@ -56,7 +59,7 @@ DEFAULT_SEPARATED_ARG_FLAGS: frozenset[str] = frozenset()
 
 
 def is_separated_arg_flag(
-    flag: str, separated_arg_flags: frozenset[str] | None = None
+    flag: str | PathToken, separated_arg_flags: frozenset[str] | None = None
 ) -> bool:
     """Check if a flag takes its argument as a separate token.
 
@@ -172,8 +175,8 @@ def deduplicate_flags(
 
 
 def merge_flags(
-    existing: list[str],
-    new: Sequence[str | FlagPair],
+    existing: MutableSequence[str | PathToken],
+    new: Sequence[str | FlagPair | PathToken],
     separated_arg_flags: frozenset[str] | None = None,
 ) -> None:
     """Merge new flags into existing list, avoiding duplicates.
@@ -202,9 +205,9 @@ def merge_flags(
     if separated_arg_flags is None:
         separated_arg_flags = DEFAULT_SEPARATED_ARG_FLAGS
 
-    # Build a set of what's already in existing
-    # existing should only contain strings at this point
-    existing_items: set[str | tuple[str, str]] = set()
+    # Build a set of what's already in existing. Entries are normally strings
+    # (or flag/arg tuples), but a PathToken may appear as a complete token.
+    existing_items: set[Any] = set()
     i = 0
     while i < len(existing):
         flag = existing[i]

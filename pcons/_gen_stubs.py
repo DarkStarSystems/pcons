@@ -407,24 +407,28 @@ def generate_toolconfig_stubs() -> str:
 _USAGE_REQUIREMENT_TYPES: tuple[tuple[str, str, str | None], ...] = (
     (
         "include_dirs",
-        "list[Path | str]",
+        "MutableSequence[Path | str]",
         "directories added to dependents' include path",
     ),
     (
         "compile_flags",
-        "list[Any]",
-        "flags propagated to dependents (strings + subst tokens)",
+        "MutableSequence[str | PathToken]",
+        "flags propagated to dependents (strings, or PathToken for embedded paths)",
     ),
     (
         "link_flags",
-        "list[Any]",
-        "flags propagated to dependents (strings + subst tokens)",
+        "MutableSequence[str | PathToken]",
+        "flags propagated to dependents (strings, or PathToken for embedded paths)",
     ),
-    ("defines", "list[str]", "preprocessor defines propagated to dependents"),
+    (
+        "defines",
+        "MutableSequence[str]",
+        "preprocessor defines propagated to dependents",
+    ),
     (
         "link_libs",
-        "list[Any]",
-        "libraries propagated to dependents (str + Target + tokens)",
+        "MutableSequence[str | Target]",
+        "libraries propagated to dependents (names or Target objects)",
     ),
 )
 
@@ -445,7 +449,11 @@ def generate_usage_requirements_stubs() -> str:
     entries: list[tuple[str, str, str | None]] = list(_USAGE_REQUIREMENT_TYPES)
     return _format_attribute_stubs_file(
         module_doc=module_doc,
-        extra_typecheck_imports=[],
+        extra_typecheck_imports=[
+            "from typing import MutableSequence",
+            "from pcons.core.subst import PathToken",
+            "from pcons.core.target import Target",
+        ],
         class_name="_UsageRequirementsStubs",
         class_doc="Typed mixin for UsageRequirements (TYPE_CHECKING-only).",
         entries=entries,

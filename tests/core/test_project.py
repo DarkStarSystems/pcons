@@ -291,8 +291,8 @@ class TestProjectValidation:
         project = Project("myproject")
         a = Target("A")
         b = Target("B")
-        a.link(b)
-        b.link(a)
+        a.private.link_libs.append(b)
+        b.private.link_libs.append(a)
 
         errors = project.validate()
         assert len(errors) > 0
@@ -304,7 +304,7 @@ class TestProjectBuildOrder:
         project = Project("myproject")
         lib = Target("lib")
         app = Target("app")
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         order = project.build_order()
 
@@ -322,7 +322,7 @@ class TestProjectAllNodes:
         app = Target("app")
         app.add_source(FileNode("main.c"))
         app.output_nodes.append(FileNode("app"))
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         nodes = project.all_nodes()
 
@@ -424,7 +424,7 @@ class TestGeneratePcFile:
         zlib = ImportedTarget.from_package(pkg)
 
         target = Target("mylib")
-        target.link(zlib)
+        target.private.link_libs.append(zlib)
 
         pc = project.generate_pc_file(target, version="1.0")
         content = pc.read_text()

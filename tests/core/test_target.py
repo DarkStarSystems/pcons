@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.core.target."""
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,9 @@ from pcons.core.project import Project
 from pcons.core.target import (
     ImportedTarget,
     Target,
+    UniqueList,
     UsageRequirements,
+    ValidatedUniqueList,
     is_qualified_name,
     split_qualified_name,
 )
@@ -32,6 +35,21 @@ class TestUsageRequirements:
         assert req.include_dirs == [Path("include")]
         assert req.link_libs == ["foo"]
         assert req.defines == ["DEBUG"]
+
+    def test_items_returns_all_pairs(self):
+        req = UsageRequirements(
+            include_dirs=[Path("include")],
+            defines=["DEBUG"],
+        )
+
+        items = dict(req.items())
+
+        # items() exposes each populated requirement list keyed by name.
+        assert items["include_dirs"] == [Path("include")]
+        assert items["defines"] == ["DEBUG"]
+        # The return value is a list of (name, list) tuples.
+        assert isinstance(req.items(), list)
+        assert all(isinstance(pair, tuple) and len(pair) == 2 for pair in req.items())
 
     def test_merge(self):
         req1 = UsageRequirements(
@@ -75,6 +93,55 @@ class TestUsageRequirements:
         clone.include_dirs.append(Path("other"))
         assert Path("other") not in req.include_dirs
 
+    def test_assignment_preserves_unique_list_type(self):
+        """Assigning a plain list keeps an existing UniqueList's type and dedup."""
+        req = UsageRequirements()
+        req.defines = UniqueList(["A"])
+        original = req.defines
+
+        # Reassign with a plain list (including a duplicate).
+        req.defines = ["B", "C", "C"]
+
+        # Same list object is reused (cleared + extended, not replaced)...
+        assert req.defines is original
+        assert isinstance(req.defines, UniqueList)
+        # ...so dedup behavior still applies to the new contents.
+        assert req.defines == ["B", "C"]
+
+    def test_assignment_preserves_validator(self):
+        """Assigning to a ValidatedUniqueList keeps validation on new contents."""
+        req = UsageRequirements()
+
+        def __bad_raises(item):
+            if item == "bad":
+                raise ValueError("bad item not allowed")
+
+        req.link_libs = ValidatedUniqueList([], on_append=__bad_raises)
+
+        with pytest.raises(ValueError, match="bad item not allowed"):
+            req.link_libs = ["good", "bad", "ok"]
+
+    def test_protected_assignment_bypasses(self):
+        """Protected assignment (`req._some_protected_stuff`) bypasses the rules."""
+        req = UsageRequirements()
+        req._some_protected_stuff = UniqueList(["OLD"])
+
+        req._some_protected_stuff = ["NEW"]
+
+        assert req._some_protected_stuff == ["NEW"]
+        assert isinstance(req._some_protected_stuff, list)
+
+    def test_assignment_to_plain_list_replaces_object(self):
+        """When the existing value is a plain list, assignment replaces it."""
+        req = UsageRequirements(defines=["A"])
+        assert not isinstance(req.defines, UniqueList)
+
+        new_list = ["B"]
+        req.defines = new_list
+
+        # Plain lists are replaced outright (no clear/extend).
+        assert req.defines is new_list
+
 
 class TestQualifiedName:
     def test_qualified_name(self):
@@ -103,7 +170,7 @@ class TestTarget:
         assert target.name == "mylib"
         assert target.nodes == []
         assert target.sources == []
-        assert target.dependencies == []
+        assert len(target.dependencies) == 0
 
     def test_tracks_source_location(self, test_project):  # noqa: F811
         target = Target("mylib")
@@ -121,8 +188,8 @@ class TestTarget:
         lib2 = Target("lib2")
         app = Target("app")
 
-        app.link(lib1)
-        app.link(lib2)
+        app.private.link_libs.append(lib1)
+        app.private.link_libs.append(lib2)
 
         assert lib1 in app.dependencies
         assert lib2 in app.dependencies
@@ -131,10 +198,62 @@ class TestTarget:
         lib = Target("lib")
         app = Target("app")
 
-        app.link(lib)
-        app.link(lib)  # Same lib again
+        app.private.link_libs.append(lib)
+        app.private.link_libs.append(lib)  # Same lib again
 
         assert app.dependencies.count(lib) == 1
+
+    def test_transitive_deps_no_duplicate_private_and_public(self, test_project):  # noqa: F811
+        common = Target("common")
+        mid = Target("mid")
+        mid.public.link_libs.append(common)
+        app = Target("app")
+        app.private.link_libs.append(common)
+        app.public.link_libs.append(mid)
+
+        deps = app.transitive_dependencies()
+
+        assert deps.count(common) == 1
+        assert set(deps) == {common, mid}
+
+    def test_transitive_deps_order_dependencies_before_dependents(self, test_project):  # noqa: F811
+        # leaf <- mid <- app, where mid is a *private* dep of app.
+        # leaf (and mid's transitively-public leaf) must precede mid.
+        leaf = Target("leaf")
+        mid = Target("mid")
+        mid.public.link_libs.append(leaf)
+        app = Target("app")
+        app.private.link_libs.append(mid)
+
+        deps = app.transitive_dependencies()
+
+        assert set(deps) == {leaf, mid}
+        assert deps.index(leaf) < deps.index(mid)
+
+    def test_transitive_link_deps_follow_static_lib_private_deps(self, test_project):  # noqa: F811
+        # exe -> libA (static, public) -> libB (static, PRIVATE).
+        # A static archive does not link its deps in, so libB must reach the
+        # final link line even though it is a private dep of libA.
+        libB = Target("libB", target_type="static_library")
+        libA = Target("libA", target_type="static_library")
+        libA.private.link_libs.append(libB)
+        exe = Target("exe", target_type="program")
+        exe.private.link_libs.append(libA)
+
+        # Usage-requirement propagation must NOT pull in libB.
+        assert set(exe.transitive_dependencies()) == {libA}
+        # Link-input collection must include libB.
+        assert set(exe.transitive_dependencies(for_link=True)) == {libA, libB}
+
+    def test_transitive_link_deps_stop_at_shared_lib(self, test_project):  # noqa: F811
+        # A shared library resolves its own private deps, so libB stays hidden.
+        libB = Target("libB", target_type="static_library")
+        libA = Target("libA", target_type="shared_library")
+        libA.private.link_libs.append(libB)
+        exe = Target("exe", target_type="program")
+        exe.private.link_libs.append(libA)
+
+        assert set(exe.transitive_dependencies(for_link=True)) == {libA}
 
     def test_usage_requirements(self, test_project):  # noqa: F811
         lib = Target("lib")
@@ -146,6 +265,19 @@ class TestTarget:
         assert lib.public.defines == ["LIB_API"]
         assert lib.private.defines == ["LIB_BUILDING"]
 
+    def test_paired_flags_not_deduped_by_token(self, test_project):  # noqa: F811
+        # compile_flags/link_flags must preserve repeated tokens of paired
+        # flags: -framework Foo -framework Bar, -arch x86_64 -arch arm64.
+        # Token-level dedup (UniqueList) would drop the second flag token.
+        lib = Target("lib")
+        for tok in ("-framework", "Foo", "-framework", "Bar"):
+            lib.public.link_flags.append(tok)
+        for tok in ("-arch", "x86_64", "-arch", "arm64"):
+            lib.public.compile_flags.append(tok)
+
+        assert lib.public.link_flags == ["-framework", "Foo", "-framework", "Bar"]
+        assert lib.public.compile_flags == ["-arch", "x86_64", "-arch", "arm64"]
+
     def test_collect_usage_requirements(self, test_project):  # noqa: F811
         """Test transitive requirement collection."""
         # Create a dependency chain: app -> libB -> libA
@@ -155,11 +287,11 @@ class TestTarget:
 
         libB = Target("libB")
         libB.public.include_dirs.append(Path("libB/include"))
-        libB.link(libA)
+        libB.public.link_libs.append(libA)
 
         app = Target("app")
         app.private.defines.append("APP_PRIVATE")
-        app.link(libB)
+        app.private.link_libs.append(libB)
 
         requirements = app.collect_usage_requirements()
 
@@ -173,7 +305,7 @@ class TestTarget:
         """Test that collection is cached."""
         lib = Target("lib")
         app = Target("app")
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         req1 = app.collect_usage_requirements()
         req2 = app.collect_usage_requirements()
@@ -186,12 +318,12 @@ class TestTarget:
         lib2 = Target("lib2")
         lib2.public.defines.append("LIB2")
         app = Target("app")
-        app.link(lib1)
+        app.private.link_libs.append(lib1)
 
         req1 = app.collect_usage_requirements()
         assert "LIB2" not in req1.defines
 
-        app.link(lib2)
+        app.private.link_libs.append(lib2)
         req2 = app.collect_usage_requirements()
 
         assert req2 is not req1
@@ -203,7 +335,7 @@ class TestTarget:
 
         app = Target("app")
         app.required_languages.add("cxx")
-        app.link(lib)
+        app.private.link_libs.append(lib)
 
         langs = app.get_all_languages()
         assert "c" in langs
@@ -255,7 +387,7 @@ class TestImportedTarget:
         zlib.public.link_libs.append("z")
 
         app = Target("app")
-        app.link(zlib)
+        app.private.link_libs.append(zlib)
 
         requirements = app.collect_usage_requirements()
         assert "z" in requirements.link_libs
@@ -269,10 +401,24 @@ class TestFluentAPI:
         lib = Target("lib")
         app = Target("app")
 
-        result = app.link(lib)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            result = app.link(lib)
 
         assert result is app
         assert lib in app.dependencies
+
+    def test_link_avoids_duplicates(self, test_project):  # noqa: F811
+        """link() does not add the same target to public.link_libs twice."""
+        lib = Target("lib")
+        app = Target("app")
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            app.link(lib)
+            app.link(lib)  # same lib again — must be ignored
+
+        assert app.public.link_libs.count(lib) == 1
 
     def test_add_source_returns_self(self, tmp_path, test_project):  # noqa: F811
         """add_source() returns self for chaining."""
@@ -337,7 +483,9 @@ class TestFluentAPI:
         src = tmp_path / "main.c"
         src.touch()
 
-        result = app.add_source(src).link(lib)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=DeprecationWarning)
+            result = app.add_source(src).link(lib)
 
         assert result is app
         assert len(app.sources) == 1
@@ -544,6 +692,93 @@ class TestTargetDepends:
         dep = target._extra_implicit_deps[0]
         # project.node() canonicalizes the path
         assert dep is project.node("tools/codegen.py")
+
+
+class TestTargetAddDependency:
+    """Tests for target.add_dependency()."""
+
+    def test_adds_single_dependency(self, test_project):  # noqa: F811
+        """add_dependency() records the target as a build dependency."""
+        app = Target("app")
+        lib = Target("lib")
+
+        app.add_dependency(lib)
+
+        assert lib in app._dependencies
+        assert lib in app.dependencies
+
+    def test_returns_self_for_chaining(self, test_project):  # noqa: F811
+        """add_dependency() returns self for fluent chaining."""
+        app = Target("app")
+        a = Target("a")
+        b = Target("b")
+
+        result = app.add_dependency(a).add_dependency(b)
+
+        assert result is app
+        assert app._dependencies == [a, b]
+
+    def test_adds_multiple_in_one_call(self, test_project):  # noqa: F811
+        """add_dependency() accepts several targets at once."""
+        app = Target("app")
+        a = Target("a")
+        b = Target("b")
+
+        app.add_dependency(a, b)
+
+        assert app._dependencies == [a, b]
+
+    def test_ignores_duplicates(self, test_project):  # noqa: F811
+        """add_dependency() ignores already-present targets."""
+        app = Target("app")
+        lib = Target("lib")
+
+        app.add_dependency(lib)
+        app.add_dependency(lib, lib)
+
+        assert app._dependencies.count(lib) == 1
+
+    def test_not_treated_as_link_lib(self, test_project):  # noqa: F811
+        """add_dependency() does not add the target as a library to link."""
+        app = Target("app")
+        lib = Target("lib")
+
+        app.add_dependency(lib)
+
+        assert lib not in app.public.link_libs
+        assert lib not in app.private.link_libs
+
+    def test_propagates_to_transitive_dependencies(self, test_project):  # noqa: F811
+        """Dependencies added via add_dependency() are transitively collected."""
+        app = Target("app")
+        lib = Target("lib")
+        sublib = Target("sublib")
+
+        lib.add_dependency(sublib)
+        app.add_dependency(lib)
+
+        transitive = app.transitive_dependencies()
+        assert lib in transitive
+        assert sublib in transitive
+
+    def test_invalidates_cached_requirements(self, test_project):  # noqa: F811
+        """add_dependency() clears the collected-requirements cache."""
+        app = Target("app")
+        lib = Target("lib")
+        app._collected_requirements = UsageRequirements()  # pretend a cache exists
+
+        app.add_dependency(lib)
+
+        assert app._collected_requirements is None
+
+    def test_raises_after_resolve(self, test_project):  # noqa: F811
+        """add_dependency() fails once the target is resolved."""
+        app = Target("app")
+        lib = Target("lib")
+        app._resolved = True
+
+        with pytest.raises(RuntimeError, match="after resolve"):
+            app.add_dependency(lib)
 
 
 class TestTargetSubdir:

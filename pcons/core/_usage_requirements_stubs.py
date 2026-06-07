@@ -17,12 +17,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from typing import MutableSequence
+    from pcons.core.subst import PathToken
+    from pcons.core.target import Target
 
     class _UsageRequirementsStubs:
         """Typed mixin for UsageRequirements (TYPE_CHECKING-only)."""
 
-        include_dirs: list[Path | str]  # directories added to dependents' include path
-        compile_flags: list[Any]  # flags propagated to dependents (strings + subst tokens)
-        link_flags: list[Any]  # flags propagated to dependents (strings + subst tokens)
-        defines: list[str]  # preprocessor defines propagated to dependents
-        link_libs: list[Any]  # libraries propagated to dependents (str + Target + tokens)
+        include_dirs: MutableSequence[Path | str]  # directories added to dependents' include path
+        compile_flags: MutableSequence[str | PathToken]  # flags propagated to dependents (strings, or PathToken for embedded paths)
+        link_flags: MutableSequence[str | PathToken]  # flags propagated to dependents (strings, or PathToken for embedded paths)
+        defines: MutableSequence[str]  # preprocessor defines propagated to dependents
+        link_libs: MutableSequence[str | Target]  # libraries propagated to dependents (names or Target objects)
