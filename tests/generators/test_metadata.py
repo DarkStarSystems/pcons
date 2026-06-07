@@ -137,6 +137,48 @@ class TestMetadataGenerator:
         assert proj_by_name["parent"]["parent"] is None
         assert proj_by_name["child"]["parent"] == "parent"
 
+    def test_child_targets_not_duplicated_in_parent(self, tmp_path):
+        """Each project entry lists only its own targets, not descendants'."""
+        parent = Project("parent", root_dir=tmp_path, build_dir="build")
+        papp = Target("papp", target_type="program")
+        papp.output_nodes.append(FileNode("build/papp"))
+
+        child = Project("child", root_dir=tmp_path / "sub")
+        capp = Target("capp", target_type="program")
+        capp.output_nodes.append(FileNode("build/capp"))
+        assert capp.project is child  # registered to the child project
+
+        MetadataGenerator().generate(parent)
+        BaseGenerator._generate_pending(parent)
+
+        content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
+        proj_by_name = {p["name"]: p for p in content["projects"]}
+        assert [t["name"] for t in proj_by_name["parent"]["targets"]] == ["papp"]
+        assert [t["name"] for t in proj_by_name["child"]["targets"]] == ["capp"]
+
+        qnames = [
+            t["qualified_name"] for p in content["projects"] for t in p["targets"]
+        ]
+        assert sorted(qnames) == sorted(set(qnames))  # no duplicates
+
+    def test_grandchild_project_in_projects_list(self, tmp_path):
+        """Nested grandchildren get their own project entry with targets."""
+        parent = Project("parent", root_dir=tmp_path, build_dir="build")
+        Project("child", root_dir=tmp_path / "sub")
+        grandchild = Project("grandchild", root_dir=tmp_path / "sub" / "deep")
+        gapp = Target("gapp", target_type="program")
+        gapp.output_nodes.append(FileNode("build/gapp"))
+        assert gapp.project is grandchild
+
+        MetadataGenerator().generate(parent)
+        BaseGenerator._generate_pending(parent)
+
+        content = json.loads((tmp_path / "build" / "pcons_metadata.json").read_text())
+        proj_by_name = {p["name"]: p for p in content["projects"]}
+        assert set(proj_by_name) == {"parent", "child", "grandchild"}
+        assert proj_by_name["grandchild"]["parent"] == "child"
+        assert [t["name"] for t in proj_by_name["grandchild"]["targets"]] == ["gapp"]
+
     def test_test_target_embeds_testspec(self, tmp_path, gcc_toolchain):
         """Test() targets get an embedded `test` block for IDE integration."""
         src = tmp_path / "main.c"
