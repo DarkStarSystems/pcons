@@ -42,14 +42,20 @@ class MetadataGenerator(BaseGenerator):
             "schema_version": 2,
             "generator": self.name,
             "projects": [
-                self._serialize_project(project),
-                *[self._serialize_project(p) for p in project._children],
+                self._serialize_project(p) for p in self._walk_projects(project)
             ],
         }
 
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(metadata, f, indent=2)
             f.write("\n")
+
+    def _walk_projects(self, project: Project) -> list[Project]:
+        """Flatten the project tree depth-first (root before descendants)."""
+        result = [project]
+        for child in project._children:
+            result.extend(self._walk_projects(child))
+        return result
 
     def _serialize_project(self, project: Project) -> dict[str, Any]:
         """Serialize project-level metadata."""
@@ -61,7 +67,7 @@ class MetadataGenerator(BaseGenerator):
             "build_dir": project.build_dir.as_posix(),
             "targets": [
                 self._serialize_target(target, project, default_target_names)
-                for target in sorted(project.targets, key=lambda t: t.name)
+                for target in sorted(project._targets, key=lambda t: t.name)
             ],
             "aliases": [
                 self._serialize_alias(name, project) for name in sorted(project.aliases)
