@@ -1199,11 +1199,21 @@ class TestLinkInputOrder:
         (tmp_path / "b.c").write_text("void b(void) {}\n")
         (tmp_path / "main.c").write_text("int main(void) { return 0; }\n")
 
-    def _link_input_names(self, target):
-        return [d.path.name for d in target.output_nodes[0].explicit_deps]
+    def _assert_links_in_order(self, exe, first_lib, second_lib):
+        """Assert both libs are link inputs of exe, first before second.
+
+        Compares the targets' actual output nodes, so library naming stays
+        platform-agnostic (liba.a on Unix, a.lib on Windows).
+        """
+        link_inputs = list(exe.output_nodes[0].explicit_deps)
+        first = first_lib.output_nodes[0]
+        second = second_lib.output_nodes[0]
+        names = [d.path.name for d in link_inputs]
+        assert first in link_inputs and second in link_inputs, names
+        assert link_inputs.index(first) < link_inputs.index(second), names
 
     def test_static_chain_dependents_before_dependencies(self, tmp_path, gcc_toolchain):
-        """exe -> libA -> libB (public): libA.a must precede libB.a."""
+        """exe -> libA -> libB (public): libA must precede libB."""
         self._make_sources(tmp_path)
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
@@ -1215,13 +1225,12 @@ class TestLinkInputOrder:
         exe.private.link_libs.append(lib_a)
         project.resolve()
 
-        names = self._link_input_names(exe)
-        assert names.index("liba.a") < names.index("libb.a"), names
+        self._assert_links_in_order(exe, lib_a, lib_b)
 
     def test_static_lib_private_dep_on_link_line_and_ordered(
         self, tmp_path, gcc_toolchain
     ):
-        """exe -> libA -> libB (PRIVATE): libB.a still links, after libA.a."""
+        """exe -> libA -> libB (PRIVATE): libB still links, after libA."""
         self._make_sources(tmp_path)
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
@@ -1233,5 +1242,4 @@ class TestLinkInputOrder:
         exe.private.link_libs.append(lib_a)
         project.resolve()
 
-        names = self._link_input_names(exe)
-        assert names.index("liba.a") < names.index("libb.a"), names
+        self._assert_links_in_order(exe, lib_a, lib_b)
