@@ -63,15 +63,24 @@ class PkgConfigFinder(BaseFinder):
     def _run_pkg_config(self, *args: str) -> tuple[bool, str]:
         """Run pkg-config with arguments.
 
+        Invokes the full executable path resolved by is_available() rather
+        than the bare command name: on Windows, pkg-config may be a .bat/.cmd
+        shim (e.g. Strawberry Perl's), which shutil.which() finds via PATHEXT
+        but a bare-name subprocess launch cannot (CreateProcess's PATH search
+        only appends .exe). Using the bare name would make every query fail
+        silently, so packages would be reported as not found.
+
         Args:
             *args: Arguments to pass to pkg-config.
 
         Returns:
             Tuple of (success, output).
         """
+        self.is_available()  # Resolve the executable path if not done yet.
+        cmd = self._pkg_config_path or self.pkg_config_cmd
         try:
             result = subprocess.run(
-                [self.pkg_config_cmd, *args],
+                [cmd, *args],
                 capture_output=True,
                 text=True,
             )

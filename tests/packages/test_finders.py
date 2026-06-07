@@ -218,6 +218,35 @@ class TestSystemFinder:
 class TestPkgConfigFinderMocked:
     """Tests for PkgConfigFinder with mocked subprocess."""
 
+    def test_runs_resolved_executable_path(self) -> None:
+        """Queries must invoke the path which() resolved, not the bare name.
+
+        Regression: on Windows, pkg-config may be a .bat shim (e.g. Strawberry
+        Perl's). shutil.which() finds it via PATHEXT, but launching the bare
+        name fails (CreateProcess only appends .exe), so is_available() said
+        True while every query silently failed and packages were reported as
+        not found.
+        """
+        finder = PkgConfigFinder()
+        bat_path = r"C:\Strawberry\perl\bin\pkg-config.bat"
+        seen_cmds: list[str] = []
+
+        def mock_run(cmd, **kwargs):
+            seen_cmds.append(cmd[0])
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            return result
+
+        with (
+            patch("shutil.which", return_value=bat_path),
+            patch("subprocess.run", side_effect=mock_run),
+        ):
+            assert finder.is_available()
+            finder._run_pkg_config("--exists", "zlib")
+
+        assert seen_cmds == [bat_path]
+
     def test_find_with_mocked_pkg_config(self) -> None:
         """Test finding a package with mocked pkg-config."""
         finder = PkgConfigFinder()
