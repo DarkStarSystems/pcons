@@ -1,0 +1,24 @@
+# Test configuration for the 42_nested_metadata example
+
+[test]
+description = "Nested Project() instances each get their own metadata entry with no duplicated targets"
+
+# We don't use the expected_outputs field here because we want to validate the metadata, not the build output.
+# The test_metadata.py script will load the pcons_metadata.json file and validate that the nested projects
+# are represented correctly without duplicated or missing targets.
+# expected_outputs = [
+#     "build/root_app",
+#     "build/child/child_app",
+#     "build/child/grandchild/grandchild_app",
+# ]
+
+[verify]
+# Custom validation: load pcons_metadata.json and assert nested projects are
+# represented without duplicated or missing targets.
+commands = [
+    { run = "uv run python test_metadata.py" },
+]
+
+[skip]
+# Metadata is generator-independent, validate it once with ninja.
+generators = ["xcode", "make"]
