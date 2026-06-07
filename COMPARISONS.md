@@ -289,18 +289,18 @@ libmath = project.StaticLibrary("math", base_env, sources=["src/math.c"])
 libmath.public.include_dirs.append("include")
 
 libphysics = project.StaticLibrary("physics", base_env, sources=["src/physics.c"])
-libphysics.link(libmath)  # gets libmath's public includes transitively
+libphysics.public.link_libs.append(libmath)  # re-exports libmath's public includes
 
 for variant in ["debug", "release"]:
     env = base_env.clone()
     env.set_variant(variant)
     prog = project.Program(f"sim_{variant}", env, sources=["src/main.c"])
-    prog.link(libphysics)
+    prog.private.link_libs.append(libphysics)
 
 Generator().generate(project)
 ```
 
-This is **~15 lines of real Python**. Transitive include propagation is implicit via `.link()`. Variants are a plain `for` loop — no special syntax. The entire Python ecosystem (pathlib, os, subprocess, conditionals, comprehensions) is available without restriction.
+This is **~15 lines of real Python**. Transitive include propagation is implicit via `public.link_libs`. Variants are a plain `for` loop — no special syntax. The entire Python ecosystem (pathlib, os, subprocess, conditionals, comprehensions) is available without restriction.
 
 ### Bazel
 

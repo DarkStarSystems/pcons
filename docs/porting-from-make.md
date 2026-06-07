@@ -272,10 +272,10 @@ mylib = project.StaticLibrary("mylib", env, sources=["src/lib.c"])
 mylib.public.include_dirs.append("include")
 
 app = project.Program("app", env, sources=["app.c"])
-app.link(mylib)  # Automatically gets include dirs, defines, link flags
+app.private.link_libs.append(mylib)  # Automatically gets include dirs, defines, link flags
 ```
 
-`link()` applies the library's public usage requirements transitively. No need to manually add `-I`, `-L`, or `-l` flags.
+Appending to `link_libs` applies the library's public usage requirements. No need to manually add `-I`, `-L`, or `-l` flags. Use `private.link_libs` for a dependency that stays local (like `app` here), or `public.link_libs` to re-export it to consumers of this target.
 
 ### PUBLIC vs PRIVATE
 
@@ -301,7 +301,7 @@ CFLAGS += -Ivendor/header-lib/include
 # pcons
 headers = project.HeaderOnlyLibrary("header-lib")
 headers.public.include_dirs.append("vendor/header-lib/include")
-app.link(headers)
+app.private.link_libs.append(headers)
 ```
 
 ---
@@ -320,8 +320,8 @@ LDLIBS += $(shell pkg-config --libs libpng zlib)
 # pcons
 png = project.find_package("libpng")
 zlib = project.find_package("zlib")
-app.link(png)
-app.link(zlib)
+app.private.link_libs.append(png)
+app.private.link_libs.append(zlib)
 ```
 
 `find_package()` uses pkg-config automatically. For optional dependencies:
@@ -329,7 +329,7 @@ app.link(zlib)
 ```python
 optional_dep = project.find_package("libfoo", required=False)
 if optional_dep:
-    app.link(optional_dep)
+    app.private.link_libs.append(optional_dep)
 ```
 
 ### Manual library paths
@@ -351,7 +351,7 @@ mylib = ImportedTarget.from_package(PackageDescription(
     lib_dirs=["/opt/mylib/lib"],
     libs=["mylib"],
 ))
-app.link(mylib)
+app.private.link_libs.append(mylib)
 ```
 
 ---
@@ -579,7 +579,7 @@ lib.public.include_dirs.append("lib")
 
 # Application
 app = project.Program("app", env, sources=["app/main.c"])
-app.link(lib)
+app.private.link_libs.append(lib)
 
 Generator().generate(project)
 ```

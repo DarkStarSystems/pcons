@@ -380,7 +380,7 @@ lib.add_sources(["lib.cpp"])
 lib.public.include_dirs.append(Path("include"))
 
 # Link the program against the library
-app.link(lib)
+app.private.link_libs.append(lib)
 ```
 
 #### Target Types
@@ -661,7 +661,7 @@ libmath.public.link_libs.append("m")
 # Create program that uses the library
 app = project.Program("myapp", env)
 app.add_sources([src_dir / "main.c"])
-app.link(libmath)  # Gets libmath's public includes automatically!
+app.private.link_libs.append(libmath)  # Gets libmath's public includes automatically!
 
 project.Default(app)
 Generator().generate(project, "build")
@@ -669,7 +669,10 @@ Generator().generate(project, "build")
 
 Key points:
 - `public.include_dirs` propagates to targets that link against this library
-- `app.link(libmath)` adds libmath as a dependency and applies its public requirements
+- Appending to `app.private.link_libs` adds libmath as a dependency and applies its public requirements. Use `private.link_libs` to keep the dependency local (as here, since `app` is the final program) or `public.link_libs` to re-export it to consumers of this target.
+
+!!! note "Deprecated `target.link()`"
+    Earlier versions used `app.link(libmath)`. That method is deprecated; it is equivalent to `app.public.link_libs.append(libmath)`. Prefer appending to `public.link_libs` or `private.link_libs` directly, which lets you control propagation.
 
 ### Shared/Dynamic Library
 
@@ -711,7 +714,7 @@ libplugin.output_name = "myplugin.so"  # Override default libplugin.so
 # Create program that uses the library
 app = project.Program("host", env)
 app.add_sources([src_dir / "main.c"])
-app.link(libplugin)
+app.private.link_libs.append(libplugin)
 
 project.Default(app, libplugin)
 Generator().generate(project, "build")
@@ -758,12 +761,12 @@ libmath.public.link_libs.append("m")  # Link math library
 # Library: libphysics - depends on libmath
 libphysics = project.StaticLibrary("physics", env)
 libphysics.add_sources([src_dir / "physics.c"])
-libphysics.link(libmath)  # Gets libmath's includes transitively
+libphysics.public.link_libs.append(libmath)  # Re-exports libmath's includes to consumers
 
 # Program: simulator - main application
 simulator = project.Program("simulator", env)
 simulator.add_sources([src_dir / "main.c"])
-simulator.link(libphysics)  # Gets BOTH physics and math includes!
+simulator.private.link_libs.append(libphysics)  # Gets BOTH physics and math includes!
 
 # Set defaults and generate
 project.Default(simulator)
@@ -886,7 +889,7 @@ optional = project.find_package("optional-dep", required=False)
 
 # Use as a dependency (public requirements auto-propagate)
 app = project.Program("myapp", env, sources=["main.cpp"])
-app.link(zlib)
+app.private.link_libs.append(zlib)
 
 # Or apply directly to an environment
 env.use(openssl)
@@ -921,17 +924,17 @@ httplib = ImportedTarget.from_package(PackageDescription(
 ))
 ```
 
-If the manual package depends on another package, use `link()` to wire up transitive dependencies — don't copy public requirements manually:
+If the manual package depends on another package, append it to `public.link_libs` to wire up transitive dependencies — don't copy public requirements manually:
 
 ```python
 openssl = project.find_package("openssl")
 
 httplib = # ... see above
-httplib.link(openssl)  # openssl requirements propagate to anything linking httplib
+httplib.public.link_libs.append(openssl)  # openssl requirements propagate to anything linking httplib
 
 # Now any target that links httplib automatically gets openssl too
 app = project.Program("myapp", env, sources=["main.cpp"])
-app.link(httplib)  # gets httplib AND openssl includes, libs, flags
+app.private.link_libs.append(httplib)  # gets httplib AND openssl includes, libs, flags
 ```
 
 ### Using pkg-config
@@ -2352,7 +2355,7 @@ lib.add_sources(["src/mylib.c"])
 
 prog = project.Program("myapp", env)
 prog.add_sources(["src/main.c"])
-prog.link(lib)
+prog.private.link_libs.append(lib)
 
 # Force-load all symbols from the static library (macOS)
 prog.private.link_flags.append(
@@ -2898,7 +2901,9 @@ This is especially useful when porting CMake projects to pcons, since the templa
 |--------|-------------|
 | `target.add_source(path)` | Add a source file |
 | `target.add_sources(paths)` | Add multiple source files |
-| `target.link(*targets)` | Add library dependencies |
+| `target.public.link_libs.append(t)` | Link a dependency and re-export its public requirements |
+| `target.private.link_libs.append(t)` | Link a dependency, keeping its requirements local |
+| `target.add_dependency(t)` | Add a non-link build dependency |
 | `target.public.include_dirs` | Include dirs for consumers |
 | `target.public.link_libs` | Libraries to link (`-l`; placed after objects) |
 | `target.public.link_flags` | Linker flags (placed before objects; use `link_libs` for `-l` libraries). Use `PathToken` for flags containing paths. |

@@ -9,12 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Python packaging: PEP 517 build backend (experimental).** Python extension packages can now use pcons as their build system directly from `pyproject.toml` (`build-backend = "pcons.pyproject"`). Supports building wheels, editable installs (PEP 660 — imports resolve to the build directory, so `ninja` alone picks up changes), and sdists. Honors PEP 621 `[project]` metadata (`requires-python`, `dependencies`). Ninja is requested automatically in isolated builds when not already on PATH. Configure via `[tool.pcons]` (`variant`, `variables`, `install-target`); see the user guide and `examples/50_pyproject` (a nanobind C++ extension with Conan, exercising the full `uv sync` workflow). Marked experimental: the `[tool.pcons]` keys and the `PCONS_BUILD_WHEEL` convention may still change. (PR #37)
+- **Python packaging: PEP 517 build backend (experimental).** Python extension packages can now use pcons as their build system directly from `pyproject.toml` (`build-backend = "pcons.pyproject"`). Supports building wheels, editable installs (PEP 660 — imports resolve to the build directory, so `ninja` alone picks up changes), and sdists. Honors PEP 621 `[project]` metadata (`requires-python`, `dependencies`). Ninja is requested automatically in isolated builds when not already on PATH. Configure via `[tool.pcons]` (`variant`, `variables`, `install-target`); see the user guide and `examples/50_pyproject` (a nanobind C++ extension with Conan, exercising the full `uv sync` workflow on Linux, macOS, and Windows). Marked experimental: the `[tool.pcons]` keys and the `PCONS_BUILD_WHEEL` convention may still change. (PR #37)
 - Importing a C++20 module whose compiled interface exists only under different BMI-sensitive flags is now a clear configure-time error (naming the module, the importer, and the fix), instead of a confusing compiler error at build time.
+- **`target.add_dependency(t)`** adds a build-order/requirements dependency on a target that is not a library to link. (PR #41)
+
+### Changed
+
+- **BREAKING: link dependencies are now usage requirements.** Append `Target` objects (or library names) to `target.public.link_libs` / `target.private.link_libs`; the scope controls propagation just like `include_dirs` and `defines`, and private link dependencies are now expressible. `target.link(...)` still works but is deprecated (equivalent to appending to `public.link_libs`). `target.dependencies` is now a read-only view — use `add_dependency()` instead of `.append()`. (PR #41)
 
 ### Fixed
 
 - On macOS, toolchain auto-detection no longer mistakes Apple's `gcc` shim (which is actually clang) for a real GCC. `find_c_toolchain(prefer=["gcc"])` now falls through to the next available toolchain instead of configuring clang with GCC assumptions. (PR #37)
+- Link inputs are ordered dependents-before-dependencies, as left-to-right linkers (GNU ld) require, and a static library's *private* link dependencies still reach the consumer's final link line (without propagating as usage requirements). (PR #41)
+- Targets of nested sub-projects no longer appear once per ancestor in `pcons_metadata.json`, and grandchild projects now get their own entry — fixes duplicated entries in IDE target pickers. (PR #42)
+- **Conan packages now work on Windows.** `ConanFinder` parses Conan-generated `.pc` files itself instead of shelling out to whatever `pkg-config` happens to be on PATH (which silently dropped packages with some implementations), finds them in both single- and multi-config `cmake_layout` locations, follows transitive `Requires:`, and handles Conan's quoted Windows paths. A successful install that yields no parseable packages is now a clear error instead of a confusing downstream failure. (PR #40)
+- Library directories from imported packages propagate as `link_dirs` and are formatted per-toolchain (`/LIBPATH:` for MSVC, `-L` for GCC/Clang) instead of hardcoded `-L` flags. (PR #40)
 
 ### Contributors
 
