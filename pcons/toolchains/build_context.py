@@ -129,7 +129,7 @@ class CompileLinkContext:
         if self.libdirs:
             result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
         if self.libs:
-            result["libs"] = list(self.libs)
+            result["libs"] = self._format_libs(self.libs)
         if self.link_flags:
             # Merge with base flags from env.link.flags so that env-level
             # link flags (e.g., -fsanitize=address) are preserved alongside
@@ -139,6 +139,10 @@ class CompileLinkContext:
             result["cmd"] = self.linker_cmd
 
         return result
+
+    def _format_libs(self, libs: list[str]) -> list[str]:
+        """Format library names for the linker. Base passes them unchanged."""
+        return list(libs)
 
     @classmethod
     def from_effective_requirements(
@@ -261,74 +265,15 @@ class MsvcCompileLinkContext(CompileLinkContext):
     libdir_prefix: str = "/LIBPATH:"
     lib_prefix: str = ""  # MSVC uses full library names (foo.lib)
 
-    def _link_overrides(self) -> dict[str, object]:
-        """Return link-time overrides with MSVC-specific lib formatting."""
-        from pcons.core.subst import ProjectPath
-
-        result: dict[str, object] = {}
-
-        if self.libdirs:
-            result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
-        if self.libs:
-            # MSVC uses full library names (kernel32.lib, not -lkernel32)
-            formatted_libs = []
-            for lib in self.libs:
-                if isinstance(lib, str) and lib.endswith(".lib"):
-                    formatted_libs.append(lib)
-                elif isinstance(lib, str):
-                    formatted_libs.append(f"{lib}.lib")
-                else:
-                    formatted_libs.append(lib)
-            result["libs"] = formatted_libs
-        if self.link_flags:
-            # Merge with base flags from env.link.flags (same as base class)
-            result["flags"] = self._merge_with_base_flags("link", self.link_flags)
-        if self.linker_cmd:
-            result["cmd"] = self.linker_cmd
-
-        return result
-
-    @classmethod
-    def from_effective_requirements(
-        cls,
-        effective: EffectiveRequirements,
-        *,
-        mode: str = "compile",
-        tool_name: str | None = None,
-        language: str | None = None,
-        env: Environment | None = None,
-        target: Target | None = None,
-        output_name: str | None = None,
-    ) -> MsvcCompileLinkContext:
-        """Create a MsvcCompileLinkContext from EffectiveRequirements.
-
-        This factory method bridges the current EffectiveRequirements system
-        to the new context-based approach, with MSVC-style prefixes.
-
-        Args:
-            effective: The computed effective requirements.
-            mode: Which overrides to return: "compile" or "link".
-            tool_name: The tool name for flag merging in compile mode.
-            language: Unused for MSVC (kept for interface compatibility).
-            env: Unused for MSVC (kept for interface compatibility).
-            target: Unused for MSVC (kept for interface compatibility).
-            output_name: Unused for MSVC (kept for interface compatibility).
-
-        Returns:
-            A MsvcCompileLinkContext populated from the requirements.
-        """
-        # MSVC always uses link.exe regardless of language (no linker_cmd override).
-        # Unlike GCC/Clang where g++/clang++ must be used as the linker driver for C++
-        # runtime linkage, MSVC link.exe handles all languages automatically.
-        return cls(
-            includes=[str(p) for p in effective.includes],
-            defines=list(effective.defines),
-            flags=list(effective.compile_flags),
-            link_flags=list(effective.link_flags),
-            libs=[lib for lib in effective.link_libs if not isinstance(lib, Target)],
-            libdirs=[str(p) for p in effective.link_dirs],
-            linker_cmd=None,
-            mode=mode,
-            _tool_name=tool_name,
-            _env=env,
-        )
+    def _format_libs(self, libs: list[str]) -> list[str]:
+        # MSVC uses full library names (kernel32.lib, not -lkernel32).
+        # Non-string entries (e.g. PathToken) pass through unchanged.
+        formatted: list[str] = []
+        for lib in libs:
+            if not isinstance(lib, str):
+                formatted.append(lib)
+            elif lib.endswith(".lib"):
+                formatted.append(lib)
+            else:
+                formatted.append(f"{lib}.lib")
+        return formatted
