@@ -20,23 +20,28 @@ if TYPE_CHECKING:
     from pcons.core.builder import Builder
 
 
-def gnu_compile_vars(cmd: str, ns: str) -> dict[str, object]:
+def gnu_compile_vars(
+    cmd: str,
+    ns: str,
+    *,
+    target_tokens: list[str] | None = None,
+    extra_vars: dict[str, object] | None = None,
+) -> dict[str, object]:
     """Default vars for a GNU-style compile tool (gcc/g++/clang/clang++).
 
     Args:
         cmd: Default compiler command (e.g. "gcc", "clang++").
         ns: Tool namespace ("cc" or "cxx"), used to build the $ns.* references.
+        target_tokens: Extra tokens inserted right after the command, before
+            flags (e.g. ["--target=wasm32-wasi", "$cc.sysroot_flag"] for WASI).
+        extra_vars: Additional default vars merged into the result (e.g. WASI's
+            "sysroot_flag" placeholder).
     """
-    return {
-        "cmd": cmd,
-        "flags": [],
-        "iprefix": "-I",
-        "includes": [],
-        "dprefix": "-D",
-        "defines": [],
-        "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-        "objcmd": [
-            f"${ns}.cmd",
+    objcmd: list[object] = [f"${ns}.cmd"]
+    if target_tokens:
+        objcmd.extend(target_tokens)
+    objcmd.extend(
+        [
             f"${ns}.flags",
             f"${{prefix({ns}.iprefix, {ns}.includes)}}",
             f"${{prefix({ns}.dprefix, {ns}.defines)}}",
@@ -45,8 +50,21 @@ def gnu_compile_vars(cmd: str, ns: str) -> dict[str, object]:
             "-o",
             TargetPath(),
             SourcePath(),
-        ],
+        ]
+    )
+    result: dict[str, object] = {
+        "cmd": cmd,
+        "flags": [],
+        "iprefix": "-I",
+        "includes": [],
+        "dprefix": "-D",
+        "defines": [],
+        "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
+        "objcmd": objcmd,
     }
+    if extra_vars:
+        result.update(extra_vars)
+    return result
 
 
 def _link_tail() -> list[object]:
