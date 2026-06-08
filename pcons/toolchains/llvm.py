@@ -13,6 +13,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.environment import Environment
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.toolchains.gnu_common import gnu_compile_vars, gnu_link_vars
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
@@ -174,26 +175,7 @@ class ClangCCompiler(BaseTool):
         super().__init__("cc", language="c")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "clang",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cc.cmd",
-                "$cc.flags",
-                "${prefix(cc.iprefix, cc.includes)}",
-                "${prefix(cc.dprefix, cc.defines)}",
-                "$cc.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
-        }
+        return gnu_compile_vars("clang", "cc")
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()
@@ -235,26 +217,9 @@ class ClangCxxCompiler(BaseTool):
 
     def default_vars(self) -> dict[str, object]:
         return {
-            "cmd": "clang++",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
+            **gnu_compile_vars("clang++", "cxx"),
             "moddir": "cxx_modules",
             "modules": False,  # set True to enable C++20 module scanning
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cxx.cmd",
-                "$cxx.flags",
-                "${prefix(cxx.iprefix, cxx.includes)}",
-                "${prefix(cxx.dprefix, cxx.defines)}",
-                "$cxx.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -356,44 +321,7 @@ class LlvmLinker(BaseTool):
         super().__init__("link")
 
     def default_vars(self) -> dict[str, object]:
-        platform = get_platform()
-        shared_flag = "-dynamiclib" if platform.is_macos else "-shared"
-        return {
-            "cmd": "clang",
-            "flags": [],
-            "lprefix": "-l",
-            "libs": [],
-            "Lprefix": "-L",
-            "libdirs": [],
-            # Framework support (macOS only, but always defined for portability)
-            "Fprefix": "-F",
-            "frameworkdirs": [],
-            "fprefix": "-framework",
-            "frameworks": [],
-            "progcmd": [
-                "$link.cmd",
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-            "sharedcmd": [
-                "$link.cmd",
-                shared_flag,
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-        }
+        return gnu_link_vars("clang")
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()

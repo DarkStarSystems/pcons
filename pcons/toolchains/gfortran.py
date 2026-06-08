@@ -20,6 +20,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gcc import GccArchiver
+from pcons.toolchains.gnu_common import gnu_link_vars
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 
@@ -156,43 +157,7 @@ class GfortranLinker(BaseTool):
         super().__init__("link")
 
     def default_vars(self) -> dict[str, object]:
-        platform = get_platform()
-        shared_flag = "-dynamiclib" if platform.is_macos else "-shared"
-        return {
-            "cmd": "gfortran",
-            "flags": [],
-            "lprefix": "-l",
-            "libs": [],
-            "Lprefix": "-L",
-            "libdirs": [],
-            "Fprefix": "-F",
-            "frameworkdirs": [],
-            "fprefix": "-framework",
-            "frameworks": [],
-            "progcmd": [
-                "$link.cmd",
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-            "sharedcmd": [
-                "$link.cmd",
-                shared_flag,
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-        }
+        return gnu_link_vars("gfortran")
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()

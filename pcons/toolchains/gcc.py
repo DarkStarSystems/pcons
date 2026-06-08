@@ -20,6 +20,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.node import FileNode
 from pcons.core.subst import PathToken, SourcePath, TargetPath
+from pcons.toolchains.gnu_common import gnu_compile_vars, gnu_link_vars
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 
@@ -176,26 +177,7 @@ class GccCCompiler(BaseTool):
         super().__init__("cc", language="c")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "gcc",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cc.cmd",
-                "$cc.flags",
-                "${prefix(cc.iprefix, cc.includes)}",
-                "${prefix(cc.dprefix, cc.defines)}",
-                "$cc.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
-        }
+        return gnu_compile_vars("gcc", "cc")
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()
@@ -251,26 +233,7 @@ class GccCxxCompiler(BaseTool):
         super().__init__("cxx", language="cxx")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "g++",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cxx.cmd",
-                "$cxx.flags",
-                "${prefix(cxx.iprefix, cxx.includes)}",
-                "${prefix(cxx.dprefix, cxx.defines)}",
-                "$cxx.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
-        }
+        return gnu_compile_vars("g++", "cxx")
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()
@@ -377,44 +340,7 @@ class GccLinker(BaseTool):
         super().__init__("link")
 
     def default_vars(self) -> dict[str, object]:
-        platform = get_platform()
-        shared_flag = "-dynamiclib" if platform.is_macos else "-shared"
-        return {
-            "cmd": "gcc",
-            "flags": [],
-            "lprefix": "-l",
-            "libs": [],
-            "Lprefix": "-L",
-            "libdirs": [],
-            # Framework support (macOS only, but always defined for portability)
-            "Fprefix": "-F",
-            "frameworkdirs": [],
-            "fprefix": "-framework",
-            "frameworks": [],
-            "progcmd": [
-                "$link.cmd",
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-            "sharedcmd": [
-                "$link.cmd",
-                shared_flag,
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-        }
+        return gnu_link_vars("gcc")
 
     def builders(self) -> dict[str, Builder]:
         platform = get_platform()
