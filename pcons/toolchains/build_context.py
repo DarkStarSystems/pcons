@@ -88,6 +88,20 @@ class CompileLinkContext:
             return self._link_overrides()
         return {}
 
+    def _merge_with_base_flags(
+        self, tool_name: str | None, flags: list[str | PathToken]
+    ) -> list[object]:
+        """Prepend env.<tool>.flags to `flags`, dropping duplicates.
+
+        Keeps env-level flags (e.g. -std=c++20, -fsanitize=address) ahead of
+        the target-specific flags from usage requirements.
+        """
+        base_flags: list[object] = []
+        if tool_name and self._env and self._env.has_tool(tool_name):
+            tool_cfg = getattr(self._env, tool_name, None)
+            base_flags = list(getattr(tool_cfg, "flags", None) or [])
+        return base_flags + [f for f in flags if f not in base_flags]
+
     def _compile_overrides(self) -> dict[str, object]:
         """Return compile-time overrides: includes, defines, flags."""
         from pcons.core.subst import ProjectPath
@@ -102,12 +116,7 @@ class CompileLinkContext:
             # Merge with base flags from env.{tool_name}.flags so that
             # language-specific flags (e.g., -std=c++20 on env.cxx.flags)
             # are preserved alongside effective-requirement flags.
-            base_flags: list[object] = []
-            if self._tool_name and self._env and self._env.has_tool(self._tool_name):
-                tool_cfg = getattr(self._env, self._tool_name, None)
-                base_flags = list(getattr(tool_cfg, "flags", None) or [])
-            merged = base_flags + [f for f in self.flags if f not in base_flags]
-            result["flags"] = merged
+            result["flags"] = self._merge_with_base_flags(self._tool_name, self.flags)
 
         return result
 
@@ -125,12 +134,7 @@ class CompileLinkContext:
             # Merge with base flags from env.link.flags so that env-level
             # link flags (e.g., -fsanitize=address) are preserved alongside
             # target-specific link flags from usage requirements.
-            base_flags: list[object] = []
-            if self._env and self._env.has_tool("link"):
-                link_cfg = getattr(self._env, "link", None)
-                base_flags = list(getattr(link_cfg, "flags", None) or [])
-            merged = base_flags + [f for f in self.link_flags if f not in base_flags]
-            result["flags"] = merged
+            result["flags"] = self._merge_with_base_flags("link", self.link_flags)
         if self.linker_cmd:
             result["cmd"] = self.linker_cmd
 
@@ -278,12 +282,7 @@ class MsvcCompileLinkContext(CompileLinkContext):
             result["libs"] = formatted_libs
         if self.link_flags:
             # Merge with base flags from env.link.flags (same as base class)
-            base_flags: list[object] = []
-            if self._env and self._env.has_tool("link"):
-                link_cfg = getattr(self._env, "link", None)
-                base_flags = list(getattr(link_cfg, "flags", None) or [])
-            merged = base_flags + [f for f in self.link_flags if f not in base_flags]
-            result["flags"] = merged
+            result["flags"] = self._merge_with_base_flags("link", self.link_flags)
         if self.linker_cmd:
             result["cmd"] = self.linker_cmd
 
