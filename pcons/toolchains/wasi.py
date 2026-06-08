@@ -119,6 +119,12 @@ def _find_sysroot(sdk_path: Path) -> Path | None:
     return None
 
 
+def _wasi_hints() -> list[Path | str] | None:
+    """Search hints pointing at a wasi-sdk's bin directory, if one is found."""
+    sdk = find_wasi_sdk()
+    return [sdk / "bin"] if sdk else None
+
+
 # =============================================================================
 # Tools
 # =============================================================================
@@ -142,24 +148,10 @@ class WasiCCompiler(BaseTool):
         return gnu_compile_builders("cc", object_suffix=".o")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
         # Prefer wasi-sdk's clang, fall back to system clang
-        sdk = find_wasi_sdk()
-        if sdk:
-            clang = config.find_program("clang", hints=[sdk / "bin"])
-        else:
-            clang = config.find_program("clang")
-        if clang is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cc", cmd=str(clang.path))
-        if clang.version:
-            tool_config.version = clang.version
-        return tool_config
+        return self._find_tool_config(
+            config, "clang", hints=_wasi_hints(), with_version=True
+        )
 
 
 class WasiCxxCompiler(BaseTool):
@@ -180,23 +172,9 @@ class WasiCxxCompiler(BaseTool):
         return gnu_compile_builders("cxx", object_suffix=".o")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        sdk = find_wasi_sdk()
-        if sdk:
-            clangxx = config.find_program("clang++", hints=[sdk / "bin"])
-        else:
-            clangxx = config.find_program("clang++")
-        if clangxx is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cxx", cmd=str(clangxx.path))
-        if clangxx.version:
-            tool_config.version = clangxx.version
-        return tool_config
+        return self._find_tool_config(
+            config, "clang++", hints=_wasi_hints(), with_version=True
+        )
 
 
 class WasiArchiver(BaseTool):
@@ -212,22 +190,7 @@ class WasiArchiver(BaseTool):
         return gnu_archiver_builders(object_suffix=".o", static_lib_suffix=".a")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        sdk = find_wasi_sdk()
-        if sdk:
-            ar = config.find_program("llvm-ar", hints=[sdk / "bin"])
-        else:
-            ar = config.find_program("llvm-ar")
-        if ar is None:
-            ar = config.find_program("ar")
-        if ar is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ar", cmd=str(ar.path))
+        return self._find_tool_config(config, "llvm-ar", "ar", hints=_wasi_hints())
 
 
 class WasiLinker(BaseTool):
@@ -277,20 +240,7 @@ class WasiLinker(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        sdk = find_wasi_sdk()
-        if sdk:
-            clang = config.find_program("clang", hints=[sdk / "bin"])
-        else:
-            clang = config.find_program("clang")
-        if clang is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(clang.path))
+        return self._find_tool_config(config, "clang", hints=_wasi_hints())
 
 
 # =============================================================================

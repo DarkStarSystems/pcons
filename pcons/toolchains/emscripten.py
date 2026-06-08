@@ -103,6 +103,15 @@ def _find_emcc_dir(emsdk_path: Path) -> Path | None:
     return None
 
 
+def _emsdk_hints() -> list[Path | str] | None:
+    """Search hints pointing at an emsdk's emcc directory, if one is found."""
+    emsdk = find_emsdk()
+    if not emsdk:
+        return None
+    emcc_dir = _find_emcc_dir(emsdk)
+    return [emcc_dir] if emcc_dir else None
+
+
 def is_emcc_available() -> bool:
     """Check whether emcc is available (either via emsdk or PATH)."""
     env_path = os.environ.get("EMSDK")
@@ -131,25 +140,9 @@ class EmccCCompiler(BaseTool):
         return gnu_compile_builders("cc", object_suffix=".o")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        emsdk = find_emsdk()
-        if emsdk:
-            emcc_dir = _find_emcc_dir(emsdk)
-            hints: list[Path | str] = [emcc_dir] if emcc_dir else []
-            emcc = config.find_program("emcc", hints=hints)
-        else:
-            emcc = config.find_program("emcc")
-        if emcc is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cc", cmd=str(emcc.path))
-        if emcc.version:
-            tool_config.version = emcc.version
-        return tool_config
+        return self._find_tool_config(
+            config, "emcc", hints=_emsdk_hints(), with_version=True
+        )
 
 
 class EmccCxxCompiler(BaseTool):
@@ -165,25 +158,9 @@ class EmccCxxCompiler(BaseTool):
         return gnu_compile_builders("cxx", object_suffix=".o")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        emsdk = find_emsdk()
-        if emsdk:
-            emcc_dir = _find_emcc_dir(emsdk)
-            hints: list[Path | str] = [emcc_dir] if emcc_dir else []
-            empp = config.find_program("em++", hints=hints)
-        else:
-            empp = config.find_program("em++")
-        if empp is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cxx", cmd=str(empp.path))
-        if empp.version:
-            tool_config.version = empp.version
-        return tool_config
+        return self._find_tool_config(
+            config, "em++", hints=_emsdk_hints(), with_version=True
+        )
 
 
 class EmccArchiver(BaseTool):
@@ -199,22 +176,7 @@ class EmccArchiver(BaseTool):
         return gnu_archiver_builders(object_suffix=".o", static_lib_suffix=".a")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        emsdk = find_emsdk()
-        if emsdk:
-            emcc_dir = _find_emcc_dir(emsdk)
-            hints: list[Path | str] = [emcc_dir] if emcc_dir else []
-            emar = config.find_program("emar", hints=hints)
-        else:
-            emar = config.find_program("emar")
-        if emar is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ar", cmd=str(emar.path))
+        return self._find_tool_config(config, "emar", hints=_emsdk_hints())
 
 
 class EmccLinker(BaseTool):
@@ -272,22 +234,7 @@ class EmccLinker(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        emsdk = find_emsdk()
-        if emsdk:
-            emcc_dir = _find_emcc_dir(emsdk)
-            hints: list[Path | str] = [emcc_dir] if emcc_dir else []
-            emcc = config.find_program("emcc", hints=hints)
-        else:
-            emcc = config.find_program("emcc")
-        if emcc is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(emcc.path))
+        return self._find_tool_config(config, "emcc", hints=_emsdk_hints())
 
 
 # =============================================================================
