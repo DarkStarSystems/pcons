@@ -17,10 +17,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
-from pcons.core.builder import CommandBuilder
 from pcons.core.node import FileNode
-from pcons.core.subst import PathToken, SourcePath, TargetPath
+from pcons.core.subst import PathToken, TargetPath
 from pcons.toolchains.gnu_common import (
+    gnu_archiver_builders,
+    gnu_archiver_vars,
+    gnu_compile_builders,
     gnu_compile_vars,
     gnu_link_builders,
     gnu_link_vars,
@@ -184,20 +186,7 @@ class GccCCompiler(BaseTool):
         return gnu_compile_vars("gcc", "cc")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cc",
-                "objcmd",
-                src_suffixes=[".c"],
-                target_suffixes=[platform.object_suffix],
-                language="c",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cc")
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
@@ -240,20 +229,7 @@ class GccCxxCompiler(BaseTool):
         return gnu_compile_vars("g++", "cxx")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cxx",
-                "objcmd",
-                src_suffixes=[".cpp", ".cxx", ".cc", ".C"],
-                target_suffixes=[platform.object_suffix],
-                language="cxx",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cxx")
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
@@ -288,24 +264,10 @@ class GccArchiver(BaseTool):
         super().__init__("ar")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "ar",
-            "flags": ["rcs"],
-            "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
-        }
+        return gnu_archiver_vars("ar")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "StaticLibrary": CommandBuilder(
-                "StaticLibrary",
-                "ar",
-                "libcmd",
-                src_suffixes=[platform.object_suffix],
-                target_suffixes=[platform.static_lib_suffix],
-                single_source=False,
-            ),
-        }
+        return gnu_archiver_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure

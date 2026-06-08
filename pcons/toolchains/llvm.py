@@ -14,6 +14,9 @@ from pcons.core.builder import CommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gnu_common import (
+    gnu_archiver_builders,
+    gnu_archiver_vars,
+    gnu_compile_builders,
     gnu_compile_vars,
     gnu_link_builders,
     gnu_link_vars,
@@ -182,20 +185,7 @@ class ClangCCompiler(BaseTool):
         return gnu_compile_vars("clang", "cc")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cc",
-                "objcmd",
-                src_suffixes=[".c"],
-                target_suffixes=[platform.object_suffix],
-                language="c",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cc")
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
@@ -227,20 +217,7 @@ class ClangCxxCompiler(BaseTool):
         }
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cxx",
-                "objcmd",
-                src_suffixes=[".cpp", ".cxx", ".cc", ".C"],
-                target_suffixes=[platform.object_suffix],
-                language="cxx",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cxx")
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure
@@ -269,24 +246,10 @@ class LlvmArchiver(BaseTool):
 
         # Prefer llvm-ar if available, otherwise fall back to ar
         ar_cmd = "llvm-ar" if shutil.which("llvm-ar") else "ar"
-        return {
-            "cmd": ar_cmd,
-            "flags": ["rcs"],
-            "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
-        }
+        return gnu_archiver_vars(ar_cmd)
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "StaticLibrary": CommandBuilder(
-                "StaticLibrary",
-                "ar",
-                "libcmd",
-                src_suffixes=[platform.object_suffix],
-                target_suffixes=[platform.static_lib_suffix],
-                single_source=False,
-            ),
-        }
+        return gnu_archiver_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure

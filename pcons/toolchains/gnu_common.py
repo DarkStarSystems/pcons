@@ -4,8 +4,8 @@
 GCC, LLVM/Clang, and gfortran share the same option syntax: -I/-D for
 includes/defines, -l/-L for libraries, -F/-framework for macOS frameworks, and
 -MD/-MF for dependency generation. These factories build the `default_vars`
-dicts so each tool only specifies what differs (its command name and any extra
-keys).
+dicts and `builders()` maps so each tool only specifies what differs (its
+command name and any extra keys).
 """
 
 from __future__ import annotations
@@ -83,6 +83,80 @@ def gnu_link_vars(cmd: str) -> dict[str, object]:
         "frameworks": [],
         "progcmd": ["$link.cmd", "$link.flags", *_link_tail()],
         "sharedcmd": ["$link.cmd", shared_flag, "$link.flags", *_link_tail()],
+    }
+
+
+# src_suffixes and language for each compile namespace.
+_COMPILE_SOURCES: dict[str, tuple[list[str], str]] = {
+    "cc": ([".c"], "c"),
+    "cxx": ([".cpp", ".cxx", ".cc", ".C"], "cxx"),
+}
+
+
+def gnu_compile_builders(
+    ns: str, *, object_suffix: str | None = None
+) -> dict[str, Builder]:
+    """The {'Object': ...} builder for a GNU-style compile tool.
+
+    Args:
+        ns: Tool namespace ("cc" or "cxx").
+        object_suffix: Object-file suffix. Defaults to the host platform's
+            (".o"/".obj"); pass ".o" explicitly for wasm toolchains that always
+            emit ".o" regardless of host.
+    """
+    src_suffixes, language = _COMPILE_SOURCES[ns]
+    if object_suffix is None:
+        object_suffix = get_platform().object_suffix
+    return {
+        "Object": CommandBuilder(
+            "Object",
+            ns,
+            "objcmd",
+            src_suffixes=src_suffixes,
+            target_suffixes=[object_suffix],
+            language=language,
+            single_source=True,
+            depfile=TargetPath(suffix=".d"),
+            deps_style="gcc",
+        ),
+    }
+
+
+def gnu_archiver_vars(cmd: str) -> dict[str, object]:
+    """Default vars for a GNU-style archiver (ar, llvm-ar, emar).
+
+    Args:
+        cmd: Default archiver command.
+    """
+    return {
+        "cmd": cmd,
+        "flags": ["rcs"],
+        "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
+    }
+
+
+def gnu_archiver_builders(
+    *, object_suffix: str | None = None, static_lib_suffix: str | None = None
+) -> dict[str, Builder]:
+    """The {'StaticLibrary': ...} builder for a GNU-style archiver.
+
+    Suffixes default to the host platform's; pass ".o"/".a" explicitly for wasm
+    toolchains that use those regardless of host.
+    """
+    platform = get_platform()
+    if object_suffix is None:
+        object_suffix = platform.object_suffix
+    if static_lib_suffix is None:
+        static_lib_suffix = platform.static_lib_suffix
+    return {
+        "StaticLibrary": CommandBuilder(
+            "StaticLibrary",
+            "ar",
+            "libcmd",
+            src_suffixes=[object_suffix],
+            target_suffixes=[static_lib_suffix],
+            single_source=False,
+        ),
     }
 
 
