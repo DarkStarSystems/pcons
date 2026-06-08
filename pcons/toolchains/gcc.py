@@ -421,6 +421,7 @@ class GccToolchain(UnixToolchain):
             build_keyed_entries,
             keyed_bmi_path,
             map_module_providers,
+            merge_scan_compile_flags,
             scan_translation_units,
             select_modules_scope,
             wire_std_into_targets,
@@ -478,20 +479,9 @@ class GccToolchain(UnixToolchain):
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
-            seen: set[str] = set(base_flags)
-            compile_flags = list(base_flags)
-            if modules_flag not in seen:
-                compile_flags.append(modules_flag)
-                seen.add(modules_flag)
-            if context:
-                for f in context.flags:
-                    if f not in seen:
-                        compile_flags.append(f)
-                        seen.add(f)
-                for inc in context.includes:
-                    compile_flags.append(f"-I{inc}")
-                for d in context.defines:
-                    compile_flags.append(f"-D{d}")
+            compile_flags = merge_scan_compile_flags(
+                base_flags, context, extra_flags=(modules_flag,)
+            )
 
             # For module interfaces, insert a scan step to generate the depfile.
             if src in module_src_paths:
