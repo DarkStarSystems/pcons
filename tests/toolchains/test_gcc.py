@@ -157,6 +157,34 @@ class TestGccLinker:
         assert "SharedLibrary" in builders
 
 
+class TestGccConfigure:
+    """Each tool's configure() delegates to _find_tool_config."""
+
+    @pytest.mark.parametrize(
+        "cls", [GccCCompiler, GccCxxCompiler, GccArchiver, GccLinker]
+    )
+    def test_configure_finds_program(self, cls, tmp_path):
+        from pcons.configure.config import Configure, ProgramInfo
+
+        config = Configure(build_dir=tmp_path)
+        config.find_program = (  # type: ignore[method-assign]
+            lambda *a, **k: ProgramInfo(path=Path("/usr/bin/tool"), version="1.0")
+        )
+        cfg = cls().configure(config)
+        assert cfg is not None
+        assert cfg.cmd == str(Path("/usr/bin/tool"))
+
+    @pytest.mark.parametrize(
+        "cls", [GccCCompiler, GccCxxCompiler, GccArchiver, GccLinker]
+    )
+    def test_configure_returns_none_when_missing(self, cls, tmp_path):
+        from pcons.configure.config import Configure
+
+        config = Configure(build_dir=tmp_path)
+        config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
+        assert cls().configure(config) is None
+
+
 class TestGccToolchain:
     def test_creation(self):
         tc = GccToolchain()

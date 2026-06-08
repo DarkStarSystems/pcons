@@ -258,6 +258,81 @@ class TestCrossPresetApplication:
 
         assert "/MACHINE:ARM64" in env.link.flags
 
+    def _make_msvc_env(self) -> Environment:
+        env = Environment()
+        for name in ("cc", "cxx", "link", "lib"):
+            tool = env.add_tool(name)
+            tool.set("cmd", f"{name}.exe")
+            tool.set("flags", [])
+            tool.set("defines", [])
+        return env
+
+    def _concrete_msvc(self):
+        from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
+
+        class ConcreteMsvc(MsvcCompatibleToolchain):
+            def _configure_tools(self, config: object) -> bool:
+                return True
+
+        return ConcreteMsvc("test-msvc")
+
+    def test_msvc_apply_extra_flags(self, test_project):  # noqa: F811
+        """MsvcCompatibleToolchain applies extra compile/link flags."""
+        env = self._make_msvc_env()
+        toolchain = self._concrete_msvc()
+
+        preset = CrossPreset(
+            name="test",
+            arch="x64",
+            extra_compile_flags=("/DCUSTOM",),
+            extra_link_flags=("/LIBPATH:custom",),
+        )
+        toolchain.apply_cross_preset(env, preset)
+
+        assert "/DCUSTOM" in env.cc.flags
+        assert "/DCUSTOM" in env.cxx.flags
+        assert "/LIBPATH:custom" in env.link.flags
+
+    def test_msvc_apply_variant(self, test_project):  # noqa: F811
+        """MsvcCompatibleToolchain.apply_variant adds flags and defines."""
+        env = self._make_msvc_env()
+        toolchain = self._concrete_msvc()
+
+        toolchain.apply_variant(env, "debug")
+
+        assert "/Od" in env.cc.flags
+        assert "/Zi" in env.cxx.flags
+        assert "DEBUG" in env.cc.defines
+        assert "_DEBUG" in env.cxx.defines
+
+    def test_wasm_apply_cross_preset(self, test_project):  # noqa: F811
+        """WasmToolchain applies extra flags without sysroot handling."""
+        from pcons.toolchains.emscripten import EmscriptenToolchain
+
+        env = _make_unix_env()
+        toolchain = EmscriptenToolchain()
+
+        preset = CrossPreset(
+            name="test",
+            arch="wasm32",
+            extra_compile_flags=("-DWASM",),
+            extra_link_flags=("-sUSE_PTHREADS",),
+        )
+        toolchain.apply_cross_preset(env, preset)
+
+        assert "-DWASM" in env.cc.flags
+        assert "-DWASM" in env.cxx.flags
+        assert "-sUSE_PTHREADS" in env.link.flags
+
+    def test_wasm_apply_target_arch_forces_wasm32(self, test_project):  # noqa: F811
+        """WasmToolchain ignores the requested arch and uses wasm32."""
+        from pcons.toolchains.emscripten import EmscriptenToolchain
+
+        env = _make_unix_env()
+        toolchain = EmscriptenToolchain()
+        # Any requested arch is accepted but treated as wasm32 (no error).
+        toolchain.apply_target_arch(env, "x86_64")
+
     def test_env_apply_cross_preset_delegates(self, test_project):  # noqa: F811
         """Environment.apply_cross_preset() should delegate to toolchains."""
         from pcons.toolchains.llvm import LlvmToolchain

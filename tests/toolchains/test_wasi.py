@@ -257,3 +257,35 @@ class TestWasiRegistration:
         entry = toolchain_registry.get("wasi-sdk")
         assert entry is not None
         assert entry.toolchain_class is WasiToolchain
+
+
+class TestWasiHints:
+    """Tests for _wasi_hints search-hint helper."""
+
+    def test_none_when_no_sdk(self, monkeypatch):
+        from pcons.toolchains import wasi
+
+        monkeypatch.setattr(wasi, "find_wasi_sdk", lambda: None)
+        assert wasi._wasi_hints() is None
+
+    def test_returns_bin_when_found(self, monkeypatch, tmp_path):
+        from pcons.toolchains import wasi
+
+        monkeypatch.setattr(wasi, "find_wasi_sdk", lambda: tmp_path)
+        assert wasi._wasi_hints() == [tmp_path / "bin"]
+
+
+class TestWasiConfigureMissing:
+    """configure() returns None when the program is not found."""
+
+    @pytest.mark.parametrize(
+        "cls", [WasiCCompiler, WasiCxxCompiler, WasiArchiver, WasiLinker]
+    )
+    def test_configure_returns_none(self, cls, monkeypatch, tmp_path):
+        from pcons.configure.config import Configure
+        from pcons.toolchains import wasi
+
+        monkeypatch.setattr(wasi, "_wasi_hints", lambda: None)
+        config = Configure(build_dir=tmp_path)
+        config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
+        assert cls().configure(config) is None

@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.tools.tool."""
 
+from pathlib import Path
+
+from pcons.configure.config import Configure, ProgramInfo
 from pcons.core.builder import Builder, CommandBuilder
 from pcons.core.environment import Environment
 from pcons.tools.tool import BaseTool, BuilderMethod, Tool
@@ -73,6 +76,59 @@ class TestBaseTool:
         # Builder should be callable from tool config
         assert hasattr(env.mock, "Compile")
         assert isinstance(env.mock.Compile, BuilderMethod)
+
+
+class TestFindToolConfig:
+    """Tests for BaseTool._find_tool_config (the shared configure helper)."""
+
+    def test_non_configure_returns_none(self):
+        tool = MockTool()
+        assert tool._find_tool_config(object(), "gcc") is None
+
+    def test_program_found(self, tmp_path):
+        tool = MockTool()
+        config = Configure(build_dir=tmp_path)
+        config.find_program = (  # type: ignore[method-assign]
+            lambda name, hints=None, version_flag="--version": ProgramInfo(
+                path=Path("/usr/bin/gcc")
+            )
+        )
+        cfg = tool._find_tool_config(config, "gcc")
+        assert cfg is not None
+        assert cfg.cmd == str(Path("/usr/bin/gcc"))
+
+    def test_with_version(self, tmp_path):
+        tool = MockTool()
+        config = Configure(build_dir=tmp_path)
+        config.find_program = (  # type: ignore[method-assign]
+            lambda name, hints=None, version_flag="--version": ProgramInfo(
+                path=Path("/usr/bin/gcc"), version="14.2.1"
+            )
+        )
+        cfg = tool._find_tool_config(config, "gcc", with_version=True)
+        assert cfg is not None
+        assert cfg.version == "14.2.1"
+
+    def test_not_found_returns_none(self, tmp_path):
+        tool = MockTool()
+        config = Configure(build_dir=tmp_path)
+        config.find_program = (  # type: ignore[method-assign]
+            lambda name, hints=None, version_flag="--version": None
+        )
+        assert tool._find_tool_config(config, "nope") is None
+
+    def test_falls_through_to_second_candidate(self, tmp_path):
+        tool = MockTool()
+        config = Configure(build_dir=tmp_path)
+        found = {"first": None, "second": ProgramInfo(path=Path("/usr/bin/second"))}
+
+        def fake_find(name, hints=None, version_flag="--version"):
+            return found[name]
+
+        config.find_program = fake_find  # type: ignore[method-assign]
+        cfg = tool._find_tool_config(config, "first", "second")
+        assert cfg is not None
+        assert cfg.cmd == str(Path("/usr/bin/second"))
 
 
 class TestBuilderMethod:
