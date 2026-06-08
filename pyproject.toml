@@ -71,7 +71,9 @@ dev = [
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+# --dist loadgroup keeps @pytest.mark.xdist_group tests on one worker, so the
+# conan-based examples share a Conan cache instead of racing to populate it.
+addopts = "-v --tb=short --dist loadgroup"
 
 [tool.mypy]
 python_version = "3.11"

@@ -1108,6 +1108,16 @@ def build_example_params() -> list[pytest.ParameterSet]:
         config = load_test_config(example_dir)
         requested_toolchains = get_requested_toolchains(config)
 
+        # Examples that drive `conan install` share a global Conan cache. Keep
+        # them on a single xdist worker (see --dist loadgroup) so parallel
+        # workers don't race to register the same recipe, which fails with
+        # "Reference ... already exists".
+        marks = (
+            (pytest.mark.xdist_group("conan"),)
+            if (example_dir / "conanfile.txt").exists()
+            else ()
+        )
+
         for invocation in INVOCATIONS:
             for generator in GENERATORS:
                 for toolchain in requested_toolchains:
@@ -1121,6 +1131,7 @@ def build_example_params() -> list[pytest.ParameterSet]:
                             generator,
                             toolchain,
                             id=test_id,
+                            marks=marks,
                         )
                     )
 
