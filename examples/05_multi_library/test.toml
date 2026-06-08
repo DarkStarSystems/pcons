@@ -10,6 +10,7 @@ expected_outputs = [
     "build/build.ninja",
     "build/compile_commands.json",
     "build/deps.mmd",
+    "build/deps.dot",
     "build/libmath.a",
     "build/libphysics.so",
     "build/simulator",
@@ -35,6 +36,12 @@ commands = [
     { run = "cat build/deps.mmd", expect_stdout = "libphysics" },
     { run = "cat build/deps.mmd", expect_stdout = "simulator" },
     { run = "cat build/deps.mmd", expect_stdout = "-->" },
+
+    # Verify deps.dot has the dependency graph
+    { run = "cat build/deps.dot", expect_stdout = "digraph" },
+    { run = "cat build/deps.dot", expect_stdout = "libmath" },
+    { run = "cat build/deps.dot", expect_stdout = "simulator" },
+    { run = "cat build/deps.dot", expect_stdout = "->" },
 ]
 
 # Windows needs different checks for deps.mmd since library names differ
@@ -54,6 +61,12 @@ commands_windows = [
     { run = "type build\\deps.mmd", expect_stdout = "physics" },
     { run = "type build\\deps.mmd", expect_stdout = "simulator" },
     { run = "type build\\deps.mmd", expect_stdout = "-->" },
+
+    # Verify deps.dot has the dependency graph
+    { run = "type build\\deps.dot", expect_stdout = "digraph" },
+    { run = "type build\\deps.dot", expect_stdout = "math" },
+    { run = "type build\\deps.dot", expect_stdout = "simulator" },
+    { run = "type build\\deps.dot", expect_stdout = "->" },
 ]
 
 [skip]
