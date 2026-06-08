@@ -17,9 +17,16 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
-from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.node import FileNode
-from pcons.core.subst import PathToken, SourcePath, TargetPath
+from pcons.core.subst import PathToken, TargetPath
+from pcons.toolchains.gnu_common import (
+    gnu_archiver_builders,
+    gnu_archiver_vars,
+    gnu_compile_builders,
+    gnu_compile_vars,
+    gnu_link_builders,
+    gnu_link_vars,
+)
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 
@@ -176,61 +183,13 @@ class GccCCompiler(BaseTool):
         super().__init__("cc", language="c")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "gcc",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cc.cmd",
-                "$cc.flags",
-                "${prefix(cc.iprefix, cc.includes)}",
-                "${prefix(cc.dprefix, cc.defines)}",
-                "$cc.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
-        }
+        return gnu_compile_vars("gcc", "cc")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cc",
-                "objcmd",
-                src_suffixes=[".c"],
-                target_suffixes=[platform.object_suffix],
-                language="c",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cc")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        gcc = config.find_program("gcc")
-        if gcc is None:
-            gcc = config.find_program("cc")
-        if gcc is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cc", cmd=str(gcc.path))
-        if gcc.version:
-            tool_config.version = gcc.version
-        return tool_config
+        return self._find_tool_config(config, "gcc", "cc", with_version=True)
 
 
 class GccCxxCompiler(BaseTool):
@@ -251,61 +210,13 @@ class GccCxxCompiler(BaseTool):
         super().__init__("cxx", language="cxx")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "g++",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cxx.cmd",
-                "$cxx.flags",
-                "${prefix(cxx.iprefix, cxx.includes)}",
-                "${prefix(cxx.dprefix, cxx.defines)}",
-                "$cxx.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
-        }
+        return gnu_compile_vars("g++", "cxx")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cxx",
-                "objcmd",
-                src_suffixes=[".cpp", ".cxx", ".cc", ".C"],
-                target_suffixes=[platform.object_suffix],
-                language="cxx",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cxx")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        gxx = config.find_program("g++")
-        if gxx is None:
-            gxx = config.find_program("c++")
-        if gxx is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cxx", cmd=str(gxx.path))
-        if gxx.version:
-            tool_config.version = gxx.version
-        return tool_config
+        return self._find_tool_config(config, "g++", "c++", with_version=True)
 
 
 class GccArchiver(BaseTool):
@@ -321,38 +232,13 @@ class GccArchiver(BaseTool):
         super().__init__("ar")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "ar",
-            "flags": ["rcs"],
-            "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
-        }
+        return gnu_archiver_vars("ar")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "StaticLibrary": CommandBuilder(
-                "StaticLibrary",
-                "ar",
-                "libcmd",
-                src_suffixes=[platform.object_suffix],
-                target_suffixes=[platform.static_lib_suffix],
-                single_source=False,
-            ),
-        }
+        return gnu_archiver_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        ar = config.find_program("ar")
-        if ar is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ar", cmd=str(ar.path))
+        return self._find_tool_config(config, "ar")
 
 
 class GccLinker(BaseTool):
@@ -377,83 +263,13 @@ class GccLinker(BaseTool):
         super().__init__("link")
 
     def default_vars(self) -> dict[str, object]:
-        platform = get_platform()
-        shared_flag = "-dynamiclib" if platform.is_macos else "-shared"
-        return {
-            "cmd": "gcc",
-            "flags": [],
-            "lprefix": "-l",
-            "libs": [],
-            "Lprefix": "-L",
-            "libdirs": [],
-            # Framework support (macOS only, but always defined for portability)
-            "Fprefix": "-F",
-            "frameworkdirs": [],
-            "fprefix": "-framework",
-            "frameworks": [],
-            "progcmd": [
-                "$link.cmd",
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-            "sharedcmd": [
-                "$link.cmd",
-                shared_flag,
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-        }
+        return gnu_link_vars("gcc")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Program": CommandBuilder(
-                "Program",
-                "link",
-                "progcmd",
-                src_suffixes=[platform.object_suffix],
-                target_suffixes=[platform.exe_suffix],
-                single_source=False,
-            ),
-            "SharedLibrary": MultiOutputBuilder(
-                "SharedLibrary",
-                "link",
-                "sharedcmd",
-                outputs=[
-                    OutputSpec("primary", platform.shared_lib_suffix),
-                ],
-                src_suffixes=[platform.object_suffix],
-                single_source=False,
-            ),
-        }
+        return gnu_link_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        gcc = config.find_program("gcc")
-        if gcc is None:
-            gcc = config.find_program("cc")
-        if gcc is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(gcc.path))
+        return self._find_tool_config(config, "gcc", "cc")
 
 
 def _build_scan_node(
@@ -605,6 +421,7 @@ class GccToolchain(UnixToolchain):
             build_keyed_entries,
             keyed_bmi_path,
             map_module_providers,
+            merge_scan_compile_flags,
             scan_translation_units,
             select_modules_scope,
             wire_std_into_targets,
@@ -662,20 +479,9 @@ class GccToolchain(UnixToolchain):
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
-            seen: set[str] = set(base_flags)
-            compile_flags = list(base_flags)
-            if modules_flag not in seen:
-                compile_flags.append(modules_flag)
-                seen.add(modules_flag)
-            if context:
-                for f in context.flags:
-                    if f not in seen:
-                        compile_flags.append(f)
-                        seen.add(f)
-                for inc in context.includes:
-                    compile_flags.append(f"-I{inc}")
-                for d in context.defines:
-                    compile_flags.append(f"-D{d}")
+            compile_flags = merge_scan_compile_flags(
+                base_flags, context, extra_flags=(modules_flag,)
+            )
 
             # For module interfaces, insert a scan step to generate the depfile.
             if src in module_src_paths:

@@ -54,6 +54,43 @@ _cc_path, _is_msvc_style = _find_c_compiler()
 has_cc = _cc_path is not None
 
 
+class TestCachedOrCompiler:
+    """Cached and no-compiler paths of _cached_or_compiler (no real compiler)."""
+
+    def _make_checks(self, tmp_path, test_project):  # noqa: F811
+        config = Configure(build_dir=tmp_path)
+        env = Environment()
+        env.add_tool("cc")  # no cmd -> no compiler configured
+        return config, ToolChecks(config, env, "cc")
+
+    def test_check_header_cached(self, tmp_path, test_project):  # noqa: F811
+        config, checks = self._make_checks(tmp_path, test_project)
+        config.set(checks._cache_key("header", "stdio.h"), True)
+        result = checks.check_header("stdio.h")
+        assert result.cached is True
+        assert result.success is True
+
+    def test_check_type_cached(self, tmp_path, test_project):  # noqa: F811
+        config, checks = self._make_checks(tmp_path, test_project)
+        config.set(checks._cache_key("type", "size_t"), True)
+        result = checks.check_type("size_t")
+        assert result.cached is True
+        assert result.success is True
+
+    def test_check_function_cached(self, tmp_path, test_project):  # noqa: F811
+        config, checks = self._make_checks(tmp_path, test_project)
+        config.set(checks._cache_key("function", "printf"), False)
+        result = checks.check_function("printf")
+        assert result.cached is True
+        assert result.success is False
+
+    def test_no_compiler_returns_failure(self, tmp_path, test_project):  # noqa: F811
+        _config, checks = self._make_checks(tmp_path, test_project)
+        result = checks.check_header("uncached-header.h")
+        assert result.success is False
+        assert "No compiler configured" in result.output
+
+
 @pytest.mark.skipif(not has_cc, reason="No C compiler available")
 class TestToolChecksWithCompiler:
     """Tests that require a real compiler."""
@@ -141,6 +178,12 @@ class TestToolChecksWithCompiler:
         checks = ToolChecks(config, env, "cc")
         flag = "/W4" if _is_msvc_style else "-Wall"
         result = checks.check_header("stdio.h", extra_flags=[flag])
+        assert result.success is True
+
+    def test_check_function_exists(self, setup):
+        config, env = setup
+        checks = ToolChecks(config, env, "cc")
+        result = checks.check_function("printf", headers=["stdio.h"])
         assert result.success is True
 
     def test_check_type_exists(self, setup):

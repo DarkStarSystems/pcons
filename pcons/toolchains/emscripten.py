@@ -20,18 +20,23 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
-from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.builder import MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
-from pcons.toolchains.unix import UnixToolchain
+from pcons.toolchains.gnu_common import (
+    gnu_archiver_builders,
+    gnu_archiver_vars,
+    gnu_compile_builders,
+    gnu_compile_vars,
+)
+from pcons.toolchains.wasm_common import WasmToolchain
 from pcons.tools.tool import BaseTool
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
-    from pcons.tools.toolchain import SourceHandler
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +103,15 @@ def _find_emcc_dir(emsdk_path: Path) -> Path | None:
     return None
 
 
+def _emsdk_hints() -> list[Path | str] | None:
+    """Search hints pointing at an emsdk's emcc directory, if one is found."""
+    emsdk = find_emsdk()
+    if not emsdk:
+        return None
+    emcc_dir = _find_emcc_dir(emsdk)
+    return [emcc_dir] if emcc_dir else None
+
+
 def is_emcc_available() -> bool:
     """Check whether emcc is available (either via emsdk or PATH)."""
     env_path = os.environ.get("EMSDK")
@@ -120,62 +134,15 @@ class EmccCCompiler(BaseTool):
         super().__init__("cc", language="c")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "emcc",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cc.cmd",
-                "$cc.flags",
-                "${prefix(cc.iprefix, cc.includes)}",
-                "${prefix(cc.dprefix, cc.defines)}",
-                "$cc.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
-        }
+        return gnu_compile_vars("emcc", "cc")
 
     def builders(self) -> dict[str, Builder]:
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cc",
-                "objcmd",
-                src_suffixes=[".c"],
-                target_suffixes=[".o"],
-                language="c",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cc", object_suffix=".o")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        emsdk = find_emsdk()
-        if emsdk:
-            emcc_dir = _find_emcc_dir(emsdk)
-            hints: list[Path | str] = [emcc_dir] if emcc_dir else []
-            emcc = config.find_program("emcc", hints=hints)
-        else:
-            emcc = config.find_program("emcc")
-        if emcc is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cc", cmd=str(emcc.path))
-        if emcc.version:
-            tool_config.version = emcc.version
-        return tool_config
+        return self._find_tool_config(
+            config, "emcc", hints=_emsdk_hints(), with_version=True
+        )
 
 
 class EmccCxxCompiler(BaseTool):
@@ -185,62 +152,15 @@ class EmccCxxCompiler(BaseTool):
         super().__init__("cxx", language="cxx")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "em++",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cxx.cmd",
-                "$cxx.flags",
-                "${prefix(cxx.iprefix, cxx.includes)}",
-                "${prefix(cxx.dprefix, cxx.defines)}",
-                "$cxx.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
-        }
+        return gnu_compile_vars("em++", "cxx")
 
     def builders(self) -> dict[str, Builder]:
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cxx",
-                "objcmd",
-                src_suffixes=[".cpp", ".cxx", ".cc", ".C"],
-                target_suffixes=[".o"],
-                language="cxx",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cxx", object_suffix=".o")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        emsdk = find_emsdk()
-        if emsdk:
-            emcc_dir = _find_emcc_dir(emsdk)
-            hints: list[Path | str] = [emcc_dir] if emcc_dir else []
-            empp = config.find_program("em++", hints=hints)
-        else:
-            empp = config.find_program("em++")
-        if empp is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cxx", cmd=str(empp.path))
-        if empp.version:
-            tool_config.version = empp.version
-        return tool_config
+        return self._find_tool_config(
+            config, "em++", hints=_emsdk_hints(), with_version=True
+        )
 
 
 class EmccArchiver(BaseTool):
@@ -250,41 +170,13 @@ class EmccArchiver(BaseTool):
         super().__init__("ar")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "emar",
-            "flags": ["rcs"],
-            "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
-        }
+        return gnu_archiver_vars("emar")
 
     def builders(self) -> dict[str, Builder]:
-        return {
-            "StaticLibrary": CommandBuilder(
-                "StaticLibrary",
-                "ar",
-                "libcmd",
-                src_suffixes=[".o"],
-                target_suffixes=[".a"],
-                single_source=False,
-            ),
-        }
+        return gnu_archiver_builders(object_suffix=".o", static_lib_suffix=".a")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        emsdk = find_emsdk()
-        if emsdk:
-            emcc_dir = _find_emcc_dir(emsdk)
-            hints: list[Path | str] = [emcc_dir] if emcc_dir else []
-            emar = config.find_program("emar", hints=hints)
-        else:
-            emar = config.find_program("emar")
-        if emar is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ar", cmd=str(emar.path))
+        return self._find_tool_config(config, "emar", hints=_emsdk_hints())
 
 
 class EmccLinker(BaseTool):
@@ -342,22 +234,7 @@ class EmccLinker(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        emsdk = find_emsdk()
-        if emsdk:
-            emcc_dir = _find_emcc_dir(emsdk)
-            hints: list[Path | str] = [emcc_dir] if emcc_dir else []
-            emcc = config.find_program("emcc", hints=hints)
-        else:
-            emcc = config.find_program("emcc")
-        if emcc is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(emcc.path))
+        return self._find_tool_config(config, "emcc", hints=_emsdk_hints())
 
 
 # =============================================================================
@@ -365,7 +242,7 @@ class EmccLinker(BaseTool):
 # =============================================================================
 
 
-class EmscriptenToolchain(UnixToolchain):
+class EmscriptenToolchain(WasmToolchain):
     """Emscripten toolchain for compiling C/C++ to WebAssembly + JavaScript.
 
     Uses Emscripten (emcc/em++) to produce ``.js`` + ``.wasm`` pairs.
@@ -379,51 +256,12 @@ class EmscriptenToolchain(UnixToolchain):
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link")
 
+    program_suffix = ".js"
+    platform_label = "Emscripten"
+
     def __init__(self) -> None:
         super().__init__("emscripten")
         self._emsdk_path: Path | None = None
-
-    # -- Suffix / naming overrides ------------------------------------------
-
-    def get_output_prefix(self, target_type: str) -> str:
-        # Emscripten targets Unix-like wasm — always use "lib" prefix
-        # regardless of host platform (e.g., when cross-compiling from Windows).
-        if target_type in ("static_library", "shared_library"):
-            return "lib"
-        return ""
-
-    def get_output_suffix(self, target_type: str) -> str:
-        if target_type == "program":
-            return ".js"
-        if target_type == "shared_library":
-            raise NotImplementedError(
-                "Emscripten does not support shared libraries. "
-                "Use StaticLibrary instead, or target a native platform."
-            )
-        return ".a"  # static library
-
-    def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
-        # No -fPIC needed for WebAssembly
-        if target_type == "shared_library":
-            raise NotImplementedError("Emscripten does not support shared libraries.")
-        return []
-
-    # -- Source handler ------------------------------------------------------
-
-    def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Handle C/C++ sources (no Objective-C or assembly for Emscripten)."""
-        from pcons.tools.toolchain import SourceHandler
-
-        depfile = TargetPath(suffix=".d")
-        # Check case-sensitive .C (C++ on Unix) before lowering
-        if suffix == ".C":
-            return SourceHandler("cxx", "cxx", ".o", depfile, "gcc")
-        suffix_lower = suffix.lower()
-        if suffix_lower == ".c":
-            return SourceHandler("cc", "c", ".o", depfile, "gcc")
-        if suffix_lower in (".cpp", ".cxx", ".cc", ".c++"):
-            return SourceHandler("cxx", "cxx", ".o", depfile, "gcc")
-        return None
 
     # -- Configuration -------------------------------------------------------
 
@@ -480,24 +318,6 @@ class EmscriptenToolchain(UnixToolchain):
                     env.cxx.cmd = str(emcc_dir / "em++")
                 if env.has_tool("ar"):
                     env.ar.cmd = str(emcc_dir / "emar")
-
-    # -- Variant / arch overrides -------------------------------------------
-
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        # wasm32 is the only architecture; ignore arch requests
-        super(UnixToolchain, self).apply_target_arch(env, "wasm32", **kwargs)
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
-            for tool_name in ("cc", "cxx"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                        tool.flags.extend(preset.extra_compile_flags)
-        if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
-            if env.has_tool("link"):
-                if isinstance(env.link.flags, list):
-                    env.link.flags.extend(preset.extra_link_flags)
 
 
 # =============================================================================

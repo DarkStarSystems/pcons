@@ -22,6 +22,7 @@ from pcons.toolchains.cxx_module_scanner import (
     build_keyed_entries,
     build_module_map,
     map_module_providers,
+    merge_scan_compile_flags,
     module_file_for,
     run_scan_deps,
     run_scan_deps_msvc,
@@ -761,3 +762,32 @@ class TestBuildKeyedEntries:
             results, spec_to_obj, obj_key, {}, "cxx_modules", ".pcm"
         )
         assert entries == [("obj.lib1/consumer.cpp.o", [], [])]
+
+
+class TestMergeScanCompileFlags:
+    """Tests for merge_scan_compile_flags."""
+
+    def test_dedups_extra_and_context_flags(self) -> None:
+        from types import SimpleNamespace
+
+        ctx = SimpleNamespace(
+            flags=["-O2", "-std=c++23"],  # -std dup vs base, kept once
+            includes=["inc", "/abs/inc"],
+            defines=["FOO=1", "BAR"],
+        )
+        result = merge_scan_compile_flags(
+            ["-std=c++23"], ctx, extra_flags=("-fmodules", "-fmodules")
+        )
+        assert result == [
+            "-std=c++23",
+            "-fmodules",
+            "-O2",
+            "-Iinc",
+            "-I/abs/inc",
+            "-DFOO=1",
+            "-DBAR",
+        ]
+
+    def test_no_context(self) -> None:
+        result = merge_scan_compile_flags(["-std=c++20"], None, extra_flags=("-x",))
+        assert result == ["-std=c++20", "-x"]

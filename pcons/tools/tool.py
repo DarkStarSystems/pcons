@@ -97,6 +97,46 @@ class BaseTool(ABC):
         """Default implementation returns None (tool not configured)."""
         return None
 
+    def _find_tool_config(
+        self,
+        config: object,
+        *programs: str,
+        hints: list[Path | str] | None = None,
+        version_flag: str = "--version",
+        with_version: bool = False,
+    ) -> ToolConfig | None:
+        """Locate the first available program and build this tool's ToolConfig.
+
+        Tries each name in *programs* in order. Returns None if *config* is not
+        a Configure or none of the candidates are found.
+
+        Args:
+            config: The Configure instance (anything else yields None).
+            programs: Candidate executable names, tried in order.
+            hints: Extra directories to search.
+            version_flag: Flag used to probe the version; pass "" for tools
+                that don't support --version (e.g. lib.exe, lld-link).
+            with_version: Copy the detected program version onto the config.
+        """
+        from pcons.configure.config import Configure
+
+        if not isinstance(config, Configure):
+            return None
+        found = None
+        for name in programs:
+            found = config.find_program(name, hints=hints, version_flag=version_flag)
+            if found is not None:
+                break
+        if found is None:
+            return None
+
+        from pcons.core.toolconfig import ToolConfig
+
+        tool_config = ToolConfig(self._name, cmd=str(found.path))
+        if with_version and found.version:
+            tool_config.version = found.version
+        return tool_config
+
     def setup(self, env: Environment) -> None:
         """Set up the tool namespace with default values."""
         # Create or get the tool's namespace

@@ -14,6 +14,7 @@ Build graph:
 import sys
 
 from pcons import Project, find_c_toolchain
+from pcons.generators.dot import DotGenerator
 from pcons.generators.mermaid import MermaidGenerator
 
 # =============================================================================
@@ -55,10 +56,13 @@ simulator.private.link_libs.append(
     libphysics
 )  # Gets both libphysics and libmath includes
 
-# Generate Mermaid dependency diagram (after generate, which auto-resolves)
+# Generate dependency diagrams (after generate, which auto-resolves)
 mermaid_gen = MermaidGenerator(direction="LR")
 mermaid_gen.generate(project)
+dot_gen = DotGenerator(rankdir="LR")
+dot_gen.generate(project)
 
 print("Generated 'build.ninja'")
 print("Generated 'compile_commands.json'")
 print("Generated 'deps.mmd'")
+print("Generated 'deps.dot'")

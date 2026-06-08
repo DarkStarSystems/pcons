@@ -144,12 +144,7 @@ class CudaToolchain(BaseToolchain):
         defines.extend(extra_defines)
 
         # Apply to CUDA compiler
-        if env.has_tool("cuda"):
-            tool = env.cuda
-            if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                tool.flags.extend(compile_flags)
-            if hasattr(tool, "defines") and isinstance(tool.defines, list):
-                tool.defines.extend(defines)
+        self._add_compile_flags_and_defines(env, ("cuda",), compile_flags, defines)
 
     def _linker_for_language(self, language: str) -> str:
         """CUDA linking is typically handled by the host C++ compiler."""

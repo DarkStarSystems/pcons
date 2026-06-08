@@ -678,6 +678,49 @@ class BaseToolchain(ABC):
         # Store variant name on environment
         env.variant = variant
 
+    @staticmethod
+    def _add_tool_flags(
+        env: Environment, tool_names: tuple[str, ...], flags: list[str]
+    ) -> None:
+        """Extend each named tool's `flags` list with `flags`.
+
+        Skips tools that are absent or whose `flags` isn't a list. The
+        arch/preset/cross-preset hooks all push flags onto cc/cxx and/or link
+        this same way.
+        """
+        if not flags:
+            return
+        for tool_name in tool_names:
+            if not env.has_tool(tool_name):
+                continue
+            tool_flags = getattr(getattr(env, tool_name), "flags", None)
+            if isinstance(tool_flags, list):
+                tool_flags.extend(flags)
+
+    @staticmethod
+    def _add_compile_flags_and_defines(
+        env: Environment,
+        tool_names: tuple[str, ...],
+        flags: list[str],
+        defines: list[str],
+    ) -> None:
+        """Extend each named tool's `flags` and `defines` lists.
+
+        Skips tools that are absent or whose attribute isn't a list. Used by
+        the apply_variant hooks, which push compile flags and defines onto the
+        compiler tools the same way.
+        """
+        for tool_name in tool_names:
+            if not env.has_tool(tool_name):
+                continue
+            tool = getattr(env, tool_name)
+            tool_flags = getattr(tool, "flags", None)
+            if isinstance(tool_flags, list):
+                tool_flags.extend(flags)
+            tool_defines = getattr(tool, "defines", None)
+            if isinstance(tool_defines, list):
+                tool_defines.extend(defines)
+
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
         """Apply target architecture flags to the environment.
 
@@ -720,29 +763,17 @@ class BaseToolchain(ABC):
 
         # Apply sysroot to cc, cxx, link
         if hasattr(preset, "sysroot") and preset.sysroot:
-            sysroot_flag = f"--sysroot={preset.sysroot}"
-            for tool_name in ("cc", "cxx"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                        tool.flags.append(sysroot_flag)
-            if env.has_tool("link"):
-                if isinstance(env.link.flags, list):
-                    env.link.flags.append(sysroot_flag)
+            self._add_tool_flags(
+                env, ("cc", "cxx", "link"), [f"--sysroot={preset.sysroot}"]
+            )
 
         # Apply extra compile flags
         if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
-            for tool_name in ("cc", "cxx"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                        tool.flags.extend(preset.extra_compile_flags)
+            self._add_tool_flags(env, ("cc", "cxx"), preset.extra_compile_flags)
 
         # Apply extra link flags
         if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
-            if env.has_tool("link"):
-                if isinstance(env.link.flags, list):
-                    env.link.flags.extend(preset.extra_link_flags)
+            self._add_tool_flags(env, ("link",), preset.extra_link_flags)
 
         # Override CC/CXX commands from env_vars
         if hasattr(preset, "env_vars") and preset.env_vars:

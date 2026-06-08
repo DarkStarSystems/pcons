@@ -120,7 +120,18 @@ class CythonTranspiler(BaseTool):
         return tool_config
 
 
-class CythonCCompiler(BaseTool):
+class _PythonInfoTool(BaseTool):
+    """BaseTool that lazily caches interpreter info from get_python_info()."""
+
+    _python_info: dict[str, str] | None = None
+
+    def _get_python_info(self) -> dict[str, str]:
+        if self._python_info is None:
+            self._python_info = get_python_info()
+        return self._python_info
+
+
+class CythonCCompiler(_PythonInfoTool):
     """C compiler configured for Cython extension modules.
 
     This is a C compiler with Python-specific settings for building
@@ -137,12 +148,6 @@ class CythonCCompiler(BaseTool):
 
     def __init__(self) -> None:
         super().__init__("cycc", language="c")
-        self._python_info: dict[str, str] | None = None
-
-    def _get_python_info(self) -> dict[str, str]:
-        if self._python_info is None:
-            self._python_info = get_python_info()
-        return self._python_info
 
     def default_vars(self) -> dict[str, object]:
         platform = get_platform()
@@ -228,7 +233,7 @@ class CythonCCompiler(BaseTool):
         return tool_config
 
 
-class CythonLinker(BaseTool):
+class CythonLinker(_PythonInfoTool):
     """Linker for Cython extension modules.
 
     Creates shared libraries (.so/.pyd) that Python can import.
@@ -244,12 +249,6 @@ class CythonLinker(BaseTool):
 
     def __init__(self) -> None:
         super().__init__("cylink")
-        self._python_info: dict[str, str] | None = None
-
-    def _get_python_info(self) -> dict[str, str]:
-        if self._python_info is None:
-            self._python_info = get_python_info()
-        return self._python_info
 
     def default_vars(self) -> dict[str, object]:
         platform = get_platform()

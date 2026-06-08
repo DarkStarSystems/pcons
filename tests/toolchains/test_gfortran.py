@@ -301,3 +301,32 @@ def test_find_fortran_toolchain_returns_toolchain() -> None:
     with patch("shutil.which", return_value="/usr/bin/gfortran"):
         tc = find_fortran_toolchain()
         assert isinstance(tc, GfortranToolchain)
+
+
+class TestGfortranConfigure:
+    """GfortranCompiler/Linker configure() delegates to _find_tool_config."""
+
+    @pytest.mark.parametrize("cls", [GfortranCompiler, GfortranLinker])
+    def test_configure_finds_program(self, cls, tmp_path):
+        from pcons.configure.config import Configure, ProgramInfo
+
+        config = Configure(build_dir=tmp_path)
+        config.find_program = (  # type: ignore[method-assign]
+            lambda *a, **k: ProgramInfo(path=Path("/usr/bin/gfortran"), version="14")
+        )
+        cfg = cls().configure(config)
+        assert cfg is not None
+        assert cfg.cmd == str(Path("/usr/bin/gfortran"))
+
+    @pytest.mark.parametrize("cls", [GfortranCompiler, GfortranLinker])
+    def test_configure_returns_none_when_missing(self, cls, tmp_path):
+        from pcons.configure.config import Configure
+
+        config = Configure(build_dir=tmp_path)
+        config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
+        assert cls().configure(config) is None
+
+    def test_linker_builders(self):
+        """GfortranLinker.builders exposes the GNU link builders."""
+        builders = GfortranLinker().builders()
+        assert "Program" in builders

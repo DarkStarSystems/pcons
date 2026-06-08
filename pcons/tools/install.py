@@ -36,7 +36,9 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
+    from pcons.core.node import Node
     from pcons.core.project import Project
+    from pcons.util.source_location import SourceLocation
 
 
 def _stamp_name_for(path: Path) -> str:
@@ -97,6 +99,36 @@ def _deduplicate_target_name(project: Project, base_name: str) -> str:
             target_name,
         )
     return target_name
+
+
+def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path:
+    """Prepend PCONS_INSTALL_PREFIX to *dest* unless it is rooted or opted out."""
+    if no_prefix or _is_rooted(dest):
+        return dest
+    from pcons import get_var
+
+    prefix = get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist"))
+    return Path(prefix) / dest
+
+
+def _make_install_target(
+    target_name: str,
+    builder_name: str,
+    builder_data: dict[str, str],
+    sources: Sequence[Target | Node | Path | str],
+    *,
+    defined_at: SourceLocation,
+) -> Target:
+    """Create an interface Target carrying install builder metadata."""
+    install_target = Target(
+        target_name,
+        target_type="interface",
+        defined_at=defined_at,
+    )
+    install_target._builder_name = builder_name
+    install_target._builder_data = builder_data
+    install_target._pending_sources = list(sources)
+    return install_target
 
 
 def install_dir(env: Environment, target_type: str) -> str:
@@ -531,32 +563,19 @@ class InstallBuilder:
         Returns:
             A Target representing the install operation.
         """
-        from pcons import get_var
-
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
             project, name or f"install_{dest_dir.name}"
         )
+        dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
-        if not no_prefix and not _is_rooted(dest_dir):
-            dest_dir = (
-                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
-                / dest_dir
-            )
-
-        # Create the install target
-        install_target = Target(
+        return _make_install_target(
             target_name,
-            target_type="interface",
+            "Install",
+            {"dest_dir": str(dest_dir)},
+            list(sources),
             defined_at=get_caller_location(),
         )
-
-        # Set builder metadata for factory dispatch
-        install_target._builder_name = "Install"
-        install_target._builder_data = {"dest_dir": str(dest_dir)}
-        install_target._pending_sources = list(sources)
-
-        return install_target
 
 
 @builder("InstallAs", target_type="interface", factory_class=InstallNodeFactory)
@@ -591,8 +610,6 @@ class InstallAsBuilder:
         Raises:
             BuilderError: If source is a list (use Install() for multiple files).
         """
-        from pcons import get_var
-
         # Validate source is not a list - common user error
         if isinstance(source, (list, tuple)):
             from pcons.core.errors import BuilderError
@@ -605,26 +622,15 @@ class InstallAsBuilder:
 
         dest = Path(dest)
         target_name = _deduplicate_target_name(project, name or f"install_{dest.name}")
+        dest = _apply_install_prefix(project, dest, no_prefix)
 
-        if not no_prefix and not _is_rooted(dest):
-            dest = (
-                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
-                / dest
-            )
-
-        # Create the install target
-        install_target = Target(
+        return _make_install_target(
             target_name,
-            target_type="interface",
+            "InstallAs",
+            {"dest": str(dest)},
+            [source],
             defined_at=get_caller_location(),
         )
-
-        # Set builder metadata for factory dispatch
-        install_target._builder_name = "InstallAs"
-        install_target._builder_data = {"dest": str(dest)}
-        install_target._pending_sources = [source]
-
-        return install_target
 
 
 @builder("InstallDir", target_type="interface", factory_class=InstallNodeFactory)
@@ -656,29 +662,16 @@ class InstallDirBuilder:
         Returns:
             A Target representing the install operation.
         """
-        from pcons import get_var
-
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
             project, name or f"install_dir_{dest_dir.name}"
         )
+        dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
-        if not no_prefix and not _is_rooted(dest_dir):
-            dest_dir = (
-                Path(get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist")))
-                / dest_dir
-            )
-
-        # Create the install target
-        install_target = Target(
+        return _make_install_target(
             target_name,
-            target_type="interface",
+            "InstallDir",
+            {"dest_dir": str(dest_dir)},
+            [source],
             defined_at=get_caller_location(),
         )
-
-        # Set builder metadata for factory dispatch
-        install_target._builder_name = "InstallDir"
-        install_target._builder_data = {"dest_dir": str(dest_dir)}
-        install_target._pending_sources = [source]
-
-        return install_target

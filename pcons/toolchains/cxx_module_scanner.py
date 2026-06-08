@@ -646,6 +646,35 @@ def bmi_key_for_flags(flags: list[str], spec: StdModuleFlagSpec) -> str:
     return hashlib.sha1(canonical.encode("utf-8")).hexdigest()[:12]
 
 
+def merge_scan_compile_flags(
+    base_flags: list[str],
+    context: Any,
+    extra_flags: tuple[str, ...] = (),
+) -> list[str]:
+    """Build a per-TU compile-flag list for module scanning.
+
+    Starts from *base_flags*, injects *extra_flags* (deduped, e.g. GCC's
+    ``-fmodules``), then appends the build context's flags (deduped), ``-I``
+    includes, and ``-D`` defines, in that order.
+    """
+    seen = set(base_flags)
+    compile_flags = list(base_flags)
+    for flag in extra_flags:
+        if flag not in seen:
+            compile_flags.append(flag)
+            seen.add(flag)
+    if context:
+        for flag in context.flags:
+            if flag not in seen:
+                compile_flags.append(flag)
+                seen.add(flag)
+        for inc in context.includes:
+            compile_flags.append(f"-I{inc}")
+        for define in context.defines:
+            compile_flags.append(f"-D{define}")
+    return compile_flags
+
+
 def wire_std_into_targets(
     project: Any,
     results: list[TuScanResult],

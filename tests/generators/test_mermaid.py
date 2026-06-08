@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for MermaidGenerator."""
 
+import sys
 from pathlib import Path
 
 from pcons.core.node import FileNode
@@ -146,6 +147,47 @@ class TestMermaidGeneratorGraph:
         assert "build_myapp[[" in output
         # Interface: hexagon {{name}}
         assert "include_headers{{" in output
+
+
+class TestMermaidGeneratorHeaders:
+    """Tests for header-dependency parsing (include_headers=True)."""
+
+    def test_header_dependencies(self, tmp_path):
+        project = Project("hdr", build_dir=tmp_path)
+        target = Target("app", target_type="program")
+        src = FileNode(tmp_path / "main.c")
+        obj = FileNode(tmp_path / "main.o")
+        exe = FileNode(tmp_path / "app")
+        obj.depends([src])
+        target.intermediate_nodes.append(obj)
+        target.output_nodes.append(exe)
+
+        depfile = tmp_path / "main.o.d"
+        depfile.write_text(
+            f"main.o: {tmp_path / 'main.c'} {tmp_path / 'foo.h'} /usr/include/stdio.h\n"
+        )
+
+        gen = MermaidGenerator(include_headers=True)
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        output = (tmp_path / "deps.mmd").read_text()
+        # Header node uses the asymmetric shape: id>label]
+        assert "foo_h>foo.h]" in output
+        assert "foo_h --> main_o" in output
+        # System headers (/usr, /Library, /System) are dropped on POSIX; the
+        # prefix filter is Unix-pathed, so skip the assertion on Windows.
+        if not sys.platform.startswith("win"):
+            assert "stdio" not in output
+
+    def test_output_dir_override(self, tmp_path):
+        sub = tmp_path / "diagrams"
+        project = Project("p", build_dir=tmp_path)
+        gen = MermaidGenerator(output_dir=sub)
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert (sub / "deps.mmd").exists()
 
 
 class TestMermaidGeneratorDirection:

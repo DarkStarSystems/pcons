@@ -178,18 +178,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
             logger.warning("Unknown preset '%s' for MSVC toolchain", name)
             return
 
-        compile_flags = preset.get("compile_flags", [])
-        link_flags = preset.get("link_flags", [])
-
-        for tool_name in ("cc", "cxx"):
-            if env.has_tool(tool_name):
-                tool = getattr(env, tool_name)
-                if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                    tool.flags.extend(compile_flags)
-
-        if env.has_tool("link") and link_flags:
-            if isinstance(env.link.flags, list):
-                env.link.flags.extend(link_flags)
+        self._add_tool_flags(env, ("cc", "cxx"), preset.get("compile_flags", []))
+        self._add_tool_flags(env, ("link",), preset.get("link_flags", []))
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross-compilation preset with MSVC-style flags.
@@ -207,16 +197,10 @@ class MsvcCompatibleToolchain(BaseToolchain):
 
         # Apply extra compile/link flags and env_vars from base
         if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
-            for tool_name in ("cc", "cxx"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                        tool.flags.extend(preset.extra_compile_flags)
+            self._add_tool_flags(env, ("cc", "cxx"), preset.extra_compile_flags)
 
         if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
-            if env.has_tool("link"):
-                if isinstance(env.link.flags, list):
-                    env.link.flags.extend(preset.extra_link_flags)
+            self._add_tool_flags(env, ("link",), preset.extra_link_flags)
 
         if hasattr(preset, "env_vars") and preset.env_vars:
             for var_name, value in preset.env_vars.items():
@@ -259,10 +243,4 @@ class MsvcCompatibleToolchain(BaseToolchain):
         compile_flags.extend(extra_flags)
         defines.extend(extra_defines)
 
-        for tool_name in ("cc", "cxx"):
-            if env.has_tool(tool_name):
-                tool = getattr(env, tool_name)
-                if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                    tool.flags.extend(compile_flags)
-                if hasattr(tool, "defines") and isinstance(tool.defines, list):
-                    tool.defines.extend(defines)
+        self._add_compile_flags_and_defines(env, ("cc", "cxx"), compile_flags, defines)

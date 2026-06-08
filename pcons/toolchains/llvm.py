@@ -10,9 +10,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
-from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.builder import CommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.toolchains.gnu_common import (
+    gnu_archiver_builders,
+    gnu_archiver_vars,
+    gnu_compile_builders,
+    gnu_compile_vars,
+    gnu_link_builders,
+    gnu_link_vars,
+)
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
@@ -174,57 +182,13 @@ class ClangCCompiler(BaseTool):
         super().__init__("cc", language="c")
 
     def default_vars(self) -> dict[str, object]:
-        return {
-            "cmd": "clang",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cc.cmd",
-                "$cc.flags",
-                "${prefix(cc.iprefix, cc.includes)}",
-                "${prefix(cc.dprefix, cc.defines)}",
-                "$cc.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
-        }
+        return gnu_compile_vars("clang", "cc")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cc",
-                "objcmd",
-                src_suffixes=[".c"],
-                target_suffixes=[platform.object_suffix],
-                language="c",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cc")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        clang = config.find_program("clang")
-        if clang is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cc", cmd=str(clang.path))
-        if clang.version:
-            tool_config.version = clang.version
-        return tool_config
+        return self._find_tool_config(config, "clang", with_version=True)
 
 
 class ClangCxxCompiler(BaseTool):
@@ -235,58 +199,16 @@ class ClangCxxCompiler(BaseTool):
 
     def default_vars(self) -> dict[str, object]:
         return {
-            "cmd": "clang++",
-            "flags": [],
-            "iprefix": "-I",
-            "includes": [],
-            "dprefix": "-D",
-            "defines": [],
+            **gnu_compile_vars("clang++", "cxx"),
             "moddir": "cxx_modules",
             "modules": False,  # set True to enable C++20 module scanning
-            "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],
-            "objcmd": [
-                "$cxx.cmd",
-                "$cxx.flags",
-                "${prefix(cxx.iprefix, cxx.includes)}",
-                "${prefix(cxx.dprefix, cxx.defines)}",
-                "$cxx.depflags",
-                "-c",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-            ],
         }
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Object": CommandBuilder(
-                "Object",
-                "cxx",
-                "objcmd",
-                src_suffixes=[".cpp", ".cxx", ".cc", ".C"],
-                target_suffixes=[platform.object_suffix],
-                language="cxx",
-                single_source=True,
-                depfile=TargetPath(suffix=".d"),
-                deps_style="gcc",
-            ),
-        }
+        return gnu_compile_builders("cxx")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        clangxx = config.find_program("clang++")
-        if clangxx is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cxx", cmd=str(clangxx.path))
-        if clangxx.version:
-            tool_config.version = clangxx.version
-        return tool_config
+        return self._find_tool_config(config, "clang++", with_version=True)
 
 
 class LlvmArchiver(BaseTool):
@@ -300,38 +222,13 @@ class LlvmArchiver(BaseTool):
 
         # Prefer llvm-ar if available, otherwise fall back to ar
         ar_cmd = "llvm-ar" if shutil.which("llvm-ar") else "ar"
-        return {
-            "cmd": ar_cmd,
-            "flags": ["rcs"],
-            "libcmd": ["$ar.cmd", "$ar.flags", TargetPath(), SourcePath()],
-        }
+        return gnu_archiver_vars(ar_cmd)
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "StaticLibrary": CommandBuilder(
-                "StaticLibrary",
-                "ar",
-                "libcmd",
-                src_suffixes=[platform.object_suffix],
-                target_suffixes=[platform.static_lib_suffix],
-                single_source=False,
-            ),
-        }
+        return gnu_archiver_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        ar = config.find_program("llvm-ar")
-        if ar is None:
-            ar = config.find_program("ar")
-        if ar is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ar", cmd=str(ar.path))
+        return self._find_tool_config(config, "llvm-ar", "ar")
 
 
 class LlvmLinker(BaseTool):
@@ -356,79 +253,13 @@ class LlvmLinker(BaseTool):
         super().__init__("link")
 
     def default_vars(self) -> dict[str, object]:
-        platform = get_platform()
-        shared_flag = "-dynamiclib" if platform.is_macos else "-shared"
-        return {
-            "cmd": "clang",
-            "flags": [],
-            "lprefix": "-l",
-            "libs": [],
-            "Lprefix": "-L",
-            "libdirs": [],
-            # Framework support (macOS only, but always defined for portability)
-            "Fprefix": "-F",
-            "frameworkdirs": [],
-            "fprefix": "-framework",
-            "frameworks": [],
-            "progcmd": [
-                "$link.cmd",
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-            "sharedcmd": [
-                "$link.cmd",
-                shared_flag,
-                "$link.flags",
-                "-o",
-                TargetPath(),
-                SourcePath(),
-                "${prefix(link.Lprefix, link.libdirs)}",
-                "${prefix(link.lprefix, link.libs)}",
-                "${prefix(link.Fprefix, link.frameworkdirs)}",
-                "${pairwise(link.fprefix, link.frameworks)}",
-            ],
-        }
+        return gnu_link_vars("clang")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Program": CommandBuilder(
-                "Program",
-                "link",
-                "progcmd",
-                src_suffixes=[platform.object_suffix],
-                target_suffixes=[platform.exe_suffix],
-                single_source=False,
-            ),
-            "SharedLibrary": MultiOutputBuilder(
-                "SharedLibrary",
-                "link",
-                "sharedcmd",
-                outputs=[
-                    OutputSpec("primary", platform.shared_lib_suffix),
-                ],
-                src_suffixes=[platform.object_suffix],
-                single_source=False,
-            ),
-        }
+        return gnu_link_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        clang = config.find_program("clang")
-        if clang is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(clang.path))
+        return self._find_tool_config(config, "clang")
 
 
 class MetalCompiler(BaseTool):
@@ -609,6 +440,7 @@ class LlvmToolchain(UnixToolchain):
             build_keyed_entries,
             keyed_bmi_path,
             map_module_providers,
+            merge_scan_compile_flags,
             scan_translation_units,
             select_modules_scope,
             wire_std_into_targets,
@@ -662,17 +494,7 @@ class LlvmToolchain(UnixToolchain):
         for src, obj_node in all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
-            seen: set[str] = set(base_flags)
-            compile_flags = list(base_flags)
-            if context:
-                for f in context.flags:
-                    if f not in seen:
-                        compile_flags.append(f)
-                        seen.add(f)
-                for inc in context.includes:
-                    compile_flags.append(f"-I{inc}")
-                for d in context.defines:
-                    compile_flags.append(f"-D{d}")
+            compile_flags = merge_scan_compile_flags(base_flags, context)
 
             spec = TuScanSpec(
                 src=src.resolve(),
