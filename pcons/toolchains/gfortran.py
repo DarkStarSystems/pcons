@@ -128,21 +128,7 @@ class GfortranCompiler(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        gfortran = config.find_program("gfortran")
-        if gfortran is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("fc", cmd=str(gfortran.path))
-        if gfortran.version:
-            tool_config.version = gfortran.version
-        return tool_config
+        return self._find_tool_config(config, "gfortran", with_version=True)
 
 
 class GfortranLinker(BaseTool):
@@ -163,18 +149,7 @@ class GfortranLinker(BaseTool):
         return gnu_link_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        gfortran = config.find_program("gfortran")
-        if gfortran is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(gfortran.path))
+        return self._find_tool_config(config, "gfortran")
 
 
 class GfortranToolchain(UnixToolchain):

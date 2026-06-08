@@ -189,23 +189,7 @@ class GccCCompiler(BaseTool):
         return gnu_compile_builders("cc")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        gcc = config.find_program("gcc")
-        if gcc is None:
-            gcc = config.find_program("cc")
-        if gcc is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cc", cmd=str(gcc.path))
-        if gcc.version:
-            tool_config.version = gcc.version
-        return tool_config
+        return self._find_tool_config(config, "gcc", "cc", with_version=True)
 
 
 class GccCxxCompiler(BaseTool):
@@ -232,23 +216,7 @@ class GccCxxCompiler(BaseTool):
         return gnu_compile_builders("cxx")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        gxx = config.find_program("g++")
-        if gxx is None:
-            gxx = config.find_program("c++")
-        if gxx is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cxx", cmd=str(gxx.path))
-        if gxx.version:
-            tool_config.version = gxx.version
-        return tool_config
+        return self._find_tool_config(config, "g++", "c++", with_version=True)
 
 
 class GccArchiver(BaseTool):
@@ -270,18 +238,7 @@ class GccArchiver(BaseTool):
         return gnu_archiver_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        ar = config.find_program("ar")
-        if ar is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ar", cmd=str(ar.path))
+        return self._find_tool_config(config, "ar")
 
 
 class GccLinker(BaseTool):
@@ -312,20 +269,7 @@ class GccLinker(BaseTool):
         return gnu_link_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-
-        gcc = config.find_program("gcc")
-        if gcc is None:
-            gcc = config.find_program("cc")
-        if gcc is None:
-            return None
-
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(gcc.path))
+        return self._find_tool_config(config, "gcc", "cc")
 
 
 def _build_scan_node(

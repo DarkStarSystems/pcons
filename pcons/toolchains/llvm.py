@@ -188,19 +188,7 @@ class ClangCCompiler(BaseTool):
         return gnu_compile_builders("cc")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        clang = config.find_program("clang")
-        if clang is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cc", cmd=str(clang.path))
-        if clang.version:
-            tool_config.version = clang.version
-        return tool_config
+        return self._find_tool_config(config, "clang", with_version=True)
 
 
 class ClangCxxCompiler(BaseTool):
@@ -220,19 +208,7 @@ class ClangCxxCompiler(BaseTool):
         return gnu_compile_builders("cxx")
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        clangxx = config.find_program("clang++")
-        if clangxx is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig("cxx", cmd=str(clangxx.path))
-        if clangxx.version:
-            tool_config.version = clangxx.version
-        return tool_config
+        return self._find_tool_config(config, "clang++", with_version=True)
 
 
 class LlvmArchiver(BaseTool):
@@ -252,18 +228,7 @@ class LlvmArchiver(BaseTool):
         return gnu_archiver_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        ar = config.find_program("llvm-ar")
-        if ar is None:
-            ar = config.find_program("ar")
-        if ar is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("ar", cmd=str(ar.path))
+        return self._find_tool_config(config, "llvm-ar", "ar")
 
 
 class LlvmLinker(BaseTool):
@@ -294,16 +259,7 @@ class LlvmLinker(BaseTool):
         return gnu_link_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        clang = config.find_program("clang")
-        if clang is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(clang.path))
+        return self._find_tool_config(config, "clang")
 
 
 class MetalCompiler(BaseTool):
