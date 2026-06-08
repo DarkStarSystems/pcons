@@ -907,8 +907,15 @@ class Project(_ProjectBuilders):
 
         content = "\n".join(lines) + "\n"
 
-        # Write-if-changed
-        pc_path = self.build_dir / f"{name}.pc"
+        # Write-if-changed. build_dir may be relative to root_dir (the usual
+        # case), so resolve it to an absolute location independent of the
+        # current working directory.
+        build_dir = (
+            self.build_dir
+            if self.build_dir.is_absolute()
+            else self.root_dir / self.build_dir
+        )
+        pc_path = build_dir / f"{name}.pc"
         pc_path.parent.mkdir(parents=True, exist_ok=True)
         if pc_path.exists() and pc_path.read_text() == content:
             return pc_path
