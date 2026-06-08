@@ -79,22 +79,9 @@ class ClangClCompiler(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
+        if not get_platform().is_windows:
             return None
-        platform = get_platform()
-        if not platform.is_windows:
-            return None
-        clang_cl = config.find_program("clang-cl")
-        if clang_cl is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        tool_config = ToolConfig(self.name, cmd=str(clang_cl.path))
-        if clang_cl.version:
-            tool_config.version = clang_cl.version
-        return tool_config
+        return self._find_tool_config(config, "clang-cl", with_version=True)
 
 
 class ClangClCCompiler(ClangClCompiler):
@@ -163,22 +150,10 @@ class ClangClLibrarian(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
+        if not get_platform().is_windows:
             return None
         # Prefer llvm-lib, fall back to lib.exe
-        lib = config.find_program("llvm-lib", version_flag="")
-        if lib is None:
-            lib = config.find_program("lib.exe", version_flag="")
-        if lib is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("lib", cmd=str(lib.path))
+        return self._find_tool_config(config, "llvm-lib", "lib.exe", version_flag="")
 
 
 class ClangClLinker(BaseTool):
@@ -239,22 +214,10 @@ class ClangClLinker(BaseTool):
         }
 
     def configure(self, config: object) -> ToolConfig | None:
-        from pcons.configure.config import Configure
-
-        if not isinstance(config, Configure):
-            return None
-        platform = get_platform()
-        if not platform.is_windows:
+        if not get_platform().is_windows:
             return None
         # Prefer lld-link, fall back to link.exe
-        link = config.find_program("lld-link", version_flag="")
-        if link is None:
-            link = config.find_program("link.exe", version_flag="")
-        if link is None:
-            return None
-        from pcons.core.toolconfig import ToolConfig
-
-        return ToolConfig("link", cmd=str(link.path))
+        return self._find_tool_config(config, "lld-link", "link.exe", version_flag="")
 
 
 class ClangClToolchain(MsvcCompatibleToolchain):

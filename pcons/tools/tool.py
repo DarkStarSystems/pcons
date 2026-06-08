@@ -102,6 +102,7 @@ class BaseTool(ABC):
         config: object,
         *programs: str,
         hints: list[Path | str] | None = None,
+        version_flag: str = "--version",
         with_version: bool = False,
     ) -> ToolConfig | None:
         """Locate the first available program and build this tool's ToolConfig.
@@ -113,6 +114,8 @@ class BaseTool(ABC):
             config: The Configure instance (anything else yields None).
             programs: Candidate executable names, tried in order.
             hints: Extra directories to search.
+            version_flag: Flag used to probe the version; pass "" for tools
+                that don't support --version (e.g. lib.exe, lld-link).
             with_version: Copy the detected program version onto the config.
         """
         from pcons.configure.config import Configure
@@ -121,7 +124,7 @@ class BaseTool(ABC):
             return None
         found = None
         for name in programs:
-            found = config.find_program(name, hints=hints)
+            found = config.find_program(name, hints=hints, version_flag=version_flag)
             if found is not None:
                 break
         if found is None:
