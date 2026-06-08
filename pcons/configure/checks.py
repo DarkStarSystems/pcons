@@ -103,6 +103,22 @@ class ToolChecks:
         compiler = self._get_compiler() or "unknown"
         return f"check:{self._tool_name}:{compiler}:{check_type}:{':'.join(args)}"
 
+    def _cached_or_compiler(self, cache_key: str) -> CheckResult | str:
+        """Shared preamble for the check_* methods.
+
+        Returns a CheckResult when the answer is already cached or no compiler
+        is configured (the caller returns it directly), otherwise the compiler
+        command to use.
+        """
+        cached = self._config.get(cache_key)
+        if cached is not None:
+            trace("configure", "  cached: %s", cached)
+            return CheckResult(success=cached, cached=True)
+        compiler = self._get_compiler()
+        if compiler is None:
+            return CheckResult(success=False, output="No compiler configured")
+        return compiler
+
     def try_compile(
         self,
         source: str,
@@ -149,14 +165,10 @@ class ToolChecks:
         )
         trace("configure", "  source: %s", self._source_preview(source))
         cache_key = self._cache_key("try_compile", code_hash, flags_str, link_str)
-        cached = self._config.get(cache_key)
-        if cached is not None:
-            trace("configure", "  cached: %s", cached)
-            return CheckResult(success=cached, cached=True)
-
-        compiler = self._get_compiler()
-        if compiler is None:
-            return CheckResult(success=False, output="No compiler configured")
+        outcome = self._cached_or_compiler(cache_key)
+        if isinstance(outcome, CheckResult):
+            return outcome
+        compiler = outcome
 
         cdir = self._make_check_dir()
         try:
@@ -201,14 +213,10 @@ class ToolChecks:
             self._caller_location(),
         )
         cache_key = self._cache_key("flag", flag)
-        cached = self._config.get(cache_key)
-        if cached is not None:
-            trace("configure", "  cached: %s", cached)
-            return CheckResult(success=cached, cached=True)
-
-        compiler = self._get_compiler()
-        if compiler is None:
-            return CheckResult(success=False, output="No compiler configured")
+        outcome = self._cached_or_compiler(cache_key)
+        if isinstance(outcome, CheckResult):
+            return outcome
+        compiler = outcome
 
         # Minimal C program
         source = "int main(void) { return 0; }\n"
@@ -265,14 +273,10 @@ class ToolChecks:
         if extra_flags:
             cache_parts.extend(sorted(extra_flags))
         cache_key = self._cache_key("header", *cache_parts)
-        cached = self._config.get(cache_key)
-        if cached is not None:
-            trace("configure", "  cached: %s", cached)
-            return CheckResult(success=cached, cached=True)
-
-        compiler = self._get_compiler()
-        if compiler is None:
-            return CheckResult(success=False, output="No compiler configured")
+        outcome = self._cached_or_compiler(cache_key)
+        if isinstance(outcome, CheckResult):
+            return outcome
+        compiler = outcome
 
         define_lines = ""
         if defines:
@@ -311,14 +315,10 @@ class ToolChecks:
             self._caller_location(),
         )
         cache_key = self._cache_key("type", type_name)
-        cached = self._config.get(cache_key)
-        if cached is not None:
-            trace("configure", "  cached: %s", cached)
-            return CheckResult(success=cached, cached=True)
-
-        compiler = self._get_compiler()
-        if compiler is None:
-            return CheckResult(success=False, output="No compiler configured")
+        outcome = self._cached_or_compiler(cache_key)
+        if isinstance(outcome, CheckResult):
+            return outcome
+        compiler = outcome
 
         includes = ""
         if headers:
@@ -472,14 +472,10 @@ PCONS_UNDEFINED
             self._caller_location(),
         )
         cache_key = self._cache_key("function", function)
-        cached = self._config.get(cache_key)
-        if cached is not None:
-            trace("configure", "  cached: %s", cached)
-            return CheckResult(success=cached, cached=True)
-
-        compiler = self._get_compiler()
-        if compiler is None:
-            return CheckResult(success=False, output="No compiler configured")
+        outcome = self._cached_or_compiler(cache_key)
+        if isinstance(outcome, CheckResult):
+            return outcome
+        compiler = outcome
 
         includes = ""
         if headers:
