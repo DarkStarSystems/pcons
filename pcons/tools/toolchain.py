@@ -697,6 +697,30 @@ class BaseToolchain(ABC):
             if isinstance(tool_flags, list):
                 tool_flags.extend(flags)
 
+    @staticmethod
+    def _add_compile_flags_and_defines(
+        env: Environment,
+        tool_names: tuple[str, ...],
+        flags: list[str],
+        defines: list[str],
+    ) -> None:
+        """Extend each named tool's `flags` and `defines` lists.
+
+        Skips tools that are absent or whose attribute isn't a list. Used by
+        the apply_variant hooks, which push compile flags and defines onto the
+        compiler tools the same way.
+        """
+        for tool_name in tool_names:
+            if not env.has_tool(tool_name):
+                continue
+            tool = getattr(env, tool_name)
+            tool_flags = getattr(tool, "flags", None)
+            if isinstance(tool_flags, list):
+                tool_flags.extend(flags)
+            tool_defines = getattr(tool, "defines", None)
+            if isinstance(tool_defines, list):
+                tool_defines.extend(defines)
+
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
         """Apply target architecture flags to the environment.
 

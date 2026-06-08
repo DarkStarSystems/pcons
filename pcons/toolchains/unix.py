@@ -331,13 +331,7 @@ class UnixToolchain(BaseToolchain):
         defines.extend(extra_defines)
 
         # Apply to compilers
-        for tool_name in ("cc", "cxx"):
-            if env.has_tool(tool_name):
-                tool = getattr(env, tool_name)
-                if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                    tool.flags.extend(compile_flags)
-                if hasattr(tool, "defines") and isinstance(tool.defines, list):
-                    tool.defines.extend(defines)
+        self._add_compile_flags_and_defines(env, ("cc", "cxx"), compile_flags, defines)
 
         # Apply to linker
         if env.has_tool("link") and link_flags:
