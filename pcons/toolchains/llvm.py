@@ -10,10 +10,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
-from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.builder import CommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.subst import SourcePath, TargetPath
-from pcons.toolchains.gnu_common import gnu_compile_vars, gnu_link_vars
+from pcons.toolchains.gnu_common import (
+    gnu_compile_vars,
+    gnu_link_builders,
+    gnu_link_vars,
+)
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
@@ -324,27 +328,7 @@ class LlvmLinker(BaseTool):
         return gnu_link_vars("clang")
 
     def builders(self) -> dict[str, Builder]:
-        platform = get_platform()
-        return {
-            "Program": CommandBuilder(
-                "Program",
-                "link",
-                "progcmd",
-                src_suffixes=[platform.object_suffix],
-                target_suffixes=[platform.exe_suffix],
-                single_source=False,
-            ),
-            "SharedLibrary": MultiOutputBuilder(
-                "SharedLibrary",
-                "link",
-                "sharedcmd",
-                outputs=[
-                    OutputSpec("primary", platform.shared_lib_suffix),
-                ],
-                src_suffixes=[platform.object_suffix],
-                single_source=False,
-            ),
-        }
+        return gnu_link_builders()
 
     def configure(self, config: object) -> ToolConfig | None:
         from pcons.configure.config import Configure

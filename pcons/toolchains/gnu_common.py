@@ -10,8 +10,14 @@ keys).
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from pcons.configure.platform import get_platform
+from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
+
+if TYPE_CHECKING:
+    from pcons.core.builder import Builder
 
 
 def gnu_compile_vars(cmd: str, ns: str) -> dict[str, object]:
@@ -77,4 +83,33 @@ def gnu_link_vars(cmd: str) -> dict[str, object]:
         "frameworks": [],
         "progcmd": ["$link.cmd", "$link.flags", *_link_tail()],
         "sharedcmd": ["$link.cmd", shared_flag, "$link.flags", *_link_tail()],
+    }
+
+
+def gnu_link_builders() -> dict[str, Builder]:
+    """Program and SharedLibrary builders shared by GNU-style linkers.
+
+    Identical for gcc, clang, and gfortran: link object files into an
+    executable (progcmd) or a shared library (sharedcmd).
+    """
+    platform = get_platform()
+    return {
+        "Program": CommandBuilder(
+            "Program",
+            "link",
+            "progcmd",
+            src_suffixes=[platform.object_suffix],
+            target_suffixes=[platform.exe_suffix],
+            single_source=False,
+        ),
+        "SharedLibrary": MultiOutputBuilder(
+            "SharedLibrary",
+            "link",
+            "sharedcmd",
+            outputs=[
+                OutputSpec("primary", platform.shared_lib_suffix),
+            ],
+            src_suffixes=[platform.object_suffix],
+            single_source=False,
+        ),
     }
