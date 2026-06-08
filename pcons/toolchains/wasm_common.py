@@ -86,12 +86,6 @@ class WasmToolchain(UnixToolchain):
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         # Sysroot (if any) is handled by setup(); just apply extra flags.
         if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
-            for tool_name in ("cc", "cxx"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                        tool.flags.extend(preset.extra_compile_flags)
+            self._add_tool_flags(env, ("cc", "cxx"), preset.extra_compile_flags)
         if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
-            if env.has_tool("link"):
-                if isinstance(env.link.flags, list):
-                    env.link.flags.extend(preset.extra_link_flags)
+            self._add_tool_flags(env, ("link",), preset.extra_link_flags)
