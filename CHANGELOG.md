@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Importing a C++20 module whose compiled interface exists only under different BMI-sensitive flags is now a clear configure-time error (naming the module, the importer, and the fix), instead of a confusing compiler error at build time.
 - **`target.add_dependency(t)`** adds a build-order/requirements dependency on a target that is not a library to link. (PR #41)
 - **`env.explain()` / `env.cc.explain()`** trace where each compiler flag came from — every flag, define, and replaced command is attributed to the variant/feature/cross preset that added it, with toolchain defaults and manual edits shown as `(manual)`.
+- **`pyodide()` cross-preset** for building CPython extension modules as Emscripten side modules under the PEP 783 PyEmscripten ABI (`pyemscripten_2025_0`/`2026_0`); pair it with the Emscripten toolchain and let `pyodide-build`/`cibuildwheel` handle wheel packaging.
 
 ### Changed
 

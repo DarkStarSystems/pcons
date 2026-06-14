@@ -174,6 +174,58 @@ def emscripten(
     )
 
 
+# PEP 783 PyEmscripten ABIs: platform tag -> CPython version it targets.
+PYEMSCRIPTEN_ABIS: dict[str, str] = {
+    "2025_0": "3.13",  # Pyodide 0.29.x
+    "2026_0": "3.14",  # Pyodide 314.x
+}
+
+
+def pyodide(
+    abi: str = "2026_0",
+    emsdk: str | None = None,
+) -> CrossPreset:
+    """Create a cross-compilation preset for Pyodide / PEP 783 PyEmscripten.
+
+    Builds on :func:`emscripten` and adds the flags needed to produce a CPython
+    extension module as an Emscripten *side module* — the form Pyodide loads and
+    the ABI standardized by `PEP 783 <https://peps.python.org/pep-0783/>`_. The
+    resulting wheels can be published to PyPI under the ``pyemscripten_*``
+    platform tags.
+
+    pcons covers the C/C++ compile + link side. Full wheel packaging (ABI tags,
+    metadata, PyPI upload) is the job of ``pyodide-build`` / ``cibuildwheel``;
+    point them at this toolchain for the build step.
+
+    Args:
+        abi: PyEmscripten ABI: ``"2025_0"`` (CPython 3.13, Pyodide 0.29.x) or
+             ``"2026_0"`` (CPython 3.14, Pyodide 314.x).
+        emsdk: Path to the Emscripten SDK root. If None, assumes ``emcc`` is on
+               PATH. The ABI is tied to a specific Emscripten version, which the
+               SDK must match.
+
+    Returns:
+        CrossPreset configured for the PyEmscripten side-module ABI.
+    """
+    if abi not in PYEMSCRIPTEN_ABIS:
+        raise ValueError(
+            f"Unknown PyEmscripten ABI '{abi}'. Supported: "
+            f"{', '.join(PYEMSCRIPTEN_ABIS)}"
+        )
+
+    base = emscripten(emsdk=emsdk)
+    return CrossPreset(
+        name=f"pyemscripten_{abi}",
+        arch=base.arch,
+        triple=base.triple,
+        sysroot=base.sysroot,
+        # Extension modules are position-independent Emscripten side modules.
+        extra_compile_flags=base.extra_compile_flags + ("-fPIC",),
+        extra_link_flags=base.extra_link_flags + ("-sSIDE_MODULE=1",),
+        env_vars=base.env_vars,
+    )
+
+
 def wasi_sdk(
     sdk_path: str | None = None,
 ) -> CrossPreset:

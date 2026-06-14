@@ -16,6 +16,7 @@ from pcons.toolchains.presets import (
     emscripten,
     ios,
     linux_cross,
+    pyodide,
 )
 
 
@@ -143,6 +144,43 @@ class TestEmscriptenPreset:
         preset = emscripten(emsdk="/fake/emsdk")
         assert "emcc" in preset.env_vars["CC"]
         assert "em++" in preset.env_vars["CXX"]
+
+
+class TestPyodidePreset:
+    """Tests for the pyodide() / PEP 783 PyEmscripten factory function."""
+
+    def test_default_abi(self) -> None:
+        preset = pyodide()
+        assert preset.name == "pyemscripten_2026_0"
+        assert preset.arch == "wasm32"
+        assert preset.triple == "wasm32-unknown-emscripten"
+        # Builds on emscripten() — keeps the emcc/em++ commands.
+        assert preset.env_vars["CC"] == "emcc"
+        assert preset.env_vars["CXX"] == "em++"
+
+    def test_side_module_flags(self) -> None:
+        preset = pyodide()
+        assert "-fPIC" in preset.extra_compile_flags
+        assert "-sSIDE_MODULE=1" in preset.extra_link_flags
+
+    def test_explicit_abi(self) -> None:
+        assert pyodide(abi="2025_0").name == "pyemscripten_2025_0"
+
+    def test_unknown_abi_raises(self) -> None:
+        with pytest.raises(ValueError, match="Unknown PyEmscripten ABI"):
+            pyodide(abi="9999_0")
+
+    def test_applied_to_emscripten_toolchain(self, test_project):  # noqa: F811
+        """Applying pyodide() adds the side-module flags via the wasm toolchain."""
+        from pcons.toolchains.emscripten import EmscriptenToolchain
+
+        env = _make_unix_env()
+        toolchain = EmscriptenToolchain()
+        toolchain.apply_cross_preset(env, pyodide())
+
+        assert "-fPIC" in env.cc.flags
+        assert "-fPIC" in env.cxx.flags
+        assert "-sSIDE_MODULE=1" in env.link.flags
 
 
 class TestLinuxCrossPreset:
