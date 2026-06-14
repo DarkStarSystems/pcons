@@ -10,13 +10,12 @@ env = project.Environment(
     toolchain=(toolchain := find_c_toolchain(prefer=[get_var("TOOLCHAIN", "gcc")]))
 )
 
+env.set_cxx_standard("c++20")
 if toolchain.name == "msvc":
-    env.cxx.flags.extend(["/std:c++latest", "/EHsc", "/permissive-"])
+    env.cxx.flags.extend(["/EHsc", "/permissive-"])
 elif toolchain.name == "llvm":
-    env.cxx.flags.extend(["-std=c++20", "-stdlib=libc++"])
+    env.cxx.flags.append("-stdlib=libc++")
     env.link.libs.append("c++")
-else:
-    env.cxx.flags.append("-std=c++20")
 
 add_subdirectory("a")
 add_subdirectory("b")

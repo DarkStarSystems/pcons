@@ -6,9 +6,20 @@ Each toolchain family defines its own flags for each preset.
 
 from __future__ import annotations
 
+import pytest
+
 from pcons.core.environment import Environment
+from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
+
+
+def _concrete_msvc() -> MsvcCompatibleToolchain:
+    class ConcreteMsvc(MsvcCompatibleToolchain):
+        def _configure_tools(self, config: object) -> bool:
+            return True
+
+    return ConcreteMsvc("test-msvc")
 
 
 def _make_unix_env() -> Environment:
@@ -240,3 +251,49 @@ class TestMsvcPresets:
         toolchain.apply_preset(env, "nonexistent")
 
         assert len(env.cc.flags) == 0
+
+
+class TestCxxStandard:
+    """Tests for env.set_cxx_standard() across toolchains."""
+
+    def test_gcc_sets_std_on_cxx_only(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env.set_cxx_standard("c++20")
+        assert "-std=c++20" in env.cxx.flags
+        assert "-std=c++20" not in env.cc.flags  # C++ standard, not C
+
+    def test_msvc_concrete_standard(self, test_project):  # noqa: F811
+        env = _make_msvc_env()
+        env._toolchain = _concrete_msvc()
+        env.set_cxx_standard(20)
+        assert "/std:c++20" in env.cxx.flags
+
+    def test_msvc_maps_above_20_to_latest(self, test_project):  # noqa: F811
+        # MSVC has no /std:c++23 switch, so c++23/c++26 -> /std:c++latest.
+        env = _make_msvc_env()
+        env._toolchain = _concrete_msvc()
+        env.set_cxx_standard("c++23")
+        assert "/std:c++latest" in env.cxx.flags
+
+    def test_accepts_int_str_and_prefixed(self, test_project):  # noqa: F811
+        for value in (20, "20", "c++20"):
+            env = _make_unix_env()
+            env._toolchain = GccToolchain()
+            env.set_cxx_standard(value)
+            assert "-std=c++20" in env.cxx.flags
+
+    def test_invalid_standard_raises(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        with pytest.raises(ValueError, match="Unsupported C\\+\\+ standard"):
+            env.set_cxx_standard("c++19")
+        with pytest.raises(ValueError, match="Invalid C\\+\\+ standard"):
+            env.set_cxx_standard("bogus")
+
+    def test_explain_attributes_to_language(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env.set_cxx_standard("c++20")
+        rows = [r for r in env.cxx.explain().rows if r.token == "-std=c++20"]
+        assert rows and rows[0].source == "c++20" and rows[0].category == "language"

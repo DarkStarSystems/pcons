@@ -243,6 +243,9 @@ class UnixToolchain(BaseToolchain):
         "minsizerel": (["-Os"], ["NDEBUG"]),
     }
 
+    def _cxx_standard_flag(self, standard: int) -> str:
+        return f"-std=c++{standard}"
+
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """On macOS, add -arch for universal builds; elsewhere no flags.
 

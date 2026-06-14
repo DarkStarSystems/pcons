@@ -78,7 +78,7 @@ if not fmt_pkg:
 
 env = project.Environment(toolchain=toolchain)
 env.set_variant(VARIANT)
-env.cxx.flags.append("-std=c++17")
+env.set_cxx_standard("c++17")
 
 # Use C++ compiler as linker for C++ programs (gets correct runtime libraries)
 env.link.cmd = env.cxx.cmd

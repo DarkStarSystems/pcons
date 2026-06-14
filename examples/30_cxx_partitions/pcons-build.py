@@ -21,10 +21,7 @@ from pcons.toolchains import find_c_toolchain
 project = Project("cxx_partitions")
 toolchain = find_c_toolchain(prefer=["llvm", "msvc"])
 env = project.Environment(toolchain=toolchain)
-if toolchain.name == "msvc":
-    env.cxx.flags.append("/std:c++20")
-else:
-    env.cxx.flags.append("-std=c++20")
+env.set_cxx_standard("c++20")
 
 project.Program(
     "hello",

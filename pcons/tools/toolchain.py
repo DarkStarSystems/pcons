@@ -423,6 +423,14 @@ class Toolchain(Protocol):
         """
         ...
 
+    def make_cxx_standard_preset(self, standard: int) -> Preset | None:
+        """Build a Preset selecting the C++ *standard*, or None if not C++.
+
+        Args:
+            standard: C++ standard as an integer (e.g. 20 for C++20).
+        """
+        ...
+
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
         ...
@@ -719,6 +727,25 @@ class BaseToolchain(ABC):
             logger.warning("Unknown preset '%s' for toolchain '%s'", name, self.name)
             return
         env.apply(preset)
+
+    def make_cxx_standard_preset(self, standard: int) -> Preset | None:
+        """Build a C++-standard Preset, or None if this toolchain has no C++.
+
+        The flag spelling is toolchain-specific (``-std=c++20`` vs
+        ``/std:c++20``); subclasses provide it via ``_cxx_standard_flag``.
+        """
+        flag = self._cxx_standard_flag(standard)
+        if flag is None:
+            return None
+        return Preset(
+            name=f"c++{standard}",
+            category="language",
+            contributions=(ToolContribution("cxx", flags=(flag,)),),
+        )
+
+    def _cxx_standard_flag(self, standard: int) -> str | None:
+        """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
+        return None
 
     def make_feature_preset(self, name: str) -> Preset | None:
         """Build a feature Preset by name, or None if unknown.

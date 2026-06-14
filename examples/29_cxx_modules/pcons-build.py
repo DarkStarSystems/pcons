@@ -13,7 +13,7 @@ from pcons.toolchains import find_c_toolchain
 
 project = Project("cxx_modules")
 env = project.Environment(toolchain=find_c_toolchain(prefer=["llvm"]))
-env.cxx.flags.append("-std=c++20")
+env.set_cxx_standard("c++20")
 
 project.Program("hello", env, sources=["src/MyMod.cppm", "src/main.cpp"])
 

@@ -22,10 +22,7 @@ project = Project("cxx_modules_optin")
 toolchain = find_c_toolchain(prefer=["llvm", "msvc"])
 env = project.Environment(toolchain=toolchain)
 env.cxx.modules = True
-if toolchain.name == "msvc":
-    env.cxx.flags.append("/std:c++20")
-else:
-    env.cxx.flags.append("-std=c++20")
+env.set_cxx_standard("c++20")
 
 project.Program(
     "hello",

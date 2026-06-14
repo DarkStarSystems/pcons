@@ -27,6 +27,8 @@ else:
 
 env = project.Environment(toolchain=toolchain)
 
+# NOTE: this example builds via PEP 517 isolation against the *released* pcons,
+# so it intentionally avoids newer APIs like env.set_cxx_standard().
 if toolchain.name == "msvc":
     env.cxx.flags.extend(["/std:c++20", "/EHsc", "/permissive-"])
 elif toolchain.name == "llvm":

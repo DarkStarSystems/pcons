@@ -147,6 +147,15 @@ class MsvcCompatibleToolchain(BaseToolchain):
         "minsizerel": (["/O1"], ["NDEBUG"]),
     }
 
+    def _cxx_standard_flag(self, standard: int) -> str:
+        # MSVC switches are /std:c++14, c++17, c++20, and c++latest — there is
+        # no /std:c++23 or :c++26, so anything above 20 uses c++latest.
+        if standard >= 23:
+            return "/std:c++latest"
+        if standard <= 14:
+            return "/std:c++14"
+        return f"/std:c++{standard}"
+
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Add /MACHINE:xxx to linker and librarian."""
         machine = self.MSVC_MACHINE_MAP.get(arch.lower(), arch.upper())
