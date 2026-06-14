@@ -7,13 +7,17 @@ A Toolchain is a coordinated set of Tools that work together
 
 from __future__ import annotations
 
+import logging
 import shutil
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Protocol, runtime_checkable
 
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -664,123 +668,123 @@ class BaseToolchain(ABC):
         for tool in self._tools.values():
             tool.setup(env)
 
+    # =========================================================================
+    # Presets (variants, features, cross targets)
+    #
+    # Variants, feature presets, and cross-compilation targets all reduce to a
+    # declarative Preset (a bundle of ToolContributions). Toolchains build them
+    # via the make_*_preset() / *_contributions() hooks below; Environment.apply()
+    # applies the opaque tokens and records the preset so it can be explained.
+    # The apply_*() methods are thin wrappers kept for call-site readability.
+    # =========================================================================
+
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant to the environment.
+        """Apply a build variant (e.g. "debug", "release") to the environment."""
+        env.apply(self.make_variant_preset(variant, **kwargs))
 
-        Default implementation does nothing. Subclasses override this
-        to implement toolchain-specific variant handling.
+    def make_variant_preset(self, variant: str, **kwargs: Any) -> Preset:
+        """Build a variant Preset. Base contributes no flags."""
+        return Preset(
+            name=variant,
+            category="variant",
+            exclusive_group="build_variant",
+            contributions=tuple(self._variant_contributions(variant, **kwargs)),
+        )
 
-        Args:
-            env: Environment to configure.
-            variant: Variant name (e.g., "debug", "release").
-            **kwargs: Toolchain-specific options.
-        """
-        # Store variant name on environment
-        env.variant = variant
-
-    @staticmethod
-    def _add_tool_flags(
-        env: Environment, tool_names: tuple[str, ...], flags: list[str]
-    ) -> None:
-        """Extend each named tool's `flags` list with `flags`.
-
-        Skips tools that are absent or whose `flags` isn't a list. The
-        arch/preset/cross-preset hooks all push flags onto cc/cxx and/or link
-        this same way.
-        """
-        if not flags:
-            return
-        for tool_name in tool_names:
-            if not env.has_tool(tool_name):
-                continue
-            tool_flags = getattr(getattr(env, tool_name), "flags", None)
-            if isinstance(tool_flags, list):
-                tool_flags.extend(flags)
-
-    @staticmethod
-    def _add_compile_flags_and_defines(
-        env: Environment,
-        tool_names: tuple[str, ...],
-        flags: list[str],
-        defines: list[str],
-    ) -> None:
-        """Extend each named tool's `flags` and `defines` lists.
-
-        Skips tools that are absent or whose attribute isn't a list. Used by
-        the apply_variant hooks, which push compile flags and defines onto the
-        compiler tools the same way.
-        """
-        for tool_name in tool_names:
-            if not env.has_tool(tool_name):
-                continue
-            tool = getattr(env, tool_name)
-            tool_flags = getattr(tool, "flags", None)
-            if isinstance(tool_flags, list):
-                tool_flags.extend(flags)
-            tool_defines = getattr(tool, "defines", None)
-            if isinstance(tool_defines, list):
-                tool_defines.extend(defines)
+    def _variant_contributions(
+        self, variant: str, **kwargs: Any
+    ) -> list[ToolContribution]:
+        """Tool contributions for a variant. Base knows no variants."""
+        return []
 
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        """Apply target architecture flags to the environment.
+        """Apply target architecture flags to the environment."""
+        env.apply(
+            Preset(
+                name=arch,
+                category="arch",
+                arch=arch,
+                contributions=tuple(self._arch_contributions(arch)),
+            )
+        )
 
-        Default implementation just stores the arch name. Subclasses override
-        this to implement toolchain-specific architecture handling, calling
-        super().apply_target_arch() to store the name.
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """Tool contributions for a target arch. Base adds none (just records)."""
+        return []
 
-        Args:
-            env: Environment to configure.
-            arch: Architecture name (e.g., "arm64", "x86_64", "x64").
-            **kwargs: Toolchain-specific options.
+    def apply_preset(self, env: Environment, name: str) -> None:
+        """Apply a named feature preset (e.g. "warnings", "sanitize")."""
+        preset = self.make_feature_preset(name)
+        if preset is None:
+            logger.warning("Unknown preset '%s' for toolchain '%s'", name, self.name)
+            return
+        env.apply(preset)
+
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """Build a feature Preset by name, or None if unknown.
+
+        Base has no feature presets; toolchains override this.
         """
-        # Store target architecture name on environment
-        env.target_arch = arch
-
-    def apply_preset(self, env: Environment, name: str) -> None:  # noqa: B027
-        """Apply a named flag preset to the environment.
-
-        Default implementation does nothing. Subclasses override this
-        to implement toolchain-specific preset handling.
-
-        Args:
-            env: Environment to configure.
-            name: Preset name (e.g., "warnings", "sanitize").
-        """
+        return None
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation preset to the environment.
+        """Apply a cross-compilation target preset (a CrossPreset)."""
+        env.apply(self.make_target_preset(preset))
 
-        Default implementation applies generic CrossPreset fields.
-        Subclasses override this for toolchain-specific handling.
+    def make_target_preset(self, cross: Any) -> Preset:
+        """Convert a CrossPreset descriptor into a Preset."""
+        return Preset(
+            name=getattr(cross, "name", "target"),
+            category="target",
+            arch=getattr(cross, "arch", None),
+            contributions=tuple(self._target_contributions(cross)),
+        )
 
-        Args:
-            env: Environment to configure.
-            preset: A CrossPreset dataclass instance.
+    def _target_contributions(self, cross: Any) -> list[ToolContribution]:
+        """Tool contributions for a cross target (arch flags, extra flags, cmd).
+
+        Toolchains extend this (UnixToolchain adds triple/sysroot; WasmToolchain
+        narrows it to extra flags only).
         """
-        # Apply architecture if specified
-        if hasattr(preset, "arch") and preset.arch:
-            self.apply_target_arch(env, preset.arch)
+        contribs: list[ToolContribution] = []
+        if getattr(cross, "arch", None):
+            contribs.extend(self._arch_contributions(cross.arch))
+        contribs.extend(self._extra_flag_contributions(cross))
+        contribs.extend(self._cmd_contributions(cross))
+        return contribs
 
-        # Apply sysroot to cc, cxx, link
-        if hasattr(preset, "sysroot") and preset.sysroot:
-            self._add_tool_flags(
-                env, ("cc", "cxx", "link"), [f"--sysroot={preset.sysroot}"]
-            )
+    @staticmethod
+    def _extra_flag_contributions(cross: Any) -> list[ToolContribution]:
+        """cc/cxx extra_compile_flags and link extra_link_flags from a CrossPreset."""
+        contribs: list[ToolContribution] = []
+        compile_flags = getattr(cross, "extra_compile_flags", ())
+        if compile_flags:
+            contribs.append(ToolContribution("cc", flags=tuple(compile_flags)))
+            contribs.append(ToolContribution("cxx", flags=tuple(compile_flags)))
+        link_flags = getattr(cross, "extra_link_flags", ())
+        if link_flags:
+            contribs.append(ToolContribution("link", flags=tuple(link_flags)))
+        return contribs
 
-        # Apply extra compile flags
-        if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
-            self._add_tool_flags(env, ("cc", "cxx"), preset.extra_compile_flags)
+    @staticmethod
+    def _cmd_contributions(cross: Any) -> list[ToolContribution]:
+        """cc/cxx command overrides from a CrossPreset's env_vars (CC/CXX)."""
+        contribs: list[ToolContribution] = []
+        env_vars = getattr(cross, "env_vars", None) or {}
+        for var_name, value in env_vars.items():
+            tool_name = var_name.lower()
+            if tool_name in ("cc", "cxx"):
+                contribs.append(ToolContribution(tool_name, cmd=value))
+        return contribs
 
-        # Apply extra link flags
-        if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
-            self._add_tool_flags(env, ("link",), preset.extra_link_flags)
-
-        # Override CC/CXX commands from env_vars
-        if hasattr(preset, "env_vars") and preset.env_vars:
-            for var_name, value in preset.env_vars.items():
-                tool_name = var_name.lower()
-                if tool_name in ("cc", "cxx") and env.has_tool(tool_name):
-                    getattr(env, tool_name).cmd = value
+    @staticmethod
+    def _sysroot_contributions(cross: Any) -> list[ToolContribution]:
+        """--sysroot flag on cc/cxx/link from a CrossPreset."""
+        sysroot = getattr(cross, "sysroot", None)
+        if not sysroot:
+            return []
+        flag = f"--sysroot={sysroot}"
+        return [ToolContribution(t, flags=(flag,)) for t in ("cc", "cxx", "link")]
 
     def get_linker_for_languages(self, languages: set[str]) -> str:
         """Determine which tool should link based on languages used.

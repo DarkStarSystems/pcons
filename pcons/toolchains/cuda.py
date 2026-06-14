@@ -29,6 +29,7 @@ import logging
 import shutil
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.preset import ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.tools.cuda import CudaCompiler
 from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_registry
@@ -36,7 +37,7 @@ from pcons.tools.toolchain import BaseToolchain, SourceHandler, toolchain_regist
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from pcons.core.environment import Environment
+    pass
 
 
 class CudaToolchain(BaseToolchain):
@@ -92,59 +93,31 @@ class CudaToolchain(BaseToolchain):
         self._tools = {"cuda": cuda}
         return True
 
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply build variant to CUDA compiler.
+    # CUDA variant flags per build type (compile_flags, defines).
+    # -G enables device debugging; -lineinfo gives profiler line info; nvcc
+    # has no -Os, so minsizerel uses -O1.
+    CUDA_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
+        "debug": (["-g", "-G", "-O0"], ["DEBUG", "_DEBUG"]),
+        "release": (["-O3"], ["NDEBUG"]),
+        "relwithdebinfo": (["-O2", "-lineinfo"], ["NDEBUG"]),
+        "profile": (["-O3", "-lineinfo"], ["NDEBUG"]),
+        "minsizerel": (["-O1"], ["NDEBUG"]),
+    }
 
-        CUDA-specific variant settings:
-        - debug: Device debug symbols (-G), host debug (-g)
-        - release: Optimization (-O3), no device debug
-        - profile: Line info for profilers (-lineinfo)
-
-        Args:
-            env: Environment to modify.
-            variant: Variant name (debug, release, profile, etc.).
-            **kwargs: Optional extra_flags and extra_defines.
-        """
-        super().apply_variant(env, variant, **kwargs)
-
-        compile_flags: list[str] = []
-        defines: list[str] = []
-
-        variant_lower = variant.lower()
-        if variant_lower == "debug":
-            # -G enables device debugging (slower, larger code)
-            # -g enables host code debugging
-            compile_flags = ["-g", "-G", "-O0"]
-            defines = ["DEBUG", "_DEBUG"]
-        elif variant_lower == "release":
-            compile_flags = ["-O3"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "relwithdebinfo":
-            # Line info for profiling without full debug
-            compile_flags = ["-O2", "-lineinfo"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "profile":
-            # Optimized with line info for profilers like Nsight
-            compile_flags = ["-O3", "-lineinfo"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "minsizerel":
-            compile_flags = ["-O1"]  # nvcc doesn't have -Os
-            defines = ["NDEBUG"]
-        else:
+    def _variant_contributions(
+        self, variant: str, **kwargs: Any
+    ) -> list[ToolContribution]:
+        """CUDA variant flags applied to the nvcc compiler."""
+        spec = self.CUDA_VARIANTS.get(variant.lower())
+        if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
                 f"Supported CUDA variants: debug, release, relwithdebinfo, "
                 f"profile, minsizerel."
             )
-
-        # Add extra flags/defines from kwargs
-        extra_flags = kwargs.get("extra_flags", [])
-        extra_defines = kwargs.get("extra_defines", [])
-        compile_flags.extend(extra_flags)
-        defines.extend(extra_defines)
-
-        # Apply to CUDA compiler
-        self._add_compile_flags_and_defines(env, ("cuda",), compile_flags, defines)
+        flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
+        defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
+        return [ToolContribution("cuda", flags=tuple(flags), defines=tuple(defines))]
 
     def _linker_for_language(self, language: str) -> str:
         """CUDA linking is typically handled by the host C++ compiler."""

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.tools.tool import BaseTool
@@ -1050,19 +1051,14 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
         return std_obj_nodes
 
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply build variant with MSVC flags.
-
-        Extends base class to add /DEBUG linker flag for debug variants.
-        """
-        # Base class handles compile flags and defines
-        super().apply_variant(env, variant, **kwargs)
-
-        # MSVC also needs /DEBUG linker flag for debug variants
-        variant_lower = variant.lower()
-        if variant_lower in ("debug", "relwithdebinfo"):
-            if env.has_tool("link") and isinstance(env.link.flags, list):
-                env.link.flags.append("/DEBUG")
+    def _variant_contributions(
+        self, variant: str, **kwargs: Any
+    ) -> list[ToolContribution]:
+        """MSVC variant flags, plus the /DEBUG linker flag for debug builds."""
+        contribs = super()._variant_contributions(variant, **kwargs)
+        if variant.lower() in ("debug", "relwithdebinfo"):
+            contribs.append(ToolContribution("link", flags=("/DEBUG",)))
+        return contribs
 
     def create_build_context(
         self,

@@ -34,7 +34,7 @@ class ToolConfig(_ToolConfigStubs):
         name: The tool's name (e.g., 'cc', 'cxx', 'link').
     """
 
-    __slots__ = ("_name", "_vars")
+    __slots__ = ("_name", "_vars", "_env")
 
     def __init__(self, name: str, **defaults: Any) -> None:
         """Create a tool configuration.
@@ -45,6 +45,9 @@ class ToolConfig(_ToolConfigStubs):
         """
         object.__setattr__(self, "_name", name)
         object.__setattr__(self, "_vars", dict(defaults))
+        # Back-reference to the owning Environment, set when the tool is added.
+        # Used only by explain(); None for detached/standalone ToolConfigs.
+        object.__setattr__(self, "_env", None)
 
     @property
     def name(self) -> str:
@@ -132,6 +135,19 @@ class ToolConfig(_ToolConfigStubs):
         """Return variables as a dictionary (shallow copy)."""
         vars_dict = object.__getattribute__(self, "_vars")
         return dict(vars_dict)
+
+    def explain(self) -> Any:
+        """Explain where this tool's flags came from (see Environment.explain).
+
+        Returns an :class:`~pcons.core.explain.Explanation` for this tool.
+        """
+        env = object.__getattribute__(self, "_env")
+        if env is None:
+            raise RuntimeError(
+                f"Tool '{self.name}' is not attached to an environment; "
+                f"use env.explain('{self.name}') instead."
+            )
+        return env.explain(tool=self.name)
 
     def as_namespace(self) -> dict[str, Any]:
         """Return as a namespace dict for substitution.

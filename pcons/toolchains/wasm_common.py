@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.preset import ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.toolchains.unix import UnixToolchain
 
@@ -80,12 +81,13 @@ class WasmToolchain(UnixToolchain):
     # -- Variant / arch overrides -------------------------------------------
 
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        # wasm32 is the only architecture; ignore arch requests
-        super(UnixToolchain, self).apply_target_arch(env, "wasm32", **kwargs)
+        # wasm32 is the only architecture; ignore the requested arch.
+        super().apply_target_arch(env, "wasm32", **kwargs)
 
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        # Sysroot (if any) is handled by setup(); just apply extra flags.
-        if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
-            self._add_tool_flags(env, ("cc", "cxx"), preset.extra_compile_flags)
-        if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
-            self._add_tool_flags(env, ("link",), preset.extra_link_flags)
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        # wasm32 needs no -arch flag (unlike macOS); arch is recorded only.
+        return []
+
+    def _target_contributions(self, cross: Any) -> list[ToolContribution]:
+        # Sysroot/triple are handled by setup(); only extra flags apply here.
+        return self._extra_flag_contributions(cross)

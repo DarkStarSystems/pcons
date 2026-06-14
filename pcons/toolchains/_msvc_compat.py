@@ -7,16 +7,13 @@ MSVC-compatible binaries on Windows (MSVC and clang-cl).
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
+from pcons.core.preset import Preset, ToolContribution
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
-    from pcons.core.environment import Environment
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
-
-logger = logging.getLogger(__name__)
 
 
 class MsvcCompatibleToolchain(BaseToolchain):
@@ -142,105 +139,49 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """Return flags that take their argument as a separate token."""
         return self.SEPARATED_ARG_FLAGS
 
-    def _apply_machine_flags(self, env: Environment, arch: str) -> None:
-        """Add /MACHINE:xxx flags to linker and librarian.
+    # Variant flags per build type (compile_flags, defines).
+    MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
+        "debug": (["/Od", "/Zi"], ["DEBUG", "_DEBUG"]),
+        "release": (["/O2"], ["NDEBUG"]),
+        "relwithdebinfo": (["/O2", "/Zi"], ["NDEBUG"]),
+        "minsizerel": (["/O1"], ["NDEBUG"]),
+    }
 
-        This is a helper method used by apply_target_arch implementations.
-        """
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """Add /MACHINE:xxx to linker and librarian."""
         machine = self.MSVC_MACHINE_MAP.get(arch.lower(), arch.upper())
+        flag = f"/MACHINE:{machine}"
+        return [
+            ToolContribution("link", flags=(flag,)),
+            ToolContribution("lib", flags=(flag,)),
+        ]
 
-        if env.has_tool("link"):
-            if isinstance(env.link.flags, list):
-                env.link.flags.append(f"/MACHINE:{machine}")
+    def make_feature_preset(self, name: str) -> Preset | None:
+        spec = self.MSVC_PRESETS.get(name)
+        if spec is None:
+            return None
+        contribs: list[ToolContribution] = []
+        compile_flags = spec.get("compile_flags", [])
+        if compile_flags:
+            contribs.append(ToolContribution("cc", flags=tuple(compile_flags)))
+            contribs.append(ToolContribution("cxx", flags=tuple(compile_flags)))
+        link_flags = spec.get("link_flags", [])
+        if link_flags:
+            contribs.append(ToolContribution("link", flags=tuple(link_flags)))
+        return Preset(name=name, category="feature", contributions=tuple(contribs))
 
-        if env.has_tool("lib"):
-            if isinstance(env.lib.flags, list):
-                env.lib.flags.append(f"/MACHINE:{machine}")
-
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        """Apply target architecture flags.
-
-        Adds /MACHINE:xxx to linker and librarian. Subclasses may override
-        to add additional flags (e.g., clang-cl adds --target).
-        """
-        super().apply_target_arch(env, arch, **kwargs)
-        self._apply_machine_flags(env, arch)
-
-    def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named flag preset with MSVC-style flags.
-
-        Args:
-            env: Environment to modify.
-            name: Preset name (warnings, sanitize, profile, lto, hardened).
-        """
-        preset = self.MSVC_PRESETS.get(name)
-        if preset is None:
-            logger.warning("Unknown preset '%s' for MSVC toolchain", name)
-            return
-
-        self._add_tool_flags(env, ("cc", "cxx"), preset.get("compile_flags", []))
-        self._add_tool_flags(env, ("link",), preset.get("link_flags", []))
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation preset with MSVC-style flags.
-
-        Applies /MACHINE:xxx flags via the architecture, then delegates
-        to BaseToolchain for generic fields.
-
-        Args:
-            env: Environment to modify.
-            preset: A CrossPreset dataclass instance.
-        """
-        # For MSVC, apply machine flags via architecture
-        if hasattr(preset, "arch") and preset.arch:
-            self._apply_machine_flags(env, preset.arch)
-
-        # Apply extra compile/link flags and env_vars from base
-        if hasattr(preset, "extra_compile_flags") and preset.extra_compile_flags:
-            self._add_tool_flags(env, ("cc", "cxx"), preset.extra_compile_flags)
-
-        if hasattr(preset, "extra_link_flags") and preset.extra_link_flags:
-            self._add_tool_flags(env, ("link",), preset.extra_link_flags)
-
-        if hasattr(preset, "env_vars") and preset.env_vars:
-            for var_name, value in preset.env_vars.items():
-                tool_name = var_name.lower()
-                if tool_name in ("cc", "cxx") and env.has_tool(tool_name):
-                    getattr(env, tool_name).cmd = value
-
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply build variant (debug, release, etc.) with MSVC-style flags.
-
-        Subclasses may override to add linker-specific flags.
-        """
-        super().apply_variant(env, variant, **kwargs)
-
-        compile_flags: list[str] = []
-        defines: list[str] = []
-
-        variant_lower = variant.lower()
-        if variant_lower == "debug":
-            compile_flags = ["/Od", "/Zi"]
-            defines = ["DEBUG", "_DEBUG"]
-        elif variant_lower == "release":
-            compile_flags = ["/O2"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "relwithdebinfo":
-            compile_flags = ["/O2", "/Zi"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "minsizerel":
-            compile_flags = ["/O1"]
-            defines = ["NDEBUG"]
-        else:
+    def _variant_contributions(
+        self, variant: str, **kwargs: Any
+    ) -> list[ToolContribution]:
+        spec = self.MSVC_VARIANTS.get(variant.lower())
+        if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
                 f"Supported variants: debug, release, relwithdebinfo, minsizerel."
             )
-
-        # Add extra flags/defines from kwargs
-        extra_flags = kwargs.get("extra_flags", [])
-        extra_defines = kwargs.get("extra_defines", [])
-        compile_flags.extend(extra_flags)
-        defines.extend(extra_defines)
-
-        self._add_compile_flags_and_defines(env, ("cc", "cxx"), compile_flags, defines)
+        flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
+        defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
+        return [
+            ToolContribution("cc", flags=tuple(flags), defines=tuple(defines)),
+            ToolContribution("cxx", flags=tuple(flags), defines=tuple(defines)),
+        ]

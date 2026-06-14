@@ -10,10 +10,11 @@ diagnostics and optimizations.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
+from pcons.core.preset import ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.msvc import MsvcAssembler, MsvcResourceCompiler
@@ -23,7 +24,6 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder
-    from pcons.core.environment import Environment
     from pcons.core.toolconfig import ToolConfig
 
 
@@ -298,29 +298,21 @@ class ClangClToolchain(MsvcCompatibleToolchain):
         "aarch64": "aarch64-pc-windows-msvc",
     }
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        """Apply target architecture flags for Clang-CL.
-
-        Extends base class to add --target flag for cross-compilation.
-        Base class handles /MACHINE:xxx for linker and librarian.
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """Add /MACHINE:xxx (via base) plus --target for cross-compilation.
 
         Supported architectures:
         - x64 (or amd64, x86_64): 64-bit Intel/AMD
         - x86 (or i386, i686): 32-bit Intel/AMD
         - arm64 (or aarch64): 64-bit ARM
         """
-        # Base class adds /MACHINE:xxx flags
-        super().apply_target_arch(env, arch, **kwargs)
-
-        # Clang-CL also supports --target for cross-compilation
+        contribs = super()._arch_contributions(arch)
         target_triple = self.CLANG_CL_TARGET_MAP.get(arch.lower())
         if target_triple:
-            target_flag = f"--target={target_triple}"
-            for tool_name in ("cc", "cxx"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "flags") and isinstance(tool.flags, list):
-                        tool.flags.append(target_flag)
+            flag = f"--target={target_triple}"
+            contribs.append(ToolContribution("cc", flags=(flag,)))
+            contribs.append(ToolContribution("cxx", flags=(flag,)))
+        return contribs
 
 
 # =============================================================================

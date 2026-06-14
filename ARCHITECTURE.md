@@ -1098,22 +1098,29 @@ The core (`pcons/core/`) must remain completely tool-agnostic. It knows nothing 
 - Environment and tool namespaces
 - Node and target abstractions
 
-**Toolchains own their semantics:** Each toolchain (GCC, LLVM, MSVC, etc.) implements its own `apply_variant()` method to handle build variants like "debug" or "release". The core only knows the variant *name* - toolchains define what it means.
+**Toolchains own their semantics:** Build variants ("debug"/"release"), feature presets ("warnings"/"sanitize"), and cross-compilation targets ("emscripten"/"android") all reduce to one tool-agnostic primitive: a declarative `Preset` (a bundle of per-tool `ToolContribution`s). The core only applies presets and never knows what a flag *means* — toolchains build the presets.
 
 ```python
-# Core only provides:
-env.set_variant("debug")  # Just a name, delegates to toolchain
+# Core only provides apply() + thin wrappers; it carries opaque tokens:
+env.set_variant("debug")              # -> toolchain.make_variant_preset("debug")
+env.apply_preset("warnings")          # -> toolchain.make_feature_preset("warnings")
+env.apply_cross_preset(emscripten())  # -> toolchain.make_target_preset(cross)
 
-# GCC toolchain implements:
-def apply_variant(self, env, variant, **kwargs):
+# A toolchain builds the Preset as data (no env mutation):
+def _variant_contributions(self, variant, **kwargs):
     if variant == "debug":
-        env.cc.flags.extend(["-O0", "-g"])
-        env.cc.defines.extend(["-DDEBUG"])
+        return [ToolContribution("cc", flags=("-O0", "-g"), defines=("DEBUG",)),
+                ToolContribution("cxx", flags=("-O0", "-g"), defines=("DEBUG",))]
+    ...
+```
 
-# A hypothetical LaTeX toolchain might implement:
-def apply_variant(self, env, variant, **kwargs):
-    if variant == "draft":
-        env.latex.options.append("draft")
+**Provenance is derived, not recorded.** Because presets are data and `Environment.apply()` keeps the ordered list of applied presets, `env.explain()` / `env.cc.explain()` can replay that list and attribute every flag to its source — no per-flag bookkeeping. Tokens not produced by a preset (toolchain defaults or `env.cc.flags.append(...)`) are labelled `(manual)`:
+
+```
+cxx.flags:
+  -Wall   ← warnings (feature)
+  -O2     ← release (variant)
+  -std=c++20  ← (manual)
 ```
 
 **Guidelines for new code:**

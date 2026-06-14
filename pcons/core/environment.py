@@ -20,7 +20,9 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core._environment_stubs import _EnvironmentStubs
+    from pcons.core.explain import Explanation
     from pcons.core.node import FileNode, Node
+    from pcons.core.preset import Preset, ToolContribution
     from pcons.core.target import Target
     from pcons.tools.toolchain import Toolchain
 else:
@@ -61,6 +63,7 @@ class Environment(_EnvironmentStubs):
         "_toolchain",
         "_additional_toolchains",
         "_created_nodes",
+        "_applied_presets",
         "_name",
         "defined_at",
     )
@@ -96,6 +99,7 @@ class Environment(_EnvironmentStubs):
         self._toolchain = toolchain
         self._additional_toolchains: list[Toolchain] = []
         self._created_nodes: list[Any] = []  # Nodes created by builders
+        self._applied_presets: list[Preset] = []  # Presets applied, in order
         self._name = name
         self.defined_at = defined_at or get_caller_location()
 
@@ -116,6 +120,9 @@ class Environment(_EnvironmentStubs):
         # Initialize tools from toolchain if provided
         if toolchain is not None:
             toolchain.setup(self)
+            # Record the toolchain's base flags before any user/preset edits, so
+            # explain() can attribute them (e.g. /nologo) to the toolchain.
+            self._record_toolchain_baseline(toolchain, list(self._get_tools().keys()))
 
         # Always add standalone tools (install, archive)
         # These are tool-agnostic and always available
@@ -181,6 +188,7 @@ class Environment(_EnvironmentStubs):
         elif isinstance(value, ToolConfig):
             tools = self._get_tools()
             tools[name] = value
+            value._env = self
         else:
             vars_dict = self._get_vars()
             vars_dict[name] = value
@@ -204,6 +212,7 @@ class Environment(_EnvironmentStubs):
         if config is None:
             config = ToolConfig(name)
         tools[name] = config
+        config._env = self
         return config
 
     def has_tool(self, name: str) -> bool:
@@ -228,7 +237,10 @@ class Environment(_EnvironmentStubs):
             self, "_additional_toolchains"
         )
         additional.append(toolchain)
+        before = set(self._get_tools().keys())
         toolchain.setup(self)
+        new_tools = [n for n in self._get_tools() if n not in before]
+        self._record_toolchain_baseline(toolchain, new_tools)
 
     @property
     def toolchains(self) -> list[Toolchain]:
@@ -374,7 +386,9 @@ class Environment(_EnvironmentStubs):
         # Clone tool configurations
         new_tools = new_env._get_tools()
         for name, config in tools.items():
-            new_tools[name] = config.clone()
+            cloned = config.clone()
+            cloned._env = new_env
+            new_tools[name] = cloned
 
         # Rebind BuilderMethod instances to reference the new environment
         # (BuilderMethod stores env reference for node registration)
@@ -386,6 +400,9 @@ class Environment(_EnvironmentStubs):
                 if isinstance(var_value, BuilderMethod):
                     # Create new BuilderMethod pointing to new_env
                     config.set(var_name, BuilderMethod(new_env, var_value._builder))
+
+        # Copy applied presets (frozen dataclasses → shallow copy is safe)
+        new_env._applied_presets = list(self._applied_presets)
 
         # Copy toolchain references (not cloned - they're shared)
         new_env._toolchain = self._toolchain
@@ -457,6 +474,128 @@ class Environment(_EnvironmentStubs):
         yield temp_env
 
     # Convenience methods for common patterns
+
+    def apply(self, preset: Preset) -> None:
+        """Apply a :class:`Preset`, recording it for later explanation.
+
+        Extends each contribution's tool flag/define lists and, for ``cmd``
+        contributions, replaces the tool command. The applied preset is
+        appended to this environment's history (see :meth:`explain`).
+
+        Presets sharing an ``exclusive_group`` are mutually exclusive: applying
+        a second, differently-named preset in the group raises ``ValueError``.
+        Clone the environment to build multiple variants.
+
+        The core is tool-agnostic — toolchains build presets via
+        ``make_variant_preset``/``make_feature_preset``/``make_target_preset``;
+        this method just applies the opaque tokens they carry.
+        """
+        if preset.exclusive_group is not None:
+            for applied in self._applied_presets:
+                if (
+                    applied.exclusive_group == preset.exclusive_group
+                    and applied.name != preset.name
+                ):
+                    raise ValueError(
+                        f"Cannot apply '{preset.name}': '{applied.name}' from "
+                        f"the same group '{preset.exclusive_group}' is already "
+                        f"applied. Clone the environment to build multiple "
+                        f"variants."
+                    )
+
+        for contribution in preset.contributions:
+            self._apply_contribution(contribution)
+
+        self._applied_presets.append(preset)
+
+        if preset.category == "variant":
+            self.variant = preset.name
+        if preset.arch is not None:
+            self.target_arch = preset.arch
+
+    @property
+    def applied_presets(self) -> tuple[Preset, ...]:
+        """Presets applied to this environment, in order (for inspection)."""
+        return tuple(self._applied_presets)
+
+    def explain(self, tool: str | None = None) -> Explanation:
+        """Explain where each tool flag/define came from.
+
+        Replays the presets applied to this environment and attributes each
+        flag, define, and replaced command to the preset that contributed it;
+        tokens from toolchain defaults or direct edits are labelled ``(manual)``.
+
+        Args:
+            tool: Restrict to a single tool (e.g. "cc"); otherwise all tools.
+
+        Returns:
+            An :class:`~pcons.core.explain.Explanation` (printable as a table).
+
+        Example:
+            env.set_variant("release")
+            env.apply_preset("warnings")
+            print(env.explain())       # all tools
+            print(env.cc.explain())    # just the C compiler
+        """
+        from pcons.core.explain import explain as _explain
+
+        tools = self._get_tools()
+        names = [tool] if tool is not None else list(tools.keys())
+        snapshot: dict[str, dict[str, Any]] = {}
+        for name in names:
+            if name not in tools:
+                continue
+            snapshot[name] = tools[name].as_dict()
+        return _explain(self._applied_presets, snapshot)
+
+    def _record_toolchain_baseline(
+        self, toolchain: Toolchain, tool_names: list[str]
+    ) -> None:
+        """Record a toolchain's base flags/defines as a 'toolchain' preset.
+
+        Called right after ``toolchain.setup()`` (before any user or preset
+        edits), so the captured tokens are exactly the toolchain's defaults
+        (e.g. ``/nologo``, ``rcs``). explain() then attributes them to the
+        toolchain instead of labelling them ``(manual)``.
+        """
+        from pcons.core.preset import Preset, ToolContribution
+
+        tools = self._get_tools()
+        contributions: list[ToolContribution] = []
+        for name in tool_names:
+            tool = tools.get(name)
+            if tool is None:
+                continue
+            flags = tool.get("flags")
+            defines = tool.get("defines")
+            f = tuple(flags) if isinstance(flags, list) else ()
+            d = tuple(defines) if isinstance(defines, list) else ()
+            if f or d:
+                contributions.append(ToolContribution(name, flags=f, defines=d))
+        if contributions:
+            self._applied_presets.append(
+                Preset(
+                    name=toolchain.name,
+                    category="toolchain",
+                    contributions=tuple(contributions),
+                )
+            )
+
+    def _apply_contribution(self, c: ToolContribution) -> None:
+        """Apply a single tool contribution (extend flags/defines, set cmd)."""
+        if not self.has_tool(c.tool):
+            return
+        tool = self._get_tools()[c.tool]
+        if c.flags:
+            flags = tool.get("flags")
+            if isinstance(flags, list):
+                flags.extend(c.flags)
+        if c.defines:
+            defines = tool.get("defines")
+            if isinstance(defines, list):
+                defines.extend(c.defines)
+        if c.cmd is not None:
+            tool.cmd = c.cmd
 
     def set_variant(self, name: str, **kwargs: Any) -> None:
         """Set the build variant.

@@ -7,6 +7,7 @@ This example demonstrates:
 - Building both debug and release variants in one project
 - How variants affect compiler flags and defines
 - Organizing outputs into variant-specific directories
+- env.explain() to trace where each flag came from
 """
 
 from pcons import Project, find_c_toolchain
@@ -40,5 +41,11 @@ for variant in ["debug", "release"]:
     prog.output_prefix = f"{variant}/"
     prog.add_sources([src_dir / "main.c"])
 
+    # explain() traces every flag back to its source: the -Wall we added
+    # manually above shows as "(manual)", while -O2/-g/NDEBUG are attributed
+    # to the variant preset.
+    print(f"\n=== {variant} cc flags ===")
+    print(env.cc.explain())
+
 project.generate()
-print(f"Generated {build_dir}")
+print(f"\nGenerated {build_dir}")

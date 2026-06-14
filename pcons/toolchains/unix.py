@@ -16,13 +16,13 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from pcons.core.environment import Environment
     from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
@@ -235,105 +235,67 @@ class UnixToolchain(BaseToolchain):
     # Target Architecture and Variant Methods
     # =========================================================================
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        """Apply target architecture flags.
+    # Variant flags per build type (compile_flags, defines).
+    UNIX_VARIANTS: dict[str, tuple[list[str], list[str]]] = {
+        "debug": (["-O0", "-g"], ["DEBUG", "_DEBUG"]),
+        "release": (["-O2"], ["NDEBUG"]),
+        "relwithdebinfo": (["-O2", "-g"], ["NDEBUG"]),
+        "minsizerel": (["-Os"], ["NDEBUG"]),
+    }
 
-        On macOS, uses the -arch flag for cross-compilation (e.g., building
-        arm64 binaries on x86_64 or vice versa). This enables building
-        universal binaries by compiling each architecture separately and
-        combining with lipo.
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """On macOS, add -arch for universal builds; elsewhere no flags.
 
-        On Linux, cross-compilation typically requires a different toolchain,
-        so this method is a no-op there (use a different toolchain instead).
-
-        Args:
-            env: Environment to modify.
-            arch: Architecture name (e.g., "arm64", "x86_64").
-            **kwargs: Toolchain-specific options (unused).
+        On Linux, cross-compilation uses a different toolchain (or a triple via
+        a cross-preset), so a bare arch adds nothing here.
         """
-        super().apply_target_arch(env, arch, **kwargs)
-        platform = get_platform()
+        if get_platform().is_macos:
+            return [
+                ToolContribution(t, flags=("-arch", arch))
+                for t in ("cc", "cxx", "link")
+            ]
+        return []
 
-        if platform.is_macos:
-            # macOS uses -arch flag for universal binary builds
-            self._add_tool_flags(env, ("cc", "cxx", "link"), ["-arch", arch])
+    def make_feature_preset(self, name: str) -> Preset | None:
+        spec = self.UNIX_PRESETS.get(name)
+        if spec is None:
+            return None
+        contribs: list[ToolContribution] = []
+        compile_flags = spec.get("compile_flags", [])
+        if compile_flags:
+            contribs.append(ToolContribution("cc", flags=tuple(compile_flags)))
+            contribs.append(ToolContribution("cxx", flags=tuple(compile_flags)))
+        link_flags = spec.get("link_flags", [])
+        if link_flags:
+            contribs.append(ToolContribution("link", flags=tuple(link_flags)))
+        return Preset(name=name, category="feature", contributions=tuple(contribs))
 
-    def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named flag preset.
+    def _target_contributions(self, cross: Any) -> list[ToolContribution]:
+        """Base contributions plus --target triple (Clang only) and --sysroot.
 
-        Args:
-            env: Environment to modify.
-            name: Preset name (warnings, sanitize, profile, lto, hardened).
+        GCC uses different toolchain binaries rather than a --target flag, but
+        --target is harmless for the cross-preset descriptors we support.
         """
-        preset = self.UNIX_PRESETS.get(name)
-        if preset is None:
-            logger.warning("Unknown preset '%s' for Unix toolchain", name)
-            return
+        contribs = super()._target_contributions(cross)
+        contribs.extend(self._sysroot_contributions(cross))
+        triple = getattr(cross, "triple", None)
+        if triple:
+            contribs.append(ToolContribution("cc", flags=(f"--target={triple}",)))
+            contribs.append(ToolContribution("cxx", flags=(f"--target={triple}",)))
+        return contribs
 
-        self._add_tool_flags(env, ("cc", "cxx"), preset.get("compile_flags", []))
-        self._add_tool_flags(env, ("link",), preset.get("link_flags", []))
-
-    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation preset.
-
-        Handles --target triple (Clang only) and --sysroot flags,
-        then delegates to BaseToolchain for generic fields.
-
-        Args:
-            env: Environment to modify.
-            preset: A CrossPreset dataclass instance.
-        """
-        # Apply target triple (Clang/LLVM only — GCC uses different
-        # toolchain binaries rather than --target flag)
-        if hasattr(preset, "triple") and preset.triple:
-            self._add_tool_flags(env, ("cc", "cxx"), [f"--target={preset.triple}"])
-
-        # Delegate to base for sysroot, extra flags, env_vars, arch
-        super().apply_cross_preset(env, preset)
-
-    def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply build variant (debug, release, etc.).
-
-        Args:
-            env: Environment to modify.
-            variant: Variant name (debug, release, relwithdebinfo, minsizerel).
-            **kwargs: Optional extra_flags and extra_defines to add.
-        """
-        super().apply_variant(env, variant, **kwargs)
-
-        compile_flags: list[str] = []
-        defines: list[str] = []
-        link_flags: list[str] = []
-
-        variant_lower = variant.lower()
-        if variant_lower == "debug":
-            compile_flags = ["-O0", "-g"]
-            defines = ["DEBUG", "_DEBUG"]
-        elif variant_lower == "release":
-            compile_flags = ["-O2"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "relwithdebinfo":
-            compile_flags = ["-O2", "-g"]
-            defines = ["NDEBUG"]
-        elif variant_lower == "minsizerel":
-            compile_flags = ["-Os"]
-            defines = ["NDEBUG"]
-        else:
+    def _variant_contributions(
+        self, variant: str, **kwargs: Any
+    ) -> list[ToolContribution]:
+        spec = self.UNIX_VARIANTS.get(variant.lower())
+        if spec is None:
             raise ValueError(
                 f"Unknown variant '{variant}'. "
                 f"Supported variants: debug, release, relwithdebinfo, minsizerel."
             )
-
-        # Add extra flags/defines from kwargs
-        extra_flags = kwargs.get("extra_flags", [])
-        extra_defines = kwargs.get("extra_defines", [])
-        compile_flags.extend(extra_flags)
-        defines.extend(extra_defines)
-
-        # Apply to compilers
-        self._add_compile_flags_and_defines(env, ("cc", "cxx"), compile_flags, defines)
-
-        # Apply to linker
-        if env.has_tool("link") and link_flags:
-            if isinstance(env.link.flags, list):
-                env.link.flags.extend(link_flags)
+        flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
+        defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
+        return [
+            ToolContribution("cc", flags=tuple(flags), defines=tuple(defines)),
+            ToolContribution("cxx", flags=tuple(flags), defines=tuple(defines)),
+        ]

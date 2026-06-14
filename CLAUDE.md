@@ -100,6 +100,8 @@ pcons/
 | Change variable substitution | `pcons/core/subst.py` |
 | Modify target resolution | `pcons/core/resolver.py` |
 | Add compile/link flags | `pcons/tools/toolchain.py` (ToolchainContext) |
+| Add/change a preset (variant, feature, cross target) | `pcons/core/preset.py` (the `Preset`/`ToolContribution` model), `make_*_preset()` / `_*_contributions()` in `pcons/toolchains/`, factories in `pcons/toolchains/presets.py` |
+| Trace where a flag came from | `pcons/core/explain.py` (`env.explain()` / `env.cc.explain()`) |
 | Package management | `pcons/packages/finders/`, `pcons/packages/imported.py` |
 
 ## Testing
