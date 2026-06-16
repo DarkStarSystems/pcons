@@ -63,16 +63,16 @@ class Explanation:
                 lines.append(f"{key}:")
                 for r in rows:
                     if r.source is None:
-                        origin = "← (manual)"
+                        origin = "<- (manual)"
                     else:
-                        origin = f"← {r.source} ({r.category})"
+                        origin = f"<- {r.source} ({r.category})"
                         if r.var == "cmd":
                             origin += " [replaced]"
                     lines.append(f"  {r.token.ljust(width)}  {origin}")
         if self.imperative:
             lines.append("imperative presets (ran; effect not attributable):")
             for name, desc in self.imperative:
-                lines.append(f"  {name} — {desc}" if desc else f"  {name}")
+                lines.append(f"  {name} - {desc}" if desc else f"  {name}")
         return "\n".join(lines) if lines else "(no flags)"
 
 

@@ -103,7 +103,7 @@ class TestStr:
         env.apply(_release())
         text = str(env.explain("cc"))
         assert "-O2" in text
-        assert "← release (variant)" in text
+        assert "<- release (variant)" in text
 
     def test_str_marks_manual(self, test_project):
         env = _make_env()
@@ -162,7 +162,7 @@ class TestToolchainBaseline:
         assert _src(exp, "cc", "-O2") == "release"
         assert _src(exp, "cc", "-std=c++20") is None
         # category shows in the rendered table
-        assert "← faketc (toolchain)" in str(exp)
+        assert "<- faketc (toolchain)" in str(exp)
 
     def test_baseline_survives_clone(self, test_project):
         from pcons.core.environment import Environment

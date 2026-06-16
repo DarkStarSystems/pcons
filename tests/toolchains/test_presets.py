@@ -490,7 +490,7 @@ class TestImperativePreset:
         assert "-O3" in env.cxx.flags
         exp = env.cxx.explain()
         assert ("acme/o3", "O2->O3") in exp.imperative
-        assert "acme/o3 — O2->O3" in str(exp)
+        assert "acme/o3 - O2->O3" in str(exp)
 
     def test_imperative_survives_clone(self, test_project, clean_registry):  # noqa: F811
         from pcons.core.preset import register_preset

@@ -101,7 +101,7 @@ the toolchain as possible:
 
 Resolution order: the active **toolchain answers first** (built-ins, near their
 flags), then the **registry** (contributed). `explain()` records which source
-realized each flag (`warnings ← gcc (toolchain)` vs `mycorp/strict ←
+realized each flag (`warnings <- gcc (toolchain)` vs `mycorp/strict <-
 registry`), so indirection never becomes a mystery.
 
 ## Tool-agnostic by construction
@@ -188,7 +188,7 @@ def no_rtti(env):
 ```
 
 `explain()` then appends: `imperative presets (ran; effect not attributable):
-acme/no-rtti — drop -frtti, force -fno-rtti`.
+acme/no-rtti - drop -frtti, force -fno-rtti`.
 
 ## Status summary
 
