@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-06-16
+
 ### Added
 
 - **Python packaging: PEP 517 build backend (experimental).** Python extension packages can now use pcons as their build system directly from `pyproject.toml` (`build-backend = "pcons.pyproject"`). Supports building wheels, editable installs (PEP 660 — imports resolve to the build directory, so `ninja` alone picks up changes), and sdists. Honors PEP 621 `[project]` metadata (`requires-python`, `dependencies`). Ninja is requested automatically in isolated builds when not already on PATH. Configure via `[tool.pcons]` (`variant`, `variables`, `install-target`); see the user guide and `examples/50_pyproject` (a nanobind C++ extension with Conan, exercising the full `uv sync` workflow on Linux, macOS, and Windows). Marked experimental: the `[tool.pcons]` keys and the `PCONS_BUILD_WHEEL` convention may still change. (PR #37)
@@ -21,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **BREAKING: link dependencies are now usage requirements.** Append `Target` objects (or library names) to `target.public.link_libs` / `target.private.link_libs`; the scope controls propagation just like `include_dirs` and `defines`, and private link dependencies are now expressible. `target.link(...)` still works but is deprecated (equivalent to appending to `public.link_libs`). `target.dependencies` is now a read-only view — use `add_dependency()` instead of `.append()`. (PR #41)
+- **BREAKING: the `warnings` preset no longer implies `-Werror`/`/WX`** — it enables only the warning set (`-Wall -Wextra -Wpedantic`, `/W4`). Apply the new orthogonal `werror` preset to promote warnings to errors.
+- **BREAKING: applying a second, differently-named build variant to one environment now raises** instead of silently merging both flag sets. Clone the environment per variant (`env.clone().set_variant(...)`), as the examples already do.
+- **BREAKING (custom toolchains only):** feature/variant/target presets are now declared as data — a `FEATURE_PRESETS` dict plus `make_*_preset()` / `_*_contributions()` hooks — instead of overriding `apply_variant`/`apply_preset`/`apply_cross_preset`; the per-family `UNIX_PRESETS`/`MSVC_PRESETS` dicts were renamed to `FEATURE_PRESETS`. See `docs/presets.md`.
 
 ### Fixed
 
@@ -911,7 +916,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/DarkStarSystems/pcons/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/DarkStarSystems/pcons/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/DarkStarSystems/pcons/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/DarkStarSystems/pcons/compare/v0.16.0...v0.17.0
