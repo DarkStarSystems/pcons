@@ -329,6 +329,46 @@ def should_skip(config: dict[str, Any]) -> str | None:
         if _find_gcc_std_module_source(gxx, "std", []) is None:
             return "GCC std module support requires GCC 15+ with libstdc++"
 
+    def _check_clang_named_module_support() -> bool | str:
+        """Named C++20 modules with clang need clang-scan-deps and clang++.
+
+        Lighter than the std-module check: named modules don't require the
+        libc++ std module manifest.
+        """
+        if shutil.which("clang++") is None and shutil.which("clang") is None:
+            return "clang not found (needed for C++ module scanning)"
+        if shutil.which("clang-scan-deps") is None:
+            return "clang-scan-deps not found (needed to scan C++ modules with clang)"
+
+    def _check_gcc_named_module_support() -> bool | str:
+        """Named C++20 modules with GCC just need g++ (it scans via `g++ -E`)."""
+        if shutil.which("g++") is None:
+            return "g++ not found (needed for C++ module scanning)"
+
+    # check for named C++ module support if required by the test config. Unlike
+    # std modules, MSVC scans natively (cl.exe /scanDependencies) and GCC scans
+    # with g++, so neither needs clang — gate per toolchain accordingly.
+    if skip_config.get("requires_cxx_modules"):
+        toolchain = config.get("toolchain")
+        named_checks = {
+            "msvc": _check_msvc_module_support,
+            "llvm": _check_clang_named_module_support,
+            "gcc": _check_gcc_named_module_support,
+        }
+        if toolchain is None:
+            # No explicit toolchain: assume the platform default (MSVC on
+            # Windows, clang on macOS, GCC on Linux) like find_c_toolchain.
+            default_check = {
+                "windows": _check_msvc_module_support,
+                "darwin": _check_clang_named_module_support,
+            }.get(current_platform, _check_gcc_named_module_support)
+            if (check := default_check()) is not None:
+                return check
+        else:
+            check_fn = named_checks.get(toolchain)
+            if check_fn is not None and (check := check_fn()) is not None:
+                return check
+
     # check for C++ std module support if required by the test config
     if skip_config.get("requires_cxx_std_module"):
         toolchain = config.get("toolchain")
