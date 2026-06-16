@@ -56,11 +56,11 @@ class ToolConfig(_ToolConfigStubs):
         return name
 
     def __getattr__(self, name: str) -> Any:
-        """Get a tool variable, or a toolchain-provided knob method.
+        """Get a tool variable, or a toolchain-provided setting method.
 
-        Domain knobs (e.g. ``env.cxx.set_standard``) are not stored as variables;
-        they're resolved through the owning environment's toolchain at access
-        time, so they stay tool-agnostic in core and clone-safe. See
+        Domain settings (e.g. ``env.cxx.set_standard``) are not stored as
+        variables; they're resolved through the owning environment's toolchain
+        at access time, so they stay tool-agnostic in core and clone-safe. See
         docs/presets.md.
         """
         if name.startswith("_"):
@@ -73,9 +73,9 @@ class ToolConfig(_ToolConfigStubs):
         if env is not None:
             tool_name = object.__getattribute__(self, "_name")
             for toolchain in env.toolchains:
-                knob = toolchain.tool_knob(tool_name, name)
-                if knob is not None:
-                    return lambda *args, **kwargs: knob(env, *args, **kwargs)
+                setting = toolchain.tool_setting(tool_name, name)
+                if setting is not None:
+                    return lambda *args, **kwargs: setting(env, *args, **kwargs)
 
         raise AttributeError(
             f"Tool '{self.name}' has no variable '{name}'. "

@@ -24,30 +24,29 @@ one verb onto all of them.
 
 ### Knobs
 
-General knobs that apply to any build live on the environment:
+General settings that apply to any build live on the environment:
 
 ```python
 env.set_variant("release")
 env.set_target_arch("arm64")
 ```
 
-**Domain-specific** knobs live on the relevant *tool facet*, not on core, so the
+**Domain-specific** settings live on the relevant *tool namespace*, not on core, so the
 core stays tool-agnostic and each language brings its own:
 
 ```python
-env.cxx.set_standard("c++20")     # C++ knob, on the cxx facet
-env.cxx.set_stdlib("libc++")      # clang-only; no-op on GCC/MSVC
+env.cxx.set_standard("c++20")     # C++ setting, on the cxx namespace
 # a Fortran toolchain would offer env.fc.set_standard("f2018"), etc.
 ```
 
 > **How it works:** there is no C/C++ vocabulary on core `Environment`. A tool
-> facet (`env.cxx`) resolves an unknown attribute like `set_standard` through
-> the environment's toolchain via `Toolchain.tool_knob(tool, name)`, which
+> namespace (`env.cxx`) resolves an unknown attribute like `set_standard` through
+> the environment's toolchain via `Toolchain.tool_setting(tool, name)`, which
 > returns a callable bound to the env at *access* time (so it's clone-safe and
 > reuses no captured state). The realization stays per-toolchain
-> (`make_cxx_standard_preset`/`make_cxx_stdlib_preset`); a toolchain that doesn't
-> realize a knob simply no-ops. New domain knobs are added by overriding
-> `tool_knob` — no core change.
+> (`make_cxx_standard_preset`); a toolchain that doesn't realize a setting simply
+> no-ops. New domain settings are added by overriding `tool_setting` — no core
+> change.
 
 ### Features
 
@@ -113,7 +112,7 @@ knowledge:
 - The `Preset`/`ToolContribution` model and the categories are tool-free.
 - A feature resolver **receives the toolchain and returns contributions**, so it
   works for *any* domain — C/C++, Fortran, WASM, LaTeX, asset pipelines.
-- Domain knobs live on tool facets (above), not on core.
+- Domain settings live on tool namespaces (above), not on core.
 
 Feature presets are realized for whatever compile tools a toolchain declares via
 `_feature_preset_tools()` (e.g. `("cc", "cxx")` for C/C++, `("fc",)` for
@@ -168,6 +167,10 @@ env.apply_preset("acme/draft")
 Bare (unscoped) names are reserved for pcons; `register_preset` warns if a
 contributed preset omits its `scope/`.
 
+A declarative resolver can already make **compiler-version-specific choices** —
+it receives the toolchain, so it may branch on `tc.name`/version and return
+different contributions.
+
 ## Status summary
 
 | Piece | State |
@@ -177,5 +180,5 @@ contributed preset omits its `scope/`.
 | `warnings` + `werror` (orthogonal), Fortran/WASM coverage | implemented |
 | `env.set_variant` / `env.set_target_arch` | implemented |
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
-| `env.cxx.set_standard` / `set_stdlib` (tool-facet knobs via `tool_knob`) | implemented |
+| `env.cxx.set_standard` (tool-namespace setting via `tool_setting`) | implemented |
 | Registry, `scope/name` namespacing, `register_preset`/`preset`/`list_presets` | implemented |

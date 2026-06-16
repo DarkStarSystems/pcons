@@ -27,8 +27,8 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
-# C++ knob methods (exposed on the cxx tool facet via Toolchain.tool_knob).
-# Realization stays per-toolchain (make_cxx_standard_preset / make_cxx_stdlib_preset).
+# C++ setting methods (exposed on the cxx tool namespace via Toolchain.tool_setting).
+# Realization stays per-toolchain (make_cxx_standard_preset).
 # =============================================================================
 
 _CXX_STANDARDS: frozenset[int] = frozenset({11, 14, 17, 20, 23, 26})
@@ -54,14 +54,6 @@ def _cxx_set_standard(env: Environment, standard: int | str) -> None:
     n = _parse_cxx_standard(standard)
     for toolchain in env.toolchains:
         preset = toolchain.make_cxx_standard_preset(n)
-        if preset is not None:
-            env.apply(preset)
-
-
-def _cxx_set_stdlib(env: Environment, stdlib: str) -> None:
-    """``env.cxx.set_stdlib(...)`` — select the C++ standard library (clang)."""
-    for toolchain in env.toolchains:
-        preset = toolchain.make_cxx_stdlib_preset(stdlib)
         if preset is not None:
             env.apply(preset)
 
@@ -475,12 +467,8 @@ class Toolchain(Protocol):
         """
         ...
 
-    def make_cxx_stdlib_preset(self, stdlib: str) -> Preset | None:
-        """Build a Preset selecting the C++ standard library, or None."""
-        ...
-
-    def tool_knob(self, tool: str, name: str) -> Callable[..., None] | None:
-        """Return a knob method for ``env.<tool>.<name>``, or None."""
+    def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
+        """Return a setting method for ``env.<tool>.<name>``, or None."""
         ...
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
@@ -799,42 +787,17 @@ class BaseToolchain(ABC):
         """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
         return None
 
-    def make_cxx_stdlib_preset(self, stdlib: str) -> Preset | None:
-        """Build a C++ standard-library Preset, or None if not selectable.
+    def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
+        """Return a setting method ``(env, *args) -> None`` for ``env.<tool>.<name>``.
 
-        Realizes on both the compiler and the (clang-driver) linker. Only
-        toolchains that can switch stdlib (clang) provide ``_cxx_stdlib_flag``;
-        GCC (libstdc++ only) and MSVC return None and no-op.
-        """
-        flag = self._cxx_stdlib_flag(stdlib)
-        if flag is None:
-            return None
-        return Preset(
-            name=f"stdlib={stdlib}",
-            category="language",
-            contributions=(
-                ToolContribution("cxx", flags=(flag,)),
-                ToolContribution("link", flags=(flag,)),
-            ),
-        )
-
-    def _cxx_stdlib_flag(self, stdlib: str) -> str | None:
-        """Flag selecting the C++ standard library, or None if not selectable."""
-        return None
-
-    def tool_knob(self, tool: str, name: str) -> Callable[..., None] | None:
-        """Return a knob method ``(env, *args) -> None`` for ``env.<tool>.<name>``.
-
-        Knobs are domain methods exposed on a tool facet (e.g.
+        Settings are domain methods exposed on a tool namespace (e.g.
         ``env.cxx.set_standard``). The realization stays per-toolchain
         (``make_cxx_standard_preset`` etc.); a toolchain that doesn't realize a
-        knob simply no-ops. Returns None for unknown knobs. See docs/presets.md.
+        setting simply no-ops. Returns None for unknown settings. See
+        docs/presets.md.
         """
-        if tool == "cxx":
-            if name == "set_standard":
-                return _cxx_set_standard
-            if name == "set_stdlib":
-                return _cxx_set_stdlib
+        if tool == "cxx" and name == "set_standard":
+            return _cxx_set_standard
         return None
 
     # Named feature presets for this toolchain, keyed by preset name. Each value

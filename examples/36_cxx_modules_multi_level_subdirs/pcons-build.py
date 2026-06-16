@@ -11,9 +11,11 @@ env = project.Environment(
 )
 
 env.cxx.set_standard("c++20")
-env.cxx.set_stdlib("libc++")  # no-op unless the toolchain is clang
 if toolchain.name == "msvc":
     env.cxx.flags.extend(["/EHsc", "/permissive-"])
+elif toolchain.name == "llvm":
+    env.cxx.flags.append("-stdlib=libc++")
+    env.link.libs.append("c++")
 
 add_subdirectory("a")
 add_subdirectory("b")

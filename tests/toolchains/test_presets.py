@@ -275,7 +275,7 @@ class TestMsvcPresets:
 
 
 class TestCxxStandard:
-    """Tests for the env.cxx.set_standard() tool-facet knob across toolchains."""
+    """Tests for the env.cxx.set_standard() tool-namespace setting across toolchains."""
 
     def test_gcc_sets_std_on_cxx_only(self, test_project):  # noqa: F811
         env = _make_unix_env()
@@ -318,30 +318,6 @@ class TestCxxStandard:
         env.cxx.set_standard("c++20")
         rows = [r for r in env.cxx.explain().rows if r.token == "-std=c++20"]
         assert rows and rows[0].source == "c++20" and rows[0].category == "language"
-
-
-class TestCxxStdlib:
-    """Tests for the env.cxx.set_stdlib() knob (clang-only)."""
-
-    def test_llvm_libcxx_on_compile_and_link(self, test_project):  # noqa: F811
-        env = _make_unix_env()
-        env._toolchain = LlvmToolchain()
-        env.cxx.set_stdlib("libc++")
-        assert "-stdlib=libc++" in env.cxx.flags
-        assert "-stdlib=libc++" in env.link.flags  # clang driver links libc++
-
-    def test_gcc_stdlib_is_noop(self, test_project):  # noqa: F811
-        # GCC has no -stdlib switch (libstdc++ only); the knob no-ops.
-        env = _make_unix_env()
-        env._toolchain = GccToolchain()
-        env.cxx.set_stdlib("libc++")
-        assert not any("stdlib" in f for f in env.cxx.flags)
-
-    def test_msvc_stdlib_is_noop(self, test_project):  # noqa: F811
-        env = _make_msvc_env()
-        env._toolchain = _concrete_msvc()
-        env.cxx.set_stdlib("libc++")
-        assert env.cxx.flags == []
 
 
 def _make_fortran_env() -> Environment:
