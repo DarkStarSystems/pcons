@@ -55,6 +55,8 @@ Pre-commit hooks run ruff check, ruff format, and ty (type checking) automatical
 
 **ToolchainContext protocol**: Decouples core from C/C++ specifics. Provides `get_env_overrides()` to set values on the environment before command expansion. Implementations (CompileLinkContext, MsvcCompileLinkContext) use toolchain-specific prefixes like `-I`, `/I`.
 
+**Presets** (variants, feature bundles, cross-targets): `docs/presets.md` is the **authoritative, decided convention** for naming, namespacing, locality, and tool-agnosticism. Read it before adding or changing any preset, knob, or `apply_*`/`set_*` surface, and keep changes consistent with it. Key rules: built-in flag realizations live *in* the toolchain (never centralized); names are lowercase-hyphenated and composable (`warnings` + `werror`, not mega-bundles); domain knobs belong on tool facets (`env.cxx.set_standard`), not core.
+
 See `ARCHITECTURE.md` for full design documentation.
 
 ## Key Patterns
