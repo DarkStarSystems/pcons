@@ -341,9 +341,26 @@ def should_skip(config: dict[str, Any]) -> str | None:
             return "clang-scan-deps not found (needed to scan C++ modules with clang)"
 
     def _check_gcc_named_module_support() -> bool | str:
-        """Named C++20 modules with GCC just need g++ (it scans via `g++ -E`)."""
-        if shutil.which("g++") is None:
+        """Named C++20 modules with GCC need GCC 14+ (it scans via `g++ -E`).
+
+        Older g++ rejects the P1689 scan flags (`-fmodules`,
+        `-fdeps-format=p1689r5`), so probe for them and skip if unsupported.
+        """
+        gxx = shutil.which("g++")
+        if gxx is None:
             return "g++ not found (needed for C++ module scanning)"
+        try:
+            result = subprocess.run(
+                [gxx, "-fmodules", "-fdeps-format=p1689r5", "-x", "c++", "-E", "-"],
+                input="",
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return "could not probe g++ for C++ module support"
+        if "unrecognized command-line option" in result.stderr:
+            return "g++ is too old for C++20 named-module scanning (needs GCC 14+)"
 
     # check for named C++ module support if required by the test config. Unlike
     # std modules, MSVC scans natively (cl.exe /scanDependencies) and GCC scans
