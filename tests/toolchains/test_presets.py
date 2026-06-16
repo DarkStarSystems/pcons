@@ -398,3 +398,96 @@ class TestWasmPresets:
         EmscriptenToolchain().apply_preset(env, "werror")
 
         assert "-Werror" in env.cc.flags
+
+
+@pytest.fixture
+def clean_registry():
+    """Isolate the contributed-preset registry for a test."""
+    from pcons.core import preset as preset_mod
+
+    saved = dict(preset_mod._PRESET_REGISTRY)
+    preset_mod._PRESET_REGISTRY.clear()
+    try:
+        yield
+    finally:
+        preset_mod._PRESET_REGISTRY.clear()
+        preset_mod._PRESET_REGISTRY.update(saved)
+
+
+class TestPresetRegistry:
+    """Contributed feature presets via register_preset / @preset (see docs/presets.md)."""
+
+    def test_register_and_apply(self, test_project, clean_registry):  # noqa: F811
+        from pcons.core.preset import ToolContribution as TC
+        from pcons.core.preset import register_preset
+
+        register_preset(
+            "acme/strict",
+            lambda tc: [TC("cc", flags=("-Wshadow",)), TC("cxx", flags=("-Wshadow",))],
+        )
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env.apply_preset("acme/strict")
+        assert "-Wshadow" in env.cc.flags
+        rows = [r for r in env.cc.explain().rows if r.token == "-Wshadow"]
+        assert rows and rows[0].source == "acme/strict"
+
+    def test_decorator_form(self, test_project, clean_registry):  # noqa: F811
+        from pcons.core.preset import ToolContribution as TC
+        from pcons.core.preset import preset as preset_deco
+
+        @preset_deco("acme/x")
+        def _x(tc):
+            return [TC("cc", flags=("-Dfoo",))]
+
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env.apply_preset("acme/x")
+        assert "-Dfoo" in env.cc.flags
+
+    def test_builtin_wins_over_registry(self, test_project, clean_registry):  # noqa: F811
+        # A registry entry shadowing a built-in name is ignored (toolchain-first).
+        from pcons.core.preset import ToolContribution as TC
+        from pcons.core.preset import register_preset
+
+        register_preset("warnings", lambda tc: [TC("cc", flags=("-WREGISTRY",))])
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env.apply_preset("warnings")
+        assert "-Wall" in env.cc.flags
+        assert "-WREGISTRY" not in env.cc.flags
+
+    def test_resolver_none_is_silent_noop(self, test_project, clean_registry, caplog):  # noqa: F811
+        # Registered but not applicable to this toolchain -> no flags, no warning.
+        from pcons.core.preset import register_preset
+
+        register_preset("acme/na", lambda tc: None)
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        with caplog.at_level("WARNING"):
+            env.apply_preset("acme/na")
+        assert env.cc.flags == []
+        assert "Unknown preset" not in caplog.text
+
+    def test_truly_unknown_warns(self, test_project, clean_registry, caplog):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        with caplog.at_level("WARNING"):
+            env.apply_preset("nope/never-registered")
+        assert "Unknown preset" in caplog.text
+
+    def test_bare_name_warns(self, test_project, clean_registry, caplog):  # noqa: F811
+        from pcons.core.preset import register_preset
+
+        with caplog.at_level("WARNING"):
+            register_preset("bare", lambda tc: None)
+        assert "without a scope" in caplog.text
+
+    def test_list_presets_sorted_with_scope(self, test_project, clean_registry):  # noqa: F811
+        from pcons.core.preset import list_presets, register_preset
+
+        register_preset("z/b", lambda tc: None)
+        register_preset("a/a", lambda tc: None, description="first")
+        entries = list_presets()
+        assert [e.name for e in entries] == ["a/a", "z/b"]
+        assert entries[0].scope == "a" and entries[0].description == "first"

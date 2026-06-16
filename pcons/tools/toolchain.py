@@ -451,6 +451,10 @@ class Toolchain(Protocol):
         """
         ...
 
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """Build a built-in feature Preset by name, or None if not known."""
+        ...
+
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross-compilation preset to the environment.
 

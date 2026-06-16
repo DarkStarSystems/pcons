@@ -709,30 +709,43 @@ class Environment(_EnvironmentStubs):
                     t.cmd = f"{tool} {cmd}"
 
     def apply_preset(self, name: str) -> None:
-        """Apply a named flag preset to this environment.
+        """Apply a named feature preset to this environment.
 
-        Presets provide commonly-used flag combinations for development
-        workflows. Each toolchain defines its own flags for each preset.
-
-        Available presets:
-            warnings: All warnings + warnings-as-errors
-            sanitize: Address + undefined behavior sanitizers
-            profile: Profiling support
-            lto: Link-time optimization
-            hardened: Security hardening flags
+        Resolution is **toolchain-first, then registry**: each toolchain's
+        built-in ``FEATURE_PRESETS`` is tried first, then the contributed-preset
+        registry (see :func:`pcons.register_preset`). Built-ins use bare names
+        (``warnings``, ``werror``, ``sanitize``, ``lto``, ``hardened``);
+        contributed presets are namespaced (``scope/name``). ``explain()``
+        attributes each flag to the preset that added it.
 
         Args:
-            name: Preset name.
+            name: Preset name (``"warnings"`` or ``"scope/name"``).
 
         Example:
             env.apply_preset("warnings")
-            env.apply_preset("sanitize")
+            env.apply_preset("mycorp/strict")
         """
-        if self.toolchains:
-            for toolchain in self.toolchains:
-                toolchain.apply_preset(self, name)
-        else:
+        from pcons.core.preset import (
+            is_registered_preset,
+            resolve_registered_feature,
+        )
+
+        if not self.toolchains:
             logger.warning("No toolchains configured; cannot apply preset '%s'", name)
+            return
+
+        applied = False
+        for toolchain in self.toolchains:
+            preset = toolchain.make_feature_preset(name)  # built-in
+            if preset is None:
+                preset = resolve_registered_feature(name, toolchain)  # registry
+            if preset is not None:
+                self.apply(preset)
+                applied = True
+        # A registered preset whose resolver returned None for these toolchains is
+        # a deliberate no-op (not applicable), not an unknown name.
+        if not applied and not is_registered_preset(name):
+            logger.warning("Unknown preset '%s'", name)
 
     def apply_cross_preset(self, preset: Any) -> None:
         """Apply a cross-compilation preset to this environment.

@@ -24,6 +24,12 @@ from pcons.configure.config_file import configure_file  # noqa: E402
 from pcons.configure.platform import Platform, get_platform  # noqa: E402
 from pcons.core.context import context  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
+from pcons.core.preset import (  # noqa: E402
+    ToolContribution,
+    list_presets,
+    preset,
+    register_preset,
+)
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.core.subst import PathToken  # noqa: E402
 from pcons.core.test import set_test_properties, set_test_property  # noqa: E402
@@ -165,6 +171,11 @@ __all__ = [
     "ImportedTarget",
     "PackageDescription",
     "Project",
+    # Presets (contributed-preset registry)
+    "register_preset",
+    "preset",
+    "list_presets",
+    "ToolContribution",
     # Generators
     # Intentionally not exposing MultiGenerator as it's an implementation detail
     "Generator",

@@ -7,8 +7,9 @@ tool-agnostic primitive, a `Preset` (a set of per-tool `ToolContribution`s),
 applied by the core via `env.apply(preset)`.
 
 This document is the **decided convention** for how presets are named, applied,
-and authored. Agents and contributors should follow it. Sections marked
-**(planned)** describe the agreed target that is not yet fully implemented.
+and authored. Agents and contributors should follow it. The whole convention is
+implemented (see the status table at the end); any future additions marked
+**(planned)** describe an agreed-but-unbuilt target.
 
 ## The three shapes
 
@@ -55,7 +56,7 @@ Additive, named bundles, resolved per-toolchain:
 ```python
 env.apply_preset("warnings")      # built-in
 env.apply_preset("werror")        # compose freely with any warning set
-env.apply_preset("mycorp/strict") # contributed (planned registry)
+env.apply_preset("mycorp/strict") # contributed (registry)
 ```
 
 ### Targets
@@ -77,9 +78,10 @@ env.apply_cross_preset(pyodide("2026_0"))
   is additive and `explain()` shows provenance, so composition is the idiom.
   This is why `warnings` does **not** include `-Werror` — apply `werror` too if
   you want it.
-- **Namespacing — `scope/name`** *(planned for contributed features)*:
+- **Namespacing — `scope/name`** (for contributed features):
   - **Bare names are reserved for pcons built-ins** (`warnings`, `lto`).
-  - **Contributed presets must carry a scope**: `mycorp/strict`, `qt/widgets`.
+  - **Contributed presets must carry a scope**: `mycorp/strict`, `qt/widgets`
+    (`register_preset` warns on a bare name).
   - Targets and value presets are namespaced by Python import instead
     (`from mycorp.pcons import strict`).
 
@@ -92,9 +94,9 @@ the toolchain as possible:
 - **Built-in realizations live *in* the toolchain** — e.g. each toolchain's
   `FEATURE_PRESETS` dict and `*_VARIANTS` tables. Flags are never relocated to a
   central place.
-- **Contributed realizations live with the contributor** *(planned registry)* as
-  a resolver `(toolchain) -> contributions | None` (or a family-keyed table as
-  sugar). This is the only place external presets *can* live.
+- **Contributed realizations live with the contributor** (in the registry) as a
+  resolver `(toolchain) -> contributions | None`. This is the only place
+  external presets *can* live.
 - The **core registry holds identity + a resolver pointer + metadata — never raw
   flags.**
 
@@ -145,15 +147,26 @@ class GfortranToolchain(UnixToolchain):
         return ("fc",)
 ```
 
-**Contributed (external) — *(planned)*.** Register a resolver under a scope:
+**Contributed (external).** Register a resolver under a scope. The resolver
+receives the toolchain and returns contributions, or `None` when the preset
+doesn't apply to that toolchain (a silent no-op, not an error):
 
 ```python
-@pcons.preset("acme/draft", category="feature")
+from pcons import preset, ToolContribution   # or register_preset(name, fn, ...)
+
+@preset("acme/draft", description="LaTeX draft mode")
 def draft(tc):
     if tc.name != "latex":
         return None                       # not applicable to this toolchain
     return [ToolContribution("latex", flags=("-draftmode",))]
+
+# build script (resolution is toolchain-first, then registry):
+env.apply_preset("acme/draft")
+# pcons.list_presets() lists registered contributed presets.
 ```
+
+Bare (unscoped) names are reserved for pcons; `register_preset` warns if a
+contributed preset omits its `scope/`.
 
 ## Status summary
 
@@ -165,4 +178,4 @@ def draft(tc):
 | `env.set_variant` / `env.set_target_arch` | implemented |
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
 | `env.cxx.set_standard` / `set_stdlib` (tool-facet knobs via `tool_knob`) | implemented |
-| Registry, `scope/name` namespacing, `register_preset`, `list_presets` | planned |
+| Registry, `scope/name` namespacing, `register_preset`/`preset`/`list_presets` | implemented |
