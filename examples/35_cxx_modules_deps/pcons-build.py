@@ -15,12 +15,10 @@ toolchain = find_c_toolchain(prefer=[get_var("TOOLCHAIN", None) or "gcc"])
 project = Project("cxx_modules")
 env = project.Environment(toolchain=toolchain)
 
-env.set_cxx_standard("c++20")
+env.cxx.set_standard("c++20")
+env.cxx.set_stdlib("libc++")  # no-op unless the toolchain is clang
 if toolchain.name == "msvc":
     env.cxx.flags.extend(["/EHsc", "/permissive-"])
-elif toolchain.name == "llvm":
-    env.cxx.flags.append("-stdlib=libc++")
-    env.link.libs.append("c++")
 
 hello = project.Program(
     "hello",

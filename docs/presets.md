@@ -34,16 +34,19 @@ env.set_target_arch("arm64")
 core stays tool-agnostic and each language brings its own:
 
 ```python
-env.cxx.set_standard("c++20")     # C++ knob, on the cxx facet  (planned home)
-env.cxx.set_stdlib("libc++")      # (planned)
+env.cxx.set_standard("c++20")     # C++ knob, on the cxx facet
+env.cxx.set_stdlib("libc++")      # clang-only; no-op on GCC/MSVC
 # a Fortran toolchain would offer env.fc.set_standard("f2018"), etc.
 ```
 
-> **Status:** `set_variant`/`set_target_arch` are on core today. `set_cxx_standard`
-> currently lives on core `Environment` as well; it is **(planned)** to move to
-> `env.cxx.set_standard` so no C/C++ vocabulary remains in core. A toolchain
-> attaches its facet knobs at setup, resolving through the tool's owning
-> environment at call time (clone-safe).
+> **How it works:** there is no C/C++ vocabulary on core `Environment`. A tool
+> facet (`env.cxx`) resolves an unknown attribute like `set_standard` through
+> the environment's toolchain via `Toolchain.tool_knob(tool, name)`, which
+> returns a callable bound to the env at *access* time (so it's clone-safe and
+> reuses no captured state). The realization stays per-toolchain
+> (`make_cxx_standard_preset`/`make_cxx_stdlib_preset`); a toolchain that doesn't
+> realize a knob simply no-ops. New domain knobs are added by overriding
+> `tool_knob` — no core change.
 
 ### Features
 
@@ -161,5 +164,5 @@ def draft(tc):
 | `warnings` + `werror` (orthogonal), Fortran/WASM coverage | implemented |
 | `env.set_variant` / `env.set_target_arch` | implemented |
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
-| `env.cxx.set_standard` / `set_stdlib` (knob re-homing) | planned |
+| `env.cxx.set_standard` / `set_stdlib` (tool-facet knobs via `tool_knob`) | implemented |
 | Registry, `scope/name` namespacing, `register_preset`, `list_presets` | planned |

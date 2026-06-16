@@ -275,49 +275,73 @@ class TestMsvcPresets:
 
 
 class TestCxxStandard:
-    """Tests for env.set_cxx_standard() across toolchains."""
+    """Tests for the env.cxx.set_standard() tool-facet knob across toolchains."""
 
     def test_gcc_sets_std_on_cxx_only(self, test_project):  # noqa: F811
         env = _make_unix_env()
         env._toolchain = GccToolchain()
-        env.set_cxx_standard("c++20")
+        env.cxx.set_standard("c++20")
         assert "-std=c++20" in env.cxx.flags
         assert "-std=c++20" not in env.cc.flags  # C++ standard, not C
 
     def test_msvc_concrete_standard(self, test_project):  # noqa: F811
         env = _make_msvc_env()
         env._toolchain = _concrete_msvc()
-        env.set_cxx_standard(20)
+        env.cxx.set_standard(20)
         assert "/std:c++20" in env.cxx.flags
 
     def test_msvc_maps_above_20_to_latest(self, test_project):  # noqa: F811
         # MSVC has no /std:c++23 switch, so c++23/c++26 -> /std:c++latest.
         env = _make_msvc_env()
         env._toolchain = _concrete_msvc()
-        env.set_cxx_standard("c++23")
+        env.cxx.set_standard("c++23")
         assert "/std:c++latest" in env.cxx.flags
 
     def test_accepts_int_str_and_prefixed(self, test_project):  # noqa: F811
         for value in (20, "20", "c++20"):
             env = _make_unix_env()
             env._toolchain = GccToolchain()
-            env.set_cxx_standard(value)
+            env.cxx.set_standard(value)
             assert "-std=c++20" in env.cxx.flags
 
     def test_invalid_standard_raises(self, test_project):  # noqa: F811
         env = _make_unix_env()
         env._toolchain = GccToolchain()
         with pytest.raises(ValueError, match="Unsupported C\\+\\+ standard"):
-            env.set_cxx_standard("c++19")
+            env.cxx.set_standard("c++19")
         with pytest.raises(ValueError, match="Invalid C\\+\\+ standard"):
-            env.set_cxx_standard("bogus")
+            env.cxx.set_standard("bogus")
 
     def test_explain_attributes_to_language(self, test_project):  # noqa: F811
         env = _make_unix_env()
         env._toolchain = GccToolchain()
-        env.set_cxx_standard("c++20")
+        env.cxx.set_standard("c++20")
         rows = [r for r in env.cxx.explain().rows if r.token == "-std=c++20"]
         assert rows and rows[0].source == "c++20" and rows[0].category == "language"
+
+
+class TestCxxStdlib:
+    """Tests for the env.cxx.set_stdlib() knob (clang-only)."""
+
+    def test_llvm_libcxx_on_compile_and_link(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = LlvmToolchain()
+        env.cxx.set_stdlib("libc++")
+        assert "-stdlib=libc++" in env.cxx.flags
+        assert "-stdlib=libc++" in env.link.flags  # clang driver links libc++
+
+    def test_gcc_stdlib_is_noop(self, test_project):  # noqa: F811
+        # GCC has no -stdlib switch (libstdc++ only); the knob no-ops.
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env.cxx.set_stdlib("libc++")
+        assert not any("stdlib" in f for f in env.cxx.flags)
+
+    def test_msvc_stdlib_is_noop(self, test_project):  # noqa: F811
+        env = _make_msvc_env()
+        env._toolchain = _concrete_msvc()
+        env.cxx.set_stdlib("libc++")
+        assert env.cxx.flags == []
 
 
 def _make_fortran_env() -> Environment:

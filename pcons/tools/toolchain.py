@@ -27,6 +27,46 @@ if TYPE_CHECKING:
 
 
 # =============================================================================
+# C++ knob methods (exposed on the cxx tool facet via Toolchain.tool_knob).
+# Realization stays per-toolchain (make_cxx_standard_preset / make_cxx_stdlib_preset).
+# =============================================================================
+
+_CXX_STANDARDS: frozenset[int] = frozenset({11, 14, 17, 20, 23, 26})
+
+
+def _parse_cxx_standard(standard: int | str) -> int:
+    """Normalize ``"c++20"`` / ``"20"`` / ``20`` to the integer ``20``."""
+    text = str(standard).strip().lower().removeprefix("c++").removeprefix("gnu++")
+    try:
+        n = int(text)
+    except ValueError:
+        raise ValueError(
+            f"Invalid C++ standard {standard!r}; use e.g. 'c++20' or 20"
+        ) from None
+    if n not in _CXX_STANDARDS:
+        allowed = ", ".join(str(s) for s in sorted(_CXX_STANDARDS))
+        raise ValueError(f"Unsupported C++ standard 'c++{n}'; supported: {allowed}")
+    return n
+
+
+def _cxx_set_standard(env: Environment, standard: int | str) -> None:
+    """``env.cxx.set_standard(...)`` — select the C++ language standard."""
+    n = _parse_cxx_standard(standard)
+    for toolchain in env.toolchains:
+        preset = toolchain.make_cxx_standard_preset(n)
+        if preset is not None:
+            env.apply(preset)
+
+
+def _cxx_set_stdlib(env: Environment, stdlib: str) -> None:
+    """``env.cxx.set_stdlib(...)`` — select the C++ standard library (clang)."""
+    for toolchain in env.toolchains:
+        preset = toolchain.make_cxx_stdlib_preset(stdlib)
+        if preset is not None:
+            env.apply(preset)
+
+
+# =============================================================================
 # Toolchain Context - provides variables for build statements
 # =============================================================================
 
@@ -431,6 +471,14 @@ class Toolchain(Protocol):
         """
         ...
 
+    def make_cxx_stdlib_preset(self, stdlib: str) -> Preset | None:
+        """Build a Preset selecting the C++ standard library, or None."""
+        ...
+
+    def tool_knob(self, tool: str, name: str) -> Callable[..., None] | None:
+        """Return a knob method for ``env.<tool>.<name>``, or None."""
+        ...
+
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
         ...
@@ -745,6 +793,44 @@ class BaseToolchain(ABC):
 
     def _cxx_standard_flag(self, standard: int) -> str | None:
         """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
+        return None
+
+    def make_cxx_stdlib_preset(self, stdlib: str) -> Preset | None:
+        """Build a C++ standard-library Preset, or None if not selectable.
+
+        Realizes on both the compiler and the (clang-driver) linker. Only
+        toolchains that can switch stdlib (clang) provide ``_cxx_stdlib_flag``;
+        GCC (libstdc++ only) and MSVC return None and no-op.
+        """
+        flag = self._cxx_stdlib_flag(stdlib)
+        if flag is None:
+            return None
+        return Preset(
+            name=f"stdlib={stdlib}",
+            category="language",
+            contributions=(
+                ToolContribution("cxx", flags=(flag,)),
+                ToolContribution("link", flags=(flag,)),
+            ),
+        )
+
+    def _cxx_stdlib_flag(self, stdlib: str) -> str | None:
+        """Flag selecting the C++ standard library, or None if not selectable."""
+        return None
+
+    def tool_knob(self, tool: str, name: str) -> Callable[..., None] | None:
+        """Return a knob method ``(env, *args) -> None`` for ``env.<tool>.<name>``.
+
+        Knobs are domain methods exposed on a tool facet (e.g.
+        ``env.cxx.set_standard``). The realization stays per-toolchain
+        (``make_cxx_standard_preset`` etc.); a toolchain that doesn't realize a
+        knob simply no-ops. Returns None for unknown knobs. See docs/presets.md.
+        """
+        if tool == "cxx":
+            if name == "set_standard":
+                return _cxx_set_standard
+            if name == "set_stdlib":
+                return _cxx_set_stdlib
         return None
 
     # Named feature presets for this toolchain, keyed by preset name. Each value

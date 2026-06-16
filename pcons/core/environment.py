@@ -34,24 +34,6 @@ else:
 
 logger = logging.getLogger(__name__)
 
-# C++ standards pcons can request; toolchains map these to their own flags.
-_CXX_STANDARDS: frozenset[int] = frozenset({11, 14, 17, 20, 23, 26})
-
-
-def _parse_cxx_standard(standard: int | str) -> int:
-    """Normalize ``"c++20"`` / ``"20"`` / ``20`` to the integer ``20``."""
-    text = str(standard).strip().lower().removeprefix("c++").removeprefix("gnu++")
-    try:
-        n = int(text)
-    except ValueError:
-        raise ValueError(
-            f"Invalid C++ standard {standard!r}; use e.g. 'c++20' or 20"
-        ) from None
-    if n not in _CXX_STANDARDS:
-        allowed = ", ".join(str(s) for s in sorted(_CXX_STANDARDS))
-        raise ValueError(f"Unsupported C++ standard 'c++{n}'; supported: {allowed}")
-    return n
-
 
 class Environment(_EnvironmentStubs):
     """Build environment with namespaced tool configuration.
@@ -641,32 +623,6 @@ class Environment(_EnvironmentStubs):
         else:
             # No toolchains - just set the variant name
             self.variant = name
-
-    def set_cxx_standard(self, standard: int | str) -> None:
-        """Set the C++ language standard for this environment.
-
-        Each toolchain maps the standard to its own flag (``-std=c++20`` for
-        GCC/Clang, ``/std:c++20`` for MSVC). MSVC has no switch above C++20, so
-        ``c++23``/``c++26`` map to ``/std:c++latest`` — ``explain()`` shows the
-        result so the mapping is visible rather than hidden.
-
-        Args:
-            standard: A C++ standard as ``"c++20"`` or ``20`` (also ``"20"``).
-
-        Example:
-            env.set_cxx_standard("c++20")   # -> -std=c++20 / /std:c++20
-            env.set_cxx_standard(23)        # -> -std=c++23 / /std:c++latest
-        """
-        n = _parse_cxx_standard(standard)
-        if not self.toolchains:
-            logger.warning(
-                "No toolchains configured; cannot set C++ standard 'c++%d'", n
-            )
-            return
-        for toolchain in self.toolchains:
-            preset = toolchain.make_cxx_standard_preset(n)
-            if preset is not None:
-                self.apply(preset)
 
     def set_target_arch(self, arch: str, **kwargs: Any) -> None:
         """Set the target CPU architecture for cross-compilation.

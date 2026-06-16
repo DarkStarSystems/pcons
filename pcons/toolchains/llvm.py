@@ -346,6 +346,11 @@ class LlvmToolchain(UnixToolchain):
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
 
+    def _cxx_stdlib_flag(self, stdlib: str) -> str:
+        # clang selects the C++ standard library via -stdlib= (e.g. libc++,
+        # libstdc++). GCC has no such switch, so this stays clang-only.
+        return f"-stdlib={stdlib}"
+
     def __init__(self) -> None:
         super().__init__("llvm")
 
