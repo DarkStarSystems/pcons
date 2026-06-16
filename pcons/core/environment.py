@@ -64,6 +64,7 @@ class Environment(_EnvironmentStubs):
         "_additional_toolchains",
         "_created_nodes",
         "_applied_presets",
+        "_applied_imperative",
         "_name",
         "defined_at",
     )
@@ -100,6 +101,8 @@ class Environment(_EnvironmentStubs):
         self._additional_toolchains: list[Toolchain] = []
         self._created_nodes: list[Any] = []  # Nodes created by builders
         self._applied_presets: list[Preset] = []  # Presets applied, in order
+        # Imperative escape-hatch presets that ran: (name, description)
+        self._applied_imperative: list[tuple[str, str]] = []
         self._name = name
         self.defined_at = defined_at or get_caller_location()
 
@@ -403,6 +406,7 @@ class Environment(_EnvironmentStubs):
 
         # Copy applied presets (frozen dataclasses → shallow copy is safe)
         new_env._applied_presets = list(self._applied_presets)
+        new_env._applied_imperative = list(self._applied_imperative)
 
         # Copy toolchain references (not cloned - they're shared)
         new_env._toolchain = self._toolchain
@@ -546,7 +550,7 @@ class Environment(_EnvironmentStubs):
             if name not in tools:
                 continue
             snapshot[name] = tools[name].as_dict()
-        return _explain(self._applied_presets, snapshot)
+        return _explain(self._applied_presets, snapshot, self._applied_imperative)
 
     def _record_toolchain_baseline(
         self, toolchain: Toolchain, tool_names: list[str]
@@ -726,6 +730,7 @@ class Environment(_EnvironmentStubs):
             env.apply_preset("mycorp/strict")
         """
         from pcons.core.preset import (
+            apply_imperative_preset,
             is_registered_preset,
             resolve_registered_feature,
         )
@@ -742,6 +747,11 @@ class Environment(_EnvironmentStubs):
             if preset is not None:
                 self.apply(preset)
                 applied = True
+        # Imperative escape-hatch preset: runs once against the whole env.
+        description = apply_imperative_preset(name, self)
+        if description is not None:
+            self._applied_imperative.append((name, description))
+            applied = True
         # A registered preset whose resolver returned None for these toolchains is
         # a deliberate no-op (not applicable), not an unknown name.
         if not applied and not is_registered_preset(name):

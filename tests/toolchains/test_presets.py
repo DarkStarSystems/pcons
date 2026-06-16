@@ -467,3 +467,48 @@ class TestPresetRegistry:
         entries = list_presets()
         assert [e.name for e in entries] == ["a/a", "z/b"]
         assert entries[0].scope == "a" and entries[0].description == "first"
+
+
+class TestImperativePreset:
+    """The imperative escape hatch: register_preset(..., imperative=True)."""
+
+    def test_imperative_mutates_and_is_noted(self, test_project, clean_registry):  # noqa: F811
+        from pcons.core.preset import register_preset
+
+        def to_o3(env):
+            if "-O2" in env.cxx.flags:
+                env.cxx.flags.remove("-O2")  # the realistic case: remove a flag
+            env.cxx.flags.append("-O3")
+
+        register_preset("acme/o3", to_o3, imperative=True, description="O2->O3")
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env.cxx.flags.append("-O2")
+        env.apply_preset("acme/o3")
+
+        assert "-O2" not in env.cxx.flags
+        assert "-O3" in env.cxx.flags
+        exp = env.cxx.explain()
+        assert ("acme/o3", "O2->O3") in exp.imperative
+        assert "acme/o3 — O2->O3" in str(exp)
+
+    def test_imperative_survives_clone(self, test_project, clean_registry):  # noqa: F811
+        from pcons.core.preset import register_preset
+
+        register_preset(
+            "acme/x",
+            lambda env: env.cxx.flags.append("-DX"),
+            imperative=True,
+            description="adds -DX",
+        )
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env.apply_preset("acme/x")
+        clone = env.clone()
+        assert ("acme/x", "adds -DX") in clone.explain().imperative
+
+    def test_imperative_not_resolved_as_declarative(self, test_project, clean_registry):  # noqa: F811
+        from pcons.core.preset import register_preset, resolve_registered_feature
+
+        register_preset("acme/y", lambda env: None, imperative=True)
+        assert resolve_registered_feature("acme/y", GccToolchain()) is None

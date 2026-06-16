@@ -37,34 +37,43 @@ class ExplainRow:
 
 @dataclass(frozen=True)
 class Explanation:
-    """The attributed tokens of one or more tools, with a readable ``str``."""
+    """The attributed tokens of one or more tools, with a readable ``str``.
+
+    ``imperative`` lists ``(name, description)`` of any imperative escape-hatch
+    presets that ran — these mutate the environment directly, so their effect
+    can't be attributed token-by-token; they're reported as a trailing note.
+    """
 
     rows: tuple[ExplainRow, ...]
+    imperative: tuple[tuple[str, str], ...] = ()
 
     def __bool__(self) -> bool:
-        return bool(self.rows)
+        return bool(self.rows) or bool(self.imperative)
 
     def __str__(self) -> str:
-        if not self.rows:
-            return "(no flags)"
-        # Group rows by "tool.var", preserving first-seen order.
-        groups: dict[str, list[ExplainRow]] = {}
-        for row in self.rows:
-            groups.setdefault(f"{row.tool}.{row.var}", []).append(row)
-
-        width = max(len(r.token) for r in self.rows)
         lines: list[str] = []
-        for key, rows in groups.items():
-            lines.append(f"{key}:")
-            for r in rows:
-                if r.source is None:
-                    origin = "← (manual)"
-                else:
-                    origin = f"← {r.source} ({r.category})"
-                    if r.var == "cmd":
-                        origin += " [replaced]"
-                lines.append(f"  {r.token.ljust(width)}  {origin}")
-        return "\n".join(lines)
+        if self.rows:
+            # Group rows by "tool.var", preserving first-seen order.
+            groups: dict[str, list[ExplainRow]] = {}
+            for row in self.rows:
+                groups.setdefault(f"{row.tool}.{row.var}", []).append(row)
+
+            width = max(len(r.token) for r in self.rows)
+            for key, rows in groups.items():
+                lines.append(f"{key}:")
+                for r in rows:
+                    if r.source is None:
+                        origin = "← (manual)"
+                    else:
+                        origin = f"← {r.source} ({r.category})"
+                        if r.var == "cmd":
+                            origin += " [replaced]"
+                    lines.append(f"  {r.token.ljust(width)}  {origin}")
+        if self.imperative:
+            lines.append("imperative presets (ran; effect not attributable):")
+            for name, desc in self.imperative:
+                lines.append(f"  {name} — {desc}" if desc else f"  {name}")
+        return "\n".join(lines) if lines else "(no flags)"
 
 
 def _attribute(
@@ -92,6 +101,7 @@ def _attribute(
 def explain(
     applied_presets: Sequence[Preset],
     tools: dict[str, dict[str, object]],
+    imperative: Sequence[tuple[str, str]] = (),
 ) -> Explanation:
     """Build an :class:`Explanation` for the given tools.
 
@@ -99,6 +109,7 @@ def explain(
         applied_presets: Presets applied to the environment, in order.
         tools: ``{tool_name: {"flags": [...], "defines": [...], "cmd": value}}``
             snapshot of each tool's current values.
+        imperative: ``(name, description)`` of imperative presets that ran.
     """
     rows: list[ExplainRow] = []
     for tool_name, values in tools.items():
@@ -129,4 +140,4 @@ def explain(
             if replaced is not None and cmd == replaced[2]:
                 rows.append(ExplainRow(tool_name, "cmd", cmd, replaced[0], replaced[1]))
 
-    return Explanation(tuple(rows))
+    return Explanation(tuple(rows), tuple(imperative))

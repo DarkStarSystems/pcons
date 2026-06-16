@@ -171,6 +171,25 @@ A declarative resolver can already make **compiler-version-specific choices** �
 it receives the toolchain, so it may branch on `tc.name`/version and return
 different contributions.
 
+**Imperative escape hatch.** Most presets only *add* flags, which the
+declarative form handles. For the rare preset that must do something else —
+**remove** or **override** a flag, or anything not expressible as additive
+contributions — register it with `imperative=True`. Its function receives the
+*environment* and may do anything; it must self-describe (the `description` is
+what `explain()` reports, since an imperative change can't be attributed
+token-by-token):
+
+```python
+@preset("acme/no-rtti", imperative=True, description="drop -frtti, force -fno-rtti")
+def no_rtti(env):
+    if "-frtti" in env.cxx.flags:
+        env.cxx.flags.remove("-frtti")
+    env.cxx.flags.append("-fno-rtti")
+```
+
+`explain()` then appends: `imperative presets (ran; effect not attributable):
+acme/no-rtti — drop -frtti, force -fno-rtti`.
+
 ## Status summary
 
 | Piece | State |
@@ -182,3 +201,4 @@ different contributions.
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
 | `env.cxx.set_standard` (tool-namespace setting via `tool_setting`) | implemented |
 | Registry, `scope/name` namespacing, `register_preset`/`preset`/`list_presets` | implemented |
+| Imperative escape hatch (`register_preset(..., imperative=True)`) | implemented |
