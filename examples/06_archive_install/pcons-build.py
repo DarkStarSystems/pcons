@@ -28,16 +28,12 @@ project = Project("archive_install")
 src_dir = project.root_dir
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
+# Warning flags, resolved per-toolchain (/W4 on MSVC, -Wall … on GCC/Clang).
+env.apply_preset("warnings")
 
 # Build hello program using target-centric API
 hello = project.Program("hello", env)
 hello.add_sources([src_dir / "hello.c"])
-
-# Add warning flags
-if toolchain.name in ("msvc", "clang-cl"):
-    hello.private.compile_flags.extend(["/W4"])
-else:
-    hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 # Set as default target
 project.Default(hello)

@@ -32,16 +32,12 @@ project = Project("hello_xcode")
 src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
+# Warning flags, resolved per-toolchain (/W4 on MSVC, -Wall … on GCC/Clang).
+env.apply_preset("warnings")
 
 # Create program target
 hello = project.Program("hello", env)
 hello.add_sources([src_dir / "main.c"])
-
-# Add warning flags
-if toolchain.name in ("msvc", "clang-cl"):
-    hello.private.compile_flags.extend(["/W4"])
-else:
-    hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 project.generate()
 

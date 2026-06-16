@@ -36,12 +36,7 @@ src_dir = Path(__file__).parent / "src"
 # Create project with variant-specific build directory
 project = Project("app", build_dir=f"build/{variant}")
 env = project.Environment(toolchain=toolchain)
-
-if toolchain.name in ("msvc", "clang-cl"):
-    env.cc.flags.append("/W4")
-else:
-    env.cc.flags.append("-Wall")
-
+env.apply_preset("warnings")  # per-toolchain: /W4 (MSVC) or -Wall -Wextra … (GCC/Clang)
 env.set_variant(variant)
 
 prog = project.Program("app", env)

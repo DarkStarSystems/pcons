@@ -25,17 +25,13 @@ src_dir = project.root_dir / "src"
 include_dir = project.root_dir / "include"
 build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
+# Warning flags, resolved per-toolchain (/W4 on MSVC, -Wall … on GCC/Clang).
+env.apply_preset("warnings")
 
 # Create calculator program target using target-centric API
 calculator = project.Program("calculator", env)
 calculator.add_sources([src_dir / "math_ops.c", src_dir / "main.c"])
 calculator.private.include_dirs.append(include_dir)
-
-# Add warning flags appropriate for the toolchain
-if toolchain.name in ("msvc", "clang-cl"):
-    calculator.private.compile_flags.extend(["/W4"])
-else:
-    calculator.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 project.generate()
 
