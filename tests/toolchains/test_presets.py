@@ -71,8 +71,19 @@ class TestUnixPresets:
         assert "-Wall" in env.cc.flags
         assert "-Wextra" in env.cc.flags
         assert "-Wpedantic" in env.cc.flags
-        assert "-Werror" in env.cc.flags
         assert "-Wall" in env.cxx.flags
+        # warnings no longer forces -Werror; that's the separate `werror` preset.
+        assert "-Werror" not in env.cc.flags
+
+    def test_werror_preset(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        toolchain = GccToolchain()
+        toolchain.apply_preset(env, "werror")
+
+        assert "-Werror" in env.cc.flags
+        assert "-Werror" in env.cxx.flags
+        # orthogonal: werror adds only -Werror, not the warning set
+        assert "-Wall" not in env.cc.flags
 
     def test_sanitize_preset(self, test_project):  # noqa: F811
         env = _make_unix_env()
@@ -153,7 +164,7 @@ class TestUnixPresets:
         env.apply_preset("warnings")
 
         assert "-Wall" in env.cc.flags
-        assert "-Werror" in env.cc.flags
+        assert "-Wextra" in env.cc.flags
 
 
 class TestMsvcPresets:
@@ -174,8 +185,18 @@ class TestMsvcPresets:
         toolchain.apply_preset(env, "warnings")
 
         assert "/W4" in env.cc.flags
-        assert "/WX" in env.cc.flags
         assert "/W4" in env.cxx.flags
+        # /WX (warnings-as-errors) is the separate `werror` preset now.
+        assert "/WX" not in env.cc.flags
+
+    def test_werror_preset(self, test_project):  # noqa: F811
+        env = _make_msvc_env()
+        toolchain = _concrete_msvc()
+        toolchain.apply_preset(env, "werror")
+
+        assert "/WX" in env.cc.flags
+        assert "/WX" in env.cxx.flags
+        assert "/W4" not in env.cc.flags
 
     def test_sanitize_preset(self, test_project):  # noqa: F811
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
@@ -297,3 +318,59 @@ class TestCxxStandard:
         env.set_cxx_standard("c++20")
         rows = [r for r in env.cxx.explain().rows if r.token == "-std=c++20"]
         assert rows and rows[0].source == "c++20" and rows[0].category == "language"
+
+
+def _make_fortran_env() -> Environment:
+    """Environment with a Fortran compiler tool (fc) and a linker."""
+    env = Environment()
+    fc = env.add_tool("fc")
+    fc.set("cmd", "gfortran")
+    fc.set("flags", [])
+    fc.set("defines", [])
+    link = env.add_tool("link")
+    link.set("cmd", "gfortran")
+    link.set("flags", [])
+    return env
+
+
+class TestFortranPresets:
+    """Feature presets realize on the Fortran compiler (fc), not cc/cxx."""
+
+    def test_warnings_targets_fc(self, test_project):  # noqa: F811
+        from pcons.toolchains.gfortran import GfortranToolchain
+
+        env = _make_fortran_env()
+        GfortranToolchain().apply_preset(env, "warnings")
+
+        assert "-Wall" in env.fc.flags
+        assert "-Wextra" in env.fc.flags
+        assert "-Werror" not in env.fc.flags
+
+    def test_werror_targets_fc(self, test_project):  # noqa: F811
+        from pcons.toolchains.gfortran import GfortranToolchain
+
+        env = _make_fortran_env()
+        GfortranToolchain().apply_preset(env, "werror")
+
+        assert "-Werror" in env.fc.flags
+
+
+class TestWasmPresets:
+    """WASM toolchains are clang-based and inherit the C/C++ realizations."""
+
+    def test_emscripten_inherits_warnings(self, test_project):  # noqa: F811
+        from pcons.toolchains.emscripten import EmscriptenToolchain
+
+        env = _make_unix_env()
+        EmscriptenToolchain().apply_preset(env, "warnings")
+
+        assert "-Wall" in env.cc.flags
+        assert "-Werror" not in env.cc.flags
+
+    def test_emscripten_werror(self, test_project):  # noqa: F811
+        from pcons.toolchains.emscripten import EmscriptenToolchain
+
+        env = _make_unix_env()
+        EmscriptenToolchain().apply_preset(env, "werror")
+
+        assert "-Werror" in env.cc.flags

@@ -16,7 +16,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
-from pcons.core.preset import Preset, ToolContribution
+from pcons.core.preset import ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.tools.toolchain import BaseToolchain
 
@@ -43,11 +43,15 @@ class UnixToolchain(BaseToolchain):
     - Override get_source_handler() if they handle additional file types
     """
 
-    # Named flag presets for common development workflows.
-    # Keys are preset names; values map tool categories to flag lists.
-    UNIX_PRESETS: dict[str, dict[str, list[str]]] = {
+    # Named feature presets for common development workflows (see docs/presets.md).
+    # Keep them small and orthogonal: `warnings` enables warnings; `werror`
+    # promotes them to errors — compose both for the strict combination.
+    FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {
-            "compile_flags": ["-Wall", "-Wextra", "-Wpedantic", "-Werror"],
+            "compile_flags": ["-Wall", "-Wextra", "-Wpedantic"],
+        },
+        "werror": {
+            "compile_flags": ["-Werror"],
         },
         "sanitize": {
             "compile_flags": [
@@ -258,20 +262,6 @@ class UnixToolchain(BaseToolchain):
                 for t in ("cc", "cxx", "link")
             ]
         return []
-
-    def make_feature_preset(self, name: str) -> Preset | None:
-        spec = self.UNIX_PRESETS.get(name)
-        if spec is None:
-            return None
-        contribs: list[ToolContribution] = []
-        compile_flags = spec.get("compile_flags", [])
-        if compile_flags:
-            contribs.append(ToolContribution("cc", flags=tuple(compile_flags)))
-            contribs.append(ToolContribution("cxx", flags=tuple(compile_flags)))
-        link_flags = spec.get("link_flags", [])
-        if link_flags:
-            contribs.append(ToolContribution("link", flags=tuple(link_flags)))
-        return Preset(name=name, category="feature", contributions=tuple(contribs))
 
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
         """Base contributions plus --target triple (Clang only) and --sysroot.

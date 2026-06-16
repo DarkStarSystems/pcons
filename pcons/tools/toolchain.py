@@ -747,12 +747,38 @@ class BaseToolchain(ABC):
         """Compiler flag selecting C++ *standard*, or None if not a C++ toolchain."""
         return None
 
-    def make_feature_preset(self, name: str) -> Preset | None:
-        """Build a feature Preset by name, or None if unknown.
+    # Named feature presets for this toolchain, keyed by preset name. Each value
+    # maps "compile_flags"/"link_flags" to flag lists, realized on the
+    # toolchain's compile tools (see _feature_preset_tools). Subclasses populate
+    # this; the built-in flags live here, near the toolchain. See docs/presets.md.
+    FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {}
 
-        Base has no feature presets; toolchains override this.
+    def _feature_preset_tools(self) -> tuple[str, ...]:
+        """Compile tools that feature-preset compile_flags apply to.
+
+        Defaults to the C/C++ compilers; Fortran-style toolchains override
+        (e.g. ``("fc",)``).
         """
-        return None
+        return ("cc", "cxx")
+
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """Build a feature Preset by name, or None if this toolchain lacks it.
+
+        Realizes the named entry's compile flags on the toolchain's compile
+        tools and link flags on ``link``. See docs/presets.md.
+        """
+        spec = self.FEATURE_PRESETS.get(name)
+        if spec is None:
+            return None
+        contribs: list[ToolContribution] = []
+        compile_flags = spec.get("compile_flags", [])
+        if compile_flags:
+            for tool in self._feature_preset_tools():
+                contribs.append(ToolContribution(tool, flags=tuple(compile_flags)))
+        link_flags = spec.get("link_flags", [])
+        if link_flags:
+            contribs.append(ToolContribution("link", flags=tuple(link_flags)))
+        return Preset(name=name, category="feature", contributions=tuple(contribs))
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross-compilation target preset (a CrossPreset)."""

@@ -162,6 +162,17 @@ class GfortranToolchain(UnixToolchain):
 
     TOOL_NAMES = ("fc", "ar", "link")
 
+    # Fortran feature presets, realized on the `fc` compiler (not cc/cxx).
+    # gfortran shares the GNU flag vocabulary; -Wpedantic is omitted as it is
+    # noisy for legal Fortran. See docs/presets.md.
+    FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
+        "warnings": {"compile_flags": ["-Wall", "-Wextra"]},
+        "werror": {"compile_flags": ["-Werror"]},
+    }
+
+    def _feature_preset_tools(self) -> tuple[str, ...]:
+        return ("fc",)
+
     # Include "fortran" with priority 3 so Fortran wins over C/C++ when
     # GfortranToolchain is the primary toolchain.
     @property

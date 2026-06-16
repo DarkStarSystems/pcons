@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.preset import Preset, ToolContribution
+from pcons.core.preset import ToolContribution
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
@@ -31,10 +31,14 @@ class MsvcCompatibleToolchain(BaseToolchain):
     cross-compilation flags or tool configuration.
     """
 
-    # Named flag presets for common development workflows (MSVC-compatible).
-    MSVC_PRESETS: dict[str, dict[str, list[str]]] = {
+    # Named feature presets (MSVC-compatible). See docs/presets.md. `warnings`
+    # enables warnings; `werror` (/WX) promotes them to errors — compose both.
+    FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {
-            "compile_flags": ["/W4", "/WX"],
+            "compile_flags": ["/W4"],
+        },
+        "werror": {
+            "compile_flags": ["/WX"],
         },
         "sanitize": {
             "compile_flags": ["/fsanitize=address"],
@@ -164,20 +168,6 @@ class MsvcCompatibleToolchain(BaseToolchain):
             ToolContribution("link", flags=(flag,)),
             ToolContribution("lib", flags=(flag,)),
         ]
-
-    def make_feature_preset(self, name: str) -> Preset | None:
-        spec = self.MSVC_PRESETS.get(name)
-        if spec is None:
-            return None
-        contribs: list[ToolContribution] = []
-        compile_flags = spec.get("compile_flags", [])
-        if compile_flags:
-            contribs.append(ToolContribution("cc", flags=tuple(compile_flags)))
-            contribs.append(ToolContribution("cxx", flags=tuple(compile_flags)))
-        link_flags = spec.get("link_flags", [])
-        if link_flags:
-            contribs.append(ToolContribution("link", flags=tuple(link_flags)))
-        return Preset(name=name, category="feature", contributions=tuple(contribs))
 
     def _variant_contributions(
         self, variant: str, **kwargs: Any
