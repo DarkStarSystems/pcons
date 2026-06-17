@@ -1,7 +1,7 @@
 [project]
 name = "pcons"
 dynamic = ["version"]
-description = "A Python-based build system that generates Ninja files"
+description = "A cross-platform software build system, configured in Python, that generates Ninja files"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Gary Oberbrunner", email = "garyo@oberbrunner.com" }]
