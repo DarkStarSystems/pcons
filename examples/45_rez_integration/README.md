@@ -11,7 +11,26 @@ Demonstrates pcons's two-sided integration with [rez](https://rez.readthedocs.io
 
 Skip this if you already have rez running with a local packages path.
 
-### Install rez
+### Quick setup with uv (recommended for trying it out)
+
+The fastest way to get rez and the pcons plugin into one environment —
+both rez's CLI tools and pcons end up on the same `sys.path`, so rez
+discovers the `build_system = "pcons"` plugin automatically:
+
+```bash
+uv tool install rez --with "pcons @ git+https://github.com/DarkStarSystems/pcons.git@feature/rez"
+```
+
+Use a release once published (`--with pcons`), or a local checkout for
+development (`--with-editable /path/to/pcons`). rez will warn
+`Pip-based rez installation detected … not guaranteed to function
+correctly`; that warning is expected with this install method and the
+build_system plugin works regardless.
+
+Then jump to [Configure a local packages path](#configure-a-local-packages-path)
+and skip the official-installer steps below.
+
+### Install rez (official installer)
 
 Use rez's official installer — see [rez's installation
 guide](https://rez.readthedocs.io/en/stable/installation.html) for the
@@ -42,8 +61,11 @@ rez-config packages_path  # should list ~/rez_packages
 
 ### Make the pcons rez plugin discoverable
 
-For rez to pick up packages declaring `build_system = "pcons"`, pcons
-must live in rez's bundled Python venv. Use `rez-python -m pip`:
+Skip this if you used the [uv quick setup](#quick-setup-with-uv-recommended-for-trying-it-out) —
+pcons is already in the same environment as rez.
+
+For an official-installer rez, pcons must live in rez's bundled Python
+venv. Use `rez-python -m pip`:
 
 ```bash
 # Production:
@@ -51,12 +73,18 @@ must live in rez's bundled Python venv. Use `rez-python -m pip`:
 
 # Or, for development against a local pcons checkout:
 /opt/rez/bin/rez/rez-python -m pip install -e /path/to/pcons
-
-rez-build --help  # should list "pcons" under -b {make,pcons}
 ```
 
 `rez-python` is rez's wrapped Python interpreter — installing into it
 puts pcons on the same `sys.path` rez sees during plugin discovery.
+
+Verify the plugin is registered (should print `pcons` among the
+build systems):
+
+```bash
+rez-python -c "from rez.plugin_managers import plugin_manager; print(plugin_manager.get_plugins('build_system'))"
+# → ['cmake', 'custom', 'make', 'pcons']
+```
 
 ### Build the test rez packages
 
