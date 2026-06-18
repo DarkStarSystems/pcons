@@ -38,9 +38,9 @@ Here's a [comparison](COMPARISONS.md) between pcons and other common modern buil
 
 Core functionality is working and well tested: C/C++/Fortran compilation, static and shared libraries, programs, install targets, installers (Win/Mac), and mixed-language builds. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 
-### Rust / Go interop (experimental)
+### Rust / Go interop
 
-There's working code on a branch for linking Rust crates into C/C++ projects — pcons drives `cargo build` and links the resulting library, with optional [cbindgen](https://github.com/mozilla/cbindgen) header generation. Go support is straightforward to add on the same pattern. If you have a mixed-language project that would benefit, [open an issue](https://github.com/DarkStarSystems/pcons/issues) and I'll point you at the branch — your feedback will help shape it before merging.
+pcons links Rust crates into C/C++ projects: `project.CargoBuild()` drives `cargo build` and links the resulting library, with optional [cbindgen](https://github.com/mozilla/cbindgen) header generation. See `examples/43_rust_cxx_hybrid` (hand-written FFI header) and `examples/44_rust_cxx_cbindgen` (cbindgen-generated header). Go support is straightforward to add on the same pattern — [open an issue](https://github.com/DarkStarSystems/pcons/issues) if you'd like it.
 
 ## Quick Example
 
