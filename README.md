@@ -34,7 +34,7 @@ Here's a [comparison](COMPARISONS.md) between pcons and other common modern buil
 
 ## Status
 
-🚧 **Under active development** - ready for experimentation and feedback. It's working in several medium-sized projects.
+✅ **Ready for small-scale production use** - and still under active development, so feedback is very welcome. It's working in several medium-sized projects.
 
 Core functionality is working and well tested: C/C++/Fortran compilation, static and shared libraries, programs, install targets, installers (Win/Mac), and mixed-language builds. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 

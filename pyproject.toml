@@ -8,7 +8,7 @@ authors = [{ name = "Gary Oberbrunner", email = "garyo@oberbrunner.com" }]
 requires-python = ">=3.11"
 keywords = ["build", "build-system", "ninja", "scons", "cmake"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
