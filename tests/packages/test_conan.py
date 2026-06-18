@@ -542,6 +542,66 @@ Cflags: -I/opt/nanobind/include
         # --cflags would have done).
         assert "/p/robin/include" in nb.include_dirs
 
+    def test_transitive_merge_preserves_repeated_framework_flags(
+        self, tmp_path: Path
+    ) -> None:
+        """macOS ``-framework`` flags survive the transitive Requires merge.
+
+        Regression: _merge_transitive_requires deduped link_flags token by
+        token, so the repeated literal ``-framework`` in
+        ``Libs: -framework Foundation -framework IOKit -framework CoreGraphics``
+        collapsed to ``-framework Foundation IOKit CoreGraphics`` — IOKit and
+        CoreGraphics then look like input files and the link fails. The merge
+        only runs when the package has a transitive ``Require`` (OpenColorIO →
+        expat here), which is why a deps-free .pc never tripped it.
+        """
+        gen = tmp_path / "build" / "generators"
+        gen.mkdir(parents=True)
+        (gen / "OpenColorIO.pc").write_text(
+            "Name: OpenColorIO\n"
+            "Version: 2.3.0\n"
+            "Libs: -lOpenColorIO -framework Foundation -framework IOKit "
+            "-framework CoreGraphics\n"
+            "Requires: expat\n"
+        )
+        (gen / "expat.pc").write_text("Name: expat\nVersion: 2.6.0\nLibs: -lexpat\n")
+
+        finder = ConanFinder(output_folder=tmp_path)
+        packages = finder._parse_pkgconfig_files()
+
+        flags = packages["OpenColorIO"].link_flags
+        # Each framework keeps its preceding -framework, and none collapsed.
+        assert flags.count("-framework") == 3
+        for fw in ("Foundation", "IOKit", "CoreGraphics"):
+            assert flags[flags.index(fw) - 1] == "-framework"
+
+    def test_transitive_merge_keeps_chained_xlinker_directives(
+        self, tmp_path: Path
+    ) -> None:
+        """-Xlinker pass-through survives the merge without corruption.
+
+        ``-Xlinker -rpath -Xlinker /a -Xlinker -rpath -Xlinker /b`` forwards
+        ``-rpath /a -rpath /b`` to the linker. Pair-deduping the repeated
+        ``-Xlinker -rpath`` would drop the second pair and orphan ``/b``, so
+        -X-family flags are kept verbatim rather than deduped.
+        """
+        gen = tmp_path / "build" / "generators"
+        gen.mkdir(parents=True)
+        (gen / "OpenColorIO.pc").write_text(
+            "Name: OpenColorIO\n"
+            "Version: 2.3.0\n"
+            "Libs: -lOpenColorIO -Xlinker -rpath -Xlinker /a "
+            "-Xlinker -rpath -Xlinker /b\n"
+            "Requires: expat\n"
+        )
+        (gen / "expat.pc").write_text("Name: expat\nVersion: 2.6.0\nLibs: -lexpat\n")
+
+        finder = ConanFinder(output_folder=tmp_path)
+        flags = finder._parse_pkgconfig_files()["OpenColorIO"].link_flags
+        assert flags.count("-Xlinker") == 4
+        assert flags.count("-rpath") == 2
+        assert "/a" in flags and "/b" in flags
+
 
 class TestConanFinderFind:
     """Tests for find() method."""

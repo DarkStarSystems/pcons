@@ -147,6 +147,51 @@ class TestDeduplicateFlags:
         result = deduplicate_flags(["-F", "path1", "-F", "path1"])
         assert result == ["-F", "path1"]  # Still deduped, but as separate items
 
+    def test_repeated_frameworks_survive(self):
+        """Distinct -framework pairs are kept; the repeated literal isn't dropped."""
+        result = deduplicate_flags(
+            [
+                "-framework",
+                "Foundation",
+                "-framework",
+                "IOKit",
+                "-framework",
+                "CoreGraphics",
+            ],
+            frozenset({"-framework"}),
+        )
+        assert result == [
+            "-framework",
+            "Foundation",
+            "-framework",
+            "IOKit",
+            "-framework",
+            "CoreGraphics",
+        ]
+        # Identical (flag, arg) pairs still collapse.
+        assert deduplicate_flags(
+            ["-framework", "IOKit", "-framework", "IOKit"], frozenset({"-framework"})
+        ) == ["-framework", "IOKit"]
+
+    def test_passthrough_flags_kept_verbatim(self):
+        """-Xlinker pass-through directives are never deduped (no orphaned args)."""
+        flags = [
+            "-Xlinker",
+            "-rpath",
+            "-Xlinker",
+            "/a",
+            "-Xlinker",
+            "-rpath",
+            "-Xlinker",
+            "/b",
+        ]
+        result = deduplicate_flags(
+            flags,
+            separated_arg_flags=frozenset(),
+            passthrough_flags=frozenset({"-Xlinker"}),
+        )
+        assert result == flags  # every occurrence preserved
+
 
 class TestMergeFlags:
     """Tests for merge_flags function."""
