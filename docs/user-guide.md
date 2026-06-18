@@ -208,7 +208,7 @@ env.latex.engine = "xelatex"
 env.latex.flags.append("-shell-escape")
 ```
 
-**Rust** crates can be built via cargo and linked into a C/C++ program with `project.CargoBuild()`. Pcons treats `cargo build` as a black-box sub-build (cargo handles intra-Rust incremental compilation) and wraps the resulting library so consumers can `.link()` it like any other dependency:
+**Rust** is supported as *interop*, not as a native toolchain: pcons does not compile `.rs` files itself and there is no Rust toolchain to detect or configure. Instead `project.CargoBuild()` drives `cargo build` as a black-box sub-build (cargo owns the Rust compile and its intra-Rust incremental logic) and wraps the resulting library so C/C++ consumers can `.link()` it like any other dependency. Cross-compilation, Rust dialect, and similar settings are configured on the cargo side, not through pcons's environment:
 
 ```python
 rust_core = project.CargoBuild(
