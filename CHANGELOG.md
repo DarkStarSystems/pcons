@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-06-18
+
 ### Fixed
 
 - **Conan/pkg-config packages with multiple macOS frameworks now link correctly.** Resolving a package whose `.pc` `Libs:` listed several frameworks (e.g. `-framework Foundation -framework IOKit -framework CoreGraphics`) collapsed the repeated `-framework` tokens during the transitive-`Requires` merge, leaving the framework names looking like input files and breaking the link. The merge is now pair-aware (and keeps `-Xlinker`-style pass-through directives verbatim).
@@ -920,7 +922,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/DarkStarSystems/pcons/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/DarkStarSystems/pcons/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/DarkStarSystems/pcons/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/DarkStarSystems/pcons/compare/v0.17.0...v0.18.0
