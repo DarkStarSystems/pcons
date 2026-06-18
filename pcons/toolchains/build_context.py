@@ -102,6 +102,20 @@ class CompileLinkContext:
             base_flags = list(getattr(tool_cfg, "flags", None) or [])
         return base_flags + [f for f in flags if f not in base_flags]
 
+    def _merge_with_base_libs(self, libs: list[str]) -> list[str]:
+        """Prepend env.link.libs to `libs`, dropping duplicates.
+
+        Library names set directly on the link tool (``env.link.libs``) must
+        survive alongside the libraries that come from usage requirements;
+        otherwise setting ``env.link.libs`` is silently ignored whenever a
+        target also links a library by usage requirement.
+        """
+        base_libs: list[str] = []
+        if self._env and self._env.has_tool("link"):
+            link_cfg = getattr(self._env, "link", None)
+            base_libs = list(getattr(link_cfg, "libs", None) or [])
+        return base_libs + [lib for lib in libs if lib not in base_libs]
+
     def _compile_overrides(self) -> dict[str, object]:
         """Return compile-time overrides: includes, defines, flags."""
         from pcons.core.subst import ProjectPath
@@ -128,8 +142,9 @@ class CompileLinkContext:
 
         if self.libdirs:
             result["libdirs"] = [ProjectPath(p) for p in self.libdirs]
-        if self.libs:
-            result["libs"] = self._format_libs(self.libs)
+        merged_libs = self._merge_with_base_libs(self.libs)
+        if merged_libs:
+            result["libs"] = self._format_libs(merged_libs)
         if self.link_flags:
             # Merge with base flags from env.link.flags so that env-level
             # link flags (e.g., -fsanitize=address) are preserved alongside

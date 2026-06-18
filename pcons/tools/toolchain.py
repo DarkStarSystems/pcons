@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.subst import PathToken
     from pcons.core.target import Target
+    from pcons.toolchains.build_context import CompileLinkContext
     from pcons.tools.tool import BaseTool, Tool
 
 
@@ -469,6 +470,10 @@ class Toolchain(Protocol):
 
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
         """Return a setting method for ``env.<tool>.<name>``, or None."""
+        ...
+
+    def compile_link_context_class(self) -> type[CompileLinkContext]:
+        """Return the CompileLinkContext subclass for compile/link commands."""
         ...
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
@@ -1165,6 +1170,18 @@ class BaseToolchain(ABC):
             A frozenset of flag strings that take separate arguments.
         """
         return frozenset()
+
+    def compile_link_context_class(self) -> type[CompileLinkContext]:
+        """Return the CompileLinkContext subclass used for compile/link commands.
+
+        The context class controls how flags and library names are formatted
+        for this toolchain's tools. The GNU-style default passes library
+        names through unchanged (``-lfoo`` is built by the command template);
+        MSVC-compatible toolchains override this to format ``foo.lib``.
+        """
+        from pcons.toolchains.build_context import CompileLinkContext
+
+        return CompileLinkContext
 
     def create_build_context(
         self,

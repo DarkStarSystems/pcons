@@ -42,6 +42,13 @@ if sys.platform == "darwin":
     )
 elif sys.platform.startswith("linux"):
     env.link.libs.extend(["dl", "pthread"])
+elif sys.platform == "win32":
+    # Rust std on the MSVC target needs these Windows system libraries.
+    # rustc prints the authoritative list for a crate with
+    # `cargo rustc --release -- --print native-static-libs`.
+    env.link.libs.extend(
+        ["ws2_32", "userenv", "advapi32", "bcrypt", "ntdll", "kernel32"]
+    )
 
 env.cxx.includes.append(project.root_dir / "src")
 app = project.Program("hello_rust", env, sources=["src/main.cpp"])
