@@ -1,0 +1,13 @@
+[package]
+name = "rust_math"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rust_math"
+crate-type = ["staticlib"]
+
+[profile.release]
+opt-level = 1
+lto = false
+codegen-units = 16

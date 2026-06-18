@@ -28,7 +28,7 @@ def register_builtin_builders() -> None:
     from pcons.builders import compile, test  # noqa: F401
 
     # Install and Archive builders are now in pcons.tools (merged with tools)
-    from pcons.tools import archive, install  # noqa: F401
+    from pcons.tools import archive, cargo, install  # noqa: F401
 
     # Contrib builders: platform-specific installer/packaging helpers
     _register_contrib_builders()
