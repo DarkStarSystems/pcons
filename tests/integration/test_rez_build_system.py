@@ -2,7 +2,7 @@
 """Tests for pcons.integrations.rez.build_system.PconsBuildSystem.
 
 Skipped unless ``rez`` is importable. End-to-end ``rez-build`` exercise
-lives in the ``examples/35_rez_integration`` example test (gated on
+lives in the ``examples/45_rez_integration`` example test (gated on
 ``REZ_USED_RESOLVE``).
 """
 

@@ -106,7 +106,7 @@ cleanly — it doesn't try to build.
 ## What's in this directory
 
 ```
-35_rez_integration/
+45_rez_integration/
 ├── README.md            # this file
 ├── pcons-build.py       # pcons reads the rez resolve
 ├── test.toml            # CI test config

@@ -6,7 +6,7 @@
 #
 #     rez-env hello_lib -- uv run pytest tests/test_examples.py
 #
-# See examples/35_rez_integration/README.md for full setup.
+# See examples/45_rez_integration/README.md for full setup.
 
 [test]
 description = "pcons reads a rez resolve and builds against rez-resolved packages"

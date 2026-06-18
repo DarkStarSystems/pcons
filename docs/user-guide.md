@@ -1285,7 +1285,7 @@ A complete worked example — a `hello_lib` package built with rez's
 built-in cmake plugin and a `hello_app` package that uses pcons via
 `build_system = "pcons"` *and* depends on `hello_lib` through
 `rez_environment` — lives in
-[`examples/35_rez_integration/`](https://github.com/DarkStarSystems/pcons/tree/main/examples/35_rez_integration).
+[`examples/45_rez_integration/`](https://github.com/DarkStarSystems/pcons/tree/main/examples/45_rez_integration).
 That example exercises both halves of the integration in one place.
 
 #### Installing the pcons plugin into rez

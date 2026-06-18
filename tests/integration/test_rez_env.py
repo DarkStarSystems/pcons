@@ -243,12 +243,10 @@ class TestPkgConfigOverride:
 
 class TestRezEnvironment:
     def test_no_rez_is_noop(
-        self, monkeypatch: pytest.MonkeyPatch, gcc_toolchain
+        self, monkeypatch: pytest.MonkeyPatch, gcc_toolchain, test_project
     ) -> None:
-        from pcons.core.environment import Environment
-
         monkeypatch.delenv("REZ_USED_RESOLVE", raising=False)
-        env = Environment(toolchain=gcc_toolchain)
+        env = test_project.Environment(toolchain=gcc_toolchain)
         # Snapshot include list to confirm env is untouched.
         before = list(env.cxx.includes)
 
@@ -260,13 +258,12 @@ class TestRezEnvironment:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
         gcc_toolchain,
+        test_project,
     ) -> None:
-        from pcons.core.environment import Environment
-
         root = _make_pkg_install(tmp_path, "hello_lib")
         _set_rez_resolve(monkeypatch, ("hello_lib", "0.1.0", root))
 
-        env = Environment(toolchain=gcc_toolchain)
+        env = test_project.Environment(toolchain=gcc_toolchain)
         assert rez_environment(env) is None
 
         assert str(root / "include") in env.cxx.includes
@@ -278,9 +275,8 @@ class TestRezEnvironment:
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
         gcc_toolchain,
+        test_project,
     ) -> None:
-        from pcons.core.environment import Environment
-
         a_root = _make_pkg_install(tmp_path, "alpha")
         b_root = _make_pkg_install(tmp_path, "beta")
         _set_rez_resolve(
@@ -289,7 +285,7 @@ class TestRezEnvironment:
             ("beta", "1.0", b_root),
         )
 
-        env = Environment(toolchain=gcc_toolchain)
+        env = test_project.Environment(toolchain=gcc_toolchain)
         rez_environment(env, packages=["alpha"])
 
         assert "alpha" in env.link.libs
