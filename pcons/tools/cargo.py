@@ -257,17 +257,17 @@ class CargoBuildBuilder:
             include_dirs=[str(include_dir)] if include_dir else [],
             found_by="cargo",
         )
+        # from_package() creates the target, which auto-registers with the
+        # current project via Target.__init__.
         imported = ImportedTarget.from_package(pkg)
-        imported._project = project
 
         # The imported wrapper depends on the underlying cargo (and
         # cbindgen) Command targets. The compile_link machinery walks
         # transitive_dependencies() to collect output nodes for the
         # linker, so the .a/.lib gets wired in as an implicit dep of
         # the link step automatically.
-        imported.dependencies.append(cargo_target)
+        imported.add_dependency(cargo_target)
         if cbindgen_target is not None:
-            imported.dependencies.append(cbindgen_target)
+            imported.add_dependency(cbindgen_target)
 
-        project.add_target(imported)
         return imported

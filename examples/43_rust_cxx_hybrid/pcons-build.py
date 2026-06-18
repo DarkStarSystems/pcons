@@ -45,6 +45,6 @@ elif sys.platform.startswith("linux"):
 
 env.cxx.includes.append(project.root_dir / "src")
 app = project.Program("hello_rust", env, sources=["src/main.cpp"])
-app.link(rust_greet)
+app.private.link_libs.append(rust_greet)
 
 project.generate()

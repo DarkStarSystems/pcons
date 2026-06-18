@@ -5,7 +5,7 @@
 # ///
 """Rust + C++ with cbindgen-generated FFI header.
 
-Like 36_rust_cxx_hybrid, but the C header is produced from the Rust
+Like 43_rust_cxx_hybrid, but the C header is produced from the Rust
 sources by cbindgen at build time instead of being hand-written.
 pcons wires the cbindgen invocation as a separate Command target;
 the generated header's directory is propagated as an include
@@ -39,6 +39,6 @@ elif sys.platform.startswith("linux"):
     env.link.libs.extend(["dl", "pthread"])
 
 app = project.Program("stats", env, sources=["src/main.cpp"])
-app.link(rust_math)
+app.private.link_libs.append(rust_math)
 
 project.generate()
