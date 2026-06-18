@@ -17,8 +17,34 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
+from pcons.core.flags import deduplicate_flags
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.base import BaseFinder
+
+# Flags whose argument is the next token, deduped as a (flag, arg) unit. The
+# flag literal repeats legitimately (macOS frameworks: -framework A -framework
+# B), so a plain token dedupe would drop the repeats and leave the arguments
+# looking like input files at link time. No toolchain is available when parsing
+# .pc files, so the relevant set is named here.
+_PC_SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
+    {
+        "-framework",
+        "-weak_framework",
+        "-arch",
+        "-isystem",
+        "-iframework",
+        "-include",
+        "-imacros",
+        "-iquote",
+        "-idirafter",
+        "-u",
+    }
+)
+# Driver pass-through flags: consecutive ones form one multi-token directive
+# (-Xlinker -rpath -Xlinker /path is "-rpath /path"), so keep every occurrence.
+_PC_PASSTHROUGH_FLAGS: frozenset[str] = frozenset(
+    {"-Xlinker", "-Xclang", "-Xpreprocessor", "-Xassembler"}
+)
 
 if TYPE_CHECKING:
     from pcons.configure.config import Configure
@@ -668,6 +694,15 @@ class ConanFinder(BaseFinder):
                     out.append(item)
             return out
 
+        def dedupe_flags(seq: list[str]) -> list[str]:
+            # Pair-aware de-dupe so repeated separated-arg flags survive (macOS
+            # frameworks: -framework A -framework B), with -Xlinker-style
+            # pass-through directives kept verbatim. No toolchain is available
+            # at .pc-parse time, so the relevant flag sets are named here.
+            return deduplicate_flags(
+                seq, _PC_SEPARATED_ARG_FLAGS, _PC_PASSTHROUGH_FLAGS
+            )
+
         for name, pkg in packages.items():
             dep_names = closure(name, {name})
             if not dep_names:
@@ -683,10 +718,10 @@ class ConanFinder(BaseFinder):
                 pkg.libraries + [d for dep in deps for d in dep.libraries]
             )
             pkg.defines = dedupe(pkg.defines + [d for dep in deps for d in dep.defines])
-            pkg.compile_flags = dedupe(
+            pkg.compile_flags = dedupe_flags(
                 pkg.compile_flags + [f for dep in deps for f in dep.compile_flags]
             )
-            pkg.link_flags = dedupe(
+            pkg.link_flags = dedupe_flags(
                 pkg.link_flags + [f for dep in deps for f in dep.link_flags]
             )
 

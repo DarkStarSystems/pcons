@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Conan/pkg-config packages with multiple macOS frameworks now link correctly.** Resolving a package whose `.pc` `Libs:` listed several frameworks (e.g. `-framework Foundation -framework IOKit -framework CoreGraphics`) collapsed the repeated `-framework` tokens during the transitive-`Requires` merge, leaving the framework names looking like input files and breaking the link. The merge is now pair-aware (and keeps `-Xlinker`-style pass-through directives verbatim).
+
 ## [0.20.0] - 2026-06-16
 
 ### Added
