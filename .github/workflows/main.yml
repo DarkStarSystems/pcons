@@ -63,11 +63,16 @@ jobs:
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo apt-get update -qq
-          # noninteractive + no-install-recommends avoids debconf prompts that
-          # can hang the runner; output is left visible so a stall is diagnosable.
+          # Best-effort install: examples/32_latex skips when latexmk is
+          # absent, so a flaky/slow apt mirror degrades to "LaTeX example
+          # skipped" instead of hanging the job and blocking releases.
+          # Retries + a short per-connection timeout keep a degraded mirror
+          # from burning the whole job budget (it was stalling ~60s/package).
+          sudo apt-get update -qq || true
           sudo apt-get install -y --no-install-recommends \
-            texlive-latex-base texlive-bibtex-extra latexmk
+            -o Acquire::Retries=5 -o Acquire::http::Timeout=20 \
+            texlive-latex-base texlive-bibtex-extra latexmk \
+            || echo "::warning::LaTeX install failed (apt mirror?); LaTeX example tests will be skipped"
       - name: Install dependencies
         run: uv sync
       - name: Extend Conan settings for new Apple Clang versions (macOS)
