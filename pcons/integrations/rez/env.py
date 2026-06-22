@@ -13,7 +13,13 @@ objects from each package's install root using a convention-based scan
 (``<root>/include``, ``<root>/lib``, plus a pkg-config fallback when
 ``<root>/lib/pkgconfig/*.pc`` files are present).
 
-No rez Python API is required.
+Packages that don't follow the default ``include``/``lib`` layout can be
+described explicitly with a :class:`RezLayout` (see ``layouts`` on
+:func:`rez_environment` and :class:`RezFinder`).
+
+The rez Python API is used to read the resolve when it's importable (the
+resolved context is authoritative); otherwise the documented ``REZ_*``
+environment variables are parsed, so no rez install is required.
 """
 
 from __future__ import annotations
@@ -36,7 +42,28 @@ class ResolvedPackage(NamedTuple):
     root: Path
 
 
+class RezLayout(NamedTuple):
+    """Explicit install layout for a rez package, relative to its root.
+
+    Use this when a package doesn't follow the default
+    ``<root>/include`` + ``<root>/lib`` convention — multi-arch lib dirs,
+    nested header trees, or a multi-library package. Pass it via the
+    ``layouts`` argument of :func:`rez_environment` or :class:`RezFinder`.
+
+    A caller-supplied layout is trusted: its directories are recorded
+    verbatim (no existence check), so a typo surfaces as a compiler or
+    linker error rather than being silently dropped. ``libraries=None``
+    keeps the ``lib<name>`` auto-detection; pass an explicit (possibly
+    empty) tuple to list the libraries to link instead.
+    """
+
+    include_dirs: tuple[str, ...] = ("include",)
+    library_dirs: tuple[str, ...] = ("lib",)
+    libraries: tuple[str, ...] | None = None
+
+
 _RESOLVE_VAR = "REZ_USED_RESOLVE"
+_DEFAULT_LAYOUT = RezLayout()
 
 
 def is_in_rez_resolve() -> bool:
@@ -55,7 +82,52 @@ def _root_env_var(name: str) -> str:
 
 
 def resolved_packages() -> list[ResolvedPackage]:
-    """Return every package in ``REZ_USED_RESOLVE`` paired with its root.
+    """Return every resolved rez package paired with its install root.
+
+    When the rez Python API is importable it is authoritative: the active
+    resolved context (loaded from the current ``.rxt`` file) is the source
+    of truth. Otherwise this falls back to parsing the documented
+    ``REZ_USED_RESOLVE`` / ``REZ_<NAME>_ROOT`` environment variables, which
+    works even when rez itself isn't importable in the build interpreter.
+
+    Packages with no install root (implicit version-range packages, etc.)
+    are skipped in both paths.
+    """
+    if not is_in_rez_resolve():
+        return []
+    from_api = _resolved_packages_from_api()
+    if from_api is not None:
+        return from_api
+    return _resolved_packages_from_env()
+
+
+def _resolved_packages_from_api() -> list[ResolvedPackage] | None:
+    """Read the resolve via rez's Python API, or ``None`` if unavailable.
+
+    Returns ``None`` — signaling the env-var fallback — when rez isn't
+    importable or reports no active context. ``rez.status.status`` and
+    ``ResolvedContext.resolved_packages`` are stable rez API.
+    """
+    try:
+        from rez.status import status  # ty: ignore[unresolved-import]
+    except ImportError:
+        return None
+
+    context = status.context
+    if context is None:
+        return None
+
+    out: list[ResolvedPackage] = []
+    for pkg in context.resolved_packages:
+        root = getattr(pkg, "root", None)
+        if not root:
+            continue
+        out.append(ResolvedPackage(pkg.name, str(pkg.version), Path(root)))
+    return out
+
+
+def _resolved_packages_from_env() -> list[ResolvedPackage]:
+    """Read the resolve from ``REZ_USED_RESOLVE`` / ``REZ_<NAME>_ROOT``.
 
     Entries whose ``REZ_<NAME>_ROOT`` is unset are skipped (this filters
     out implicit packages like ``~arch==arm64`` that have no install root).
@@ -113,14 +185,21 @@ def package_description(
     name: str,
     version: str,
     root: Path,
+    layout: RezLayout | None = None,
 ) -> PackageDescription:
     """Build a :class:`PackageDescription` for one rez package.
 
-    If ``<root>/lib/pkgconfig/*.pc`` or ``<root>/share/pkgconfig/*.pc``
-    is present, defer to :class:`PkgConfigFinder` — a ``.pc`` file is
-    the authoritative declaration of what the package exports, so it
-    wins outright. The result's ``prefix`` is set to the rez install
-    root and ``found_by`` to ``"rez+pkg-config"``.
+    If ``layout`` is given, it wins outright: the package is described
+    exactly as the caller declared (pkg-config and the convention scan
+    are skipped). This is the escape hatch for packages that don't follow
+    the default layout — see :class:`RezLayout`.
+
+    Otherwise, if ``<root>/lib/pkgconfig/*.pc`` or
+    ``<root>/share/pkgconfig/*.pc`` is present, defer to
+    :class:`PkgConfigFinder` — a ``.pc`` file is the authoritative
+    declaration of what the package exports, so it wins. The result's
+    ``prefix`` is set to the rez install root and ``found_by`` to
+    ``"rez+pkg-config"``.
 
     Otherwise fall back to a convention scan:
 
@@ -129,12 +208,36 @@ def package_description(
     - If ``<root>/lib/lib<name>.{a,dylib,so}`` (or ``<name>.lib`` on
       Windows) exists, ``<name>`` is added to ``libraries``.
     """
+    if layout is not None:
+        return _scan_layout(name, version, root, layout, trust=True)
+
     pc_dirs = _pkgconfig_dirs(root)
     if pc_dirs:
         pd = _from_pkgconfig(name, version, root, pc_dirs)
         if pd is not None:
             return pd
 
+    return _scan_layout(name, version, root, _DEFAULT_LAYOUT, trust=False)
+
+
+def _scan_layout(
+    name: str,
+    version: str,
+    root: Path,
+    layout: RezLayout,
+    *,
+    trust: bool,
+) -> PackageDescription:
+    """Build a :class:`PackageDescription` from ``root`` and ``layout``.
+
+    ``trust=False`` (the default convention) records only directories that
+    actually exist, mirroring auto-discovery. ``trust=True`` (an explicit
+    caller-supplied layout) records the declared directories verbatim.
+
+    When ``layout.libraries`` is ``None`` the library is auto-detected
+    (``lib<name>.{a,dylib,so}`` / ``<name>.lib``) in the first existing
+    library dir; otherwise the listed libraries are used as given.
+    """
     pd = PackageDescription(
         name=name,
         version=version,
@@ -142,16 +245,26 @@ def package_description(
         found_by="rez",
     )
 
-    include_dir = root / "include"
-    if include_dir.is_dir():
-        pd.include_dirs.append(str(include_dir))
+    for sub in layout.include_dirs:
+        d = root / sub
+        if trust or d.is_dir():
+            pd.include_dirs.append(str(d))
 
-    lib_dir = root / "lib"
-    if lib_dir.is_dir():
-        pd.library_dirs.append(str(lib_dir))
-        lib_name = _detect_library(lib_dir, name)
-        if lib_name is not None:
-            pd.libraries.append(lib_name)
+    for sub in layout.library_dirs:
+        d = root / sub
+        if trust or d.is_dir():
+            pd.library_dirs.append(str(d))
+
+    if layout.libraries is None:
+        for sub in layout.library_dirs:
+            lib_dir = root / sub
+            if lib_dir.is_dir():
+                lib_name = _detect_library(lib_dir, name)
+                if lib_name is not None:
+                    pd.libraries.append(lib_name)
+                    break
+    else:
+        pd.libraries.extend(layout.libraries)
 
     return pd
 
@@ -204,6 +317,7 @@ def rez_environment(
     env: Environment,
     *,
     packages: list[str] | None = None,
+    layouts: dict[str, RezLayout] | None = None,
 ) -> None:
     """Apply every resolved rez package's settings to ``env`` via ``env.use``.
 
@@ -225,9 +339,13 @@ def rez_environment(
         env: The pcons :class:`Environment` to mutate.
         packages: Optional whitelist. If given, only packages with names
             in this list are applied; others are ignored.
+        layouts: Optional ``{package_name: RezLayout}`` map. A package
+            listed here is described from its :class:`RezLayout` instead
+            of the default convention scan — see :class:`RezLayout`.
     """
     for pkg in resolved_packages():
         if packages is not None and pkg.name not in packages:
             continue
-        pd = package_description(pkg.name, pkg.version, pkg.root)
+        layout = layouts.get(pkg.name) if layouts else None
+        pd = package_description(pkg.name, pkg.version, pkg.root, layout)
         env.use(pd)

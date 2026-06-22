@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from pcons.integrations.rez import RezFinder
+from pcons.integrations.rez import RezFinder, RezLayout
 
 
 def _make_pkg(tmp_path: Path, name: str, version: str = "0.1.0") -> Path:
@@ -80,6 +80,22 @@ def test_components_arg_emits_warning(
 
     assert pd is not None
     assert any("components" in str(w.message) for w in caught)
+
+
+def test_find_uses_layout_override(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A layout passed to the finder describes the package explicitly."""
+    root = tmp_path / "weird" / "0.1.0"
+    (root / "api").mkdir(parents=True)
+    _set_resolve(monkeypatch, "weird", root)
+
+    finder = RezFinder({"weird": RezLayout(include_dirs=("api",), libraries=("w",))})
+    pd = finder.find("weird")
+
+    assert pd is not None
+    assert pd.include_dirs == [str(root / "api")]
+    assert pd.libraries == ["w"]
 
 
 def test_integrates_with_finder_chain(

@@ -1141,6 +1141,11 @@ The `is_in_rez_resolve()` guard means the same `pcons-build.py` works
 both inside and outside rez — it just degrades to a vanilla pcons
 build if no rez resolve is active.
 
+The resolve is read from rez's Python API when it's importable in the
+build interpreter (the resolved context is authoritative); otherwise
+pcons parses the documented `REZ_*` environment variables. Either way
+no rez install is required for the common standalone case.
+
 ##### Picking individual packages
 
 If you only want to apply a subset of the resolve (e.g. you have
@@ -1150,6 +1155,33 @@ a `packages=[...]` whitelist:
 ```python
 rez_environment(env, packages=["openfx", "boost"])
 ```
+
+##### Packages with a non-standard layout
+
+The convention scan assumes `<root>/include` and `<root>/lib`. A package
+that ships its own `.pc` file is handled automatically (it wins over the
+scan). For one that does neither — multi-arch lib dirs, nested header
+trees, or several libraries — describe it explicitly with a `RezLayout`:
+
+```python
+from pcons.integrations.rez import RezLayout, rez_environment
+
+rez_environment(
+    env,
+    layouts={
+        "mylib": RezLayout(
+            include_dirs=("include", "include/detail"),
+            library_dirs=("lib64",),
+            libraries=("mylib_core", "mylib_extra"),
+        ),
+    },
+)
+```
+
+A supplied layout is trusted verbatim and wins over both pkg-config and
+the convention scan; paths are relative to the package's install root.
+Leave `libraries` unset to keep `lib<name>` auto-detection. `RezFinder`
+takes the same `layouts` map: `RezFinder({"mylib": RezLayout(...)})`.
 
 ##### Per-package access through `find_package()`
 

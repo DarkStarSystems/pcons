@@ -11,6 +11,7 @@ from __future__ import annotations
 import warnings
 
 from pcons.integrations.rez.env import (
+    RezLayout,
     is_in_rez_resolve,
     package_description,
     resolved_packages,
@@ -37,7 +38,14 @@ class RezFinder(BaseFinder):
     constraints belong in the package's ``requires`` list (or on the
     ``rez-env`` command line), not at build time. The returned
     :class:`PackageDescription` carries the resolved version verbatim.
+
+    Packages that don't follow the default ``include``/``lib`` layout can
+    be described explicitly by passing a ``{name: RezLayout}`` map to the
+    constructor — see :class:`RezLayout`.
     """
+
+    def __init__(self, layouts: dict[str, RezLayout] | None = None) -> None:
+        self._layouts = layouts or {}
 
     @property
     def name(self) -> str:
@@ -60,5 +68,7 @@ class RezFinder(BaseFinder):
             )
         for pkg in resolved_packages():
             if pkg.name == package_name:
-                return package_description(pkg.name, pkg.version, pkg.root)
+                return package_description(
+                    pkg.name, pkg.version, pkg.root, self._layouts.get(pkg.name)
+                )
         return None

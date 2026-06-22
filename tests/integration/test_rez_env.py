@@ -14,6 +14,7 @@ import pytest
 from pcons.integrations.rez import env as rez_env
 from pcons.integrations.rez.env import (
     ResolvedPackage,
+    RezLayout,
     is_in_rez_resolve,
     package_description,
     resolved_packages,
@@ -138,6 +139,86 @@ class TestResolvedPackages:
         assert result == [ResolvedPackage("foo", "1.0-beta.2", root)]
 
 
+class TestResolvedPackagesViaApi:
+    """When rez is importable, ``status.context`` is the source of truth.
+
+    rez isn't a dependency, so a fake ``rez.status`` module is injected to
+    exercise the API path without installing rez.
+    """
+
+    @staticmethod
+    def _install_fake_rez(
+        monkeypatch: pytest.MonkeyPatch,
+        packages: list[tuple[str, str, Path | None]],
+    ) -> None:
+        import sys
+        import types
+
+        variants = [
+            types.SimpleNamespace(
+                name=name, version=version, root=(str(root) if root else None)
+            )
+            for name, version, root in packages
+        ]
+        context = types.SimpleNamespace(resolved_packages=variants)
+        status_mod = types.ModuleType("rez.status")
+        status_mod.status = types.SimpleNamespace(context=context)  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "rez", types.ModuleType("rez"))
+        monkeypatch.setitem(sys.modules, "rez.status", status_mod)
+
+    def test_api_used_when_available(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        root = _make_pkg_install(tmp_path, "hello_lib")
+        # is_in_rez_resolve() gates on this; the per-package ROOT var is
+        # intentionally left unset so only the API path can find the root.
+        monkeypatch.setenv("REZ_USED_RESOLVE", "hello_lib-0.1.0")
+        monkeypatch.delenv("REZ_HELLO_LIB_ROOT", raising=False)
+        self._install_fake_rez(monkeypatch, [("hello_lib", "0.1.0", root)])
+
+        assert resolved_packages() == [ResolvedPackage("hello_lib", "0.1.0", root)]
+
+    def test_api_wins_over_env_vars(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        api_root = _make_pkg_install(tmp_path, "pkg", "2.0")
+        env_root = tmp_path / "stale"
+        env_root.mkdir()
+        monkeypatch.setenv("REZ_USED_RESOLVE", "pkg-1.0")
+        monkeypatch.setenv("REZ_PKG_ROOT", str(env_root))
+        self._install_fake_rez(monkeypatch, [("pkg", "2.0", api_root)])
+
+        assert resolved_packages() == [ResolvedPackage("pkg", "2.0", api_root)]
+
+    def test_api_skips_packages_without_root(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        root = _make_pkg_install(tmp_path, "real")
+        monkeypatch.setenv("REZ_USED_RESOLVE", "real-0.1.0")
+        self._install_fake_rez(
+            monkeypatch,
+            [("real", "0.1.0", root), ("platform", "1.0", None)],
+        )
+
+        assert resolved_packages() == [ResolvedPackage("real", "0.1.0", root)]
+
+    def test_falls_back_to_env_when_no_context(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # rez importable but no active context -> env-var path.
+        import sys
+        import types
+
+        root = _make_pkg_install(tmp_path, "envpkg")
+        _set_rez_resolve(monkeypatch, ("envpkg", "0.1.0", root))
+        status_mod = types.ModuleType("rez.status")
+        status_mod.status = types.SimpleNamespace(context=None)  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "rez", types.ModuleType("rez"))
+        monkeypatch.setitem(sys.modules, "rez.status", status_mod)
+
+        assert resolved_packages() == [ResolvedPackage("envpkg", "0.1.0", root)]
+
+
 class TestPackageDescription:
     def test_builds_includes_and_libs(self, tmp_path: Path) -> None:
         root = _make_pkg_install(tmp_path, "hello_lib")
@@ -178,6 +259,91 @@ class TestPackageDescription:
 
         assert str(root / "lib") in pd.library_dirs
         assert pd.libraries == []
+
+
+class TestLayoutOverride:
+    """An explicit RezLayout overrides pkg-config and the convention scan."""
+
+    def test_custom_dirs_are_trusted_verbatim(self, tmp_path: Path) -> None:
+        # Non-standard layout: headers under api/, libs under lib64/, and a
+        # library name that doesn't match the package name.
+        root = tmp_path / "weird" / "1.0"
+        (root / "api").mkdir(parents=True)
+        (root / "lib64").mkdir(parents=True)
+
+        pd = package_description(
+            "weird",
+            "1.0",
+            root,
+            RezLayout(
+                include_dirs=("api", "api/detail"),
+                library_dirs=("lib64",),
+                libraries=("weird_core", "weird_extra"),
+            ),
+        )
+
+        assert pd.found_by == "rez"
+        assert pd.include_dirs == [str(root / "api"), str(root / "api/detail")]
+        assert pd.library_dirs == [str(root / "lib64")]
+        assert pd.libraries == ["weird_core", "weird_extra"]
+
+    def test_trusted_dirs_recorded_even_if_absent(self, tmp_path: Path) -> None:
+        # Unlike the convention scan, declared dirs are kept even when they
+        # don't exist on disk, so a wrong path fails loudly at compile time.
+        root = tmp_path / "nothing_here" / "1.0"
+        root.mkdir(parents=True)
+
+        pd = package_description("nothing_here", "1.0", root, RezLayout(libraries=()))
+
+        assert pd.include_dirs == [str(root / "include")]
+        assert pd.library_dirs == [str(root / "lib")]
+        assert pd.libraries == []
+
+    def test_none_libraries_auto_detects(self, tmp_path: Path) -> None:
+        # libraries=None keeps lib<name> auto-detection within the layout dirs.
+        root = _make_pkg_install(tmp_path, "auto", with_include=False)
+        # Move the archive into a custom lib dir.
+        custom = root / "lib64"
+        custom.mkdir()
+        (custom / "libauto.a").write_bytes(b"\x00")
+
+        pd = package_description(
+            "auto", "1.0", root, RezLayout(library_dirs=("lib64",))
+        )
+
+        assert pd.library_dirs == [str(custom)]
+        assert pd.libraries == ["auto"]
+
+    def test_layout_skips_pkgconfig(self, tmp_path: Path) -> None:
+        # Even with a .pc file present, an explicit layout wins outright.
+        root = _make_pkg_install(tmp_path, "pcpkg", pkgconfig=True)
+
+        pd = package_description(
+            "pcpkg", "0.1.0", root, RezLayout(libraries=("pcpkg",))
+        )
+
+        assert pd.found_by == "rez"
+        assert pd.libraries == ["pcpkg"]
+
+    def test_rez_environment_uses_layouts(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        gcc_toolchain,
+        test_project,
+    ) -> None:
+        root = tmp_path / "custom" / "1.0"
+        (root / "api").mkdir(parents=True)
+        _set_rez_resolve(monkeypatch, ("custom", "1.0", root))
+
+        env = test_project.Environment(toolchain=gcc_toolchain)
+        rez_environment(
+            env,
+            layouts={"custom": RezLayout(include_dirs=("api",), libraries=("custom",))},
+        )
+
+        assert str(root / "api") in env.cxx.includes
+        assert "custom" in env.link.libs
 
 
 class TestPkgConfigOverride:
@@ -298,6 +464,7 @@ def test_module_exports_match_init() -> None:
 
     for name in (
         "ResolvedPackage",
+        "RezLayout",
         "is_in_rez_resolve",
         "package_description",
         "resolved_packages",

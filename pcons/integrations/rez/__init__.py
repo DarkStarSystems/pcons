@@ -18,6 +18,7 @@ Both sides are independent; you can use either alone.
 
 from pcons.integrations.rez.env import (
     ResolvedPackage,
+    RezLayout,
     is_in_rez_resolve,
     package_description,
     resolved_packages,
@@ -28,6 +29,7 @@ from pcons.integrations.rez.finder import RezFinder
 __all__ = [
     "ResolvedPackage",
     "RezFinder",
+    "RezLayout",
     "is_in_rez_resolve",
     "package_description",
     "resolved_packages",
