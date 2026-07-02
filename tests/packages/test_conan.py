@@ -809,6 +809,30 @@ class TestConanFinderWithToolchain:
 
         assert settings["compiler.version"] == "13"
 
+    def test_detect_compiler_version_no_toolchain_maps_apple_clang_to_binary(
+        self, tmp_path: Path
+    ) -> None:
+        """With no toolchain (sync_profile() called bare), the Conan compiler
+        name "apple-clang" must be mapped to the real "clang" binary — it is
+        not itself an executable — so version detection still works on macOS.
+        """
+        finder = ConanFinder(output_folder=tmp_path)
+        invoked: list[str] = []
+
+        def mock_run(cmd, **kwargs):
+            invoked.append(cmd[0])
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "Apple clang version 15.0.0 (clang-1500.0.40.1)\n"
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            version = finder._detect_compiler_version("apple-clang", None)
+
+        assert version == "15"
+        assert invoked == ["clang"]  # not the non-existent "apple-clang"
+
     def test_detect_compiler_settings_with_clang_toolchain(
         self, tmp_path: Path
     ) -> None:
