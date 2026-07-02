@@ -3,6 +3,7 @@
 
 import json
 import os
+import shlex
 from pathlib import Path
 
 from pcons.core.builder import CommandBuilder
@@ -242,7 +243,10 @@ class TestCompileCommandsEntries:
 
         content = json.loads((tmp_path / "compile_commands.json").read_text())
         assert len(content) == 1
-        command_parts = normalize_path(content[0]["command"]).split()
+        # Parse with shlex so shell-quoting (bash quotes tokens containing a
+        # backslash, e.g. a Windows-style output path) is undone before we
+        # compare individual arguments.
+        command_parts = [normalize_path(p) for p in shlex.split(content[0]["command"])]
         assert "cl.exe" in command_parts
         assert "/c" in command_parts
         assert "/Fobuild/main.obj" in command_parts
