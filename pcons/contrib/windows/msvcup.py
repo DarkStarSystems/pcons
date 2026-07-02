@@ -17,6 +17,7 @@ See https://github.com/marler8997/msvcup for more information.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import subprocess
@@ -28,6 +29,28 @@ from pathlib import Path
 from pcons.configure.platform import get_platform
 
 logger = logging.getLogger(__name__)
+
+# SHA-256 checksums for the pinned msvcup release archives, keyed by
+# (msvcup_version, host_arch). These are the checksums GitHub computes
+# automatically for each uploaded release asset -- not something msvcup
+# itself publishes -- but they let us pin the exact bytes we expect for a
+# given release and refuse to run anything else (e.g. a MITM'd or
+# compromised download).
+#
+# To update when bumping the default `msvcup_version`, fetch the digest
+# for each windows zip asset, e.g.:
+#   gh release view <tag> --repo marler8997/msvcup --json assets \
+#     --jq '.assets[] | select(.name | endswith("windows.zip")) | "\(.name) \(.digest)"'
+# or, without `gh`:
+#   curl -sL <asset-url> | sha256sum
+_RELEASE_SHA256: dict[tuple[str, str], str] = {
+    ("v2026_02_07", "x86_64"): (
+        "fdc1743a766ee96ebb912b3cd657f4cc2bc773a125887f4a05242230d0554124"
+    ),
+    ("v2026_02_07", "aarch64"): (
+        "53192e26737f450c8b97ab949069fb96cc017e90230aa7c11e7dc2e47127b90c"
+    ),
+}
 
 
 class MsvcUp:
@@ -155,6 +178,7 @@ class MsvcUp:
 
         logger.info("Downloading msvcup %s for %s...", self._msvcup_version, host_arch)
         urllib.request.urlretrieve(zip_url, zip_path)  # noqa: S310
+        self._verify_checksum(zip_path, host_arch)
 
         msvcup_exe.parent.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(zip_path) as zf:
@@ -170,6 +194,42 @@ class MsvcUp:
 
         logger.info("Installed msvcup to %s", msvcup_exe)
         return msvcup_exe
+
+    def _verify_checksum(self, zip_path: Path, host_arch: str) -> None:
+        """Verify a downloaded archive against its pinned SHA-256 checksum.
+
+        Fails closed: if no checksum is pinned for this version/arch, or the
+        computed digest doesn't match, the downloaded file is deleted and a
+        ``RuntimeError`` is raised rather than extracting and executing an
+        unverified binary.
+        """
+        expected = _RELEASE_SHA256.get((self._msvcup_version, host_arch))
+        if expected is None:
+            zip_path.unlink(missing_ok=True)
+            msg = (
+                f"No pinned SHA-256 checksum for msvcup {self._msvcup_version} "
+                f"({host_arch}); refusing to run an unverified download. "
+                "Add an entry to _RELEASE_SHA256 in msvcup.py -- see the "
+                "comment above that dict for how to get the hash."
+            )
+            raise RuntimeError(msg)
+
+        digest = hashlib.sha256()
+        with open(zip_path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                digest.update(chunk)
+        actual = digest.hexdigest()
+
+        if actual != expected:
+            zip_path.unlink(missing_ok=True)
+            msg = (
+                f"msvcup download checksum mismatch for {self._msvcup_version} "
+                f"({host_arch}): expected {expected}, got {actual}. The "
+                "downloaded file has been deleted. This may indicate a "
+                "corrupted download or a tampered/compromised source -- "
+                "refusing to execute it."
+            )
+            raise RuntimeError(msg)
 
     # -- Install + autoenv ----------------------------------------------------
 
