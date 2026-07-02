@@ -18,6 +18,7 @@ from pcons import (
     NinjaGenerator,
 )
 from pcons.cli import (
+    _find_command_index,
     find_command_in_argv,
     find_script,
     parse_variables,
@@ -276,6 +277,31 @@ class TestFindCommandInArgv:
         """Test that invalid commands return None."""
         assert find_command_in_argv(["notacommand"]) is None
         assert find_command_in_argv(["BUILD"]) is None  # case sensitive
+
+
+class TestFindCommandIndex:
+    """Tests for _find_command_index (returns the position, not the name)."""
+
+    def test_index_of_first_positional_command(self) -> None:
+        assert _find_command_index(["build"]) == 0
+        assert _find_command_index(["-v", "generate"]) == 1
+
+    def test_option_value_equal_to_command_is_not_the_command(self) -> None:
+        # The motivating bug: an option value that equals a command name
+        # must not be reported as the subcommand.
+        assert _find_command_index(["--build-dir", "test", "test"]) == 2
+        assert _find_command_index(["-B", "build", "build"]) == 2
+
+    def test_equals_option_then_command(self) -> None:
+        assert _find_command_index(["--build-dir=out", "test"]) == 1
+
+    def test_boolean_flag_then_command(self) -> None:
+        assert _find_command_index(["--unknown-flag", "clean"]) == 1
+
+    def test_no_command_returns_none(self) -> None:
+        assert _find_command_index([]) is None
+        assert _find_command_index(["notacommand"]) is None
+        assert _find_command_index(["--build-dir", "out"]) is None
 
 
 class TestRunScriptEnvironment:

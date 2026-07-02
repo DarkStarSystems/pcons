@@ -255,6 +255,48 @@ class TestCompileCommandsEntries:
         assert "-c" not in command_parts
         assert "-o" not in command_parts
 
+    def test_build_typed_path_token_gets_build_dir_prepended(self, tmp_path):
+        """A PathToken with path_type="build" in the command is emitted with
+        the project build_dir prepended (compile_commands entries run from the
+        project root, not the build dir)."""
+        from pcons.core.subst import PathToken, SourcePath, TargetPath
+
+        project = Project("test", root_dir=tmp_path, build_dir="out")
+
+        target = Target("app")
+        output_node = FileNode("out/main.o")
+        source_node = FileNode("src/main.c")
+        output_node._build_info = {
+            "tool": "cc",
+            "command_var": "objcmd",
+            "language": "c",
+            "sources": [source_node],
+            "command": [
+                "gcc",
+                "-c",
+                PathToken(prefix="-I", path="generated_inc", path_type="build"),
+                TargetPath(prefix="-o"),
+                SourcePath(),
+            ],
+        }
+        output_node.builder = CommandBuilder(
+            "Object",
+            "cc",
+            "objcmd",
+            src_suffixes=[".c"],
+            target_suffixes=[".o"],
+            language="c",
+        )
+        target.intermediate_nodes.append(output_node)
+
+        gen = CompileCommandsGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = json.loads((tmp_path / "compile_commands.json").read_text())
+        command = normalize_path(content[0]["command"])
+        assert "-Iout/generated_inc" in command
+
 
 class TestCompileCommandsSymlink:
     def test_creates_symlink_at_project_root(self, tmp_path):

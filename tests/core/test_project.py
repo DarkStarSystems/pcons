@@ -297,6 +297,12 @@ class TestProjectDefaults:
         with pytest.raises(KeyError, match="not a known alias or target"):
             project.Default("nonexistent")
 
+    def test_default_wrong_type_raises_type_error(self):
+        project = Project("myproject")
+
+        with pytest.raises(TypeError):
+            project.Default(42)  # type: ignore[arg-type]
+
 
 class TestProjectValidation:
     def test_valid_project(self, tmp_path):
