@@ -122,26 +122,3 @@ class TestLanguagePriority:
         priority = tc.language_priority
         assert priority["c"] < priority["cxx"]
         assert priority["cxx"] < priority["cuda"]
-
-    def test_get_linker_for_languages_c_only(self):
-        tc = MockToolchain()
-        linker = tc.get_linker_for_languages({"c"})
-        assert linker == "cc"
-
-    def test_get_linker_for_languages_cxx(self):
-        tc = MockToolchain()
-        linker = tc.get_linker_for_languages({"c", "cxx"})
-        # C++ should win (higher priority)
-        assert linker == "cxx"
-
-    def test_get_linker_for_languages_empty(self):
-        tc = MockToolchain()
-        linker = tc.get_linker_for_languages(set())
-        assert linker == "link"
-
-    def test_get_linker_for_fortran(self):
-        tc = MockToolchain()
-        linker = tc.get_linker_for_languages({"c", "fortran"})
-        # Base toolchains don't know about Fortran priority, so C wins.
-        # GfortranToolchain overrides language_priority to add "fortran": 3.
-        assert linker == "cc"

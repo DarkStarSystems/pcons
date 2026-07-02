@@ -892,50 +892,6 @@ class BaseToolchain(ABC):
         flag = f"--sysroot={sysroot}"
         return [ToolContribution(t, flags=(flag,)) for t in ("cc", "cxx", "link")]
 
-    def get_linker_for_languages(self, languages: set[str]) -> str:
-        """Determine which tool should link based on languages used.
-
-        Args:
-            languages: Set of language names (e.g., {'c', 'cxx'}).
-
-        Returns:
-            Tool name to use for linking.
-        """
-        if not languages:
-            return "link"
-
-        # Find the highest priority language
-        priority = self.language_priority
-        max_priority = -1
-        max_lang = "c"
-
-        for lang in languages:
-            p = priority.get(lang, 0)
-            if p > max_priority:
-                max_priority = p
-                max_lang = lang
-
-        # Map language to linker tool
-        # (subclasses may override this mapping)
-        return self._linker_for_language(max_lang)
-
-    # Default mapping from language to linker tool name.
-    # Override in subclasses if the mapping is different.
-    _LANGUAGE_TO_LINKER: dict[str, str] = {
-        "c": "cc",
-        "cxx": "cxx",
-        "objcxx": "cxx",
-        "fortran": "fortran",
-        "cuda": "cuda",
-    }
-
-    def _linker_for_language(self, language: str) -> str:
-        """Get the linker tool name for a language.
-
-        Override in subclasses if the mapping is different.
-        """
-        return self._LANGUAGE_TO_LINKER.get(language, "link")
-
     def get_runtime_libs(
         self, linker_language: str, object_languages: set[str]
     ) -> list[str]:

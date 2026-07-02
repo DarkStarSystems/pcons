@@ -215,12 +215,6 @@ class GfortranToolchain(UnixToolchain):
         # Fall back to C/C++ handlers from UnixToolchain
         return super().get_source_handler(suffix)
 
-    def _linker_for_language(self, language: str) -> str:
-        """For Fortran, use the 'link' tool (which is gfortran)."""
-        if language == "fortran":
-            return "link"
-        return super()._linker_for_language(language)
-
     def get_runtime_libs(
         self, linker_language: str, object_languages: set[str]
     ) -> list[str]:

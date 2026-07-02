@@ -119,14 +119,6 @@ class CudaToolchain(BaseToolchain):
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
         return [ToolContribution("cuda", flags=tuple(flags), defines=tuple(defines))]
 
-    def _linker_for_language(self, language: str) -> str:
-        """CUDA linking is typically handled by the host C++ compiler."""
-        # nvcc can link, but usually we delegate to the C++ toolchain
-        if language == "cuda":
-            # Return cuda so the resolver knows to use nvcc if needed
-            return "cuda"
-        return super()._linker_for_language(language)
-
 
 def find_cuda_toolchain() -> CudaToolchain | None:
     """Find CUDA installation and create toolchain.
