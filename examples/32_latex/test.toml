@@ -2,9 +2,7 @@
 
 [test]
 description = "LaTeX PDF compilation via latexmk"
-
-[test.verify]
-files = ["build/main.pdf"]
+expected_outputs = ["build/main.pdf"]
 
 [skip]
 require_commands = ["latexmk"]

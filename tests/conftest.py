@@ -1,8 +1,12 @@
 # SPDX-License-Identifier: MIT
 """Pytest configuration and shared fixtures."""
 
+from typing import Any
+
 import pytest
 
+from pcons.core.builder_registry import BuilderRegistry
+from pcons.core.preset import _PRESET_REGISTRY
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.gcc import (
@@ -59,12 +63,38 @@ int main(void) {
     return src_file
 
 
+def _snapshot_registries() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Snapshot the mutable dicts backing the global BuilderRegistry and the
+    contributed-preset registry, so registrations made during a test can be
+    undone afterwards. Copies the containers (not just rebinding names) so
+    later mutation of the live dicts doesn't affect the snapshot.
+    """
+    return dict(BuilderRegistry._builders), dict(_PRESET_REGISTRY)
+
+
+def _restore_registries(snapshot: tuple[dict[str, Any], dict[str, Any]]) -> None:
+    """Restore the global registries to a prior `_snapshot_registries()` result."""
+    builders, presets = snapshot
+    BuilderRegistry._builders.clear()
+    BuilderRegistry._builders.update(builders)
+    _PRESET_REGISTRY.clear()
+    _PRESET_REGISTRY.update(presets)
+
+
 @pytest.fixture(autouse=True)
 def clear_project_tree():
-    """Ensure global Project and generator state is cleared for each test."""
+    """Ensure global Project/generator/registry state is isolated per test.
+
+    Snapshots the BuilderRegistry and the contributed-preset registry before
+    each test and restores them afterwards, so a test that registers a
+    builder or preset (directly, or as a side effect of a non-hermetic module
+    load) can't leak state into later tests.
+    """
     Project._clear_tree()
     BaseGenerator._clear_pending()
+    registries = _snapshot_registries()
     yield
+    _restore_registries(registries)
     Project._clear_tree()
     BaseGenerator._clear_pending()
 

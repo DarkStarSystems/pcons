@@ -257,14 +257,114 @@ def discover_examples() -> list[Path]:
     return examples
 
 
+# Keys recognized at the top level of test.toml.
+_TOP_LEVEL_KEYS = {"test", "skip", "toolchains", "verify", "rebuild"}
+
+# Keys recognized one level down, inside each known top-level table. Some
+# support a platform-specific `<key>_<platform>` override (see
+# get_platform_value()); those are listed separately so the suffixed form is
+# accepted too.
+_TEST_SECTION_KEYS = {
+    "description",
+    "build_command",
+    "variants",
+    "timeout",
+    "generator",
+}
+_TEST_SECTION_PLATFORM_KEYS = {
+    "expected_outputs",
+    "expected_install_outputs",
+    "build_targets",
+    "toolchains",
+    "toolchain",
+}
+_SKIP_SECTION_KEYS = {
+    "platforms",
+    "requires",
+    "require_commands",
+    "requires_any",
+    "require_env",
+    "requires_cxx_modules",
+    "requires_cxx_std_module",
+    "generators",
+    "rebuild_on_windows",
+}
+_VERIFY_SECTION_PLATFORM_KEYS = {"commands"}
+_TOOLCHAINS_SECTION_KEYS = {"linux", "darwin", "windows"}
+
+_PLATFORM_SUFFIXES = ("windows", "darwin", "linux")
+
+
+def _validate_known_keys(
+    test_toml: Path,
+    section: str,
+    table: dict[str, Any],
+    allowed: set[str],
+    platform_aware: set[str] = frozenset(),
+) -> None:
+    """Raise if `table` has keys outside `allowed`/`platform_aware` (+ its
+    `_<platform>` suffixed forms).
+
+    A misnamed key (e.g. `test.expected_output` instead of the recognized
+    `test.expected_outputs`) otherwise silently disables the check it was
+    meant to enable — the build still passes, just with less coverage than
+    the author intended. Failing loudly on an unknown key catches the typo
+    instead.
+    """
+    unknown = [
+        key
+        for key in table
+        if key not in allowed
+        and key not in platform_aware
+        and not any(
+            key == f"{base}_{p}" for base in platform_aware for p in _PLATFORM_SUFFIXES
+        )
+    ]
+    if unknown:
+        raise ValueError(
+            f"{test_toml}: unknown key(s) in [{section}]: {', '.join(sorted(unknown))}"
+        )
+
+
 def load_test_config(example_dir: Path) -> dict[str, Any]:
-    """Load test.toml configuration."""
+    """Load test.toml configuration.
+
+    Validates that only recognized keys are present (see `_validate_known_keys`)
+    so a misnamed key fails the test run loudly instead of silently disabling
+    the verification it was meant to enable.
+    """
     if tomllib is None:
         pytest.skip("tomllib/tomli not available")
 
     config_file = example_dir / "test.toml"
     with open(config_file, "rb") as f:
-        return tomllib.load(f)
+        config = tomllib.load(f)
+
+    _validate_known_keys(config_file, "top level", config, _TOP_LEVEL_KEYS)
+    if "test" in config:
+        _validate_known_keys(
+            config_file,
+            "test",
+            config["test"],
+            _TEST_SECTION_KEYS,
+            _TEST_SECTION_PLATFORM_KEYS,
+        )
+    if "skip" in config:
+        _validate_known_keys(config_file, "skip", config["skip"], _SKIP_SECTION_KEYS)
+    if "verify" in config:
+        _validate_known_keys(
+            config_file,
+            "verify",
+            config["verify"],
+            set(),
+            _VERIFY_SECTION_PLATFORM_KEYS,
+        )
+    if "toolchains" in config:
+        _validate_known_keys(
+            config_file, "toolchains", config["toolchains"], _TOOLCHAINS_SECTION_KEYS
+        )
+
+    return config
 
 
 def should_skip(config: dict[str, Any]) -> str | None:
