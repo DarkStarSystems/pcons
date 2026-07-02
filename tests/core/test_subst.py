@@ -294,6 +294,34 @@ class TestSubstFunctions:
             subst(["${prefix(a)}"], {"a": "-I"})
         assert "2 args" in str(exc_info.value)
 
+    def test_function_call_with_space_after_comma_in_string_template(self):
+        """A space after the comma in ${func(a, b)} must not break tokenization
+        when the function call appears in a *string* template (not a list)."""
+        ns = {"sep": ",", "items": ["a", "b", "c"]}
+        result = subst("${join(sep, items)}", ns)
+        assert result == ["a,b,c"]
+
+    def test_function_call_with_space_mixed_with_other_tokens(self):
+        ns = {"iprefix": "-I", "includes": ["/usr/include", "/opt/include"]}
+        result = subst("gcc ${prefix(iprefix, includes)} -c file.c", ns)
+        assert result == ["gcc", "-I/usr/include", "-I/opt/include", "-c", "file.c"]
+
+    def test_prefix_expands_variable_references_in_list_items(self):
+        """List items that are themselves $var references must be recursively
+        expanded, not passed through as literal '$var' text."""
+        ns = {
+            "iprefix": "-I",
+            "includes": ["$abs_include", "relative/inc"],
+            "abs_include": "/opt/local/include",
+        }
+        result = subst(["${prefix(iprefix, includes)}"], ns)
+        assert result == ["-I/opt/local/include", "-Irelative/inc"]
+
+    def test_join_expands_variable_references_in_list_items(self):
+        ns = {"sep": ",", "items": ["$x", "y"], "x": "X"}
+        result = subst(["${join(sep, items)}"], ns)
+        assert result == ["X,y"]
+
 
 class TestSubstErrors:
     """Test error handling."""
@@ -339,6 +367,18 @@ class TestSubstErrors:
         }
         with pytest.raises(CircularReferenceError):
             subst("$a", ns)
+
+    def test_self_referential_list_variable(self):
+        """A list variable whose item refers back to itself must raise
+        CircularReferenceError, not RecursionError."""
+        ns = {"x": ["$x"]}
+        with pytest.raises(CircularReferenceError):
+            subst(["$x"], ns)
+
+    def test_mutually_referential_list_variables(self):
+        ns = {"a": ["$b"], "b": ["$a"]}
+        with pytest.raises(CircularReferenceError):
+            subst(["$a"], ns)
 
 
 class TestSubstEdgeCases:
@@ -466,6 +506,53 @@ class TestToShellCommand:
         result = to_shell_command(tokens, shell="ninja")
         assert "\\$$HOME" in result
         assert "$in" in result
+
+    # --- Security: space-free tokens with shell metacharacters must be
+    # neutralized, not passed through bare (a token could be an
+    # attacker-influenced filename from a glob, or a flag pulled from a
+    # malicious Conan/pkg-config .pc file). ---
+
+    def test_ninja_quotes_backtick_command_substitution(self):
+        tokens = ["gcc", "-c", "`id`.c", "-o", "$out"]
+        result = to_shell_command(tokens, shell="ninja")
+        # The backtick must be escaped so it can't run as a command substitution
+        assert "`id`.c" not in result
+        assert "\\`id\\`.c" in result
+
+    def test_ninja_quotes_dollar_paren_command_substitution(self):
+        tokens = ["gcc", "-c", "$(id).c", "-o", "$out"]
+        result = to_shell_command(tokens, shell="ninja")
+        # The token must be quoted, and its leading '$' backslash-escaped, so
+        # that after ninja's own $$ -> $ pass the shell sees `\$(id).c`
+        # (a literal, escaped $) rather than an executable `$(id)` command
+        # substitution.
+        assert '"\\$$(id).c"' in result
+
+    def test_ninja_quotes_semicolon(self):
+        tokens = ["gcc", "-c", "x;touch_pwned.c", "-o", "$out"]
+        result = to_shell_command(tokens, shell="ninja")
+        # The semicolon-bearing token must be quoted, not passed through bare
+        assert result.count('"x;touch_pwned.c"') == 1
+
+    def test_ninja_quotes_pipe_and_ampersand(self):
+        tokens = ["gcc", "-c", "a|b&c.c", "-o", "$out"]
+        result = to_shell_command(tokens, shell="ninja")
+        assert '"a|b&c.c"' in result
+
+    def test_ninja_still_expands_topdir_when_quoted(self):
+        """$topdir must still be present (unescaped) for ninja to expand,
+        even when the surrounding token needs quoting for other reasons."""
+        tokens = ["gcc", "-c", "$topdir/src/x;y.c", "-o", "$out"]
+        result = to_shell_command(tokens, shell="ninja")
+        assert "$topdir/src/x;y.c" in result
+        assert result.count('"') >= 2
+
+    def test_ninja_bare_in_out_still_unquoted(self):
+        """$in/$out must remain bare (unquoted) so multi-file expansion works."""
+        tokens = ["gcc", "-c", "$in", "-o", "$out"]
+        result = to_shell_command(tokens, shell="ninja")
+        assert " $in " in f" {result} "
+        assert result.endswith("$out")
 
 
 class TestGeneratorVariables:

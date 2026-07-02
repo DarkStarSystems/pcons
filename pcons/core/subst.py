@@ -326,6 +326,44 @@ _TOKEN_PATTERN = re.compile(
 _ARG_SPLIT = re.compile(r",\s*")
 
 
+def _split_template_string(template: str) -> list[str]:
+    """Split a string command template on whitespace into tokens.
+
+    Like str.split(), but treats a ``${...}`` span as a single unbreakable
+    token even if it contains whitespace. This keeps function-call syntax
+    such as ``${join(sep, items)}`` intact when the argument list has a
+    space after the comma, instead of tearing it apart before it can be
+    recognized as a function call.
+    """
+    tokens: list[str] = []
+    current: list[str] = []
+    depth = 0
+    i = 0
+    n = len(template)
+    while i < n:
+        ch = template[i]
+        if ch == "$" and i + 1 < n and template[i + 1] == "{":
+            depth += 1
+            current.append("${")
+            i += 2
+            continue
+        if ch == "}" and depth > 0:
+            depth -= 1
+            current.append("}")
+            i += 1
+            continue
+        if ch.isspace() and depth == 0:
+            if current:
+                tokens.append("".join(current))
+                current = []
+        else:
+            current.append(ch)
+        i += 1
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
 # =============================================================================
 # Core substitution
 # =============================================================================
@@ -374,7 +412,11 @@ def _subst_command(
     SourcePath and TargetPath marker objects in the template are preserved
     as-is, allowing generators to convert them to appropriate syntax.
     """
-    tokens = template.split() if isinstance(template, str) else list(template)
+    tokens = (
+        _split_template_string(template)
+        if isinstance(template, str)
+        else list(template)
+    )
 
     result: list[CommandToken] = []
     for token in tokens:
@@ -431,7 +473,9 @@ def _expand_token(
                 else:
                     sv = str(v)
                     if "$" in sv:
-                        exp = _expand_token(sv, namespace, expanding, location)
+                        exp = _expand_token(
+                            sv, namespace, expanding | {var_name}, location
+                        )
                         if isinstance(exp, list):
                             var_result.extend(cast(list[CommandToken], exp))
                         else:
@@ -551,6 +595,7 @@ def _call_function(
         prefix = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
+        items = _expand_items(items, namespace, expanding, location)
         result: list[CommandToken] = []
         for item in items:
             if isinstance(item, ProjectPath):
@@ -569,6 +614,7 @@ def _call_function(
         items = _resolve_arg(args[0], namespace, expanding, location)
         suffix = str(_resolve_arg(args[1], namespace, expanding, location))
         items = items if isinstance(items, list) else [items]
+        items = _expand_items(items, namespace, expanding, location)
         suffix_result: list[CommandToken] = [str(item) + suffix for item in items]
         return suffix_result
 
@@ -581,6 +627,7 @@ def _call_function(
         items = _resolve_arg(args[1], namespace, expanding, location)
         suffix = str(_resolve_arg(args[2], namespace, expanding, location))
         items = items if isinstance(items, list) else [items]
+        items = _expand_items(items, namespace, expanding, location)
         wrap_result: list[CommandToken] = [
             prefix + str(item) + suffix for item in items
         ]
@@ -594,6 +641,7 @@ def _call_function(
         sep = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
+        items = _expand_items(items, namespace, expanding, location)
         join_result: list[CommandToken] = [sep.join(str(item) for item in items)]
         return join_result
 
@@ -607,6 +655,7 @@ def _call_function(
         prefix = str(_resolve_arg(args[0], namespace, expanding, location))
         items = _resolve_arg(args[1], namespace, expanding, location)
         items = items if isinstance(items, list) else [items]
+        items = _expand_items(items, namespace, expanding, location)
         pairwise_result: list[CommandToken] = []
         for item in items:
             pairwise_result.append(prefix)
@@ -615,6 +664,39 @@ def _call_function(
 
     else:
         raise SubstitutionError(f"Unknown function: {func_name}", location)
+
+
+def _expand_list_item(
+    item: Any,
+    namespace: Namespace,
+    expanding: set[str],
+    location: SourceLocation | None,
+) -> list[Any]:
+    """Recursively expand $var references embedded in a resolved list item.
+
+    Mirrors the expansion applied to whole-token list variables in
+    _expand_token(), so that list items which are themselves variable
+    references (e.g. a list value of ["$other", "literal"]) get expanded
+    rather than leaking a literal "$other" into the command. Non-string
+    items (marker objects like ProjectPath/PathToken) pass through unchanged.
+    """
+    if isinstance(item, str) and "$" in item:
+        expanded = _expand_token(item, namespace, expanding, location)
+        return expanded if isinstance(expanded, list) else [expanded]
+    return [item]
+
+
+def _expand_items(
+    items: list[Any],
+    namespace: Namespace,
+    expanding: set[str],
+    location: SourceLocation | None,
+) -> list[Any]:
+    """Expand $var references in each element of a resolved argument list."""
+    result: list[Any] = []
+    for item in items:
+        result.extend(_expand_list_item(item, namespace, expanding, location))
+    return result
 
 
 def _resolve_arg(
@@ -721,7 +803,11 @@ def _quote_for_shell(s: str, shell: str) -> str:
         # Strategy:
         # - Ninja variables ($in, $out, $topdir, etc.) → don't quote (ninja expands them)
         # - Shell operators (>, |, &&) → don't quote
-        # - Path-like arguments with spaces (pcons-expanded) → quote with double quotes
+        # - Tokens containing shell metacharacters (spaces, but also things like
+        #   backticks, ;, |, &, (, ), <, >, *, ? - which may come from
+        #   attacker-influenced input such as globbed filenames or flags pulled
+        #   from a dependency's Conan/pkg-config metadata) → quote with double
+        #   quotes so the shell can't interpret them
         # - Simple flags (--type, -c) → don't quote
         import re
 
@@ -749,6 +835,18 @@ def _quote_for_shell(s: str, shell: str) -> str:
         if re.match(r"^\$[a-zA-Z_][a-zA-Z0-9_.]*$", s):
             return s
 
+        # Any shell metacharacter (not just whitespace) means the shell could
+        # interpret this token specially: backticks/`$(...)` (command
+        # substitution), `;`/`|`/`&` (command separators), `()`/`<>` etc.
+        # Decide on quoting - and escape backslash/quote/backtick for the
+        # quoted form - using the token's original content, before the $
+        # escaping below inserts backslashes of its own.
+        needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>")
+        if needs_quote:
+            # Escape backslash, double quote, and backtick so the token
+            # survives intact inside a double-quoted shell string.
+            s = s.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
+
         # Escape literal $ signs that are NOT ninja variable references.
         # Ninja commands are passed to the shell, so $ must survive both layers:
         #   \$$ in ninja file → ninja expands $$ to $ → shell sees \$ → literal $
@@ -761,16 +859,7 @@ def _quote_for_shell(s: str, shell: str) -> str:
             s,
         )
 
-        # Path-like arguments with spaces need quoting (for paths pcons expanded)
-        # Use double quotes for cross-platform compatibility
-        has_spaces = " " in s or "\t" in s
-        if has_spaces:
-            # Escape embedded double quotes
-            escaped = s.replace('"', '\\"')
-            return f'"{escaped}"'
-
-        # Everything else (flags, paths without spaces) - pass through
-        return s
+        return f'"{s}"' if needs_quote else s
 
     if shell == "bash":
         needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>")
