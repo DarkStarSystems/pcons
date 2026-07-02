@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from pcons.util.commands import concat, copy, copytree
@@ -128,3 +129,36 @@ class TestCopytree:
         copytree(str(src), str(dest), stamp=str(stamp))
 
         assert stamp.exists()
+
+    def test_copytree_depfile_escapes_spaces(self, tmp_path: Path) -> None:
+        """Test that source paths with spaces are escaped in the depfile.
+
+        Ninja depfiles treat unescaped spaces as dependency separators, so a
+        path containing a space must be written as ``my\\ file.txt`` (a single
+        escaped dependency), not ``my file.txt`` (which ninja would parse as
+        two separate dependencies).
+        """
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "my file.txt").write_text("has a space")
+
+        dest = tmp_path / "dest"
+        depfile = tmp_path / "deps.d"
+
+        copytree(str(src), str(dest), depfile=str(depfile))
+
+        content = depfile.read_text()
+        assert "my\\ file.txt" in content
+
+        # Verify the depfile parses to exactly one dependency for this file:
+        # join line continuations, then split on spaces that are NOT
+        # backslash-escaped (mimicking ninja's depfile tokenizer), and
+        # finally unescape "\ " back to a plain space.
+        _, deps_part = content.split(":", 1)
+        deps_part = deps_part.replace("\\\n", " ")
+        tokens = re.split(r"(?<!\\) ", deps_part)
+        deps = [t.strip().replace("\\ ", " ") for t in tokens if t.strip()]
+        expected = str(src / "my file.txt").replace("\\", "/")
+        assert deps.count(expected) == 1
+        assert not any(d.endswith("/my") for d in deps)
+        assert "file.txt" not in deps
