@@ -29,6 +29,7 @@ import logging
 import shutil
 from typing import TYPE_CHECKING, Any
 
+from pcons.configure.platform import get_platform
 from pcons.core.preset import ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.tools.cuda import CudaCompiler
@@ -73,12 +74,22 @@ class CudaToolchain(BaseToolchain):
         suffix_lower = suffix.lower()
         if suffix_lower == ".cu":
             # Use TargetPath for depfile - resolved to PathToken during resolution
-            return SourceHandler("cuda", "cuda", ".o", TargetPath(suffix=".d"), "gcc")
+            return SourceHandler(
+                "cuda",
+                "cuda",
+                self.get_object_suffix(),
+                TargetPath(suffix=".d"),
+                "gcc",
+            )
         return None
 
     def get_object_suffix(self) -> str:
-        """CUDA produces standard object files."""
-        return ".o"
+        """CUDA object suffix matches the host platform (.obj on Windows, .o elsewhere).
+
+        nvcc is paired with a host C/C++ toolchain (MSVC on Windows, GCC/Clang
+        elsewhere), so its objects must match that toolchain's convention.
+        """
+        return get_platform().object_suffix
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

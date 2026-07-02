@@ -13,7 +13,7 @@ toolchains including:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import get_platform
 from pcons.core.preset import ToolContribution
@@ -42,6 +42,12 @@ class UnixToolchain(BaseToolchain):
     - Override _configure_tools() to configure toolchain-specific tools
     - Override get_source_handler() if they handle additional file types
     """
+
+    # Whether cc/cxx are Clang-family drivers that understand
+    # ``--target=<triple>``. GCC (and GCC-based toolchains like gfortran)
+    # reject --target=; it's a Clang/clang-cl flag. LlvmToolchain overrides
+    # this to True.
+    IS_CLANG_DRIVER: ClassVar[bool] = False
 
     # Named feature presets for common development workflows (see docs/presets.md).
     # Keep them small and orthogonal: `warnings` enables warnings; `werror`
@@ -266,13 +272,14 @@ class UnixToolchain(BaseToolchain):
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
         """Base contributions plus --target triple (Clang only) and --sysroot.
 
-        GCC uses different toolchain binaries rather than a --target flag, but
-        --target is harmless for the cross-preset descriptors we support.
+        GCC uses different toolchain binaries rather than a --target flag, and
+        rejects --target= outright, so it's only emitted for Clang-family
+        drivers (see IS_CLANG_DRIVER).
         """
         contribs = super()._target_contributions(cross)
         contribs.extend(self._sysroot_contributions(cross))
         triple = getattr(cross, "triple", None)
-        if triple:
+        if triple and self.IS_CLANG_DRIVER:
             contribs.append(ToolContribution("cc", flags=(f"--target={triple}",)))
             contribs.append(ToolContribution("cxx", flags=(f"--target={triple}",)))
         return contribs
