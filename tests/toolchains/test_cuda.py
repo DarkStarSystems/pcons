@@ -1,8 +1,33 @@
 # SPDX-License-Identifier: MIT
 """Tests for CUDA toolchain."""
 
+from pcons.configure.platform import Platform, get_platform
 from pcons.toolchains import CudaCompiler, CudaToolchain, find_cuda_toolchain
 from pcons.tools.toolchain import SourceHandler
+
+_WINDOWS_PLATFORM = Platform(
+    os="windows",
+    arch="x86_64",
+    is_64bit=True,
+    exe_suffix=".exe",
+    shared_lib_suffix=".dll",
+    shared_lib_prefix="",
+    static_lib_suffix=".lib",
+    static_lib_prefix="",
+    object_suffix=".obj",
+)
+
+_LINUX_PLATFORM = Platform(
+    os="linux",
+    arch="x86_64",
+    is_64bit=True,
+    exe_suffix="",
+    shared_lib_suffix=".so",
+    shared_lib_prefix="lib",
+    static_lib_suffix=".a",
+    static_lib_prefix="lib",
+    object_suffix=".o",
+)
 
 
 class TestCudaCompiler:
@@ -58,7 +83,7 @@ class TestCudaToolchain:
         assert isinstance(handler, SourceHandler)
         assert handler.tool_name == "cuda"
         assert handler.language == "cuda"
-        assert handler.object_suffix == ".o"
+        assert handler.object_suffix == get_platform().object_suffix
 
     def test_source_handler_unknown(self):
         """CudaToolchain returns None for unknown suffixes."""
@@ -68,9 +93,31 @@ class TestCudaToolchain:
         assert toolchain.get_source_handler(".txt") is None
 
     def test_object_suffix(self):
-        """CudaToolchain produces .o files."""
+        """CudaToolchain matches the host platform's object suffix."""
+        toolchain = CudaToolchain()
+        assert toolchain.get_object_suffix() == get_platform().object_suffix
+
+    def test_object_suffix_windows(self, monkeypatch):
+        """On Windows, nvcc objects pair with MSVC's .obj convention."""
+        monkeypatch.setattr(
+            "pcons.toolchains.cuda.get_platform", lambda: _WINDOWS_PLATFORM
+        )
+        toolchain = CudaToolchain()
+        assert toolchain.get_object_suffix() == ".obj"
+        handler = toolchain.get_source_handler(".cu")
+        assert handler is not None
+        assert handler.object_suffix == ".obj"
+
+    def test_object_suffix_linux(self, monkeypatch):
+        """On Linux, nvcc objects pair with GCC/Clang's .o convention."""
+        monkeypatch.setattr(
+            "pcons.toolchains.cuda.get_platform", lambda: _LINUX_PLATFORM
+        )
         toolchain = CudaToolchain()
         assert toolchain.get_object_suffix() == ".o"
+        handler = toolchain.get_source_handler(".cu")
+        assert handler is not None
+        assert handler.object_suffix == ".o"
 
 
 class TestCudaVariants:

@@ -221,6 +221,23 @@ class TestCrossPresetApplication:
         assert "--target=aarch64-linux-gnu" in env.cc.flags
         assert "--target=aarch64-linux-gnu" in env.cxx.flags
 
+    def test_gcc_apply_triple_no_target_flag(self, test_project):  # noqa: F811
+        """GCC rejects --target=; the cross preset must not add it for gcc."""
+        from pcons.toolchains.gcc import GccToolchain
+
+        env = _make_unix_env()
+        toolchain = GccToolchain()
+
+        preset = CrossPreset(
+            name="test",
+            arch="arm64",
+            triple="aarch64-linux-gnu",
+        )
+        toolchain.apply_cross_preset(env, preset)
+
+        assert not any("--target=" in str(f) for f in env.cc.flags)
+        assert not any("--target=" in str(f) for f in env.cxx.flags)
+
     def test_unix_apply_sysroot(self, test_project):  # noqa: F811
         """UnixToolchain should apply --sysroot flag."""
         from pcons.toolchains.llvm import LlvmToolchain
