@@ -62,6 +62,57 @@ def _find_msvc_install() -> Path | None:
     return None
 
 
+def _version_sort_key(name: str) -> tuple[int, ...] | None:
+    """Parse a dot-separated version directory name into an int tuple.
+
+    Handles both MSVC tool versions (``14.38.33130``) and Windows SDK
+    versions (``10.0.22621.0``). Returns None if any component isn't a
+    plain non-negative integer, so callers can skip garbage directory
+    names instead of crashing.
+    """
+    parts = name.split(".")
+    if not parts:
+        return None
+    try:
+        return tuple(int(p) for p in parts)
+    except ValueError:
+        return None
+
+
+def _sorted_version_dirs(parent: Path) -> list[Path]:
+    """List subdirectories of `parent` sorted newest-version-first.
+
+    Directory names are compared numerically component-by-component
+    (e.g. "14.10" > "14.9"), unlike plain lexicographic sort. Entries
+    that aren't dirs or don't parse as a version are skipped.
+    """
+    keyed = []
+    for entry in parent.iterdir():
+        if not entry.is_dir():
+            continue
+        key = _version_sort_key(entry.name)
+        if key is None:
+            continue
+        keyed.append((key, entry))
+    keyed.sort(key=lambda pair: pair[0], reverse=True)
+    return [entry for _, entry in keyed]
+
+
+def _host_arch_dirs() -> tuple[str, str]:
+    """Return the (host, target) bin-dir names for the running host.
+
+    Matches MSVC's `bin/Host<ARCH>/<arch>/` layout (e.g. `Hostx64/x64`),
+    used both to locate the host-native toolset and as a same-arch
+    fallback bin directory when no dev shell has been activated.
+    """
+    import platform as _platform
+
+    machine = _platform.machine().lower()
+    if machine in ("arm64", "aarch64"):
+        return "HostARM64", "arm64"
+    return "Hostx64", "x64"
+
+
 def _find_msvc_modules_dir() -> Path | None:
     """Find the MSVC C++ standard library modules directory.
 
@@ -83,7 +134,7 @@ def _find_msvc_modules_dir() -> Path | None:
     vc_tools = vs_path / "VC" / "Tools" / "MSVC"
     if not vc_tools.exists():
         return None
-    for version_dir in sorted(vc_tools.iterdir(), reverse=True):
+    for version_dir in _sorted_version_dirs(vc_tools):
         modules = version_dir / "modules"
         if (modules / "std.ixx").exists():
             return modules
@@ -168,8 +219,6 @@ def _find_msvc_bin_dir() -> Path | None:
     Returns the path to the host-appropriate bin directory containing
     cl.exe, link.exe, lib.exe, etc., or None if not found.
     """
-    import platform as _platform
-
     vs_path = _find_msvc_install()
     if vs_path is None:
         return None
@@ -177,14 +226,8 @@ def _find_msvc_bin_dir() -> Path | None:
     if not vc_tools.exists():
         return None
     # Use the latest installed version
-    machine = _platform.machine().lower()
-    if machine in ("arm64", "aarch64"):
-        host = "HostARM64"
-        target = "arm64"
-    else:
-        host = "Hostx64"
-        target = "x64"
-    for version_dir in sorted(vc_tools.iterdir(), reverse=True):
+    host, target = _host_arch_dirs()
+    for version_dir in _sorted_version_dirs(vc_tools):
         bin_dir = version_dir / "bin" / host / target
         if (bin_dir / "cl.exe").exists():
             return bin_dir
@@ -243,17 +286,13 @@ class MsvcCompiler(BaseTool):
 
         cl = config.find_program("cl.exe", version_flag="")
         if cl is None:
-            vs_path = _find_msvc_install()
-            if vs_path:
-                vc_tools = vs_path / "VC" / "Tools" / "MSVC"
-                if vc_tools.exists():
-                    for version_dir in sorted(vc_tools.iterdir(), reverse=True):
-                        cl_path = version_dir / "bin" / "Hostx64" / "x64" / "cl.exe"
-                        if cl_path.exists():
-                            from pcons.configure.config import ProgramInfo
+            bin_dir = _find_msvc_bin_dir()
+            if bin_dir is not None:
+                cl_path = bin_dir / "cl.exe"
+                if cl_path.exists():
+                    from pcons.configure.config import ProgramInfo
 
-                            cl = ProgramInfo(path=cl_path)
-                            break
+                    cl = ProgramInfo(path=cl_path)
 
         if cl is None:
             return None
@@ -394,8 +433,8 @@ class MsvcResourceCompiler(BaseTool):
             sdk_path = Path(program_files_x86) / "Windows Kits" / "10" / "bin"
             if sdk_path.exists():
                 # Find the latest SDK version
-                for version_dir in sorted(sdk_path.iterdir(), reverse=True):
-                    if version_dir.is_dir() and version_dir.name.startswith("10."):
+                for version_dir in _sorted_version_dirs(sdk_path):
+                    if version_dir.name.startswith("10."):
                         # Check architecture-specific paths
                         for arch in ["x64", "arm64", "x86"]:
                             rc_path = version_dir / arch / "rc.exe"
@@ -473,18 +512,15 @@ class MsvcAssembler(BaseTool):
         if ml is None:
             ml = config.find_program("ml.exe", version_flag="")
         if ml is None:
-            # Try to find in Visual Studio installation
-            vs_path = _find_msvc_install()
-            if vs_path:
-                vc_tools = vs_path / "VC" / "Tools" / "MSVC"
-                if vc_tools.exists():
-                    for version_dir in sorted(vc_tools.iterdir(), reverse=True):
-                        ml_path = version_dir / "bin" / "Hostx64" / "x64" / "ml64.exe"
-                        if ml_path.exists():
-                            from pcons.configure.config import ProgramInfo
+            # Try to find in Visual Studio installation (host-aware, like
+            # _find_msvc_bin_dir: ARM64 hosts get HostARM64/arm64, not x64).
+            bin_dir = _find_msvc_bin_dir()
+            if bin_dir is not None:
+                ml_path = bin_dir / "ml64.exe"
+                if ml_path.exists():
+                    from pcons.configure.config import ProgramInfo
 
-                            ml = ProgramInfo(path=ml_path)
-                            break
+                    ml = ProgramInfo(path=ml_path)
 
         if ml is None:
             return None
