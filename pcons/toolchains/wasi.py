@@ -21,7 +21,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from pcons.core.builder import CommandBuilder
 from pcons.core.subst import SourcePath, TargetPath
@@ -123,6 +123,15 @@ def _wasi_hints() -> list[Path | str] | None:
     """Search hints pointing at a wasi-sdk's bin directory, if one is found."""
     sdk = find_wasi_sdk()
     return [sdk / "bin"] if sdk else None
+
+
+def is_wasi_sdk_available() -> bool:
+    """Check whether a real wasi-sdk installation is available.
+
+    A bare ``clang`` on PATH is not sufficient — WASI requires wasi-sdk's
+    sysroot and wasm32-wasi-aware clang, not just any system compiler.
+    """
+    return find_wasi_sdk() is not None
 
 
 # =============================================================================
@@ -357,8 +366,8 @@ def find_wasi_toolchain() -> WasiToolchain:
     from pcons.tools.toolchain import toolchain_registry
 
     toolchain = toolchain_registry.find_available("wasm", ["wasi"])
-    if toolchain is not None:
-        return cast(WasiToolchain, toolchain)
+    if isinstance(toolchain, WasiToolchain):
+        return toolchain
 
     raise RuntimeError(
         "wasi-sdk not found. Install it from https://github.com/WebAssembly/wasi-sdk "
@@ -377,6 +386,7 @@ toolchain_registry.register(
     WasiToolchain,
     aliases=["wasi", "wasi-sdk"],
     check_command="clang",
+    is_available=is_wasi_sdk_available,
     tool_classes=[WasiCCompiler, WasiCxxCompiler, WasiArchiver, WasiLinker],
     category="wasm",
     platforms=["linux", "darwin"],
