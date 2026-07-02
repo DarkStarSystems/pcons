@@ -175,7 +175,7 @@ if TYPE_CHECKING:
             description: str | None = None,
             processor_architecture: str = 'x64',
             sign_cert: Path | None = None,
-            sign_password: str | None = None,
+            sign_password_env: str | None = None,
         ) -> Target:
             """Create a Windows MSIX package [win32 only]"""
             ...

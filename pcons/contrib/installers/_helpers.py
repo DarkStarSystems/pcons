@@ -13,8 +13,10 @@ for proper ninja integration, or called directly from Python.
 from __future__ import annotations
 
 import argparse
+import os
 import plistlib
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -284,6 +286,50 @@ def _xml_escape(text: str) -> str:
     )
 
 
+def sign_msix(
+    input_path: Path,
+    output_path: Path,
+    *,
+    signtool: str,
+    cert: Path,
+    password_env: str | None = None,
+) -> None:
+    """Copy an MSIX package and sign the copy with SignTool.
+
+    SignTool signs a file in place rather than producing a new file, so this
+    copies ``input_path`` to ``output_path`` first and signs that copy. The
+    original ``input_path`` is left untouched as an unsigned artifact.
+
+    Args:
+        input_path: Path to the unsigned .msix package.
+        output_path: Path to write the signed .msix package to.
+        signtool: Path to SignTool.exe.
+        cert: Path to the .pfx signing certificate.
+        password_env: Name of an environment variable holding the
+            certificate password. The password itself is never passed
+            through the build description or written to the build file;
+            it is read from the process environment when this runs.
+
+    Raises:
+        InstallerError: If password_env is given but the named environment
+            variable is not set.
+    """
+    shutil.copy(input_path, output_path)
+
+    sign_args = [signtool, "sign", "/fd", "SHA256", "/f", str(cert)]
+    if password_env:
+        password = os.environ.get(password_env)
+        if not password:
+            raise InstallerError(
+                f"Environment variable '{password_env}' is not set; "
+                "cannot sign MSIX package without the certificate password."
+            )
+        sign_args.extend(["/p", password])
+    sign_args.append(str(output_path))
+
+    subprocess.run(sign_args, check=True)
+
+
 def generate_msix_assets(output_dir: Path) -> None:
     """Generate placeholder PNG assets for MSIX packaging.
 
@@ -390,6 +436,19 @@ def main() -> int:
         "--output-dir", "-o", required=True, help="Output directory"
     )
 
+    # sign_msix command
+    sign_parser = subparsers.add_parser(
+        "sign_msix", help="Copy an MSIX package and sign the copy with SignTool"
+    )
+    sign_parser.add_argument("--input", required=True, help="Unsigned .msix path")
+    sign_parser.add_argument("--output", required=True, help="Signed .msix output path")
+    sign_parser.add_argument("--signtool", required=True, help="Path to SignTool.exe")
+    sign_parser.add_argument("--cert", required=True, help="Path to .pfx certificate")
+    sign_parser.add_argument(
+        "--password-env",
+        help="Environment variable holding the certificate password",
+    )
+
     args = parser.parse_args()
 
     if args.command == "gen_plist":
@@ -424,6 +483,14 @@ def main() -> int:
         )
     elif args.command == "gen_msix_assets":
         generate_msix_assets(Path(args.output_dir))
+    elif args.command == "sign_msix":
+        sign_msix(
+            Path(args.input),
+            Path(args.output),
+            signtool=args.signtool,
+            cert=Path(args.cert),
+            password_env=args.password_env,
+        )
 
     return 0
 
