@@ -5,6 +5,8 @@ The substitution system returns structured token lists, not strings.
 Shell quoting happens only at the final step via to_shell_command().
 """
 
+import platform
+
 import pytest
 
 from pcons.core.errors import (
@@ -515,9 +517,15 @@ class TestToShellCommand:
     def test_ninja_quotes_backtick_command_substitution(self):
         tokens = ["gcc", "-c", "`id`.c", "-o", "$out"]
         result = to_shell_command(tokens, shell="ninja")
-        # The backtick must be escaped so it can't run as a command substitution
-        assert "`id`.c" not in result
-        assert "\\`id\\`.c" in result
+        if platform.system() == "Windows":
+            # ninja runs cmd.exe, which has no backtick command substitution,
+            # so double-quoting the token is enough to keep it a literal.
+            assert '"`id`.c"' in result
+        else:
+            # ninja runs /bin/sh: the backtick must be escaped so it can't run
+            # as a command substitution.
+            assert "`id`.c" not in result
+            assert "\\`id\\`.c" in result
 
     def test_ninja_quotes_dollar_paren_command_substitution(self):
         tokens = ["gcc", "-c", "$(id).c", "-o", "$out"]
