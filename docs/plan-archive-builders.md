@@ -53,7 +53,7 @@ project.Install("packages/", [docs_tar, release_zip])
 
 project.Default(docs_tar, release_zip)
 project.resolve()
-NinjaGenerator().generate(project, "build")
+Generator().generate(project)
 ```
 
 ## Implementation Approach
