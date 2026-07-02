@@ -843,9 +843,21 @@ def _quote_for_shell(s: str, shell: str) -> str:
         # escaping below inserts backslashes of its own.
         needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>")
         if needs_quote:
-            # Escape backslash, double quote, and backtick so the token
-            # survives intact inside a double-quoted shell string.
-            s = s.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
+            if platform.system() == "Windows":
+                # Ninja runs cmd.exe on Windows. Backslash is not an escape
+                # character there, and backtick / $(...) are not command
+                # substitution, so wrapping in double quotes already
+                # neutralizes cmd's metacharacters (& | < > ^). Only embedded
+                # double quotes need escaping (\" for CommandLineToArgvW).
+                # Escaping backslashes here would corrupt payloads that rely on
+                # them, e.g. `python -c` string escapes or Windows paths.
+                s = s.replace('"', '\\"')
+            else:
+                # Ninja runs /bin/sh. Escape backslash, double quote, and
+                # backtick so the token survives intact inside a double-quoted
+                # shell string and can't break out or trigger command
+                # substitution.
+                s = s.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
 
         # Escape literal $ signs that are NOT ninja variable references.
         # Ninja commands are passed to the shell, so $ must survive both layers:
