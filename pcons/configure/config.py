@@ -84,6 +84,11 @@ class Configure:
         self._cache: dict[str, Any] = {}
         self._toolchains: dict[str, Toolchain] = {}
         self._programs: dict[str, ProgramInfo] = {}
+        # Derived output state for the config header. Rebuilt fresh from the
+        # define()/undefine()/check_*() calls made *this run* — never loaded
+        # from or persisted to the cache, so a removed define() call actually
+        # stops emitting once the build script no longer calls it.
+        self._defines: dict[str, str | int | None] = {}
 
         # Try to load existing cache
         self._load_cache()
@@ -167,19 +172,13 @@ class Configure:
         """
         trace("configure", "Finding program: %s", name)
 
-        # Check cache first
         cache_key = f"program:{name}"
-        if cache_key in self._cache:
-            cached = self._cache[cache_key]
-            path = Path(cached["path"])
-            if path.exists():
-                trace("configure", "  Found in cache: %s", path)
-                return ProgramInfo(path=path, version=cached.get("version"))
 
-        # Search for the program
+        # Explicit hints are the caller's most specific instruction, so they
+        # take priority over both the cache and PATH. This lets a caller
+        # override a stale/cached result (e.g. a different compiler install)
+        # by passing hints=[...].
         found_path: Path | None = None
-
-        # Check hints first
         if hints:
             for hint in hints:
                 hint_path = Path(hint)
@@ -193,6 +192,14 @@ class Configure:
                 if candidate.is_file() and os.access(candidate, os.X_OK):
                     found_path = candidate
                     break
+
+        # No hint match: fall back to the cache.
+        if found_path is None and cache_key in self._cache:
+            cached = self._cache[cache_key]
+            path = Path(cached["path"])
+            if path.exists():
+                trace("configure", "  Found in cache: %s", path)
+                return ProgramInfo(path=path, version=cached.get("version"))
 
         # Search PATH
         if found_path is None:
@@ -293,50 +300,19 @@ class Configure:
         """
         self._toolchains[toolchain.name] = toolchain
 
-    def check_compile(
-        self,
-        source: str,
-        *,
-        lang: str = "c",
-        flags: list[str] | None = None,
-    ) -> bool:
-        """Check if source code compiles.
-
-        Args:
-            source: Source code to compile.
-            lang: Language ('c' or 'cxx').
-            flags: Additional compiler flags.
-
-        Returns:
-            True if compilation succeeds.
-        """
-        # This is a placeholder - real implementation needs a compiler
-        # Will be implemented when toolchains are available
-        return False
-
-    def check_link(
-        self,
-        source: str,
-        *,
-        lang: str = "c",
-        flags: list[str] | None = None,
-        libs: list[str] | None = None,
-    ) -> bool:
-        """Check if source code compiles and links.
-
-        Args:
-            source: Source code to compile.
-            lang: Language ('c' or 'cxx').
-            flags: Additional compiler flags.
-            libs: Libraries to link.
-
-        Returns:
-            True if compilation and linking succeed.
-        """
-        # Placeholder - needs compiler/linker
-        return False
-
     # Feature check methods that track results for config header generation
+    #
+    # Note: there is no Configure.check_header()/check_symbol()/check_compile()
+    # here. Compiling a test program requires a real compiler, which means an
+    # Environment and a specific tool (e.g. "cc"/"cxx") — state that Configure
+    # itself does not have. Use ToolChecks (pcons.configure.checks) to run the
+    # actual compile probes, then record the outcome with define()/undefine():
+    #
+    #     checks = ToolChecks(config, env, "cc")
+    #     if checks.check_header("stdint.h").success:
+    #         config.define("HAVE_STDINT_H")
+    #     else:
+    #         config.undefine("HAVE_STDINT_H")
 
     def define(self, name: str, value: str | int | bool = 1) -> None:
         """Define a preprocessor macro for the config header.
@@ -353,11 +329,10 @@ class Configure:
             config.define("VERSION_MINOR", 2)
             config.define("HAVE_CUSTOM_FEATURE")
         """
-        defines = self._cache.setdefault("_defines", {})
         if isinstance(value, bool):
-            defines[name] = 1 if value else None  # None means #undef
+            self._defines[name] = 1 if value else None  # None means #undef
         else:
-            defines[name] = value
+            self._defines[name] = value
 
     def undefine(self, name: str) -> None:
         """Mark a macro as undefined for the config header.
@@ -367,56 +342,7 @@ class Configure:
         Args:
             name: Macro name.
         """
-        defines = self._cache.setdefault("_defines", {})
-        defines[name] = None
-
-    def check_header(
-        self,
-        header: str,
-        *,
-        define_name: str | None = None,
-        lang: str = "c",
-    ) -> bool:
-        """Check if a header file exists and can be included.
-
-        If found, defines HAVE_<HEADER>_H (with dots and slashes replaced).
-
-        Args:
-            header: Header file name (e.g., "stdint.h", "sys/types.h").
-            define_name: Override for the define name.
-            lang: Language ('c' or 'cxx').
-
-        Returns:
-            True if header is available.
-
-        Example:
-            if config.check_header("stdint.h"):
-                # HAVE_STDINT_H is defined
-                pass
-        """
-        # Cache key for this check
-        cache_key = f"header:{header}"
-        if cache_key in self._cache:
-            result = bool(self._cache[cache_key])
-        else:
-            # Try to compile a simple include
-            source = f"#include <{header}>\nint main(void) {{ return 0; }}\n"
-            result = self.check_compile(source, lang=lang)
-            self._cache[cache_key] = result
-
-        # Generate define name
-        if define_name is None:
-            # HAVE_STDINT_H, HAVE_SYS_TYPES_H, etc.
-            safe_name = header.upper().replace(".", "_").replace("/", "_")
-            define_name = f"HAVE_{safe_name}"
-
-        # Record the result
-        if result:
-            self.define(define_name)
-        else:
-            self.undefine(define_name)
-
-        return result
+        self._defines[name] = None
 
     def check_sizeof(
         self,
@@ -486,62 +412,6 @@ class Configure:
 
         return size_map.get(type_name.lower())
 
-    def check_symbol(
-        self,
-        symbol: str,
-        *,
-        header: str | None = None,
-        define_name: str | None = None,
-        lang: str = "c",
-    ) -> bool:
-        """Check if a symbol (function, variable, macro) exists.
-
-        Defines HAVE_<SYMBOL> if the symbol exists.
-
-        Args:
-            symbol: Symbol name (e.g., "pthread_create", "M_PI").
-            header: Header file that declares the symbol.
-            define_name: Override for the define name.
-            lang: Language ('c' or 'cxx').
-
-        Returns:
-            True if symbol exists.
-
-        Example:
-            if config.check_symbol("pthread_create", header="pthread.h"):
-                # HAVE_PTHREAD_CREATE is defined
-                pass
-        """
-        cache_key = f"symbol:{symbol}"
-        if cache_key in self._cache:
-            result = bool(self._cache[cache_key])
-        else:
-            # Build test source
-            include = f"#include <{header}>\n" if header else ""
-            # Try different approaches to detect the symbol
-            # First try using it as a function pointer (works for functions)
-            source = f"""{include}
-int main(void) {{
-    void (*fp)(void) = (void (*)(void)){symbol};
-    (void)fp;
-    return 0;
-}}
-"""
-            result = self.check_compile(source, lang=lang)
-            self._cache[cache_key] = result
-
-        # Generate define name
-        if define_name is None:
-            safe_name = symbol.upper()
-            define_name = f"HAVE_{safe_name}"
-
-        if result:
-            self.define(define_name)
-        else:
-            self.undefine(define_name)
-
-        return result
-
     def write_config_header(
         self,
         path: Path | str,
@@ -560,7 +430,9 @@ int main(void) {{
             include_platform: Include platform detection macros.
 
         Example:
-            config.check_header("stdint.h")
+            checks = ToolChecks(config, env, "cc")
+            if checks.check_header("stdint.h").success:
+                config.define("HAVE_STDINT_H")
             config.check_sizeof("int")
             config.define("VERSION", "1.0.0")
             config.write_config_header("config.h")
@@ -609,7 +481,7 @@ int main(void) {{
             lines.append("")
 
         # Collect defines by category
-        defines = self._cache.get("_defines", {})
+        defines = self._defines
 
         # Separate into categories
         have_defs = {k: v for k, v in defines.items() if k.startswith("HAVE_")}
@@ -657,9 +529,14 @@ int main(void) {{
         lines.append(f"#endif /* {guard} */")
         lines.append("")
 
-        # Write the file
+        # Write-if-changed: avoid bumping the file's mtime (and triggering a
+        # full rebuild of everything that includes it) when the content is
+        # unchanged from the previous run.
+        content = "\n".join(lines)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("\n".join(lines))
+        if path.exists() and path.read_text() == content:
+            return
+        path.write_text(content)
 
     def __repr__(self) -> str:
         return (

@@ -181,16 +181,38 @@ class ToolChecks:
         self._config.set(cache_key, result.success)
         return result
 
+    def _is_msvc_style(self) -> bool:
+        """Whether the configured compiler uses MSVC-style command lines.
+
+        MSVC and clang-cl (in its cl.exe-compatible mode) both take
+        slash-flags (/c, /Fo, /Fe, /E, /WX, ...) instead of the Unix-style
+        flags (-c, -o, -l, -E, -Werror, ...) used by GCC/Clang.
+        """
+        toolchain = getattr(self._env, "_toolchain", None)
+        tc_name = getattr(toolchain, "name", "") if toolchain else ""
+        if tc_name:
+            return tc_name in ("msvc", "clang-cl")
+        # No toolchain object attached to the environment (e.g. a bare
+        # Environment with cc.cmd set directly) -- fall back to sniffing the
+        # compiler executable's name.
+        compiler = self._get_compiler() or ""
+        return Path(compiler).stem.lower() in ("cl", "clang-cl")
+
     def _get_werror_flag(self) -> str:
         """Return the appropriate treat-warnings-as-errors flag.
 
         MSVC and clang-cl use /WX; GCC and Clang use -Werror.
         """
-        toolchain = getattr(self._env, "_toolchain", None)
-        tc_name = getattr(toolchain, "name", "") if toolchain else ""
-        if tc_name in ("msvc", "clang-cl"):
-            return "/WX"
-        return "-Werror"
+        return "/WX" if self._is_msvc_style() else "-Werror"
+
+    def _lib_flag(self, lib: str) -> str:
+        """Return the command-line argument to link against a library.
+
+        MSVC/clang-cl take a bare "name.lib" argument; GCC/Clang take "-lname".
+        """
+        if self._is_msvc_style():
+            return lib if lib.lower().endswith(".lib") else f"{lib}.lib"
+        return f"-l{lib}"
 
     def check_flag(self, flag: str) -> CheckResult:
         """Check if the compiler accepts a flag.
@@ -314,7 +336,13 @@ class ToolChecks:
             self._tool_name,
             self._caller_location(),
         )
-        cache_key = self._cache_key("type", type_name)
+        # Include headers in the cache key: the same type name can exist or
+        # not depending on which headers are included (e.g. a typedef only
+        # visible via a specific header).
+        cache_parts = [type_name]
+        if headers:
+            cache_parts.extend(sorted(headers))
+        cache_key = self._cache_key("type", *cache_parts)
         outcome = self._cached_or_compiler(cache_key)
         if isinstance(outcome, CheckResult):
             return outcome
@@ -354,7 +382,11 @@ class ToolChecks:
             self._tool_name,
             self._caller_location(),
         )
-        cache_key = self._cache_key("sizeof", type_name)
+        # Include headers in the cache key, same rationale as check_type().
+        cache_parts = [type_name]
+        if headers:
+            cache_parts.extend(sorted(headers))
+        cache_key = self._cache_key("sizeof", *cache_parts)
         cached = self._config.get(cache_key)
         if cached is not None:
             trace("configure", "  cached: %s", cached)
@@ -425,8 +457,10 @@ PCONS_UNDEFINED
 #endif
 """
         cdir = self._make_check_dir()
-        result = self._try_preprocess(compiler, source, check_dir=cdir)
-        self._cleanup_check_dir(*cdir)
+        try:
+            result = self._try_preprocess(compiler, source, check_dir=cdir)
+        finally:
+            self._cleanup_check_dir(*cdir)
         if not result.success:
             self._config.set(cache_key, "__UNDEFINED__")
             return None
@@ -471,7 +505,15 @@ PCONS_UNDEFINED
             self._tool_name,
             self._caller_location(),
         )
-        cache_key = self._cache_key("function", function)
+        # Include headers/libs in the cache key: they change what the probe
+        # actually compiles/links against, so a different combo must not
+        # collide with (or hit) another combo's cached result.
+        cache_parts = [function]
+        if headers:
+            cache_parts.extend(sorted(headers))
+        if libs:
+            cache_parts.extend(sorted(libs))
+        cache_key = self._cache_key("function", *cache_parts)
         outcome = self._cached_or_compiler(cache_key)
         if isinstance(outcome, CheckResult):
             return outcome
@@ -492,7 +534,7 @@ int main(void) {{
 """
         extra_flags: list[str] = []
         if libs:
-            extra_flags.extend(f"-l{lib}" for lib in libs)
+            extra_flags.extend(self._lib_flag(lib) for lib in libs)
 
         cdir = self._make_check_dir()
         try:
@@ -567,16 +609,25 @@ int main(void) {{
 
         try:
             src_path = dir_path / f"check{suffix}"
-            out_path = dir_path / "check.out"
-
             src_path.write_text(source)
 
-            cmd = [compiler]
-            if not link:
-                cmd.append("-c")
-            cmd.extend(["-o", str(out_path), str(src_path)])
-            if extra_flags:
-                cmd.extend(extra_flags)
+            if self._is_msvc_style():
+                out_path = dir_path / ("check.exe" if link else "check.obj")
+                cmd = [compiler, "/nologo"]
+                if extra_flags:
+                    cmd.extend(extra_flags)
+                if not link:
+                    cmd.append("/c")
+                cmd.append(f"/Fe{out_path}" if link else f"/Fo{out_path}")
+                cmd.append(str(src_path))
+            else:
+                out_path = dir_path / "check.out"
+                cmd = [compiler]
+                if not link:
+                    cmd.append("-c")
+                cmd.extend(["-o", str(out_path), str(src_path)])
+                if extra_flags:
+                    cmd.extend(extra_flags)
 
             trace("configure", "  cmd: %s", " ".join(cmd))
 
@@ -629,7 +680,10 @@ int main(void) {{
             src_path = dir_path / f"check{suffix}"
             src_path.write_text(source)
 
-            cmd = [compiler, "-E", str(src_path)]
+            if self._is_msvc_style():
+                cmd = [compiler, "/nologo", "/E", str(src_path)]
+            else:
+                cmd = [compiler, "-E", str(src_path)]
             trace("configure", "  cmd: %s", " ".join(cmd))
 
             try:
