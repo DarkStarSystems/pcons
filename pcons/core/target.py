@@ -884,9 +884,9 @@ class Target:
     def _collect_from_deps(self, result: UsageRequirements, visited: set[str]) -> None:
         """Recursively collect public requirements from dependencies."""
         for dep in self.transitive_dependencies():
-            if dep.name in visited:
+            if dep.qualified_name in visited:
                 continue
-            visited.add(dep.name)
+            visited.add(dep.qualified_name)
 
             # Merge this dependency's public requirements
             result.merge(dep.public)
@@ -903,11 +903,11 @@ class Target:
             Set of language names (e.g., {'c', 'cxx'}).
         """
         languages = set(self.required_languages)
-        visited: set[str] = {self.name}
+        visited: set[str] = {self.qualified_name}
 
         for dep in self.dependencies:
-            if dep.name not in visited:
-                visited.add(dep.name)
+            if dep.qualified_name not in visited:
+                visited.add(dep.qualified_name)
                 languages.update(dep.get_all_languages())
 
         return languages
@@ -944,8 +944,8 @@ class Target:
 
         def _collect(target: Target, *, include_private: bool) -> None:
             for dep in direct_deps(target, include_private=include_private):
-                if dep.name not in visited:
-                    visited.add(dep.name)
+                if dep.qualified_name not in visited:
+                    visited.add(dep.qualified_name)
                     # A static library's private link deps are not baked into the
                     # archive, so they must follow through to the link line. Shared
                     # libraries and other targets resolve their own private deps.

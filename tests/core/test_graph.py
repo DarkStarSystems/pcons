@@ -12,6 +12,7 @@ from pcons.core.graph import (
     topological_sort_targets,
 )
 from pcons.core.node import FileNode
+from pcons.core.project import Project
 from pcons.core.target import Target
 
 
@@ -85,8 +86,8 @@ class TestDetectCycles:
 
         cycles = detect_cycles_in_targets([a, b])
         assert len(cycles) == 1
-        assert "A" in cycles[0]
-        assert "B" in cycles[0]
+        assert a.qualified_name in cycles[0]
+        assert b.qualified_name in cycles[0]
 
     def test_self_cycle(self, test_project):  # noqa: F811
         a = Target("A")
@@ -211,3 +212,60 @@ class TestCollectBuildOrder:
         # left and right should come before top
         assert order.index(left) < order.index(top)
         assert order.index(right) < order.index(top)
+
+
+class TestSameShortNameAcrossSubprojects:
+    """Two subprojects may each define a target with the same short name.
+
+    Target identity is qualified_name, so graph algorithms keyed on the
+    bare .name incorrectly collapse two same-named targets from different
+    (sub)projects into one map entry: dropping targets from the result
+    (spurious DependencyCycleError from topological_sort_targets) or
+    silently skipping one of them during traversal.
+    """
+
+    def _make_sub_utils(self, root):
+        with root._enter_subdir("sub1"):
+            Project("sub1", root_dir=root.root_dir / "sub1")
+            util1 = Target("util")
+        with root._enter_subdir("sub2"):
+            Project("sub2", root_dir=root.root_dir / "sub2")
+            util2 = Target("util")
+        return util1, util2
+
+    def test_topological_sort_no_spurious_cycle(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        app = Target("app")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        result = topological_sort_targets([util1, util2, app])
+
+        assert set(result) == {util1, util2, app}
+        assert result.index(util1) < result.index(app)
+        assert result.index(util2) < result.index(app)
+
+    def test_detect_cycles_no_false_positive(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        app = Target("app")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        cycles = detect_cycles_in_targets([util1, util2, app])
+        assert cycles == []
+
+    def test_collect_all_nodes_includes_both(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        util1_out = FileNode("util1.o")
+        util2_out = FileNode("util2.o")
+        util1.output_nodes.append(util1_out)
+        util2.output_nodes.append(util2_out)
+
+        app = Target("app")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        nodes = collect_all_nodes([app])
+
+        assert util1_out in nodes
+        assert util2_out in nodes

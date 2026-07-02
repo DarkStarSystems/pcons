@@ -366,6 +366,63 @@ class TestTarget:
             Target("orphan")
 
 
+class TestSameShortNameAcrossSubprojects:
+    """Two subprojects may each define a target with the same short name.
+
+    Target identity is qualified_name (project::target), so graph
+    algorithms that key on the bare .name incorrectly collapse these into
+    one entry, silently dropping the second target's usage requirements.
+    """
+
+    def _make_sub_utils(self, root):
+        """Create two subprojects, each with a target named 'util'."""
+        with root._enter_subdir("sub1"):
+            Project("sub1", root_dir=root.root_dir / "sub1")
+            util1 = Target("util")
+        with root._enter_subdir("sub2"):
+            Project("sub2", root_dir=root.root_dir / "sub2")
+            util2 = Target("util")
+        return util1, util2
+
+    def test_transitive_dependencies_includes_both(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        assert util1.name == util2.name == "util"
+        assert util1.qualified_name != util2.qualified_name
+
+        app = Target("app")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        deps = app.transitive_dependencies()
+        assert set(deps) == {util1, util2}
+
+    def test_collect_usage_requirements_from_both(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        util1.public.defines.append("FROM_SUB1")
+        util2.public.defines.append("FROM_SUB2")
+
+        app = Target("app")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        requirements = app.collect_usage_requirements()
+        assert "FROM_SUB1" in requirements.defines
+        assert "FROM_SUB2" in requirements.defines
+
+    def test_get_all_languages_union(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        util1.required_languages.add("c")
+        util2.required_languages.add("cxx")
+
+        app = Target("app")
+        app.required_languages.add("fortran")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        langs = app.get_all_languages()
+        assert langs == {"fortran", "c", "cxx"}
+
+
 class TestImportedTarget:
     def test_creation(self, test_project):  # noqa: F811
         target = ImportedTarget("zlib", version="1.2.11")
