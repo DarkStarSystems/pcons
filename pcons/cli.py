@@ -916,10 +916,14 @@ def load_user_modules(args: argparse.Namespace) -> None:
     modules.load_modules(extra_paths)
 
 
-def find_command_in_argv(argv: list[str]) -> str | None:
-    """Find a valid command in argv, skipping options and their values.
+def _find_command_index(argv: list[str]) -> int | None:
+    """Find the index of the subcommand token in argv, or None.
 
-    Returns the command name if found, None otherwise.
+    Skips options and their values so an option value that happens to
+    equal a command name (e.g. ``--build-dir test``) is not mistaken for
+    the subcommand. Shared by :func:`find_command_in_argv` and the
+    ``pcons test`` dispatch in :func:`main`, so both agree on *where*
+    the command lives, not just its name.
     """
     valid_commands = {"info", "init", "generate", "build", "clean", "test"}
     # Options that take a value
@@ -957,9 +961,18 @@ def find_command_in_argv(argv: list[str]) -> str | None:
         else:
             # First positional argument
             if arg in valid_commands:
-                return arg
+                return i
             return None
     return None
+
+
+def find_command_in_argv(argv: list[str]) -> str | None:
+    """Find a valid command in argv, skipping options and their values.
+
+    Returns the command name if found, None otherwise.
+    """
+    idx = _find_command_index(argv)
+    return argv[idx] if idx is not None else None
 
 
 def add_build_args(parser: argparse.ArgumentParser) -> None:
@@ -1220,8 +1233,13 @@ def main() -> int:
     if command == "test":
         from pcons.test_runner import main as test_main
 
-        idx = sys.argv.index("test")
-        return test_main(sys.argv[idx + 1 :])
+        # Locate the subcommand positionally (same rules as
+        # find_command_in_argv) rather than scanning raw argv for the
+        # literal string "test", which could match an option's value
+        # (e.g. `pcons build --target test`).
+        idx = _find_command_index(sys.argv[1:])
+        assert idx is not None  # command == "test" guarantees a match
+        return test_main(sys.argv[idx + 2 :])
 
     # Special case: if --help or -h is present without a command,
     # use the full parser so help shows available commands

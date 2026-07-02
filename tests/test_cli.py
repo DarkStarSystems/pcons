@@ -792,6 +792,55 @@ class TestCLIArgumentParsing:
         assert result.returncode == 0
         assert "demo" in result.stdout
 
+    def test_test_dispatch_not_confused_by_option_value(self, tmp_path: Path) -> None:
+        """An option VALUE equal to 'test' must not be mistaken for the subcommand.
+
+        `pcons --build-dir test test ...` has "test" appearing twice: once
+        as the value of --build-dir, once as the actual subcommand. Locating
+        the dispatch point by scanning raw argv for the literal string
+        "test" (sys.argv.index("test")) finds the option value first and
+        hands the runner a bogus leading "test" positional, which its
+        argparse rejects. Dispatch must instead reuse the same
+        skip-options-and-their-values logic as find_command_in_argv.
+        """
+        import json as _json
+
+        manifest = tmp_path / "tests.json"
+        manifest.write_text(
+            _json.dumps(
+                {
+                    "version": 1,
+                    "project": "cli_dispatch",
+                    "build_dir": str(tmp_path),
+                    "tests": [
+                        {
+                            "name": "demo",
+                            "command": ["/bin/true"],
+                            "labels": ["unit"],
+                        }
+                    ],
+                }
+            )
+        )
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pcons.cli",
+                "--build-dir",
+                "test",
+                "test",
+                "--manifest",
+                str(manifest),
+                "--list",
+                "--no-color",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "demo" in result.stdout
+
     def test_generate_with_variable(self, tmp_path: Path) -> None:
         """Test pcons generate VAR=value works."""
         # Create a minimal pcons-build.py that just prints the variable

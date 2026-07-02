@@ -575,6 +575,10 @@ def run_all(
       - With ``stop_on_fail``, after the first failure no new tests are
         launched and remaining ones are emitted as ``SKIP``.
 
+    ``jobs <= 0`` follows ninja's ``-j0`` convention of "unlimited": every
+    ready test may launch at once (capped, in practice, at one worker per
+    test — there's no point in a bigger pool than that).
+
     The returned list preserves manifest order so report output is stable
     regardless of how tests interleave at runtime.
     """
@@ -582,9 +586,16 @@ def run_all(
     deps_of = {t["name"]: list(t.get("depends_on") or ()) for t in tests}
     _validate_deps(tests)
 
+    # Normalize once, and use this value for both the pool size and the
+    # launch gate below — using the raw (possibly non-positive) `jobs`
+    # for the gate while sizing the pool off `max(1, jobs)` meant `-j0`
+    # (or a negative value) made `len(running) >= jobs` always true, so
+    # no non-serial test was ever submitted.
+    effective_jobs = jobs if jobs > 0 else max(len(tests), 1)
+
     results: dict[str, TestResult] = {}
     pending: set[str] = set(by_name)
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, jobs))
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=effective_jobs)
     running: dict[concurrent.futures.Future, str] = {}
     serial_in_flight = False
     stopped = False
@@ -641,7 +652,7 @@ def run_all(
                 return
             if serial_in_flight:
                 continue
-            if len(running) >= jobs:
+            if len(running) >= effective_jobs:
                 break
             pending.discard(name)
             on_start(test)
@@ -740,6 +751,18 @@ def print_summary(
 
 # ----- Output: JUnit XML ----------------------------------------------------
 
+# XML 1.0 forbids most C0 control characters in text content (tab, LF, CR
+# are the only ones allowed below 0x20). Captured stdout/stderr from a
+# test process can contain anything — e.g. a test that crashes mid binary
+# write — so it must be scrubbed before being embedded, or ET.write()
+# produces a file that no XML parser will accept.
+_XML_ILLEGAL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+
+
+def _sanitize_xml_text(text: str) -> str:
+    """Strip control characters that are illegal in XML 1.0 text/attributes."""
+    return _XML_ILLEGAL_CHARS_RE.sub("", text)
+
 
 def write_junit(path: Path, project_name: str, results: list[TestResult]) -> None:
     """Write a single-suite JUnit XML report.
@@ -775,13 +798,20 @@ def write_junit(path: Path, project_name: str, results: list[TestResult]) -> Non
             time=f"{r.duration:.3f}",
         )
         if r.status == FAIL:
-            f = ET.SubElement(case, "failure", message=r.message or "test failed")
-            f.text = r.stderr or r.stdout or ""
+            f = ET.SubElement(
+                case, "failure", message=_sanitize_xml_text(r.message or "test failed")
+            )
+            f.text = _sanitize_xml_text(r.stderr or r.stdout or "")
         elif r.status in (TIMEOUT, ERROR):
-            e = ET.SubElement(case, "error", type=r.status, message=r.message or "")
-            e.text = r.stderr or r.stdout or ""
+            e = ET.SubElement(
+                case,
+                "error",
+                type=r.status,
+                message=_sanitize_xml_text(r.message or ""),
+            )
+            e.text = _sanitize_xml_text(r.stderr or r.stdout or "")
         elif r.status == SKIP:
-            ET.SubElement(case, "skipped", message=r.message or "")
+            ET.SubElement(case, "skipped", message=_sanitize_xml_text(r.message or ""))
 
     tree = ET.ElementTree(root)
     ET.indent(tree, space="  ")
@@ -896,11 +926,48 @@ def main(argv: list[str] | None = None) -> int:
     # The "build_dir" entry in the manifest is informational only.
     build_dir = manifest_path.parent.resolve()
 
+    # Labels survive discovery expansion unchanged (each discovered case
+    # inherits its parent's labels), so -L/-LE can be applied up front,
+    # against the pre-discovery entries. This lets a whole discover-enabled
+    # binary be skipped by label without ever invoking its "list test
+    # cases" flag. Name regexes (-R/-E) can't be applied yet: a discover
+    # entry's own name isn't one of the case names it will expand into, so
+    # those filters are re-applied below, once expansion has run.
+    label_filtered = filter_tests(
+        tests,
+        include_labels=args.L,
+        exclude_labels=args.LE,
+        include_regex=None,
+        exclude_regex=None,
+    )
+    label_filtered = expand_filter_with_deps(label_filtered, tests)
+
+    if args.list:
+        # --list only needs names, so there's no reason to actually run
+        # discovery binaries just to enumerate their cases; list the
+        # manifest-level entries instead (annotating discover entries,
+        # since their real case names are only known once run).
+        listed = filter_tests(
+            label_filtered,
+            include_labels=[],
+            exclude_labels=[],
+            include_regex=args.R,
+            exclude_regex=args.E,
+        )
+        print(f"Test project: {project_name} ({len(listed)} tests)")
+        for t in listed:
+            labels = ",".join(t.get("labels", []) or [])
+            label_str = f" [{labels}]" if labels else ""
+            discover_str = f" (discover: {t['discover']})" if t.get("discover") else ""
+            print(f"  {t['name']}{label_str}{discover_str}")
+        return 0
+
     # Discover test cases inside binaries that asked for it. This rewrites
-    # the manifest's test list in place: a "discover" entry is replaced by
-    # N entries, one per case found by running the binary's listing flag.
-    # Done before filtering so that label/regex filters apply per-case.
-    tests, _expansion_map = expand_discovered_tests(tests, build_dir)
+    # the test list in place: a "discover" entry is replaced by N entries,
+    # one per case found by running the binary's listing flag. Only the
+    # label-filtered survivors reach this point, so an excluded binary's
+    # cases are never enumerated.
+    tests, _expansion_map = expand_discovered_tests(label_filtered, build_dir)
 
     filtered = filter_tests(
         tests,
@@ -912,14 +979,6 @@ def main(argv: list[str] | None = None) -> int:
     # Auto-include any deps that the filter would otherwise drop, so that
     # `pcons test -L api` still pulls in a `setup_server` fixture.
     filtered = expand_filter_with_deps(filtered, tests)
-
-    if args.list:
-        print(f"Test project: {project_name} ({len(filtered)} tests)")
-        for t in filtered:
-            labels = ",".join(t.get("labels", []) or [])
-            label_str = f" [{labels}]" if labels else ""
-            print(f"  {t['name']}{label_str}")
-        return 0
 
     if not filtered:
         print(f"Test project: {project_name}: no tests matched.")
