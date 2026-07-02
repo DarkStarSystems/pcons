@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
+from pcons.core.errors import DependencyCycleError
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import TargetPath
@@ -186,6 +187,15 @@ class Resolver:
         # Register Command factory (env.Command doesn't use builder registry)
         self._builder_factories["Command"] = CommandNodeFactory(project)
 
+        # Stack of qualified_names currently being resolved. _resolve_target()
+        # recurses eagerly into target.depends() targets (_implicit_target_deps),
+        # which aren't reflected in the topological-order graph (that only
+        # covers .dependencies), so a depends()-only cycle isn't caught by
+        # _targets_in_build_order()'s cycle detection. This stack lets that
+        # recursion detect re-entrancy and raise a clean DependencyCycleError
+        # instead of recursing until RecursionError.
+        self._resolving: list[str] = []
+
     def resolve(self) -> None:
         """Resolve all targets in build order.
 
@@ -256,49 +266,65 @@ class Resolver:
         if target._resolved:
             return
 
+        qualified_name = target.qualified_name
+        if qualified_name in self._resolving:
+            # A depends()-only cycle: this target is already being resolved
+            # further up the call stack (reached via _implicit_target_deps
+            # recursion below), so raise instead of recursing forever.
+            cycle_start = self._resolving.index(qualified_name)
+            raise DependencyCycleError([*self._resolving[cycle_start:], qualified_name])
+
         trace("resolve", "Resolving target: %s", target.name)
 
-        env = target._env
+        self._resolving.append(qualified_name)
+        try:
+            env = target._env
 
-        # Dispatch to registered factory via _builder_name
-        builder_name = target._builder_name
-        if builder_name is not None and builder_name in self._builder_factories:
-            factory = self._builder_factories[builder_name]
-            factory.resolve(target, env)
-        elif env is None:
-            trace("resolve", "  Skipping target without env")
-        else:
-            logger.debug(
-                "Target '%s' has no factory registered for builder '%s'",
-                target.name,
-                builder_name,
-            )
+            # Dispatch to registered factory via _builder_name
+            builder_name = target._builder_name
+            if builder_name is not None and builder_name in self._builder_factories:
+                factory = self._builder_factories[builder_name]
+                factory.resolve(target, env)
+            elif env is None:
+                trace("resolve", "  Skipping target without env")
+            else:
+                logger.debug(
+                    "Target '%s' has no factory registered for builder '%s'",
+                    target.name,
+                    builder_name,
+                )
 
-        if target.output_nodes:
-            trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
+            if target.output_nodes:
+                trace(
+                    "resolve",
+                    "  Output: %s",
+                    [str(n.path) for n in target.output_nodes],
+                )
 
-        # Apply any extra implicit deps added via target.depends()
-        if target._extra_implicit_deps:
-            target._apply_extra_implicit_deps()
+            # Apply any extra implicit deps added via target.depends()
+            if target._extra_implicit_deps:
+                target._apply_extra_implicit_deps()
 
-        # Apply implicit target dependencies from target.depends(other_target).
-        # Propagated deps: outputs become implicit deps on all build nodes
-        # (intermediate + output). Output-only deps: only on output nodes.
-        for dep_target in target._implicit_target_deps:
-            if not dep_target._resolved:
-                self._resolve_target(dep_target)
-            for node in target.intermediate_nodes + target.output_nodes:
-                for dep_node in dep_target.output_nodes:
-                    if dep_node not in node.implicit_deps:
-                        node.implicit_deps.append(dep_node)
+            # Apply implicit target dependencies from target.depends(other_target).
+            # Propagated deps: outputs become implicit deps on all build nodes
+            # (intermediate + output). Output-only deps: only on output nodes.
+            for dep_target in target._implicit_target_deps:
+                if not dep_target._resolved:
+                    self._resolve_target(dep_target)
+                for node in target.intermediate_nodes + target.output_nodes:
+                    for dep_node in dep_target.output_nodes:
+                        if dep_node not in node.implicit_deps:
+                            node.implicit_deps.append(dep_node)
 
-        for dep_target in target._implicit_target_deps_output_only:
-            if not dep_target._resolved:
-                self._resolve_target(dep_target)
-            for node in target.output_nodes:
-                for dep_node in dep_target.output_nodes:
-                    if dep_node not in node.implicit_deps:
-                        node.implicit_deps.append(dep_node)
+            for dep_target in target._implicit_target_deps_output_only:
+                if not dep_target._resolved:
+                    self._resolve_target(dep_target)
+                for node in target.output_nodes:
+                    for dep_node in dep_target.output_nodes:
+                        if dep_node not in node.implicit_deps:
+                            node.implicit_deps.append(dep_node)
+        finally:
+            self._resolving.pop()
 
         target._resolved = True
 

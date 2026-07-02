@@ -34,18 +34,20 @@ def topological_sort_targets(targets: list[Target]) -> list[Target]:
     if not targets:
         return []
 
-    # Build adjacency list and in-degree count
+    # Build adjacency list and in-degree count. Keyed on qualified_name
+    # (project::target) rather than the bare name, since two targets in
+    # different (sub)projects may legitimately share a short name.
     # target -> set of targets that depend on it
-    dependents: dict[str, set[str]] = {t.name: set() for t in targets}
+    dependents: dict[str, set[str]] = {t.qualified_name: set() for t in targets}
     # target -> number of dependencies not yet processed
-    in_degree: dict[str, int] = {t.name: 0 for t in targets}
-    target_map: dict[str, Target] = {t.name: t for t in targets}
+    in_degree: dict[str, int] = {t.qualified_name: 0 for t in targets}
+    target_map: dict[str, Target] = {t.qualified_name: t for t in targets}
 
     for target in targets:
         for dep in target.dependencies:
-            if dep.name in dependents:
-                dependents[dep.name].add(target.name)
-                in_degree[target.name] += 1
+            if dep.qualified_name in dependents:
+                dependents[dep.qualified_name].add(target.qualified_name)
+                in_degree[target.qualified_name] += 1
 
     # Start with targets that have no dependencies
     queue = deque(name for name, count in in_degree.items() if count == 0)
@@ -82,11 +84,23 @@ def detect_cycles_in_targets(targets: list[Target]) -> list[list[str]]:
         Empty list if no cycles.
     """
     cycles: list[list[str]] = []
-    target_map: dict[str, Target] = {t.name: t for t in targets}
+    # Keyed on qualified_name (project::target): two targets in different
+    # (sub)projects may legitimately share a short name.
+    target_map: dict[str, Target] = {t.qualified_name: t for t in targets}
 
     # Colors: 0=white (unvisited), 1=gray (in progress), 2=black (done)
-    colors: dict[str, int] = {t.name: 0 for t in targets}
+    colors: dict[str, int] = {t.qualified_name: 0 for t in targets}
     path: list[str] = []
+
+    def target_deps(target: Target) -> list[Target]:
+        # Include implicit target deps from target.depends(other_target):
+        # they are real must-resolve-before edges (see Resolver._resolve_target)
+        # even though they don't propagate into .dependencies.
+        return [
+            *target.dependencies,
+            *target._implicit_target_deps,
+            *target._implicit_target_deps_output_only,
+        ]
 
     def dfs(name: str) -> None:
         colors[name] = 1  # Gray - in progress
@@ -94,23 +108,24 @@ def detect_cycles_in_targets(targets: list[Target]) -> list[list[str]]:
 
         target = target_map.get(name)
         if target:
-            for dep in target.dependencies:
-                if dep.name not in colors:
+            for dep in target_deps(target):
+                dep_name = dep.qualified_name
+                if dep_name not in colors:
                     # External dependency, skip
                     continue
-                if colors[dep.name] == 1:
+                if colors[dep_name] == 1:
                     # Found a back edge - there's a cycle
-                    cycle_start = path.index(dep.name)
-                    cycles.append(path[cycle_start:] + [dep.name])
-                elif colors[dep.name] == 0:
-                    dfs(dep.name)
+                    cycle_start = path.index(dep_name)
+                    cycles.append(path[cycle_start:] + [dep_name])
+                elif colors[dep_name] == 0:
+                    dfs(dep_name)
 
         path.pop()
         colors[name] = 2  # Black - done
 
     for target in targets:
-        if colors[target.name] == 0:
-            dfs(target.name)
+        if colors[target.qualified_name] == 0:
+            dfs(target.qualified_name)
 
     return cycles
 
@@ -178,9 +193,9 @@ def collect_all_nodes(targets: list[Target]) -> set[Node]:
     visited_targets: set[str] = set()
 
     def collect_from_target(target: Target) -> None:
-        if target.name in visited_targets:
+        if target.qualified_name in visited_targets:
             return
-        visited_targets.add(target.name)
+        visited_targets.add(target.qualified_name)
 
         # Add this target's nodes and sources
         result.update(target.nodes)
@@ -211,9 +226,9 @@ def collect_build_order(target: Target) -> list[Target]:
     visited: set[str] = set()
 
     def collect(t: Target) -> None:
-        if t.name in visited:
+        if t.qualified_name in visited:
             return
-        visited.add(t.name)
+        visited.add(t.qualified_name)
 
         # Collect dependencies first
         for dep in t.dependencies:
