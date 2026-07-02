@@ -562,22 +562,21 @@ class TestNinjaQuoting:
 class TestMakefileQuoting:
     """Test that Makefile generator properly quotes values."""
 
-    def test_quote_tokens_for_make(self) -> None:
-        """Test the _quote_tokens_for_make helper directly."""
+    def test_escape_dollar_for_recipe(self) -> None:
+        """Test the _escape_dollar_for_recipe helper directly."""
         from pcons.generators.makefile import MakefileGenerator
 
         gen = MakefileGenerator()
 
-        # Simple tokens - no quoting needed
-        assert gen._quote_tokens_for_make(["-Wall", "-O2"]) == "-Wall -O2"
+        # No dollar signs - unchanged
+        assert gen._escape_dollar_for_recipe("-Wall -O2") == "-Wall -O2"
 
-        # Paths with spaces need quoting
-        result = gen._quote_tokens_for_make(["-I/path with spaces"])
-        assert "'" in result or '"' in result
-
-        # Dollar signs get escaped for Make
-        result = gen._quote_tokens_for_make(["-DVAR=$HOME"])
-        assert "$$HOME" in result
+        # Dollar signs get escaped for Make, regardless of shell quoting
+        assert gen._escape_dollar_for_recipe("-DVAR=$HOME") == "-DVAR=$$HOME"
+        assert (
+            gen._escape_dollar_for_recipe("'-Wl,-rpath,$ORIGIN/../lib'")
+            == "'-Wl,-rpath,$$ORIGIN/../lib'"
+        )
 
 
 class TestCompileCommandsQuoting:

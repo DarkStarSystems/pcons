@@ -446,6 +446,11 @@ class TestNinjaDepsDirectives:
         assert "deps = msvc" in content
         # MSVC doesn't use depfile
         assert "depfile" not in content
+        # The prefix must be pinned explicitly rather than relying on
+        # ninja's built-in default, which is the English cl.exe string and
+        # silently matches nothing (dropping header deps) on a localized
+        # (e.g. German/Japanese) cl.exe.
+        assert "msvc_deps_prefix = Note: including file: " in content
 
     def test_no_deps_style_emits_no_deps_directive(self, tmp_path):
         project = Project("test", root_dir=tmp_path, build_dir=".")
@@ -700,3 +705,37 @@ class TestNinjaSrcDir:
         after_pipe = link_line.split("| ", 1)[1]
         assert "generated.h" not in before_pipe, "generated.h should not be in $in"
         assert "generated.h" in after_pipe
+
+
+class TestNinjaTestRule:
+    def test_test_rule_quotes_spaced_python_exe(
+        self, tmp_path, gcc_toolchain, monkeypatch
+    ):
+        """sys.executable must survive as a single argument even with a
+        space in the path. _escape_path's "$ " (dollar-space) is unescaped
+        by ninja to a bare space before the shell sees it, which would
+        otherwise split the interpreter path into two arguments.
+        """
+        import sys
+
+        fake_python = "/opt/my tools/bin/python3"
+        monkeypatch.setattr(sys, "executable", fake_python)
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        src = tmp_path / "main.c"
+        src.write_text("int main(void){return 0;}\n")
+        prog = project.Program("prog", env, sources=[str(src)])
+        project.Test("prog.smoke", prog)
+
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert '"/opt/my tools/bin/python3"' in content
+        # The old "$ "-escaped form (unquoted, ninja un-escapes to a bare
+        # space) must not appear.
+        assert "/opt/my$ tools/bin/python3" not in content

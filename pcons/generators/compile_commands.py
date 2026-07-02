@@ -217,6 +217,72 @@ class CompileCommandsGenerator(BaseGenerator):
     ) -> str:
         """Format the command for a source file.
 
+        Prefers the real, fully-expanded command tokens the resolver already
+        computed in ``build_info["command"]`` — the same tokens the Ninja and
+        Makefile generators build the actual invocation from — so the emitted
+        command matches the real toolchain call (e.g. MSVC's ``/c /Fo<out>``
+        rather than a hardcoded GCC ``-c -o <out>``). Falls back to
+        hand-assembling GCC-style flags from the context only when
+        ``build_info`` lacks pre-expanded tokens, which happens for
+        hand-built ``_build_info`` in unit tests that skip
+        ``project.resolve()`` (the resolver is what populates ``"command"``).
+        """
+        command_tokens = build_info.get("command") if build_info else None
+        if isinstance(command_tokens, list):
+            from pcons.core.subst import to_shell_command
+
+            expanded = self._expand_command_tokens(
+                command_tokens, source, output, project
+            )
+            return to_shell_command(expanded, shell="bash")
+
+        return self._format_command_fallback(
+            tool_name, command_var, source, output, build_info
+        )
+
+    def _expand_command_tokens(
+        self,
+        tokens: list[Any],
+        source: FileNode,
+        output: FileNode,
+        project: Project,
+    ) -> list[str]:
+        """Expand SourcePath/TargetPath markers and PathToken paths to literals.
+
+        Unlike Ninja/Make, compile_commands.json entries run with
+        ``directory`` set to the project root, so project-relative
+        ``PathToken`` paths are used unchanged. ``"build"``-typed paths
+        (relative to build_dir) get the build_dir prepended since the
+        working directory here isn't the build dir the way ninja/make use.
+        """
+        from pcons.core.subst import PathToken, SourcePath, TargetPath
+
+        result: list[str] = []
+        for token in tokens:
+            if isinstance(token, SourcePath):
+                result.append(f"{token.prefix}{source.path}{token.suffix}")
+            elif isinstance(token, TargetPath):
+                result.append(f"{token.prefix}{output.path}{token.suffix}")
+            elif isinstance(token, PathToken):
+                if token.path_type == "build":
+                    path = str(Path(project.build_dir) / token.path)
+                    result.append(f"{token.prefix}{path}{token.suffix}")
+                else:
+                    result.append(token.relativize(lambda p: p))
+            else:
+                result.append(str(token))
+        return result
+
+    def _format_command_fallback(
+        self,
+        tool_name: str,
+        command_var: str,
+        source: FileNode,
+        output: FileNode,
+        build_info: dict[str, object] | None = None,
+    ) -> str:
+        """Hand-assemble a command when build_info has no pre-expanded tokens.
+
         Includes effective flags from build_info context if available.
         The command is formatted as a shell command string with proper quoting.
         """
