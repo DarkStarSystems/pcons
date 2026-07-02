@@ -434,15 +434,19 @@ class TestGeneratePcFile:
         target = Target("foo")
 
         pc = project.generate_pc_file(target, version="1.0")
-        mtime1 = pc.stat().st_mtime
+        content1 = pc.read_text()
+        mtime_ns1 = pc.stat().st_mtime_ns
 
-        # Call again — should not rewrite
-        import time
-
-        time.sleep(0.01)
+        # Call again with identical content — should not rewrite the file.
+        # Comparing st_mtime_ns (not st_mtime) and not sleeping avoids relying
+        # on filesystem mtime granularity, which can be coarser than a
+        # wrongly-rewritten file's actual write latency and mask a bug.
         project.generate_pc_file(target, version="1.0")
-        mtime2 = pc.stat().st_mtime
-        assert mtime1 == mtime2
+        content2 = pc.read_text()
+        mtime_ns2 = pc.stat().st_mtime_ns
+
+        assert content2 == content1
+        assert mtime_ns2 == mtime_ns1
 
     def test_pc_file_requires_from_pkgconfig_deps(self, tmp_path):
         """Dependencies found via pkg-config become Requires: entries."""
