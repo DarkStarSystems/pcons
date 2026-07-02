@@ -323,6 +323,58 @@ class TestMakefilePostBuild:
         assert "echo" in content
 
 
+class TestMakefileRecipeDollarEscaping:
+    def test_rpath_origin_survives_make(self, tmp_path):
+        """A literal $ORIGIN rpath flag must be doubled ($$ORIGIN) so Make's
+        own $-expansion pass doesn't mangle it before the shell ever runs
+        the recipe (Make would otherwise read $O as variable O, an empty
+        variable, turning $ORIGIN/../lib into RIGIN/../lib).
+
+        ``build_info["command"]`` here mirrors exactly what the resolver
+        stores for a real build (see Resolver._expand_single_node_command):
+        a token list where the user's ``$$ORIGIN`` has already been
+        collapsed by subst() to a literal single-dollar ``$ORIGIN``,
+        protected from the *shell* by quoting but not yet from Make.
+        """
+        from pcons.core.subst import SourcePath, TargetPath
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        target = Target("app", target_type="program")
+        output_node = FileNode(tmp_path / "build" / "app")
+        source_node = FileNode(tmp_path / "build" / "main.o")
+
+        output_node._build_info = {
+            "tool": "link",
+            "command_var": "linkcmd",
+            "sources": [source_node],
+            "command": [
+                "gcc",
+                "-o",
+                TargetPath(),
+                SourcePath(),
+                "-Wl,-rpath,$ORIGIN/../lib",
+            ],
+        }
+        output_node.builder = CommandBuilder(
+            "Program", "link", "linkcmd", src_suffixes=[".o"], target_suffixes=[""]
+        )
+
+        target.intermediate_nodes.append(output_node)
+        target.output_nodes.append(output_node)
+        project._resolved = True  # Skip auto-resolve since nodes are hand-built
+
+        gen = MakefileGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "Makefile").read_text()
+        assert "$$ORIGIN/../lib" in content
+        # A bare single-dollar $ORIGIN would mean Make's own pass wasn't
+        # escaped away; make sure it doesn't appear un-doubled.
+        assert "$ORIGIN" not in content.replace("$$ORIGIN", "")
+
+
 class TestMakefileSrcDir:
     def test_srcdir_replaced_with_project_root(self, tmp_path):
         """$SRCDIR in Command() commands is replaced with project root for make."""
@@ -347,3 +399,37 @@ class TestMakefileSrcDir:
         assert f"{project_root}/scripts/generate.py" in content
         # Original $SRCDIR should not appear
         assert "$SRCDIR" not in content
+
+
+class TestMakefileTestRecipe:
+    def test_test_recipe_quotes_and_escapes_python_exe(
+        self, tmp_path, gcc_toolchain, monkeypatch
+    ):
+        """sys.executable is quoted for the shell and $-escaped for Make, so
+        an interpreter path containing a space or $ survives both a shell
+        argument split and Make's own $-expansion pass over the recipe.
+        """
+        import sys
+
+        fake_python = "/opt/my tools/py$thon/bin/python3"
+        monkeypatch.setattr(sys, "executable", fake_python)
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        src = tmp_path / "main.c"
+        src.write_text("int main(void){return 0;}\n")
+        prog = project.Program("prog", env, sources=[str(src)])
+        project.Test("prog.smoke", prog)
+
+        project.resolve()
+
+        gen = MakefileGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "Makefile").read_text()
+        # Shell-quoted (single quotes, so the embedded space is part of one
+        # argument) and $-escaped ($$ so Make doesn't consume $t as a
+        # variable reference before the shell ever sees the line).
+        assert "'/opt/my tools/py$$thon/bin/python3'" in content
+        assert "test-build" in content

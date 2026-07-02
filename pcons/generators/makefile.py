@@ -8,6 +8,7 @@ Requires GNU Make 3.80+ for order-only prerequisites.
 from __future__ import annotations
 
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
@@ -284,7 +285,7 @@ class MakefileGenerator(BaseGenerator):
         # Write the command
         command = self._get_command(node, target, project, sources)
         if command:
-            f.write(f"\t{command}\n")
+            f.write(f"\t{self._escape_dollar_for_recipe(command)}\n")
 
         f.write("\n")
 
@@ -462,40 +463,19 @@ class MakefileGenerator(BaseGenerator):
         # Chain commands with &&
         return command + " && " + " && ".join(substituted_cmds)
 
-    def _quote_tokens_for_make(self, tokens: list[str]) -> str:
-        """Quote and join tokens for use in Makefile shell commands.
+    def _escape_dollar_for_recipe(self, text: str) -> str:
+        """Escape literal ``$`` as ``$$`` in a Makefile recipe line.
 
-        Handles:
-        - Shell quoting for tokens with spaces or special characters
-        - Escaping $ as $$ for Make
+        Recipe text here is a fully-expanded shell command whose tokens are
+        already quoted for bash (e.g. via :func:`~pcons.core.subst.to_shell_command`).
+        Make performs its own ``$``-expansion pass over the raw recipe text
+        *before* handing it to the shell, and that pass doesn't know or care
+        about shell quotes. So a shell-protected token like the rpath idiom
+        ``'-Wl,-rpath,$ORIGIN/../lib'`` still has its ``$O`` consumed by Make
+        as a reference to (usually undefined) variable ``O`` unless the ``$``
+        is doubled here.
         """
-        if not tokens:
-            return ""
-
-        quoted = []
-        for token in tokens:
-            # Escape $ as $$ for Make (must be done first)
-            escaped = token.replace("$", "$$")
-            # Shell quote if needed (spaces, special chars)
-            if self._needs_shell_quote(escaped):
-                # Use single quotes, but handle existing single quotes
-                if "'" not in escaped:
-                    escaped = f"'{escaped}'"
-                else:
-                    # Escape for double quotes
-                    escaped = escaped.replace("\\", "\\\\")
-                    escaped = escaped.replace('"', '\\"')
-                    escaped = escaped.replace("`", "\\`")
-                    escaped = f'"{escaped}"'
-            quoted.append(escaped)
-        return " ".join(quoted)
-
-    def _needs_shell_quote(self, s: str) -> bool:
-        """Check if a string needs shell quoting."""
-        if not s:
-            return True
-        # Characters that trigger quoting
-        return any(c in s for c in " \t\n\"'\\`!*?[](){}|&;<>")
+        return self.ESCAPE_DOLLAR.sub("$$", text)
 
     def _substitute_make_vars(
         self,
@@ -612,8 +592,12 @@ class MakefileGenerator(BaseGenerator):
         f.write("# Tests\n")
         f.write(f"test-build: {' '.join(program_outputs)}\n")
         # Embed sys.executable so the runner is found in whatever venv
-        # pcons was invoked from. The path is escaped for shell.
-        python_exe = sys.executable.replace("\\", "/")
+        # pcons was invoked from. Quote it for the shell (in case the
+        # interpreter path has spaces) and escape $ for Make (which
+        # otherwise treats $ in the raw recipe text as a variable
+        # reference before the shell ever sees the line).
+        python_exe = shlex.quote(sys.executable.replace("\\", "/"))
+        python_exe = self._escape_dollar_for_recipe(python_exe)
         f.write("test: test-build\n")
         f.write(
             f"\t{python_exe} -m pcons.test_runner --manifest=tests.json --no-color\n"
