@@ -17,6 +17,10 @@ from pcons.toolchains.msvc import (
     MsvcLinker,
     MsvcResourceCompiler,
     MsvcToolchain,
+    _find_msvc_bin_dir,
+    _host_arch_dirs,
+    _sorted_version_dirs,
+    _version_sort_key,
 )
 
 
@@ -633,3 +637,124 @@ class TestMsvcAuxiliaryInputHandler:
         handler = tc.get_auxiliary_input_handler(".MANIFEST")
         assert handler is not None
         assert handler.suffix == ".manifest"
+
+
+class TestVersionSortKey:
+    """_version_sort_key parses MSVC/SDK version directory names for
+    numeric (not lexicographic) comparison."""
+
+    def test_parses_msvc_tool_version(self):
+        assert _version_sort_key("14.38.33130") == (14, 38, 33130)
+
+    def test_parses_sdk_version(self):
+        assert _version_sort_key("10.0.22621.0") == (10, 0, 22621, 0)
+
+    def test_rejects_non_numeric_component(self):
+        assert _version_sort_key("14.38.33130-preview") is None
+
+    def test_rejects_empty_string(self):
+        assert _version_sort_key("") is None
+
+
+class TestSortedVersionDirs:
+    """_sorted_version_dirs must sort numerically, not lexicographically,
+    so e.g. 14.10 (newer) beats 14.9, which a plain string sort gets wrong."""
+
+    def test_numeric_ordering_beats_lexicographic(self, tmp_path):
+        for name in ("14.9.0", "14.10.0", "14.2.0"):
+            (tmp_path / name).mkdir()
+
+        dirs = _sorted_version_dirs(tmp_path)
+
+        assert [d.name for d in dirs] == ["14.10.0", "14.9.0", "14.2.0"]
+
+    def test_realistic_sdk_versions_sort_numerically(self, tmp_path):
+        # Lexicographically "10.0.9200.0" > "10.0.22621.0" (character '9' >
+        # '2'), but 22621 is the newer SDK build.
+        for name in ("10.0.9200.0", "10.0.22621.0", "10.0.19041.0"):
+            (tmp_path / name).mkdir()
+
+        dirs = _sorted_version_dirs(tmp_path)
+
+        assert dirs[0].name == "10.0.22621.0"
+
+    def test_garbage_directories_are_skipped_not_crashed(self, tmp_path):
+        (tmp_path / "14.38.33130").mkdir()
+        (tmp_path / "not-a-version").mkdir()
+        (tmp_path / "some_file.txt").write_text("not a dir")
+
+        dirs = _sorted_version_dirs(tmp_path)
+
+        assert [d.name for d in dirs] == ["14.38.33130"]
+
+
+class TestHostArchDirs:
+    """_host_arch_dirs must reflect the detected host, not hardcode x64,
+    so ARM64 (and other) hosts get the right Host<ARCH>/<arch> bin dir."""
+
+    @pytest.mark.parametrize(
+        "machine,expected",
+        [
+            ("AMD64", ("Hostx64", "x64")),
+            ("x86_64", ("Hostx64", "x64")),
+            ("ARM64", ("HostARM64", "arm64")),
+            ("aarch64", ("HostARM64", "arm64")),
+        ],
+    )
+    def test_detected_host(self, monkeypatch, machine, expected):
+        monkeypatch.setattr("platform.machine", lambda: machine)
+        assert _host_arch_dirs() == expected
+
+
+class TestFindMsvcBinDirHostAware:
+    """_find_msvc_bin_dir (and the vswhere fallbacks in MsvcCompiler.configure
+    / MsvcAssembler.configure that delegate to it) must pick the bin dir
+    matching the running host's architecture, not a hardcoded Hostx64/x64."""
+
+    def test_picks_arm64_host_dir_on_arm64_host(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "pcons.toolchains.msvc._find_msvc_install", lambda: tmp_path
+        )
+        monkeypatch.setattr("platform.machine", lambda: "ARM64")
+
+        vc_tools = tmp_path / "VC" / "Tools" / "MSVC" / "14.40.12345"
+        arm_bin = vc_tools / "bin" / "HostARM64" / "arm64"
+        arm_bin.mkdir(parents=True)
+        (arm_bin / "cl.exe").touch()
+        # An x64 host dir also exists (e.g. a shared VS install) — it must
+        # NOT be picked when the running host is ARM64.
+        x64_bin = vc_tools / "bin" / "Hostx64" / "x64"
+        x64_bin.mkdir(parents=True)
+        (x64_bin / "cl.exe").touch()
+
+        assert _find_msvc_bin_dir() == arm_bin
+
+    def test_picks_x64_host_dir_on_x64_host(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "pcons.toolchains.msvc._find_msvc_install", lambda: tmp_path
+        )
+        monkeypatch.setattr("platform.machine", lambda: "AMD64")
+
+        vc_tools = tmp_path / "VC" / "Tools" / "MSVC" / "14.40.12345"
+        x64_bin = vc_tools / "bin" / "Hostx64" / "x64"
+        x64_bin.mkdir(parents=True)
+        (x64_bin / "cl.exe").touch()
+
+        assert _find_msvc_bin_dir() == x64_bin
+
+    def test_picks_newest_version_numerically(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "pcons.toolchains.msvc._find_msvc_install", lambda: tmp_path
+        )
+        monkeypatch.setattr("platform.machine", lambda: "AMD64")
+
+        vc_tools = tmp_path / "VC" / "Tools" / "MSVC"
+        for version in ("14.9.0", "14.10.0"):
+            bin_dir = vc_tools / version / "bin" / "Hostx64" / "x64"
+            bin_dir.mkdir(parents=True)
+            (bin_dir / "cl.exe").touch()
+
+        result = _find_msvc_bin_dir()
+
+        assert result is not None
+        assert result.parent.parent.parent.name == "14.10.0"
