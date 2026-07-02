@@ -2960,7 +2960,6 @@ This is especially useful when porting CMake projects to pcons, since the templa
 | `config.define(name, value=1)` | Define a preprocessor symbol |
 | `config.undefine(name)` | Mark a symbol as undefined |
 | `config.check_sizeof(type)` | Get the size of a type and define `SIZEOF_*` |
-| `config.check_header(name)` | Check if a header exists |
 | `config.write_config_header(path)` | Generate a config.h file |
 | `ToolChecks(config, env, tool)` | Create feature checker for a tool |
 | `checks.check_flag(flag)` | Check if compiler accepts a flag |

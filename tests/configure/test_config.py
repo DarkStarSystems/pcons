@@ -129,6 +129,58 @@ class TestConfigureFindProgram:
             cached = config.get(cache_key)
             assert cached is not None
 
+    def _make_fake_exe(self, dir_path, name="fake_program"):
+        import sys
+
+        dir_path.mkdir(parents=True, exist_ok=True)
+        if sys.platform == "win32":
+            exe = dir_path / f"{name}.exe"
+            exe.write_text("@echo fake")
+        else:
+            exe = dir_path / name
+            exe.write_text("#!/bin/sh\necho fake")
+            exe.chmod(0o755)
+        return exe
+
+    def test_find_program_hint_overrides_cache(self, tmp_path):
+        """An explicit hint must win over a previously cached result.
+
+        Regression test: find_program() used to check the cache before
+        considering hints, so a hint pointing at a different location than
+        the cached one was silently ignored.
+        """
+        dir_a = tmp_path / "a"
+        dir_b = tmp_path / "b"
+        exe_a = self._make_fake_exe(dir_a)
+        exe_b = self._make_fake_exe(dir_b)
+
+        config = Configure(build_dir=tmp_path / "build")
+
+        # First run: caches the "a" copy.
+        first = config.find_program("fake_program", hints=[dir_a])
+        assert first is not None
+        assert first.path == exe_a
+
+        # Later run with a different explicit hint must find the "b" copy,
+        # not the stale cached "a" path.
+        second = config.find_program("fake_program", hints=[dir_b])
+        assert second is not None
+        assert second.path == exe_b
+
+    def test_find_program_no_hint_still_uses_cache(self, tmp_path):
+        """Without a hint, a cached result is still returned (no regression)."""
+        dir_a = tmp_path / "a"
+        exe_a = self._make_fake_exe(dir_a)
+
+        config = Configure(build_dir=tmp_path / "build")
+        first = config.find_program("fake_program", hints=[dir_a])
+        assert first is not None
+
+        # No hints this time: should come from cache, not PATH.
+        second = config.find_program("fake_program")
+        assert second is not None
+        assert second.path == exe_a
+
 
 class TestProgramInfo:
     def test_creation(self):
