@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -132,13 +133,13 @@ class ConanFinder(BaseFinder):
         """
         # 1. Explicit command from constructor
         if self._conan_cmd:
-            return [self._conan_cmd]
+            return shlex.split(self._conan_cmd)
 
         # 2-3. Environment variables
         for env_var in ("PCONS_CONAN", "CONAN"):
             env_val = os.environ.get(env_var)
             if env_val:
-                return [env_val]
+                return shlex.split(env_val)
 
         # 4. Check if conan is in PATH
         if shutil.which("conan"):
@@ -190,12 +191,16 @@ class ConanFinder(BaseFinder):
         )
 
     def _detect_compiler_settings(
-        self, toolchain: Toolchain | None = None
+        self,
+        toolchain: Toolchain | None = None,
+        build_type: str = "Release",
     ) -> dict[str, str]:
         """Detect compiler settings for Conan profile.
 
         Args:
             toolchain: Optional toolchain to get settings from.
+            build_type: Build type, used to derive compiler.runtime_type
+                for MSVC (mandatory in Conan 2 profiles).
 
         Returns:
             Dict of Conan settings.
@@ -218,32 +223,37 @@ class ConanFinder(BaseFinder):
         elif self._platform.arch in ("x86", "i686", "i386"):
             settings["arch"] = "x86"
 
-        # Compiler settings from toolchain
+        # Compiler settings from toolchain. No real Toolchain exposes a
+        # `.version` attribute (only test doubles do), so the version is
+        # always detected by running the toolchain's actual compiler
+        # command below — never a bare "gcc"/"clang" looked up on PATH,
+        # which could silently be a different compiler than the one
+        # [buildenv] CC/CXX configures for the build itself.
+        compiler_cmd: str | None = None
         if toolchain is not None:
             compiler_name = toolchain.name.lower()
+            compiler_cmd = self._get_toolchain_compiler_cmd(
+                toolchain, "cc"
+            ) or self._get_toolchain_compiler_cmd(toolchain, "cxx")
             if "gcc" in compiler_name:
                 settings["compiler"] = "gcc"
-                if hasattr(toolchain, "version") and toolchain.version:
-                    # Extract major version
-                    version_str = str(toolchain.version)
-                    major = version_str.split(".")[0]
-                    settings["compiler.version"] = major
                 settings["compiler.libcxx"] = "libstdc++11"
             elif "clang" in compiler_name or "llvm" in compiler_name:
                 if self._platform.is_macos:
                     settings["compiler"] = "apple-clang"
-                else:
-                    settings["compiler"] = "clang"
-                if hasattr(toolchain, "version") and toolchain.version:
-                    version_str = str(toolchain.version)
-                    major = version_str.split(".")[0]
-                    settings["compiler.version"] = major
-                if self._platform.is_macos:
                     settings["compiler.libcxx"] = "libc++"
                 else:
+                    settings["compiler"] = "clang"
                     settings["compiler.libcxx"] = "libstdc++11"
             elif "msvc" in compiler_name:
                 settings["compiler"] = "msvc"
+                # Conan 2 requires compiler.runtime (and runtime_type) for
+                # msvc. pcons links the dynamic CRT (/MD, /MDd); the debug
+                # vs. release runtime follows the build type.
+                settings["compiler.runtime"] = "dynamic"
+                settings["compiler.runtime_type"] = (
+                    "Debug" if build_type == "Debug" else "Release"
+                )
         else:
             # Default to system compiler detection
             if self._platform.is_macos:
@@ -253,9 +263,8 @@ class ConanFinder(BaseFinder):
                 settings["compiler"] = "gcc"
                 settings["compiler.libcxx"] = "libstdc++11"
 
-        # Auto-detect compiler version if not set
-        if "compiler.version" not in settings and "compiler" in settings:
-            version = self._detect_compiler_version(settings.get("compiler", ""))
+        if "compiler" in settings:
+            version = self._detect_compiler_version(settings["compiler"], compiler_cmd)
             if version:
                 settings["compiler.version"] = version
 
@@ -283,8 +292,6 @@ class ConanFinder(BaseFinder):
         if not flags:
             return None
 
-        import re
-
         for flag in flags:
             flag_str = str(flag)
             # GCC/Clang: -std=c++17, -std=c++20, -std=c++2a, -std=gnu++23
@@ -306,19 +313,25 @@ class ConanFinder(BaseFinder):
                 return aliases.get(std, std)
         return None
 
-    def _detect_compiler_version(self, compiler: str) -> str | None:
+    def _detect_compiler_version(
+        self, compiler: str, compiler_cmd: str | None = None
+    ) -> str | None:
         """Auto-detect compiler version by running the compiler.
 
         Args:
             compiler: Compiler name (gcc, clang, apple-clang, msvc).
-
-        Returns:
-            Major version string, or None if detection fails.
+            compiler_cmd: The actual command to invoke, e.g. from
+                ``_get_toolchain_compiler_cmd`` — this must match what
+                [buildenv] CC/CXX use, so profile detection doesn't run a
+                bare "gcc"/"clang" off PATH while the build itself uses a
+                different, toolchain-selected compiler. Falls back to the
+                bare compiler name when no toolchain is available.
         """
+        cmd = compiler_cmd or compiler
         try:
             if compiler in ("apple-clang", "clang"):
                 result = subprocess.run(
-                    ["clang", "--version"],
+                    [cmd, "--version"],
                     capture_output=True,
                     text=True,
                 )
@@ -332,22 +345,51 @@ class ConanFinder(BaseFinder):
                                     return parts[i + 1].split(".")[0]
             elif compiler == "gcc":
                 result = subprocess.run(
-                    ["gcc", "--version"],
+                    [cmd, "--version"],
                     capture_output=True,
                     text=True,
                 )
                 if result.returncode == 0:
                     # Parse "gcc (Ubuntu X.Y.Z-...) X.Y.Z" or similar
                     line = result.stdout.split("\n")[0]
-                    # Find version number pattern
-                    import re
-
                     match = re.search(r"(\d+)\.\d+\.\d+", line)
                     if match:
                         return match.group(1)
+            elif compiler == "msvc":
+                # cl.exe prints its version banner to stderr and exits
+                # non-zero when run with no arguments; e.g.:
+                # "Microsoft (R) C/C++ Optimizing Compiler Version 19.38.33130 for x64"
+                result = subprocess.run(
+                    [cmd],
+                    capture_output=True,
+                    text=True,
+                )
+                match = re.search(r"Version (\d+\.\d+)", result.stderr)
+                if match:
+                    return self._msvc_conan_version(match.group(1))
         except (OSError, subprocess.SubprocessError):
             pass
         return None
+
+    @staticmethod
+    def _msvc_conan_version(cl_version: str) -> str | None:
+        """Map a raw cl.exe version (e.g. "19.38") to Conan's msvc
+        ``compiler.version`` scheme.
+
+        Conan buckets msvc by product line rather than exact toolset:
+        17.x -> "170" (VS 2012), 18.x -> "180" (VS 2013), and 19.x splits
+        by the minor version's leading digit: 19.0x -> "190" (VS 2015),
+        19.1x -> "191" (VS 2017), 19.2x -> "192" (VS 2019), 19.3x -> "193"
+        and 19.4x -> "194" (VS 2022 and its later updates).
+        """
+        major_str, _, minor_str = cl_version.partition(".")
+        if not major_str.isdigit():
+            return None
+        major = int(major_str)
+        if major != 19:
+            return f"{major}0"
+        minor = int(minor_str) if minor_str.isdigit() else 0
+        return f"19{minor // 10}"
 
     def set_profile_setting(self, key: str, value: str) -> None:
         """Set a custom profile setting.
@@ -397,7 +439,7 @@ class ConanFinder(BaseFinder):
         lines.append("[settings]")
 
         # Get base settings from toolchain
-        settings = self._detect_compiler_settings(toolchain)
+        settings = self._detect_compiler_settings(toolchain, build_type)
         settings["build_type"] = build_type
 
         # Set compiler.cppstd — explicit parameter wins, then infer from env
@@ -538,9 +580,14 @@ class ConanFinder(BaseFinder):
         if conanfile is not None:
             self.conanfile = Path(conanfile)
 
-        # Check if we need to run conan install
+        # Check if we need to run conan install. A stale cache key file
+        # whose .pc files were deleted out from under it (output folder
+        # wiped, cache key left behind) must not be treated as valid —
+        # fall through to a real install instead of silently returning {}.
         if not force and self._is_cache_valid():
-            return self._parse_pkgconfig_files()
+            packages = self._parse_pkgconfig_files()
+            if packages:
+                return packages
 
         # Ensure profile exists
         if not self.profile_path.exists():
@@ -554,7 +601,7 @@ class ConanFinder(BaseFinder):
         cmd: list[str] = [
             *self.conan_cmd,
             "install",
-            str(self.conanfile.parent if self.conanfile.is_file() else self.conanfile),
+            str(self.conanfile),
             f"--profile:host={self.profile_path}",
             f"--profile:build={self.profile_path}",
             "-g",
@@ -782,7 +829,16 @@ class ConanFinder(BaseFinder):
                 old_result = result
                 for var_name, var_value in variables.items():
                     result = result.replace(f"${{{var_name}}}", var_value)
-                    result = result.replace(f"${var_name}", var_value)
+                    # Unbraced $name form: a plain replace() would also
+                    # rewrite the head of a longer name that happens to
+                    # share this prefix (e.g. "$prefix" inside
+                    # "$prefix_bin"), corrupting it. Require that the
+                    # match not be followed by another identifier char.
+                    result = re.sub(
+                        r"\$" + re.escape(var_name) + r"(?![A-Za-z0-9_])",
+                        lambda m, v=var_value: v,
+                        result,
+                    )
                 if result == old_result:
                     break  # No more substitutions possible
             return result
