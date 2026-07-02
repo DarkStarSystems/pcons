@@ -53,7 +53,7 @@ commands_windows = [
     { run = "type build\\compile_commands.json", expect_stdout = "math_utils.c" },
     { run = "type build\\compile_commands.json", expect_stdout = "physics.c" },
     { run = "type build\\compile_commands.json", expect_stdout = "main.c" },
-    { run = "type build\\compile_commands.json", expect_stdout = "-I" },
+    { run = "type build\\compile_commands.json", expect_stdout = "/I" },
 
     # Verify deps.mmd has the dependency graph (Windows uses different library names)
     { run = "type build\\deps.mmd", expect_stdout = "flowchart" },
