@@ -523,17 +523,91 @@ class Project(_ProjectBuilders):
         These are built when 'ninja' is run with no arguments.
 
         Args:
-            *targets: Targets, nodes, or alias names to build by default.
+            *targets: Targets, output Nodes, or alias/target names to build
+                by default. A Node must already be a registered output of
+                some target (e.g. from ``env.Command()``); it is resolved to
+                that owning target, since defaults are ultimately consumed
+                as targets by the generators.
+
+        Raises:
+            ValueError: If a Node isn't the output of any registered target,
+                or an alias resolves to no target-backed output.
+            KeyError: If a string name matches neither an alias nor a target.
         """
         for t in targets:
-            if isinstance(t, Target):
-                if t not in self._default_targets:
-                    self._default_targets.append(t)
-            elif isinstance(t, str):
-                # Look up by name
-                target = self.get_target(t)
-                if target and target not in self._default_targets:
-                    self._default_targets.append(target)
+            match t:
+                case Target():
+                    self._add_default_target(t)
+                case Node():
+                    target = self._find_target_for_node(t)
+                    if target is None:
+                        raise ValueError(
+                            f"Default(): {t!r} is not an output of any "
+                            f"target registered in project '{self.name}', "
+                            "so it can't be used as a default build target. "
+                            "Pass the owning Target instead, or call "
+                            "Default() with the node after its target has "
+                            "produced its outputs (e.g. after resolve())."
+                        )
+                    self._add_default_target(target)
+                case str():
+                    for target in self._resolve_default_name(t):
+                        self._add_default_target(target)
+                case _:
+                    raise TypeError(
+                        f"Default() arguments must be Target, Node, or str; "
+                        f"got {type(t)!r}"
+                    )
+
+    def _add_default_target(self, target: Target) -> None:
+        """Register `target` as a default build target, deduping by identity."""
+        if target not in self._default_targets:
+            self._default_targets.append(target)
+
+    def _find_target_for_node(self, node: Node) -> Target | None:
+        """Find the target (in this project or its children) that produced `node`.
+
+        Searches intermediate/output nodes, so this only succeeds for nodes
+        that already exist -- e.g. outputs of eagerly-built targets such as
+        ``env.Command()``. Compile/link target outputs aren't populated
+        until ``resolve()`` runs. Returns None if no target produced `node`.
+        """
+        for target in self.targets:
+            if node in target.output_nodes or node in target.intermediate_nodes:
+                return target
+        return None
+
+    def _resolve_default_name(self, name: str) -> list[Target]:
+        """Resolve a Default() string argument to one or more targets.
+
+        Tries `name` as an alias first (an alias may wrap several targets),
+        then as a plain target name.
+        """
+        alias = self._aliases.get(name)
+        if alias is not None:
+            resolved: list[Target] = list(alias._target_refs)
+            for node in alias._nodes:
+                target = self._find_target_for_node(node)
+                if target is not None and target not in resolved:
+                    resolved.append(target)
+            if not resolved:
+                raise ValueError(
+                    f"Default(): alias '{name}' does not resolve to any "
+                    "target-backed build output, so it can't be used as a "
+                    "default build target."
+                )
+            return resolved
+
+        target = self.get_target(name, raise_if_missing=False)
+        if target is not None:
+            return [target]
+
+        raise KeyError(
+            f"Default(): '{name}' is not a known alias or target in "
+            f"project '{self.name}'. Tried aliases "
+            f"{sorted(self._aliases)!r} and targets "
+            f"{sorted(t.name for t in self.targets)!r}."
+        )
 
     @property
     def default_targets(self) -> list[Target]:

@@ -264,6 +264,39 @@ class TestProjectDefaults:
 
         assert project.default_targets.count(target) == 1
 
+    def test_default_with_node(self):
+        project = Project("myproject")
+        target = Target("app")
+        node = FileNode(Path("app.out"))
+        target.output_nodes.append(node)
+
+        project.Default(node)
+
+        assert target in project.default_targets
+
+    def test_default_with_node_not_owned_by_any_target_raises(self):
+        project = Project("myproject")
+        Target("app")
+        orphan_node = FileNode(Path("orphan.out"))
+
+        with pytest.raises(ValueError, match="not an output of any target"):
+            project.Default(orphan_node)
+
+    def test_default_with_alias(self):
+        project = Project("myproject")
+        target = Target("app")
+        project.Alias("myalias", target)
+
+        project.Default("myalias")
+
+        assert target in project.default_targets
+
+    def test_default_unknown_name_raises_clear_error(self):
+        project = Project("myproject")
+
+        with pytest.raises(KeyError, match="not a known alias or target"):
+            project.Default("nonexistent")
+
 
 class TestProjectValidation:
     def test_valid_project(self, tmp_path):
