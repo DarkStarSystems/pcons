@@ -83,30 +83,21 @@ def _validate_staging_path(project: Project, staging_prefix: str) -> None:
     for target in project.targets:
         for node in target.output_nodes:
             node_path = node.path
-            try:
-                # Check if node path would be under or conflict with staging
-                node_path.relative_to(staging_path)
+            if node_path.is_relative_to(staging_path):
                 raise ValueError(
                     f"Installer staging path '{staging_path}' conflicts with "
                     f"target '{target.name}' output: {node_path}. "
                     f"Rename the target's output or use a different build directory."
                 )
-            except ValueError:
-                # Not under staging path - this is expected
-                pass
 
     # Check for conflicts with existing nodes in project
     for node_path in project._nodes:
-        try:
-            node_path.relative_to(staging_path)
+        if node_path.is_relative_to(staging_path):
             raise ValueError(
                 f"Installer staging path '{staging_path}' conflicts with "
                 f"existing build node: {node_path}. "
                 f"This may indicate a naming conflict in your build configuration."
             )
-        except ValueError:
-            # Not under staging path - this is expected
-            pass
 
 
 def create_component_pkg(
