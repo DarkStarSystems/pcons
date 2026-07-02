@@ -94,7 +94,7 @@ hello.add_sources(["hello.cpp"])
 project.Default(hello)
 
 # Resolve dependencies and generate build files
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 **3. Generate and build**:
@@ -256,7 +256,7 @@ Your script must call a generator at the end:
 project.resolve()
 
 # REQUIRED: Generate build files (Ninja is the default generator, but Makefile and Xcode generators are also included)
-Generator().generate(project, build_dir)
+Generator().generate(project)
 ```
 
 The `pcons` CLI executes your script but does NOT automatically call resolve/generate - your script controls when and how this happens. This gives you flexibility for conditional generation or multiple generators.
@@ -525,7 +525,7 @@ hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 # Generate
 project.Default(hello)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 **Build and run:**
@@ -615,7 +615,7 @@ calculator.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 # Generate
 project.Default(calculator)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 ### Static Library
@@ -664,7 +664,7 @@ app.add_sources([src_dir / "main.c"])
 app.private.link_libs.append(libmath)  # Gets libmath's public includes automatically!
 
 project.Default(app)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 Key points:
@@ -717,7 +717,7 @@ app.add_sources([src_dir / "main.c"])
 app.private.link_libs.append(libplugin)
 
 project.Default(app, libplugin)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 ### Project with Subdirectories
@@ -806,7 +806,7 @@ app = project.Program("myapp", env)
 app.add_sources(["main.c"])
 
 project.Default(app)
-Generator().generate(project, build_dir)
+Generator().generate(project)
 
 print(f"Variant: {variant}")
 print(f"Build dir: {build_dir}")
@@ -1022,7 +1022,7 @@ hello = project.Program("hello_fmt", env)
 hello.add_sources([project_dir / "src" / "main.cpp"])
 
 project.Default(hello)
-Generator().generate(project, build_dir)
+Generator().generate(project)
 ```
 
 #### sync_profile() Reference
@@ -1658,7 +1658,7 @@ Generate a traditional Makefile instead of Ninja build files:
 from pcons.generators.makefile import MakefileGenerator
 
 # Generate Makefile
-MakefileGenerator().generate(project, build_dir)
+MakefileGenerator().generate(project)
 # Creates build/Makefile
 ```
 
@@ -1678,7 +1678,7 @@ Generate dependency graphs:
 from pcons.generators.mermaid import MermaidGenerator
 
 # Generate Mermaid diagram
-MermaidGenerator().generate(project, build_dir)
+MermaidGenerator().generate(project)
 # Creates build/deps.mmd
 ```
 
@@ -2167,7 +2167,7 @@ msix = windows.create_msix(
 | `description` | Package description |
 | `processor_architecture` | `"x64"`, `"x86"`, or `"arm64"` (default: `"x64"`) |
 | `sign_cert` | Path to `.pfx` certificate for signing |
-| `sign_password` | Certificate password |
+| `sign_password_env` | Name of an environment variable holding the certificate password (not the password itself, so it's never baked into `build.ninja`) |
 
 #### Complete Platform-Conditional Example
 
@@ -2457,7 +2457,7 @@ lib_universal = create_universal_binary(
 )
 
 project.Default(lib_universal)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 The `create_universal_binary()` function:
