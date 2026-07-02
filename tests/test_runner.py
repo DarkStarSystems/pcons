@@ -277,6 +277,32 @@ class TestJUnitOutput:
         assert cases[1].find("failure") is not None
         assert cases[2].find("skipped") is not None
 
+    def test_control_chars_in_output_produce_valid_xml(self, tmp_path):
+        # XML 1.0 forbids most C0 control chars (only tab/LF/CR survive
+        # below 0x20). A test that dumps binary-ish output to stdout/stderr
+        # used to get embedded raw, producing a file ET couldn't parse.
+        illegal = "boom\x00\x01\x07 core dumped"
+        results = [
+            TestResult(
+                name="bad",
+                status=FAIL,
+                duration=0.01,
+                stderr=illegal,
+                message="crashed\x0b",
+            ),
+        ]
+        out = tmp_path / "junit.xml"
+        write_junit(out, "demo", results)
+
+        # This raises ET.ParseError if the control chars weren't stripped.
+        root = ET.fromstring(out.read_text())
+        failure = root.find("testsuite/testcase/failure")
+        assert failure is not None
+        assert "\x00" not in (failure.text or "")
+        assert "boom" in (failure.text or "")
+        assert "core dumped" in (failure.text or "")
+        assert "\x0b" not in failure.attrib["message"]
+
 
 # ----- main() CLI integration ----------------------------------------------
 
@@ -321,6 +347,73 @@ class TestCLIMain:
         assert rc == 0
         captured = capsys.readouterr()
         assert "alpha" in captured.out
+
+    def test_list_mode_does_not_execute_discovery_binary(self, tmp_path, capsys):
+        # A discover-enabled entry's "list test cases" flag used to be
+        # invoked even for --list. It should now be listed at the
+        # manifest level (annotated) without ever being spawned.
+        marker = tmp_path / "invoked.marker"
+        lister = _make_exit_script(
+            tmp_path,
+            "lister.py",
+            f"import pathlib; pathlib.Path(r'{marker}').write_text('yes')\n"
+            "print('Suite.')\nprint('  Case')\n",
+        )
+        _make_manifest(
+            tmp_path,
+            [
+                {
+                    "name": "gtest_bin",
+                    "command": [str(lister)],
+                    "discover": "gtest",
+                    "labels": [],
+                }
+            ],
+        )
+        rc = main(["--manifest", str(tmp_path / "tests.json"), "--list", "--no-color"])
+        assert rc == 0
+        assert not marker.exists()
+        out = capsys.readouterr().out
+        assert "gtest_bin" in out
+        assert "discover: gtest" in out
+
+    def test_label_excluded_discovery_binary_is_never_invoked(self, tmp_path):
+        # Filtering must happen before discovery: a binary excluded by
+        # label should never have its listing flag run, in a real
+        # (non --list) invocation too.
+        marker = tmp_path / "invoked.marker"
+        lister = _make_exit_script(
+            tmp_path,
+            "lister.py",
+            f"import pathlib; pathlib.Path(r'{marker}').write_text('yes')\n"
+            "print('Suite.')\nprint('  Case')\n",
+        )
+        ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        _make_manifest(
+            tmp_path,
+            [
+                {
+                    "name": "gtest_bin",
+                    "command": [str(lister)],
+                    "discover": "gtest",
+                    "labels": ["slow"],
+                },
+                {"name": "fast", "command": [str(ok)], "labels": ["fast"]},
+            ],
+        )
+        rc = main(
+            [
+                "--manifest",
+                str(tmp_path / "tests.json"),
+                "-LE",
+                "slow",
+                "-j",
+                "1",
+                "--no-color",
+            ]
+        )
+        assert rc == 0
+        assert not marker.exists()
 
     def test_label_filter(self, tmp_path, capsys):
         ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
@@ -703,6 +796,46 @@ class TestSerialExclusivity:
         )
         assert {r.name for r in results} == {"p1", "s1", "p2"}
         assert all(r.status == PASS for r in results)
+
+
+class TestJobsZeroMeansUnlimited:
+    def test_jobs_zero_runs_all_non_serial_tests(self, tmp_path):
+        # Regression test: run_all used to size the worker pool off
+        # max(1, jobs) but gate launches on the raw `jobs` value, so
+        # `jobs=0` (ninja's "-j0 == unlimited" convention) made
+        # `len(running) >= 0` always true. No non-serial test was ever
+        # submitted; they all came back as SKIP "not run", which is a
+        # false green (main() would report 0 failures with nothing run).
+        ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        tests = [
+            {"name": "a", "command": [str(ok)], "labels": []},
+            {"name": "b", "command": [str(ok)], "labels": []},
+            {"name": "c", "command": [str(ok)], "labels": []},
+        ]
+        results = run_all(
+            tests,
+            tmp_path,
+            jobs=0,
+            stop_on_fail=False,
+            on_start=lambda _t: None,
+            on_finish=lambda _t, _r: None,
+        )
+        by_name = {r.name: r for r in results}
+        assert all(r.status == PASS for r in by_name.values())
+        assert all(r.message != "not run" for r in by_name.values())
+
+    def test_negative_jobs_also_means_unlimited(self, tmp_path):
+        ok = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        tests = [{"name": "a", "command": [str(ok)], "labels": []}]
+        results = run_all(
+            tests,
+            tmp_path,
+            jobs=-1,
+            stop_on_fail=False,
+            on_start=lambda _t: None,
+            on_finish=lambda _t, _r: None,
+        )
+        assert results[0].status == PASS
 
 
 # ----- Discovery warnings (non-fatal paths) -------------------------------
