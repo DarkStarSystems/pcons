@@ -324,10 +324,14 @@ class ConanFinder(BaseFinder):
                 ``_get_toolchain_compiler_cmd`` — this must match what
                 [buildenv] CC/CXX use, so profile detection doesn't run a
                 bare "gcc"/"clang" off PATH while the build itself uses a
-                different, toolchain-selected compiler. Falls back to the
-                bare compiler name when no toolchain is available.
+                different, toolchain-selected compiler. Falls back to a
+                real compiler binary on PATH when no toolchain is available.
         """
-        cmd = compiler_cmd or compiler
+        # Without a toolchain command, map the Conan compiler name to an
+        # actual executable: "apple-clang" is a Conan setting value, not a
+        # runnable binary (the binary is "clang").
+        _name_to_binary = {"apple-clang": "clang", "clang": "clang", "gcc": "gcc"}
+        cmd = compiler_cmd or _name_to_binary.get(compiler, compiler)
         try:
             if compiler in ("apple-clang", "clang"):
                 result = subprocess.run(
