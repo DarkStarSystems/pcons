@@ -40,6 +40,16 @@ def concat(sources: list[str], dest: str) -> None:
                 out.write(f.read())
 
 
+def _escape_depfile_path(path: str) -> str:
+    """Escape spaces in a path for ninja depfile output.
+
+    Ninja depfiles use unescaped whitespace to separate dependencies, so any
+    space in a path must be backslash-escaped (mirrors the escaping done in
+    pcons/util/latex_deps.py).
+    """
+    return path.replace(" ", "\\ ")
+
+
 def copytree(
     src: str, dest: str, depfile: str | None = None, stamp: str | None = None
 ) -> None:
@@ -79,7 +89,10 @@ def copytree(
         # Write ninja depfile format: stamp_file: deps
         # Use the stamp file (or dest) as the "target" for dependency purposes
         target_str = (stamp or str(dest_path)).replace("\\", "/")
-        deps_str = " \\\n  ".join(source_files)
+        # Escape spaces so ninja doesn't treat them as dependency separators
+        # (mirrors the escaping in pcons/util/latex_deps.py).
+        escaped_files = [_escape_depfile_path(f) for f in source_files]
+        deps_str = " \\\n  ".join(escaped_files)
         with open(depfile_path, "w") as f:
             f.write(f"{target_str}: \\\n  {deps_str}\n")
 
