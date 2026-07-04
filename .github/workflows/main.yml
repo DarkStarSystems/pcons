@@ -262,9 +262,55 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: cxx-modules
 
+  test-rez:
+    name: "test rez integration (${{ matrix.os }})"
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        # rez targets Linux/macOS; the example skips on Windows (see its test.toml).
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "latest"
+      - name: Install dependencies (with rez)
+        # rez is installed into the project venv so its plugin lands on the
+        # same sys.path pcons does (that's how rez discovers the build_system
+        # plugin). uv sync would uninstall it, so every run below uses
+        # --no-sync.
+        run: |
+          uv python install 3.12
+          uv sync
+          uv pip install rez
+      - name: Run rez integration unit tests
+        run: uv run --no-sync pytest tests/integration/ --cov=pcons --cov-report=xml -v
+      - name: Build the rez test packages and run the example end-to-end
+        # hello_lib (rez's built-in cmake build_system) then hello_app (pcons's
+        # build_system plugin — exercises PconsBuildSystem.build()); then run
+        # example 45's test inside the resolve so REZ_USED_RESOLVE is set.
+        run: |
+          export REZ_LOCAL_PACKAGES_PATH="$RUNNER_TEMP/rez_packages"
+          export REZ_RELEASE_PACKAGES_PATH="$RUNNER_TEMP/rez_packages"
+          export REZ_PACKAGES_PATH="$RUNNER_TEMP/rez_packages"
+          mkdir -p "$REZ_LOCAL_PACKAGES_PATH"
+          export PATH="$PWD/.venv/bin:$PATH"
+          ( cd examples/45_rez_integration/rez_packages/hello_lib && rez-build -i )
+          ( cd examples/45_rez_integration/rez_packages/hello_app && rez-build -i )
+          rez-env hello_lib -- uv run --no-sync pytest tests/test_examples.py \
+            --cov=pcons --cov-report=xml --cov-append -k "45_rez_integration" -v
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: rez
+
   release:
     name: Create Release & Publish
-    needs: [test, test-examples-windows, test-wasm, test-msvcup, test-cxx-modules]
+    needs: [test, test-examples-windows, test-wasm, test-msvcup, test-cxx-modules, test-rez]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
