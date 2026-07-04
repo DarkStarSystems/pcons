@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-07-04
+
 ### Added
 
 - **Rez integration (`pcons.integrations.rez`)**: two-sided integration with the [rez](https://rez.readthedocs.io) VFX/animation package manager.
@@ -42,6 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`pcons test` fixes:** `-j0` now runs tests (unlimited) instead of silently reporting a false green; illegal XML control characters are stripped from JUnit output; label filters apply before discovery so excluded tests never launch and `--list` doesn't execute discovery binaries; and the `test` subcommand is located by argument position so an option value equal to `"test"` can't misdirect dispatch.
 - **Dependencies with spaces in their paths are tracked correctly** — `copytree` depfile paths are space-escaped, so a staged `my file.txt` is one dependency, not two.
 - **A broken optional module no longer aborts every command.** An auto-discovered module that raises any exception at import (not just `ImportError`/`SyntaxError`) is logged and skipped instead of crashing pcons for all projects.
+
+### Contributors
+
+- Jean-Christophe Morin — review feedback on the rez integration.
 
 ## [0.20.1] - 2026-06-18
 
@@ -958,7 +964,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/DarkStarSystems/pcons/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/DarkStarSystems/pcons/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/DarkStarSystems/pcons/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/DarkStarSystems/pcons/compare/v0.18.0...v0.19.0
