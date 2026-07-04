@@ -619,13 +619,40 @@ class TestFluentAPI:
     def test_link_private_not_reexported(self, test_project):  # noqa: F811
         """A private link dependency is not re-exported (mirrors line 233)."""
         leaf = Target("leaf")
+        leaf.public.include_dirs.append(Path("leaf_inc"))
         mid = Target("mid")
         mid.link_private(leaf)  # private
         app = Target("app")
         app.link_private(mid)
 
-        # Usage-requirement propagation must not pull leaf in through mid.
+        # Neither the dependency graph nor the propagated usage requirements
+        # may pull leaf in through mid's private edge.
         assert leaf not in app.transitive_dependencies()
+        assert Path("leaf_inc") not in app.collect_usage_requirements().include_dirs
+
+    def test_private_deps_do_not_leak_headers_up_the_chain(self, test_project):  # noqa: F811
+        """A private dependency's public headers must not propagate to a
+        consumer at any distance.
+
+        Regression test: usage-requirement collection used to re-enter each
+        dependency at its own top level (following that dep's *private*
+        link_libs), leaking a private dependency's public include dirs
+        unboundedly up the consumer chain.
+        """
+        leaf = Target("leaf")
+        leaf.public.include_dirs.append(Path("leaf_inc"))
+        mid = Target("mid")
+        mid.link_private(leaf)  # leaf is mid's private implementation detail
+        app = Target("app")
+        app.link(mid)  # public
+        top = Target("top")
+        top.link(app)  # public, two levels above the private edge
+
+        # mid uses leaf, so mid itself sees leaf's headers...
+        assert Path("leaf_inc") in mid.collect_usage_requirements().include_dirs
+        # ...but no consumer of mid does, at any distance.
+        assert Path("leaf_inc") not in app.collect_usage_requirements().include_dirs
+        assert Path("leaf_inc") not in top.collect_usage_requirements().include_dirs
 
     def test_add_source_returns_self(self, tmp_path, test_project):  # noqa: F811
         """add_source() returns self for chaining."""
