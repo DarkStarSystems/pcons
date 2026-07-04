@@ -369,12 +369,15 @@ class TestPkgConfigOverride:
         extra_inc.mkdir(parents=True)
         pc_dir = root / "lib" / "pkgconfig"
         pc_dir.mkdir(parents=True)
+        # .pc files use pkg-config syntax, where backslash is an escape
+        # character — real .pc files use forward slashes for paths even on
+        # Windows, so write them that way here too.
         (pc_dir / "fancy.pc").write_text(
             f"Name: fancy\n"
             f"Description: test fixture\n"
             f"Version: 0.1.0\n"
-            f"Cflags: -I{extra_inc} -DUSING_FANCY\n"
-            f"Libs: -L{root}/lib -lfancy_alt\n"
+            f"Cflags: -I{extra_inc.as_posix()} -DUSING_FANCY\n"
+            f"Libs: -L{root.as_posix()}/lib -lfancy_alt\n"
         )
 
         monkeypatch.setenv("PKG_CONFIG_PATH", str(pc_dir))
@@ -383,8 +386,9 @@ class TestPkgConfigOverride:
 
         assert pd.found_by == "rez+pkg-config"
         assert pd.prefix == str(root)
-        # Only what the .pc file declared:
-        assert pd.include_dirs == [str(extra_inc)]
+        # Only what the .pc file declared (compare as Paths so the
+        # forward-slash pkg-config output matches the native path).
+        assert [Path(p) for p in pd.include_dirs] == [extra_inc]
         assert pd.libraries == ["fancy_alt"]
         assert "USING_FANCY" in pd.defines
 
