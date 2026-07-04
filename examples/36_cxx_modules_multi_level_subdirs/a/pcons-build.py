@@ -8,4 +8,4 @@ a = project.StaticLibrary("a", env, sources=["a.cppm"])
 (aa,) = add_subdirectory("aa", pick=["aa"])
 
 a_app = project.Program("a_app", env, sources=["a_main.cpp"])
-a_app.private.link_libs.extend([a, aa])
+a_app.link_private(a, aa)

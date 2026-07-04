@@ -90,17 +90,33 @@ class CompileLinkContext:
 
     def _merge_with_base_flags(
         self, tool_name: str | None, flags: list[str | PathToken]
-    ) -> list[object]:
+    ) -> list[str | PathToken]:
         """Prepend env.<tool>.flags to `flags`, dropping duplicates.
 
         Keeps env-level flags (e.g. -std=c++20, -fsanitize=address) ahead of
-        the target-specific flags from usage requirements.
+        the target-specific flags from usage requirements. Uses the same
+        flag-pair-aware merge as usage requirements so separated-argument
+        flags (-isystem, -framework, -include, -arch, -Xlinker, ...) aren't
+        split by naive per-token deduplication.
         """
-        base_flags: list[object] = []
+        from pcons.core.flags import (
+            get_separated_arg_flags_from_toolchains,
+            merge_flags,
+        )
+
+        base_flags: list[str | PathToken] = []
         if tool_name and self._env and self._env.has_tool(tool_name):
             tool_cfg = getattr(self._env, tool_name, None)
             base_flags = list(getattr(tool_cfg, "flags", None) or [])
-        return base_flags + [f for f in flags if f not in base_flags]
+
+        separated_arg_flags = (
+            get_separated_arg_flags_from_toolchains(self._env.toolchains)
+            if self._env is not None
+            else None
+        )
+        result: list[str | PathToken] = list(base_flags)
+        merge_flags(result, flags, separated_arg_flags)
+        return result
 
     def _compile_overrides(self) -> dict[str, object]:
         """Return compile-time overrides: includes, defines, flags."""
@@ -166,9 +182,13 @@ class CompileLinkContext:
             mode: Which overrides to return: "compile" or "link".
             tool_name: The tool name (e.g., "cc", "cxx") for flag merging
                 in compile mode.
-            language: The link language (e.g., "c", "cxx"). If "cxx" and env
-                has a "cxx" tool, the linker_cmd will be set to env.cxx.cmd
-                to ensure proper C++ runtime linkage.
+            language: The link language (e.g., "c", "cxx"). If "cxx",
+                "objcxx", or "cuda" and env has a "cxx" tool, the linker_cmd
+                will be set to env.cxx.cmd to ensure proper C++ runtime
+                linkage. Objective-C++ (.mm) is compiled with the cxx tool
+                (see unix.py's get_source_handler) and CUDA is designed to
+                link via the host C++ toolchain, so both need the C++ driver
+                just like plain C++.
             env: The build environment, used to look up the C++ compiler
                 command when linking C++ code.
             target: The target being built. When provided along with
@@ -187,7 +207,11 @@ class CompileLinkContext:
         # cl.exe as a linker driver breaks flags like /OUT:. We only override
         # when link.cmd == cc.cmd (i.e., the linker is the C compiler driver).
         linker_cmd = None
-        if language == "cxx" and env is not None and env.has_tool("cxx"):
+        if (
+            language in ("cxx", "objcxx", "cuda")
+            and env is not None
+            and env.has_tool("cxx")
+        ):
             cxx_cmd = getattr(env.cxx, "cmd", None)
             # Only override when the link tool is using the C compiler as its cmd
             # (GCC/Clang pattern). Skip when the link tool has its own separate

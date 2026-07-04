@@ -3,11 +3,12 @@
 
 [test]
 description = "Example showing how to use Conan packages with pcons"
+expected_outputs = ["build/hello_fmt"]
 
-[test.commands]
-generate = "uvx pcons generate"
-build = "ninja -C build"
-run = "./build/hello_fmt"
+[verify]
+commands = [
+    { run = "./build/hello_fmt", expect_stdout = "Hello from fmt" },
+]
 
 [skip]
 # Skip on Windows - MSVC/Conan integration requires VS Developer environment

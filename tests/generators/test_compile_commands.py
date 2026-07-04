@@ -3,6 +3,7 @@
 
 import json
 import os
+import shlex
 from pathlib import Path
 
 from pcons.core.builder import CommandBuilder
@@ -196,6 +197,105 @@ class TestCompileCommandsEntries:
         assert "command" in content[0]
         # Normalize path separators for cross-platform comparison
         assert "src/main.c" in normalize_path(content[0]["command"])
+
+    def test_msvc_style_command_uses_real_tokens(self, tmp_path):
+        """When build_info["command"] holds the resolver's real,
+        fully-expanded tokens (as it does for a real build via
+        Resolver._expand_single_node_command), compile_commands.json must
+        render the actual toolchain invocation -- e.g. MSVC's "/c /Fo<out>"
+        -- rather than hardcoded GCC "-c -o <out>" flags.
+        """
+        from pcons.core.subst import SourcePath, TargetPath
+
+        project = Project("test", root_dir=tmp_path, build_dir=".")
+
+        target = Target("app")
+        output_node = FileNode("build/main.obj")
+        source_node = FileNode("src/main.c")
+        output_node._build_info = {
+            "tool": "cc",
+            "command_var": "objcmd",
+            "language": "c",
+            "sources": [source_node],
+            "command": [
+                "cl.exe",
+                "/nologo",
+                "/showIncludes",
+                "/c",
+                TargetPath(prefix="/Fo"),
+                SourcePath(),
+            ],
+        }
+        output_node.builder = CommandBuilder(
+            "Object",
+            "cc",
+            "objcmd",
+            src_suffixes=[".c"],
+            target_suffixes=[".obj"],
+            language="c",
+        )
+
+        target.intermediate_nodes.append(output_node)
+
+        gen = CompileCommandsGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = json.loads((tmp_path / "compile_commands.json").read_text())
+        assert len(content) == 1
+        # Parse with shlex so shell-quoting (bash quotes tokens containing a
+        # backslash, e.g. a Windows-style output path) is undone before we
+        # compare individual arguments.
+        command_parts = [normalize_path(p) for p in shlex.split(content[0]["command"])]
+        assert "cl.exe" in command_parts
+        assert "/c" in command_parts
+        assert "/Fobuild/main.obj" in command_parts
+        assert any(p.endswith("src/main.c") for p in command_parts)
+        # Should not fall back to hardcoded GCC-style flags
+        assert "-c" not in command_parts
+        assert "-o" not in command_parts
+
+    def test_build_typed_path_token_gets_build_dir_prepended(self, tmp_path):
+        """A PathToken with path_type="build" in the command is emitted with
+        the project build_dir prepended (compile_commands entries run from the
+        project root, not the build dir)."""
+        from pcons.core.subst import PathToken, SourcePath, TargetPath
+
+        project = Project("test", root_dir=tmp_path, build_dir="out")
+
+        target = Target("app")
+        output_node = FileNode("out/main.o")
+        source_node = FileNode("src/main.c")
+        output_node._build_info = {
+            "tool": "cc",
+            "command_var": "objcmd",
+            "language": "c",
+            "sources": [source_node],
+            "command": [
+                "gcc",
+                "-c",
+                PathToken(prefix="-I", path="generated_inc", path_type="build"),
+                TargetPath(prefix="-o"),
+                SourcePath(),
+            ],
+        }
+        output_node.builder = CommandBuilder(
+            "Object",
+            "cc",
+            "objcmd",
+            src_suffixes=[".c"],
+            target_suffixes=[".o"],
+            language="c",
+        )
+        target.intermediate_nodes.append(output_node)
+
+        gen = CompileCommandsGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = json.loads((tmp_path / "compile_commands.json").read_text())
+        command = normalize_path(content[0]["command"])
+        assert "-Iout/generated_inc" in command
 
 
 class TestCompileCommandsSymlink:

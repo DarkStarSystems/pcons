@@ -15,6 +15,7 @@ These are building blocks that domain-specific modules can use:
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -54,6 +55,11 @@ def generate_info_plist(
         >>> plist = generate_info_plist("MyPlugin", "1.0.0", bundle_type="BNDL")
         >>> (bundle_dir / "Contents" / "Info.plist").write_text(plist)
     """
+    # Deferred import: importing _helpers at module scope triggers a runpy
+    # "found in sys.modules after import of package" RuntimeWarning when a
+    # build script is run via `python -m`.
+    from pcons.contrib.installers._helpers import _xml_escape
+
     if identifier is None:
         # Sanitize name for bundle identifier
         safe_name = name.replace(" ", "").replace("-", "")
@@ -70,29 +76,29 @@ def generate_info_plist(
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>{executable}</string>
+    <string>{_xml_escape(executable)}</string>
     <key>CFBundleIdentifier</key>
-    <string>{identifier}</string>
+    <string>{_xml_escape(identifier)}</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>{name}</string>
+    <string>{_xml_escape(name)}</string>
     <key>CFBundlePackageType</key>
-    <string>{bundle_type}</string>
+    <string>{_xml_escape(bundle_type)}</string>
     <key>CFBundleShortVersionString</key>
-    <string>{version}</string>
+    <string>{_xml_escape(version)}</string>
     <key>CFBundleSignature</key>
-    <string>{signature}</string>
+    <string>{_xml_escape(signature)}</string>
     <key>CFBundleVersion</key>
-    <string>{version}</string>
+    <string>{_xml_escape(version)}</string>
     <key>LSMinimumSystemVersion</key>
-    <string>{min_os_version}</string>
+    <string>{_xml_escape(min_os_version)}</string>
 """
 
     if extra_keys:
         for key, value in extra_keys.items():
-            plist += f"    <key>{key}</key>\n"
-            plist += f"    <string>{value}</string>\n"
+            plist += f"    <key>{_xml_escape(key)}</key>\n"
+            plist += f"    <string>{_xml_escape(value)}</string>\n"
 
     plist += """\
 </dict>
@@ -103,7 +109,7 @@ def generate_info_plist(
 
 def create_macos_bundle(
     project: Project,
-    env: Environment,  # noqa: ARG001 - kept for API consistency
+    env: Environment,
     plugin: Target,
     *,
     bundle_dir: Path | str,
@@ -155,11 +161,23 @@ def create_macos_bundle(
     # Install Info.plist
     if info_plist is not None:
         if isinstance(info_plist, str):
-            # Write plist content to file, then install
-            # Note: This creates a source node; the actual file should exist
-            # In practice, the user should write the plist file themselves
-            # or use env.Command to generate it
-            pass
+            # Generate the plist content into a build-dir file, then install
+            # it into the bundle's Contents directory, mirroring the Path
+            # branch below.
+            plist_path = Path(".bundle_staging") / bundle_path.name / "Info.plist"
+            python_cmd = sys.executable.replace("\\", "/")
+            plist_target = env.Command(
+                target=plist_path,
+                source=None,
+                command=[
+                    python_cmd,
+                    "-c",
+                    f"import pathlib; pathlib.Path({str(plist_path)!r})"
+                    f".write_text({info_plist!r}, encoding='utf-8')",
+                ],
+                name=f"info_plist_{bundle_path.stem}",
+            )
+            project.Install(contents_dir, [plist_target])
         elif isinstance(info_plist, Path):
             project.Install(contents_dir, [info_plist])
 

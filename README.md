@@ -64,7 +64,7 @@ project.generate()
 ```
 
 ```bash
-uvx pcons # generate ninja.build and run it, producing build/myapp (or build/myapp.exe)
+uvx pcons # generate build.ninja and run it, producing build/myapp (or build/myapp.exe)
 ```
 
 ## Installation
@@ -118,7 +118,7 @@ make fmt
 
 # Or use uv directly
 uv run ruff check pcons/
-uv run mypy pcons/
+uvx ty check pcons/ examples/
 ```
 
 ## This Project is AI-Assisted

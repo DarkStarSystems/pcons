@@ -20,7 +20,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from pcons.core.builder import MultiOutputBuilder, OutputSpec
 from pcons.core.subst import SourcePath, TargetPath
@@ -337,8 +337,8 @@ def find_emscripten_toolchain() -> EmscriptenToolchain:
     from pcons.tools.toolchain import toolchain_registry
 
     toolchain = toolchain_registry.find_available("wasm", ["emscripten", "emcc"])
-    if toolchain is not None:
-        return cast(EmscriptenToolchain, toolchain)
+    if isinstance(toolchain, EmscriptenToolchain):
+        return toolchain
 
     raise RuntimeError(
         "Emscripten not found. Install it from https://emscripten.org/docs/getting_started/ "
@@ -357,6 +357,7 @@ toolchain_registry.register(
     EmscriptenToolchain,
     aliases=["emscripten", "emcc"],
     check_command="emcc",
+    is_available=is_emcc_available,
     tool_classes=[EmccCCompiler, EmccCxxCompiler, EmccArchiver, EmccLinker],
     category="wasm",
     platforms=["linux", "darwin"],

@@ -346,6 +346,9 @@ class LlvmToolchain(UnixToolchain):
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
 
+    # Clang understands --target=<triple> for cross-compilation.
+    IS_CLANG_DRIVER = True
+
     def __init__(self) -> None:
         super().__init__("llvm")
 

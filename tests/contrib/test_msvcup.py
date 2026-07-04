@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from pathlib import Path
@@ -263,6 +264,125 @@ class TestEnsureMsvc:
             )
             assert result == Path(r"C:\msvcup\autoenv-x64")
             mock_ensure.assert_called_once()
+
+
+class TestChecksumVerification:
+    """Tests for SHA-256 verification of downloaded msvcup archives."""
+
+    def test_verify_checksum_success(self, tmp_path: Path):
+        """A matching digest passes and leaves the file in place."""
+        zip_path = tmp_path / "msvcup.zip"
+        data = b"totally-legit-msvcup-zip-bytes"
+        zip_path.write_bytes(data)
+        digest = hashlib.sha256(data).hexdigest()
+
+        up = MsvcUp("14.44.17.14", "10.0.22621.7", msvcup_version="v_test")
+        with patch(
+            "pcons.contrib.windows.msvcup._RELEASE_SHA256",
+            {("v_test", "x86_64"): digest},
+        ):
+            up._verify_checksum(zip_path, "x86_64")  # should not raise
+
+        assert zip_path.exists()
+
+    def test_verify_checksum_mismatch_raises_and_deletes(self, tmp_path: Path):
+        """A mismatching digest raises and removes the downloaded file."""
+        zip_path = tmp_path / "msvcup.zip"
+        zip_path.write_bytes(b"possibly-tampered-bytes")
+
+        up = MsvcUp("14.44.17.14", "10.0.22621.7", msvcup_version="v_test")
+        with patch(
+            "pcons.contrib.windows.msvcup._RELEASE_SHA256",
+            {("v_test", "x86_64"): "0" * 64},
+        ):
+            with pytest.raises(RuntimeError, match="checksum mismatch"):
+                up._verify_checksum(zip_path, "x86_64")
+
+        assert not zip_path.exists()
+
+    def test_verify_checksum_missing_pin_raises_and_deletes(self, tmp_path: Path):
+        """An unpinned version/arch fails closed rather than skipping."""
+        zip_path = tmp_path / "msvcup.zip"
+        zip_path.write_bytes(b"some-bytes")
+
+        up = MsvcUp("14.44.17.14", "10.0.22621.7", msvcup_version="v_unpinned")
+        with patch("pcons.contrib.windows.msvcup._RELEASE_SHA256", {}):
+            with pytest.raises(RuntimeError, match="No pinned SHA-256"):
+                up._verify_checksum(zip_path, "x86_64")
+
+        assert not zip_path.exists()
+
+    def test_bootstrap_checksum_match_extracts_and_installs(self, tmp_path: Path):
+        """End-to-end: a good download proceeds to install/autoenv."""
+        import io
+        import zipfile
+
+        exe_bytes = b"fake-msvcup-exe-contents"
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as zf:
+            zf.writestr("msvcup.exe", exe_bytes)
+        zip_bytes = buf.getvalue()
+        digest = hashlib.sha256(zip_bytes).hexdigest()
+
+        def fake_urlretrieve(url: str, filename: Path) -> None:
+            Path(filename).write_bytes(zip_bytes)
+
+        up = MsvcUp("14.44.17.14", "10.0.22621.7", msvcup_version="v_test")
+        mock_platform = MagicMock(arch="x86_64")
+        with (
+            patch.object(MsvcUp, "MSVCUP_DIR", str(tmp_path)),
+            patch(
+                "pcons.contrib.windows.msvcup._RELEASE_SHA256",
+                {("v_test", "x86_64"): digest},
+            ),
+            patch(
+                "pcons.contrib.windows.msvcup.get_platform",
+                return_value=mock_platform,
+            ),
+            patch(
+                "pcons.contrib.windows.msvcup.urllib.request.urlretrieve",
+                side_effect=fake_urlretrieve,
+            ),
+            patch("pcons.contrib.windows.msvcup.subprocess.run") as mock_run,
+        ):
+            msvcup_exe = up._bootstrap_msvcup()
+
+        assert msvcup_exe.read_bytes() == exe_bytes
+        mock_run.assert_not_called()  # bootstrap alone doesn't execute msvcup
+
+    def test_bootstrap_checksum_mismatch_never_executes(self, tmp_path: Path):
+        """A bad download is deleted and never reaches install/autoenv."""
+        zip_bytes = b"attacker-controlled-payload"
+
+        def fake_urlretrieve(url: str, filename: Path) -> None:
+            Path(filename).write_bytes(zip_bytes)
+
+        up = MsvcUp("14.44.17.14", "10.0.22621.7", msvcup_version="v_test")
+        mock_platform = MagicMock(arch="x86_64")
+        with (
+            patch.object(MsvcUp, "MSVCUP_DIR", str(tmp_path)),
+            patch(
+                "pcons.contrib.windows.msvcup._RELEASE_SHA256",
+                {("v_test", "x86_64"): "0" * 64},
+            ),
+            patch(
+                "pcons.contrib.windows.msvcup.get_platform",
+                return_value=mock_platform,
+            ),
+            patch(
+                "pcons.contrib.windows.msvcup.urllib.request.urlretrieve",
+                side_effect=fake_urlretrieve,
+            ),
+            patch("pcons.contrib.windows.msvcup.subprocess.run") as mock_run,
+        ):
+            with pytest.raises(RuntimeError, match="checksum mismatch"):
+                up.ensure_installed()
+
+        mock_run.assert_not_called()
+        msvcup_exe = Path(tmp_path) / "bin" / "msvcup.exe"
+        assert not msvcup_exe.exists()
+        cache_zip = Path(tmp_path) / "cache" / "msvcup-v_test.zip"
+        assert not cache_zip.exists()
 
 
 class TestModuleImport:

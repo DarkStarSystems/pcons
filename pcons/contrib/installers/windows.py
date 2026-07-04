@@ -89,7 +89,7 @@ def create_msix(
     description: str | None = None,
     processor_architecture: str = "x64",
     sign_cert: Path | None = None,
-    sign_password: str | None = None,
+    sign_password_env: str | None = None,
 ) -> Target:
     """Create a Windows MSIX package using MakeAppx.exe.
 
@@ -112,7 +112,11 @@ def create_msix(
         description: Package description.
         processor_architecture: Target architecture ("x64", "x86", "arm64").
         sign_cert: Path to .pfx certificate for signing.
-        sign_password: Password for the certificate.
+        sign_password_env: Name of an environment variable holding the
+            certificate password. The password itself is never embedded in
+            the generated build file; it is read from the environment when
+            the signing step actually runs. Leave unset for certificates
+            that don't require a password.
 
     Returns:
         Target representing the .msix file.
@@ -238,20 +242,30 @@ def create_msix(
                 "Install Windows SDK for code signing support",
             )
 
+        # SignTool signs its target in place rather than producing a new
+        # file. Route through the _helpers CLI (like the manifest/assets
+        # steps above) so the declared ninja target is the file that's
+        # actually written: a copy of the unsigned .msix is made and that
+        # copy is signed, leaving the unsigned package intact.
+        signed_output = output.with_suffix(".signed.msix")
         sign_cmd = [
+            python_cmd,
+            "-m",
+            "pcons.contrib.installers._helpers",
+            "sign_msix",
+            "--input",
+            str(output),
+            "--output",
+            str(signed_output),
+            "--signtool",
             signtool,
-            "sign",
-            "/fd",
-            "SHA256",
-            "/f",
+            "--cert",
             str(sign_cert),
+            *(["--password-env", sign_password_env] if sign_password_env else []),
         ]
-        if sign_password:
-            sign_cmd.extend(["/p", sign_password])
-        sign_cmd.append(str(output))
 
         signed_target = env.Command(
-            target=output.with_suffix(".signed.msix"),
+            target=signed_output,
             source=[msix_target],
             command=sign_cmd,
             name=f"sign_{name}",

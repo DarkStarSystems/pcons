@@ -9,11 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Rez integration (`pcons.integrations.rez`)**: Two-sided integration with the [rez](https://rez.readthedocs.io) VFX/animation package manager.
+- **Rez integration (`pcons.integrations.rez`)**: two-sided integration with the [rez](https://rez.readthedocs.io) VFX/animation package manager.
   - `rez_environment(env)` and `RezFinder` read a rez resolve from inside a `pcons-build.py` and inject every resolved package's include/lib/define settings into the pcons `Environment`. Packages that don't follow the default `include`/`lib` layout can be described explicitly with a `RezLayout` via the `layouts=` argument.
-  - A `pcons` rez `build_system` plugin (registered via `[project.entry-points."rez.plugins.build_system"]`) lets `rez-build` auto-detect packages with a `pcons-build.py` and build them with pcons. CLI options exposed as `--pcons-generator` and `--pcons-jobs`.
-  - New example `45_rez_integration` with worked `hello_lib` (cmake) and `hello_app` (pcons) test rez packages.
-  - Documented in `docs/user-guide.md` under a new top-level "Integrations" section.
+  - A `pcons` rez `build_system` plugin (registered via `[project.entry-points."rez.plugins.build_system"]`) lets `rez-build` auto-detect packages with a `pcons-build.py` and build them with pcons, exposing `--pcons-generator` / `--pcons-jobs`.
+  - New example `45_rez_integration` with worked `hello_lib` (cmake) and `hello_app` (pcons) test rez packages, documented under a new "Integrations" section of the user guide.
+- **`target.link_private(*libs)`** adds PRIVATE link dependencies: the target gets the dependency's headers and usage requirements (or, for a string like `"m"`, just the raw link token) without re-exporting anything to its own consumers. The counterpart of `target.link()`, and the recommended replacement for `target.private.link_libs.append(...)`.
+
+### Changed
+
+- **`target.link(*libs)` is un-deprecated and is again the recommended way to add PUBLIC link dependencies** (it re-exports them to consumers, like CMake's plain `target_link_libraries`). It now also accepts raw library-name strings (`app.link(mylib, "m")`). The `target.public.link_libs` / `target.private.link_libs` lists remain fully supported as the low-level form.
+- **Removed the non-functional `Configure.check_compile()`/`check_link()` and the `check_header()`/`check_symbol()` methods that depended on them** — they always returned `False`. Use `ToolChecks` for feature checks.
+
+### Security
+
+- **Closed a command-injection hole in Ninja output.** Shell metacharacters (backtick, `;`, `|`, `&`, `$(…)`) in a whitespace-free token — e.g. an attacker-controlled source filename or dependency flag — passed unescaped into the command Ninja runs via `/bin/sh`, so building a malicious project could execute arbitrary commands. The Ninja generator now escapes shell metacharacters (platform-aware: full escaping for `/bin/sh`, quote-neutralization for `cmd.exe`) while still expanding genuine Ninja variables (`$topdir`, `$in`, `$out`).
+- **The Windows `msvcup` bootstrap now verifies its download.** `msvcup.exe` was fetched and executed with no integrity check; pcons now pins and verifies its SHA-256 (keyed by release version and host arch) and fails closed — deleting the file, never executing — on a mismatch or an unpinned version.
+- **Installer signing passwords no longer leak.** `create_msix` takes the signing password as an environment-variable *name* (`sign_password_env`) resolved at build time, so the literal password no longer appears in `build.ninja` or the process table.
+
+### Fixed
+
+- **Private link dependencies no longer leak to consumers.** A private dependency's public usage requirements (headers, defines) were put on the compile line of everything that transitively linked the target, at any distance; they now stay local, as `link_private()` / `private.link_libs` document.
+- **Targets sharing a short name across sub-projects no longer collapse.** Graph algorithms now key on qualified names, so a same-named dependency isn't dropped from the link line, its usage requirements propagate, and two sub-projects defining the same short target name no longer trigger a spurious dependency-cycle error. A `depends()`-only cycle (`A.depends(B); B.depends(A)`) now raises a clear `DependencyCycleError` instead of `RecursionError`.
+- **`compile_commands.json` now matches the real build.** Entries render from the resolver's actual, fully-expanded command tokens (the same ones Ninja/Make use), so MSVC/clang-cl databases show the true flags (e.g. `/I`, `/Fo`) instead of hand-assembled GCC-style ones, and flags set on the environment are included.
+- **Conan fixes:** custom conanfile names (e.g. `conanfile-ci.txt`) are honored; the MSVC profile sets `compiler.version`/`compiler.runtime`/`runtime_type` (required by Conan 2), so `conan install` works on Windows; the compiler version is detected by running the toolchain's actual compiler (and `sync_profile()` without a toolchain detects it on macOS again, mapping `apple-clang` → `clang`); `.pc` variable substitution is word-boundary-aware (`$prefix` no longer corrupts `$prefix_bin`); a multi-word `PCONS_CONAN`/`conan_cmd` (e.g. `"uvx conan"`) is honored; and a stale-cache install re-runs Conan instead of returning nothing.
+- **MSVC toolchain selection is more robust.** Tool and Windows SDK version directories are chosen by numeric version (14.10 > 14.9, 10.0.22621 > 10.0.9200), unparseable names are skipped, and the `vswhere` fallback is host-aware (ARM64 Windows without a developer shell no longer hardcodes x64). On localized MSVC, Ninja `/showIncludes` header-dependency parsing works again (`msvc_deps_prefix` is emitted).
+- **Mixed Objective-C++ / CUDA targets link with the right driver** — `.mm`/`.cu` no longer force the C driver and miss libc++/libstdc++. Cross `--target=<triple>` is emitted only for clang-family drivers (GCC rejects it), and CUDA object files use the platform suffix (`.obj` on Windows).
+- **macOS bundles and installers fixed.** A string `info_plist` is now written and installed (previously a no-op that produced a bundle with no `Info.plist`); interpolated plist values are XML-escaped; `create_msix` produces the signed file it declares (no more phantom, always-dirty output); and a real macOS staging-path conflict now raises instead of being swallowed.
+- **Makefile recipes no longer mangle `$`.** Literal `$` is escaped (`$$`) so flags like `-Wl,-rpath,$ORIGIN` survive Make's own expansion pass.
+- **Configuration cache correctness.** Explicit `find_program` hints override cached results; `define()`/`undefine()` state no longer lingers across runs; config headers are written only when changed (an unchanged header doesn't rebuild the world); and `ToolChecks` cache keys include headers/libs (no cross-check collisions) with per-toolchain dispatch so checks work under MSVC/clang-cl.
+- **WASM toolchain detection requires a real SDK.** `find_emscripten_toolchain()` no longer falls through to WASI (mislabeling it and emitting `.wasm` instead of `.js`+`.wasm`), and `find_wasi_toolchain()` no longer returns an unusable toolchain when no wasi-sdk is installed.
+- **`project.Default()` handles all its argument types** — a `Node` resolves to its owning target, an alias name resolves via the alias table, an unknown name raises a clear error listing known aliases/targets, and a wrong type raises `TypeError` (Nodes were silently dropped and aliases raised a bare `KeyError`).
+- **`pcons test` fixes:** `-j0` now runs tests (unlimited) instead of silently reporting a false green; illegal XML control characters are stripped from JUnit output; label filters apply before discovery so excluded tests never launch and `--list` doesn't execute discovery binaries; and the `test` subcommand is located by argument position so an option value equal to `"test"` can't misdirect dispatch.
+- **Dependencies with spaces in their paths are tracked correctly** — `copytree` depfile paths are space-escaped, so a staged `my file.txt` is one dependency, not two.
+- **A broken optional module no longer aborts every command.** An auto-discovered module that raises any exception at import (not just `ImportError`/`SyntaxError`) is logged and skipped instead of crashing pcons for all projects.
+
+## [0.20.1] - 2026-06-18
+
+### Fixed
+
+- **Conan/pkg-config packages with multiple macOS frameworks now link correctly.** Resolving a package whose `.pc` `Libs:` listed several frameworks (e.g. `-framework Foundation -framework IOKit -framework CoreGraphics`) collapsed the repeated `-framework` tokens during the transitive-`Requires` merge, leaving the framework names looking like input files and breaking the link. The merge is now pair-aware (and keeps `-Xlinker`-style pass-through directives verbatim).
 
 ## [0.20.0] - 2026-06-16
 
@@ -924,7 +958,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/DarkStarSystems/pcons/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/DarkStarSystems/pcons/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/DarkStarSystems/pcons/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/DarkStarSystems/pcons/compare/v0.17.0...v0.18.0

@@ -242,6 +242,57 @@ Cflags: -I${includedir}
             assert "PkgConfigDeps" in call_args
             assert "--build=missing" in call_args
 
+    def test_install_passes_custom_conanfile_path_not_parent_dir(
+        self, tmp_path: Path
+    ) -> None:
+        """A custom conanfile name must reach `conan install` as the file
+        itself, not its containing directory — otherwise Conan silently
+        falls back to resolving the default conanfile.txt in that dir.
+        """
+        conanfile = tmp_path / "conanfile-ci.txt"
+        conanfile.write_text("[requires]\nzlib/1.3\n")
+        # A default conanfile.txt also exists alongside it, with different
+        # requirements, to prove the wrong (default) one isn't picked up.
+        (tmp_path / "conanfile.txt").write_text("[requires]\nopenssl/3.0\n")
+
+        output_folder = tmp_path / "deps"
+        output_folder.mkdir()
+
+        finder = ConanFinder(
+            conanfile=conanfile,
+            output_folder=output_folder,
+        )
+        finder.sync_profile()
+
+        pc_file = output_folder / "zlib.pc"
+        pc_file.write_text(
+            "prefix=/usr/local\nName: zlib\nVersion: 1.3\nLibs:\nCflags:\n"
+        )
+
+        captured_calls: list = []
+
+        def mock_run(cmd, **kwargs):
+            captured_calls.append(cmd)
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        with (
+            patch.object(finder, "is_available", return_value=True),
+            patch("subprocess.run", side_effect=mock_run),
+        ):
+            finder.install()
+
+        conan_calls = [c for c in captured_calls if "install" in c]
+        assert len(conan_calls) == 1
+        call_args = conan_calls[0]
+        assert str(conanfile) in call_args
+        # The bare parent directory must not be passed instead of the file —
+        # that would make conan silently resolve the default conanfile.txt.
+        assert str(tmp_path) not in call_args
+
     def test_install_parses_pc_files(self, tmp_path: Path) -> None:
         """Test that install parses generated .pc files."""
         conanfile = tmp_path / "conanfile.txt"
@@ -316,6 +367,46 @@ Cflags: -I${includedir}
             pytest.raises(RuntimeError, match=re.escape(str(output_folder))),
         ):
             finder.install()
+
+    def test_install_reinstalls_when_cache_valid_but_pc_files_missing(
+        self, tmp_path: Path
+    ) -> None:
+        """A valid cache key with no .pc files (e.g. the output folder was
+        cleaned but the cache key file survived) must not be treated as a
+        cache hit returning {} — it must fall through to a real install.
+        """
+        conanfile = tmp_path / "conanfile.txt"
+        conanfile.write_text("[requires]\nzlib/1.3\n")
+
+        output_folder = tmp_path / "deps"
+        output_folder.mkdir()
+
+        finder = ConanFinder(
+            conanfile=conanfile,
+            output_folder=output_folder,
+        )
+        finder.sync_profile()
+        finder._save_cache_key()
+        assert finder._is_cache_valid() is True
+
+        def mock_run(cmd, **kwargs):
+            if "install" in cmd:
+                (output_folder / "zlib.pc").write_text(
+                    "prefix=/usr/local\nName: zlib\nVersion: 1.3\nLibs:\nCflags:\n"
+                )
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        with (
+            patch.object(finder, "is_available", return_value=True),
+            patch("subprocess.run", side_effect=mock_run),
+        ):
+            packages = finder.install()
+
+        assert "zlib" in packages
 
 
 class TestConanFinderCaching:
@@ -542,6 +633,66 @@ Cflags: -I/opt/nanobind/include
         # --cflags would have done).
         assert "/p/robin/include" in nb.include_dirs
 
+    def test_transitive_merge_preserves_repeated_framework_flags(
+        self, tmp_path: Path
+    ) -> None:
+        """macOS ``-framework`` flags survive the transitive Requires merge.
+
+        Regression: _merge_transitive_requires deduped link_flags token by
+        token, so the repeated literal ``-framework`` in
+        ``Libs: -framework Foundation -framework IOKit -framework CoreGraphics``
+        collapsed to ``-framework Foundation IOKit CoreGraphics`` — IOKit and
+        CoreGraphics then look like input files and the link fails. The merge
+        only runs when the package has a transitive ``Require`` (OpenColorIO →
+        expat here), which is why a deps-free .pc never tripped it.
+        """
+        gen = tmp_path / "build" / "generators"
+        gen.mkdir(parents=True)
+        (gen / "OpenColorIO.pc").write_text(
+            "Name: OpenColorIO\n"
+            "Version: 2.3.0\n"
+            "Libs: -lOpenColorIO -framework Foundation -framework IOKit "
+            "-framework CoreGraphics\n"
+            "Requires: expat\n"
+        )
+        (gen / "expat.pc").write_text("Name: expat\nVersion: 2.6.0\nLibs: -lexpat\n")
+
+        finder = ConanFinder(output_folder=tmp_path)
+        packages = finder._parse_pkgconfig_files()
+
+        flags = packages["OpenColorIO"].link_flags
+        # Each framework keeps its preceding -framework, and none collapsed.
+        assert flags.count("-framework") == 3
+        for fw in ("Foundation", "IOKit", "CoreGraphics"):
+            assert flags[flags.index(fw) - 1] == "-framework"
+
+    def test_transitive_merge_keeps_chained_xlinker_directives(
+        self, tmp_path: Path
+    ) -> None:
+        """-Xlinker pass-through survives the merge without corruption.
+
+        ``-Xlinker -rpath -Xlinker /a -Xlinker -rpath -Xlinker /b`` forwards
+        ``-rpath /a -rpath /b`` to the linker. Pair-deduping the repeated
+        ``-Xlinker -rpath`` would drop the second pair and orphan ``/b``, so
+        -X-family flags are kept verbatim rather than deduped.
+        """
+        gen = tmp_path / "build" / "generators"
+        gen.mkdir(parents=True)
+        (gen / "OpenColorIO.pc").write_text(
+            "Name: OpenColorIO\n"
+            "Version: 2.3.0\n"
+            "Libs: -lOpenColorIO -Xlinker -rpath -Xlinker /a "
+            "-Xlinker -rpath -Xlinker /b\n"
+            "Requires: expat\n"
+        )
+        (gen / "expat.pc").write_text("Name: expat\nVersion: 2.6.0\nLibs: -lexpat\n")
+
+        finder = ConanFinder(output_folder=tmp_path)
+        flags = finder._parse_pkgconfig_files()["OpenColorIO"].link_flags
+        assert flags.count("-Xlinker") == 4
+        assert flags.count("-rpath") == 2
+        assert "/a" in flags and "/b" in flags
+
 
 class TestConanFinderFind:
     """Tests for find() method."""
@@ -583,23 +734,104 @@ Cflags: -I/opt/pcons_test/include
         assert result is None
 
 
+class _FakeCompilerTool:
+    """Stand-in for a Tool: only ``default_vars()['cmd']`` is read by
+    ``ConanFinder._get_toolchain_compiler_cmd``.
+    """
+
+    def __init__(self, cmd: str) -> None:
+        self._cmd = cmd
+
+    def default_vars(self) -> dict[str, str]:
+        return {"cmd": self._cmd}
+
+
+class _FakeToolchain:
+    """Stand-in for a Toolchain exposing only ``.name`` and ``.tools`` —
+    the attributes ConanFinder's compiler detection reads. Real toolchains
+    never expose a ``.version`` attribute, so tests must go through the
+    same cc/cxx command path the real code uses, not a shortcut.
+    """
+
+    def __init__(self, name: str, cc_cmd: str, cxx_cmd: str | None = None) -> None:
+        self.name = name
+        self.tools = {
+            "cc": _FakeCompilerTool(cc_cmd),
+            "cxx": _FakeCompilerTool(cxx_cmd or cc_cmd),
+        }
+
+
 class TestConanFinderWithToolchain:
     """Tests for toolchain integration."""
 
     def test_detect_compiler_settings_with_gcc_toolchain(self, tmp_path: Path) -> None:
-        """Test compiler detection with GCC toolchain."""
+        """Compiler version must be detected by running the toolchain's
+        actual compiler command, not a bare "gcc" resolved from PATH.
+        """
         finder = ConanFinder(output_folder=tmp_path)
+        toolchain = _FakeToolchain("gcc", cc_cmd="/opt/gcc-13/bin/gcc-13")
 
-        # Mock toolchain
-        toolchain = MagicMock()
-        toolchain.name = "gcc"
-        toolchain.version = "12.3.0"
+        def mock_run(cmd, **kwargs):
+            assert cmd[0] == "/opt/gcc-13/bin/gcc-13"
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "gcc (Ubuntu 13.2.0-4ubuntu3) 13.2.0\n"
+            result.stderr = ""
+            return result
 
-        settings = finder._detect_compiler_settings(toolchain)
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(toolchain)
 
         assert settings["compiler"] == "gcc"
-        assert settings["compiler.version"] == "12"
+        assert settings["compiler.version"] == "13"
         assert settings["compiler.libcxx"] == "libstdc++11"
+
+    def test_detect_compiler_version_uses_toolchain_cmd_not_path(
+        self, tmp_path: Path
+    ) -> None:
+        """A gcc-13 toolchain must not be reported using whatever "gcc"
+        happens to resolve first on PATH (e.g. an unrelated gcc-11).
+        """
+        finder = ConanFinder(output_folder=tmp_path)
+        toolchain = _FakeToolchain("gcc", cc_cmd="/opt/gcc-13/bin/gcc-13")
+
+        def mock_run(cmd, **kwargs):
+            if cmd[0] in ("gcc", "clang"):
+                raise AssertionError(f"looked up bare {cmd[0]!r} on PATH")
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "gcc (Ubuntu 13.2.0-4ubuntu3) 13.2.0\n"
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(toolchain)
+
+        assert settings["compiler.version"] == "13"
+
+    def test_detect_compiler_version_no_toolchain_maps_apple_clang_to_binary(
+        self, tmp_path: Path
+    ) -> None:
+        """With no toolchain (sync_profile() called bare), the Conan compiler
+        name "apple-clang" must be mapped to the real "clang" binary — it is
+        not itself an executable — so version detection still works on macOS.
+        """
+        finder = ConanFinder(output_folder=tmp_path)
+        invoked: list[str] = []
+
+        def mock_run(cmd, **kwargs):
+            invoked.append(cmd[0])
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "Apple clang version 15.0.0 (clang-1500.0.40.1)\n"
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            version = finder._detect_compiler_version("apple-clang", None)
+
+        assert version == "15"
+        assert invoked == ["clang"]  # not the non-existent "apple-clang"
 
     def test_detect_compiler_settings_with_clang_toolchain(
         self, tmp_path: Path
@@ -608,10 +840,7 @@ class TestConanFinderWithToolchain:
         from pcons.configure.platform import Platform
 
         finder = ConanFinder(output_folder=tmp_path)
-
-        toolchain = MagicMock()
-        toolchain.name = "clang"
-        toolchain.version = "15.0.0"
+        toolchain = _FakeToolchain("clang", cc_cmd="/usr/lib/llvm-15/bin/clang")
 
         # Create a mock platform that's not macOS
         mock_platform = MagicMock(spec=Platform)
@@ -620,23 +849,73 @@ class TestConanFinderWithToolchain:
         mock_platform.is_windows = False
         mock_platform.arch = "x86_64"
 
+        def mock_run(cmd, **kwargs):
+            assert cmd[0] == "/usr/lib/llvm-15/bin/clang"
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "Ubuntu clang version 15.0.7\n"
+            result.stderr = ""
+            return result
+
         original_platform = finder._platform
         finder._platform = mock_platform
         try:
-            settings = finder._detect_compiler_settings(toolchain)
+            with patch("subprocess.run", side_effect=mock_run):
+                settings = finder._detect_compiler_settings(toolchain)
         finally:
             finder._platform = original_platform
 
         assert settings["compiler"] == "clang"
         assert settings["compiler.version"] == "15"
 
+    def test_detect_compiler_settings_with_msvc_toolchain(self, tmp_path: Path) -> None:
+        """MSVC settings must include compiler.version and compiler.runtime
+        (both mandatory in Conan 2 msvc profiles) so `conan install`
+        doesn't fail on Windows.
+        """
+        finder = ConanFinder(output_folder=tmp_path)
+        toolchain = _FakeToolchain("msvc", cc_cmd="cl.exe")
+
+        def mock_run(cmd, **kwargs):
+            assert cmd == ["cl.exe"]
+            result = MagicMock()
+            result.returncode = 2
+            result.stdout = ""
+            result.stderr = (
+                "Microsoft (R) C/C++ Optimizing Compiler Version "
+                "19.38.33130 for x64\n"
+                "Copyright (C) Microsoft Corporation.  All rights reserved.\n"
+            )
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(toolchain, build_type="Debug")
+
+        assert settings["compiler"] == "msvc"
+        assert settings["compiler.version"] == "193"
+        assert settings["compiler.runtime"] == "dynamic"
+        assert settings["compiler.runtime_type"] == "Debug"
+
+    @pytest.mark.parametrize(
+        ("cl_version", "expected"),
+        [
+            ("17.0", "170"),
+            ("18.0", "180"),
+            ("19.0", "190"),
+            ("19.16", "191"),
+            ("19.29", "192"),
+            ("19.38", "193"),
+            ("19.40", "194"),
+        ],
+    )
+    def test_msvc_conan_version_mapping(self, cl_version: str, expected: str) -> None:
+        """cl.exe's raw version must map to Conan's msvc version buckets."""
+        assert ConanFinder._msvc_conan_version(cl_version) == expected
+
     def test_sync_profile_with_toolchain(self, tmp_path: Path) -> None:
         """Test profile generation with toolchain."""
         finder = ConanFinder(output_folder=tmp_path)
-
-        toolchain = MagicMock()
-        toolchain.name = "gcc"
-        toolchain.version = "11"
+        toolchain = _FakeToolchain("gcc", cc_cmd="gcc")
 
         finder.sync_profile(toolchain=toolchain)
 

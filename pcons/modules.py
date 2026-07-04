@@ -140,7 +140,21 @@ def load_modules(extra_paths: list[Path | str] | None = None) -> dict[str, Modul
                 logger.debug("Loaded module: %s from %s", name, module_file)
 
             except (ImportError, ModuleNotFoundError, SyntaxError) as e:
-                logger.warning("Failed to load module %s: %s", name, e)
+                logger.warning(
+                    "Failed to load module %s from %s: %s", name, module_file, e
+                )
+            except Exception as e:
+                # A module is an optional add-on: any error raised while
+                # importing it or running its register() must not be fatal
+                # to the rest of pcons (KeyboardInterrupt/SystemExit still
+                # propagate since they are not Exception subclasses).
+                logger.warning(
+                    "Skipping module %s from %s: %s: %s",
+                    name,
+                    module_file,
+                    type(e).__name__,
+                    e,
+                )
 
     return dict(_loaded_modules)
 

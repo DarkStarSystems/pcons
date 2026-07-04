@@ -29,7 +29,9 @@ theme:
 nav:
   - Home: index.md
   - User Guide: user-guide.md
+  - Presets: presets.md
   - Porting from CMake: porting-from-cmake.md
+  - Porting from Make: porting-from-make.md
   - Changelog: changelog.md
   - Architecture: architecture.md
   - Contributing: contributing.md

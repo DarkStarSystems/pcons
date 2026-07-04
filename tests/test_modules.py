@@ -175,6 +175,43 @@ def was_registered() -> bool:
         assert "valid" in loaded
         assert "invalid" not in loaded
 
+    def test_handles_non_import_exception_at_module_scope(
+        self, module_dir: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A module raising e.g. NameError/ValueError at import time is
+        logged and skipped, not fatal, and other modules still load."""
+        from pcons import modules  # type: ignore[attr-defined]
+
+        (module_dir / "good.py").write_text("x = 1")
+        # Raises NameError (undefined_name) when executed, not an
+        # import/syntax error.
+        (module_dir / "bad.py").write_text("undefined_name + 1\n")
+
+        with caplog.at_level("WARNING"):
+            loaded = modules.load_modules([module_dir])
+
+        assert "good" in loaded
+        assert "bad" not in loaded
+        assert any("bad" in record.message for record in caplog.records)
+
+    def test_handles_register_exception_gracefully(
+        self, module_dir: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A module whose register() raises is logged and skipped, not
+        fatal, and other modules still load."""
+        from pcons import modules  # type: ignore[attr-defined]
+
+        (module_dir / "good2.py").write_text("y = 2")
+        (module_dir / "badreg.py").write_text(
+            "def register() -> None:\n    raise RuntimeError('boom')\n"
+        )
+
+        with caplog.at_level("WARNING"):
+            loaded = modules.load_modules([module_dir])
+
+        assert "good2" in loaded
+        assert any("badreg" in record.message for record in caplog.records)
+
 
 class TestModuleNamespace:
     """Tests for the pcons.modules namespace."""

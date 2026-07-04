@@ -16,7 +16,7 @@ class TestDefine:
         config = Configure(build_dir=tmp_path)
         config.define("MY_FEATURE")
 
-        defines = config._cache.get("_defines", {})
+        defines = config._defines
         assert defines.get("MY_FEATURE") == 1
 
     def test_define_with_value(self, tmp_path: Path) -> None:
@@ -25,7 +25,7 @@ class TestDefine:
         config.define("VERSION_MAJOR", 2)
         config.define("VERSION_MINOR", 5)
 
-        defines = config._cache.get("_defines", {})
+        defines = config._defines
         assert defines.get("VERSION_MAJOR") == 2
         assert defines.get("VERSION_MINOR") == 5
 
@@ -34,7 +34,7 @@ class TestDefine:
         config = Configure(build_dir=tmp_path)
         config.define("VERSION_STRING", "1.2.3")
 
-        defines = config._cache.get("_defines", {})
+        defines = config._defines
         assert defines.get("VERSION_STRING") == "1.2.3"
 
     def test_undefine(self, tmp_path: Path) -> None:
@@ -42,9 +42,45 @@ class TestDefine:
         config = Configure(build_dir=tmp_path)
         config.undefine("MISSING_FEATURE")
 
-        defines = config._cache.get("_defines", {})
+        defines = config._defines
         assert "MISSING_FEATURE" in defines
         assert defines.get("MISSING_FEATURE") is None
+
+    def test_defines_not_persisted_across_runs(self, tmp_path: Path) -> None:
+        """A define() removed from the build script must stop appearing.
+
+        Regression test: _defines used to be stored inside the persisted
+        cache dict, so once written, "#define USE_FOO 1" would survive
+        forever even after the build script stopped calling define("USE_FOO"),
+        because _load_cache() merged the whole cache (including _defines)
+        back in on the next run.
+        """
+        header_path = tmp_path / "config.h"
+
+        # First "run": build script calls define("USE_FOO") and saves the cache.
+        config1 = Configure(build_dir=tmp_path)
+        config1.define("USE_FOO")
+        config1.write_config_header(header_path)
+        config1.save()
+        assert "#define USE_FOO 1" in header_path.read_text()
+
+        # Second "run": loads the same persisted cache, but the build script
+        # no longer calls define("USE_FOO").
+        config2 = Configure(build_dir=tmp_path)
+        assert config2.get("USE_FOO") is None  # sanity: not in real check cache
+        config2.write_config_header(header_path)
+
+        content = header_path.read_text()
+        assert "USE_FOO" not in content
+
+    def test_check_result_cache_survives_reconfigure(self, tmp_path: Path) -> None:
+        """Unlike _defines, genuine cached check results ARE meant to persist."""
+        config1 = Configure(build_dir=tmp_path)
+        config1.set("some_check_key", True)
+        config1.save()
+
+        config2 = Configure(build_dir=tmp_path)
+        assert config2.get("some_check_key") is True
 
 
 class TestCheckSizeof:
@@ -58,7 +94,7 @@ class TestCheckSizeof:
         assert size is not None
         assert size == 4  # int is typically 4 bytes
 
-        defines = config._cache.get("_defines", {})
+        defines = config._defines
         assert defines.get("SIZEOF_INT") == 4
 
     def test_sizeof_pointer(self, tmp_path: Path) -> None:
@@ -70,7 +106,7 @@ class TestCheckSizeof:
         # Should be 8 on 64-bit, 4 on 32-bit
         assert size in (4, 8)
 
-        defines = config._cache.get("_defines", {})
+        defines = config._defines
         assert "SIZEOF_VOIDP" in defines
 
     def test_sizeof_custom_define_name(self, tmp_path: Path) -> None:
@@ -78,7 +114,7 @@ class TestCheckSizeof:
         config = Configure(build_dir=tmp_path)
         config.check_sizeof("long", define_name="MY_LONG_SIZE")
 
-        defines = config._cache.get("_defines", {})
+        defines = config._defines
         assert "MY_LONG_SIZE" in defines
 
     def test_sizeof_unknown_type(self, tmp_path: Path) -> None:
@@ -87,45 +123,6 @@ class TestCheckSizeof:
         size = config.check_sizeof("unknown_type_xyz", default=0)
 
         assert size == 0
-
-
-class TestCheckHeader:
-    """Tests for check_header method."""
-
-    def test_check_header_records_define(self, tmp_path: Path) -> None:
-        """Test that check_header records a define."""
-        config = Configure(build_dir=tmp_path)
-
-        # Since check_compile is not fully implemented,
-        # this will return False, but the define should be recorded
-        config.check_header("stdio.h")
-
-        defines = config._cache.get("_defines", {})
-        # Should have either defined or undefined HAVE_STDIO_H
-        assert "HAVE_STDIO_H" in defines
-
-    def test_check_header_custom_define(self, tmp_path: Path) -> None:
-        """Test check_header with custom define name."""
-        config = Configure(build_dir=tmp_path)
-        config.check_header("myheader.h", define_name="HAS_MY_HEADER")
-
-        defines = config._cache.get("_defines", {})
-        assert "HAS_MY_HEADER" in defines
-
-
-class TestCheckSymbol:
-    """Tests for check_symbol method."""
-
-    def test_check_symbol_records_define(self, tmp_path: Path) -> None:
-        """Test that check_symbol records a define."""
-        config = Configure(build_dir=tmp_path)
-
-        # Since check_compile is not implemented, this will fail
-        # but the define should still be recorded
-        config.check_symbol("printf", header="stdio.h")
-
-        defines = config._cache.get("_defines", {})
-        assert "HAVE_PRINTF" in defines
 
 
 class TestWriteConfigHeader:
@@ -234,3 +231,42 @@ class TestWriteConfigHeader:
             if line.startswith("#define ") and "CONFIG_H" not in line:
                 parts = line.split()
                 assert len(parts) >= 2  # #define NAME [value]
+
+    def test_write_is_skipped_when_content_unchanged(self, tmp_path: Path) -> None:
+        """Rewriting identical content must not touch the file at all.
+
+        Regression test: write_config_header() used to write unconditionally,
+        bumping the header's mtime (and forcing a full rebuild of everything
+        that includes it) on every run even when nothing changed.
+        """
+        header_path = tmp_path / "config.h"
+
+        config1 = Configure(build_dir=tmp_path)
+        config1.define("FOO", 1)
+        config1.write_config_header(header_path)
+        content1 = header_path.read_text()
+        mtime1 = header_path.stat().st_mtime_ns
+
+        # Second, independent "run" that produces byte-identical output.
+        config2 = Configure(build_dir=tmp_path)
+        config2.define("FOO", 1)
+        config2.write_config_header(header_path)
+        content2 = header_path.read_text()
+        mtime2 = header_path.stat().st_mtime_ns
+
+        assert content1 == content2
+        assert mtime1 == mtime2  # file was not touched, so mtime is unchanged
+
+    def test_write_happens_when_content_changes(self, tmp_path: Path) -> None:
+        """Sanity check: a real content change still gets written."""
+        header_path = tmp_path / "config.h"
+
+        config1 = Configure(build_dir=tmp_path)
+        config1.define("FOO", 1)
+        config1.write_config_header(header_path)
+
+        config2 = Configure(build_dir=tmp_path)
+        config2.define("FOO", 2)
+        config2.write_config_header(header_path)
+
+        assert "#define FOO 2" in header_path.read_text()

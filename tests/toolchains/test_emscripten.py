@@ -11,6 +11,7 @@ from pcons.toolchains.emscripten import (
     EmccCxxCompiler,
     EmccLinker,
     EmscriptenToolchain,
+    find_emscripten_toolchain,
     find_emsdk,
     is_emcc_available,
 )
@@ -291,6 +292,43 @@ class TestEmscriptenRegistration:
         entry = toolchain_registry.get("emcc")
         assert entry is not None
         assert entry.toolchain_class is EmscriptenToolchain
+
+    def test_is_available_wired_to_real_probe(self):
+        """The registry entry must gate on is_emcc_available, not just
+        ``shutil.which("emcc")`` directly — this is what lets
+        find_available() correctly skip Emscripten when emcc is absent
+        even though another wasm-category toolchain's check_command
+        (e.g. WASI's "clang") happens to be on PATH."""
+        from pcons.tools.toolchain import toolchain_registry
+
+        entry = toolchain_registry.get("emscripten")
+        assert entry is not None
+        assert entry.is_available is is_emcc_available
+
+
+class TestFindEmscriptenToolchain:
+    """find_emscripten_toolchain() must not return a WASI toolchain when
+    emcc is absent — a bare ``clang`` on PATH (WASI's check_command) is
+    not Emscripten, and must not be silently substituted."""
+
+    def test_raises_when_no_emcc(self, monkeypatch):
+        monkeypatch.delenv("EMSDK", raising=False)
+        monkeypatch.setattr("shutil.which", lambda _cmd: None)
+        with pytest.raises(RuntimeError, match="Emscripten not found"):
+            find_emscripten_toolchain()
+
+    def test_does_not_silently_return_wasi(self, monkeypatch, tmp_path):
+        """Even if a real wasi-sdk happens to be installed (category-wide
+        fallback), find_emscripten_toolchain must raise rather than
+        silently return a WasiToolchain — which would produce a bare
+        .wasm instead of the expected .js + .wasm pair."""
+        from pcons.toolchains import wasi
+
+        monkeypatch.delenv("EMSDK", raising=False)
+        monkeypatch.setattr("shutil.which", lambda _cmd: None)
+        monkeypatch.setattr(wasi, "find_wasi_sdk", lambda: tmp_path)
+        with pytest.raises(RuntimeError, match="Emscripten not found"):
+            find_emscripten_toolchain()
 
 
 class TestEmsdkHints:

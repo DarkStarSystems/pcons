@@ -289,6 +289,12 @@ class NinjaGenerator(BaseGenerator):
 
             if deps_style == "msvc":
                 f.write("  deps = msvc\n")
+                # Ninja's default msvc_deps_prefix is the English
+                # "Note: including file: " that cl.exe emits. On a
+                # localized (e.g. German/Japanese) cl.exe this default
+                # silently matches nothing and header deps are dropped, so
+                # pin it explicitly rather than relying on ninja's default.
+                f.write("  msvc_deps_prefix = Note: including file: \n")
             elif deps_style == "gcc":
                 if depfile:
                     # depfile is a PathToken - use suffix to create $out.d pattern
@@ -702,7 +708,15 @@ class NinjaGenerator(BaseGenerator):
         # run pcons itself so the runner is guaranteed to find the
         # `pcons` package, even when the user's `python` on PATH is a
         # different interpreter.
-        python_exe = self._escape_path(sys.executable)
+        # Quote for the shell (not just ninja's $-escaping) so an
+        # interpreter path containing spaces survives as a single argument:
+        # _escape_path's "$ " for spaces is unescaped by ninja to a bare
+        # space, which the shell then splits on.
+        from pcons.core.subst import to_shell_command
+
+        python_exe = to_shell_command(
+            [sys.executable.replace("\\", "/")], shell="ninja"
+        )
         f.write("rule pcons_test\n")
         f.write(
             f"  command = {python_exe} -m pcons.test_runner "

@@ -366,6 +366,63 @@ class TestTarget:
             Target("orphan")
 
 
+class TestSameShortNameAcrossSubprojects:
+    """Two subprojects may each define a target with the same short name.
+
+    Target identity is qualified_name (project::target), so graph
+    algorithms that key on the bare .name incorrectly collapse these into
+    one entry, silently dropping the second target's usage requirements.
+    """
+
+    def _make_sub_utils(self, root):
+        """Create two subprojects, each with a target named 'util'."""
+        with root._enter_subdir("sub1"):
+            Project("sub1", root_dir=root.root_dir / "sub1")
+            util1 = Target("util")
+        with root._enter_subdir("sub2"):
+            Project("sub2", root_dir=root.root_dir / "sub2")
+            util2 = Target("util")
+        return util1, util2
+
+    def test_transitive_dependencies_includes_both(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        assert util1.name == util2.name == "util"
+        assert util1.qualified_name != util2.qualified_name
+
+        app = Target("app")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        deps = app.transitive_dependencies()
+        assert set(deps) == {util1, util2}
+
+    def test_collect_usage_requirements_from_both(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        util1.public.defines.append("FROM_SUB1")
+        util2.public.defines.append("FROM_SUB2")
+
+        app = Target("app")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        requirements = app.collect_usage_requirements()
+        assert "FROM_SUB1" in requirements.defines
+        assert "FROM_SUB2" in requirements.defines
+
+    def test_get_all_languages_union(self, test_project):  # noqa: F811
+        util1, util2 = self._make_sub_utils(test_project)
+        util1.required_languages.add("c")
+        util2.required_languages.add("cxx")
+
+        app = Target("app")
+        app.required_languages.add("fortran")
+        app.private.link_libs.append(util1)
+        app.private.link_libs.append(util2)
+
+        langs = app.get_all_languages()
+        assert langs == {"fortran", "c", "cxx"}
+
+
 class TestImportedTarget:
     def test_creation(self, test_project):  # noqa: F811
         target = ImportedTarget("zlib", version="1.2.11")
@@ -401,9 +458,7 @@ class TestFluentAPI:
         lib = Target("lib")
         app = Target("app")
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            result = app.link(lib)
+        result = app.link(lib)
 
         assert result is app
         assert lib in app.dependencies
@@ -413,12 +468,191 @@ class TestFluentAPI:
         lib = Target("lib")
         app = Target("app")
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            app.link(lib)
-            app.link(lib)  # same lib again — must be ignored
+        app.link(lib)
+        app.link(lib)  # same lib again — must be ignored
 
         assert app.public.link_libs.count(lib) == 1
+
+    def test_link_emits_no_warning(self, test_project):  # noqa: F811
+        """link() is no longer deprecated: no warning on call."""
+        lib = Target("lib")
+        app = Target("app")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            app.link(lib)
+
+        assert lib in app.public.link_libs
+
+    def test_link_private_appends_to_private_not_public(self, test_project):  # noqa: F811
+        """link_private() targets go to private.link_libs only."""
+        lib = Target("lib")
+        app = Target("app")
+
+        app.link_private(lib)
+
+        assert lib in app.private.link_libs
+        assert lib not in app.public.link_libs
+
+    def test_link_accepts_string(self, test_project):  # noqa: F811
+        """link() accepts raw library-name strings."""
+        app = Target("app")
+
+        app.link("m")
+
+        assert "m" in app.public.link_libs
+
+    def test_link_private_accepts_string(self, test_project):  # noqa: F811
+        """link_private() accepts raw library-name strings."""
+        app = Target("app")
+
+        app.link_private("m")
+
+        assert "m" in app.private.link_libs
+
+    def test_link_mixed_targets_and_strings(self, test_project):  # noqa: F811
+        """link() preserves argument order for mixed targets/strings."""
+        lib = Target("lib")
+        lib2 = Target("lib2")
+        app = Target("app")
+
+        app.link(lib, "m", lib2)
+
+        assert list(app.public.link_libs) == [lib, "m", lib2]
+
+    def test_link_private_returns_self_and_chains(self, test_project):  # noqa: F811
+        """link()/link_private() chain, both returning self."""
+        a = Target("a")
+        b = Target("b")
+        app = Target("app")
+
+        assert app.link(a).link_private(b) is app
+
+    def test_link_string_dedup(self, test_project):  # noqa: F811
+        """A repeated string library name is de-duped."""
+        app = Target("app")
+
+        app.link("m")
+        app.link("m")
+
+        assert app.public.link_libs.count("m") == 1
+
+    def test_link_private_rejects_list(self, test_project):  # noqa: F811
+        """link_private() rejects a list argument with TypeError."""
+        lib = Target("lib")
+        app = Target("app")
+
+        with pytest.raises(TypeError):
+            app.link_private([lib])
+
+    def test_link_rejects_bad_type(self, test_project):  # noqa: F811
+        """link() rejects non-Target, non-str arguments."""
+        app = Target("app")
+
+        with pytest.raises(TypeError):
+            app.link(42)
+        with pytest.raises(TypeError):
+            app.link(Path("libfoo.a"))
+
+    def test_link_rejects_empty_string(self, test_project):  # noqa: F811
+        """link() rejects empty/whitespace-only library names."""
+        app = Target("app")
+
+        with pytest.raises(ValueError):
+            app.link("")
+        with pytest.raises(ValueError):
+            app.link("  ")
+
+    def test_link_rejects_self(self, test_project):  # noqa: F811
+        """link() rejects linking a target against itself."""
+        app = Target("app")
+
+        with pytest.raises(ValueError):
+            app.link(app)
+
+    def test_link_private_rejects_self(self, test_project):  # noqa: F811
+        """link_private() rejects linking a target against itself."""
+        app = Target("app")
+
+        with pytest.raises(ValueError):
+            app.link_private(app)
+
+    def test_link_after_resolve_raises(self, test_project):  # noqa: F811
+        """link() after resolve() raises RuntimeError."""
+        lib = Target("lib")
+        app = Target("app")
+        app._resolved = True
+
+        with pytest.raises(RuntimeError):
+            app.link(lib)
+
+    def test_link_private_after_resolve_raises(self, test_project):  # noqa: F811
+        """link_private() after resolve() raises RuntimeError."""
+        lib = Target("lib")
+        app = Target("app")
+        app._resolved = True
+
+        with pytest.raises(RuntimeError):
+            app.link_private(lib)
+
+    def test_link_target_brings_usage_requirements(self, test_project):  # noqa: F811
+        """A linked Target brings its public usage requirements."""
+        lib = Target("lib")
+        lib.public.include_dirs.append(Path("include"))
+        app = Target("app")
+
+        app.link_private(lib)
+
+        assert Path("include") in app.collect_usage_requirements().include_dirs
+
+    def test_link_public_reexports_to_consumers(self, test_project):  # noqa: F811
+        """A public link dependency propagates to consumers (mirrors line 219)."""
+        leaf = Target("leaf")
+        mid = Target("mid")
+        mid.link(leaf)  # public
+        app = Target("app")
+        app.link_private(mid)
+
+        # leaf is re-exported through mid's public scope.
+        assert leaf in app.transitive_dependencies()
+
+    def test_link_private_not_reexported(self, test_project):  # noqa: F811
+        """A private link dependency is not re-exported (mirrors line 233)."""
+        leaf = Target("leaf")
+        leaf.public.include_dirs.append(Path("leaf_inc"))
+        mid = Target("mid")
+        mid.link_private(leaf)  # private
+        app = Target("app")
+        app.link_private(mid)
+
+        # Neither the dependency graph nor the propagated usage requirements
+        # may pull leaf in through mid's private edge.
+        assert leaf not in app.transitive_dependencies()
+        assert Path("leaf_inc") not in app.collect_usage_requirements().include_dirs
+
+    def test_private_deps_do_not_leak_headers_up_the_chain(self, test_project):  # noqa: F811
+        """A private dependency's public headers must not propagate to a
+        consumer at any distance.
+
+        Regression test: usage-requirement collection used to re-enter each
+        dependency at its own top level (following that dep's *private*
+        link_libs), leaking a private dependency's public include dirs
+        unboundedly up the consumer chain.
+        """
+        leaf = Target("leaf")
+        leaf.public.include_dirs.append(Path("leaf_inc"))
+        mid = Target("mid")
+        mid.link_private(leaf)  # leaf is mid's private implementation detail
+        app = Target("app")
+        app.link(mid)  # public
+        top = Target("top")
+        top.link(app)  # public, two levels above the private edge
+
+        # mid uses leaf, so mid itself sees leaf's headers...
+        assert Path("leaf_inc") in mid.collect_usage_requirements().include_dirs
+        # ...but no consumer of mid does, at any distance.
+        assert Path("leaf_inc") not in app.collect_usage_requirements().include_dirs
+        assert Path("leaf_inc") not in top.collect_usage_requirements().include_dirs
 
     def test_add_source_returns_self(self, tmp_path, test_project):  # noqa: F811
         """add_source() returns self for chaining."""
@@ -483,9 +717,7 @@ class TestFluentAPI:
         src = tmp_path / "main.c"
         src.touch()
 
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=DeprecationWarning)
-            result = app.add_source(src).link(lib)
+        result = app.add_source(src).link(lib)
 
         assert result is app
         assert len(app.sources) == 1

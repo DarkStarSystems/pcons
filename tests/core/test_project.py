@@ -264,6 +264,45 @@ class TestProjectDefaults:
 
         assert project.default_targets.count(target) == 1
 
+    def test_default_with_node(self):
+        project = Project("myproject")
+        target = Target("app")
+        node = FileNode(Path("app.out"))
+        target.output_nodes.append(node)
+
+        project.Default(node)
+
+        assert target in project.default_targets
+
+    def test_default_with_node_not_owned_by_any_target_raises(self):
+        project = Project("myproject")
+        Target("app")
+        orphan_node = FileNode(Path("orphan.out"))
+
+        with pytest.raises(ValueError, match="not an output of any target"):
+            project.Default(orphan_node)
+
+    def test_default_with_alias(self):
+        project = Project("myproject")
+        target = Target("app")
+        project.Alias("myalias", target)
+
+        project.Default("myalias")
+
+        assert target in project.default_targets
+
+    def test_default_unknown_name_raises_clear_error(self):
+        project = Project("myproject")
+
+        with pytest.raises(KeyError, match="not a known alias or target"):
+            project.Default("nonexistent")
+
+    def test_default_wrong_type_raises_type_error(self):
+        project = Project("myproject")
+
+        with pytest.raises(TypeError):
+            project.Default(42)  # type: ignore[arg-type]
+
 
 class TestProjectValidation:
     def test_valid_project(self, tmp_path):
@@ -401,15 +440,19 @@ class TestGeneratePcFile:
         target = Target("foo")
 
         pc = project.generate_pc_file(target, version="1.0")
-        mtime1 = pc.stat().st_mtime
+        content1 = pc.read_text()
+        mtime_ns1 = pc.stat().st_mtime_ns
 
-        # Call again — should not rewrite
-        import time
-
-        time.sleep(0.01)
+        # Call again with identical content — should not rewrite the file.
+        # Comparing st_mtime_ns (not st_mtime) and not sleeping avoids relying
+        # on filesystem mtime granularity, which can be coarser than a
+        # wrongly-rewritten file's actual write latency and mask a bug.
         project.generate_pc_file(target, version="1.0")
-        mtime2 = pc.stat().st_mtime
-        assert mtime1 == mtime2
+        content2 = pc.read_text()
+        mtime_ns2 = pc.stat().st_mtime_ns
+
+        assert content2 == content1
+        assert mtime_ns2 == mtime_ns1
 
     def test_pc_file_requires_from_pkgconfig_deps(self, tmp_path):
         """Dependencies found via pkg-config become Requires: entries."""

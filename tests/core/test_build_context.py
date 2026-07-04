@@ -142,6 +142,50 @@ class TestCompileLinkContext:
             assert flags.count("-fsanitize=address") == 1
             assert "-pthread" in flags
 
+    def test_link_overrides_separated_arg_flags_not_split(self) -> None:
+        """Verify separated-arg flags like -isystem/-framework aren't split.
+
+        Regression test for the same bug class as the -framework fix (#49):
+        naive per-token dedup treats a repeated "-isystem" as already-seen
+        and drops it, orphaning the following directory as a bare
+        positional argument on the command line.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from pcons.core.project import Project
+        from pcons.toolchains.gcc import GccToolchain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+            toolchain = GccToolchain()
+            toolchain._configured = True
+            env = project.Environment(toolchain=toolchain)
+            env.add_tool("link")
+            env.link.flags = ["-isystem", "/usr/local/include", "-framework", "Cocoa"]
+
+            ctx = CompileLinkContext(
+                link_flags=["-isystem", "/opt/include", "-framework", "CoreFoundation"],
+                mode="link",
+                _env=env,
+            )
+            overrides = ctx.get_env_overrides()
+
+            # Each -isystem/-framework pair must stay intact: the second
+            # occurrence of the flag is a different pair (different
+            # argument) and must not be dropped or orphaned.
+            assert overrides["flags"] == [
+                "-isystem",
+                "/usr/local/include",
+                "-framework",
+                "Cocoa",
+                "-isystem",
+                "/opt/include",
+                "-framework",
+                "CoreFoundation",
+            ]
+
     def test_toolchain_injected_flag_deduplicated(self) -> None:
         """Toolchain-injected link flags already present are not duplicated."""
         from pcons.tools.requirements import EffectiveRequirements
@@ -168,6 +212,61 @@ class TestCompileLinkContext:
 
         assert ctx.link_flags.count("-Wl,-soname,libfoo.so") == 1
         assert "-Wl,-z" in ctx.link_flags
+
+    def test_from_effective_requirements_objcxx_uses_cxx_linker(
+        self, gcc_toolchain, tmp_project
+    ) -> None:
+        """.mm sources (link_language "objcxx") must link with the C++ driver.
+
+        Regression test: objcxx has priority 3 (higher than cxx's 2, see
+        BaseToolchain.DEFAULT_LANGUAGE_PRIORITY), so a target that mixes
+        .mm and .cpp sources picks "objcxx" as its link_language. Before
+        this fix, only "cxx" (and "fortran") triggered the C++ linker-driver
+        override, so objcxx fell through to the default C linker (gcc) and
+        libstdc++/libc++ was never linked in, breaking STL usage in .mm
+        files.
+        """
+        from pcons.core.project import Project
+        from pcons.tools.requirements import EffectiveRequirements
+
+        project = Project("test", root_dir=tmp_project, build_dir=tmp_project / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        ctx = CompileLinkContext.from_effective_requirements(
+            EffectiveRequirements(),
+            mode="link",
+            language="objcxx",
+            env=env,
+        )
+
+        assert ctx.linker_cmd == env.cxx.cmd
+        assert ctx.linker_cmd != env.cc.cmd
+
+    def test_from_effective_requirements_cuda_uses_cxx_linker(
+        self, gcc_toolchain, tmp_project
+    ) -> None:
+        """CUDA-linked targets (link_language "cuda") use the host C++ linker.
+
+        CudaToolchain is designed to be used alongside a C/C++ toolchain for
+        linking (nvcc only compiles .cu files); when cuda is the
+        highest-priority language in a mixed build, the C++ driver must
+        still be selected, just as for plain C++.
+        """
+        from pcons.core.project import Project
+        from pcons.tools.requirements import EffectiveRequirements
+
+        project = Project("test", root_dir=tmp_project, build_dir=tmp_project / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        ctx = CompileLinkContext.from_effective_requirements(
+            EffectiveRequirements(),
+            mode="link",
+            language="cuda",
+            env=env,
+        )
+
+        assert ctx.linker_cmd == env.cxx.cmd
+        assert ctx.linker_cmd != env.cc.cmd
 
     def test_compile_overrides_merge_with_env_flags(self) -> None:
         """Verify compile flags are merged with env.{tool}.flags.
@@ -463,22 +562,21 @@ class TestNinjaQuoting:
 class TestMakefileQuoting:
     """Test that Makefile generator properly quotes values."""
 
-    def test_quote_tokens_for_make(self) -> None:
-        """Test the _quote_tokens_for_make helper directly."""
+    def test_escape_dollar_for_recipe(self) -> None:
+        """Test the _escape_dollar_for_recipe helper directly."""
         from pcons.generators.makefile import MakefileGenerator
 
         gen = MakefileGenerator()
 
-        # Simple tokens - no quoting needed
-        assert gen._quote_tokens_for_make(["-Wall", "-O2"]) == "-Wall -O2"
+        # No dollar signs - unchanged
+        assert gen._escape_dollar_for_recipe("-Wall -O2") == "-Wall -O2"
 
-        # Paths with spaces need quoting
-        result = gen._quote_tokens_for_make(["-I/path with spaces"])
-        assert "'" in result or '"' in result
-
-        # Dollar signs get escaped for Make
-        result = gen._quote_tokens_for_make(["-DVAR=$HOME"])
-        assert "$$HOME" in result
+        # Dollar signs get escaped for Make, regardless of shell quoting
+        assert gen._escape_dollar_for_recipe("-DVAR=$HOME") == "-DVAR=$$HOME"
+        assert (
+            gen._escape_dollar_for_recipe("'-Wl,-rpath,$ORIGIN/../lib'")
+            == "'-Wl,-rpath,$$ORIGIN/../lib'"
+        )
 
 
 class TestCompileCommandsQuoting:

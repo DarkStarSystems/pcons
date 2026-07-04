@@ -94,7 +94,7 @@ hello.add_sources(["hello.cpp"])
 project.Default(hello)
 
 # Resolve dependencies and generate build files
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 **3. Generate and build**:
@@ -256,7 +256,7 @@ Your script must call a generator at the end:
 project.resolve()
 
 # REQUIRED: Generate build files (Ninja is the default generator, but Makefile and Xcode generators are also included)
-Generator().generate(project, build_dir)
+Generator().generate(project)
 ```
 
 The `pcons` CLI executes your script but does NOT automatically call resolve/generate - your script controls when and how this happens. This gives you flexibility for conditional generation or multiple generators.
@@ -380,7 +380,7 @@ lib.add_sources(["lib.cpp"])
 lib.public.include_dirs.append(Path("include"))
 
 # Link the program against the library
-app.private.link_libs.append(lib)
+app.link_private(lib)
 ```
 
 #### Target Types
@@ -525,7 +525,7 @@ hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 # Generate
 project.Default(hello)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 **Build and run:**
@@ -615,7 +615,7 @@ calculator.private.compile_flags.extend(["-Wall", "-Wextra"])
 
 # Generate
 project.Default(calculator)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 ### Static Library
@@ -654,25 +654,25 @@ libmath.add_sources([src_dir / "math_utils.c"])
 libmath.public.include_dirs.append(include_dir)
 
 # Public link libs (e.g., math library on Linux).
-# Use link_libs for -l libraries (placed after objects on the link line).
-# Use link_flags for other linker flags (placed before objects).
-libmath.public.link_libs.append("m")
+# link("m") adds a raw -l library (placed after objects on the link line);
+# use link_flags for other linker flags (placed before objects).
+libmath.link("m")
 
 # Create program that uses the library
 app = project.Program("myapp", env)
 app.add_sources([src_dir / "main.c"])
-app.private.link_libs.append(libmath)  # Gets libmath's public includes automatically!
+app.link_private(libmath)  # Gets libmath's public includes automatically!
 
 project.Default(app)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 Key points:
 - `public.include_dirs` propagates to targets that link against this library
-- Appending to `app.private.link_libs` adds libmath as a dependency and applies its public requirements. Use `private.link_libs` to keep the dependency local (as here, since `app` is the final program) or `public.link_libs` to re-export it to consumers of this target.
+- `app.link_private(libmath)` adds libmath as a dependency and applies its public requirements. Use `link_private()` to keep the dependency local (as here, since `app` is the final program) or `link()` to re-export it to consumers of this target.
 
-!!! note "Deprecated `target.link()`"
-    Earlier versions used `app.link(libmath)`. That method is deprecated; it is equivalent to `app.public.link_libs.append(libmath)`. Prefer appending to `public.link_libs` or `private.link_libs` directly, which lets you control propagation.
+!!! note "`link()` / `link_private()` vs. the `link_libs` lists"
+    `target.link(...)` and `target.link_private(...)` are the recommended high-level forms. They are exactly equivalent to appending to `target.public.link_libs` and `target.private.link_libs` respectively — those lists remain fully supported as the low-level form, and accept the same `Target` objects and library-name strings.
 
 ### Shared/Dynamic Library
 
@@ -714,10 +714,10 @@ libplugin.output_name = "myplugin.so"  # Override default libplugin.so
 # Create program that uses the library
 app = project.Program("host", env)
 app.add_sources([src_dir / "main.c"])
-app.private.link_libs.append(libplugin)
+app.link_private(libplugin)
 
 project.Default(app, libplugin)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 ### Project with Subdirectories
@@ -756,17 +756,17 @@ env = project.Environment(toolchain=toolchain)
 libmath = project.StaticLibrary("math", env)
 libmath.add_sources([src_dir / "math_utils.c"])
 libmath.public.include_dirs.append(include_dir)
-libmath.public.link_libs.append("m")  # Link math library
+libmath.link("m")  # Link math library
 
 # Library: libphysics - depends on libmath
 libphysics = project.StaticLibrary("physics", env)
 libphysics.add_sources([src_dir / "physics.c"])
-libphysics.public.link_libs.append(libmath)  # Re-exports libmath's includes to consumers
+libphysics.link(libmath)  # Re-exports libmath's includes to consumers
 
 # Program: simulator - main application
 simulator = project.Program("simulator", env)
 simulator.add_sources([src_dir / "main.c"])
-simulator.private.link_libs.append(libphysics)  # Gets BOTH physics and math includes!
+simulator.link_private(libphysics)  # Gets BOTH physics and math includes!
 
 # Set defaults and generate
 project.Default(simulator)
@@ -806,7 +806,7 @@ app = project.Program("myapp", env)
 app.add_sources(["main.c"])
 
 project.Default(app)
-Generator().generate(project, build_dir)
+Generator().generate(project)
 
 print(f"Variant: {variant}")
 print(f"Build dir: {build_dir}")
@@ -889,7 +889,7 @@ optional = project.find_package("optional-dep", required=False)
 
 # Use as a dependency (public requirements auto-propagate)
 app = project.Program("myapp", env, sources=["main.cpp"])
-app.private.link_libs.append(zlib)
+app.link_private(zlib)
 
 # Or apply directly to an environment
 env.use(openssl)
@@ -924,17 +924,17 @@ httplib = ImportedTarget.from_package(PackageDescription(
 ))
 ```
 
-If the manual package depends on another package, append it to `public.link_libs` to wire up transitive dependencies — don't copy public requirements manually:
+If the manual package depends on another package, `link()` it to wire up transitive dependencies — don't copy public requirements manually:
 
 ```python
 openssl = project.find_package("openssl")
 
 httplib = # ... see above
-httplib.public.link_libs.append(openssl)  # openssl requirements propagate to anything linking httplib
+httplib.link(openssl)  # openssl requirements propagate to anything linking httplib
 
 # Now any target that links httplib automatically gets openssl too
 app = project.Program("myapp", env, sources=["main.cpp"])
-app.private.link_libs.append(httplib)  # gets httplib AND openssl includes, libs, flags
+app.link_private(httplib)  # gets httplib AND openssl includes, libs, flags
 ```
 
 ### Using pkg-config
@@ -1022,7 +1022,7 @@ hello = project.Program("hello_fmt", env)
 hello.add_sources([project_dir / "src" / "main.cpp"])
 
 project.Default(hello)
-Generator().generate(project, build_dir)
+Generator().generate(project)
 ```
 
 #### sync_profile() Reference
@@ -1970,7 +1970,7 @@ Generate a traditional Makefile instead of Ninja build files:
 from pcons.generators.makefile import MakefileGenerator
 
 # Generate Makefile
-MakefileGenerator().generate(project, build_dir)
+MakefileGenerator().generate(project)
 # Creates build/Makefile
 ```
 
@@ -1990,7 +1990,7 @@ Generate dependency graphs:
 from pcons.generators.mermaid import MermaidGenerator
 
 # Generate Mermaid diagram
-MermaidGenerator().generate(project, build_dir)
+MermaidGenerator().generate(project)
 # Creates build/deps.mmd
 ```
 
@@ -2479,7 +2479,7 @@ msix = windows.create_msix(
 | `description` | Package description |
 | `processor_architecture` | `"x64"`, `"x86"`, or `"arm64"` (default: `"x64"`) |
 | `sign_cert` | Path to `.pfx` certificate for signing |
-| `sign_password` | Certificate password |
+| `sign_password_env` | Name of an environment variable holding the certificate password (not the password itself, so it's never baked into `build.ninja`) |
 
 #### Complete Platform-Conditional Example
 
@@ -2667,7 +2667,7 @@ lib.add_sources(["src/mylib.c"])
 
 prog = project.Program("myapp", env)
 prog.add_sources(["src/main.c"])
-prog.private.link_libs.append(lib)
+prog.link_private(lib)
 
 # Force-load all symbols from the static library (macOS)
 prog.private.link_flags.append(
@@ -2769,7 +2769,7 @@ lib_universal = create_universal_binary(
 )
 
 project.Default(lib_universal)
-Generator().generate(project, "build")
+Generator().generate(project)
 ```
 
 The `create_universal_binary()` function:
@@ -3213,10 +3213,12 @@ This is especially useful when porting CMake projects to pcons, since the templa
 |--------|-------------|
 | `target.add_source(path)` | Add a source file |
 | `target.add_sources(paths)` | Add multiple source files |
-| `target.public.link_libs.append(t)` | Link a dependency and re-export its public requirements |
-| `target.private.link_libs.append(t)` | Link a dependency, keeping its requirements local |
+| `target.link(t, "m")` | Link a dependency (or raw lib name) and re-export it to consumers |
+| `target.link_private(t, "m")` | Link a dependency (or raw lib name), keeping it local |
 | `target.add_dependency(t)` | Add a non-link build dependency |
 | `target.public.include_dirs` | Include dirs for consumers |
+| `target.public.link_libs.append(t)` | Low-level form of `link()` (append a `Target` or `-l` name) |
+| `target.private.link_libs.append(t)` | Low-level form of `link_private()` |
 | `target.public.link_libs` | Libraries to link (`-l`; placed after objects) |
 | `target.public.link_flags` | Linker flags (placed before objects; use `link_libs` for `-l` libraries). Use `PathToken` for flags containing paths. |
 | `target.public.defines` | Defines for consumers |
@@ -3272,7 +3274,6 @@ This is especially useful when porting CMake projects to pcons, since the templa
 | `config.define(name, value=1)` | Define a preprocessor symbol |
 | `config.undefine(name)` | Mark a symbol as undefined |
 | `config.check_sizeof(type)` | Get the size of a type and define `SIZEOF_*` |
-| `config.check_header(name)` | Check if a header exists |
 | `config.write_config_header(path)` | Generate a config.h file |
 | `ToolChecks(config, env, tool)` | Create feature checker for a tool |
 | `checks.check_flag(flag)` | Check if compiler accepts a flag |

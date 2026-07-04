@@ -90,6 +90,58 @@ class TestCachedOrCompiler:
         assert result.success is False
         assert "No compiler configured" in result.output
 
+    def test_check_function_cache_key_varies_with_headers_and_libs(
+        self, tmp_path, test_project
+    ):  # noqa: F811
+        """headers/libs must be part of the cache key, not just the function name.
+
+        Regression test: check_function() used to cache purely on the
+        function name, so check_function("SSL_new", headers=[...], libs=[...])
+        and a bare check_function("SSL_new") would collide.
+        """
+        config, checks = self._make_checks(tmp_path, test_project)
+        key_with_headers_libs = checks._cache_key(
+            "function", "SSL_new", "openssl/ssl.h", "ssl"
+        )
+        config.set(key_with_headers_libs, True)
+
+        # A different (bare) combo must not hit that cache entry.
+        result_bare = checks.check_function("SSL_new")
+        assert result_bare.cached is False
+
+        # The exact same headers/libs combo does hit the cache.
+        result_match = checks.check_function(
+            "SSL_new", headers=["openssl/ssl.h"], libs=["ssl"]
+        )
+        assert result_match.cached is True
+        assert result_match.success is True
+
+    def test_check_type_cache_key_varies_with_headers(self, tmp_path, test_project):  # noqa: F811
+        config, checks = self._make_checks(tmp_path, test_project)
+        key_with_header = checks._cache_key("type", "my_type_t", "mylib.h")
+        config.set(key_with_header, True)
+
+        result_bare = checks.check_type("my_type_t")
+        assert result_bare.cached is False
+
+        result_match = checks.check_type("my_type_t", headers=["mylib.h"])
+        assert result_match.cached is True
+        assert result_match.success is True
+
+    def test_check_type_size_cache_key_varies_with_headers(
+        self, tmp_path, test_project
+    ):  # noqa: F811
+        config, checks = self._make_checks(tmp_path, test_project)
+        key_with_header = checks._cache_key("sizeof", "my_type_t", "mylib.h")
+        config.set(key_with_header, 8)
+
+        # Bare call misses the seeded entry; with no compiler configured it
+        # falls through to None rather than returning the seeded value.
+        assert checks.check_type_size("my_type_t") is None
+
+        # Exact same headers combo hits the cache.
+        assert checks.check_type_size("my_type_t", headers=["mylib.h"]) == 8
+
 
 @pytest.mark.skipif(not has_cc, reason="No C compiler available")
 class TestToolChecksWithCompiler:
@@ -291,3 +343,104 @@ class TestToolChecksWithoutCompiler:
         assert "gcc" in key
         assert "flag" in key
         assert "-Wall" in key
+
+
+class TestMsvcStyleDispatch:
+    """Toolchain-aware compile/link/preprocess flag rendering (no real MSVC needed).
+
+    Regression tests for ToolChecks hardcoding GCC/Clang-only flags
+    (-c, -o, -l, -E), which made every check fail under MSVC/clang-cl.
+    """
+
+    def _checks_with_compiler(self, tmp_path, test_project, compiler_cmd):  # noqa: F811
+        config = Configure(build_dir=tmp_path)
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.cmd = compiler_cmd
+        return ToolChecks(config, env, "cc")
+
+    def test_is_msvc_style_detects_cl_and_clang_cl(self, tmp_path, test_project):  # noqa: F811
+        assert self._checks_with_compiler(
+            tmp_path, test_project, "cl.exe"
+        )._is_msvc_style()
+        assert self._checks_with_compiler(
+            tmp_path, test_project, "clang-cl"
+        )._is_msvc_style()
+        assert not self._checks_with_compiler(
+            tmp_path, test_project, "gcc"
+        )._is_msvc_style()
+
+    def test_lib_flag_msvc_vs_unix(self, tmp_path, test_project):  # noqa: F811
+        msvc_checks = self._checks_with_compiler(tmp_path, test_project, "cl.exe")
+        assert msvc_checks._lib_flag("ssl") == "ssl.lib"
+        assert msvc_checks._lib_flag("ssl.lib") == "ssl.lib"
+
+        gcc_checks = self._checks_with_compiler(tmp_path, test_project, "gcc")
+        assert gcc_checks._lib_flag("ssl") == "-lssl"
+
+    @staticmethod
+    def _fake_run(captured):
+        class _Result:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+
+        def run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return _Result()
+
+        return run
+
+    def test_try_compile_uses_msvc_flags(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        checks = self._checks_with_compiler(tmp_path, test_project, "cl.exe")
+        captured: dict[str, list[str]] = {}
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run", self._fake_run(captured)
+        )
+
+        checks.try_compile("int main(void) { return 0; }\n")
+
+        cmd = captured["cmd"]
+        assert "/c" in cmd
+        assert any(arg.startswith("/Fo") for arg in cmd)
+        assert "-c" not in cmd
+        assert not any(arg == "-o" for arg in cmd)
+
+    def test_try_preprocess_uses_msvc_flag(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        checks = self._checks_with_compiler(tmp_path, test_project, "cl.exe")
+        captured: dict[str, list[str]] = {}
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run", self._fake_run(captured)
+        )
+
+        checks.check_define("SOME_MACRO")
+
+        cmd = captured["cmd"]
+        assert "/E" in cmd
+        assert "-E" not in cmd
+
+    def test_try_compile_link_uses_fe(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        checks = self._checks_with_compiler(tmp_path, test_project, "cl.exe")
+        captured: dict[str, list[str]] = {}
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run", self._fake_run(captured)
+        )
+
+        checks.try_compile("int main(void) { return 0; }\n", link=True)
+
+        cmd = captured["cmd"]
+        assert any(arg.startswith("/Fe") for arg in cmd)
+        assert "/c" not in cmd
+
+    def test_unix_style_unaffected(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        checks = self._checks_with_compiler(tmp_path, test_project, "gcc")
+        captured: dict[str, list[str]] = {}
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run", self._fake_run(captured)
+        )
+
+        checks.try_compile("int main(void) { return 0; }\n")
+
+        cmd = captured["cmd"]
+        assert "-c" in cmd
+        assert "-o" in cmd

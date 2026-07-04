@@ -84,7 +84,9 @@ def is_separated_arg_flag(
 
 
 def deduplicate_flags(
-    flags: Sequence[str | FlagPair], separated_arg_flags: frozenset[str] | None = None
+    flags: Sequence[str | FlagPair],
+    separated_arg_flags: frozenset[str] | None = None,
+    passthrough_flags: frozenset[str] | None = None,
 ) -> list[str]:
     """De-duplicate a list of flags, preserving flag+argument pairs.
 
@@ -93,6 +95,10 @@ def deduplicate_flags(
     2. Flags with attached arguments like -DFOO, -Ipath: de-duplicated as complete tokens
     3. Flags with separate arguments like -F path, -framework Foo: de-duplicated as pairs
     4. FlagPair objects: treated as atomic flag+argument pairs
+    5. Pass-through flags like -Xlinker: flag+next-token kept verbatim, never
+       de-duplicated, because consecutive ones form one directive
+       (``-Xlinker -rpath -Xlinker /p`` is ``-rpath /p`` to the linker) and
+       de-duping a repeated ``-Xlinker -rpath`` would orphan its path.
 
     The function preserves order (first occurrence wins) and handles the case where
     a flag might appear both with and without an argument (unusual but possible).
@@ -101,6 +107,8 @@ def deduplicate_flags(
         flags: List of flag strings or FlagPair objects.
         separated_arg_flags: Set of flags that take separate arguments.
                            If None, uses DEFAULT_SEPARATED_ARG_FLAGS (empty).
+        passthrough_flags: Set of driver pass-through flags (e.g. -Xlinker)
+                           whose flag+argument pairs are kept verbatim.
 
     Returns:
         De-duplicated list of flags with order preserved (FlagPairs expanded to strings).
@@ -143,6 +151,18 @@ def deduplicate_flags(
                 result.append(flag.flag)
                 result.append(flag.argument)
             i += 1
+            continue
+
+        # Pass-through driver flags (e.g. -Xlinker): keep flag+arg verbatim.
+        if passthrough_flags and flag in passthrough_flags and i + 1 < len(flags):
+            next_item = flags[i + 1]
+            result.append(flag)
+            if isinstance(next_item, FlagPair):
+                result.append(next_item.flag)
+                result.append(next_item.argument)
+            else:
+                result.append(next_item)
+            i += 2
             continue
 
         # Check if this is a flag that takes a separate argument

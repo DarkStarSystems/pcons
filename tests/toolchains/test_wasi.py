@@ -11,6 +11,8 @@ from pcons.toolchains.wasi import (
     WasiLinker,
     WasiToolchain,
     find_wasi_sdk,
+    find_wasi_toolchain,
+    is_wasi_sdk_available,
 )
 
 # =============================================================================
@@ -257,6 +259,56 @@ class TestWasiRegistration:
         entry = toolchain_registry.get("wasi-sdk")
         assert entry is not None
         assert entry.toolchain_class is WasiToolchain
+
+    def test_is_available_wired_to_real_sdk_probe(self):
+        """The registry entry must gate on a real wasi-sdk probe, not just
+        ``shutil.which("clang")`` — otherwise any system clang would make
+        the toolchain look available (see find_available)."""
+        from pcons.tools.toolchain import toolchain_registry
+
+        entry = toolchain_registry.get("wasi")
+        assert entry is not None
+        assert entry.is_available is is_wasi_sdk_available
+
+
+class TestIsWasiSdkAvailable:
+    def test_false_when_no_sdk(self, monkeypatch):
+        from pcons.toolchains import wasi
+
+        monkeypatch.setattr(wasi, "find_wasi_sdk", lambda: None)
+        assert is_wasi_sdk_available() is False
+
+    def test_true_when_sdk_found(self, monkeypatch, tmp_path):
+        from pcons.toolchains import wasi
+
+        monkeypatch.setattr(wasi, "find_wasi_sdk", lambda: tmp_path)
+        assert is_wasi_sdk_available() is True
+
+
+class TestFindWasiToolchain:
+    """find_wasi_toolchain() must not return a toolchain whose wasi-sdk
+    isn't actually installed — plain ``clang`` on PATH is not enough."""
+
+    def test_raises_when_no_wasi_sdk(self, monkeypatch):
+        from pcons.toolchains import wasi
+
+        monkeypatch.setattr(wasi, "find_wasi_sdk", lambda: None)
+        with pytest.raises(RuntimeError, match="wasi-sdk not found"):
+            find_wasi_toolchain()
+
+    def test_does_not_silently_return_emscripten(self, monkeypatch):
+        """Even if Emscripten happens to be available (category-wide
+        fallback), find_wasi_toolchain must raise rather than silently
+        return an EmscriptenToolchain mislabeled as WASI."""
+        from pcons.toolchains import wasi
+
+        monkeypatch.setattr(wasi, "find_wasi_sdk", lambda: None)
+        monkeypatch.delenv("EMSDK", raising=False)
+        monkeypatch.setattr(
+            "shutil.which", lambda cmd: "/usr/bin/emcc" if cmd == "emcc" else None
+        )
+        with pytest.raises(RuntimeError, match="wasi-sdk not found"):
+            find_wasi_toolchain()
 
 
 class TestWasiHints:

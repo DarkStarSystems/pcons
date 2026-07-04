@@ -29,6 +29,7 @@ import logging
 import shutil
 from typing import TYPE_CHECKING, Any
 
+from pcons.configure.platform import get_platform
 from pcons.core.preset import ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.tools.cuda import CudaCompiler
@@ -73,12 +74,22 @@ class CudaToolchain(BaseToolchain):
         suffix_lower = suffix.lower()
         if suffix_lower == ".cu":
             # Use TargetPath for depfile - resolved to PathToken during resolution
-            return SourceHandler("cuda", "cuda", ".o", TargetPath(suffix=".d"), "gcc")
+            return SourceHandler(
+                "cuda",
+                "cuda",
+                self.get_object_suffix(),
+                TargetPath(suffix=".d"),
+                "gcc",
+            )
         return None
 
     def get_object_suffix(self) -> str:
-        """CUDA produces standard object files."""
-        return ".o"
+        """CUDA object suffix matches the host platform (.obj on Windows, .o elsewhere).
+
+        nvcc is paired with a host C/C++ toolchain (MSVC on Windows, GCC/Clang
+        elsewhere), so its objects must match that toolchain's convention.
+        """
+        return get_platform().object_suffix
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure
@@ -118,14 +129,6 @@ class CudaToolchain(BaseToolchain):
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
         return [ToolContribution("cuda", flags=tuple(flags), defines=tuple(defines))]
-
-    def _linker_for_language(self, language: str) -> str:
-        """CUDA linking is typically handled by the host C++ compiler."""
-        # nvcc can link, but usually we delegate to the C++ toolchain
-        if language == "cuda":
-            # Return cuda so the resolver knows to use nvcc if needed
-            return "cuda"
-        return super()._linker_for_language(language)
 
 
 def find_cuda_toolchain() -> CudaToolchain | None:

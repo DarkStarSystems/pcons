@@ -313,6 +313,287 @@ class TestWindowsInstallers:
             assert "MakeAppx" in path
 
 
+class TestMsixSigning:
+    """Tests for MSIX signing target correctness (platform-independent).
+
+    These only exercise the build-graph construction in windows.create_msix,
+    not the real MakeAppx.exe/SignTool.exe tools, so they run on any OS.
+    """
+
+    @staticmethod
+    def _mock_find_sdk_tool(tool_name: str) -> str:
+        if tool_name == "MakeAppx.exe":
+            return "/fake/MakeAppx.exe"
+        if tool_name == "SignTool.exe":
+            return "/fake/SignTool.exe"
+        raise AssertionError(f"unexpected tool lookup: {tool_name}")
+
+    def test_signed_target_output_matches_produced_file(self, monkeypatch) -> None:
+        """The declared ninja target must be the file the command actually writes.
+
+        Regression test: previously the signed target was declared as
+        output.with_suffix(".signed.msix") while the sign command modified
+        the unsigned output in place, so the declared target was never
+        produced (a perpetually-dirty, phantom output).
+        """
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_sdk_tool", self._mock_find_sdk_tool)
+
+        project = Project("test_msix_sign_target")
+        env = project.Environment()
+
+        signed = windows.create_msix(
+            project=project,
+            env=env,
+            name="TestApp",
+            version="1.0.0",
+            publisher="CN=Test Publisher",
+            sources=[],
+            sign_cert=Path("dummy_cert.pfx"),
+        )
+
+        assert len(signed.output_nodes) == 1
+        declared_path = signed.output_nodes[0].path
+        assert declared_path == Path("TestApp-1.0.0.signed.msix")
+
+        # The command's own output file (the last --output value) must be
+        # the same path as the declared ninja target.
+        command = signed.output_nodes[0]._build_info["command"]
+        assert command[command.index("--output") + 1] == str(declared_path)
+
+    def test_signed_target_input_is_unsigned_output(self, monkeypatch) -> None:
+        """The sign step must consume the unsigned .msix, not itself."""
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_sdk_tool", self._mock_find_sdk_tool)
+
+        project = Project("test_msix_sign_input")
+        env = project.Environment()
+
+        signed = windows.create_msix(
+            project=project,
+            env=env,
+            name="TestApp",
+            version="1.0.0",
+            publisher="CN=Test Publisher",
+            sources=[],
+            sign_cert=Path("dummy_cert.pfx"),
+        )
+
+        command = signed.output_nodes[0]._build_info["command"]
+        assert command[command.index("--input") + 1] == "TestApp-1.0.0.msix"
+
+    def test_signing_password_not_embedded_literally(self, monkeypatch) -> None:
+        """The certificate password must never appear literally in the command.
+
+        Only the *name* of an environment variable may appear; the value is
+        resolved from the environment when the signing step actually runs.
+        """
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_sdk_tool", self._mock_find_sdk_tool)
+
+        project = Project("test_msix_sign_password")
+        env = project.Environment()
+
+        secret = "hunter2-super-secret-password"  # noqa: S105 - test value
+        signed = windows.create_msix(
+            project=project,
+            env=env,
+            name="TestApp",
+            version="1.0.0",
+            publisher="CN=Test Publisher",
+            sources=[],
+            sign_cert=Path("dummy_cert.pfx"),
+            sign_password_env="PCONS_TEST_MSIX_PASSWORD",
+        )
+
+        command = signed.output_nodes[0]._build_info["command"]
+        assert secret not in command
+        assert "PCONS_TEST_MSIX_PASSWORD" in command
+        assert command[command.index("--password-env") + 1] == (
+            "PCONS_TEST_MSIX_PASSWORD"
+        )
+
+    def test_signing_without_password_env_omits_flag(self, monkeypatch) -> None:
+        """No --password-env token should appear when no password is needed."""
+        from pcons.contrib.installers import windows
+
+        monkeypatch.setattr(windows, "_find_sdk_tool", self._mock_find_sdk_tool)
+
+        project = Project("test_msix_sign_no_password")
+        env = project.Environment()
+
+        signed = windows.create_msix(
+            project=project,
+            env=env,
+            name="TestApp",
+            version="1.0.0",
+            publisher="CN=Test Publisher",
+            sources=[],
+            sign_cert=Path("dummy_cert.pfx"),
+        )
+
+        command = signed.output_nodes[0]._build_info["command"]
+        assert "--password-env" not in command
+
+
+class TestSignMsixHelper:
+    """Tests for the sign_msix _helpers function that performs the copy+sign."""
+
+    def test_copies_and_signs(self, tmp_path: Path, monkeypatch) -> None:
+        from pcons.contrib.installers import _helpers
+
+        input_path = tmp_path / "unsigned.msix"
+        output_path = tmp_path / "signed.msix"
+        input_path.write_text("fake msix contents")
+
+        calls: list[list[str]] = []
+
+        def fake_run(args: list[str], check: bool) -> None:  # noqa: ARG001
+            calls.append(args)
+
+        monkeypatch.setattr(_helpers.subprocess, "run", fake_run)
+
+        _helpers.sign_msix(
+            input_path,
+            output_path,
+            signtool="/fake/SignTool.exe",
+            cert=tmp_path / "cert.pfx",
+        )
+
+        # Original left untouched; copy created at the declared output path.
+        assert input_path.exists()
+        assert output_path.read_text() == "fake msix contents"
+        assert len(calls) == 1
+        assert calls[0][0] == "/fake/SignTool.exe"
+        assert str(output_path) in calls[0]
+
+    def test_password_env_resolved_at_runtime(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from pcons.contrib.installers import _helpers
+
+        input_path = tmp_path / "unsigned.msix"
+        output_path = tmp_path / "signed.msix"
+        input_path.write_text("fake msix contents")
+
+        monkeypatch.setenv("PCONS_TEST_SIGN_PW", "hunter2-super-secret-password")
+
+        calls: list[list[str]] = []
+        monkeypatch.setattr(
+            _helpers.subprocess,
+            "run",
+            lambda args, check: calls.append(args),  # noqa: ARG005
+        )
+
+        _helpers.sign_msix(
+            input_path,
+            output_path,
+            signtool="/fake/SignTool.exe",
+            cert=tmp_path / "cert.pfx",
+            password_env="PCONS_TEST_SIGN_PW",
+        )
+
+        assert "hunter2-super-secret-password" in calls[0]
+
+    def test_missing_password_env_raises(self, tmp_path: Path, monkeypatch) -> None:
+        from pcons.contrib.installers import _helpers
+
+        input_path = tmp_path / "unsigned.msix"
+        input_path.write_text("fake msix contents")
+        monkeypatch.delenv("PCONS_TEST_SIGN_PW_UNSET", raising=False)
+
+        with pytest.raises(_helpers.InstallerError, match="PCONS_TEST_SIGN_PW_UNSET"):
+            _helpers.sign_msix(
+                input_path,
+                tmp_path / "signed.msix",
+                signtool="/fake/SignTool.exe",
+                cert=tmp_path / "cert.pfx",
+                password_env="PCONS_TEST_SIGN_PW_UNSET",
+            )
+
+
+class TestValidateStagingPath:
+    """Tests for macos._validate_staging_path conflict detection.
+
+    Platform-independent: this only walks in-memory project/target state,
+    it never shells out to pkgbuild/hdiutil.
+    """
+
+    def test_raises_on_target_output_conflict(self, tmp_path: Path) -> None:
+        from pcons.contrib.installers import macos
+
+        project = Project("test_staging_conflict", build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        # A target whose output lives under the staging directory. Normal
+        # builder outputs (Program/Library/...) carry the build_dir prefix
+        # on their node path, so model that here rather than a bare
+        # build_dir-relative path.
+        env.Command(
+            target=project.build_dir
+            / ".pkg_staging"
+            / "MyApp"
+            / "payload"
+            / "leftover.txt",
+            source=None,
+            command="",
+            name="conflicting_target",
+        )
+
+        with pytest.raises(ValueError, match="conflicts with"):
+            macos._validate_staging_path(project, ".pkg_staging")
+
+    def test_raises_on_raw_node_conflict(self, tmp_path: Path) -> None:
+        from pcons.contrib.installers import macos
+
+        project = Project("test_staging_node_conflict", build_dir=tmp_path / "build")
+
+        # A raw node (not attached to any Target) directly under staging.
+        project.node(project.build_dir / ".pkg_staging" / "stray_file.txt")
+
+        with pytest.raises(ValueError, match="conflicts with"):
+            macos._validate_staging_path(project, ".pkg_staging")
+
+    def test_no_conflict_for_unrelated_outputs(self, tmp_path: Path) -> None:
+        from pcons.contrib.installers import macos
+
+        project = Project("test_staging_no_conflict", build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        # Unrelated output, not under the staging directory.
+        env.Command(
+            target=Path("dist") / "output.txt",
+            source=None,
+            command="",
+            name="unrelated_target",
+        )
+        project.node(project.build_dir / "other" / "file.txt")
+
+        # Should not raise.
+        macos._validate_staging_path(project, ".pkg_staging")
+
+    def test_no_conflict_for_sibling_prefix(self, tmp_path: Path) -> None:
+        """A staging dir with a matching prefix but different name isn't a conflict."""
+        from pcons.contrib.installers import macos
+
+        project = Project("test_staging_prefix", build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        # ".pkg_staging_extra" is not under ".pkg_staging" despite the string
+        # prefix match, so this must not raise.
+        env.Command(
+            target=project.build_dir / ".pkg_staging_extra" / "file.txt",
+            source=None,
+            command="",
+            name="sibling_target",
+        )
+
+        macos._validate_staging_path(project, ".pkg_staging")
+
+
 class TestWindowsInstallersErrors:
     """Tests for error handling in Windows installer creation."""
 

@@ -3,8 +3,12 @@
 
 from pathlib import Path
 
+import pytest
+
+from pcons.core.errors import DependencyCycleError
 from pcons.core.project import Project
 from pcons.core.resolver import Resolver
+from pcons.core.target import Target
 
 
 class TestResolverCreation:
@@ -14,6 +18,36 @@ class TestResolverCreation:
         resolver = Resolver(project)
 
         assert resolver.project is project
+
+
+class TestResolverImplicitDependsCycle:
+    """A cycle formed purely via target.depends() (implicit target deps).
+
+    target.dependencies (used for topological sort / cycle detection)
+    excludes _implicit_target_deps, so a depends()-only cycle isn't caught
+    by validate() before resolve() runs. Without a guard, _resolve_target's
+    eager recursion into depends() targets recurses forever. It must raise
+    a clean DependencyCycleError instead.
+    """
+
+    def test_depends_only_cycle_raises_cleanly(self, test_project):  # noqa: F811
+        a = Target("A")
+        b = Target("B")
+        a.depends(b)
+        b.depends(a)
+
+        with pytest.raises(DependencyCycleError):
+            test_project.resolve()
+
+    def test_depends_only_cycle_via_resolver_directly(self, test_project):  # noqa: F811
+        a = Target("A")
+        b = Target("B")
+        a.depends(b)
+        b.depends(a)
+
+        resolver = Resolver(test_project)
+        with pytest.raises(DependencyCycleError):
+            resolver.resolve()
 
 
 class TestResolverSingleTarget:
