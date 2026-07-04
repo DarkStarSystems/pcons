@@ -296,10 +296,13 @@ jobs:
           export REZ_RELEASE_PACKAGES_PATH="$RUNNER_TEMP/rez_packages"
           export REZ_PACKAGES_PATH="$RUNNER_TEMP/rez_packages"
           mkdir -p "$REZ_LOCAL_PACKAGES_PATH"
-          export PATH="$PWD/.venv/bin:$PATH"
+          VENV="$PWD/.venv"
+          export PATH="$VENV/bin:$PATH"
           ( cd examples/45_rez_integration/rez_packages/hello_lib && rez-build -i )
           ( cd examples/45_rez_integration/rez_packages/hello_app && rez-build -i )
-          rez-env hello_lib -- uv run --no-sync pytest tests/test_examples.py \
+          # Use the venv python by absolute path: rez-env's resolved
+          # environment does not carry uv on PATH.
+          rez-env hello_lib -- "$VENV/bin/python" -m pytest tests/test_examples.py \
             --cov=pcons --cov-report=xml --cov-append -k "45_rez_integration" -v
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
