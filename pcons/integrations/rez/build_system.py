@@ -33,16 +33,17 @@ from __future__ import annotations
 
 import functools
 import os
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-# ty/Pyright: rez is intentionally not in pcons's dev dependencies. This
-# module is loaded by rez itself (during plugin discovery) or by tests
-# gated on `pytest.importorskip("rez")`.
-from rez.build_process import BuildType  # ty: ignore[unresolved-import]
-from rez.build_system import BuildSystem  # ty: ignore[unresolved-import]
+# rez is intentionally not a pcons dependency: this module is imported by rez
+# itself during plugin discovery, or by tests/CI that install rez. The main
+# `ty` lint excludes this package (rez isn't in that environment); the rez CI
+# job type-checks it with rez present.
+from rez.build_process import BuildType
+from rez.build_system import BuildResult, BuildSystem
 
 if TYPE_CHECKING:
-    from rez.resolved_context import ResolvedContext  # ty: ignore[unresolved-import]
+    from rez.resolved_context import ResolvedContext
 
 
 _PCONS_BUILD_SCRIPT = "pcons-build.py"
@@ -86,7 +87,7 @@ class PconsBuildSystem(BuildSystem):
         install_path: str,
         install: bool = False,
         build_type: Any = BuildType.local,
-    ) -> dict[str, Any]:
+    ) -> BuildResult:
         generator = self._opt("pcons_generator", "ninja")
         jobs = self._opt("pcons_jobs", None)
 
@@ -110,16 +111,16 @@ class PconsBuildSystem(BuildSystem):
             install_path=install_path,
         )
 
-        # 1. Configure: run pcons-build.py via the pcons CLI.
-        configure_cmd = self._pcons_cli(context) + ["generate"]
-        retcode, _, _ = context.execute_shell(
-            command=configure_cmd,
-            block=True,
-            cwd=self.working_dir,
+        run = functools.partial(
+            self._run_in_context,
+            context,
             actions_callback=actions_callback,
             post_actions_callback=post_actions_callback,
         )
-        if retcode:
+
+        # 1. Configure: run pcons-build.py via the pcons CLI.
+        configure_cmd = self._pcons_cli(context) + ["generate"]
+        if run(configure_cmd):
             return {"success": False}
 
         # 2. Build: ninja -C <build_path> (or make).
@@ -127,30 +128,37 @@ class PconsBuildSystem(BuildSystem):
         if jobs is not None:
             builder.append(f"-j{jobs}")
         build_cmd = builder + ["-C", build_path]
-        retcode, _, _ = context.execute_shell(
-            command=build_cmd,
+        if run(build_cmd):
+            return {"success": False}
+
+        # 3. Install: ninja -C <build_path> install.
+        if install and run(build_cmd + ["install"]):
+            return {"success": False}
+
+        return {"success": True}
+
+    def _run_in_context(
+        self,
+        context: ResolvedContext,
+        command: list[str],
+        actions_callback: Any,
+        post_actions_callback: Any,
+    ) -> int:
+        """Run a command in the resolved environment; return its exit code.
+
+        ``execute_shell(block=True)`` returns a ``(returncode, stdout, stderr)``
+        tuple, but rez only types the non-blocking ``Popen`` return, so narrow
+        it explicitly.
+        """
+        result = context.execute_shell(
+            command=command,
             block=True,
             cwd=self.working_dir,
             actions_callback=actions_callback,
             post_actions_callback=post_actions_callback,
         )
-        if retcode:
-            return {"success": False}
-
-        # 3. Install: ninja -C <build_path> install.
-        if install:
-            install_cmd = build_cmd + ["install"]
-            retcode, _, _ = context.execute_shell(
-                command=install_cmd,
-                block=True,
-                cwd=self.working_dir,
-                actions_callback=actions_callback,
-                post_actions_callback=post_actions_callback,
-            )
-            if retcode:
-                return {"success": False}
-
-        return {"success": True}
+        returncode, _, _ = cast("tuple[int, Any, Any]", result)
+        return returncode
 
     def _opt(self, name: str, default: Any) -> Any:
         return getattr(self.opts, name, default) if self.opts else default

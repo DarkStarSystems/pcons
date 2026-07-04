@@ -109,7 +109,7 @@ def _resolved_packages_from_api() -> list[ResolvedPackage] | None:
     ``ResolvedContext.resolved_packages`` are stable rez API.
     """
     try:
-        from rez.status import status  # ty: ignore[unresolved-import]
+        from rez.status import status
     except ImportError:
         return None
 
@@ -118,7 +118,7 @@ def _resolved_packages_from_api() -> list[ResolvedPackage] | None:
         return None
 
     out: list[ResolvedPackage] = []
-    for pkg in context.resolved_packages:
+    for pkg in context.resolved_packages or []:
         root = getattr(pkg, "root", None)
         if not root:
             continue

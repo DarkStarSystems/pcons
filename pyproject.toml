@@ -96,6 +96,13 @@ warn_unused_ignores = true
 module = "tests.*"
 disallow_untyped_defs = false
 
+[tool.ty.src]
+# The rez integration imports `rez`, which is intentionally not a pcons
+# dependency, so it can't be type-checked in the default (rez-free)
+# environment; the `test-rez` CI job type-checks it with rez installed.
+# rez_packages/ holds example package.py files, not pcons source.
+exclude = ["**/integrations/rez/**", "**/rez_packages/**"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 88
