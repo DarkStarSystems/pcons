@@ -914,12 +914,23 @@ def run_example(
             "CLI invocation with xcode generator requires xcodebuild (macOS only)"
         )
 
-    # Copy example to temp directory (so we don't pollute the source tree)
+    # Copy example to temp directory (so we don't pollute the source tree).
+    # Ignore transient artifacts a local run may have left behind: build output,
+    # and especially a stale .venv — copytree dereferences its symlinked
+    # interpreter into a real binary copy whose @rpath/../lib no longer resolves,
+    # which would break pyproject/venv-based examples (e.g. 50_pyproject).
     work_dir = tmp_path / example_dir.name
     shutil.copytree(
         example_dir,
         work_dir,
-        ignore=shutil.ignore_patterns("build", "compile_commands.json"),
+        ignore=shutil.ignore_patterns(
+            "build",
+            "compile_commands.json",
+            ".venv",
+            "dist",
+            "__pycache__",
+            "*.egg-info",
+        ),
     )
 
     # If the example uses pcons as a PEP 517 build backend, inject a
