@@ -29,6 +29,8 @@ core_lib.public.include_dirs.append(src_dir)  # So dependents can #include "core
 
 # 2. Create shared library from wrapper.c, linking the static library
 #    wrapper.c includes "core.h" which should be found via core_lib's public includes
+# This example deliberately uses the low-level link_libs lists (the power form)
+# instead of link()/link_private(), to keep that API exercised in CI.
 wrapper_lib = project.SharedLibrary("wrapper", env, sources=[src_dir / "wrapper.c"])
 wrapper_lib.public.link_libs.append(core_lib)
 

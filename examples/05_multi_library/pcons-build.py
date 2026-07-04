@@ -33,7 +33,7 @@ libmath.add_sources(["src/math_utils.c"])
 libmath.public.include_dirs.append("include")
 # Link against libm for math functions (required on Linux, not needed on Windows)
 if sys.platform != "win32":
-    libmath.public.link_libs.append("m")
+    libmath.link("m")
 
 # -----------------------------------------------------------------------------
 # Library: libphysics - physics simulation, depends on libmath
@@ -43,18 +43,14 @@ libphysics.add_sources(["src/physics.c"])
 if sys.platform == "win32":
     # export symbols on Windows
     libphysics.private.defines.append("PHYSICS_BUILDING_DLL")
-libphysics.public.link_libs.append(
-    libmath
-)  # Gets libmath's public includes transitively
+libphysics.link(libmath)  # Gets libmath's public includes transitively
 
 # -----------------------------------------------------------------------------
 # Program: simulator - main application
 # -----------------------------------------------------------------------------
 simulator = project.Program("simulator", env)
 simulator.add_sources(["src/main.c"])
-simulator.private.link_libs.append(
-    libphysics
-)  # Gets both libphysics and libmath includes
+simulator.link_private(libphysics)  # Gets both libphysics and libmath includes
 
 # Generate dependency diagrams (after generate, which auto-resolves)
 mermaid_gen = MermaidGenerator(direction="LR")

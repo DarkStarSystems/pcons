@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`target.link_private(*libs)`** adds PRIVATE link dependencies: the target gets the dependency's headers and usage requirements (or, for a string like `"m"`, just the raw link token) without re-exporting anything to its own consumers. The counterpart of `target.link()`, and the recommended replacement for `target.private.link_libs.append(...)`.
+
+### Changed
+
+- **`target.link(*libs)` is un-deprecated and is again the recommended way to add PUBLIC link dependencies** (it re-exports them to consumers, like CMake's plain `target_link_libraries`). It now also accepts raw library-name strings (`app.link(mylib, "m")`). The `target.public.link_libs` / `target.private.link_libs` lists remain fully supported as the low-level form.
+
 ## [0.20.1] - 2026-06-18
 
 ### Fixed

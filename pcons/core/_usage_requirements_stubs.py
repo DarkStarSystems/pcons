@@ -28,4 +28,4 @@ if TYPE_CHECKING:
         compile_flags: MutableSequence[str | PathToken]  # flags propagated to dependents (strings, or PathToken for embedded paths)
         link_flags: MutableSequence[str | PathToken]  # flags propagated to dependents (strings, or PathToken for embedded paths)
         defines: MutableSequence[str]  # preprocessor defines propagated to dependents
-        link_libs: MutableSequence[str | Target]  # libraries propagated to dependents (names or Target objects)
+        link_libs: MutableSequence[str | Target]  # link deps: a Target brings its public usage requirements (headers etc.); a str is a raw link token; public re-exports, private does not

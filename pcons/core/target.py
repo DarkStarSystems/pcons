@@ -7,35 +7,12 @@ and carries "usage requirements" that propagate to consumers (CMake-style).
 
 from __future__ import annotations
 
-import functools
 import logging
 import re
-import sys
-import warnings
 from collections import UserList
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, MutableSequence, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
-
-if sys.version_info >= (3, 13):
-    from warnings import deprecated
-else:
-
-    def deprecated(msg: str):  # type: ignore[no-redef]
-        def decorator(func):
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                warnings.warn(
-                    f"{func.__name__} is deprecated: {msg}",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-                return func(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
-
 
 from pcons.core.flags import merge_flags
 
@@ -104,6 +81,14 @@ class UsageRequirements(_UsageRequirementsStubs):
     define its own requirement names. C/C++ toolchains use include_dirs,
     defines, compile_flags, link_flags, link_libs. Other toolchains can
     use any names they need (e.g., python_packages, data_schemas).
+
+    The ``link_libs`` list is special: appending a ``Target`` creates a full
+    dependency (the owner inherits that target's public usage requirements —
+    headers, defines, transitive link libs — and links its output), while
+    appending a ``str`` adds only a raw link token (``"m"`` → ``-lm``) with
+    no usage requirements. As with all requirements, the ``public`` scope
+    re-exports to consumers; ``private`` does not. ``target.link(...)`` and
+    ``target.link_private(...)`` are the recommended high-level equivalents.
 
     A field may use a special list type (``UniqueList`` dedup, or
     ``ValidatedUniqueList`` whose ``on_append`` hook enforces invariants and
@@ -277,6 +262,16 @@ def _make_default_requirements(
     # usage requirements are merged. Direct appends are preserved verbatim.
     reqs.compile_flags = []
     reqs.link_flags = []
+    # link_libs is the link-dependency list. Entries are either:
+    #   - a Target: a full dependency — the owner inherits its PUBLIC usage
+    #     requirements (include_dirs/headers, defines, flags, transitive
+    #     link_libs) and links its output. NOT just a link-line entry.
+    #   - a str (e.g. "m"): a raw link token, formatted by the toolchain
+    #     (-lm / m.lib) and placed after objects. No usage requirements.
+    # Scope controls propagation: entries on target.public re-export to the
+    # target's consumers; entries on target.private stay local.
+    # target.link(...) / target.link_private(...) are the equivalent
+    # high-level API; this list is the low-level/power form.
     reqs.link_libs = ValidatedUniqueList([], on_append=link_libs_validator)
     return reqs
 
@@ -525,54 +520,134 @@ class Target:
         """All build nodes for this target (intermediate + output)."""
         return self.intermediate_nodes + self.output_nodes
 
-    def __link_libs_validator(self, target: Target):
+    def __link_libs_validator(self, item: Target | str):
         if self._resolved:
             raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
-        if target is self:
+        if item is self:
             raise ValueError(f"Target '{self.name}' cannot link itself.")
         # Invalidate cached requirements
         self._collected_requirements = None
 
-    @deprecated("Use target.{public,private}.link_libs instead")
-    def link(self, *targets: Target) -> Target:
-        """Add targets as dependencies (fluent API).
+    def link(self, *libs: Target | str) -> Target:
+        """Add PUBLIC link dependencies (fluent API).
 
-        The dependencies' public usage requirements will be applied
-        when building this target.
+        Each ``Target`` argument becomes a full dependency, not just a link
+        line entry: when this target is built it inherits the dependency's
+        PUBLIC usage requirements — include_dirs (headers), defines, flags,
+        and transitive link_libs — and links against the dependency's
+        output. Because the dependency is added PUBLICLY, it is also
+        re-exported: anything that later links *this* target inherits it
+        too (like CMake's ``target_link_libraries(... PUBLIC ...)``). Use
+        :meth:`link_private` for implementation-only dependencies that
+        consumers should not see.
+
+        Each ``str`` argument is a raw library name (e.g. ``"m"``,
+        ``"pthread"``), formatted by the toolchain (``-lm``, ``m.lib``) and
+        placed after object files on the link line. A string brings no
+        usage requirements — no headers, no defines — it is just a link
+        token. Being public, it too propagates to consumers' link lines.
+
+        Equivalent to appending each argument to ``self.public.link_libs``;
+        the methods and the lists are interchangeable, the lists being the
+        low-level form. Duplicates are silently ignored; argument order is
+        preserved (link order can matter for static libraries).
 
         Args:
-            *targets: Targets to depend on.
+            *libs: Targets to depend on, and/or raw library-name strings.
 
         Returns:
-            self for method chaining.
+            self, for method chaining.
 
         Raises:
-            TypeError: If a non-Target argument is passed.
-            ValueError: If a target tries to link itself.
+            TypeError: If an argument is not a Target or str. Pass lists
+                unpacked: ``target.link(*libs)``, not ``target.link(libs)``.
+            ValueError: If a target links itself, or a library name is empty.
             RuntimeError: If called after the target has been resolved.
+
+        Example:
+            libmath = project.StaticLibrary("math", env, sources=["math.c"])
+            libmath.public.include_dirs.append("include")
+            libmath.link("m")  # consumers of libmath also get -lm
+
+            libphysics = project.SharedLibrary("physics", env, sources=["physics.c"])
+            libphysics.link(libmath)  # re-exports libmath (headers and all)
+
+            app = project.Program("app", env, sources=["main.c"])
+            app.link_private(libphysics)  # app gets physics + math + -lm
         """
+        return self._link_into(self.public.link_libs, libs, "link")
+
+    def link_private(self, *libs: Target | str) -> Target:
+        """Add PRIVATE link dependencies (fluent API).
+
+        Exactly like :meth:`link`, but the dependencies are NOT re-exported
+        to this target's consumers (like CMake's ``target_link_libraries(...
+        PRIVATE ...)``): a ``Target`` argument still brings its PUBLIC usage
+        requirements (headers, defines, transitive link_libs) into *this*
+        target's build, and a ``str`` argument is still a raw link token —
+        but targets that link this one inherit none of it. Use this for
+        implementation details; it is the right choice for programs, which
+        have no consumers.
+
+        Equivalent to appending each argument to ``self.private.link_libs``.
+
+        Note: a private dependency of a *static* library still reaches the
+        final program's link line (an archive does not contain its
+        dependencies), without propagating headers or defines.
+
+        Args:
+            *libs: Targets to depend on, and/or raw library-name strings.
+
+        Returns:
+            self, for method chaining.
+
+        Raises:
+            TypeError: If an argument is not a Target or str. Pass lists
+                unpacked: ``target.link_private(*libs)``.
+            ValueError: If a target links itself, or a library name is empty.
+            RuntimeError: If called after the target has been resolved.
+
+        Example:
+            core = project.StaticLibrary("core", env, sources=["core.c"])
+            core.link_private(zlib)  # core uses zlib; consumers never see zlib headers
+
+            app = project.Program("app", env, sources=["main.c"])
+            app.link_private(core, "pthread")
+        """
+        return self._link_into(self.private.link_libs, libs, "link_private")
+
+    def _link_into(
+        self,
+        link_libs: MutableSequence[Target | str],
+        libs: tuple[Target | str, ...],
+        method: str,
+    ) -> Target:
+        """Validate and append link dependencies; shared by link()/link_private()."""
         if self._resolved:
             raise RuntimeError(
                 f"Cannot modify target '{self.name}' after resolve(). "
-                f"Add link_libs before project.resolve() or project.generate()."
+                f"Add link dependencies before project.resolve() or project.generate()."
             )
-        for target in targets:
-            if isinstance(target, (list, tuple)):
+        for lib in libs:
+            if isinstance(lib, (list, tuple)):
                 raise TypeError(
-                    "link() takes Target arguments, not a list. "
-                    "Use target.link(a, b) instead of target.link([a, b])."
+                    f"{method}() takes individual arguments, not a list. "
+                    f"Use target.{method}(a, b) or target.{method}(*libs)."
                 )
-            if not isinstance(target, Target):
+            if not isinstance(lib, (Target, str)):
                 raise TypeError(
-                    f"link() requires Target objects, got {type(target).__name__}. "
-                    f"Use project.get_target(name) to look up a target by name."
+                    f"{method}() requires Target objects or library-name strings, "
+                    f"got {type(lib).__name__}. Pass a Target to depend on it "
+                    f"(bringing its headers and usage requirements), or a string "
+                    f"like 'm' for a raw system library."
                 )
-            if target is self:
+            if isinstance(lib, str) and not lib.strip():
+                raise ValueError(f"{method}() got an empty library name.")
+            if lib is self:
                 raise ValueError(f"Target '{self.name}' cannot link itself.")
-            if target not in self.public.link_libs:
-                self.public.link_libs.append(target)
-        # Invalidate cached requirements
-        self._collected_requirements = None
+            link_libs.append(
+                lib
+            )  # ValidatedUniqueList: validates, de-dupes, invalidates cache
         return self
 
     def add_dependency(self, *targets: Target) -> Target:
@@ -581,8 +656,8 @@ class Target:
         Each becomes a full dependency: it is included in
         ``transitive_dependencies()`` and ``dependencies``, so its public
         usage requirements propagate here. Unlike ``link_libs``, this does not
-        treat the targets as libraries to link, use ``target.{public,private}
-        .link_libs`` for that. Duplicates are ignored.
+        treat the targets as libraries to link, use ``target.link()`` /
+        ``target.link_private()`` for that. Duplicates are ignored.
 
         Args:
             *targets: Targets to depend on.
