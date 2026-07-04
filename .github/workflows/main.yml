@@ -298,6 +298,12 @@ jobs:
           mkdir -p "$REZ_LOCAL_PACKAGES_PATH"
           VENV="$PWD/.venv"
           export PATH="$VENV/bin:$PATH"
+          # rez builds a clean resolved environment that keeps only system
+          # paths; on macOS that drops Homebrew's bin, so ninja (needed by the
+          # pcons build_system plugin and the example build) goes missing.
+          # Inherit the parent PATH into resolved environments.
+          printf 'parent_variables = ["PATH"]\n' > "$RUNNER_TEMP/rezconfig.py"
+          export REZ_CONFIG_FILE="$RUNNER_TEMP/rezconfig.py"
           ( cd examples/45_rez_integration/rez_packages/hello_lib && rez-build -i )
           ( cd examples/45_rez_integration/rez_packages/hello_app && rez-build -i )
           # Use the venv python by absolute path: rez-env's resolved
