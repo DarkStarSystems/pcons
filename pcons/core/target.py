@@ -957,17 +957,20 @@ class Target:
         return result
 
     def _collect_from_deps(self, result: UsageRequirements, visited: set[str]) -> None:
-        """Recursively collect public requirements from dependencies."""
+        """Merge public requirements from all transitive dependencies.
+
+        ``transitive_dependencies()`` already returns the full public-edge
+        closure (a private dep of a dependency is not re-exported), so we
+        simply merge each one's public requirements. We must NOT recurse via
+        ``dep._collect_from_deps`` here: that re-enters each dependency at its
+        own top level, where its *private* link_libs are followed, which would
+        leak private dependencies' headers up to consumers.
+        """
         for dep in self.transitive_dependencies():
             if dep.qualified_name in visited:
                 continue
             visited.add(dep.qualified_name)
-
-            # Merge this dependency's public requirements
             result.merge(dep.public)
-
-            # Recursively get transitive requirements
-            dep._collect_from_deps(result, visited)
 
     def get_all_languages(self) -> set[str]:
         """Get all languages required by this target and its dependencies.
