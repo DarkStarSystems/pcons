@@ -30,7 +30,7 @@ fmt:              ## Format code using ruff.
 lint:             ## Run ruff and ty linters.
 	uv run ruff check pcons/ tests/ examples/
 	uv run ruff format --check pcons/ tests/ examples/
-	uvx ty check pcons/ examples/
+	uvx ty check --exclude='**/rez_packages/**' pcons/ examples/
 
 .PHONY: test
 test:             ## Run tests.

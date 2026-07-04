@@ -21,7 +21,7 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Running ty typecheck..."
-uvx ty check pcons/ examples/
+uvx ty check --exclude='**/rez_packages/**' pcons/ examples/
 if [ $? -ne 0 ]; then
     echo ""
     echo "Type check failed. Fix the type errors above before committing."

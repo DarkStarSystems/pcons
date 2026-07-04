@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rez integration (`pcons.integrations.rez`)**: two-sided integration with the [rez](https://rez.readthedocs.io) VFX/animation package manager.
+  - `rez_environment(env)` and `RezFinder` read a rez resolve from inside a `pcons-build.py` and inject every resolved package's include/lib/define settings into the pcons `Environment`. Packages that don't follow the default `include`/`lib` layout can be described explicitly with a `RezLayout` via the `layouts=` argument.
+  - A `pcons` rez `build_system` plugin (registered via `[project.entry-points."rez.plugins.build_system"]`) lets `rez-build` auto-detect packages with a `pcons-build.py` and build them with pcons, exposing `--pcons-generator` / `--pcons-jobs`.
+  - New example `45_rez_integration` with worked `hello_lib` (cmake) and `hello_app` (pcons) test rez packages, documented under a new "Integrations" section of the user guide.
 - **`target.link_private(*libs)`** adds PRIVATE link dependencies: the target gets the dependency's headers and usage requirements (or, for a string like `"m"`, just the raw link token) without re-exporting anything to its own consumers. The counterpart of `target.link()`, and the recommended replacement for `target.private.link_libs.append(...)`.
 
 ### Changed

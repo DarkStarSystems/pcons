@@ -1056,6 +1056,318 @@ env.use(pkg)
 # - Adds link_flags to link.flags
 ```
 
+> If your project uses [rez](https://rez.readthedocs.io), see
+> [Integrations → Rez](#rez-vfx-animation-package-manager) for native
+> rez-resolve support — `RezFinder` plugs into `find_package()` and
+> `rez_environment(env)` injects every resolved package's flags.
+
+---
+
+## Integrations
+
+Pcons ships with first-class integrations for tools that aren't build
+systems themselves but commonly drive — or are driven by — one. Each
+integration lives under `pcons.integrations.<name>`.
+
+### Rez (VFX/animation package manager)
+
+[Rez](https://rez.readthedocs.io) is the dominant package manager in
+VFX/animation pipelines. It resolves combinations of tool and library
+versions and exposes them to a build via environment variables —
+notably `REZ_USED_RESOLVE` (the resolved package list) and
+`REZ_<PKG>_ROOT` (each package's install root). Rez is explicit that
+it is **not** a build system; it expects the package author to plug in
+their own tool. Pcons fits that gap.
+
+Pcons is a *build-time* dependency for rez. Once a pcons-built package
+lives in a rez repo, consumers (`rez-env mypackage -- ...`) treat it
+like any other rez package — they don't need pcons installed. So
+ignore this section if all you do is consume packages.
+
+For the people who *do* care, the docs below are split by role:
+
+| If you are… | …jump to |
+| --- | --- |
+| **Building an app or library** with pcons that depends on rez packages (Maya, OpenFX, Boost, in-house libs, etc.) | [Consuming rez packages from a pcons project](#consuming-rez-packages-from-a-pcons-project) |
+| **Maintaining a rez package** and want `rez-build` to drive pcons as the build engine — same way it drives cmake or make today | [Shipping a rez package built with pcons](#shipping-a-rez-package-built-with-pcons) |
+| **Running the rez install at your facility** (pipeline TD, build admin) and need to enable `build_system = "pcons"` for your maintainers | [Installing the pcons plugin into rez](#installing-the-pcons-plugin-into-rez) |
+
+A common case is the first two combined: a studio plugin's
+`package.py` is a rez package (it ships through the studio's pipeline)
+**and** its source code links against `openfx`, `boost`, etc.
+(themselves rez packages). The two halves are independent though, so
+we cover them separately.
+
+#### Consuming rez packages from a pcons project
+
+> **Audience:** you have a `pcons-build.py` and your dependencies live
+> in a rez repository. You want `-I` and `-L` flags for those deps to
+> appear automatically. Your build is launched from inside `rez-env`.
+
+The minimum needed in your `pcons-build.py`:
+
+```python
+from pcons import Generator, Project, find_c_toolchain
+from pcons.integrations.rez import is_in_rez_resolve, rez_environment
+
+project = Project("my_app")
+env = project.Environment(toolchain=find_c_toolchain())
+
+if is_in_rez_resolve():
+    rez_environment(env)   # auto-applies every resolved rez package
+
+app = project.Program("my_app", env, sources=["src/main.cpp"])
+project.Default(app)
+Generator().generate(project)
+```
+
+Then run your build inside a rez-env shell that has the deps you need:
+
+```bash
+rez-env openfx-1.4 boost-1.82 -- uvx pcons
+./build/my_app
+```
+
+Inside that shell, `rez_environment(env)` walks every resolved package
+and applies a convention-based scan of its install root:
+
+- `<root>/include` → added to `include_dirs`
+- `<root>/lib` → added to `library_dirs`
+- `lib<name>.{a,dylib,so}` (or `<name>.lib` on Windows) → added to `libraries`
+- `<root>/lib/pkgconfig/*.pc` (if present) → defers to `PkgConfigFinder`
+  for richer metadata (most well-packaged C/C++ libs ship a `.pc` file)
+
+The `is_in_rez_resolve()` guard means the same `pcons-build.py` works
+both inside and outside rez — it just degrades to a vanilla pcons
+build if no rez resolve is active.
+
+The resolve is read from rez's Python API when it's importable in the
+build interpreter (the resolved context is authoritative); otherwise
+pcons parses the documented `REZ_*` environment variables. Either way
+no rez install is required for the common standalone case.
+
+##### Picking individual packages
+
+If you only want to apply a subset of the resolve (e.g. you have
+host-only build tools you don't want pulled into your link line), pass
+a `packages=[...]` whitelist:
+
+```python
+rez_environment(env, packages=["openfx", "boost"])
+```
+
+##### Packages with a non-standard layout
+
+The convention scan assumes `<root>/include` and `<root>/lib`. A package
+that ships its own `.pc` file is handled automatically (it wins over the
+scan). For one that does neither — multi-arch lib dirs, nested header
+trees, or several libraries — describe it explicitly with a `RezLayout`:
+
+```python
+from pcons.integrations.rez import RezLayout, rez_environment
+
+rez_environment(
+    env,
+    layouts={
+        "mylib": RezLayout(
+            include_dirs=("include", "include/detail"),
+            library_dirs=("lib64",),
+            libraries=("mylib_core", "mylib_extra"),
+        ),
+    },
+)
+```
+
+A supplied layout is trusted verbatim and wins over both pkg-config and
+the convention scan; paths are relative to the package's install root.
+Leave `libraries` unset to keep `lib<name>` auto-detection. `RezFinder`
+takes the same `layouts` map: `RezFinder({"mylib": RezLayout(...)})`.
+
+##### Per-package access through `find_package()`
+
+For more control — for example, linking `boost` to one target but not
+another — register `RezFinder` with pcons's standard finder chain:
+
+```python
+from pcons.integrations.rez import RezFinder
+
+project.add_package_finder(RezFinder())
+boost = project.find_package("boost")
+app.link(boost)            # boost flags propagate as a usage requirement
+```
+
+This works exactly like `find_package` does for pkg-config or Conan;
+the only difference is the lookup source. Rez has no concept of
+"components" — passing `components=[...]` to `find()` emits a warning
+and is otherwise ignored.
+
+#### Shipping a rez package built with pcons
+
+> **Audience:** you maintain a rez `package.py` and want `rez-build`
+> to invoke pcons. End users (or your CI) will run `rez-build -i` (or
+> `rez-release`) and expect pcons to handle configure → build →
+> install transparently.
+
+You have **two ways** to wire pcons into a rez package:
+
+##### Option A — quickest: `build_command` in `package.py`
+
+Works out of the box, no plugin install needed. Rez's generic `custom`
+build system runs whatever shell command you specify:
+
+```python
+# package.py
+name = "myplugin"
+version = "1.0.0"
+requires = ["openfx-1.4", "boost-1.82"]
+build_command = "uvx pcons --build-dir {build}"
+```
+
+`rez-build` resolves the build environment, sets `REZ_OPENFX_ROOT`
+etc., and invokes your command. Your `pcons-build.py` then uses
+[`rez_environment(env)`](#consuming-rez-packages-from-a-pcons-project)
+to pick up the deps. Good for one-off packages or when you can't
+modify the rez install.
+
+##### Option B — native: `build_system = "pcons"`
+
+Once pcons is installed in the same Python environment as rez (your
+build admin's responsibility — see [Installing the pcons plugin into
+rez](#installing-the-pcons-plugin-into-rez)), it registers a rez
+`build_system` plugin via Python entry points. Rez then auto-detects
+pcons the same way it auto-detects cmake from a `CMakeLists.txt`.
+Declare it explicitly with `build_system = "pcons"`, or rely on
+auto-detection from the presence of `pcons-build.py`:
+
+```python
+# package.py
+name = "myplugin"
+version = "1.0.0"
+build_system = "pcons"     # explicit; rez also auto-detects
+requires = ["openfx-1.4", "boost-1.82"]
+
+
+def commands():
+    env.PATH.append("{root}/bin")
+```
+
+Then:
+
+```bash
+cd path/to/myplugin
+rez-build -i               # configure → ninja → ninja install
+rez-env myplugin -- myplugin
+```
+
+The pcons plugin runs three phases inside the rez-resolved build env:
+
+1. **Configure** — `pcons generate` (executes your `pcons-build.py`
+   and writes `build.ninja`), with `PCONS_BUILD_DIR`,
+   `PCONS_INSTALL_DIR`, and `PCONS_GENERATOR` set as env vars.
+2. **Build** — `ninja -C <build_path>` (or `make`).
+3. **Install** — only when `rez-build -i` (or `rez-release`) is used:
+   `ninja -C <build_path> install`. For this to do anything, your
+   `pcons-build.py` must declare an `install` alias — see below.
+
+###### Install targets
+
+Rez expects `ninja install` to copy build outputs to
+`$PCONS_INSTALL_DIR`. Pcons doesn't auto-create an `install` target;
+you wire one up in your `pcons-build.py`:
+
+```python
+import os
+
+# ... build app ...
+project.Default(app)
+
+install_dir = os.environ.get("PCONS_INSTALL_DIR")
+if install_dir:
+    install_target = project.Install(f"{install_dir}/bin", [app])
+    project.Alias("install", install_target)   # rez-build invokes "install"
+
+Generator().generate(project)
+```
+
+###### Build options exposed to `rez-build`
+
+The pcons plugin adds two flags to `rez-build`:
+
+```bash
+rez-build -- --pcons-generator=ninja --pcons-jobs=8
+```
+
+Verify the plugin is registered with rez:
+
+```bash
+rez-build --help    # should list "pcons" under -b {make,pcons,...}
+```
+
+##### Choosing between Option A and Option B
+
+| Concern | Option A (`build_command`) | Option B (`build_system = "pcons"`) |
+| --- | --- | --- |
+| Setup | Nothing extra | one-time facility install of pcons into rez's venv ([how](#installing-the-pcons-plugin-into-rez)) |
+| Discoverability | Per-package | Site-wide (any pcons-built package "just works") |
+| Install support | Hand-rolled | Standard `rez-build -i` |
+| CI/CD friction | Low | Low once the plugin is installed once on the build host |
+| Right when… | You're trying it out, or the rez install isn't yours to modify | The studio standardizes on it |
+
+A complete worked example — a `hello_lib` package built with rez's
+built-in cmake plugin and a `hello_app` package that uses pcons via
+`build_system = "pcons"` *and* depends on `hello_lib` through
+`rez_environment` — lives in
+[`examples/45_rez_integration/`](https://github.com/DarkStarSystems/pcons/tree/main/examples/45_rez_integration).
+That example exercises both halves of the integration in one place.
+
+#### Installing the pcons plugin into rez
+
+> **Audience:** you're the pipeline TD or build admin running the rez
+> install at your facility. Maintainers want `build_system = "pcons"`
+> in their `package.py` files; you make that work.
+
+Pcons registers a rez `build_system` plugin via Python entry points,
+so rez discovers it the same way it discovers cmake, make, and any
+other plugin: by reading `importlib.metadata` over its bundled Python
+environment. The one-time setup is to install pcons into that env.
+
+Assuming rez was installed via its [official
+installer](https://rez.readthedocs.io/en/stable/installation.html)
+into `/opt/rez`, install pcons with rez's wrapped Python interpreter:
+
+```bash
+/opt/rez/bin/rez/rez-python -m pip install pcons
+```
+
+`rez-python` is rez's bundled interpreter — installing into it puts
+pcons on the same `sys.path` rez uses for plugin discovery. Verify
+the plugin is registered:
+
+```bash
+rez-build --help    # should list "pcons" under -b {make,pcons,...}
+```
+
+After this, every package on every machine using this rez install can
+declare `build_system = "pcons"` and have it work without further
+setup. To upgrade pcons later, repeat the `pip install` (add `-U`).
+
+##### Troubleshooting
+
+If a maintainer runs `rez-build` on a package whose `package.py`
+declares `build_system = "pcons"` and pcons *isn't* installed in
+rez's bundled Python env, rez raises `RezPluginError` during argparse
+setup — *before* its own error formatter sees it — so they get a
+Python traceback ending in:
+
+```
+rez.exceptions.RezPluginError: Unrecognised build system plugin: 'pcons'
+```
+
+Fix: re-run the `rez-python -m pip install pcons` step above. The
+same traceback shape occurs for any unregistered or misspelled
+`build_system` value, including built-in ones like `cmake` — it's a
+rez quirk, not pcons-specific.
+
 ---
 
 ## Build Commands
