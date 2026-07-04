@@ -18,9 +18,9 @@ This guide maps common CMake patterns to their pcons equivalents. It's designed 
 | `add_executable(name src...)` | `project.Program("name", env, sources=[...])` |
 | `add_library(name STATIC src...)` | `project.StaticLibrary("name", env, sources=[...])` |
 | `add_library(name SHARED src...)` | `project.SharedLibrary("name", env, sources=[...])` |
-| `target_link_libraries(t PUBLIC lib)` | `t.public.link_libs.append(lib)` |
-| `target_link_libraries(t PRIVATE lib)` | `t.private.link_libs.append(lib)` |
-| `target_link_libraries(t -lm)` | `t.public.link_libs.append("m")` |
+| `target_link_libraries(t PUBLIC lib)` | `t.link(lib)` |
+| `target_link_libraries(t PRIVATE lib)` | `t.link_private(lib)` |
+| `target_link_libraries(t -lm)` | `t.link("m")` |
 | `target_include_directories(t PUBLIC dir)` | `t.public.include_dirs.append(dir)` |
 | `target_compile_definitions(t PRIVATE DEF)` | `t.private.defines.append("DEF")` |
 | `set_target_properties(t PROPERTIES OUTPUT_NAME n)` | `t.output_name = "n"` |
@@ -144,10 +144,10 @@ target_link_libraries(app PRIVATE mylib)
 
 ```python
 # pcons
-app.private.link_libs.append(mylib)
+app.link_private(mylib)
 ```
 
-Appending to `link_libs` applies the dependency's public usage requirements (include dirs, defines, link flags) — just like CMake. Use `public.link_libs` to re-export them to consumers (CMake's `PUBLIC`) or `private.link_libs` to keep them local (CMake's `PRIVATE`).
+`link()` / `link_private()` apply the dependency's public usage requirements (include dirs, defines, link flags) — just like CMake. Use `link()` to re-export them to consumers (CMake's `PUBLIC`) or `link_private()` to keep them local (CMake's `PRIVATE`). The `target.public.link_libs` / `target.private.link_libs` lists are the equivalent low-level form.
 
 ### PUBLIC vs PRIVATE
 
@@ -169,8 +169,8 @@ mylib.private.defines.append("INTERNAL_FLAG")
 
 ### System libraries (`-l` flags)
 
-!!! warning "Use `link_libs`, not `link_flags`"
-    On Linux, link order matters. Libraries specified with `link_libs` are placed **after** object files on the link line (correct for `-l` resolution). `link_flags` are placed **before** objects.
+!!! warning "Use `link()`, not `link_flags`"
+    On Linux, link order matters. Libraries linked with `link()`/`link_private()` are placed **after** object files on the link line (correct for `-l` resolution). `link_flags` are placed **before** objects.
 
 ```cmake
 # CMake
@@ -179,8 +179,7 @@ target_link_libraries(mylib PUBLIC m pthread)
 
 ```python
 # pcons
-mylib.public.link_libs.append("m")
-mylib.public.link_libs.append("pthread")
+mylib.link("m", "pthread")
 ```
 
 ### INTERFACE-only libraries
@@ -475,7 +474,7 @@ target_link_libraries(app PRIVATE ZLIB::ZLIB)
 ```python
 # pcons
 zlib = project.find_package("zlib")
-app.private.link_libs.append(zlib)
+app.link_private(zlib)
 ```
 
 `find_package()` searches using pkg-config first, then system paths. For optional dependencies:
@@ -483,7 +482,7 @@ app.private.link_libs.append(zlib)
 ```python
 optional_dep = project.find_package("libfoo", required=False)
 if optional_dep:
-    app.private.link_libs.append(optional_dep)
+    app.link_private(optional_dep)
 ```
 
 ### Conan integration
@@ -695,7 +694,7 @@ Print statements work during generation — they run at configure/generate time,
 
 ## Gotchas and Tips
 
-1. **`link_libs` vs `link_flags`**: Use `link_libs` for `-l` libraries (e.g., `"m"`, `"pthread"`). These are placed **after** objects on the link line, which matters on Linux where the linker resolves symbols left-to-right. `link_flags` are placed **before** objects and are for flags like `-Wl,-rpath`.
+1. **`link()` vs `link_flags`**: Use `link()`/`link_private()` for `-l` libraries (e.g., `"m"`, `"pthread"`). These are placed **after** objects on the link line, which matters on Linux where the linker resolves symbols left-to-right. `link_flags` are placed **before** objects and are for flags like `-Wl,-rpath`.
 
 2. **Pre-compiled objects and `-fPIC`**: If you compile objects with `env.cc.Object()` and add them to both a static and shared library, compile them separately. Pcons auto-adds `-fPIC` for `SharedLibrary` sources, but not for pre-compiled objects.
 
@@ -711,7 +710,7 @@ Print statements work during generation — they run at configure/generate time,
 
 8. **Removing flags from a cloned environment**: CMake's per-target flags are additive. In pcons, if you clone an environment and need to *remove* a flag (e.g., `-fno-rtti` for a consumer library that needs RTTI), you modify the list directly on the cloned env using plain python. Plan for this when a project has libraries with different flag requirements.
 
-9. **Transitive dependencies work automatically**: Like CMake, when A links B and B links C, A automatically gets C's public requirements. You don't need to repeat `link_libs` entries — just link your direct dependencies and public include dirs, defines, and link libs propagate transitively.
+9. **Transitive dependencies work automatically**: Like CMake, when A links B and B links C, A automatically gets C's public requirements. You don't need to repeat `link()` calls — just link your direct dependencies and public include dirs, defines, and link libs propagate transitively.
 
 10. **Configure-time vs build-time code generation**: If you generate files with plain Python at configure time (e.g., embedding assets into headers), pcons won't track changes to the input files across builds. For inputs that may change, either use `env.Command()` (runs at build time with dependency tracking) or add `target.depends()` on the generated file's inputs so rebuilds are triggered correctly.
 

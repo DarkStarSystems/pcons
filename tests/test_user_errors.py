@@ -10,6 +10,7 @@ These serve as both regression tests for existing good errors and a
 roadmap for future error handling improvements.
 """
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -65,22 +66,28 @@ class TestWrongArgumentTypes:
         with pytest.raises(TypeError, match="name"):
             project.Program(123, env, sources=["src/main.c"])
 
-    def test_link_string_instead_of_target(self, project_env):
-        """User passes a string library name instead of a Target object."""
+    def test_link_accepts_string_library(self, project_env):
+        """A string library name is a valid link() argument (raw link token)."""
         project, env = project_env
         app = project.Program("app", env, sources=["src/main.c"])
-        with (
-            pytest.raises(TypeError, match="[Tt]arget"),
-            pytest.warns(DeprecationWarning, match="link"),
-        ):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
             app.link("mylib")
+        assert "mylib" in app.public.link_libs
+
+    def test_link_non_target_non_string(self, project_env):
+        """A non-Target, non-str argument to link() is a TypeError."""
+        project, env = project_env
+        app = project.Program("app", env, sources=["src/main.c"])
+        with pytest.raises(TypeError):
+            app.link(42)
 
     def test_link_list_instead_of_varargs(self, project_env):
         """User passes a list instead of unpacking: link([a, b]) vs link(a, b)."""
         project, env = project_env
         lib = project.StaticLibrary("mylib", env, sources=["src/lib.c"])
         app = project.Program("app", env, sources=["src/main.c"])
-        with pytest.raises(TypeError), pytest.warns(DeprecationWarning, match="link"):
+        with pytest.raises(TypeError):
             app.link([lib])
 
     def test_add_sources_string_not_list(self, project_env):
@@ -372,13 +379,15 @@ class TestDependencyMistakes:
         # Should not crash and lib should appear only once
         assert app.dependencies.count(lib) == 1
 
-    def test_link_now_deprecated(self, project_env):
-        """Using the old link() method should raise a DeprecationWarning."""
+    def test_link_not_deprecated(self, project_env):
+        """link() is a first-class API and must not emit any warning."""
         project, env = project_env
         lib = project.StaticLibrary("mylib", env, sources=["src/lib.c"])
         app = project.Program("app", env, sources=["src/main.c"])
-        with pytest.warns(DeprecationWarning, match="link"):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
             app.link(lib)
+        assert lib in app.public.link_libs
 
 
 # =============================================================================

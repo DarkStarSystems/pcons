@@ -428,7 +428,7 @@ _USAGE_REQUIREMENT_TYPES: tuple[tuple[str, str, str | None], ...] = (
     (
         "link_libs",
         "MutableSequence[str | Target]",
-        "libraries propagated to dependents (names or Target objects)",
+        "link deps: a Target brings its public usage requirements (headers etc.); a str is a raw link token; public re-exports, private does not",
     ),
 )
 

@@ -1449,16 +1449,16 @@ httplib = ImportedTarget.from_package(PackageDescription(
     include_dirs=['/opt/homebrew/include'],
     defines=['CPPHTTPLIB_OPENSSL_SUPPORT'],
 ))
-httplib.public.link_libs.append(openssl)  # transitive: consumers get openssl too
+httplib.link(openssl)  # transitive: consumers get openssl too
 
 # Build library
 libcore = project.StaticLibrary('core', env, sources=['src/core.cpp'])
 libcore.public.include_dirs.append(Path('include'))
-libcore.private.link_libs.append(zlib)  # private dep: not re-exported to consumers
+libcore.link_private(zlib)  # private dep: not re-exported to consumers
 
 # Build executable — gets zlib transitively through libcore's link deps
 app = project.Program('myapp', env, sources=['src/main.cpp'])
-app.private.link_libs.extend([libcore, openssl, httplib])
+app.link_private(libcore, openssl, httplib)
 
 project.Default(app)
 Generator().generate(project)
@@ -1565,7 +1565,7 @@ An ImportedTarget represents an external dependency. It has usage requirements b
 ```python
 # Preferred: use project.find_package()
 zlib = project.find_package("zlib")
-app.private.link_libs.append(zlib)  # public requirements propagate automatically
+app.link_private(zlib)  # public requirements propagate automatically
 
 # Manual: for header-only libs or packages without .pc files
 httplib = ImportedTarget.from_package(PackageDescription(
@@ -1573,7 +1573,7 @@ httplib = ImportedTarget.from_package(PackageDescription(
     include_dirs=["/usr/include"],
     defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
 ))
-httplib.public.link_libs.append(openssl)  # re-exported to consumers
+httplib.link(openssl)  # re-exported to consumers
 ```
 
 ### Package Finders
@@ -1606,13 +1606,13 @@ from pcons import Generator, Project, find_c_toolchain
 project = Project('myapp', build_dir='build')
 env = project.Environment(toolchain=find_c_toolchain())
 
-# find_package returns ImportedTarget — link_libs propagates requirements
+# find_package returns ImportedTarget — link_private propagates requirements
 zlib = project.find_package('zlib')
 openssl = project.find_package('openssl')
 boost = project.find_package('boost', components=['filesystem'])
 
 app = project.Program('myapp', env, sources=['main.cpp'])
-app.private.link_libs.extend([zlib, openssl, boost])
+app.link_private(zlib, openssl, boost)
 # Automatically gets all include dirs, library dirs, libraries, flags
 
 Generator().generate(project)

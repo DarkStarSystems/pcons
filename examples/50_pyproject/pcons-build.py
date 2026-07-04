@@ -130,6 +130,9 @@ hello_lib.private.defines.append("HELLO_LIB_EXPORTS")
 # e.g. pcons_hello_ext.cpython-314-x86_64-linux-gnu.so
 pcons_hello_ext.output_prefix = ""
 pcons_hello_ext.output_suffix = sysconfig.get_config_var("EXT_SUFFIX")
+# Uses the low-level link_libs list rather than link_private(): this example
+# builds under PEP 517 isolation against the *released* pcons (see the note at
+# the top of this file), so it sticks to APIs available in the released version.
 pcons_hello_ext.private.link_libs.extend([python, nanobind, hello_lib])
 
 subgen = Path(nanobind.package.prefix) / "nanobind" / "stubgen.py"
