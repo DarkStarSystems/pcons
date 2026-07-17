@@ -24,6 +24,12 @@ Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), 
 - **Explicit over implicit**: Dependencies are discoverable and traceable
 - **Extensible**: Add-on modules for domain-specific tasks (plugin bundles, SDK configuration, etc.)
 
+## Language and OS Support
+
+Pcons currently supports C and C++, ObjC and C++, Fortran, CUDA, assembly, WASM (Emscripten/WASI), LaTeX, Python native extensions, and Rust (via integration). The list is always growing, and it's easy to create your own tools. All built-in tools work on Mac, Windows and Linux. It has cross-compile presets for Android NDK and iOS.
+
+Pcons can build not just executables, but also tar/zip archives, python packages, Windows installers, and MacOS installer packages.
+
 ## Why another software build tool?
 
 I was one of the original developers of SCons, and helped maintain it for many years. I love that python is the config language; that makes build descriptions incredibly flexible and powerful. Recently I've been using CMake for more projects, and despite the deeply painful configuration language, I've come to appreciate its power: conan integration, the separation between *describing* the build andrunning it, and dependency propagation, among other things. I feel that SCons hasn't kept up with modern python; like any very widely used mature project, it has a lot of accumulated wisdom but also a bit ossified ways of doing things.
