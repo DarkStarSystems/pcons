@@ -12,6 +12,11 @@ expected_outputs = [
     "build/calculator",
 ]
 
+[toolchains]
+linux = ["gcc", "llvm"]
+darwin = ["llvm"]
+windows = ["msvc", "gcc"]
+
 [verify]
 # Run the built program and check output
 # Commands are Unix-style; automatically adapted for Windows

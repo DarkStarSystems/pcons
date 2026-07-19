@@ -5,10 +5,10 @@
 This example demonstrates the target-centric build API:
 - Compiling multiple source files into a single program
 - Using include directories via private requirements
-- Automatic resolution of sources to objects
+- Overriding the toolchain from the command line: pcons TOOLCHAIN=gcc
 """
 
-from pcons import Project
+from pcons import Project, get_var
 
 # =============================================================================
 # Build Script
@@ -20,7 +20,9 @@ project = Project("multi_file")
 # Directories
 src_dir = project.root_dir / "src"
 include_dir = project.root_dir / "include"
-env = project.Environment(toolchain="c")
+
+# toolchain="c" auto-detects; a specific name like "gcc" requires it
+env = project.Environment(toolchain=get_var("TOOLCHAIN", "c"))
 # Warning flags, resolved per-toolchain (/W4 on MSVC, -Wall … on GCC/Clang).
 env.apply_preset("warnings")
 

@@ -1,7 +1,7 @@
 # Test configuration for the hello_c example
 
 [test]
-description = "Demonstrates compiling a simple C program (cross-platform)"
+description = "The simplest pcons build: one C file, one program"
 
 # Files that should exist after the build
 # Object files are in obj.<target>/ subdirectories
@@ -10,15 +10,6 @@ expected_outputs = [
     "build/obj.hello/src/hello.c.o",
     "build/hello",
 ]
-
-expected_install_outputs = [
-    "${BINARY_INSTALL_DIR}/hello${BINARY_EXT}",
-]
-
-[toolchains]
-linux = ["gcc", "llvm"]
-darwin = ["llvm"]
-windows = ["msvc", "gcc"]
 
 [verify]
 # Run the built program and check output
