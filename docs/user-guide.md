@@ -203,6 +203,20 @@ swiftc drives the link when Swift is involved (bringing the Swift runtime),
 and a C/C++-driven link of Swift objects gets the runtime path injected via
 `swiftc -print-target-info`. See `examples/48_swift_cxx_interop`.
 
+A `module.modulemap` can be generated instead of hand-written —
+`clang_module_map(project, "CStats", ["include/cstats.h"])` (from
+`pcons.toolchains.swift`) writes one into the build tree and returns its
+directory for `public.include_dirs`. For distributable libraries,
+`env.swiftc.library_evolution = True` builds with
+`-enable-library-evolution` and emits a `.swiftinterface` next to the
+`.swiftmodule`. And Swift participates in cross presets: two lines target
+iOS (see `examples/49_swift_ios`):
+
+```python
+env = project.Environment(toolchain="swift")
+env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
+```
+
 **Fortran** (`gfortran`) is available as `toolchain="fortran"`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
 
 ```python

@@ -174,6 +174,84 @@ class TestCxxInterop:
         assert "clang_header" not in info["outputs"]
 
 
+class TestClangModuleMap:
+    def test_generates_modulemap(self, swift_project) -> None:
+        from pcons.toolchains.swift import clang_module_map
+
+        project, env = swift_project
+        (project.root_dir / "include").mkdir()
+        (project.root_dir / "include" / "clib.h").write_text("void f(void);\n")
+
+        map_dir = clang_module_map(project, "CLib", ["include/clib.h"])
+
+        content = (map_dir / "module.modulemap").read_text()
+        assert content.startswith("module CLib {")
+        assert "export *" in content
+        # Header paths are absolute so the map works from any cwd.
+        assert str(project.root_dir / "include" / "clib.h") in content
+
+    def test_write_if_changed(self, swift_project) -> None:
+        from pcons.toolchains.swift import clang_module_map
+
+        project, env = swift_project
+        (project.root_dir / "clib.h").write_text("void f(void);\n")
+
+        map_file = clang_module_map(project, "CLib", ["clib.h"]) / "module.modulemap"
+        first_mtime = map_file.stat().st_mtime_ns
+        map_file2 = clang_module_map(project, "CLib", ["clib.h"]) / "module.modulemap"
+        assert map_file2.stat().st_mtime_ns == first_mtime  # untouched
+
+
+class TestLibraryEvolution:
+    def test_library_evolution_flags_and_interface(self, swift_project) -> None:
+        project, env = swift_project
+        env.swiftc.library_evolution = True
+        lib = project.StaticLibrary("Geometry", env, sources=["src/extra.swift"])
+        project.resolve()
+
+        info = lib.intermediate_nodes[0]._build_info
+        assert "-enable-library-evolution" in info["vars"]["MODULE_FLAGS"]
+        outputs = info["outputs"]
+        assert outputs["swiftinterface"]["implicit"] is True
+        assert str(outputs["swiftinterface"]["path"]).endswith(
+            "Geometry.swiftinterface"
+        )
+
+    def test_programs_unaffected(self, swift_project) -> None:
+        project, env = swift_project
+        env.swiftc.library_evolution = True
+        prog = project.Program("tool", env, sources=["src/main.swift"])
+        project.resolve()
+
+        info = prog.intermediate_nodes[0]._build_info
+        assert "-enable-library-evolution" not in info["vars"]["MODULE_FLAGS"]
+
+
+class TestCrossTarget:
+    def test_ios_target_contributions(self, swift_toolchain) -> None:
+        from types import SimpleNamespace
+
+        cross = SimpleNamespace(
+            name="ios-arm64",
+            arch="arm64",
+            triple="arm64-apple-ios15.0",
+            sysroot="/fake/iPhoneOS.sdk",
+            extra_compile_flags=(),
+            extra_link_flags=(),
+            env_vars=None,
+        )
+        contribs = swift_toolchain._target_contributions(cross)
+        swiftc = [c for c in contribs if c.tool == "swiftc"]
+        assert swiftc, "expected a swiftc contribution"
+        flags = swiftc[0].flags
+        assert "-target" in flags and "arm64-apple-ios15.0" in flags
+        assert "-sdk" in flags and "/fake/iPhoneOS.sdk" in flags
+        # swiftc drives the link: no clang-style -arch link contribution.
+        link = [c for c in contribs if c.tool == "link"]
+        assert all("-arch" not in c.flags for c in link)
+        assert any("-target" in c.flags for c in link)
+
+
 class TestRuntimeInjection:
     def test_swift_links_cxx_objects(self, swift_toolchain) -> None:
         libs = swift_toolchain.get_runtime_libs("swift", {"swift", "cxx"})

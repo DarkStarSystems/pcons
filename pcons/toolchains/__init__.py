@@ -71,6 +71,7 @@ from pcons.toolchains.swift import (
     SwiftCompiler,
     SwiftLinker,
     SwiftToolchain,
+    clang_module_map,
     find_swift_toolchain,
 )
 from pcons.toolchains.wasi import (
@@ -165,6 +166,7 @@ __all__ = [
     "find_c_toolchain",
     "find_fortran_toolchain",
     "find_swift_toolchain",
+    "clang_module_map",
     "find_cuda_toolchain",
     "find_cython_toolchain",
     "find_emscripten_toolchain",

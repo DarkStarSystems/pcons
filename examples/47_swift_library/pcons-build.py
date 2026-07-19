@@ -7,12 +7,14 @@ Demonstrates:
 - Cross-module import: the library's .swiftmodule search path propagates
   to dependents as an ordinary usage requirement
 - A Test() target running the built program
+- Library evolution: the library also emits a .swiftinterface
 """
 
 from pcons import Project
 
 project = Project("swift_library")
 env = project.Environment(toolchain="swift")
+env.swiftc.library_evolution = True
 
 geometry = project.StaticLibrary(
     "Geometry", env, sources=["geometry/geometry.swift", "geometry/util.swift"]

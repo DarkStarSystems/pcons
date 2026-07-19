@@ -6,6 +6,7 @@ description = "Demonstrates a Swift library with cross-module import and a Test(
 expected_outputs = [
     "build/shapes",
     "build/swiftmodules/Geometry.swiftmodule",
+    "build/swiftmodules/Geometry.swiftinterface",
 ]
 
 [verify]

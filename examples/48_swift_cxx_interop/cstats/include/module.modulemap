@@ -1,6 +1,0 @@
-// Makes the C library importable from Swift: `import CStats`.
-// swiftc finds this via the include dir the library propagates.
-module CStats {
-    header "cstats.h"
-    export *
-}

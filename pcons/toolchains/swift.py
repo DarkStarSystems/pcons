@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pcons.configure.platform import get_platform
@@ -71,6 +72,73 @@ def module_name_for(target_name: str) -> str:
     return name
 
 
+def clang_module_map(
+    project: Any, name: str, headers: list[str | Path] | tuple[str | Path, ...]
+) -> Path:
+    """Generate a ``module.modulemap`` exposing C headers to Swift.
+
+    Writes ``<build_dir>/modulemaps/<name>/module.modulemap`` (only when
+    its content changes, so builds stay incremental) and returns the
+    directory. Append it to the C library's ``public.include_dirs`` and
+    dependent Swift code can ``import <name>``:
+
+        cstats = project.StaticLibrary("cstats", env, sources=[...])
+        cstats.public.include_dirs.append("cstats/include")
+        cstats.public.include_dirs.append(
+            clang_module_map(project, "CStats", ["cstats/include/cstats.h"])
+        )
+
+    Header paths are resolved to absolute paths inside the map, so the
+    generated file works regardless of where swiftc runs. A hand-written
+    module.modulemap shipped in the include dir works just as well.
+    """
+    map_dir = Path(project.root_dir) / project.build_dir / "modulemaps" / name
+    lines = [f"module {name} {{"]
+    for header in headers:
+        p = Path(header)
+        if not p.is_absolute():
+            p = Path(project.root_dir) / p
+        lines.append(f'    header "{p}"')
+    lines.append("    export *")
+    lines.append("}")
+    content = "\n".join(lines) + "\n"
+
+    map_dir.mkdir(parents=True, exist_ok=True)
+    map_file = map_dir / "module.modulemap"
+    if not map_file.exists() or map_file.read_text() != content:
+        map_file.write_text(content)
+    return map_dir
+
+
+_APPLE_SDK_CACHE: dict[str, str | None] = {}
+
+
+def _apple_sdk_for_triple(triple: str) -> str | None:
+    """Resolve the Apple SDK path for a target triple via xcrun (cached)."""
+    t = triple.lower()
+    if "-ios" in t:
+        sdk_name = "iphonesimulator" if "simulator" in t else "iphoneos"
+    elif "apple" in t or "darwin" in t or "macos" in t:
+        sdk_name = "macosx"
+    else:
+        return None
+    if sdk_name not in _APPLE_SDK_CACHE:
+        import subprocess
+
+        try:
+            _APPLE_SDK_CACHE[sdk_name] = subprocess.run(
+                ["xcrun", "--sdk", sdk_name, "--show-sdk-path"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            logger.warning("Could not resolve %s SDK path via xcrun", sdk_name)
+            _APPLE_SDK_CACHE[sdk_name] = None
+    return _APPLE_SDK_CACHE[sdk_name]
+
+
 def _link_tail() -> list[object]:
     """Link-command tail; swiftc understands GNU-style -L/-l/-framework."""
     return [
@@ -112,6 +180,9 @@ class SwiftCompiler(BaseTool):
             # When true, library modules also emit a C/C++ header
             # (<Module>-Swift.h) into swiftmodules/ so C++ can call Swift.
             "interop_header": False,
+            # When true, library modules build with -enable-library-evolution
+            # and emit a .swiftinterface (for distributable/resilient libs).
+            "library_evolution": False,
             # -emit-dependencies-path is frontend-only; with -wmo there is
             # exactly one frontend job, so -Xfrontend passing is reliable.
             "depflags": [
@@ -336,6 +407,30 @@ class SwiftToolchain(UnixToolchain):
                 )
         return self._swift_runtime_libdirs
 
+    def _target_contributions(self, cross: Any) -> list[ToolContribution]:
+        """Add swiftc/link -target and -sdk for cross targets (e.g. ios()).
+
+        Swift embeds the deployment version in the triple, and Apple
+        targets need the matching SDK; when the CrossPreset carries no
+        sysroot it is resolved via xcrun.
+        """
+        contribs = super()._target_contributions(cross)
+        triple = getattr(cross, "triple", None)
+        if not triple:
+            return contribs
+        # swiftc drives this toolchain's link and rejects clang-style
+        # -arch/--target link flags; the Swift -target triple carries the
+        # architecture. Keep the cc/cxx contributions (for mixed C/C++
+        # targets in the same env) but replace the link ones.
+        contribs = [c for c in contribs if c.tool != "link"]
+        swift_flags: list[str] = ["-target", str(triple)]
+        sdk = getattr(cross, "sysroot", None) or _apple_sdk_for_triple(str(triple))
+        if sdk:
+            swift_flags += ["-sdk", str(sdk)]
+        contribs.append(ToolContribution("swiftc", flags=tuple(swift_flags)))
+        contribs.append(ToolContribution("link", flags=tuple(swift_flags)))
+        return contribs
+
     def _configure_tools(self, config: object) -> bool:
         compiler = SwiftCompiler()
         archiver = GccArchiver()
@@ -370,9 +465,26 @@ class SwiftToolchain(UnixToolchain):
 
         # Programs may contain top-level code (the entry point); library
         # targets must not, and need -parse-as-library.
-        module_flags: list[str] = []
-        if target.target_type != "program":
+        is_library = target.target_type != "program"
+        module_flags: list[object] = []
+        interface_path = None
+        if is_library:
             module_flags.append("-parse-as-library")
+            if bool(getattr(env.swiftc, "library_evolution", False)):
+                interface_rel = f"{SWIFTMODULE_DIR}/{module_name}.swiftinterface"
+                interface_path = (
+                    target.build_dir / SWIFTMODULE_DIR / f"{module_name}.swiftinterface"
+                )
+                module_flags += [
+                    "-enable-library-evolution",
+                    "-emit-module-interface-path",
+                    PathToken(path=interface_rel, path_type="build"),
+                    # The interface-verify pass runs as an extra frontend job
+                    # that inherits our -Xfrontend depfile flags and rejects
+                    # them ("this mode does not support emitting dependency
+                    # files"); skip it — the interface is still emitted.
+                    "-no-verify-emitted-module-interface",
+                ]
 
         # Optional C/C++ interop header (<Module>-Swift.h) for library
         # modules, emitted next to the .swiftmodule so the same propagated
@@ -380,7 +492,7 @@ class SwiftToolchain(UnixToolchain):
         header_flags: list[object] = []
         header_path = None
         emit_header = bool(getattr(env.swiftc, "interop_header", False))
-        if emit_header and target.target_type != "program":
+        if emit_header and is_library:
             header_rel = f"{SWIFTMODULE_DIR}/{module_name}-Swift.h"
             header_path = target.build_dir / SWIFTMODULE_DIR / f"{module_name}-Swift.h"
             header_flags = [
@@ -409,6 +521,12 @@ class SwiftToolchain(UnixToolchain):
                 "implicit": True,
             },
         }
+        if interface_path is not None:
+            node._build_info["outputs"]["swiftinterface"] = {
+                "path": interface_path,
+                "suffix": ".swiftinterface",
+                "implicit": True,
+            }
         if header_path is not None:
             node._build_info["outputs"]["clang_header"] = {
                 "path": header_path,
