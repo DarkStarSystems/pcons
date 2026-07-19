@@ -504,6 +504,9 @@ class TestCLICommands:
         assert "from pcons import Project, find_c_toolchain" in build_content
         # No explicit generate call needed: generation is automatic
         assert ".generate(" not in build_content
+        # PEP 723 metadata so `uv run pcons-build.py` works standalone
+        assert "# /// script" in build_content
+        assert '"pcons>=' in build_content
         # Project and program named after the directory
         assert f'Project("{tmp_path.name}")' in build_content
         assert '"src/main.cpp",' in build_content

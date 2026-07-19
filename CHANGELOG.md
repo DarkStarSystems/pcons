@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`pcons init` now generates a working build script**: it adopts any existing C/C++ sources (top-level and under `src/`, plus an `include/` directory if present) into a real program target, and in an empty directory scaffolds a hello-world starter (C++ by default; `--lang c` for C) so `pcons init && pcons` builds and runs immediately.
+- **`pcons init` now generates a working build script**: it adopts any existing C/C++ sources (top-level and under `src/`, plus an `include/` directory if present) into a real program target, and in an empty directory scaffolds a hello-world starter (C++ by default; `--lang c` for C) so `pcons init && pcons` builds and runs immediately. The generated script carries PEP 723 inline metadata, so `uv run pcons-build.py` also works with nothing installed but uv.
 - **Generation is now fully automatic**: creating a top-level `Project` is enough — build files are generated when the script finishes, even when it is run directly with `python` rather than via the `pcons` CLI. Explicit `project.generate()` / `Generator().generate(project)` calls still work but are no longer needed. If the script dies on an unhandled exception (or exits nonzero under the CLI), pending generation is cancelled so build files are never written from a partially-executed script.
 
 ## [0.21.0] - 2026-07-04
