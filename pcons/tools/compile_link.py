@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
     from pcons.core.target import Target
-    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
+    from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler, Toolchain
 
 
 # Suffixes for files that belong on a C/C++ link command line.
@@ -81,6 +81,12 @@ class CompileLinkFactory:
     def __init__(self, project: Project) -> None:
         self.project = project
         self._object_cache: dict[tuple[Path, str, tuple], FileNode] = {}
+        # Grouped (whole-module) compile nodes, keyed by the sorted source
+        # set + compiler cmd + effective requirements.
+        self._grouped_object_cache: dict[
+            tuple[str, tuple[str, ...], str, tuple], FileNode
+        ]
+        self._grouped_object_cache = {}
         # Maps language -> list of (source_path, obj_node) pairs.
         # Populated by _create_object_node(); passed to toolchain after_resolve() hooks.
         self._source_obj_by_language: dict[str, list[tuple[Path, FileNode]]] = {}
@@ -153,8 +159,12 @@ class CompileLinkFactory:
         # Separate sources into compilable sources and auxiliary inputs
         auxiliary_inputs: list[tuple[FileNode, str, AuxiliaryInputHandler]] = []
 
-        # Create object nodes for each source (delegated to helper methods)
+        # Create object nodes for each source (delegated to helper methods).
+        # Sources whose handler sets group_sources compile together in ONE
+        # node per (toolchain, tool) group — whole-module compilation.
         trace("resolve", "  Creating object nodes for %d sources", len(target.sources))
+        grouped: dict[tuple[int, str], tuple[SourceHandler, Toolchain, list[FileNode]]]
+        grouped = {}
         for source in target.sources:
             if isinstance(source, FileNode):
                 # Check if this is an auxiliary input file
@@ -165,11 +175,31 @@ class CompileLinkFactory:
                     trace("resolve", "    %s -> auxiliary input", source.path)
                     continue
 
+                found = self._get_source_handler_with_toolchain(source.path, env)
+                if found is not None and found[0].group_sources:
+                    handler, toolchain = found
+                    key = (id(toolchain), handler.tool_name)
+                    grouped.setdefault(key, (handler, toolchain, []))[2].append(source)
+                    continue
+
                 # Normal source file - create object node
                 obj_node = self._create_object_node(target, source, effective, env)
                 if obj_node:
                     target.intermediate_nodes.append(obj_node)
                     trace("resolve", "    %s -> %s", source.path, obj_node.path)
+
+        for handler, toolchain, sources in grouped.values():
+            obj_node = self._create_grouped_object_node(
+                target, sources, handler, toolchain, effective, env
+            )
+            target.intermediate_nodes.append(obj_node)
+            trace(
+                "resolve",
+                "    %d %s sources -> %s (grouped)",
+                len(sources),
+                handler.language,
+                obj_node.path,
+            )
 
         # Store auxiliary inputs on the target for use by output creation
         if auxiliary_inputs:
@@ -201,11 +231,18 @@ class CompileLinkFactory:
         self, source: Path, env: Environment
     ) -> SourceHandler | None:
         """Get source handler from any of the environment's toolchains."""
+        found = self._get_source_handler_with_toolchain(source, env)
+        return found[0] if found else None
+
+    def _get_source_handler_with_toolchain(
+        self, source: Path, env: Environment
+    ) -> tuple[SourceHandler, Toolchain] | None:
+        """Get (handler, owning toolchain) for a source, or None."""
         for toolchain in env.toolchains:
             handler = toolchain.get_source_handler(source.suffix)
             if handler is not None:
                 if env.has_tool(handler.tool_name):
-                    return handler
+                    return handler, toolchain
                 else:
                     logger.warning(
                         "Tool '%s' required for '%s' files is not available in the "
@@ -328,6 +365,76 @@ class CompileLinkFactory:
         self._source_obj_by_language.setdefault(language, []).append(
             (source.path, obj_node)
         )
+
+        env.register_node(obj_node)
+        return obj_node
+
+    def _create_grouped_object_node(
+        self,
+        target: Target,
+        sources: list[FileNode],
+        handler: SourceHandler,
+        toolchain: Toolchain,
+        effective: EffectiveRequirements,
+        env: Environment,
+    ) -> FileNode:
+        """Create ONE object node compiling all `sources` together.
+
+        Whole-module compilation (SourceHandler.group_sources): the command
+        template sees every source (bare SourcePath() renders them all, the
+        same mechanism link nodes use), and produces a single object named
+        after the target. The owning toolchain's setup_group_node() hook can
+        add per-node template vars, extra outputs, or implicit deps.
+        """
+        tool_name = handler.tool_name
+
+        tool_cmd = str(getattr(getattr(env, tool_name, None), "cmd", tool_name))
+        effective_hash = effective.as_hashable_tuple()
+        source_key = tuple(sorted(str(s.path.resolve()) for s in sources))
+        # Unlike per-source objects, grouped nodes are NOT shared between
+        # targets: the node carries target identity (module name, output
+        # path). The key only guards against double-resolving one target.
+        cache_key = (target.qualified_name, source_key, tool_cmd, effective_hash)
+        cached = self._grouped_object_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        obj_dir = target.build_dir / f"obj.{target.name}"
+        obj_path = obj_dir / f"{target.name}{handler.object_suffix}"
+        obj_node = self.project.node(obj_path)
+        obj_node.depends(list(sources))
+
+        depfile = self._resolve_depfile(handler.depfile, obj_path)
+
+        for source in sources:
+            if source.explicit_deps:
+                obj_node.implicit_deps.extend(source.explicit_deps)
+
+        context = CompileLinkContext.from_effective_requirements(
+            effective,
+            mode="compile",
+            tool_name=tool_name,
+            env=env,
+        )
+
+        obj_node._build_info = {
+            "tool": tool_name,
+            "command_var": handler.command_var,
+            "language": handler.language,
+            "sources": list(sources),
+            "depfile": depfile,
+            "deps_style": handler.deps_style,
+            "context": context,
+            "env": env,
+        }
+
+        toolchain.setup_group_node(obj_node, target, env)
+
+        self._grouped_object_cache[cache_key] = obj_node
+        for source in sources:
+            self._source_obj_by_language.setdefault(handler.language, []).append(
+                (source.path, obj_node)
+            )
 
         env.register_node(obj_node)
         return obj_node

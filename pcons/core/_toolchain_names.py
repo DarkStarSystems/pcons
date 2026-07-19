@@ -32,6 +32,8 @@ KnownToolchain = Literal[
     "llvm",  # LLVM/Clang compiler
     "msvc",  # Microsoft Visual C/C++ compiler
     "nvcc",  # NVIDIA CUDA compiler (nvcc)
+    "swift",  # Auto-detect the Swift toolchain (swiftc)
+    "swiftc",  # Swift compiler (whole-module compilation, swiftc links)
     "vc",  # Microsoft Visual C/C++ compiler
     "visualstudio",  # Microsoft Visual C/C++ compiler
     "wasi",  # Auto-detect the WASI SDK WebAssembly toolchain

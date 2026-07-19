@@ -133,6 +133,13 @@ class SourceHandler:
         deps_style: Dependency file style (e.g., "gcc", "msvc") or None.
         command_var: Name of the command variable (e.g., "objcmd", "rccmd").
                      Defaults to "objcmd" for backwards compatibility.
+        group_sources: If True, all of a target's sources matching this
+                       handler compile in ONE invocation producing one
+                       object (whole-module compilation — Swift-style
+                       languages where the compilation unit is the module,
+                       not the file). The command template sees all sources
+                       (bare SourcePath() renders them all); the toolchain
+                       can augment the grouped node via setup_group_node().
     """
 
     tool_name: str
@@ -141,6 +148,7 @@ class SourceHandler:
     depfile: TargetPath | None = None
     deps_style: str | None = None
     command_var: str = "objcmd"
+    group_sources: bool = False
 
 
 @dataclass
@@ -584,6 +592,10 @@ class Toolchain(Protocol):
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
+        ...
+
+    def setup_group_node(self, node: Any, target: Target, env: Environment) -> None:
+        """Augment a grouped (whole-module) compile node; usually a no-op."""
         ...
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
@@ -1081,6 +1093,24 @@ class BaseToolchain(ABC):
             SourceHandler describing how to compile, or None if not handled.
         """
         return None
+
+    def setup_group_node(  # noqa: B027 — optional hook, intentionally a no-op
+        self, node: Any, target: Target, env: Environment
+    ) -> None:
+        """Augment a grouped (whole-module) compile node. No-op by default.
+
+        Called by CompileLinkFactory after it creates the single compile
+        node for a SourceHandler with ``group_sources=True``. Toolchains
+        override this to add per-node template variables
+        (``node._build_info["vars"]``, expanded into the command template),
+        extra outputs (``node._build_info["outputs"]``), or implicit deps —
+        e.g. Swift's ``-module-name`` and ``.swiftmodule`` emission.
+
+        Args:
+            node: The grouped compile FileNode (``_build_info`` populated).
+            target: The target whose sources the node compiles.
+            env: The environment the node was created with.
+        """
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
         """Return handler for auxiliary input files, or None if not handled.

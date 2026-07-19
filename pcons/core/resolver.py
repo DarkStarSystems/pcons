@@ -517,6 +517,12 @@ class Resolver:
         # These take precedence over tool_config values in namespace lookup
         extra_vars.update(tool_overrides)
 
+        # Per-node template variables (e.g. a grouped compile node's
+        # MODULE_NAME, set by a toolchain's setup_group_node hook).
+        node_vars = build_info.get("vars")
+        if node_vars:
+            extra_vars.update(node_vars)
+
         # Expand the command template to a list of tokens
         # Tokens stay separate for proper quoting - generator joins with shell quoting
         command_tokens = env.subst_list(cmd_template, **extra_vars)

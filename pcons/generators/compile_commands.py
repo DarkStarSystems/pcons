@@ -12,7 +12,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.node import FileNode
 from pcons.generators.generator import BaseGenerator
@@ -49,7 +49,7 @@ class CompileCommandsGenerator(BaseGenerator):
     """
 
     # Languages that should be included in compile_commands.json
-    COMPILE_LANGUAGES = {"c", "cxx", "cpp", "objc", "objcxx", "cuda"}
+    COMPILE_LANGUAGES = {"c", "cxx", "cpp", "objc", "objcxx", "cuda", "swift"}
 
     def __init__(self) -> None:
         super().__init__("compile_commands")
@@ -231,8 +231,15 @@ class CompileCommandsGenerator(BaseGenerator):
         if isinstance(command_tokens, list):
             from pcons.core.subst import to_shell_command
 
+            all_sources = build_info.get("sources") if build_info else None
             expanded = self._expand_command_tokens(
-                command_tokens, source, output, project
+                command_tokens,
+                source,
+                output,
+                project,
+                all_sources=cast("list[FileNode]", all_sources)
+                if isinstance(all_sources, list)
+                else None,
             )
             return to_shell_command(expanded, shell="bash")
 
@@ -246,6 +253,7 @@ class CompileCommandsGenerator(BaseGenerator):
         source: FileNode,
         output: FileNode,
         project: Project,
+        all_sources: list[FileNode] | None = None,
     ) -> list[str]:
         """Expand SourcePath/TargetPath markers and PathToken paths to literals.
 
@@ -254,12 +262,21 @@ class CompileCommandsGenerator(BaseGenerator):
         ``PathToken`` paths are used unchanged. ``"build"``-typed paths
         (relative to build_dir) get the build_dir prepended since the
         working directory here isn't the build dir the way ninja/make use.
+
+        For grouped (whole-module) compiles, ``all_sources`` carries every
+        source of the node: a bare SourcePath expands to the full file list
+        (each per-file entry repeats the whole command, the convention
+        sourcekit-lsp and CMake use for Swift).
         """
         from pcons.core.subst import PathToken, SourcePath, TargetPath
 
         result: list[str] = []
         for token in tokens:
             if isinstance(token, SourcePath):
+                if all_sources and len(all_sources) > 1 and token.index is None:
+                    for s in all_sources:
+                        result.append(f"{token.prefix}{s.path}{token.suffix}")
+                    continue
                 result.append(f"{token.prefix}{source.path}{token.suffix}")
             elif isinstance(token, TargetPath):
                 result.append(f"{token.prefix}{output.path}{token.suffix}")

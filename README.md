@@ -26,7 +26,7 @@ Pcons is inspired by [SCons](https://scons.org) and [CMake](https://cmake.org), 
 
 ## Language and OS Support
 
-Pcons currently supports C and C++, ObjC and C++, Fortran, CUDA, assembly, WASM (Emscripten/WASI), LaTeX, Python native extensions, and Rust (via integration). The list is always growing, and it's easy to create your own tools. All built-in tools work on Mac, Windows and Linux. It has cross-compile presets for Android NDK and iOS.
+Pcons currently supports C and C++, ObjC and C++, Swift, Fortran, CUDA, assembly, WASM (Emscripten/WASI), LaTeX, Python native extensions, and Rust (via integration). The list is always growing, and it's easy to create your own tools. All built-in tools work on Mac, Windows and Linux. It has cross-compile presets for Android NDK and iOS.
 
 Pcons can build not just executables, but also tar/zip archives, python packages, Windows installers, and MacOS installer packages.
 

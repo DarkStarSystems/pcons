@@ -1,0 +1,20 @@
+# Test configuration for the swift_hello example
+
+[test]
+description = "Demonstrates building a Swift program (whole-module compilation)"
+
+expected_outputs = [
+    "build/hello",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_stdout = "Hello from Swift, pcons!" },
+]
+
+[skip]
+# Requires a Swift compiler (Xcode on macOS, swift.org toolchain on Linux)
+requires = ["swiftc"]
+# Windows Swift support is deferred; xcode/make generators untested with Swift
+platforms = ["windows"]
+generators = ["xcode", "make"]

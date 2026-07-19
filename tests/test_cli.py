@@ -517,6 +517,24 @@ class TestCLICommands:
         assert "from pcons.core" not in build_content
         assert "from pcons.generators" not in build_content
 
+    def test_pcons_init_adopts_swift_sources(self, tmp_path: Path) -> None:
+        """A directory of .swift sources gets toolchain="swift"."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.swift").write_text('print("hi")\n')
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "init"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        build_content = (tmp_path / "pcons-build.py").read_text()
+        assert 'toolchain="swift"' in build_content
+        assert '"src/main.swift",' in build_content
+        # No starter source scaffolded over existing code
+        assert not (tmp_path / "src" / "main.cpp").exists()
+
     def test_pcons_init_lang_c(self, tmp_path: Path) -> None:
         """Test pcons init --lang c scaffolds a C starter."""
         result = subprocess.run(

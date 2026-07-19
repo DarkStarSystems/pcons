@@ -838,7 +838,7 @@ def _info_targets(args: argparse.Namespace, script: Path) -> int:
     return 0
 
 
-_SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
+_SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".swift"}
 
 _HELLO_C = """\
 #include <stdio.h>
@@ -914,7 +914,13 @@ def cmd_init(args: argparse.Namespace) -> int:
         logger.info("Created %s", scaffolded)
         sources = [scaffolded]
 
-    lang = "c" if all(p.suffix == ".c" for p in sources) else "c++"
+    suffixes = {p.suffix for p in sources}
+    if suffixes <= {".swift"}:
+        lang = "swift"
+    elif suffixes <= {".c"}:
+        lang = "c"
+    else:
+        lang = "c++"
     has_include = (root / "include").is_dir()
     target_lines = [
         f"{'app = ' if has_include else ''}project.Program(",

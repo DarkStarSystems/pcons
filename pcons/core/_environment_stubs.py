@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     class _EnvironmentStubs:
         """Typed mixin for Environment (TYPE_CHECKING-only)."""
 
-        ar: ToolConfig  # EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, WasiToolchain
+        ar: ToolConfig  # EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, SwiftToolchain, WasiToolchain
         archive: ToolConfig  # Environment._setup_standalone_tools (always)
         cc: ToolConfig  # ClangClToolchain, EmscriptenToolchain, GccToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
         cuda: ToolConfig  # CudaToolchain
@@ -52,9 +52,10 @@ if TYPE_CHECKING:
         install: ToolConfig  # Environment._setup_standalone_tools (always)
         latex: ToolConfig  # LatexToolchain
         lib: ToolConfig  # ClangClToolchain, MsvcToolchain
-        link: ToolConfig  # ClangClToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, MsvcToolchain, WasiToolchain
+        link: ToolConfig  # ClangClToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
         metal: ToolConfig  # LlvmToolchain
         ml: ToolConfig  # ClangClToolchain, MsvcToolchain
         rc: ToolConfig  # ClangClToolchain, MsvcToolchain
+        swiftc: ToolConfig  # SwiftToolchain
         build_dir: Path
         variant: str

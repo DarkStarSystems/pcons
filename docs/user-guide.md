@@ -155,6 +155,28 @@ IDE autocompletion for these names comes from the generated `KnownToolchain` typ
 - **Windows**: clang-cl → msvc → llvm → gcc
 - **Linux / macOS**: llvm → gcc
 
+**Swift** is available as `toolchain="swift"` (requires Xcode on macOS or a
+swift.org toolchain on Linux). Swift's compilation unit is the module, not the
+file: each pcons target compiles as one Swift module in a single whole-module
+`swiftc` invocation, so files in a target see each other without imports.
+Importing another target's module is an ordinary dependency — the library's
+`.swiftmodule` search path propagates as a usage requirement:
+
+```python
+env = project.Environment(toolchain="swift")
+
+geometry = project.StaticLibrary("Geometry", env, sources=["lib/geometry.swift"])
+app = project.Program("shapes", env, sources=["src/main.swift"])  # import Geometry
+app.link_private(geometry)
+```
+
+The module name is the target name (sanitized to a Swift identifier); library
+targets compile with `-parse-as-library`. Variants map to `-Onone -g` /
+`-O`, and `werror` maps to `-warnings-as-errors`. `compile_commands.json`
+entries are emitted per source file with the whole-module command, the
+convention sourcekit-lsp expects. See `examples/46_swift_hello` and
+`examples/47_swift_library`.
+
 **Fortran** (`gfortran`) is available as `toolchain="fortran"`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
 
 ```python

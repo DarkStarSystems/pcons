@@ -67,6 +67,12 @@ from pcons.toolchains.msvc import (
     MsvcLinker,
     MsvcToolchain,
 )
+from pcons.toolchains.swift import (
+    SwiftCompiler,
+    SwiftLinker,
+    SwiftToolchain,
+    find_swift_toolchain,
+)
 from pcons.toolchains.wasi import (
     WasiArchiver,
     WasiCCompiler,
@@ -158,6 +164,7 @@ __all__ = [
     # Toolchain finder and registry
     "find_c_toolchain",
     "find_fortran_toolchain",
+    "find_swift_toolchain",
     "find_cuda_toolchain",
     "find_cython_toolchain",
     "find_emscripten_toolchain",
@@ -178,6 +185,9 @@ __all__ = [
     "GfortranCompiler",
     "GfortranLinker",
     "GfortranToolchain",
+    "SwiftCompiler",
+    "SwiftLinker",
+    "SwiftToolchain",
     # GCC toolchain
     "GccCCompiler",
     "GccCxxCompiler",
