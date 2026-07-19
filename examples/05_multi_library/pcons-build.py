@@ -13,7 +13,7 @@ Build graph:
 
 import sys
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 from pcons.generators.dot import DotGenerator
 from pcons.generators.mermaid import MermaidGenerator
 
@@ -22,7 +22,7 @@ from pcons.generators.mermaid import MermaidGenerator
 # =============================================================================
 
 project = Project("multi_library")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # -----------------------------------------------------------------------------
 # Library: libmath - low-level math utilities

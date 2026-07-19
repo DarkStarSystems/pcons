@@ -136,6 +136,7 @@ omit = [
     "pcons/core/_environment_stubs.py",
     "pcons/core/_toolconfig_stubs.py",
     "pcons/core/_usage_requirements_stubs.py",
+    "pcons/core/_toolchain_names.py",
 ]
 
 [tool.coverage.report]

@@ -436,3 +436,10 @@ toolchain_registry.register(
     description="Cython transpiler (.pyx to Python extension)",
     finder="find_cython_toolchain()",
 )
+
+
+toolchain_registry.register_finder(
+    ["cython"],
+    find_cython_toolchain,
+    description="Auto-detect the Cython toolchain",
+)

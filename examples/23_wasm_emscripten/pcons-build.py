@@ -3,7 +3,7 @@
 """Build script for a simple Emscripten WebAssembly program.
 
 This example demonstrates:
-- Using find_emscripten_toolchain() to select Emscripten
+- Selecting the Emscripten toolchain by name: toolchain="emscripten"
 - Building a C program that compiles to .js + .wasm
 - The output can be run with: node build/hello.js
 
@@ -12,9 +12,9 @@ Prerequisites:
   Set EMSDK or activate the emsdk environment.
 """
 
-from pcons import Project, find_emscripten_toolchain
+from pcons import Project
 
 project = Project("hello_emscripten")
-env = project.Environment(toolchain=find_emscripten_toolchain())
+env = project.Environment(toolchain="emscripten")
 
 project.Program("hello", env, sources=["src/hello.c"])

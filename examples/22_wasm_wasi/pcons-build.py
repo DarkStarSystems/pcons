@@ -3,7 +3,7 @@
 """Build script for a simple WASI WebAssembly program.
 
 This example demonstrates:
-- Using find_wasi_toolchain() to select the wasi-sdk toolchain
+- Selecting the wasi-sdk toolchain by name: toolchain="wasi"
 - Building a C program that compiles to a .wasm file
 - The output can be run with any WASI runtime: wasmtime, wasmer, etc.
 
@@ -12,9 +12,9 @@ Prerequisites:
   Set WASI_SDK_PATH or install to /opt/wasi-sdk.
 """
 
-from pcons import Project, find_wasi_toolchain
+from pcons import Project
 
 project = Project("hello_wasi")
-env = project.Environment(toolchain=find_wasi_toolchain())
+env = project.Environment(toolchain="wasi")
 
 project.Program("hello", env, sources=["src/hello.c"])

@@ -19,7 +19,7 @@ This exercises multi-component build_dir paths (e.g. "build/release").
 
 from pathlib import Path
 
-from pcons import Project, find_c_toolchain, get_variant
+from pcons import Project, get_variant
 
 # =============================================================================
 # Build Script
@@ -28,14 +28,11 @@ from pcons import Project, find_c_toolchain, get_variant
 # Get the variant (debug by default, overridable via --variant or VARIANT env)
 variant = get_variant(default="debug")
 
-# Find a C toolchain (uses platform-appropriate defaults)
-toolchain = find_c_toolchain()
-
 src_dir = Path(__file__).parent / "src"
 
 # Create project with variant-specific build directory
 project = Project("app", build_dir=f"build/{variant}")
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 env.apply_preset("warnings")  # per-toolchain: /W4 (MSVC) or -Wall -Wextra … (GCC/Clang)
 env.set_variant(variant)
 

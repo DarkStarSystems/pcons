@@ -501,7 +501,8 @@ class TestCLICommands:
 
         # Check content uses the canonical pcons API
         build_content = (tmp_path / "pcons-build.py").read_text()
-        assert "from pcons import Project, find_c_toolchain" in build_content
+        assert "from pcons import Project" in build_content
+        assert 'toolchain="c++"' in build_content
         # No explicit generate call needed: generation is automatic
         assert ".generate(" not in build_content
         # PEP 723 metadata so `uv run pcons-build.py` works standalone
@@ -687,7 +688,8 @@ class TestCLICommands:
 
         # Check content was replaced
         build_content = (tmp_path / "pcons-build.py").read_text()
-        assert "from pcons import Project, find_c_toolchain" in build_content
+        assert "from pcons import Project" in build_content
+        assert 'toolchain="c++"' in build_content
 
     def test_pcons_info(self, tmp_path: Path) -> None:
         """Test pcons info shows pcons-build.py docstring."""

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core._project_builder_stubs import _ProjectBuilders
+    from pcons.core._toolchain_names import KnownToolchain
     from pcons.tools.toolchain import Toolchain
 else:
     # At runtime, builder lookup goes through Project.__getattr__; the
@@ -264,14 +265,17 @@ class Project(_ProjectBuilders):
 
     def Environment(
         self,
-        toolchain: Toolchain | None = None,
+        toolchain: Toolchain | KnownToolchain | str | Sequence[str] | None = None,
         name: str | None = None,
         **kwargs: Any,
     ) -> Env:
         """Create and register a new environment.
 
         Args:
-            toolchain: Optional toolchain to initialize with.
+            toolchain: Optional toolchain to initialize with. A string is
+                looked up in the toolchain registry: a finder name like "c"
+                auto-detects, a specific alias like "gcc" requires that
+                toolchain. A sequence of names is a preference list.
             name: Optional name for this environment (used in ninja rule names).
             **kwargs: Additional variables to set on the environment.
 

@@ -10,7 +10,7 @@ and (when installing) ``PCONS_INSTALL_DIR`` — all set by the plugin.
 import os
 from pathlib import Path
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 from pcons.integrations.rez import is_in_rez_resolve, rez_environment
 
 source_dir = Path(os.environ.get("PCONS_SOURCE_DIR", Path(__file__).parent))
@@ -19,8 +19,7 @@ install_dir = os.environ.get("PCONS_INSTALL_DIR")
 
 project = Project("hello_app", root_dir=source_dir, build_dir=build_dir)
 
-toolchain = find_c_toolchain()
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c++")
 env.cxx.flags.append("-std=c++17")
 env.link.cmd = env.cxx.cmd  # link with C++ driver to pick up libstdc++/libc++
 

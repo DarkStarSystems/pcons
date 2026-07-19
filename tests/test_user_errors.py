@@ -97,11 +97,17 @@ class TestWrongArgumentTypes:
         with pytest.raises((TypeError, ValueError), match="sources"):
             app.add_sources("src/main.c")
 
-    def test_environment_toolchain_string(self, project_env):
-        """User passes a string like "gcc" instead of find_c_toolchain()."""
+    def test_environment_toolchain_unknown_string(self, project_env):
+        """A toolchain name that isn't registered fails with the known names."""
         project, _ = project_env
-        with pytest.raises(TypeError, match="toolchain"):
-            project.Environment(toolchain="gcc")
+        with pytest.raises(ValueError, match="Unknown toolchain 'gcc-13'.*gcc"):
+            project.Environment(toolchain="gcc-13")
+
+    def test_environment_toolchain_wrong_type(self, project_env):
+        """A non-string, non-Toolchain object fails with a clear message."""
+        project, _ = project_env
+        with pytest.raises(TypeError, match="Toolchain object or a registered"):
+            project.Environment(toolchain=42)
 
     def test_public_include_dirs_assigned_string(self, project_env):
         """User assigns a string instead of appending to the list.

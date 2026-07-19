@@ -8,7 +8,7 @@ Works on both x64 and ARM64 Windows machines -- target_cpu is auto-detected.
 
 import sys
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 if sys.platform == "win32":
     from pcons.contrib.windows.msvcup import ensure_msvc
@@ -17,5 +17,5 @@ if sys.platform == "win32":
     ensure_msvc("14.44.17.14", "10.0.22621.7")
 
 project = Project("hello")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 project.Program("hello", env, sources=["src/hello.c"])

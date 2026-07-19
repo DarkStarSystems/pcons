@@ -16,11 +16,9 @@ get the correct compile flags. On MSVC the internal partition gets
 """
 
 from pcons import Project
-from pcons.toolchains import find_c_toolchain
 
 project = Project("cxx_partitions")
-toolchain = find_c_toolchain(prefer=["llvm", "msvc"])
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=["llvm", "msvc", "c"])
 env.cxx.set_standard("c++20")
 
 project.Program(

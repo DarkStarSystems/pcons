@@ -10,22 +10,20 @@ This example demonstrates:
 - env.explain() to trace where each flag came from
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Find a C toolchain (uses platform-appropriate defaults)
-toolchain = find_c_toolchain()
 project = Project("variants_example")
 
 # Directories
 src_dir = project.root_dir / "src"
 
 # Create base environment with common settings
-base_env = project.Environment(toolchain=toolchain)
-if toolchain.name in ("msvc", "clang-cl"):
+base_env = project.Environment(toolchain="c")
+if base_env.toolchain.name in ("msvc", "clang-cl"):
     base_env.cc.flags.append("/W4")
 else:
     base_env.cc.flags.append("-Wall")

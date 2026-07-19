@@ -52,10 +52,10 @@ project(mylib VERSION 1.2.3 LANGUAGES C CXX)
 ### Pcons
 
 ```python
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project
 
 project = Project("mylib", build_dir="build")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 ```
 
 Version handling is plain Python — read it from a file, set it as a variable, or hardcode it:

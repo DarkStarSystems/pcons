@@ -23,11 +23,10 @@ from pcons import (
     MetadataGenerator,
     Project,
     add_subdirectory,
-    find_c_toolchain,
 )
 
 project = Project("nested_root", root_dir=Path(__file__).parent)
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 root_app = project.Program("root_app", env, sources=["src/root.c"])
 

@@ -78,13 +78,13 @@ int main() {
 
 ```python
 #!/usr/bin/env python3
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # Create project with build directory
 project = Project("hello", build_dir="build")
 
 # Create an environment with the system default C/C++ toolchain
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # Create a program target
 hello = project.Program("hello", env)
@@ -138,7 +138,15 @@ Pcons ships with built-in support for several languages and toolchains. The core
 
 ### Registered Toolchains
 
-The following toolchains are auto-detected. Use `find_c_toolchain()` for C/C++, or the specialized finders listed below.
+The following toolchains are auto-detected. Select one by name — `toolchain="c"` auto-detects a C/C++ toolchain, a specific name like `"gcc"` requires that toolchain, and a list is a preference order:
+
+```python
+env = project.Environment(toolchain="c")                # auto-detect C/C++
+env = project.Environment(toolchain="msvc")             # require MSVC
+env = project.Environment(toolchain=["gcc", "llvm"])    # first available wins
+```
+
+IDE autocompletion for these names comes from the generated `KnownToolchain` type; any registered name (including user-registered toolchains) also works. For programmatic control, the underlying finder functions like `find_c_toolchain(prefer=[...])` remain available and return `Toolchain` objects.
 
 {{ toolchain_table }}
 
@@ -147,35 +155,23 @@ The following toolchains are auto-detected. Use `find_c_toolchain()` for C/C++, 
 - **Windows**: clang-cl → msvc → llvm → gcc
 - **Linux / macOS**: llvm → gcc
 
-```python
-from pcons import find_c_toolchain
-
-toolchain = find_c_toolchain()                       # auto-detect
-toolchain = find_c_toolchain(prefer=["gcc", "llvm"]) # prefer GCC
-env = project.Environment(toolchain=toolchain)
-```
-
-**Fortran** (`gfortran`) is available via `find_fortran_toolchain()`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
+**Fortran** (`gfortran`) is available as `toolchain="fortran"`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
 
 ```python
-from pcons import find_fortran_toolchain
-
-env = project.Environment(toolchain=find_fortran_toolchain())
+env = project.Environment(toolchain="fortran")
 project.Program("hello", env, sources=["src/main.f90", "src/greetings.f90"])
 ```
 
 **Mixed C++/Fortran** builds use `env.add_toolchain()`. Runtime libraries are injected automatically in both directions:
 
 ```python
-from pcons import find_c_toolchain, find_fortran_toolchain
-
 # Fortran primary: gfortran links, -lc++ / -lstdc++ injected for C++ objects
-env = project.Environment(toolchain=find_fortran_toolchain())
-env.add_toolchain(find_c_toolchain())
+env = project.Environment(toolchain="fortran")
+env.add_toolchain("c")
 
 # C++ primary: g++/clang++ links, -lgfortran injected for Fortran objects
-env = project.Environment(toolchain=find_c_toolchain())
-env.add_toolchain(find_fortran_toolchain())
+env = project.Environment(toolchain="c++")
+env.add_toolchain("fortran")
 
 project.Program("hello", env, sources=["src/main.f90", "src/helper.cpp"])
 ```
@@ -183,10 +179,8 @@ project.Program("hello", env, sources=["src/main.f90", "src/helper.cpp"])
 **CUDA** is designed to work alongside a C/C++ toolchain — CUDA handles `.cu` compilation while the host toolchain handles linking:
 
 ```python
-from pcons import find_c_toolchain, find_cuda_toolchain
-
-env = project.Environment(toolchain=find_c_toolchain())
-env.add_toolchain(find_cuda_toolchain())
+env = project.Environment(toolchain="c++")
+env.add_toolchain("cuda")
 ```
 
 **Emscripten** requires the Emscripten SDK. Set the `EMSDK` environment variable, or install to `~/emsdk` or `/opt/emsdk`.
@@ -288,8 +282,8 @@ The project provides factory methods for creating targets:
 An `Environment` holds configuration for building: compiler settings, flags, include directories, and more. You can have multiple environments (e.g., for different platforms or variants).
 
 ```python
-# Create environment with toolchain
-env = project.Environment(toolchain=toolchain)
+# Create environment with an auto-detected C/C++ toolchain
+env = project.Environment(toolchain="c")
 
 # Configure compiler flags
 env.cc.flags.extend(["-Wall", "-Wextra"])
@@ -337,15 +331,19 @@ If you accidentally include the build directory name in a relative path (e.g., `
 A `Toolchain` is a coordinated set of tools (compiler, linker, archiver) that work together. Pcons automatically detects available C/C++ toolchains.
 
 ```python
-from pcons import find_c_toolchain
-
-# Auto-detect the best available toolchain
+# Auto-detect the best available C/C++ toolchain by name.
 # Uses platform-appropriate defaults:
 #   Windows: clang-cl, msvc, llvm, gcc
 #   Unix/Mac: llvm, gcc
-toolchain = find_c_toolchain()
+env = project.Environment(toolchain="c")
 
-# Or specify a preference order
+# Or give a preference order, or require a specific toolchain
+env = project.Environment(toolchain=["gcc", "llvm"])
+env = project.Environment(toolchain="msvc")
+
+# For programmatic selection, finder functions return Toolchain objects
+from pcons import find_c_toolchain
+
 toolchain = find_c_toolchain(prefer=["gcc", "llvm"])
 ```
 
@@ -507,12 +505,11 @@ int main(void) {
 **pcons-build.py:**
 ```python
 #!/usr/bin/env python3
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # Setup
-toolchain = find_c_toolchain()
 project = Project("hello", build_dir="build")
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Create program
 hello = project.Program("hello", env)
@@ -585,16 +582,15 @@ int main(void) {
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # Directories
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
 
 # Setup
-toolchain = find_c_toolchain()
 project = Project("calculator", build_dir="build")
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Create program with multiple sources
 calculator = project.Program("calculator", env)
@@ -629,14 +625,13 @@ project/
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
 
-toolchain = find_c_toolchain()
 project = Project("myproject", build_dir="build")
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Create static library
 libmath = project.StaticLibrary("math", env)
@@ -673,14 +668,13 @@ Create a shared library (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows).
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
 
-toolchain = find_c_toolchain()
 project = Project("myproject", build_dir="build")
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Create shared library
 libplugin = project.SharedLibrary("plugin", env)
@@ -731,16 +725,15 @@ project/
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project_dir = Path(__file__).parent
 src_dir = project_dir / "src"
 include_dir = project_dir / "include"
 build_dir = project_dir / "build"
 
-toolchain = find_c_toolchain()
 project = Project("simulator", root_dir=project_dir, build_dir=build_dir)
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Library: libmath - low-level math utilities
 libmath = project.StaticLibrary("math", env)
@@ -770,16 +763,15 @@ Use `set_variant()` to switch between debug and release builds.
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, get_variant
+from pcons import Project, get_variant
 
 # Get variant from command line: pcons --variant=debug
 # Defaults to "release"
 variant = get_variant("release")
 build_dir = Path("build") / variant
 
-toolchain = find_c_toolchain()
 project = Project("myapp", build_dir=build_dir)
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Apply variant settings
 # debug: -O0 -g
@@ -857,11 +849,10 @@ env.apply_preset("lto")
 The simplest way to use an external package is `project.find_package()`. It searches for the package using available finders (pkg-config, system paths) and returns an `ImportedTarget` that you can link against or apply to an environment.
 
 ```python
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
-toolchain = find_c_toolchain()
 project = Project("myapp", build_dir="build")
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Find packages (raises PackageNotFoundError if not found)
 zlib = project.find_package("zlib")
@@ -963,7 +954,7 @@ PkgConfigDeps
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, get_variant
+from pcons import Project, get_variant
 from pcons.configure.config import Configure
 from pcons.packages.finders import ConanFinder
 
@@ -1092,11 +1083,11 @@ we cover them separately.
 The minimum needed in your `pcons-build.py`:
 
 ```python
-from pcons import Project, find_c_toolchain
+from pcons import Project
 from pcons.integrations.rez import is_in_rez_resolve, rez_environment
 
 project = Project("my_app")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 if is_in_rez_resolve():
     rez_environment(env)   # auto-applies every resolved rez package
@@ -1766,7 +1757,7 @@ uses C++ modules — e.g. fmtlib's `src/fmt.cc` (primary interface in
 explicitly:
 
 ```python
-env = project.Environment(toolchain=find_c_toolchain(prefer=["msvc"]))
+env = project.Environment(toolchain="msvc")
 env.cxx.modules = True
 env.cxx.flags.extend(["/std:c++latest", "/EHsc"])
 project.Program("hello", env, sources=["main.cpp"])  # main.cpp does `import std;`
@@ -1842,9 +1833,8 @@ Handle platform differences in your build script:
 
 ```python
 import sys
-from pcons import find_c_toolchain
 
-toolchain = find_c_toolchain()
+env = project.Environment(toolchain="c")
 
 # Add platform-specific flags
 if sys.platform == "darwin":
@@ -1871,14 +1861,14 @@ The `pcons.contrib.windows.msvcup` module wraps the [msvcup](https://github.com/
 
 ```python
 import sys
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 if sys.platform == "win32":
     from pcons.contrib.windows.msvcup import ensure_msvc
     ensure_msvc("14.44.17.14", "10.0.22621.7")
 
 project = Project("hello", build_dir="build")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 project.Program("hello", env, sources=["hello.c"])
 ```
 
@@ -2048,7 +2038,7 @@ Create variant environments by cloning:
 
 ```python
 # Base environment
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Clone for profiling - gets a COPY of all settings
 profile_env = env.clone()
@@ -2641,10 +2631,10 @@ Sometimes you need to embed a file path inside a linker flag, such as `-Wl,-forc
 Use `PathToken` to embed paths in flags:
 
 ```python
-from pcons import PathToken, Project, find_c_toolchain
+from pcons import PathToken, Project
 
 project = Project("myapp")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 lib = project.StaticLibrary("mylib", env)
 lib.add_sources(["src/mylib.c"])
@@ -2680,18 +2670,17 @@ Pcons supports building for multiple CPU architectures, which is useful for:
 Use `env.set_target_arch()` to configure an environment for a specific architecture:
 
 ```python
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("mylib")
-toolchain = find_c_toolchain()
 
 # Create environment for arm64
-env_arm64 = project.Environment(toolchain=toolchain)
+env_arm64 = project.Environment(toolchain="c")
 env_arm64.set_target_arch("arm64")
 env_arm64.build_dir = Path("build/arm64")
 
 # Create environment for x86_64
-env_x86_64 = project.Environment(toolchain=toolchain)
+env_x86_64 = project.Environment(toolchain="c")
 env_x86_64.set_target_arch("x86_64")
 env_x86_64.build_dir = Path("build/x86_64")
 ```
@@ -2724,21 +2713,20 @@ To create a universal binary that runs on both Intel and Apple Silicon Macs, bui
 
 ```python
 from pathlib import Path
-from pcons import Project, find_c_toolchain
+from pcons import Project
 from pcons.util.macos import create_universal_binary
 
 project = Project("mylib")
-toolchain = find_c_toolchain()
 
 # Build for arm64
-env_arm64 = project.Environment(toolchain=toolchain)
+env_arm64 = project.Environment(toolchain="c")
 env_arm64.set_target_arch("arm64")
 env_arm64.set_variant("release")
 lib_arm64 = project.StaticLibrary("mylib", env_arm64, sources=["lib.c"])
 # Note: output goes to build/libmylib.a by default
 
 # Build for x86_64 (use different build dir to avoid conflicts)
-env_x86_64 = project.Environment(toolchain=toolchain)
+env_x86_64 = project.Environment(toolchain="c")
 env_x86_64.set_target_arch("x86_64")
 env_x86_64.set_variant("release")
 env_x86_64.build_dir = Path("build/x86_64")
@@ -2796,10 +2784,7 @@ env.apply_cross_preset(linux_cross(
 For a fully self-contained WASI build, prefer the dedicated WASI toolchain:
 
 ```python
-from pcons import find_wasi_toolchain
-
-toolchain = find_wasi_toolchain()
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="wasi")
 project.Program("hello", env, sources=["src/hello.c"])
 ```
 
@@ -2877,19 +2862,15 @@ Pcons supports combining multiple toolchains in a single environment. This is us
 Use `env.add_toolchain()` to add extra toolchains to an environment:
 
 ```python
-from pcons import Project, find_c_toolchain
-from pcons.toolchains import find_cuda_toolchain
+from pcons import Project
 
 project = Project("gpu_app", build_dir="build")
-toolchain = find_c_toolchain()
 
 # Create environment with C/C++ toolchain
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c++")
 
 # Add CUDA toolchain for .cu files
-cuda_toolchain = find_cuda_toolchain()
-if cuda_toolchain:
-    env.add_toolchain(cuda_toolchain)
+env.add_toolchain("cuda")
 
 # Now this target can have both .cpp and .cu sources
 app = project.Program("gpu_app", env)
@@ -2914,8 +2895,8 @@ The primary toolchain (passed to `project.Environment()`) has precedence. If mul
 When you call `env.set_variant()`, the variant is applied to all toolchains:
 
 ```python
-env = project.Environment(toolchain=c_toolchain)
-env.add_toolchain(cuda_toolchain)
+env = project.Environment(toolchain="c++")
+env.add_toolchain("cuda")
 
 # This applies "debug" settings to both C++ AND CUDA compilers
 env.set_variant("debug")
@@ -2925,18 +2906,12 @@ env.set_variant("debug")
 
 #### Available Toolchain Finders
 
+Toolchain name strings resolve through finder functions, which are also available directly for programmatic use:
+
 | Function | Description |
 |----------|-------------|
 | `find_c_toolchain()` | Find C/C++ toolchain (LLVM, GCC, MSVC, etc.) |
 | `find_cuda_toolchain()` | Find CUDA toolchain (returns `None` if nvcc not found) |
-
-```python
-from pcons.toolchains import find_c_toolchain, find_cuda_toolchain
-
-# Both return None if not available
-c_toolchain = find_c_toolchain()
-cuda_toolchain = find_cuda_toolchain()
-```
 
 ---
 
@@ -2957,7 +2932,7 @@ from pcons.configure.config import Configure
 from pcons.configure.checks import ToolChecks
 
 config = Configure(build_dir=Path("build"))
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Create a checker for the C compiler
 checks = ToolChecks(config, env, "cc")
@@ -3358,12 +3333,11 @@ Then use it in your build script:
 
 ```python
 # pcons-build.py
-from pcons import Project, find_c_toolchain
+from pcons import Project
 from pcons.modules import ofx  # Auto-loaded!
 
 project = Project("myplugin")
-toolchain = find_c_toolchain()
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 ofx.setup_env(env)
 plugin = ofx.create_bundle(

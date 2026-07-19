@@ -19,25 +19,20 @@ The user code itself is portable: a single-module library that exposes
 """
 
 from pcons import Project, get_var
-from pcons.toolchains import find_c_toolchain
 
 project = Project("cxx_import_std")
 
 # Optional override: pcons build TOOLCHAIN=gcc|llvm|msvc
 toolchain_override = get_var("TOOLCHAIN", None)
-if toolchain_override:
-    toolchain = find_c_toolchain(prefer=[toolchain_override])
-else:
-    # Prefer MSVC on Windows (its `import std;` lives in std.ixx and works
-    # out of the box). Elsewhere, prefer LLVM/Clang with libc++, then GCC.
-    toolchain = find_c_toolchain(prefer=["msvc", "llvm", "gcc"])
-env = project.Environment(toolchain=toolchain)
+# Prefer MSVC on Windows (its `import std;` lives in std.ixx and works
+# out of the box). Elsewhere, prefer LLVM/Clang with libc++, then GCC.
+env = project.Environment(toolchain=toolchain_override or ["msvc", "llvm", "gcc"])
 
 # import std needs C++23 (MSVC has no /std:c++23, so it maps to /std:c++latest).
 env.cxx.set_standard("c++23")
-if toolchain.name == "msvc":
+if env.toolchain.name == "msvc":
     env.cxx.flags.extend(["/EHsc", "/permissive-"])
-elif toolchain.name == "llvm":
+elif env.toolchain.name == "llvm":
     env.cxx.flags.append("-stdlib=libc++")  # libc++ ships the std module
     env.link.libs.append("c++")
 

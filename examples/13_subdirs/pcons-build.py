@@ -29,13 +29,13 @@ Usage:
 
 from pathlib import Path
 
-from pcons import Project, add_subdirectory, find_c_toolchain
+from pcons import Project, add_subdirectory
 
 this_dir = Path(__file__).parent
 
 # Create the main project
 project = Project("subdirs_example")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # add_subdirectory() returns a SimpleNamespace of all module-level names
 # defined in the subdir's pcons-build.py.  libfoo/pcons-build.py assigns

@@ -25,20 +25,15 @@ Status by toolchain:
   - MSVC:  supported (per-key dirs + /ifcOutput / /ifcSearchDir).
 """
 
-from pcons import Project, find_c_toolchain, get_var
+from pcons import Project, get_var
 
 project = Project("bmi-compat")
 
 toolchain_override = get_var("TOOLCHAIN")
-if toolchain_override:
-    toolchain = find_c_toolchain(prefer=[toolchain_override])
-else:
-    toolchain = find_c_toolchain(prefer=["gcc", "llvm", "msvc"])
-
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=toolchain_override or ["gcc", "llvm", "msvc"])
 
 # Pick a shared dialect and a BMI-incompatible "breaker" dialect per toolchain.
-if toolchain.name == "msvc":
+if env.toolchain.name == "msvc":
     env.cxx.flags.append("/EHsc")
     shared_dialect = ["/std:c++20"]
     breaker_dialect = ["/std:c++latest"]

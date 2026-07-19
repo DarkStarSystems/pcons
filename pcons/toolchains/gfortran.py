@@ -381,3 +381,10 @@ def find_fortran_toolchain(
         f"No Fortran toolchain found. Tried: {', '.join(tried)}. "
         "Make sure gfortran is installed and in PATH."
     )
+
+
+toolchain_registry.register_finder(
+    ["fortran"],
+    find_fortran_toolchain,
+    description="Auto-detect a Fortran toolchain",
+)

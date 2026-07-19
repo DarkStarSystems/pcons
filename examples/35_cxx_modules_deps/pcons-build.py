@@ -3,22 +3,20 @@
 """Build script for a C++20 modules example.
 
 Demonstrates:
-- Using find_c_toolchain() to select LLVM/Clang
+- Selecting a toolchain via the TOOLCHAIN build variable, else auto-detect
 - C++20 named module interface units (.cppm)
 - Ninja dyndep for correct module dependency ordering
 """
 
 from pcons import Project, get_var
-from pcons.toolchains import find_c_toolchain
 
-toolchain = find_c_toolchain(prefer=[get_var("TOOLCHAIN", None) or "gcc"])
 project = Project("cxx_modules")
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=get_var("TOOLCHAIN", "c"))
 
 env.cxx.set_standard("c++20")
-if toolchain.name == "msvc":
+if env.toolchain.name == "msvc":
     env.cxx.flags.extend(["/EHsc", "/permissive-"])
-elif toolchain.name == "llvm":
+elif env.toolchain.name == "llvm":
     env.cxx.flags.append("-stdlib=libc++")
     env.link.libs.append("c++")
 

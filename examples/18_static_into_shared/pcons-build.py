@@ -12,14 +12,14 @@ Expected: core.h is found via public include propagation,
 and core_value() from static lib is available in shared lib.
 """
 
-from pcons import Project, find_c_toolchain, install_dir
+from pcons import Project, install_dir
 
 # Create project
 project = Project("static_into_shared")
 
 # Directories
 src_dir = project.root_dir / "src"
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # 1. Create static library from core.c with PUBLIC include directory
 #    This should propagate to any target that links core_lib

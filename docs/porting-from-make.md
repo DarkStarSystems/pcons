@@ -14,7 +14,7 @@ This guide maps common Makefile patterns to their pcons equivalents. It's design
 
 | Make | pcons |
 |------|-------|
-| `CC = gcc` | `env = project.Environment(toolchain=find_c_toolchain())` |
+| `CC = gcc` | `env = project.Environment(toolchain="c")` |
 | `TARGET = myapp` | `app = project.Program("myapp", env, sources=[...])` |
 | `$(TARGET): $(OBJS)` | (automatic — pcons compiles and links from sources) |
 | `%.o: %.c` | (automatic — pcons generates compile rules) |
@@ -64,10 +64,10 @@ clean:
 ### Pcons
 
 ```python
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("myapp", build_dir="build")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 env.cc.flags.extend(["-Wall", "-O2"])
 env.link.libs.append("m")
@@ -566,10 +566,10 @@ app: main.o ../lib/libfoo.a
 
 ```python
 # pcons-build.py
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("myproject", build_dir="build")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # Library
 lib = project.StaticLibrary("foo", env, sources=["lib/lib.c", "lib/util.c"])

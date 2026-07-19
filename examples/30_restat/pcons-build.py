@@ -14,13 +14,13 @@ potentially expensive rebuilds in large projects.
 
 import sys
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("restat_example")
 
 src_dir = project.root_dir / "src"
 build_dir = project.build_dir
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # Generate version.h from version.txt, with restat so unchanged
 # output doesn't trigger downstream rebuilds.

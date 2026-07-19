@@ -170,6 +170,14 @@ class AuxiliaryInputHandler:
 # =============================================================================
 
 
+@dataclass
+class _FinderEntry:
+    """A registered auto-detection finder (see ToolchainRegistry.register_finder)."""
+
+    finder: Callable[[], BaseToolchain | None]
+    description: str = ""
+
+
 class ToolchainRegistry:
     """Registry for toolchains that support auto-discovery.
 
@@ -190,6 +198,104 @@ class ToolchainRegistry:
 
     def __init__(self) -> None:
         self._toolchains: dict[str, ToolchainEntry] = {}
+        self._finders: dict[str, _FinderEntry] = {}
+
+    def register_finder(
+        self,
+        names: Sequence[str],
+        finder: Callable[[], BaseToolchain | None],
+        *,
+        description: str = "",
+    ) -> None:
+        """Register an auto-detection finder under one or more names.
+
+        Finders are curated entry points like ``find_c_toolchain`` that pick
+        the best available toolchain for a language or platform. ``resolve()``
+        checks finder names before toolchain aliases, so a finder can shadow
+        an alias of the same name with richer detection and error reporting.
+
+        Args:
+            names: Names the finder responds to (e.g., ["c", "c++", "cpp"]).
+            finder: Callable returning a configured toolchain, or None if
+                nothing suitable is available (resolve() turns that into an
+                error). May also raise with a descriptive message.
+            description: Short human-readable description for listings.
+        """
+        entry = _FinderEntry(finder=finder, description=description)
+        for name in names:
+            self._finders[name.lower()] = entry
+
+    def known_names(self) -> dict[str, str]:
+        """All resolvable names (finders and aliases) with descriptions.
+
+        Used for the generated ``KnownToolchain`` Literal and for error
+        messages. Finder names come first so their descriptions win when a
+        name is both a finder and an alias.
+        """
+        names: dict[str, str] = {}
+        for alias, tc_entry in self._toolchains.items():
+            names[alias] = tc_entry.description
+        for name, f_entry in self._finders.items():
+            names[name] = f_entry.description
+        return dict(sorted(names.items()))
+
+    def resolve(self, spec: str | Sequence[str]) -> BaseToolchain:
+        """Resolve a toolchain name (or preference list) to a toolchain.
+
+        A single string is either a finder name ("c", "fortran", ...) for
+        auto-detection, or a specific toolchain alias ("gcc", "msvc", ...)
+        which must be available. A sequence is a preference list: the first
+        name that resolves to an available toolchain wins.
+
+        Args:
+            spec: Toolchain name, or a preference-ordered list of names.
+
+        Returns:
+            A configured toolchain ready for use.
+
+        Raises:
+            ValueError: If a name is unknown (lists all known names).
+            RuntimeError: If the named toolchain(s) are not available.
+        """
+        if isinstance(spec, str):
+            return self._resolve_one(spec)
+
+        errors: list[str] = []
+        for name in spec:
+            try:
+                return self._resolve_one(name)
+            except (RuntimeError, ValueError) as e:
+                errors.append(f"{name}: {e}")
+        raise RuntimeError(
+            "No toolchain available from preference list "
+            f"{list(spec)}:\n  " + "\n  ".join(errors)
+        )
+
+    def _resolve_one(self, name: str) -> BaseToolchain:
+        key = name.lower()
+
+        finder = self._finders.get(key)
+        if finder is not None:
+            toolchain = finder.finder()
+            if toolchain is None:
+                raise RuntimeError(f"No '{name}' toolchain found on this system")
+            return toolchain
+
+        entry = self._toolchains.get(key)
+        if entry is not None:
+            if entry.is_available is not None:
+                available = entry.is_available()
+            else:
+                available = shutil.which(entry.check_command) is not None
+            if not available:
+                raise RuntimeError(
+                    f"Toolchain '{name}' is not available "
+                    f"('{entry.check_command}' not found in PATH)"
+                )
+            return entry.create_toolchain()
+
+        known = ", ".join(sorted({*self._finders, *self._toolchains}))
+        raise ValueError(f"Unknown toolchain '{name}'. Known names: {known}")
 
     def register(
         self,

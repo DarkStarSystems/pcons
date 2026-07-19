@@ -7,7 +7,7 @@ information that gets embedded into the executable.
 Windows-only: requires MSVC toolchain.
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # Create project
 project = Project("resource_example")
@@ -16,8 +16,7 @@ project = Project("resource_example")
 src_dir = project.root_dir / "src"
 
 # Find C toolchain - prefer MSVC or clang-cl on Windows for resource file support
-toolchain = find_c_toolchain(prefer=["msvc", "clang-cl", "gcc", "llvm"])
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=["msvc", "clang-cl", "gcc", "llvm"])
 
 # Create program with C source and Windows resource file
 app = project.Program("myapp", env)

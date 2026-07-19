@@ -9,7 +9,7 @@ This example shows how to create:
 The installer targets are created based on the current platform.
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 from pcons.contrib import platform
 
 # =============================================================================
@@ -21,7 +21,7 @@ project = Project("installer_example")
 
 # Directories
 src_dir = project.root_dir / "src"
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # Build the application
 app = project.Program("hello", env)

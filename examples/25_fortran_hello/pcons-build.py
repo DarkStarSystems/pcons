@@ -3,13 +3,13 @@
 """Build script for a simple Fortran program.
 
 This example demonstrates:
-- Using find_fortran_toolchain() to automatically select gfortran
+- Selecting a Fortran toolchain by name: toolchain="fortran"
 - Creating a Program target with a Fortran source file
 """
 
-from pcons import Project, find_fortran_toolchain
+from pcons import Project
 
 project = Project("fortran_hello")
-env = project.Environment(toolchain=find_fortran_toolchain())
+env = project.Environment(toolchain="fortran")
 
 project.Program("hello", env, sources=["src/hello.f90"])

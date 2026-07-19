@@ -52,10 +52,10 @@ There's working code on a branch for linking Rust crates into C/C++ projects —
 
 ```python
 # pcons-build.py
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("myapp")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 env.cc.flags.extend(["-Wall"])
 
 # Build a static library

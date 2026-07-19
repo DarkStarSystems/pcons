@@ -2,18 +2,16 @@
 # SPDX-License-Identifier: MIT
 """Build script demonstrating multi-level subdirectory builds."""
 
-from pcons import Project, add_subdirectory, find_c_toolchain, get_var
+from pcons import Project, add_subdirectory, get_var
 
 # Create the main project
 project = Project("subdirs_example")
-env = project.Environment(
-    toolchain=(toolchain := find_c_toolchain(prefer=[get_var("TOOLCHAIN", "gcc")]))
-)
+env = project.Environment(toolchain=get_var("TOOLCHAIN", "c"))
 
 env.cxx.set_standard("c++20")
-if toolchain.name == "msvc":
+if env.toolchain.name == "msvc":
     env.cxx.flags.extend(["/EHsc", "/permissive-"])
-elif toolchain.name == "llvm":
+elif env.toolchain.name == "llvm":
     env.cxx.flags.append("-stdlib=libc++")
     env.link.libs.append("c++")
 

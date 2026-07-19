@@ -21,10 +21,10 @@ Run::
 
 import os
 
-from pcons import Project, find_c_toolchain, set_test_property
+from pcons import Project, set_test_property
 
 project = Project("unit_tests", build_dir=os.environ.get("PCONS_BUILD_DIR", "build"))
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 test_prog = project.Program(
     "test_math",

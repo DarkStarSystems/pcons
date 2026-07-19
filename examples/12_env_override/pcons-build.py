@@ -6,20 +6,19 @@ This example demonstrates using env.override() to compile specific
 source files with different flags - like extra defines or includes.
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
-toolchain = find_c_toolchain()
 project = Project("override_example")
 
 src_dir = project.root_dir / "src"
 include_dir = project.root_dir / "include"
 build_dir = project.build_dir
 
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Get correct suffixes for this toolchain (.o/.obj for objects, .exe on Windows)
-obj_suffix = toolchain.get_object_suffix()
-prog_name = toolchain.get_program_name("demo")
+obj_suffix = env.toolchain.get_object_suffix()
+prog_name = env.toolchain.get_program_name("demo")
 
 # Compile main.c with standard settings
 # Object() returns a list, use [0] to get the node

@@ -15,9 +15,7 @@ if not project.is_top_level:
     # take parent environment
     env = project.parent.default_environment
 else:
-    from pcons import find_c_toolchain
-
-    env = project.Environment(toolchain=find_c_toolchain())
+    env = project.Environment(toolchain="c")
 
 # Assigning to a module-level name exports it: the parent can access this
 # target as `ns.libfoo` after `ns = add_subdirectory("libfoo")`.

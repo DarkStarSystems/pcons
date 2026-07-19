@@ -364,3 +364,10 @@ toolchain_registry.register(
     description="Emscripten C/C++ to WebAssembly + JS (browser/Node.js)",
     finder="find_emscripten_toolchain()",
 )
+
+
+toolchain_registry.register_finder(
+    ["emscripten"],
+    find_emscripten_toolchain,
+    description="Auto-detect the Emscripten WebAssembly toolchain",
+)

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Toolchains can now be selected by name**: `project.Environment(toolchain="c")` auto-detects a C/C++ toolchain (no `find_c_toolchain` import needed), a specific name like `"gcc"` or `"msvc"` requires that toolchain, and a list like `["msvc", "clang-cl"]` is a preference order. Works for all registered toolchains (`"fortran"`, `"cuda"`, `"wasi"`, `"emscripten"`, `"cython"`, ...) and for `env.add_toolchain("cuda")`. Unknown names fail fast listing every registered name. IDE autocompletion comes from a generated `KnownToolchain` Literal type scraped from the toolchain registry; the finder functions remain available for programmatic use.
+- **`env.toolchain`**: public accessor for the environment's primary toolchain (e.g. `env.toolchain.name`), complementing the existing `env.toolchains` list.
+
 ### Changed
 
 - **`pcons init` now generates a working build script**: it adopts any existing C/C++ sources (top-level and under `src/`, plus an `include/` directory if present) into a real program target, and in an empty directory scaffolds a hello-world starter (C++ by default; `--lang c` for C) so `pcons init && pcons` builds and runs immediately. The generated script carries PEP 723 inline metadata, so `uv run pcons-build.py` also works with nothing installed but uv.

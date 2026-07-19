@@ -1426,11 +1426,10 @@ pcons/
 
 ### pcons-build.py
 ```python
-from pcons import ImportedTarget, PackageDescription, Project, find_c_toolchain
+from pcons import ImportedTarget, PackageDescription, Project
 
 project = Project('myapp', build_dir='build')
-toolchain = find_c_toolchain()
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain='c')
 env.cxx.flags.extend(['-std=c++20', '-Wall'])
 
 # Find dependencies via pkg-config/system search
@@ -1593,10 +1592,10 @@ desc = finder.find("zlib", version=">=1.2")  # returns PackageDescription or Non
 > **Status: Implemented** - `find_package()` returns ImportedTargets; `link_libs` propagates requirements.
 
 ```python
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project('myapp', build_dir='build')
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # find_package returns ImportedTarget — link_private propagates requirements
 zlib = project.find_package('zlib')

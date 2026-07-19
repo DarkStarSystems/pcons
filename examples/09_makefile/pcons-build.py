@@ -6,7 +6,7 @@ This example is similar to 02_hello_c but generates a Makefile
 instead of Ninja build files.
 """
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Generator, Project
 
 # =============================================================================
 # Build Script
@@ -17,7 +17,7 @@ project = Project("hello_makefile")
 
 # Directories
 src_dir = project.root_dir / "src"
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # Create program target using the target-centric API
 hello = project.Program("hello", env)

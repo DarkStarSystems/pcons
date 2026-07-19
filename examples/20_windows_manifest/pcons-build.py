@@ -8,7 +8,7 @@ This example shows how to:
 Windows-only: requires MSVC or clang-cl toolchain.
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # Create project
 project = Project("manifest_example")
@@ -17,15 +17,14 @@ project = Project("manifest_example")
 src_dir = project.root_dir / "src"
 
 # Find C toolchain - prefer MSVC or clang-cl on Windows for manifest support
-toolchain = find_c_toolchain(prefer=["msvc", "clang-cl", "gcc", "llvm"])
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=["msvc", "clang-cl", "gcc", "llvm"])
 
 # Example 1: Create a DLL that will be part of an assembly
 mylib = project.SharedLibrary("MyLib", env)
 mylib.add_sources([src_dir / "mylib.c"])
 
 # Check if we're on Windows with manifest support
-is_windows_toolchain = toolchain.name in ("msvc", "clang-cl")
+is_windows_toolchain = env.toolchain.name in ("msvc", "clang-cl")
 
 if is_windows_toolchain:
     from pcons.contrib.windows import manifest

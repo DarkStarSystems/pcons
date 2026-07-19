@@ -21,7 +21,7 @@ Two tests are declared:
 - `parser.campaign` — fuzzes for a few seconds. Labelled "fuzz" so
   `pcons test -LE fuzz` excludes it from fast inner loops.
 
-libFuzzer is clang-only: this script prefers the LLVM toolchain and
+libFuzzer is clang-only: this script requires the LLVM toolchain and
 raises if clang isn't found. The flags are written out inline rather
 than hidden behind a helper, so it's obvious what the binary is being
 built with.
@@ -32,18 +32,12 @@ import platform
 import shutil
 from pathlib import Path
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("fuzzing", build_dir=os.environ.get("PCONS_BUILD_DIR", "build"))
 
-toolchain = find_c_toolchain(prefer=["llvm"])
-if toolchain.name != "llvm":
-    raise RuntimeError(
-        f"libFuzzer requires the LLVM/clang toolchain; got {toolchain.name!r}. "
-        "Install clang or set CC=clang and re-run."
-    )
-
-env = project.Environment(toolchain=toolchain)
+# libFuzzer is clang-only, so require the LLVM toolchain by name
+env = project.Environment(toolchain="llvm")
 
 # libFuzzer build flags; adjust to suit.
 #

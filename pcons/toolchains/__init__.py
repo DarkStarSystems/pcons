@@ -147,6 +147,13 @@ def find_c_toolchain(
     )
 
 
+toolchain_registry.register_finder(
+    ["c", "c++", "cpp"],
+    find_c_toolchain,
+    description="Auto-detect a C/C++ toolchain",
+)
+
+
 __all__ = [
     # Toolchain finder and registry
     "find_c_toolchain",

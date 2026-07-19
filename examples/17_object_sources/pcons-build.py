@@ -10,14 +10,12 @@ Use case: Compile some sources with different flags (e.g., different
 optimization level, or legacy code with warnings disabled).
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Find a C toolchain
-toolchain = find_c_toolchain()
 
 # Create project
 project = Project("object_sources")
@@ -25,12 +23,12 @@ project = Project("object_sources")
 # Directories
 src_dir = project.root_dir / "src"
 build_dir = project.build_dir
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Compile helper.c separately with special flags
 # For example, compile with -O0 for debugging while rest uses -O2
 # Use the toolchain's object suffix for cross-platform compatibility
-obj_suffix = toolchain.get_object_suffix()  # .o on Unix, .obj on Windows
+obj_suffix = env.toolchain.get_object_suffix()  # .o on Unix, .obj on Windows
 helper_obj = env.cc.Object(
     build_dir / f"helper{obj_suffix}",
     src_dir / "helper.c",

@@ -914,6 +914,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         logger.info("Created %s", scaffolded)
         sources = [scaffolded]
 
+    lang = "c" if all(p.suffix == ".c" for p in sources) else "c++"
     has_include = (root / "include").is_dir()
     target_lines = [
         f"{'app = ' if has_include else ''}project.Program(",
@@ -942,10 +943,10 @@ Run `pcons` to generate build files and build.
 Docs: https://pcons.readthedocs.io
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("{name}")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="{lang}")
 env.apply_preset("warnings")
 
 {target_block}

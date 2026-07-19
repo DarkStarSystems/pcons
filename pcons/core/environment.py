@@ -11,7 +11,7 @@ import logging
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.core.debug import trace, trace_value
 from pcons.core.subst import Namespace, subst, to_shell_command
@@ -20,6 +20,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core._environment_stubs import _EnvironmentStubs
+    from pcons.core._toolchain_names import KnownToolchain
     from pcons.core.explain import Explanation
     from pcons.core.node import FileNode, Node
     from pcons.core.preset import Preset, ToolContribution
@@ -78,16 +79,25 @@ class Environment(_EnvironmentStubs):
         self,
         *,
         name: str | None = None,
-        toolchain: Toolchain | None = None,
+        toolchain: Toolchain | KnownToolchain | str | Sequence[str] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
         """Create an environment.
 
         Args:
             name: Optional name for this environment (used in ninja rule names).
-            toolchain: Optional toolchain to initialize tools from.
+            toolchain: Optional toolchain to initialize tools from. A string
+                is looked up in the toolchain registry: a finder name like
+                "c" auto-detects, a specific alias like "gcc" requires that
+                toolchain. A sequence of names is a preference list.
             defined_at: Source location where this was created.
         """
+        if isinstance(toolchain, str | Sequence):
+            from pcons.tools.toolchain import toolchain_registry
+
+            toolchain = toolchain_registry.resolve(
+                cast("str | Sequence[str]", toolchain)
+            )
         self._tools: dict[str, ToolConfig] = {}
         self._vars: dict[str, Any] = {
             "build_dir": Path("build"),
@@ -106,13 +116,12 @@ class Environment(_EnvironmentStubs):
         self._name = name
         self.defined_at = defined_at or get_caller_location()
 
-        # Validate toolchain type early, before any access
-        if toolchain is not None and (
-            not hasattr(toolchain, "setup") or isinstance(toolchain, str)
-        ):
+        # Validate toolchain type early, before any access (strings and
+        # sequences were already resolved via the registry above)
+        if toolchain is not None and not hasattr(toolchain, "setup"):
             raise TypeError(
-                f"toolchain must be a Toolchain object, got {type(toolchain).__name__}. "
-                f"Use find_c_toolchain() or similar to get a toolchain."
+                f"toolchain must be a Toolchain object or a registered toolchain "
+                f'name like "c" or "gcc", got {type(toolchain).__name__}'
             )
 
         trace("env", "Creating environment: %s", name or "(unnamed)")
@@ -222,7 +231,19 @@ class Environment(_EnvironmentStubs):
         """Check if a tool namespace exists."""
         return name in self._get_tools()
 
-    def add_toolchain(self, toolchain: Toolchain) -> None:
+    @property
+    def toolchain(self) -> Toolchain:
+        """The primary toolchain this environment was created with.
+
+        Raises if the environment has no toolchain — use ``env.toolchains``
+        (an empty list in that case) to probe without raising.
+        """
+        toolchain: Toolchain | None = object.__getattribute__(self, "_toolchain")
+        if toolchain is None:
+            raise AttributeError("this Environment was created without a toolchain")
+        return toolchain
+
+    def add_toolchain(self, toolchain: Toolchain | KnownToolchain | str) -> None:
         """Add an additional toolchain to this environment.
 
         Additional toolchains provide extra source handlers and tools.
@@ -230,12 +251,17 @@ class Environment(_EnvironmentStubs):
         output naming conventions.
 
         Args:
-            toolchain: Toolchain to add.
+            toolchain: Toolchain to add. A string is looked up in the
+                toolchain registry, like the Environment constructor.
 
         Example:
-            env = project.Environment(toolchain=gcc_toolchain)
-            env.add_toolchain(cuda_toolchain)  # Adds CUDA support
+            env = project.Environment(toolchain="c")
+            env.add_toolchain("cuda")  # Adds CUDA support
         """
+        if isinstance(toolchain, str):
+            from pcons.tools.toolchain import toolchain_registry
+
+            toolchain = toolchain_registry.resolve(toolchain)
         additional: list[Toolchain] = object.__getattribute__(
             self, "_additional_toolchains"
         )

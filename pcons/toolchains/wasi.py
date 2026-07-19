@@ -393,3 +393,10 @@ toolchain_registry.register(
     description="WASI SDK for standalone WebAssembly (.wasm)",
     finder="find_wasi_toolchain()",
 )
+
+
+toolchain_registry.register_finder(
+    ["wasi"],
+    find_wasi_toolchain,
+    description="Auto-detect the WASI SDK WebAssembly toolchain",
+)

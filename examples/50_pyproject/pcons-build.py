@@ -10,22 +10,22 @@ from pathlib import Path
 from pcons import ImportedTarget, Project, get_var, get_variant, install_dir
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders import ConanFinder
-from pcons.toolchains import find_c_toolchain
 
 project = Project("hello_python")
 
 toolchain_override = get_var("TOOLCHAIN")
 if toolchain_override:
-    toolchain = find_c_toolchain(prefer=[toolchain_override])
+    toolchain_spec: str | list[str] = toolchain_override
 elif sys.platform == "win32":
     # MSVC-ABI compilers only. The extension links the MSVC-built CPython
     # (pythonNN.lib) and must match its ABI, so a GNU-driver clang (pcons's
     # "llvm" toolchain, which may be on PATH) is not suitable here.
-    toolchain = find_c_toolchain(prefer=["msvc"])
+    toolchain_spec = ["msvc", "clang-cl"]
 else:
-    toolchain = find_c_toolchain(prefer=["gcc", "llvm"])
+    toolchain_spec = ["gcc", "llvm"]
 
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain=toolchain_spec)
+toolchain = env.toolchain
 
 # NOTE: this example builds under PEP 517 isolation, where the build backend is
 # the *released* pcons — so it sticks to released APIs and avoids newer ones

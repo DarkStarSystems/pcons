@@ -16,12 +16,12 @@ plugin — lives under ``rez_packages/hello_app/``.
 
 import sys
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 from pcons.integrations.rez import is_in_rez_resolve, rez_environment
 
 project = Project("rez_demo")
 
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 env.cxx.flags.append("-std=c++17")
 env.link.cmd = env.cxx.cmd
 

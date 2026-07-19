@@ -8,22 +8,19 @@ This example demonstrates the target-centric build API:
 - Automatic resolution of sources to objects
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Find a C toolchain (uses platform-appropriate defaults)
-toolchain = find_c_toolchain()
-
-# Create project with the toolchain
+# Create project
 project = Project("multi_file")
 
 # Directories
 src_dir = project.root_dir / "src"
 include_dir = project.root_dir / "include"
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 # Warning flags, resolved per-toolchain (/W4 on MSVC, -Wall … on GCC/Clang).
 env.apply_preset("warnings")
 

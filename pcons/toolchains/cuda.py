@@ -169,3 +169,10 @@ toolchain_registry.register(
     description="NVIDIA CUDA compiler (nvcc)",
     finder="find_cuda_toolchain()",
 )
+
+
+toolchain_registry.register_finder(
+    ["cuda"],
+    find_cuda_toolchain,
+    description="Auto-detect the NVIDIA CUDA toolchain (nvcc)",
+)

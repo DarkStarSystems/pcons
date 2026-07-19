@@ -6,10 +6,10 @@ This example builds a static library and generates a .pc file so
 downstream CMake or pkg-config consumers can find it.
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("pkg_config_example")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # Build a static library with public headers
 lib = project.StaticLibrary("mylib", env, sources=["src/mylib.c"])

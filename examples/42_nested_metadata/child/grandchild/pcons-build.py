@@ -6,12 +6,12 @@ Creates its own Project and one Program. Reached via add_subdirectory from
 the child project.
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("nested_grandchild")
 
 if project.is_top_level:
-    env = project.Environment(toolchain=find_c_toolchain())
+    env = project.Environment(toolchain="c")
 else:
     # Reuse the top-level toolchain rather than re-detecting one per level.
     env = Project.top_level().default_environment

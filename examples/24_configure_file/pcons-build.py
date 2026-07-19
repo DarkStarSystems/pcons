@@ -8,10 +8,10 @@ This example demonstrates:
 - Using the generated header in a C program
 """
 
-from pcons import Project, configure_file, find_c_toolchain
+from pcons import Project, configure_file
 
 project = Project("configure_file_example")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # Generate config.h from template at configure time
 configure_file(

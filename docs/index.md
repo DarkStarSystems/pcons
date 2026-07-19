@@ -19,10 +19,10 @@ int main() { printf("Hello, world!\n"); return 0; }
 **2. Create `pcons-build.py`:**
 
 ```python
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 project = Project("hello", build_dir="build")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 hello = project.Program("hello", env, sources=["hello.c"])
 ```

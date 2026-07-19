@@ -17,14 +17,12 @@ This is important for projects on systems where paths commonly
 contain spaces (Windows, macOS with iCloud, etc.).
 """
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 
 # =============================================================================
 # Build Script
 # =============================================================================
 
-# Find a C toolchain
-toolchain = find_c_toolchain()
 
 # Create project
 project = Project("paths_with_spaces")
@@ -32,7 +30,7 @@ project = Project("paths_with_spaces")
 # Directories - note the spaces in names!
 src_dir = project.root_dir / "src with spaces"
 include_dir = project.root_dir / "My Headers"
-env = project.Environment(toolchain=toolchain)
+env = project.Environment(toolchain="c")
 
 # Create program target
 # - Source file has spaces in both directory and filename
@@ -49,7 +47,7 @@ program.public.include_dirs.append(include_dir)
 program.public.defines.append('GREETING_MESSAGE="Hello from pcons!"')
 
 # Add warning flags
-if toolchain.name in ("msvc", "clang-cl"):
+if env.toolchain.name in ("msvc", "clang-cl"):
     program.private.compile_flags.extend(["/W4"])
 else:
     program.private.compile_flags.extend(["-Wall", "-Wextra"])

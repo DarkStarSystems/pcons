@@ -18,10 +18,10 @@ linker behavior.
 
 import sys
 
-from pcons import PathToken, Project, find_c_toolchain
+from pcons import PathToken, Project
 
 project = Project("path_in_flags")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 src_dir = project.root_dir / "src"
 

@@ -15,7 +15,7 @@ file with version information.
 
 from pathlib import Path
 
-from pcons import Project, find_c_toolchain
+from pcons import Project
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode
 from pcons.core.target import Target
@@ -129,7 +129,7 @@ class GenerateVersionBuilder:
 project = Project("custom_builder_example")
 build_dir = project.build_dir
 
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c")
 
 # Use our custom builder to generate a version header
 # This works exactly like built-in builders!
