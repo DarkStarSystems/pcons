@@ -1214,8 +1214,8 @@ def create_full_parser() -> argparse.ArgumentParser:
     init_parser.add_argument(
         "--lang",
         choices=["c", "cpp"],
-        default="c",
-        help="Language for the starter program when no sources are found (default: c)",
+        default="cpp",
+        help="Language for the starter program when no sources are found (default: cpp)",
     )
     add_common_args(init_parser)
     init_parser.set_defaults(func=cmd_init)

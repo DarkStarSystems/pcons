@@ -496,8 +496,8 @@ class TestCLICommands:
         )
         assert result.returncode == 0
         assert (tmp_path / "pcons-build.py").exists()
-        # Empty dir: a hello-world starter source is created
-        assert (tmp_path / "src" / "main.c").exists()
+        # Empty dir: a hello-world C++ starter source is created
+        assert (tmp_path / "src" / "main.cpp").exists()
 
         # Check content uses the canonical pcons API
         build_content = (tmp_path / "pcons-build.py").read_text()
@@ -506,24 +506,24 @@ class TestCLICommands:
         assert ".generate(" not in build_content
         # Project and program named after the directory
         assert f'Project("{tmp_path.name}")' in build_content
-        assert '"src/main.c",' in build_content
+        assert '"src/main.cpp",' in build_content
         # Should NOT use internal imports or legacy boilerplate
         assert "NinjaGenerator" not in build_content
         assert "Generator()" not in build_content
         assert "from pcons.core" not in build_content
         assert "from pcons.generators" not in build_content
 
-    def test_pcons_init_lang_cpp(self, tmp_path: Path) -> None:
-        """Test pcons init --lang cpp scaffolds a C++ starter."""
+    def test_pcons_init_lang_c(self, tmp_path: Path) -> None:
+        """Test pcons init --lang c scaffolds a C starter."""
         result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init", "--lang", "cpp"],
+            [sys.executable, "-m", "pcons.cli", "init", "--lang", "c"],
             capture_output=True,
             text=True,
             cwd=tmp_path,
         )
         assert result.returncode == 0
-        assert (tmp_path / "src" / "main.cpp").exists()
-        assert '"src/main.cpp",' in (tmp_path / "pcons-build.py").read_text()
+        assert (tmp_path / "src" / "main.c").exists()
+        assert '"src/main.c",' in (tmp_path / "pcons-build.py").read_text()
 
     def test_pcons_init_adopts_existing_sources(self, tmp_path: Path) -> None:
         """Test pcons init generates a target from existing sources."""
