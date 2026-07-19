@@ -30,7 +30,6 @@ project = Project("hello_xcode")
 
 # Directories
 src_dir = project.root_dir / "src"
-build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 # Warning flags, resolved per-toolchain (/W4 on MSVC, -Wall … on GCC/Clang).
 env.apply_preset("warnings")
@@ -38,7 +37,3 @@ env.apply_preset("warnings")
 # Create program target
 hello = project.Program("hello", env)
 hello.add_sources([src_dir / "main.c"])
-
-project.generate()
-
-print(f"Generated {build_dir}")

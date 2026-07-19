@@ -704,7 +704,7 @@ Print statements work during generation — they run at configure/generate time,
 
 5. **Platform detection**: Use `get_platform()` for host platform info (`is_linux`, `is_macos`, `is_windows`, `arch`, `is_64bit`). For cross-compilation, query the toolchain instead.
 
-6. **`project.generate()` shorthand**: Instead of `Generator().generate(project)`, you can call `project.generate()` directly.
+6. **Generation is automatic**: unlike CMake, no explicit generate step is needed in the script — build files are generated when it finishes. Call `project.generate()` explicitly only if you need generation to happen at a specific point.
 
 7. **Environment cloning vs override**: Use `env.clone()` for permanent forks (debug vs release). Use `env.override()` for temporary, scoped changes (per-file flags).
 

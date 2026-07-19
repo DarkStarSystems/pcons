@@ -78,7 +78,7 @@ int main() {
 
 ```python
 #!/usr/bin/env python3
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 # Create project with build directory
 project = Project("hello", build_dir="build")
@@ -92,9 +92,6 @@ hello.add_sources(["hello.cpp"])
 
 # Set this as the default target
 project.Default(hello)
-
-# Resolve dependencies and generate build files
-Generator().generate(project)
 ```
 
 **3. Generate and build**:
@@ -247,20 +244,19 @@ Every pcons build script (`pcons-build.py`) follows three phases:
 2. **Describe** - Create targets and define their sources/dependencies
 3. **Generate** - Resolve dependencies and write build files
 
-Your script must call a generator at the end:
+Your script only describes the build — the resolve and generate steps run automatically when it finishes, whether invoked via the `pcons` CLI or run directly with Python. Ninja is the default generator; select another with `pcons -G make` (or the `PCONS_GENERATOR`/`GENERATOR` environment variables).
+
+For finer control you can run either step explicitly:
 
 ```python
 # ... define targets ...
 
-# OPTIONAL: Resolve all dependencies (computes effective requirements)
-# Generators will resolve the project if it's not already resolved.
+# Resolve all dependencies now (generators do this automatically if needed)
 project.resolve()
 
-# REQUIRED: Generate build files (Ninja is the default generator, but Makefile and Xcode generators are also included)
-Generator().generate(project)
+# Generate build files now, e.g. to run code after generation completes
+project.generate()
 ```
-
-The `pcons` CLI executes your script but does NOT automatically call resolve/generate - your script controls when and how this happens. This gives you flexibility for conditional generation or multiple generators.
 
 ### Project
 
@@ -434,7 +430,6 @@ Behind the scenes, when you call `project.Program()`, pcons uses:
 ### Dependency Graph
 
 Pcons builds a dependency graph of all files and their relationships:
-
 ```
 hello.cpp  →  hello.o  →  hello (program)
              ↑
@@ -512,7 +507,7 @@ int main(void) {
 **pcons-build.py:**
 ```python
 #!/usr/bin/env python3
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 # Setup
 toolchain = find_c_toolchain()
@@ -524,9 +519,7 @@ hello = project.Program("hello", env)
 hello.add_sources(["hello.c"])
 hello.private.compile_flags.extend(["-Wall", "-Wextra"])
 
-# Generate
 project.Default(hello)
-Generator().generate(project)
 ```
 
 **Build and run:**
@@ -592,7 +585,7 @@ int main(void) {
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 # Directories
 src_dir = Path(__file__).parent / "src"
@@ -614,9 +607,7 @@ calculator.add_sources([
 calculator.private.include_dirs.append(include_dir)
 calculator.private.compile_flags.extend(["-Wall", "-Wextra"])
 
-# Generate
 project.Default(calculator)
-Generator().generate(project)
 ```
 
 ### Static Library
@@ -638,7 +629,7 @@ project/
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
@@ -665,7 +656,6 @@ app.add_sources([src_dir / "main.c"])
 app.link_private(libmath)  # Gets libmath's public includes automatically!
 
 project.Default(app)
-Generator().generate(project)
 ```
 
 Key points:
@@ -683,7 +673,7 @@ Create a shared library (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows).
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 src_dir = Path(__file__).parent / "src"
 include_dir = Path(__file__).parent / "include"
@@ -718,7 +708,6 @@ app.add_sources([src_dir / "main.c"])
 app.link_private(libplugin)
 
 project.Default(app, libplugin)
-Generator().generate(project)
 ```
 
 ### Project with Subdirectories
@@ -742,7 +731,7 @@ project/
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 project_dir = Path(__file__).parent
 src_dir = project_dir / "src"
@@ -769,11 +758,8 @@ simulator = project.Program("simulator", env)
 simulator.add_sources([src_dir / "main.c"])
 simulator.link_private(libphysics)  # Gets BOTH physics and math includes!
 
-# Set defaults and generate
+# Set defaults
 project.Default(simulator)
-
-# Generate build files (also auto-generates compile_commands.json)
-Generator().generate(project)
 ```
 
 ### Debug and Release Variants
@@ -784,7 +770,7 @@ Use `set_variant()` to switch between debug and release builds.
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, Generator, get_variant
+from pcons import Project, find_c_toolchain, get_variant
 
 # Get variant from command line: pcons --variant=debug
 # Defaults to "release"
@@ -807,7 +793,6 @@ app = project.Program("myapp", env)
 app.add_sources(["main.c"])
 
 project.Default(app)
-Generator().generate(project)
 
 print(f"Variant: {variant}")
 print(f"Build dir: {build_dir}")
@@ -872,7 +857,7 @@ env.apply_preset("lto")
 The simplest way to use an external package is `project.find_package()`. It searches for the package using available finders (pkg-config, system paths) and returns an `ImportedTarget` that you can link against or apply to an environment.
 
 ```python
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 toolchain = find_c_toolchain()
 project = Project("myapp", build_dir="build")
@@ -978,7 +963,7 @@ PkgConfigDeps
 ```python
 #!/usr/bin/env python3
 from pathlib import Path
-from pcons import Project, find_c_toolchain, Generator, get_variant
+from pcons import Project, find_c_toolchain, get_variant
 from pcons.configure.config import Configure
 from pcons.packages.finders import ConanFinder
 
@@ -1023,7 +1008,6 @@ hello = project.Program("hello_fmt", env)
 hello.add_sources([project_dir / "src" / "main.cpp"])
 
 project.Default(hello)
-Generator().generate(project)
 ```
 
 #### sync_profile() Reference
@@ -1108,7 +1092,7 @@ we cover them separately.
 The minimum needed in your `pcons-build.py`:
 
 ```python
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 from pcons.integrations.rez import is_in_rez_resolve, rez_environment
 
 project = Project("my_app")
@@ -1119,7 +1103,6 @@ if is_in_rez_resolve():
 
 app = project.Program("my_app", env, sources=["src/main.cpp"])
 project.Default(app)
-Generator().generate(project)
 ```
 
 Then run your build inside a rez-env shell that has the deps you need:
@@ -1286,8 +1269,6 @@ install_dir = os.environ.get("PCONS_INSTALL_DIR")
 if install_dir:
     install_target = project.Install(f"{install_dir}/bin", [app])
     project.Alias("install", install_target)   # rez-build invokes "install"
-
-Generator().generate(project)
 ```
 
 ###### Build options exposed to `rez-build`
@@ -1359,7 +1340,6 @@ declares `build_system = "pcons"` and pcons *isn't* installed in
 rez's bundled Python env, rez raises `RezPluginError` during argparse
 setup — *before* its own error formatter sees it — so they get a
 Python traceback ending in:
-
 ```
 rez.exceptions.RezPluginError: Unrecognised build system plugin: 'pcons'
 ```
@@ -1530,7 +1510,6 @@ project.Test("unit", unit_tests, discover="gtest", labels=["unit"])
 ```
 
 Run-time output:
-
 ```
 Test project: myproject (84 tests)
       Start  1: unit.MathSuite.Add
@@ -1892,7 +1871,7 @@ The `pcons.contrib.windows.msvcup` module wraps the [msvcup](https://github.com/
 
 ```python
 import sys
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 if sys.platform == "win32":
     from pcons.contrib.windows.msvcup import ensure_msvc
@@ -1901,7 +1880,6 @@ if sys.platform == "win32":
 project = Project("hello", build_dir="build")
 env = project.Environment(toolchain=find_c_toolchain())
 project.Program("hello", env, sources=["hello.c"])
-Generator().generate(project)
 ```
 
 On the first run, `ensure_msvc()`:
@@ -1918,7 +1896,6 @@ On non-Windows platforms, `ensure_msvc()` is a no-op (returns immediately).
 #### Version Pinning
 
 The MSVC version (e.g., `"14.44.17.14"`) and SDK version (e.g., `"10.0.22621.7"`) are explicit — every developer and CI machine gets the exact same compiler. To find available versions, run:
-
 ```
 msvcup list
 ```
@@ -1945,11 +1922,13 @@ msvcup is particularly useful in CI environments where you want reproducible bui
 
 ### IDE Integration
 
-Build generators (Ninja, Makefile, Xcode) automatically generate `compile_commands.json` alongside build files. A symlink is also created at the project root so tools find it automatically. No extra code is needed — just call `Generator().generate(project)` as usual.
+Build generators (Ninja, Makefile, Xcode) automatically generate `compile_commands.json` alongside build files. A symlink is also created at the project root so tools find it automatically. No extra code is needed.
 
-To disable auto-generation:
+To disable it, generate explicitly:
 
 ```python
+from pcons import Generator
+
 Generator().generate(project, compile_commands=False)
 ```
 
@@ -1963,16 +1942,20 @@ This enables features in:
 
 While Ninja is the default and recommended build executor, pcons also supports generating Makefiles for environments where Ninja isn't available.
 
-#### MakefileGenerator
+#### Makefile generator
 
-Generate a traditional Makefile instead of Ninja build files:
+Generate a traditional Makefile instead of Ninja build files — no script changes needed:
+
+```bash
+pcons -G make          # generates build/Makefile (and builds with make)
+```
+
+Or pin it in the build script, e.g. for a project that always uses make:
 
 ```python
-from pcons.generators.makefile import MakefileGenerator
+from pcons import Generator
 
-# Generate Makefile
-MakefileGenerator().generate(project)
-# Creates build/Makefile
+Generator("make").generate(project)   # creates build/Makefile
 ```
 
 Then build with:
@@ -1981,7 +1964,7 @@ Then build with:
 make -C build
 ```
 
-The MakefileGenerator supports the same project structure as NinjaGenerator, so you can switch between them without changing your build script.
+The Makefile generator supports the same project structure as the Ninja generator, so you can switch between them without changing your build script.
 
 ### Dependency Visualization
 
@@ -2697,7 +2680,7 @@ Pcons supports building for multiple CPU architectures, which is useful for:
 Use `env.set_target_arch()` to configure an environment for a specific architecture:
 
 ```python
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 project = Project("mylib")
 toolchain = find_c_toolchain()
@@ -2741,7 +2724,7 @@ To create a universal binary that runs on both Intel and Apple Silicon Macs, bui
 
 ```python
 from pathlib import Path
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 from pcons.util.macos import create_universal_binary
 
 project = Project("mylib")
@@ -2770,7 +2753,6 @@ lib_universal = create_universal_binary(
 )
 
 project.Default(lib_universal)
-Generator().generate(project)
 ```
 
 The `create_universal_binary()` function:
@@ -2915,7 +2897,6 @@ app.add_sources([
     "main.cpp",       # Compiled with C++ compiler
     "kernel.cu",      # Compiled with CUDA nvcc
 ])
-
 ```
 
 #### How Source Routing Works
@@ -3377,7 +3358,7 @@ Then use it in your build script:
 
 ```python
 # pcons-build.py
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 from pcons.modules import ofx  # Auto-loaded!
 
 project = Project("myplugin")
@@ -3390,8 +3371,6 @@ plugin = ofx.create_bundle(
     sources=["src/plugin.cpp"],
     build_dir=project.build_dir,
 )
-
-Generator().generate(project)
 ```
 
 ### Contrib Modules

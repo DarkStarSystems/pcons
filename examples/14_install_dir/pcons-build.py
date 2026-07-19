@@ -21,7 +21,6 @@ project = Project("install_dir")
 
 # Directories
 src_dir = project.root_dir
-build_dir = project.build_dir
 
 # Install the assets directory to the build output
 # This copies the entire 'assets' directory tree to 'PCONS_INSTALL_PREFIX/assets'
@@ -35,7 +34,3 @@ installed_assets = project.InstallDir(
 project.Default(installed_assets)
 
 project.Alias("install", installed_assets)
-
-project.generate()
-
-print(f"Generated {build_dir}")

@@ -37,6 +37,3 @@ gen = env.Command(
 env.cc.includes.append(str(build_dir))
 app = project.Program("app", env, sources=[src_dir / "main.c"])
 app.depends(gen)  # implicit dep: build gen first, but don't link version.h
-
-project.generate()
-print(f"Generated {build_dir}")

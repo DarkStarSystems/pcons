@@ -20,7 +20,7 @@ Usage:
 import os
 from pathlib import Path
 
-from pcons import Generator, Project, find_c_toolchain, get_variant
+from pcons import Project, find_c_toolchain, get_variant
 from pcons.configure.config import Configure
 from pcons.packages.finders import ConanFinder
 
@@ -101,7 +101,3 @@ project.Default(hello)
 # =============================================================================
 # Generate build files
 # =============================================================================
-
-Generator().generate(project)
-
-print(f"Generated {build_dir}")

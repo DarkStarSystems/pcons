@@ -10,7 +10,7 @@ and (when installing) ``PCONS_INSTALL_DIR`` — all set by the plugin.
 import os
 from pathlib import Path
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 from pcons.integrations.rez import is_in_rez_resolve, rez_environment
 
 source_dir = Path(os.environ.get("PCONS_SOURCE_DIR", Path(__file__).parent))
@@ -33,5 +33,3 @@ project.Default(app)
 if install_dir:
     install_target = project.Install(f"{install_dir}/bin", [app])
     project.Alias("install", install_target)
-
-Generator().generate(project)

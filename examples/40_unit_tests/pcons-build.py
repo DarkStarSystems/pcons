@@ -21,7 +21,7 @@ Run::
 
 import os
 
-from pcons import Generator, Project, find_c_toolchain, set_test_property
+from pcons import Project, find_c_toolchain, set_test_property
 
 project = Project("unit_tests", build_dir=os.environ.get("PCONS_BUILD_DIR", "build"))
 env = project.Environment(toolchain=find_c_toolchain())
@@ -72,5 +72,3 @@ project.Test(
 # — handy in loops or when the right value depends on later context.
 for t in (unit_add, unit_mul):
     set_test_property(t, "timeout", 10.0)
-
-Generator().generate(project)

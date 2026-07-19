@@ -18,5 +18,3 @@ project = Project("hello_emscripten")
 env = project.Environment(toolchain=find_emscripten_toolchain())
 
 project.Program("hello", env, sources=["src/hello.c"])
-
-project.generate()

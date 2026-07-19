@@ -16,7 +16,7 @@ plugin — lives under ``rez_packages/hello_app/``.
 
 import sys
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 from pcons.integrations.rez import is_in_rez_resolve, rez_environment
 
 project = Project("rez_demo")
@@ -36,5 +36,3 @@ else:
 
 app = project.Program("rez_demo", env, sources=["src/main.cpp"])
 project.Default(app)
-
-Generator().generate(project)

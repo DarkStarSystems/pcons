@@ -24,5 +24,3 @@ configure_file(
 env.cc.flags += ["-Ibuild"]
 
 project.Program("configure_demo", env, sources=["src/main.c"])
-
-project.generate()

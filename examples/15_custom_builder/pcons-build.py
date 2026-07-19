@@ -155,7 +155,5 @@ for src_node in app.sources:
 
 project.Default(app)
 
-project.generate()
 
-print(f"Generated build files in {build_dir}")
 print("Run 'ninja -C build' to build, then './build/demo' to run")

@@ -64,7 +64,7 @@ clean:
 ### Pcons
 
 ```python
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 project = Project("myapp", build_dir="build")
 env = project.Environment(toolchain=find_c_toolchain())
@@ -73,8 +73,6 @@ env.cc.flags.extend(["-Wall", "-O2"])
 env.link.libs.append("m")
 
 app = project.Program("myapp", env, sources=["main.c", "util.c"])
-
-Generator().generate(project)
 ```
 
 Pcons auto-detects the compiler (respecting `CC`/`CXX` environment variables), generates compile rules for each source, and links automatically. No pattern rules, no `clean` target (Ninja handles that with `ninja -t clean`), no manual object file lists.
@@ -568,7 +566,7 @@ app: main.o ../lib/libfoo.a
 
 ```python
 # pcons-build.py
-from pcons import Project, find_c_toolchain, Generator
+from pcons import Project, find_c_toolchain
 
 project = Project("myproject", build_dir="build")
 env = project.Environment(toolchain=find_c_toolchain())
@@ -580,8 +578,6 @@ lib.public.include_dirs.append("lib")
 # Application
 app = project.Program("app", env, sources=["app/main.c"])
 app.private.link_libs.append(lib)
-
-Generator().generate(project)
 ```
 
 Pcons builds the entire project as a single dependency graph — no recursive invocation, no cross-directory dependency problems, full parallel builds. You can split the pcons script into sub-scripts and invoke them from the top level without introducing any dependency issues.

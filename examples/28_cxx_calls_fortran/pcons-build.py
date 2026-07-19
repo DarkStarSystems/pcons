@@ -18,5 +18,3 @@ env = project.Environment(toolchain=find_c_toolchain())
 env.add_toolchain(find_fortran_toolchain())  # gfortran for Fortran compilation
 
 project.Program("hello", env, sources=["src/main.cpp", "src/math_utils.f90"])
-
-project.generate()

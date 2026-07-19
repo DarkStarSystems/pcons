@@ -19,7 +19,6 @@ project = Project("static_into_shared")
 
 # Directories
 src_dir = project.root_dir / "src"
-build_dir = project.build_dir
 env = project.Environment(toolchain=find_c_toolchain())
 
 # 1. Create static library from core.c with PUBLIC include directory
@@ -68,7 +67,3 @@ print(f"core_lib public.include_dirs: {list(core_lib.public.include_dirs)}")
 print(f"wrapper_lib output_nodes: {wrapper_lib.output_nodes}")
 print(f"wrapper_lib dependencies: {wrapper_lib.dependencies}")
 print(f"prog output_nodes: {prog.output_nodes}")
-
-project.generate()
-
-print(f"Generated {build_dir}")

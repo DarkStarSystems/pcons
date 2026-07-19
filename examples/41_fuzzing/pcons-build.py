@@ -32,7 +32,7 @@ import platform
 import shutil
 from pathlib import Path
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 project = Project("fuzzing", build_dir=os.environ.get("PCONS_BUILD_DIR", "build"))
 
@@ -110,5 +110,3 @@ project.Test(
     labels=["fuzz", "campaign"],
     timeout=20,
 )
-
-Generator().generate(project)

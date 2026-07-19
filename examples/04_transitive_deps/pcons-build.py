@@ -22,5 +22,3 @@ simulator = project.Program(
     ],
 )
 simulator.private.include_dirs.append("include")
-
-project.generate()

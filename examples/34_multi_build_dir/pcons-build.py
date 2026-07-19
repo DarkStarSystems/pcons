@@ -41,6 +41,3 @@ env.set_variant(variant)
 
 prog = project.Program("app", env)
 prog.add_sources([src_dir / "main.c"])
-
-project.generate()
-print(f"Generated build/{variant}")

@@ -19,4 +19,3 @@ lib.public.include_dirs.append(project.root_dir / "include")
 pc = project.generate_pc_file(lib, version="1.0.0", description="Example library")
 
 project.Default(lib)
-project.generate()

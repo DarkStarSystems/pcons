@@ -23,5 +23,7 @@ commands = [
 platforms = ["windows"]
 # Requires gcc and make to be installed
 requires = ["gcc", "make"]
-# This example specifically tests Makefile generation, not xcode
-generators = ["xcode"]
+# This example specifically tests Makefile generation: the script's
+# Generator("make") default is overridden by the harness's PCONS_GENERATOR,
+# so only the make parametrization is meaningful.
+generators = ["ninja", "xcode"]

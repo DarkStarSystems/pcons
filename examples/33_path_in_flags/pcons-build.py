@@ -46,5 +46,3 @@ prog.private.link_flags.append(
 
 # Also link normally so the linker finds the symbols
 prog.link(lib)
-
-project.generate()

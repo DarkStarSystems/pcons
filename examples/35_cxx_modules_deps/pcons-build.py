@@ -32,5 +32,3 @@ hello = project.Program(
     ],
 )
 hello.private.include_dirs.append("src")
-
-project.generate()

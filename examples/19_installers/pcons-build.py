@@ -21,7 +21,6 @@ project = Project("installer_example")
 
 # Directories
 src_dir = project.root_dir / "src"
-build_dir = project.build_dir
 env = project.Environment(toolchain=find_c_toolchain())
 
 # Build the application
@@ -80,8 +79,6 @@ if installer_targets:
 # Set the app as the default target
 project.Default(app)
 
-project.generate()
 
-print(f"Generated {build_dir}")
 if installer_targets:
     print("Run 'ninja installers' to build installer packages")

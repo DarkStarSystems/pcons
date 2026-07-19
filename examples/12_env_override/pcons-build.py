@@ -35,6 +35,3 @@ with env.override() as extra_env:
 
 # Link both objects into the program
 env.link.Program(build_dir / prog_name, [main_obj, extra_obj])
-
-project.generate()
-print(f"Generated {build_dir}")

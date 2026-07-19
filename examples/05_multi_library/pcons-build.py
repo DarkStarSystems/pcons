@@ -52,13 +52,8 @@ simulator = project.Program("simulator", env)
 simulator.add_sources(["src/main.c"])
 simulator.link_private(libphysics)  # Gets both libphysics and libmath includes
 
-# Generate dependency diagrams (after generate, which auto-resolves)
+# Also generate dependency diagrams alongside the build files
 mermaid_gen = MermaidGenerator(direction="LR")
 mermaid_gen.generate(project)
 dot_gen = DotGenerator(rankdir="LR")
 dot_gen.generate(project)
-
-print("Generated 'build.ninja'")
-print("Generated 'compile_commands.json'")
-print("Generated 'deps.mmd'")
-print("Generated 'deps.dot'")

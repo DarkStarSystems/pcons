@@ -23,7 +23,6 @@ project = Project("multi_file")
 # Directories
 src_dir = project.root_dir / "src"
 include_dir = project.root_dir / "include"
-build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 # Warning flags, resolved per-toolchain (/W4 on MSVC, -Wall … on GCC/Clang).
 env.apply_preset("warnings")
@@ -32,7 +31,3 @@ env.apply_preset("warnings")
 calculator = project.Program("calculator", env)
 calculator.add_sources([src_dir / "math_ops.c", src_dir / "main.c"])
 calculator.private.include_dirs.append(include_dir)
-
-project.generate()
-
-print(f"Generated {build_dir}")

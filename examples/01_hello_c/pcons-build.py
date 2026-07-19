@@ -25,5 +25,3 @@ bins = project.Install(install_dir(env, "program"), [hello], name="install-hello
 
 # "ninja install" (or "make install") runs the install target
 project.Alias("install", bins)
-
-project.generate()

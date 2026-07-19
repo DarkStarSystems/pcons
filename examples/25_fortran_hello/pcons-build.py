@@ -13,5 +13,3 @@ project = Project("fortran_hello")
 env = project.Environment(toolchain=find_fortran_toolchain())
 
 project.Program("hello", env, sources=["src/hello.f90"])
-
-project.generate()

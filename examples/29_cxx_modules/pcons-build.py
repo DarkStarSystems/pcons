@@ -16,5 +16,3 @@ env = project.Environment(toolchain=find_c_toolchain(prefer=["llvm"]))
 env.cxx.set_standard("c++20")
 
 project.Program("hello", env, sources=["src/MyMod.cppm", "src/main.cpp"])
-
-project.generate()

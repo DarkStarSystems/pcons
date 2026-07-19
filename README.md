@@ -65,8 +65,6 @@ lib.public.include_dirs.append("include")
 # Build a program that links the library
 app = project.Program("myapp", env, sources=["src/main.c"])
 app.private.link_libs.append(lib)
-
-project.generate()
 ```
 
 ```bash

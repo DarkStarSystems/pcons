@@ -29,5 +29,3 @@ project.Program(
     env,
     sources=["src/Math.cpp", "src/main.cpp"],
 )
-
-project.generate()

@@ -22,7 +22,6 @@ project = Project("variants_example")
 
 # Directories
 src_dir = project.root_dir / "src"
-build_dir = project.build_dir
 
 # Create base environment with common settings
 base_env = project.Environment(toolchain=toolchain)
@@ -46,6 +45,3 @@ for variant in ["debug", "release"]:
     # to the variant preset.
     print(f"\n=== {variant} cc flags ===")
     print(env.cc.explain())
-
-project.generate()
-print(f"\nGenerated {build_dir}")

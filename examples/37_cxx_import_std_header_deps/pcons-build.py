@@ -28,5 +28,3 @@ project.Program(
     env,
     sources=["src/Greet.cppm", "src/main.cpp"],
 )
-
-project.generate()

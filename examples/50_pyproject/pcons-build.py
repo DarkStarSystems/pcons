@@ -163,5 +163,3 @@ install = project.Install(
     name="install",
 )
 project.Alias("install", install)
-
-project.generate()

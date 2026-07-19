@@ -34,5 +34,3 @@ project.Program(
         "src/main.cpp",
     ],
 )
-
-project.generate()

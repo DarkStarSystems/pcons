@@ -32,7 +32,6 @@ project = Project("paths_with_spaces")
 # Directories - note the spaces in names!
 src_dir = project.root_dir / "src with spaces"
 include_dir = project.root_dir / "My Headers"
-build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 
 # Create program target
@@ -54,7 +53,3 @@ if toolchain.name in ("msvc", "clang-cl"):
     program.private.compile_flags.extend(["/W4"])
 else:
     program.private.compile_flags.extend(["-Wall", "-Wextra"])
-
-project.generate()
-
-print(f"Generated {build_dir}")

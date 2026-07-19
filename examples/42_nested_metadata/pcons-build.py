@@ -20,7 +20,6 @@ Validated by test_metadata.py via the example test runner.
 from pathlib import Path
 
 from pcons import (
-    Generator,
     MetadataGenerator,
     Project,
     add_subdirectory,
@@ -37,5 +36,4 @@ add_subdirectory("child")
 # Run the structural generator selected by PCONS_GENERATOR, and always also
 # emit the IDE metadata so the example can be validated regardless of which
 # backend is used.
-Generator().generate(project)
 MetadataGenerator().generate(project)

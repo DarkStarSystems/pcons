@@ -187,7 +187,6 @@ User runs `ninja` (or `make`). Pcons is not involved.
 > **Status: Implemented**
 
 The fundamental unit in the dependency graph. A Node represents something that can be a dependency or a target.
-
 ```
 Node (abstract)
 ├── FileNode        # A file (source or generated)
@@ -674,7 +673,6 @@ This makes build scripts declarative - the order of declarations doesn't matter.
 **Problem:** The core shouldn't know about C/C++ concepts like `-I` include flags or `-D` defines, but generators need to write these flags to build files. How do we keep the core tool-agnostic while supporting toolchain-specific flag formatting?
 
 **Solution:** The `ToolchainContext` protocol provides a clean abstraction layer between the resolver and generators.
-
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                            Resolution Phase                              │
@@ -791,7 +789,6 @@ This makes build scripts declarative - the order of declarations doesn't matter.
 **Shell quoting and command formatting:**
 
 Commands flow through two stages before becoming the final string written to build files:
-
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                          Command Template                                │
@@ -846,7 +843,6 @@ command = env.subst(command_template, shell="posix")
 
 When `subst()` expands command templates, it applies shell-appropriate quoting
 based on the target format (Ninja or POSIX shell):
-
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                    context.get_env_overrides()                           │
@@ -1115,7 +1111,6 @@ def _variant_contributions(self, variant, **kwargs):
 ```
 
 **Provenance is derived, not recorded.** Because presets are data and `Environment.apply()` keeps the ordered list of applied presets, `env.explain()` / `env.cc.explain()` can replay that list and attribute every flag to its source — no per-flag bookkeeping. Tokens not produced by a preset (toolchain defaults or `env.cc.flags.append(...)`) are labelled `(manual)`:
-
 ```
 cxx.flags:
   -Wall   ← warnings (feature)
@@ -1338,7 +1333,6 @@ validated to ensure they don't conflict with user build outputs.
 
 ## File Organization
 > **Note:** This shows the file organization with implementation status.
-
 ```
 pcons/
 ├── __init__.py
@@ -1432,7 +1426,7 @@ pcons/
 
 ### pcons-build.py
 ```python
-from pcons import Generator, ImportedTarget, PackageDescription, Project, find_c_toolchain
+from pcons import ImportedTarget, PackageDescription, Project, find_c_toolchain
 
 project = Project('myapp', build_dir='build')
 toolchain = find_c_toolchain()
@@ -1461,7 +1455,6 @@ app = project.Program('myapp', env, sources=['src/main.cpp'])
 app.link_private(libcore, openssl, httplib)
 
 project.Default(app)
-Generator().generate(project)
 ```
 
 ---
@@ -1484,7 +1477,6 @@ Generator().generate(project)
 **Core principle: Pcons handles consumption, not acquisition.**
 
 Pcons is not a package manager. External tools (Conan, vcpkg, pcons-fetch, manual builds) handle fetching and building dependencies. Pcons imports the results through a standard description format.
-
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Package Sources                          │
@@ -1601,7 +1593,7 @@ desc = finder.find("zlib", version=">=1.2")  # returns PackageDescription or Non
 > **Status: Implemented** - `find_package()` returns ImportedTargets; `link_libs` propagates requirements.
 
 ```python
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
 project = Project('myapp', build_dir='build')
 env = project.Environment(toolchain=find_c_toolchain())
@@ -1614,8 +1606,6 @@ boost = project.find_package('boost', components=['filesystem'])
 app = project.Program('myapp', env, sources=['main.cpp'])
 app.link_private(zlib, openssl, boost)
 # Automatically gets all include dirs, library dirs, libraries, flags
-
-Generator().generate(project)
 ```
 
 ### pcons-fetch: Source Dependency Tool

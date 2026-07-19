@@ -61,5 +61,3 @@ lib3.private.compile_flags.extend(breaker_dialect)
 app = project.Program("app", env, sources=["main.cpp"])
 app.private.compile_flags.extend(shared_dialect)
 app.link_private(lib1)
-
-project.generate()

@@ -18,5 +18,3 @@ env = project.Environment(toolchain=find_fortran_toolchain())
 env.add_toolchain(find_c_toolchain())  # gcc/clang for C++ compilation
 
 project.Program("hello", env, sources=["src/main.f90", "src/greet.cpp"])
-
-project.generate()

@@ -14,7 +14,6 @@ project = Project("resource_example")
 
 # Directories
 src_dir = project.root_dir / "src"
-build_dir = project.build_dir
 
 # Find C toolchain - prefer MSVC or clang-cl on Windows for resource file support
 toolchain = find_c_toolchain(prefer=["msvc", "clang-cl", "gcc", "llvm"])
@@ -26,7 +25,3 @@ app.add_sources([src_dir / "main.c", src_dir / "app.rc"])
 
 # Set as default target
 project.Default(app)
-
-project.generate()
-
-print(f"Generated {build_dir} using {toolchain.name} toolchain")

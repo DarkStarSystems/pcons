@@ -36,5 +36,3 @@ env = project.Environment(toolchain=toolchain)
 
 # Build PDF — latexmk handles bibtex, multi-pass, etc. automatically
 env.latex.Pdf(build_dir / "main.pdf", src_dir / "main.tex")
-
-project.generate()

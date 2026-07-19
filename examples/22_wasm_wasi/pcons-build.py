@@ -18,5 +18,3 @@ project = Project("hello_wasi")
 env = project.Environment(toolchain=find_wasi_toolchain())
 
 project.Program("hello", env, sources=["src/hello.c"])
-
-project.generate()

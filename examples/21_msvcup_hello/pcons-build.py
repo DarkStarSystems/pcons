@@ -19,4 +19,3 @@ if sys.platform == "win32":
 project = Project("hello")
 env = project.Environment(toolchain=find_c_toolchain())
 project.Program("hello", env, sources=["src/hello.c"])
-project.generate()

@@ -15,7 +15,6 @@ project = Project("manifest_example")
 
 # Directories
 src_dir = project.root_dir / "src"
-build_dir = project.build_dir
 
 # Find C toolchain - prefer MSVC or clang-cl on Windows for manifest support
 toolchain = find_c_toolchain(prefer=["msvc", "clang-cl", "gcc", "llvm"])
@@ -67,9 +66,7 @@ else:
     app.add_sources([src_dir / "main.c"])
     project.Default(app, mylib)
 
-project.generate()
 
-print(f"Generated {build_dir} using {toolchain.name} toolchain")
 if is_windows_toolchain:
     print("  - MyLib.dll with assembly manifest")
     print("  - myapp.exe with embedded app manifest (DPI aware, visual styles)")

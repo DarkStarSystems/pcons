@@ -55,7 +55,3 @@ project.resolve()
 # Check what happened
 print(f"Program intermediate_nodes: {prog.intermediate_nodes}")
 print(f"Program sources: {prog.sources}")
-
-project.generate()
-
-print(f"Generated {build_dir}")

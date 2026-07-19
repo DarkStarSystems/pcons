@@ -26,7 +26,6 @@ project = Project("archive_install")
 
 # Directories
 src_dir = project.root_dir
-build_dir = project.build_dir
 env = project.Environment(toolchain=toolchain)
 # Warning flags, resolved per-toolchain (/W4 on MSVC, -Wall … on GCC/Clang).
 env.apply_preset("warnings")
@@ -64,7 +63,3 @@ install_target = project.Install(
 )
 
 project.Alias("install", install_target)
-
-project.generate()
-
-print(f"Generated {build_dir}")

@@ -79,7 +79,3 @@ env.concat.Bundle(
         src_dir / "footer.txt",
     ],
 )
-
-project.generate()
-
-print(f"Generated {build_dir}")
