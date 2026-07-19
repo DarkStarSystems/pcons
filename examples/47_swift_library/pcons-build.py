@@ -15,7 +15,7 @@ project = Project("swift_library")
 env = project.Environment(toolchain="swift")
 
 geometry = project.StaticLibrary(
-    "Geometry", env, sources=["lib/geometry.swift", "lib/util.swift"]
+    "Geometry", env, sources=["geometry/geometry.swift", "geometry/util.swift"]
 )
 
 app = project.Program("shapes", env, sources=["src/main.swift"])
