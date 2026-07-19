@@ -62,21 +62,58 @@ def _read_crate_name(manifest: Path) -> str:
     return str(pkg_name).replace("-", "_")
 
 
-def _artifact_filename(crate_name: str, crate_type: str) -> str:
-    """Compute the on-disk filename cargo produces for a given crate type."""
+def _target_platform(target_triple: str | None) -> str:
+    """Classify the platform cargo builds FOR (not the host).
+
+    Uses the target triple when cross-compiling, otherwise the host
+    platform (rustc's default target). Returns one of "windows-msvc",
+    "windows-gnu", "darwin", "wasm", or "unix".
+    """
+    if target_triple:
+        t = target_triple.lower()
+        if "windows" in t:
+            return "windows-gnu" if "gnu" in t else "windows-msvc"
+        if "apple" in t or "darwin" in t:
+            return "darwin"
+        if t.startswith("wasm") or "emscripten" in t:
+            return "wasm"
+        return "unix"
+    if sys.platform == "win32":
+        return "windows-msvc"  # rustup's default host toolchain on Windows
+    if sys.platform == "darwin":
+        return "darwin"
+    return "unix"
+
+
+def _artifact_filename(
+    crate_name: str, crate_type: str, target_triple: str | None = None
+) -> str:
+    """Compute the on-disk filename cargo produces for a given crate type.
+
+    Named by the platform cargo builds *for* (the target triple when
+    cross-compiling), since cargo writes target-convention filenames
+    into target/<triple>/<profile>/ regardless of the host.
+    """
+    platform = _target_platform(target_triple)
     if crate_type == "staticlib":
-        if sys.platform == "win32":
+        # windows-gnu staticlibs use the ar convention (libfoo.a), only
+        # the MSVC target produces foo.lib.
+        if platform == "windows-msvc":
             return f"{crate_name}.lib"
         return f"lib{crate_name}.a"
     if crate_type == "cdylib":
-        if sys.platform == "win32":
+        if platform in ("windows-msvc", "windows-gnu"):
             return f"{crate_name}.dll"
-        if sys.platform == "darwin":
+        if platform == "darwin":
             return f"lib{crate_name}.dylib"
+        if platform == "wasm":
+            return f"{crate_name}.wasm"
         return f"lib{crate_name}.so"
     if crate_type == "bin":
-        if sys.platform == "win32":
+        if platform in ("windows-msvc", "windows-gnu"):
             return f"{crate_name}.exe"
+        if platform == "wasm":
+            return f"{crate_name}.wasm"
         return crate_name
     raise ValueError(
         f"Unsupported crate_type {crate_type!r}; expected one of {sorted(_CRATE_TYPES)}"
@@ -141,9 +178,14 @@ class CargoBuildBuilder:
             env: Environment used to register the underlying Command rule.
             manifest: Path to the crate's Cargo.toml (relative to project
                       root or absolute).
-            crate_type: "staticlib", "cdylib", or "bin".
+            crate_type: "staticlib", "cdylib", or "bin". Library crates
+                        return an ImportedTarget that consumers link();
+                        "bin" returns the cargo Command target whose
+                        output node is the built executable (nothing to
+                        link — depend on it or run it from the build).
             profile: Cargo profile name. "release" → target/release/,
-                     "dev" → target/debug/, anything else → target/<name>/.
+                     "dev" → target/debug/, any other profile name maps
+                     to the target/ subdirectory of the same name.
             features: Cargo features to enable.
             generate_header: Path to a cbindgen.toml. If given, runs
                              cbindgen as a second command to produce a C
@@ -163,6 +205,11 @@ class CargoBuildBuilder:
         if crate_type not in _CRATE_TYPES:
             raise ValueError(
                 f"crate_type {crate_type!r} not supported; expected one of {sorted(_CRATE_TYPES)}"
+            )
+        is_bin = crate_type == "bin"
+        if is_bin and generate_header is not None:
+            raise ValueError(
+                "generate_header only applies to library crates, not crate_type='bin'"
             )
 
         manifest_path = Path(manifest)
@@ -186,7 +233,9 @@ class CargoBuildBuilder:
         if target_triple:
             artifact_dir = target_root / target_triple / profile_dir
 
-        artifact_path = artifact_dir / _artifact_filename(crate_name, crate_type)
+        artifact_path = artifact_dir / _artifact_filename(
+            crate_name, crate_type, target_triple
+        )
 
         # Build the cargo command line.
         cargo_cmd: list[str] = [
@@ -211,13 +260,21 @@ class CargoBuildBuilder:
         # single token. Shell-quoting individual tokens would wrap pcons
         # specials like $TARGET in single quotes and prevent expansion.
         cargo_target = env.Command(
-            name=f"{name}_cargo",
+            name=name if is_bin else f"{name}_cargo",
             target=artifact_path,
             source=None,
             depends=rust_sources,
             command=cargo_cmd,
             restat=True,
         )
+
+        if is_bin:
+            # A bin crate has no linkable output — the executable itself is
+            # the product, so the cargo Command target (whose output node is
+            # the executable) is returned directly. Consumers can depend on
+            # it or run it via its output path; there are no link/include
+            # usage requirements to propagate.
+            return cargo_target
 
         # Optional cbindgen header generation.
         cbindgen_target: Target | None = None
@@ -250,9 +307,18 @@ class CargoBuildBuilder:
             )
 
         # Wrap as an ImportedTarget so consumers' link() picks up flags.
+        # For a Windows cdylib the linker consumes the import library,
+        # which rustc names <crate>.dll.lib (MSVC) / lib<crate>.dll.a
+        # (MinGW) — naming the lib "<crate>.dll" makes both linkers'
+        # name-resolution rules find it.
+        link_name = crate_name
+        if crate_type == "cdylib" and _target_platform(target_triple).startswith(
+            "windows"
+        ):
+            link_name = f"{crate_name}.dll"
         pkg = PackageDescription(
             name=name,
-            libraries=[crate_name],
+            libraries=[link_name],
             library_dirs=[str(artifact_dir)],
             include_dirs=[str(include_dir)] if include_dir else [],
             found_by="cargo",
@@ -263,9 +329,10 @@ class CargoBuildBuilder:
 
         # The imported wrapper depends on the underlying cargo (and
         # cbindgen) Command targets. The compile_link machinery walks
-        # transitive_dependencies() to collect output nodes for the
-        # linker, so the .a/.lib gets wired in as an implicit dep of
-        # the link step automatically.
+        # transitive_dependencies() to collect their output nodes: the
+        # .a/.lib is recognized as a link input and lands on the
+        # consumer's link line, while the generated header becomes an
+        # implicit dep of the consumer's compile steps.
         imported.add_dependency(cargo_target)
         if cbindgen_target is not None:
             imported.add_dependency(cbindgen_target)

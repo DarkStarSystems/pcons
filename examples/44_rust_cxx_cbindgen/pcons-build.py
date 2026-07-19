@@ -45,4 +45,4 @@ elif sys.platform == "win32":
     )
 
 app = project.Program("stats", env, sources=["src/main.cpp"])
-app.private.link_libs.append(rust_math)
+app.link_private(rust_math)

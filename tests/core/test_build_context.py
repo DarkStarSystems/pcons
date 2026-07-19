@@ -105,6 +105,39 @@ class TestCompileLinkContext:
             assert "-fsanitize=address" in overrides["flags"]
             assert "-pthread" in overrides["flags"]
 
+    def test_link_overrides_env_libs_follow_usage_requirement_libs(self) -> None:
+        """env.link.libs must come AFTER usage-requirement libs on the link line.
+
+        Left-to-right static linkers (GNU ld) only pull symbols from a
+        library to satisfy references already seen, so system libs like
+        pthread/dl set via env.link.libs must follow the libraries (e.g. a
+        Rust staticlib) whose undefined symbols they resolve.
+        """
+        import tempfile
+        from pathlib import Path
+
+        from pcons.core.project import Project
+        from pcons.toolchains.gcc import GccToolchain
+
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+            toolchain = GccToolchain()
+            toolchain._configured = True
+            env = project.Environment(toolchain=toolchain)
+            env.add_tool("link")
+            env.link.libs = ["dl", "pthread"]
+
+            ctx = CompileLinkContext(
+                libs=["rust_greet"],
+                mode="link",
+                _env=env,
+            )
+            overrides = ctx.get_env_overrides()
+
+            libs = [str(lib) for lib in overrides["libs"]]
+            assert libs == ["rust_greet", "dl", "pthread"]
+
     def test_link_overrides_without_env(self) -> None:
         """Verify link_flags work when no env is provided (no base to merge)."""
         ctx = CompileLinkContext(

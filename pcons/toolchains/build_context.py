@@ -119,18 +119,22 @@ class CompileLinkContext:
         return result
 
     def _merge_with_base_libs(self, libs: list[str]) -> list[str]:
-        """Prepend env.link.libs to `libs`, dropping duplicates.
+        """Append env.link.libs after `libs`, dropping duplicates.
 
         Library names set directly on the link tool (``env.link.libs``) must
         survive alongside the libraries that come from usage requirements;
         otherwise setting ``env.link.libs`` is silently ignored whenever a
-        target also links a library by usage requirement.
+        target also links a library by usage requirement. They go last:
+        left-to-right static linkers (GNU ld) only pull symbols from a
+        library to satisfy references already seen, so system libs like
+        ``pthread``/``dl`` must follow the usage-requirement libraries
+        whose undefined symbols they resolve.
         """
         base_libs: list[str] = []
         if self._env and self._env.has_tool("link"):
             link_cfg = getattr(self._env, "link", None)
             base_libs = list(getattr(link_cfg, "libs", None) or [])
-        return base_libs + [lib for lib in libs if lib not in base_libs]
+        return [lib for lib in libs if lib not in base_libs] + base_libs
 
     def _compile_overrides(self) -> dict[str, object]:
         """Return compile-time overrides: includes, defines, flags."""

@@ -91,6 +91,28 @@ def test_artifact_filename_rejects_unknown_type():
 
 
 @pytest.mark.parametrize(
+    "triple,crate_type,expected",
+    [
+        # Cross-compiling: cargo names artifacts by the TARGET's
+        # convention, regardless of host.
+        ("x86_64-pc-windows-msvc", "staticlib", "foo.lib"),
+        ("x86_64-pc-windows-gnu", "staticlib", "libfoo.a"),
+        ("x86_64-unknown-linux-gnu", "staticlib", "libfoo.a"),
+        ("aarch64-apple-darwin", "staticlib", "libfoo.a"),
+        ("x86_64-pc-windows-msvc", "cdylib", "foo.dll"),
+        ("aarch64-apple-darwin", "cdylib", "libfoo.dylib"),
+        ("x86_64-unknown-linux-musl", "cdylib", "libfoo.so"),
+        ("wasm32-wasi", "cdylib", "foo.wasm"),
+        ("wasm32-wasi", "bin", "foo.wasm"),
+        ("x86_64-pc-windows-msvc", "bin", "foo.exe"),
+        ("x86_64-unknown-linux-gnu", "bin", "foo"),
+    ],
+)
+def test_artifact_filename_cross_compile(triple, crate_type, expected):
+    assert _artifact_filename("foo", crate_type, triple) == expected
+
+
+@pytest.mark.parametrize(
     "profile,expected",
     [("dev", "debug"), ("release", "release"), ("bench", "bench")],
 )
@@ -176,6 +198,55 @@ def test_cargo_build_command_includes_options(project_env, tmp_path):
 
     assert any("wasm32-wasi" in str(p) for p in target.public.link_dirs)
     assert any("custom" in str(p) for p in target.public.link_dirs)
+
+
+def test_cargo_build_bin_returns_command_target(project_env, tmp_path):
+    project, env = project_env
+    _write_crate(tmp_path, package="rust_tool")
+
+    target = project.CargoBuild(
+        "rust_tool", env, manifest="rust/Cargo.toml", crate_type="bin"
+    )
+
+    # A bin crate has nothing to link: the cargo Command target itself is
+    # returned, with the executable as its output — no library usage
+    # requirements and no ImportedTarget wrapper.
+    assert target.name == "rust_tool"
+    assert not getattr(target, "is_imported", False)
+    assert not target.public.link_libs
+
+
+def test_cargo_build_bin_rejects_generate_header(project_env, tmp_path):
+    project, env = project_env
+    _write_crate(tmp_path, package="rust_tool")
+    (tmp_path / "rust" / "cbindgen.toml").write_text('language = "C"\n')
+
+    with pytest.raises(ValueError, match="generate_header"):
+        project.CargoBuild(
+            "rust_tool",
+            env,
+            manifest="rust/Cargo.toml",
+            crate_type="bin",
+            generate_header="rust/cbindgen.toml",
+        )
+
+
+def test_cargo_build_cdylib_windows_uses_import_lib_name(project_env, tmp_path):
+    project, env = project_env
+    _write_crate(tmp_path, package="rust_core")
+
+    target = project.CargoBuild(
+        "rust_core",
+        env,
+        manifest="rust/Cargo.toml",
+        crate_type="cdylib",
+        target_triple="x86_64-pc-windows-msvc",
+    )
+
+    # rustc's MSVC-target cdylib import library is <crate>.dll.lib; naming
+    # the link lib "<crate>.dll" lets MSVC (appends .lib) and MinGW
+    # (searches lib<name>.a) both resolve it.
+    assert "rust_core.dll" in target.public.link_libs
 
 
 def test_cargo_build_with_cbindgen_adds_header_and_dep(project_env, tmp_path):

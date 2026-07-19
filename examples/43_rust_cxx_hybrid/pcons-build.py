@@ -51,4 +51,4 @@ elif sys.platform == "win32":
 
 env.cxx.includes.append(project.root_dir / "src")
 app = project.Program("hello_rust", env, sources=["src/main.cpp"])
-app.private.link_libs.append(rust_greet)
+app.link_private(rust_greet)
