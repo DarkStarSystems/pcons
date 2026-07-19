@@ -1,0 +1,19 @@
+# Test configuration for the cbindgen example.
+
+[test]
+description = "Generate a C header from a Rust crate via cbindgen, then link the staticlib into C++"
+
+expected_outputs = [
+    "build/cargo/rust_math/include/rust_math.h",
+    "build/stats",
+]
+
+[verify]
+commands = [
+    { run = "./build/stats", expect_stdout = "min=1.0 max=9.0 mean=3.90" },
+    { run = "./build/stats", expect_stdout = "clamp(7.5, 0, 5) = 5.0" },
+]
+
+[skip]
+requires = ["cargo", "cbindgen"]
+generators = ["xcode", "make"]

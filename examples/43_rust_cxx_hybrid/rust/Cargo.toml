@@ -1,0 +1,14 @@
+[package]
+name = "rust_greet"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rust_greet"
+crate-type = ["staticlib"]
+
+[profile.release]
+# Keep the test build fast and small.
+opt-level = 1
+lto = false
+codegen-units = 16

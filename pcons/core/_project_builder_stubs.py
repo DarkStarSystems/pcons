@@ -52,6 +52,23 @@ if TYPE_CHECKING:
             """Create a Windows AppX package (legacy MSIX format) [win32 only]"""
             ...
 
+        def CargoBuild(
+            self,
+            name: str,
+            env: Env,
+            *,
+            manifest: str | Path,
+            crate_type: str = 'staticlib',
+            profile: str = 'release',
+            features: Sequence[str] = (),
+            generate_header: str | Path | None = None,
+            target_triple: str | None = None,
+            extra_args: Sequence[str] = (),
+            cargo: str = 'cargo',
+        ) -> Target:
+            """Build a Rust crate via cargo and return it as an ImportedTarget."""
+            ...
+
         def Command(
             self,
             name: str,

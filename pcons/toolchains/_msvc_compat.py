@@ -13,6 +13,7 @@ from pcons.core.preset import ToolContribution
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
+    from pcons.toolchains.build_context import CompileLinkContext
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
 
@@ -78,6 +79,18 @@ class MsvcCompatibleToolchain(BaseToolchain):
             "/link",
         ]
     )
+
+    def compile_link_context_class(self) -> type[CompileLinkContext]:
+        """MSVC and clang-cl both use MSVC-style command formatting.
+
+        This selects MsvcCompileLinkContext, which formats library names as
+        ``foo.lib`` (rather than the bare ``foo`` of the GNU-style base).
+        Without it, clang-cl's linker fails with "could not open 'foo'" on
+        any library referenced by name (e.g. from an imported package).
+        """
+        from pcons.toolchains.build_context import MsvcCompileLinkContext
+
+        return MsvcCompileLinkContext
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix.

@@ -1,0 +1,21 @@
+# Test configuration for the Rust + C++ hybrid example.
+
+[test]
+description = "Build a Rust staticlib via cargo and link it into a C++ program"
+
+expected_outputs = [
+    "build/hello_rust",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello_rust", expect_stdout = "Hello from Rust, pcons!" },
+    { run = "./build/hello_rust", expect_stdout = "2 + 3 = 5" },
+]
+
+[skip]
+# Need a Rust toolchain. Skip everywhere it's missing.
+requires = ["cargo"]
+# Xcode and Makefile generators are not tested here — the focus is
+# verifying that pcons → ninja → cargo → ninja relink works.
+generators = ["xcode", "make"]

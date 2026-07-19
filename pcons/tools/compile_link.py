@@ -51,6 +51,18 @@ def _is_link_input(path: Path) -> bool:
     return ".so" in path.suffixes or ".dylib" in path.suffixes
 
 
+def _context_class_for(env: Environment) -> type[CompileLinkContext]:
+    """The CompileLinkContext subclass the env's toolchain uses.
+
+    Lets MSVC-compatible toolchains (MSVC, clang-cl) format libraries as
+    ``foo.lib`` instead of the GNU-style bare ``foo``.
+    """
+    toolchain = env._toolchain
+    if toolchain is not None:
+        return toolchain.compile_link_context_class()
+    return CompileLinkContext
+
+
 class CompileLinkFactory:
     """Factory for compile-then-link targets (Program, Library, etc.).
 
@@ -289,6 +301,10 @@ class CompileLinkFactory:
         if source.explicit_deps:
             obj_node.implicit_deps.extend(source.explicit_deps)
 
+        # Compile commands use the base context so compile_commands.json
+        # stays clang-compatible (-I/-D) regardless of the actual compiler.
+        # Only linking needs the toolchain-specific context (MSVC library
+        # naming); see _setup_link_node.
         context = CompileLinkContext.from_effective_requirements(
             effective,
             mode="compile",
@@ -595,7 +611,7 @@ class CompileLinkFactory:
                 ]
 
         effective_link.link_flags = link_flags
-        context = CompileLinkContext.from_effective_requirements(
+        context = _context_class_for(env).from_effective_requirements(
             effective_link,
             mode="link",
             language=link_language,
