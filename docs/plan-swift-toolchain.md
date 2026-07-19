@@ -1,7 +1,8 @@
 # Plan: Swift Toolchain Support
 
-Status: **in progress** (drafted 2026-06-04, revised 2026-07-19 after review
-against current main; implementation started 2026-07-19)
+Status: **phases 1-3 implemented** (drafted 2026-06-04, revised and
+implemented 2026-07-19; remaining: Windows support, iOS cross-preset
+example, auto-generated modulemaps, `-enable-library-evolution`)
 
 ## Summary
 

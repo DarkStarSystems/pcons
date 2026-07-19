@@ -19,12 +19,13 @@ in ``main.swift`` or an ``@main`` type, as usual for Swift.
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import TYPE_CHECKING, Any, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
-from pcons.core.preset import ToolContribution
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.unix import UnixToolchain
@@ -37,11 +38,29 @@ if TYPE_CHECKING:
     from pcons.core.toolconfig import ToolConfig
     from pcons.tools.tool import Builder
 
+logger = logging.getLogger(__name__)
+
 SWIFT_EXTENSIONS = frozenset({".swift"})
 
 # Where each target's .swiftmodule lands, relative to the build dir.
 # Shared so dependents get a single -I search path.
 SWIFTMODULE_DIR = "swiftmodules"
+
+
+def _swift_set_cxx_interop(env: Environment, standard: str | int | None = None) -> None:
+    """``env.swiftc.set_cxx_interop(...)`` — enable Swift/C++ interoperability.
+
+    Turns on ``-cxx-interoperability-mode=default`` so Swift code can import
+    C++ (and ``-emit-clang-header`` output exposes C++-callable declarations).
+    An optional C++ standard (``"c++20"`` or ``20``) is passed through to the
+    clang importer via ``-Xcc -std=...``.
+    """
+    for toolchain in env.toolchains:
+        maker = getattr(toolchain, "make_cxx_interop_preset", None)
+        if maker is not None:
+            preset = maker(standard)
+            if preset is not None:
+                env.apply(preset)
 
 
 def module_name_for(target_name: str) -> str:
@@ -90,6 +109,9 @@ class SwiftCompiler(BaseTool):
             "includes": [],
             "dprefix": "-D",
             "defines": [],
+            # When true, library modules also emit a C/C++ header
+            # (<Module>-Swift.h) into swiftmodules/ so C++ can call Swift.
+            "interop_header": False,
             # -emit-dependencies-path is frontend-only; with -wmo there is
             # exactly one frontend job, so -Xfrontend passing is reliable.
             "depflags": [
@@ -108,6 +130,7 @@ class SwiftCompiler(BaseTool):
                 "-emit-module",
                 "-emit-module-path",
                 "$MODULE_PATH",
+                "$HEADER_FLAGS",
                 "$swiftc.depflags",
                 "$swiftc.flags",
                 "${prefix(swiftc.iprefix, swiftc.includes)}",
@@ -216,6 +239,7 @@ class SwiftToolchain(UnixToolchain):
 
     def __init__(self) -> None:
         super().__init__("swift")
+        self._swift_runtime_libdirs: list[str] | None = None
 
     @property
     def language_priority(self) -> dict[str, int]:
@@ -240,6 +264,77 @@ class SwiftToolchain(UnixToolchain):
         return [
             ToolContribution("swiftc", flags=tuple(flags), defines=tuple(defines)),
         ]
+
+    def tool_setting(self, tool: str, name: str) -> Any:
+        if tool == "swiftc" and name == "set_cxx_interop":
+            return _swift_set_cxx_interop
+        return super().tool_setting(tool, name)
+
+    def make_cxx_interop_preset(self, standard: str | int | None = None) -> Preset:
+        """Realize C++-interop mode as a preset (visible to env.explain())."""
+        flags: list[str] = ["-cxx-interoperability-mode=default"]
+        if standard is not None:
+            std = str(standard).strip().lower()
+            if not std.startswith("c++"):
+                std = f"c++{std}"
+            flags.extend(["-Xcc", f"-std={std}"])
+        return Preset(
+            name="swift-cxx-interop",
+            category="feature",
+            contributions=(ToolContribution("swiftc", flags=tuple(flags)),),
+        )
+
+    def get_runtime_libs(
+        self, linker_language: str, object_languages: set[str]
+    ) -> list[str]:
+        """Inject cross-language runtimes for mixed Swift/C++ links.
+
+        - swiftc linking C++ objects: on Linux add the C++ stdlib (on macOS
+          libc++ is already linked via the Swift runtime).
+        - C/C++ linker with Swift objects: add the core Swift runtime (the
+          library dirs come from get_runtime_libdirs).
+        """
+        platform = get_platform()
+        if linker_language == "swift" and "cxx" in object_languages:
+            return [] if platform.is_macos else ["stdc++"]
+        if linker_language in ("c", "cxx") and "swift" in object_languages:
+            return ["swiftCore"]
+        return []
+
+    def get_runtime_libdirs(
+        self, linker_language: str, object_languages: set[str]
+    ) -> list[str]:
+        """Swift runtime library dirs when a C/C++ linker links Swift objects.
+
+        Queried from ``swiftc -print-target-info`` (runtimeLibraryPaths).
+        """
+        if linker_language in ("c", "cxx") and "swift" in object_languages:
+            return self._runtime_libdirs()
+        return []
+
+    def _runtime_libdirs(self) -> list[str]:
+        if self._swift_runtime_libdirs is None:
+            import json
+            import subprocess
+
+            self._swift_runtime_libdirs = []
+            try:
+                out = subprocess.run(
+                    ["swiftc", "-print-target-info"],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                    check=True,
+                ).stdout
+                paths = json.loads(out).get("paths", {})
+                self._swift_runtime_libdirs = list(paths.get("runtimeLibraryPaths", []))
+            except (OSError, subprocess.SubprocessError, ValueError):
+                logger.warning(
+                    "Could not query swiftc -print-target-info for runtime "
+                    "library paths; mixed C++/Swift links may need -L set "
+                    "manually"
+                )
+        return self._swift_runtime_libdirs
 
     def _configure_tools(self, config: object) -> bool:
         compiler = SwiftCompiler()
@@ -279,6 +374,20 @@ class SwiftToolchain(UnixToolchain):
         if target.target_type != "program":
             module_flags.append("-parse-as-library")
 
+        # Optional C/C++ interop header (<Module>-Swift.h) for library
+        # modules, emitted next to the .swiftmodule so the same propagated
+        # include dir serves both `import Foo` and `#include "Foo-Swift.h"`.
+        header_flags: list[object] = []
+        header_path = None
+        emit_header = bool(getattr(env.swiftc, "interop_header", False))
+        if emit_header and target.target_type != "program":
+            header_rel = f"{SWIFTMODULE_DIR}/{module_name}-Swift.h"
+            header_path = target.build_dir / SWIFTMODULE_DIR / f"{module_name}-Swift.h"
+            header_flags = [
+                "-emit-clang-header-path",
+                PathToken(path=header_rel, path_type="build"),
+            ]
+
         node._build_info["vars"] = {
             "MODULE_NAME": module_name,
             # path_type="build" paths are given relative to the build dir
@@ -287,9 +396,11 @@ class SwiftToolchain(UnixToolchain):
                 path_type="build",
             ),
             "MODULE_FLAGS": module_flags,
+            "HEADER_FLAGS": header_flags,
         }
-        # Declare the .swiftmodule as an implicit output so Ninja knows
-        # this build produces it (dependents' compiles can depend on it).
+        # Declare the .swiftmodule (and interop header) as implicit outputs
+        # so Ninja knows this build produces them (dependents' compiles can
+        # depend on them).
         node._build_info["outputs"] = {
             "primary": {"path": node.path, "suffix": node.path.suffix},
             "swiftmodule": {
@@ -298,6 +409,18 @@ class SwiftToolchain(UnixToolchain):
                 "implicit": True,
             },
         }
+        if header_path is not None:
+            node._build_info["outputs"]["clang_header"] = {
+                "path": header_path,
+                "suffix": ".h",
+                "implicit": True,
+            }
+            # Adding the header to output_nodes routes it through the
+            # mixed-outputs dependency channel: consumers' compile steps
+            # gain an implicit dep on it (same mechanism as cargo+cbindgen
+            # generated headers), so C++ that #includes it builds after it
+            # exists.
+            target.output_nodes.append(target.project.node(header_path))
 
         # Dependents' compile steps need the module search path and an
         # ordering edge on the .swiftmodule file. Record it on the target;

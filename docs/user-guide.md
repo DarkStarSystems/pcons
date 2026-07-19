@@ -177,6 +177,30 @@ entries are emitted per source file with the whole-module command, the
 convention sourcekit-lsp expects. See `examples/46_swift_hello` and
 `examples/47_swift_library`.
 
+**Swift / C / C++ interop** works in both directions. Swift imports a C
+library through a `module.modulemap` shipped in the library's include dir
+(the propagated include path serves both the modulemap and headers). For
+C++, enable interop mode and header emission:
+
+```python
+env = project.Environment(toolchain="swift")
+env.add_toolchain("c")                  # C/C++ compilers for mixed targets
+env.swiftc.set_cxx_interop("c++17")     # Swift <-> C++ interop mode
+env.swiftc.interop_header = True        # libraries emit <Module>-Swift.h
+
+analyzer = project.StaticLibrary("Analyzer", env, sources=["analyzer.swift"])
+app = project.Program("demo", env, sources=["src/main.cpp"])  # #include "Analyzer-Swift.h"
+app.link_private(analyzer)
+```
+
+The generated header lands next to the `.swiftmodule` in the propagated
+include dir, and consumers' C++ compiles automatically wait for it. When a
+C header is imported in C++-interop mode it is parsed as C++, so it needs
+the usual `extern "C"` guards. Mixed links are handled automatically:
+swiftc drives the link when Swift is involved (bringing the Swift runtime),
+and a C/C++-driven link of Swift objects gets the runtime path injected via
+`swiftc -print-target-info`. See `examples/48_swift_cxx_interop`.
+
 **Fortran** (`gfortran`) is available as `toolchain="fortran"`. It supports all standard Fortran source extensions and uses Ninja dyndep to resolve `MODULE` / `USE` dependencies at build time (requires Ninja ≥ 1.10):
 
 ```python

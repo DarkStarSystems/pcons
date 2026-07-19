@@ -1,0 +1,19 @@
+# Test configuration for the swift_cxx_interop example
+
+[test]
+description = "Demonstrates bidirectional Swift/C/C++ interop (modulemap import + generated -Swift.h)"
+
+expected_outputs = [
+    "build/interop_demo",
+    "build/swiftmodules/Analyzer-Swift.h",
+]
+
+[verify]
+commands = [
+    { run = "./build/interop_demo", expect_stdout = "scaled mean = 40" },
+]
+
+[skip]
+requires = ["swiftc"]
+platforms = ["windows"]
+generators = ["xcode", "make"]

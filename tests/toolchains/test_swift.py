@@ -136,6 +136,61 @@ class TestGroupedCompile:
         assert b.intermediate_nodes[0]._build_info["vars"]["MODULE_NAME"] == "prog_b"
 
 
+class TestCxxInterop:
+    def test_set_cxx_interop_applies_flags(self, swift_project) -> None:
+        project, env = swift_project
+        env.swiftc.set_cxx_interop("c++20")
+        flags = list(env.swiftc.flags)
+        assert "-cxx-interoperability-mode=default" in flags
+        assert "-Xcc" in flags
+        assert "-std=c++20" in flags
+
+    def test_set_cxx_interop_numeric_standard(self, swift_toolchain) -> None:
+        preset = swift_toolchain.make_cxx_interop_preset(17)
+        flags = preset.contributions[0].flags
+        assert "-std=c++17" in flags
+
+    def test_interop_header_emitted_for_libraries(self, swift_project) -> None:
+        project, env = swift_project
+        env.swiftc.interop_header = True
+        lib = project.StaticLibrary("Analyzer", env, sources=["src/extra.swift"])
+        project.resolve()
+
+        info = lib.intermediate_nodes[0]._build_info
+        header_flags = info["vars"]["HEADER_FLAGS"]
+        assert "-emit-clang-header-path" in header_flags
+        assert info["outputs"]["clang_header"]["implicit"] is True
+        # The header rides output_nodes so consumers' compiles wait on it.
+        assert any(str(n.path).endswith("Analyzer-Swift.h") for n in lib.output_nodes)
+
+    def test_no_interop_header_for_programs(self, swift_project) -> None:
+        project, env = swift_project
+        env.swiftc.interop_header = True
+        prog = project.Program("tool", env, sources=["src/main.swift"])
+        project.resolve()
+
+        info = prog.intermediate_nodes[0]._build_info
+        assert info["vars"]["HEADER_FLAGS"] == []
+        assert "clang_header" not in info["outputs"]
+
+
+class TestRuntimeInjection:
+    def test_swift_links_cxx_objects(self, swift_toolchain) -> None:
+        libs = swift_toolchain.get_runtime_libs("swift", {"swift", "cxx"})
+        import sys
+
+        if sys.platform == "darwin":
+            assert libs == []  # libc++ comes with the Swift runtime
+        else:
+            assert "stdc++" in libs
+
+    def test_cxx_links_swift_objects(self, swift_toolchain) -> None:
+        assert "swiftCore" in swift_toolchain.get_runtime_libs("cxx", {"swift"})
+
+    def test_no_injection_for_pure_swift(self, swift_toolchain) -> None:
+        assert swift_toolchain.get_runtime_libs("swift", {"swift"}) == []
+
+
 class TestPresets:
     def test_variant_presets_target_swiftc(self, swift_toolchain) -> None:
         preset = swift_toolchain.make_variant_preset("debug")
