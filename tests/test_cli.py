@@ -487,7 +487,7 @@ class TestCLICommands:
         assert pcons.__version__ in result.stdout
 
     def test_pcons_init(self, tmp_path: Path) -> None:
-        """Test pcons init creates template pcons-build.py."""
+        """Test pcons init in an empty dir scaffolds a working starter."""
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "init"],
             capture_output=True,
@@ -496,17 +496,57 @@ class TestCLICommands:
         )
         assert result.returncode == 0
         assert (tmp_path / "pcons-build.py").exists()
+        # Empty dir: a hello-world starter source is created
+        assert (tmp_path / "src" / "main.c").exists()
 
         # Check content uses the canonical pcons API
         build_content = (tmp_path / "pcons-build.py").read_text()
-        assert "from pcons import Generator, Project, find_c_toolchain" in build_content
-        assert "Generator().generate(project)" in build_content
-        assert "PCONS_BUILD_DIR" in build_content
-        assert "SPDX-License-Identifier" in build_content
-        # Should NOT use internal imports
+        assert "from pcons import Project, find_c_toolchain" in build_content
+        # No explicit generate call needed: generation is automatic
+        assert ".generate(" not in build_content
+        # Project and program named after the directory
+        assert f'Project("{tmp_path.name}")' in build_content
+        assert '"src/main.c",' in build_content
+        # Should NOT use internal imports or legacy boilerplate
         assert "NinjaGenerator" not in build_content
+        assert "Generator()" not in build_content
         assert "from pcons.core" not in build_content
         assert "from pcons.generators" not in build_content
+
+    def test_pcons_init_lang_cpp(self, tmp_path: Path) -> None:
+        """Test pcons init --lang cpp scaffolds a C++ starter."""
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "init", "--lang", "cpp"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        assert (tmp_path / "src" / "main.cpp").exists()
+        assert '"src/main.cpp",' in (tmp_path / "pcons-build.py").read_text()
+
+    def test_pcons_init_adopts_existing_sources(self, tmp_path: Path) -> None:
+        """Test pcons init generates a target from existing sources."""
+        (tmp_path / "src" / "util").mkdir(parents=True)
+        (tmp_path / "include").mkdir()
+        (tmp_path / "src" / "main.cpp").write_text("int main() { return 0; }\n")
+        (tmp_path / "src" / "util" / "helper.cpp").write_text("void helper() {}\n")
+        (tmp_path / "include" / "helper.h").write_text("void helper();\n")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "init"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0
+        # No starter source is scaffolded over existing code
+        assert not (tmp_path / "src" / "main.c").exists()
+
+        build_content = (tmp_path / "pcons-build.py").read_text()
+        assert '"src/main.cpp",' in build_content
+        assert '"src/util/helper.cpp",' in build_content
+        assert 'include_dirs.append("include")' in build_content
 
     def test_pcons_init_creates_valid_python(self, tmp_path: Path) -> None:
         """Test that init creates syntactically valid Python."""
@@ -571,6 +611,54 @@ class TestCLICommands:
         assert result.returncode == 0, f"generate failed: {result.stderr}"
         assert (tmp_path / "build" / "build.ninja").exists()
 
+    def test_auto_generate_without_generate_call(self, tmp_path: Path) -> None:
+        """A script with no generate call auto-generates, even run directly."""
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\nproject = Project('auto')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "pcons-build.py"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_no_auto_generate_on_script_crash(self, tmp_path: Path) -> None:
+        """A crashed script must not generate build files at exit."""
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\n"
+            "project = Project('crash')\n"
+            "raise RuntimeError('boom')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "pcons-build.py"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode != 0
+        assert "boom" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_no_auto_generate_on_sys_exit_via_cli(self, tmp_path: Path) -> None:
+        """A script that sys.exit()s nonzero under the CLI must not generate."""
+        (tmp_path / "pcons-build.py").write_text(
+            "import sys\n"
+            "from pcons import Project\n"
+            "project = Project('bail')\n"
+            "sys.exit(3)\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons.cli", "generate"],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+        assert result.returncode == 3
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
     def test_pcons_init_force(self, tmp_path: Path) -> None:
         """Test pcons init --force overwrites files."""
         # Create existing file
@@ -596,7 +684,7 @@ class TestCLICommands:
 
         # Check content was replaced
         build_content = (tmp_path / "pcons-build.py").read_text()
-        assert "from pcons import Generator, Project, find_c_toolchain" in build_content
+        assert "from pcons import Project, find_c_toolchain" in build_content
 
     def test_pcons_info(self, tmp_path: Path) -> None:
         """Test pcons info shows pcons-build.py docstring."""

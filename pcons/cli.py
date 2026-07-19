@@ -132,6 +132,16 @@ def parse_variables(args: list[str]) -> tuple[dict[str, str], list[str]]:
     return variables, remaining
 
 
+def _cancel_pending_generation() -> None:
+    """Drop pending auto-generation after a failed build script.
+
+    Build files must not be generated from a partially-executed script.
+    """
+    from pcons.generators.generator import BaseGenerator
+
+    BaseGenerator._clear_pending()
+
+
 def run_script(
     script_path: Path,
     build_dir: Path,
@@ -240,10 +250,13 @@ def run_script(
     except SystemExit as e:
         # Script called sys.exit()
         exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
+        if exit_code != 0:
+            _cancel_pending_generation()
         return exit_code, pcons.get_registered_projects()
     except Exception as e:
         logger.error("Build script failed: %s", e)
         traceback.print_exc()
+        _cancel_pending_generation()
         return 1, []
     finally:
         os.chdir(old_cwd)
@@ -825,51 +838,134 @@ def _info_targets(args: argparse.Namespace, script: Path) -> int:
     return 0
 
 
+_SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
+
+_HELLO_C = """\
+#include <stdio.h>
+
+int main(void) {
+    printf("Hello from @NAME@!\\n");
+    return 0;
+}
+"""
+
+_HELLO_CPP = """\
+#include <iostream>
+
+int main() {
+    std::cout << "Hello from @NAME@!\\n";
+    return 0;
+}
+"""
+
+
+def _find_c_sources(root: Path, build_dir: str) -> list[Path]:
+    """Find C/C++ source files in the project root and src/ tree.
+
+    Looks at top-level files and recursively under src/, skipping hidden
+    directories and the build directory. Returns sorted paths relative
+    to *root*.
+    """
+    skip_dirs = {build_dir, "build"}
+    sources = [
+        p for p in root.iterdir() if p.is_file() and p.suffix in _SOURCE_SUFFIXES
+    ]
+    src = root / "src"
+    if src.is_dir():
+        sources += [
+            p
+            for p in src.rglob("*")
+            if p.suffix in _SOURCE_SUFFIXES
+            and not any(
+                part.startswith(".") or part in skip_dirs
+                for part in p.relative_to(root).parts
+            )
+        ]
+    return sorted(p.relative_to(root) for p in sources)
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize a new pcons project.
 
-    Creates a template pcons-build.py file.
+    Writes a pcons-build.py with a program target for any C/C++ sources
+    found; in an empty directory, scaffolds a hello-world starter so the
+    project builds and runs immediately.
     """
+    import re
+
     setup_logging(args.verbose, args.debug)
 
-    build_py = Path("pcons-build.py")
+    root = Path.cwd()
+    build_py = root / "pcons-build.py"
 
     if build_py.exists() and not args.force:
         logger.error("pcons-build.py already exists (use --force to overwrite)")
         return 1
 
-    # Write pcons-build.py template
-    build_template = '''\
+    name = re.sub(r"[^A-Za-z0-9_-]+", "_", root.name).strip("_") or "myproject"
+
+    sources = _find_c_sources(root, args.build_dir)
+    scaffolded = None
+    if not sources:
+        scaffolded = Path("src") / ("main.cpp" if args.lang == "cpp" else "main.c")
+        hello = _HELLO_CPP if args.lang == "cpp" else _HELLO_C
+        (root / "src").mkdir(exist_ok=True)
+        (root / scaffolded).write_text(hello.replace("@NAME@", name))
+        logger.info("Created %s", scaffolded)
+        sources = [scaffolded]
+
+    has_include = (root / "include").is_dir()
+    target_lines = [
+        f"{'app = ' if has_include else ''}project.Program(",
+        f'    "{name}",',
+        "    env,",
+        "    sources=[",
+        *(f'        "{p.as_posix()}",' for p in sources),
+        "    ],",
+        ")",
+    ]
+    if has_include:
+        target_lines.append('app.private.include_dirs.append("include")')
+    target_block = "\n".join(target_lines)
+
+    build_template = f'''\
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
-"""Build script for the project."""
+"""Build script for {name}.
 
-import os
+Run `pcons` to generate build files and build.
+Docs: https://pcons.readthedocs.io
+"""
 
-from pcons import Generator, Project, find_c_toolchain
+from pcons import Project, find_c_toolchain
 
-project = Project("myproject", build_dir=os.environ.get("PCONS_BUILD_DIR", "build"))
+project = Project("{name}")
 env = project.Environment(toolchain=find_c_toolchain())
+env.apply_preset("warnings")
 
-# Define your build targets here, e.g.:
-# project.Program("hello", env, sources=["src/hello.c"])
-
-Generator().generate(project)
+{target_block}
 '''
 
     build_py.write_text(build_template)
     build_py.chmod(0o755)
     logger.info("Created %s", build_py)
 
-    print("Project initialized!")
-    print("Next steps:")
-    print("  1. Edit pcons-build.py to define your build targets")
-    print("  2. Run 'pcons' to build")
+    if scaffolded:
+        print(f"Created {scaffolded} and pcons-build.py")
+    else:
+        n = len(sources)
+        print(
+            f"Created pcons-build.py with a program target for {n} source file{'s' if n > 1 else ''}"
+        )
+    exe = Path(args.build_dir) / (name + (".exe" if os.name == "nt" else ""))
+    run_cmd = str(exe) if os.name == "nt" else f"./{exe.as_posix()}"
     print()
-    print("Build variables:")
-    print("  pcons VARIANT=debug        # Set build variant")
-    print("  pcons -v debug             # Same as above")
-    print("  pcons CC=clang PORT=ofx    # Set custom variables")
+    print("Next steps:")
+    pad = max(len(run_cmd), len("pcons"))
+    print(f"  {'pcons'.ljust(pad)}   # configure and build")
+    print(f"  {run_cmd.ljust(pad)}   # run it")
+    if not scaffolded:
+        print()
+        print("Edit pcons-build.py to adjust targets and sources.")
 
     return 0
 
@@ -1114,6 +1210,12 @@ def create_full_parser() -> argparse.ArgumentParser:
     init_parser = subparsers.add_parser("init", help="Initialize a new pcons project")
     init_parser.add_argument(
         "-f", "--force", action="store_true", help="Overwrite existing files"
+    )
+    init_parser.add_argument(
+        "--lang",
+        choices=["c", "cpp"],
+        default="c",
+        help="Language for the starter program when no sources are found (default: c)",
     )
     add_common_args(init_parser)
     init_parser.set_defaults(func=cmd_init)

@@ -70,6 +70,9 @@ class BaseGenerator:
     __atexit_registered = False
     """Whether the atexit handler has been registered"""
 
+    __excepthook_installed = False
+    """Whether the crash-cancellation excepthook has been installed"""
+
     def __init__(self, name: str) -> None:
         """Initialize a generator.
 
@@ -131,12 +134,36 @@ class BaseGenerator:
             # Mark project as generated when a build generator is registered
             project._mark_generated()
 
-        if not BaseGenerator.__atexit_registered:
-            # Register the atexit handler to run pending generates
-            import atexit
+        BaseGenerator._register_atexit()
 
-            atexit.register(BaseGenerator._generate_pending, _is_atexit=True)
-            BaseGenerator.__atexit_registered = True
+    @staticmethod
+    def _register_atexit() -> None:
+        """Install the atexit hook that runs pending generation (idempotent).
+
+        Called when a top-level Project is created (so build scripts need no
+        explicit generate call) and when a generate is enqueued. Also installs
+        a sys.excepthook wrapper, once per process, that cancels pending
+        generation when the script dies on an unhandled exception — build
+        files must not be generated from a partially-executed script.
+        """
+        if BaseGenerator.__atexit_registered:
+            return
+        import atexit
+
+        atexit.register(BaseGenerator._generate_pending, _is_atexit=True)
+        BaseGenerator.__atexit_registered = True
+
+        if not BaseGenerator.__excepthook_installed:
+            import sys
+
+            prev_hook = sys.excepthook
+
+            def _cancel_pending_on_crash(exc_type, exc, tb):  # type: ignore[no-untyped-def]
+                BaseGenerator._clear_pending()
+                prev_hook(exc_type, exc, tb)
+
+            sys.excepthook = _cancel_pending_on_crash
+            BaseGenerator.__excepthook_installed = True
 
     @staticmethod
     def _clear_pending() -> None:

@@ -129,7 +129,8 @@ pcons build              # Only run ninja (assumes build.ninja exists)
 pcons clean              # Clean build artifacts
 pcons clean --all        # Remove entire build directory
 pcons info               # Show pcons-build.py documentation
-pcons init               # Create a template pcons-build.py
+pcons init               # Create pcons-build.py (adopts existing C/C++ sources,
+                         # or scaffolds a hello-world starter in an empty dir)
 ```
 
 ---

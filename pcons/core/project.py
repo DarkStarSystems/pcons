@@ -196,6 +196,12 @@ class Project(_ProjectBuilders):
         Project.__current = self
         if Project.__top_level is None:
             Project.__top_level = self
+            # Build scripts need no explicit generate call: once a top-level
+            # project exists, pending generation runs at process exit (the
+            # CLI runs it earlier, right after the script).
+            from pcons.generators.generator import BaseGenerator
+
+            BaseGenerator._register_atexit()
 
     @staticmethod
     def current() -> Project:

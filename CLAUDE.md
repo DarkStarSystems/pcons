@@ -47,7 +47,7 @@ Pre-commit hooks run ruff check, ruff format, and ty (type checking) automatical
 3. **Generate** - Write Ninja/Make files
 4. *Build* - User runs `ninja` (pcons not involved)
 
-**Build scripts end with `Generator().generate(project)`**: This auto-resolves the project and writes Ninja files (default). The `Generator()` factory is in `pcons/__init__.py` — do NOT use `NinjaGenerator` directly.
+**Build scripts need no explicit generate call**: creating a top-level `Project` registers automatic generation, which runs when the script finishes (via the CLI or an atexit hook on direct runs) — it auto-resolves the project and writes Ninja files (default). `project.generate()` may still be called explicitly (e.g. to generate early, or in older scripts). Do NOT use `NinjaGenerator` directly; the `Generator()` factory is in `pcons/__init__.py`.
 
 **Target resolution is lazy**: `lib.output_nodes` is empty until `project.resolve()` is called (or `Generator().generate()` is called, which auto-resolves). This allows customizing `output_name` after target creation.
 
