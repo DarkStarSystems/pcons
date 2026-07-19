@@ -15,10 +15,9 @@ through the imported target's public usage requirements.
 import sys
 
 from pcons import Project
-from pcons.toolchains import find_c_toolchain
 
 project = Project("rust_cxx_cbindgen")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c++")
 
 rust_math = project.CargoBuild(
     "rust_math",
@@ -47,5 +46,3 @@ elif sys.platform == "win32":
 
 app = project.Program("stats", env, sources=["src/main.cpp"])
 app.private.link_libs.append(rust_math)
-
-project.generate()

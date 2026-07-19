@@ -18,10 +18,9 @@ actually changes).
 import sys
 
 from pcons import Project
-from pcons.toolchains import find_c_toolchain
 
 project = Project("rust_cxx_hybrid")
-env = project.Environment(toolchain=find_c_toolchain())
+env = project.Environment(toolchain="c++")
 
 # Build the Rust crate as a staticlib. Cargo's target/ goes inside
 # the build dir, so a clean wipes it.
@@ -53,5 +52,3 @@ elif sys.platform == "win32":
 env.cxx.includes.append(project.root_dir / "src")
 app = project.Program("hello_rust", env, sources=["src/main.cpp"])
 app.private.link_libs.append(rust_greet)
-
-project.generate()
