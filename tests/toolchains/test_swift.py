@@ -252,6 +252,40 @@ class TestCrossTarget:
         assert any("-target" in c.flags for c in link)
 
 
+class TestWindows:
+    def test_static_library_gets_static_flag(self, swift_project, monkeypatch) -> None:
+        """On Windows, static libs need -static or importers emit __imp_ refs."""
+        import pcons.toolchains.swift as swift_mod
+
+        class FakeWindows:
+            is_windows = True
+            is_macos = False
+            object_suffix = ".obj"
+            exe_suffix = ".exe"
+            shared_lib_suffix = ".dll"
+
+        monkeypatch.setattr(swift_mod, "get_platform", lambda: FakeWindows())
+        project, env = swift_project
+        lib = project.StaticLibrary("Geometry", env, sources=["src/extra.swift"])
+        project.resolve()
+
+        assert (
+            "-static" in lib.intermediate_nodes[0]._build_info["vars"]["MODULE_FLAGS"]
+        )
+
+    def test_archiver_prefers_llvm_ar_on_windows(self, monkeypatch) -> None:
+        """llvm-ar ships with the swift.org Windows toolchain; ar doesn't."""
+        import pcons.toolchains.swift as swift_mod
+        from pcons.toolchains.swift import SwiftArchiver
+
+        class FakeWindows:
+            is_windows = True
+            is_macos = False
+
+        monkeypatch.setattr(swift_mod, "get_platform", lambda: FakeWindows())
+        assert SwiftArchiver().default_vars()["cmd"] == "llvm-ar"
+
+
 class TestRuntimeInjection:
     def test_swift_links_cxx_objects(self, swift_toolchain) -> None:
         libs = swift_toolchain.get_runtime_libs("swift", {"swift", "cxx"})

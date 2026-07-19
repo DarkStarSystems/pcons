@@ -230,6 +230,26 @@ class SwiftCompiler(BaseTool):
         return self._find_tool_config(config, "swiftc", with_version=True)
 
 
+class SwiftArchiver(GccArchiver):
+    """Archiver for Swift static libraries.
+
+    Plain ``ar`` everywhere except Windows, where ``llvm-ar`` is used —
+    it ships with the swift.org toolchain, so it's always present next
+    to swiftc (a GNU ar generally isn't).
+    """
+
+    def _archiver_cmd(self) -> str:
+        return "llvm-ar" if get_platform().is_windows else "ar"
+
+    def default_vars(self) -> dict[str, object]:
+        vars = super().default_vars()
+        vars["cmd"] = self._archiver_cmd()
+        return vars
+
+    def configure(self, config: object) -> ToolConfig | None:
+        return self._find_tool_config(config, self._archiver_cmd())
+
+
 class SwiftLinker(BaseTool):
     """Swift linker tool: swiftc as the link driver.
 
@@ -433,7 +453,7 @@ class SwiftToolchain(UnixToolchain):
 
     def _configure_tools(self, config: object) -> bool:
         compiler = SwiftCompiler()
-        archiver = GccArchiver()
+        archiver = SwiftArchiver()
         linker = SwiftLinker()
 
         compiler_config = compiler.configure(config)
@@ -470,6 +490,11 @@ class SwiftToolchain(UnixToolchain):
         interface_path = None
         if is_library:
             module_flags.append("-parse-as-library")
+            # On Windows the .swiftmodule records linkage: without -static,
+            # importers emit __imp_ (dllimport) references and fail to link
+            # against a static library.
+            if target.target_type == "static_library" and get_platform().is_windows:
+                module_flags.append("-static")
             if bool(getattr(env.swiftc, "library_evolution", False)):
                 interface_rel = f"{SWIFTMODULE_DIR}/{module_name}.swiftinterface"
                 interface_path = (
@@ -588,9 +613,9 @@ toolchain_registry.register(
     SwiftToolchain,
     aliases=["swiftc"],
     check_command="swiftc",
-    tool_classes=[SwiftCompiler, GccArchiver, SwiftLinker],
+    tool_classes=[SwiftCompiler, SwiftArchiver, SwiftLinker],
     category="swift",
-    platforms=["darwin", "linux"],
+    platforms=["darwin", "linux", "win32"],
     description="Swift compiler (whole-module compilation, swiftc links)",
     finder="find_swift_toolchain()",
 )

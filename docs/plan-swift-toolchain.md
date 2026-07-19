@@ -1,9 +1,11 @@
 # Plan: Swift Toolchain Support
 
-Status: **phases 1-4 implemented** except Windows (drafted 2026-06-04,
-revised and implemented 2026-07-19; remaining: Windows support, and
-Linux C++-interop header consumption (Swift-version/libstdc++
-sensitive; example 48 is macOS-gated))
+Status: **fully implemented** (drafted 2026-06-04, revised and
+implemented 2026-07-19; Windows verified on real hardware with the
+swift.org 6.3.3 toolchain — static libraries need `-static` to avoid
+dllimport references, llvm-ar is the archiver. One known limitation:
+Linux C++-interop header consumption is Swift-version/libstdc++
+sensitive, so example 48 is macOS-gated)
 
 ## Summary
 

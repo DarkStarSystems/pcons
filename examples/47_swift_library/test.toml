@@ -16,5 +16,5 @@ commands = [
 
 [skip]
 requires = ["swiftc"]
-platforms = ["windows"]
+# xcode/make generators untested with Swift
 generators = ["xcode", "make"]

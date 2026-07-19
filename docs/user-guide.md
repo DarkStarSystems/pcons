@@ -155,8 +155,8 @@ IDE autocompletion for these names comes from the generated `KnownToolchain` typ
 - **Windows**: clang-cl → msvc → llvm → gcc
 - **Linux / macOS**: llvm → gcc
 
-**Swift** is available as `toolchain="swift"` (requires Xcode on macOS or a
-swift.org toolchain on Linux). Swift's compilation unit is the module, not the
+**Swift** is available as `toolchain="swift"` (requires Xcode on macOS, or a
+swift.org toolchain on Linux and Windows). Swift's compilation unit is the module, not the
 file: each pcons target compiles as one Swift module in a single whole-module
 `swiftc` invocation, so files in a target see each other without imports.
 Importing another target's module is an ordinary dependency — the library's
