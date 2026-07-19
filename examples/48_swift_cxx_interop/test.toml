@@ -15,5 +15,9 @@ commands = [
 
 [skip]
 requires = ["swiftc"]
-platforms = ["windows"]
+# C++ interop header consumption is macOS-only for now: on Linux the
+# generated -Swift.h is sensitive to the Swift version and the local
+# C++ standard library (clang + gcc libstdc++ mismatches), which varies
+# across distros/runners. Pure Swift (46/47) still runs on Linux.
+platforms = ["windows", "linux"]
 generators = ["xcode", "make"]

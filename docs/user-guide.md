@@ -196,7 +196,9 @@ app.link_private(analyzer)
 The generated header lands next to the `.swiftmodule` in the propagated
 include dir, and consumers' C++ compiles automatically wait for it. When a
 C header is imported in C++-interop mode it is parsed as C++, so it needs
-the usual `extern "C"` guards. Mixed links are handled automatically:
+the usual `extern "C"` guards. Consuming the generated header from C++ is currently reliable on
+macOS; on Linux it depends on the Swift version and C++ standard library in
+use. Mixed links are handled automatically:
 swiftc drives the link when Swift is involved (bringing the Swift runtime),
 and a C/C++-driven link of Swift objects gets the runtime path injected via
 `swiftc -print-target-info`. See `examples/48_swift_cxx_interop`.
