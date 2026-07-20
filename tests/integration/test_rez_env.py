@@ -355,19 +355,25 @@ class TestPkgConfigOverride:
         import shutil
         import subprocess
 
-        if shutil.which("pkg-config") is None:
+        pkg_config = shutil.which("pkg-config")
+        if pkg_config is None:
             pytest.skip("pkg-config not installed")
         # msys2's pkg-config expects colon-separated POSIX paths in
         # PKG_CONFIG_PATH; a native Windows path (with its drive colon) gets
         # mangled and nothing is found. Probe the capability rather than
-        # sniffing the binary's origin.
+        # sniffing the binary's origin. Use the resolved path: on Windows,
+        # which() may match via PATHEXT (e.g. a .bat shim) that a bare-name
+        # subprocess call cannot run.
         probe = tmp_path / "pkgconfig-probe"
         probe.mkdir()
         (probe / "probe.pc").write_text("Name: probe\nDescription: x\nVersion: 1.0\n")
-        result = subprocess.run(
-            ["pkg-config", "--exists", "probe"],
-            env={**os.environ, "PKG_CONFIG_PATH": str(probe)},
-        )
+        try:
+            result = subprocess.run(
+                [pkg_config, "--exists", "probe"],
+                env={**os.environ, "PKG_CONFIG_PATH": str(probe)},
+            )
+        except OSError:
+            pytest.skip("pkg-config found but not runnable")
         if result.returncode != 0:
             pytest.skip(
                 "pkg-config cannot use native paths in PKG_CONFIG_PATH (msys2 build?)"
