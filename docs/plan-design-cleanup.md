@@ -66,7 +66,7 @@ as a "Preset application" section in docs/presets.md first, then implement.
 
 ## Theme 2 — One concept, two mechanisms
 
-### 2a. emscripten()/wasi_sdk() presets under-realize vs dedicated toolchains — **todo**
+### 2a. emscripten()/wasi_sdk() presets under-realize vs dedicated toolchains — **done** (fail-fast chosen: wasm presets on native toolchains raise; wasm is toolchain-shaped)
 - `_cmd_contributions` (toolchain.py:998) repoints only cc/cxx from
   `env_vars`; the dedicated toolchains also repoint `link`, change output
   suffixes to .js/.wasm, and reject shared libs (emscripten.py:312,
@@ -78,7 +78,7 @@ as a "Preset application" section in docs/presets.md first, then implement.
   a wasm preset to a non-wasm toolchain raises, directing to the dedicated
   toolchain. Decide which; don't leave both half-working.
 
-### 2b. `CrossPreset.env_vars` — env-var vocabulary for tool-cmd overrides — **todo**
+### 2b. `CrossPreset.env_vars` — env-var vocabulary for tool-cmd overrides — **done** (tool_cmds added; env_vars deprecated alias; android() gains link/ar)
 - The field is documented as "CC, CXX commands" (presets.py:36) and consumed
   only for cc/cxx (toolchain.py:1002); no way to express link/ar/ranlib.
   GCC's fail-fast also matches the literal strings "CC"/"CXX" (gcc.py:386).
@@ -106,7 +106,7 @@ as a "Preset application" section in docs/presets.md first, then implement.
 - Direction: reimplement `use()` over the same UsageRequirements merge path
   targets use; map vocabulary in one place.
 
-### 2e. SwiftToolchain inheritance / IS_CLANG_DRIVER drift — **todo** (small)
+### 2e. SwiftToolchain inheritance / IS_CLANG_DRIVER drift — **done** (comment/doc fix; IS_CLANG_DRIVER documented as 'declared cc/cxx accept --target')
 - `SwiftToolchain(UnixToolchain)` inherits `IS_CLANG_DRIVER=False`; its
   `_target_contributions` comment (swift.py:416) claims to keep cc/cxx
   contributions for mixed builds, but those are never emitted (gated on

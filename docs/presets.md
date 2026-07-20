@@ -228,10 +228,18 @@ Every toolchain reaches a foreign target in one (or both) of two ways:
    (`-target`, `-sdk`).
 2. **Binary-retargeted** — a different tool binary per target. GCC cross
    binaries (`aarch64-linux-gnu-gcc`), Emscripten (`emcc`), wasi-sdk's
-   bundled clang. Selected via the preset's `env_vars` (`CC`/`CXX`).
+   bundled clang. Selected via the preset's `tool_cmds`, keyed by pcons
+   tool name (`cc`, `cxx`, `link`, `ar`, ...) so any tool can be
+   repointed; `env_vars` (`CC`/`CXX`/`LD`/`AR`) survives as a deprecated
+   alias.
 
 A preset may carry both (Android does: per-triple clang wrappers *and* a
-triple); each toolchain consumes the mechanism it understands. A toolchain
+triple); each toolchain consumes the mechanism it understands. Some
+targets are *toolchain-shaped*, not preset-shaped: WebAssembly needs the
+dedicated `emscripten`/`wasi` toolchains, which own output suffixes,
+shared-library rules, and the link driver — applying a wasm cross preset
+to a native toolchain raises rather than half-applying (compile with
+emcc, link with the host driver). A toolchain
 that can realize **neither** mechanism from a given preset must **raise at
 apply time** with a message naming what's missing — never partially apply
 (GCC rejects triple-only presets, telling you to provide cross binaries or
@@ -266,7 +274,8 @@ the arch preset.
 | `triple` | **canonical target identity** for flag-retargeted drivers; encodes CPU, vendor, OS, ABI (and for Apple, min version) | clang `--target=`, swiftc `-target`; ignored by binary-retargeted drivers (their binary *is* the triple) |
 | `arch` | CPU name in the target ecosystem's own vocabulary (`arm64`, `arm64-v8a`, `wasm32`); metadata for naming and platform-suffix decisions | **nothing** — never a flag source |
 | `sysroot` | root of target headers/libraries (sysroot, SDK, NDK sysroot) | `--sysroot=` (GNU-style), `-isysroot` (Apple clang), `-sdk` (swiftc) |
-| `env_vars` | tool-binary overrides (`CC`, `CXX`) — the binary-retarget mechanism | replaces `cc.cmd` / `cxx.cmd` |
+| `tool_cmds` | per-tool command overrides keyed by pcons tool name — the binary-retarget mechanism | replaces `<tool>.cmd` for every named tool |
+| `env_vars` | *(deprecated alias for `tool_cmds`: CC→cc, CXX→cxx, LD→link, AR→ar)* | merged into `tool_cmds`; `tool_cmds` wins |
 | `extra_compile_flags` / `extra_link_flags` | verbatim escape hatch for target-required flags (`-mios-version-min=`, `-sSIDE_MODULE=1`) | appended to `cc`+`cxx` / `link` as-is |
 
 ### Bounded auto-detection
@@ -396,6 +405,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | `CrossPreset.arch` decoupled from flag emission (host-independent) | implemented |
 | Fail fast on unrealizable cross presets (MSVC + any, GCC + triple-only) | implemented |
 | MSVC/clang-cl `set_target_arch` selects the cross toolset (cl/lib dirs), not just `/MACHINE:` | implemented |
+| `tool_cmds` binary-retarget (any tool; `env_vars` deprecated alias); wasm presets require the wasm toolchains | implemented |
 | `env.cxx.set_standard` (tool-namespace setting via `tool_setting`) | implemented |
 | Registry, `scope/name` namespacing, `register_preset`/`preset`/`list_presets` | implemented |
 | Imperative escape hatch (`register_preset(..., imperative=True)`) | implemented |

@@ -19,6 +19,14 @@ import platform
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Deprecated env_vars keys mapped to pcons tool names (see CrossPreset).
+_ENV_VAR_TOOL_MAP: dict[str, str] = {
+    "CC": "cc",
+    "CXX": "cxx",
+    "LD": "link",
+    "AR": "ar",
+}
+
 
 @dataclass(frozen=True)
 class CrossPreset:
@@ -33,7 +41,12 @@ class CrossPreset:
         sysroot: Root of the target's headers/libraries (sysroot, SDK).
         extra_compile_flags: Additional compile flags for this target.
         extra_link_flags: Additional link flags for this target.
-        env_vars: Environment variable overrides (e.g., CC, CXX commands).
+        tool_cmds: Per-tool command overrides keyed by pcons tool name
+                   ("cc", "cxx", "link", "ar", ...) — the binary-retarget
+                   mechanism (docs/presets.md).
+        env_vars: Deprecated alias for tool_cmds using environment-variable
+                  vocabulary (CC→cc, CXX→cxx, LD→link, AR→ar). tool_cmds
+                  wins on conflict.
     """
 
     name: str
@@ -42,7 +55,18 @@ class CrossPreset:
     sysroot: str | None = None
     extra_compile_flags: tuple[str, ...] = ()
     extra_link_flags: tuple[str, ...] = ()
+    tool_cmds: dict[str, str] = field(default_factory=dict)
     env_vars: dict[str, str] = field(default_factory=dict)
+
+    def resolved_tool_cmds(self) -> dict[str, str]:
+        """tool_cmds merged with the deprecated env_vars aliases."""
+        cmds: dict[str, str] = {}
+        for var, value in self.env_vars.items():
+            tool = _ENV_VAR_TOOL_MAP.get(var.upper())
+            if tool is not None:
+                cmds[tool] = value
+        cmds.update(self.tool_cmds)
+        return cmds
 
 
 def android(
@@ -94,9 +118,11 @@ def android(
         arch=arch,
         triple=triple,
         sysroot=sysroot,
-        env_vars={
-            "CC": str(bin_dir / f"{triple}-clang"),
-            "CXX": str(bin_dir / f"{triple}-clang++"),
+        tool_cmds={
+            "cc": str(bin_dir / f"{triple}-clang"),
+            "cxx": str(bin_dir / f"{triple}-clang++"),
+            "link": str(bin_dir / f"{triple}-clang++"),
+            "ar": str(bin_dir / "llvm-ar"),
         },
     )
 
@@ -144,9 +170,11 @@ def emscripten(
 ) -> CrossPreset:
     """Create a cross-compilation preset for WebAssembly via Emscripten.
 
-    Use this with a native C/C++ toolchain (LLVM or GCC) to cross-compile
-    to WebAssembly using the Emscripten SDK.  For WASI targets, use the
-    dedicated :class:`WasiToolchain` or the :func:`wasi_sdk` preset instead.
+    Apply to the dedicated Emscripten toolchain
+    (``project.Environment(toolchain="emscripten")``), which owns output
+    suffixes, shared-library rules, and the link driver; applying a wasm
+    preset to a native toolchain raises. For WASI targets use
+    ``toolchain="wasi"`` and :func:`wasi_sdk`.
 
     Args:
         emsdk: Path to the Emscripten SDK root. If None, assumes emcc
@@ -155,22 +183,22 @@ def emscripten(
     Returns:
         CrossPreset configured for Emscripten WebAssembly.
     """
-    env_vars: dict[str, str] = {}
+    tool_cmds: dict[str, str] = {}
 
     if emsdk:
         emsdk_path = Path(emsdk).expanduser()
         upstream = emsdk_path / "upstream" / "emscripten"
-        env_vars["CC"] = str(upstream / "emcc")
-        env_vars["CXX"] = str(upstream / "em++")
+        tool_cmds["cc"] = str(upstream / "emcc")
+        tool_cmds["cxx"] = str(upstream / "em++")
     else:
-        env_vars["CC"] = "emcc"
-        env_vars["CXX"] = "em++"
+        tool_cmds["cc"] = "emcc"
+        tool_cmds["cxx"] = "em++"
 
     return CrossPreset(
         name="wasm32-emscripten",
         arch="wasm32",
         triple="wasm32-unknown-emscripten",
-        env_vars=env_vars,
+        tool_cmds=tool_cmds,
     )
 
 
@@ -222,7 +250,7 @@ def pyodide(
         # Extension modules are position-independent Emscripten side modules.
         extra_compile_flags=base.extra_compile_flags + ("-fPIC",),
         extra_link_flags=base.extra_link_flags + ("-sSIDE_MODULE=1",),
-        env_vars=base.env_vars,
+        tool_cmds=base.tool_cmds,
     )
 
 
@@ -231,9 +259,9 @@ def wasi_sdk(
 ) -> CrossPreset:
     """Create a cross-compilation preset for WASI via wasi-sdk.
 
-    This preset is for use with an existing LLVM toolchain when you want
-    to cross-compile to WASI without using :func:`find_wasi_toolchain`.
-    For a fully self-contained WASI build, prefer :class:`WasiToolchain`.
+    Apply to the dedicated WASI toolchain
+    (``project.Environment(toolchain="wasi")``); applying a wasm preset to
+    a native toolchain raises (docs/presets.md).
 
     Args:
         sdk_path: Path to the wasi-sdk root. If None, auto-detected
@@ -245,7 +273,7 @@ def wasi_sdk(
     from pcons.toolchains.wasi import find_wasi_sdk
 
     sysroot: str | None = None
-    env_vars: dict[str, str] = {}
+    tool_cmds: dict[str, str] = {}
 
     if sdk_path:
         p = Path(sdk_path).expanduser()
@@ -259,15 +287,15 @@ def wasi_sdk(
             sysroot_dir = p / "wasi-sysroot"
         if sysroot_dir.is_dir():
             sysroot = str(sysroot_dir)
-        env_vars["CC"] = str(bin_dir / "clang")
-        env_vars["CXX"] = str(bin_dir / "clang++")
+        tool_cmds["cc"] = str(bin_dir / "clang")
+        tool_cmds["cxx"] = str(bin_dir / "clang++")
 
     return CrossPreset(
         name="wasm32-wasi",
         arch="wasm32",
         triple="wasm32-wasi",
         sysroot=sysroot,
-        env_vars=env_vars,
+        tool_cmds=tool_cmds,
     )
 
 

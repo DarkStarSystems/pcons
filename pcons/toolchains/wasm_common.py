@@ -23,6 +23,9 @@ if TYPE_CHECKING:
 class WasmToolchain(UnixToolchain):
     """Base for wasm32 toolchains compiling C/C++ via a clang-like driver.
 
+    TARGETS_WASM marks these as the sanctioned home for wasm cross presets
+    (a wasm preset on a native toolchain raises; see UnixToolchain).
+
     Subclasses set `TOOL_NAMES`, `program_suffix` (".js"/".wasm"), and
     `platform_label` (used in the "no shared libraries" error messages), and
     provide SDK discovery via __init__/_configure_tools/setup.
@@ -30,6 +33,8 @@ class WasmToolchain(UnixToolchain):
     `TOOL_NAMES` stays on the concrete subclasses: the stub generator treats any
     class carrying it as a real toolchain, so the abstract base must not.
     """
+
+    TARGETS_WASM = True
 
     program_suffix: str
     platform_label: str

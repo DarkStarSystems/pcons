@@ -1006,14 +1006,25 @@ class BaseToolchain(ABC):
 
     @staticmethod
     def _cmd_contributions(cross: Any) -> list[ToolContribution]:
-        """cc/cxx command overrides from a CrossPreset's env_vars (CC/CXX)."""
-        contribs: list[ToolContribution] = []
-        env_vars = getattr(cross, "env_vars", None) or {}
-        for var_name, value in env_vars.items():
-            tool_name = var_name.lower()
-            if tool_name in ("cc", "cxx"):
-                contribs.append(ToolContribution(tool_name, cmd=value))
-        return contribs
+        """Per-tool command overrides from a CrossPreset.
+
+        Reads tool_cmds (keyed by pcons tool name) merged with the
+        deprecated env_vars aliases via CrossPreset.resolved_tool_cmds();
+        any tool the preset names can be repointed (cc, cxx, link, ar, ...).
+        """
+        resolve = getattr(cross, "resolved_tool_cmds", None)
+        if resolve is not None:
+            cmds = resolve()
+        else:
+            # Duck-typed descriptor without the helper: accept both fields.
+            cmds = dict(getattr(cross, "tool_cmds", None) or {})
+            for var_name, value in (getattr(cross, "env_vars", None) or {}).items():
+                tool = {"CC": "cc", "CXX": "cxx", "LD": "link", "AR": "ar"}.get(
+                    var_name.upper()
+                )
+                if tool is not None and tool not in cmds:
+                    cmds[tool] = value
+        return [ToolContribution(tool, cmd=cmd) for tool, cmd in sorted(cmds.items())]
 
     @staticmethod
     def _sysroot_contributions(cross: Any) -> list[ToolContribution]:

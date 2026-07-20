@@ -411,9 +411,13 @@ class SwiftToolchain(UnixToolchain):
         if not triple:
             return contribs
         # swiftc drives this toolchain's link and rejects clang-style
-        # -arch/--target link flags; the Swift -target triple carries the
-        # architecture. Keep the cc/cxx contributions (for mixed C/C++
-        # targets in the same env) but replace the link ones.
+        # -arch/--target/--sysroot link flags; the Swift -target triple
+        # carries the architecture, so replace the base link contributions
+        # with swiftc-style ones. (Any cc/cxx-targeted contributions from
+        # the base are inert here — this toolchain declares no cc/cxx
+        # tools, so they're skipped as broadcast misses at apply time; a
+        # mixed C/C++ build gets its cc/cxx retargeting from a co-resident
+        # LLVM toolchain's own realization.)
         contribs = [c for c in contribs if c.tool != "link"]
         swift_flags: list[str] = ["-target", str(triple)]
         sdk = getattr(cross, "sysroot", None) or apple_sdk_for_triple(str(triple))

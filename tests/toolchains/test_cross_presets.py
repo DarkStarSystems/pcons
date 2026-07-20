@@ -93,12 +93,13 @@ class TestAndroidPreset:
         with pytest.raises(ValueError, match="Unknown Android architecture"):
             android(ndk="/fake/ndk", arch="mips")
 
-    def test_env_vars_set(self) -> None:
+    def test_tool_cmds_set(self) -> None:
         preset = android(ndk="/fake/ndk")
-        assert "CC" in preset.env_vars
-        assert "CXX" in preset.env_vars
-        assert "clang" in preset.env_vars["CC"]
-        assert "clang++" in preset.env_vars["CXX"]
+        cmds = preset.resolved_tool_cmds()
+        assert "clang" in cmds["cc"]
+        assert "clang++" in cmds["cxx"]
+        assert "clang++" in cmds["link"]
+        assert "llvm-ar" in cmds["ar"]
 
     def test_sysroot_set(self) -> None:
         preset = android(ndk="/fake/ndk")
@@ -136,13 +137,13 @@ class TestEmscriptenPreset:
         assert preset.name == "wasm32-emscripten"
         assert preset.arch == "wasm32"
         assert preset.triple == "wasm32-unknown-emscripten"
-        assert preset.env_vars["CC"] == "emcc"
-        assert preset.env_vars["CXX"] == "em++"
+        assert preset.tool_cmds["cc"] == "emcc"
+        assert preset.tool_cmds["cxx"] == "em++"
 
     def test_custom_emsdk(self) -> None:
         preset = emscripten(emsdk="/fake/emsdk")
-        assert "emcc" in preset.env_vars["CC"]
-        assert "em++" in preset.env_vars["CXX"]
+        assert "emcc" in preset.tool_cmds["cc"]
+        assert "em++" in preset.tool_cmds["cxx"]
 
 
 class TestPyodidePreset:
@@ -154,8 +155,8 @@ class TestPyodidePreset:
         assert preset.arch == "wasm32"
         assert preset.triple == "wasm32-unknown-emscripten"
         # Builds on emscripten() — keeps the emcc/em++ commands.
-        assert preset.env_vars["CC"] == "emcc"
-        assert preset.env_vars["CXX"] == "em++"
+        assert preset.tool_cmds["cc"] == "emcc"
+        assert preset.tool_cmds["cxx"] == "em++"
 
     def test_side_module_flags(self) -> None:
         preset = pyodide()
@@ -481,3 +482,89 @@ class TestCrossPresetApplication:
         env.apply_cross_preset(preset)
 
         assert "--target=aarch64-linux-gnu" in env.cc.flags
+
+
+class TestBinaryRetarget:
+    """tool_cmds is the binary-retarget mechanism; env_vars is a deprecated
+    alias (docs/presets.md, cross-target contract)."""
+
+    def test_tool_cmds_repoints_all_named_tools(self, test_project):  # noqa: F811
+        from pcons.toolchains.llvm import LlvmToolchain
+
+        env = _make_unix_env()
+        ar = env.add_tool("ar")
+        ar.set("cmd", "ar")
+        ar.set("flags", [])
+
+        preset = CrossPreset(
+            name="test",
+            arch="aarch64",
+            triple="aarch64-linux-gnu",
+            tool_cmds={
+                "cc": "/x/cc",
+                "cxx": "/x/cxx",
+                "link": "/x/link",
+                "ar": "/x/ar",
+            },
+        )
+        LlvmToolchain().apply_cross_preset(env, preset)
+
+        assert env.cc.cmd == "/x/cc"
+        assert env.cxx.cmd == "/x/cxx"
+        assert env.link.cmd == "/x/link"
+        assert env.ar.cmd == "/x/ar"
+
+    def test_env_vars_alias_still_works(self, test_project):  # noqa: F811
+        from pcons.toolchains.gcc import GccToolchain
+
+        env = _make_unix_env()
+        preset = CrossPreset(
+            name="legacy",
+            arch="aarch64",
+            triple="aarch64-linux-gnu",
+            env_vars={"CC": "aarch64-linux-gnu-gcc", "CXX": "aarch64-linux-gnu-g++"},
+        )
+        GccToolchain().apply_cross_preset(env, preset)
+
+        assert env.cc.cmd == "aarch64-linux-gnu-gcc"
+        assert env.cxx.cmd == "aarch64-linux-gnu-g++"
+
+    def test_tool_cmds_wins_over_env_vars(self) -> None:
+        preset = CrossPreset(
+            name="both",
+            arch="x",
+            tool_cmds={"cc": "new-cc"},
+            env_vars={"CC": "old-cc", "AR": "old-ar"},
+        )
+        cmds = preset.resolved_tool_cmds()
+        assert cmds["cc"] == "new-cc"
+        assert cmds["ar"] == "old-ar"
+
+
+class TestWasmPresetsNeedWasmToolchain:
+    """wasm cross presets on a native toolchain fail fast: the dedicated
+    toolchains own suffixes, shared-lib rules, and the link driver."""
+
+    def test_emscripten_preset_on_llvm_raises(self, test_project):  # noqa: F811
+        from pcons.toolchains.llvm import LlvmToolchain
+
+        env = _make_unix_env()
+        with pytest.raises(ValueError, match="dedicated toolchain"):
+            LlvmToolchain().apply_cross_preset(env, emscripten())
+
+    def test_wasi_preset_on_gcc_raises(self, test_project):  # noqa: F811
+        from pcons.toolchains.gcc import GccToolchain
+        from pcons.toolchains.presets import wasi_sdk
+
+        env = _make_unix_env()
+        with pytest.raises(ValueError, match="dedicated toolchain"):
+            GccToolchain().apply_cross_preset(env, wasi_sdk())
+
+    def test_pyodide_on_emscripten_toolchain_ok(self, test_project):  # noqa: F811
+        """Already covered above, but assert the positive path explicitly:
+        wasm presets on wasm toolchains apply their extra flags."""
+        from pcons.toolchains.emscripten import EmscriptenToolchain
+
+        env = _make_unix_env()
+        EmscriptenToolchain().apply_cross_preset(env, pyodide())
+        assert "-sSIDE_MODULE=1" in env.link.flags

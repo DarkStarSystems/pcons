@@ -24,6 +24,7 @@ from pcons.util.macos import apple_sdk_for_triple
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pcons.core.environment import Environment
     from pcons.core.subst import PathToken
     from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
@@ -44,11 +45,40 @@ class UnixToolchain(BaseToolchain):
     - Override get_source_handler() if they handle additional file types
     """
 
-    # Whether cc/cxx are Clang-family drivers that understand
-    # ``--target=<triple>``. GCC (and GCC-based toolchains like gfortran)
-    # reject --target=; it's a Clang/clang-cl flag. LlvmToolchain overrides
-    # this to True.
+    # True when this toolchain's declared cc/cxx tools are Clang-family
+    # drivers that accept ``--target=<triple>``. GCC (and GCC-based
+    # toolchains like gfortran) reject --target= and select targets by
+    # binary instead; LlvmToolchain overrides this to True. This describes
+    # the declared cc/cxx tools only — a toolchain with no cc/cxx at all
+    # (e.g. Swift) leaves it False, meaning "nothing to retarget", not
+    # "my compiler isn't clang".
     IS_CLANG_DRIVER: ClassVar[bool] = False
+
+    # True for toolchains whose output is WebAssembly (see WasmToolchain).
+    # wasm cross presets applied to a non-wasm toolchain fail fast: they
+    # could repoint the compilers but not the output suffixes, shared-lib
+    # rules, or link driver, which live in the dedicated toolchains.
+    TARGETS_WASM: ClassVar[bool] = False
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross preset, rejecting wasm targets on native toolchains.
+
+        WebAssembly is toolchain-shaped, not preset-shaped: emscripten/wasi
+        own output suffixes (.js/.wasm), shared-library rejection, and the
+        link driver. A wasm preset on a native toolchain would half-apply
+        (compile with emcc, link with the host driver), so it raises
+        instead (docs/presets.md).
+        """
+        triple = str(getattr(preset, "triple", None) or "")
+        if triple.startswith("wasm32") and not self.TARGETS_WASM:
+            name = getattr(preset, "name", preset)
+            raise ValueError(
+                f"Cross preset '{name}' targets WebAssembly, which needs its "
+                f"dedicated toolchain rather than {self.name}: use "
+                f'project.Environment(toolchain="emscripten") or '
+                f'toolchain="wasi".'
+            )
+        super().apply_cross_preset(env, preset)
 
     # Named feature presets for common development workflows (see docs/presets.md).
     # Keep them small and orthogonal: `warnings` enables warnings; `werror`

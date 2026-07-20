@@ -2845,13 +2845,12 @@ env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
 # iOS Simulator
 env.apply_cross_preset(ios(arch="x86_64"))
 
-# WebAssembly via Emscripten
-env.apply_cross_preset(emscripten(emsdk="~/emsdk"))
-# Or if emcc is already in PATH:
-env.apply_cross_preset(emscripten())
-
-# WebAssembly via wasi-sdk (as a cross-preset on an LLVM toolchain)
-env.apply_cross_preset(wasi_sdk())
+# WebAssembly presets apply to the *dedicated* wasm toolchains, which own
+# output suffixes (.js/.wasm), shared-library rules, and the link driver —
+# applying a wasm preset to a native toolchain raises. The presets add
+# target-specific flags, e.g. pyodide() side-module flags:
+env = project.Environment(toolchain="emscripten")
+env.apply_cross_preset(pyodide("2026_0"))
 
 # Generic Linux cross-compilation
 env.apply_cross_preset(linux_cross(
