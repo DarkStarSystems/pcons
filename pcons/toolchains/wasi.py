@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder import CommandBuilder
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gnu_common import (
     gnu_archiver_builders,
@@ -149,8 +150,7 @@ class WasiCCompiler(BaseTool):
         return gnu_compile_vars(
             "clang",
             "cc",
-            target_tokens=["--target=wasm32-wasi", "$cc.sysroot_flag"],
-            extra_vars={"sysroot_flag": ""},  # placeholder, set during configure
+            target_tokens=["--target=wasm32-wasi"],
         )
 
     def builders(self) -> dict[str, Builder]:
@@ -173,8 +173,7 @@ class WasiCxxCompiler(BaseTool):
         return gnu_compile_vars(
             "clang++",
             "cxx",
-            target_tokens=["--target=wasm32-wasi", "$cxx.sysroot_flag"],
-            extra_vars={"sysroot_flag": ""},  # placeholder, set during configure
+            target_tokens=["--target=wasm32-wasi"],
         )
 
     def builders(self) -> dict[str, Builder]:
@@ -224,7 +223,6 @@ class WasiLinker(BaseTool):
             "progcmd": [
                 "$link.cmd",
                 "--target=wasm32-wasi",
-                "$link.sysroot_flag",
                 "$link.flags",
                 "-o",
                 TargetPath(),
@@ -232,7 +230,6 @@ class WasiLinker(BaseTool):
                 "${prefix(link.Lprefix, link.libdirs)}",
                 "${prefix(link.lprefix, link.libs)}",
             ],
-            "sysroot_flag": "",
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -312,10 +309,10 @@ class WasiToolchain(WasmToolchain):
         return True
 
     def setup(self, env: Environment) -> None:
-        """Set up tools and inject sysroot/SDK paths into the environment.
+        """Set up tools, detecting the SDK lazily if configure didn't.
 
-        If the SDK wasn't detected during configure (e.g. when created
-        via the toolchain registry shortcut), detect it now.
+        SDK wiring (tool commands, sysroot) is declared via setup_presets()
+        so explain() attributes it to the "wasi-sdk" preset.
         """
         # Lazy SDK detection — needed when created via registry
         if self._sdk_path is None:
@@ -325,28 +322,26 @@ class WasiToolchain(WasmToolchain):
 
         super().setup(env)
 
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """Declare SDK tool commands and sysroot as an attributable preset."""
+        contribs: list[ToolContribution] = []
         if self._sdk_path:
             bin_dir = self._sdk_path / "bin"
-            # Point compiler/linker at wasi-sdk's clang
-            for tool_name in ("cc", "link"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "cmd"):
-                        tool.cmd = str(bin_dir / "clang")
-            if env.has_tool("cxx"):
-                env.cxx.cmd = str(bin_dir / "clang++")
-            if env.has_tool("ar"):
-                ar_path = bin_dir / "llvm-ar"
-                if ar_path.exists():
-                    env.ar.cmd = str(ar_path)
-
+            contribs.append(ToolContribution("cc", cmd=str(bin_dir / "clang")))
+            contribs.append(ToolContribution("cxx", cmd=str(bin_dir / "clang++")))
+            contribs.append(ToolContribution("link", cmd=str(bin_dir / "clang")))
+            ar_path = bin_dir / "llvm-ar"
+            if ar_path.exists():
+                contribs.append(ToolContribution("ar", cmd=str(ar_path)))
         if self._sysroot:
             sysroot_flag = f"--sysroot={self._sysroot}"
             for tool_name in ("cc", "cxx", "link"):
-                if env.has_tool(tool_name):
-                    tool = getattr(env, tool_name)
-                    if hasattr(tool, "sysroot_flag"):
-                        tool.sysroot_flag = sysroot_flag
+                contribs.append(ToolContribution(tool_name, flags=(sysroot_flag,)))
+        if not contribs:
+            return []
+        return [
+            Preset(name="wasi-sdk", category="toolchain", contributions=tuple(contribs))
+        ]
 
 
 # =============================================================================

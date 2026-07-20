@@ -32,7 +32,8 @@ class TestWasiCCompiler:
         assert v["cmd"] == "clang"
         assert "objcmd" in v
         assert "--target=wasm32-wasi" in v["objcmd"]
-        assert "$cc.sysroot_flag" in v["objcmd"]
+        # sysroot is contributed by the wasi-sdk setup preset, not a template var
+        assert "$cc.sysroot_flag" not in v["objcmd"]
 
     def test_builders(self):
         cc = WasiCCompiler()
@@ -95,7 +96,7 @@ class TestWasiLinker:
         v = link.default_vars()
         assert v["cmd"] == "clang"
         assert "--target=wasm32-wasi" in v["progcmd"]
-        assert "$link.sysroot_flag" in v["progcmd"]
+        assert "$link.sysroot_flag" not in v["progcmd"]
 
     def test_builders_has_program(self):
         link = WasiLinker()
@@ -341,3 +342,46 @@ class TestWasiConfigureMissing:
         config = Configure(build_dir=tmp_path)
         config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
         assert cls().configure(config) is None
+
+
+class TestWasiSdkSetupPreset:
+    """SDK wiring is declared via setup_presets, attributable in explain()."""
+
+    def test_setup_presets_wires_sdk(self, test_project, tmp_path):  # noqa: F811
+        from pcons.core.environment import Environment
+        from pcons.toolchains.wasi import WasiToolchain
+
+        (tmp_path / "bin").mkdir()
+        (tmp_path / "bin" / "llvm-ar").touch()
+        sysroot = tmp_path / "share" / "wasi-sysroot"
+        sysroot.mkdir(parents=True)
+
+        tc = WasiToolchain()
+        tc._sdk_path = tmp_path
+        tc._sysroot = sysroot
+
+        env = Environment()
+        for name in ("cc", "cxx", "link", "ar"):
+            tool = env.add_tool(name)
+            tool.set("cmd", name)
+            tool.set("flags", [])
+
+        presets = tc.setup_presets(env)
+        assert [p.name for p in presets] == ["wasi-sdk"]
+        env.apply(presets[0])
+
+        assert env.cc.cmd.endswith("clang")
+        assert env.cxx.cmd.endswith("clang++")
+        assert env.link.cmd.endswith("clang")
+        assert env.ar.cmd.endswith("llvm-ar")
+        assert f"--sysroot={sysroot}" in env.cc.flags
+        assert f"--sysroot={sysroot}" in env.link.flags
+
+    def test_no_sdk_no_preset(self, test_project):  # noqa: F811
+        from pcons.core.environment import Environment
+        from pcons.toolchains.wasi import WasiToolchain
+
+        tc = WasiToolchain()
+        tc._sdk_path = None
+        tc._sysroot = None
+        assert tc.setup_presets(Environment()) == []

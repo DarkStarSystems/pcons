@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder import MultiOutputBuilder, OutputSpec
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains.gnu_common import (
     gnu_archiver_builders,
@@ -294,10 +295,10 @@ class EmscriptenToolchain(WasmToolchain):
         return True
 
     def setup(self, env: Environment) -> None:
-        """Set up tools and inject emsdk paths into the environment.
+        """Set up tools, detecting the SDK lazily if configure didn't.
 
-        If the SDK wasn't detected during configure (e.g. when created
-        via the toolchain registry shortcut), detect it now.
+        SDK tool commands are declared via setup_presets() so explain()
+        attributes them to the "emsdk" preset.
         """
         # Lazy SDK detection — needed when created via registry
         if self._emsdk_path is None:
@@ -305,19 +306,20 @@ class EmscriptenToolchain(WasmToolchain):
 
         super().setup(env)
 
-        if self._emsdk_path:
-            emcc_dir = _find_emcc_dir(self._emsdk_path)
-            if emcc_dir:
-                # Point compiler/linker at emsdk's emcc
-                for tool_name in ("cc", "link"):
-                    if env.has_tool(tool_name):
-                        tool = getattr(env, tool_name)
-                        if hasattr(tool, "cmd"):
-                            tool.cmd = str(emcc_dir / "emcc")
-                if env.has_tool("cxx"):
-                    env.cxx.cmd = str(emcc_dir / "em++")
-                if env.has_tool("ar"):
-                    env.ar.cmd = str(emcc_dir / "emar")
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """Declare emsdk tool commands as an attributable preset."""
+        if not self._emsdk_path:
+            return []
+        emcc_dir = _find_emcc_dir(self._emsdk_path)
+        if not emcc_dir:
+            return []
+        contribs = (
+            ToolContribution("cc", cmd=str(emcc_dir / "emcc")),
+            ToolContribution("cxx", cmd=str(emcc_dir / "em++")),
+            ToolContribution("link", cmd=str(emcc_dir / "emcc")),
+            ToolContribution("ar", cmd=str(emcc_dir / "emar")),
+        )
+        return [Preset(name="emsdk", category="toolchain", contributions=contribs)]
 
 
 # =============================================================================

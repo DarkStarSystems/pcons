@@ -568,3 +568,31 @@ class TestWasmPresetsNeedWasmToolchain:
         env = _make_unix_env()
         EmscriptenToolchain().apply_cross_preset(env, pyodide())
         assert "-sSIDE_MODULE=1" in env.link.flags
+
+
+class TestEmsdkSetupPreset:
+    """emsdk tool commands are declared via setup_presets (attributable)."""
+
+    def test_setup_presets_wires_emsdk(self, test_project, tmp_path):  # noqa: F811
+        from pcons.toolchains.emscripten import EmscriptenToolchain
+
+        emcc_dir = tmp_path / "upstream" / "emscripten"
+        emcc_dir.mkdir(parents=True)
+        (emcc_dir / "emcc").touch()
+
+        tc = EmscriptenToolchain()
+        tc._emsdk_path = tmp_path
+
+        env = _make_unix_env()
+        ar = env.add_tool("ar")
+        ar.set("cmd", "ar")
+        ar.set("flags", [])
+
+        presets = tc.setup_presets(env)
+        assert [p.name for p in presets] == ["emsdk"]
+        env.apply(presets[0])
+
+        assert env.cc.cmd.endswith("emcc")
+        assert env.cxx.cmd.endswith("em++")
+        assert env.link.cmd.endswith("emcc")
+        assert env.ar.cmd.endswith("emar")

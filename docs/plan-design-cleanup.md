@@ -86,7 +86,7 @@ as a "Preset application" section in docs/presets.md first, then implement.
   keep `env_vars` as a deprecated alias (CC→cc, CXX→cxx, LD→link, AR→ar);
   `_cmd_contributions` iterates the merged map over declared tools.
 
-### 2c. WASM toolchains bypass the contribution model — **todo**
+### 2c. WASM toolchains bypass the contribution model — **done** (new Toolchain.setup_presets() hook, applied after the explain() baseline; wasi sysroot moved from template vars to contributed flags)
 - `WasiToolchain.setup` / `EmscriptenToolchain.setup` imperatively mutate
   `env.cc.cmd`, sysroot flags, etc. (wasi.py:328-349, emscripten.py:308-320)
   — invisible to `explain()`, violating "every realized flag is

@@ -512,6 +512,10 @@ class Toolchain(Protocol):
         """
         ...
 
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """Presets to apply right after setup (attributed by explain())."""
+        ...
+
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant to the environment.
 
@@ -851,6 +855,18 @@ class BaseToolchain(ABC):
     # applies the opaque tokens and records the preset so it can be explained.
     # The apply_*() methods are thin wrappers kept for call-site readability.
     # =========================================================================
+
+    def setup_presets(self, env: Environment) -> list[Preset]:
+        """Presets this toolchain applies right after setup (default: none).
+
+        Runs after the environment records the toolchain's baseline, so
+        anything returned here is attributed by explain() to the preset
+        (e.g. ``cc.cmd <- wasi-sdk``) instead of blending into the
+        toolchain defaults. This is how a toolchain points tools at a
+        detected SDK declaratively rather than mutating env attributes in
+        setup() (docs/presets.md).
+        """
+        return []
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release") to the environment."""

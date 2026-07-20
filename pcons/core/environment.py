@@ -138,6 +138,10 @@ class Environment(_EnvironmentStubs):
             # Record the toolchain's base flags before any user/preset edits, so
             # explain() can attribute them (e.g. /nologo) to the toolchain.
             self._record_toolchain_baseline(toolchain, list(self._get_tools().keys()))
+            # Toolchain-declared presets (e.g. SDK cmd/sysroot wiring) apply
+            # after the baseline so explain() attributes them by name.
+            for preset in toolchain.setup_presets(self):
+                self.apply(preset)
 
         # Always add standalone tools (install, archive)
         # These are tool-agnostic and always available
@@ -273,6 +277,8 @@ class Environment(_EnvironmentStubs):
         toolchain.setup(self)
         new_tools = [n for n in self._get_tools() if n not in before]
         self._record_toolchain_baseline(toolchain, new_tools)
+        for preset in toolchain.setup_presets(self):
+            self.apply(preset)
 
     @property
     def toolchains(self) -> list[Toolchain]:
