@@ -47,10 +47,11 @@ class Preset:
         name: Preset name (e.g. "release", "warnings", "wasm32-emscripten").
         category: "variant", "feature", "target", or "arch".
         contributions: Per-tool flag/define/cmd contributions.
-        exclusive_group: Presets sharing a group are mutually exclusive on a
-            single environment (variants share "build_variant"); applying a
-            second, differently-named preset in the group raises. Clone the
-            environment to build multiple variants.
+        exclusive_group: Presets sharing a group act as one knob on a
+            single environment (variants share "build_variant"): applying
+            another preset in the group replaces the one already applied,
+            removing its contributions first. Clone the environment to
+            build multiple variants side by side.
         arch: Target architecture this preset selects, if any. Only presets
             with category "arch" (the ``set_target_arch`` knob) record it on
             the environment as ``env.target_arch``; on other categories it is

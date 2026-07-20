@@ -172,6 +172,33 @@ When a preset is applied, exactly one of three things happens:
      `linux_cross(triple=...)`) and says so; wasm toolchains reject any
      arch other than `wasm32` rather than silently coercing.
 
+### Exclusive groups are knobs (replace, don't refuse)
+
+Presets sharing an ``exclusive_group`` (variants share ``build_variant``)
+act as one knob: applying another preset in the group **replaces** the one
+already applied — its contributions are un-applied first — so
+``set_variant("release")`` then ``set_variant("debug")`` switches cleanly,
+``set_variant`` is idempotent, and cloning an environment at any point
+works. (Cloning remains how you build *both* variants side by side.)
+
+Replacement is sound because the declarative contribution model is
+**append-only by design** — a contribution can add flags/defines or set a
+command, never remove or rewrite — so un-applying is remove-by-count.
+This yields a three-tier trade, each tier exchanging power for
+transparency, enforced by the machinery rather than remembered by
+authors:
+
+| Tier | Attributable (`explain()`) | Invertible (groups) |
+|------|---------------------------|---------------------|
+| declarative, additive (flags/defines) | yes | yes |
+| declarative with `cmd` | yes | **no** — rejected from exclusive groups at apply time |
+| imperative (escape hatch) | no (self-describing only) | no — never carries a group |
+
+A group preset with a ``cmd`` contribution is rejected when applied (model
+command swaps as non-grouped presets); tokens an imperative preset or
+manual edit already removed are tolerated during un-apply, and user-added
+duplicates survive by count.
+
 ### One writer per bookkeeping field
 
 `env.variant` is written only by variant presets (enforced by their
@@ -402,6 +429,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | Preset application contract: apply-fully-or-raise (unknown names, missing-tool cmd, zero-effect presets, unrealizable knobs) | implemented |
 | `env.target_arch` single-writer (knob only; cross presets are metadata) | implemented |
 | One application per resolution (no per-toolchain double-apply) | implemented |
+| Exclusive groups replace on re-apply (knob semantics; group presets additive-only) | implemented |
 | `CrossPreset.arch` decoupled from flag emission (host-independent) | implemented |
 | Fail fast on unrealizable cross presets (MSVC + any, GCC + triple-only) | implemented |
 | MSVC/clang-cl `set_target_arch` selects the cross toolset (cl/lib dirs), not just `/MACHINE:` | implemented |

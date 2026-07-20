@@ -158,7 +158,7 @@ works (meson-style exe-wrapper support can be added later if ever needed).
 - Direction: `root_symlink: bool = True` keyword threaded through
   `generate()`; document ownership under multi-config builds.
 
-### 4c. clone() vs exclusive-group presets contradicts documented workflow — **todo**
+### 4c. clone() vs exclusive-group presets contradicts documented workflow — **done** (groups replace on re-apply; un-apply is remove-by-count, sound because declarative contributions are append-only; group presets with cmd rejected at apply time; three-tier trade documented in presets.md)
 - `clone()` copies `_applied_presets` (environment.py:433); the
   exclusive-group guard raises on a second same-group preset
   (environment.py:523-534) while its error text says "clone the environment

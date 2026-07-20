@@ -218,24 +218,41 @@ class TestFanoutDedup:
 
 
 class TestExclusiveGroup:
-    """Presets in the same exclusive group are mutually exclusive."""
+    """Presets in the same exclusive group act as one knob: applying
+    another replaces the one already applied (docs/presets.md)."""
 
-    def test_second_different_variant_raises(self, test_project):
+    def test_switching_variant_replaces(self, test_project):
         env = _make_env()
         env.apply(
-            Preset(name="debug", category="variant", exclusive_group="build_variant")
-        )
-        with pytest.raises(ValueError, match="already"):
-            env.apply(
-                Preset(
-                    name="release",
-                    category="variant",
-                    exclusive_group="build_variant",
-                )
+            Preset(
+                name="debug",
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(
+                    ToolContribution("cc", flags=("-O0", "-g"), defines=("DEBUG",)),
+                ),
             )
+        )
+        env.apply(
+            Preset(
+                name="release",
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(
+                    ToolContribution("cc", flags=("-O2",), defines=("NDEBUG",)),
+                ),
+            )
+        )
+        assert "-O0" not in env.cc.flags
+        assert "-g" not in env.cc.flags
+        assert "DEBUG" not in env.cc.defines
+        assert "-O2" in env.cc.flags
+        assert "NDEBUG" in env.cc.defines
+        assert env.variant == "release"
+        assert [p.name for p in env.applied_presets] == ["release"]
 
-    def test_same_variant_name_allowed(self, test_project):
-        """Re-applying the same-named preset (e.g. one per toolchain) is fine."""
+    def test_reapplying_same_variant_is_idempotent(self, test_project):
+        """set_variant is a knob: same name twice doesn't double flags."""
         env = _make_env()
         p = Preset(
             name="debug",
@@ -244,8 +261,76 @@ class TestExclusiveGroup:
             contributions=(ToolContribution("cc", flags=("-g",)),),
         )
         env.apply(p)
-        env.apply(p)  # no raise
-        assert env.cc.flags.count("-g") == 2
+        env.apply(p)
+        assert env.cc.flags.count("-g") == 1
+
+    def test_clone_then_switch_variant_works(self, test_project):
+        """The documented workflow: clone at any point, retune the clone."""
+        env = _make_env()
+        env.apply(
+            Preset(
+                name="release",
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(ToolContribution("cc", flags=("-O2",)),),
+            )
+        )
+        dbg = env.clone()
+        dbg.apply(
+            Preset(
+                name="debug",
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(ToolContribution("cc", flags=("-O0",)),),
+            )
+        )
+        assert "-O0" in dbg.cc.flags
+        assert "-O2" not in dbg.cc.flags
+        # Original untouched.
+        assert "-O2" in env.cc.flags
+        assert "-O0" not in env.cc.flags
+
+    def test_group_preset_with_cmd_rejected_at_apply(self, test_project):
+        """Group presets must be invertible (purely additive): a cmd
+        contribution is rejected when the preset is applied, not later
+        when switching would fail."""
+        env = _make_env()
+        with pytest.raises(ValueError, match="purely additive"):
+            env.apply(
+                Preset(
+                    name="alt-cc",
+                    category="variant",
+                    exclusive_group="build_variant",
+                    contributions=(ToolContribution("cc", cmd="other-cc"),),
+                )
+            )
+        assert env.applied_presets == ()
+
+    def test_unapply_tolerates_externally_removed_tokens(self, test_project):
+        """An imperative preset or manual edit may have removed a token the
+        group preset contributed; switching still works and preserves
+        user-added duplicates by count."""
+        env = _make_env()
+        env.apply(
+            Preset(
+                name="debug",
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(ToolContribution("cc", flags=("-O0", "-g")),),
+            )
+        )
+        env.cc.flags.remove("-O0")  # imperative/manual interference
+        env.cc.flags.append("-g")  # user's own -g, must survive the switch
+        env.apply(
+            Preset(
+                name="release",
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(ToolContribution("cc", flags=("-O2",)),),
+            )
+        )
+        assert "-O2" in env.cc.flags
+        assert env.cc.flags.count("-g") == 1
 
     def test_no_group_means_no_exclusion(self, test_project):
         env = _make_env()

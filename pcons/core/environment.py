@@ -521,9 +521,12 @@ class Environment(_EnvironmentStubs):
         contributions, replaces the tool command. The applied preset is
         appended to this environment's history (see :meth:`explain`).
 
-        Presets sharing an ``exclusive_group`` are mutually exclusive: applying
-        a second, differently-named preset in the group raises ``ValueError``.
-        Clone the environment to build multiple variants.
+        Presets sharing an ``exclusive_group`` behave like a knob: applying
+        another preset in the group (same or different name) *replaces* the
+        one already applied — its contributions are removed first — so
+        ``env.set_variant("release"); env.set_variant("debug")`` switches
+        cleanly and cloning works at any point. (Cloning is still how you
+        build *both* variants side by side.)
 
         Application follows the contract in docs/presets.md ("Preset
         application"): a preset applies fully or raises. A ``cmd``
@@ -548,17 +551,26 @@ class Environment(_EnvironmentStubs):
             self._fanout_seen.add(key)
 
         if preset.exclusive_group is not None:
-            for applied in self._applied_presets:
-                if (
-                    applied.exclusive_group == preset.exclusive_group
-                    and applied.name != preset.name
-                ):
-                    raise ValueError(
-                        f"Cannot apply '{preset.name}': '{applied.name}' from "
-                        f"the same group '{preset.exclusive_group}' is already "
-                        f"applied. Clone the environment to build multiple "
-                        f"variants."
-                    )
+            # Group presets are a knob (replace-on-apply), so they must be
+            # invertible: purely additive contributions, no cmd. Enforced
+            # here — at authoring/apply time — not at switch time.
+            cmd_tools = sorted(
+                {c.tool for c in preset.contributions if c.cmd is not None}
+            )
+            if cmd_tools:
+                raise ValueError(
+                    f"Preset '{preset.name}' is in exclusive group "
+                    f"'{preset.exclusive_group}' but replaces the command of "
+                    f"tool(s) {', '.join(cmd_tools)}. Group presets switch by "
+                    f"un-applying, so they must be purely additive "
+                    f"(flags/defines only); model a command swap as a "
+                    f"non-grouped preset instead."
+                )
+            for i, applied in enumerate(self._applied_presets):
+                if applied.exclusive_group == preset.exclusive_group:
+                    self._unapply_contributions(applied)
+                    del self._applied_presets[i]
+                    break
 
         # Validate up front so application is atomic: raise before any
         # contribution has been applied.
@@ -666,6 +678,30 @@ class Environment(_EnvironmentStubs):
                     contributions=tuple(contributions),
                 )
             )
+
+    def _unapply_contributions(self, preset: Preset) -> None:
+        """Remove a preset's contributions (exclusive-group replacement).
+
+        Group presets are validated additive-only at apply time, so this is
+        total for them: flags and defines are removed by first occurrence
+        (tolerating tokens an imperative preset or manual edit already
+        removed, and preserving user-added duplicates by count).
+        """
+        tools = self._get_tools()
+        for c in preset.contributions:
+            tool = tools.get(c.tool)
+            if tool is None:
+                continue
+            flags = tool.get("flags")
+            if c.flags and isinstance(flags, list):
+                for f in c.flags:
+                    if f in flags:
+                        flags.remove(f)
+            defines = tool.get("defines")
+            if c.defines and isinstance(defines, list):
+                for d in c.defines:
+                    if d in defines:
+                        defines.remove(d)
 
     @contextmanager
     def _dedup_fanout(self) -> Iterator[None]:
