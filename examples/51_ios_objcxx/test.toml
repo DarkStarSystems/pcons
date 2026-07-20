@@ -1,0 +1,20 @@
+# Test configuration for the ios_objcxx example
+
+[test]
+description = "Cross-compiles C++ and Objective-C++ for iOS via the ios() cross preset"
+
+expected_outputs = [
+    "build/hello_ios",
+]
+
+[verify]
+# Can't run an iOS binary on the build host; verify the Mach-O platform.
+commands = [
+    { run = "vtool -show-build build/hello_ios", expect_stdout = "platform IOS" },
+]
+
+[skip]
+# Needs clang plus Xcode's iOS SDK / Mach-O tools (macOS only)
+requires = ["clang", "xcrun", "vtool"]
+platforms = ["windows", "linux"]
+generators = ["xcode", "make"]

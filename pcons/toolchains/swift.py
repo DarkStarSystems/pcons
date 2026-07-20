@@ -32,6 +32,7 @@ from pcons.toolchains.gcc import GccArchiver
 from pcons.toolchains.unix import UnixToolchain
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import SourceHandler, toolchain_registry
+from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -108,35 +109,6 @@ def clang_module_map(
     if not map_file.exists() or map_file.read_text() != content:
         map_file.write_text(content)
     return map_dir
-
-
-_APPLE_SDK_CACHE: dict[str, str | None] = {}
-
-
-def _apple_sdk_for_triple(triple: str) -> str | None:
-    """Resolve the Apple SDK path for a target triple via xcrun (cached)."""
-    t = triple.lower()
-    if "-ios" in t:
-        sdk_name = "iphonesimulator" if "simulator" in t else "iphoneos"
-    elif "apple" in t or "darwin" in t or "macos" in t:
-        sdk_name = "macosx"
-    else:
-        return None
-    if sdk_name not in _APPLE_SDK_CACHE:
-        import subprocess
-
-        try:
-            _APPLE_SDK_CACHE[sdk_name] = subprocess.run(
-                ["xcrun", "--sdk", sdk_name, "--show-sdk-path"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                check=True,
-            ).stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            logger.warning("Could not resolve %s SDK path via xcrun", sdk_name)
-            _APPLE_SDK_CACHE[sdk_name] = None
-    return _APPLE_SDK_CACHE[sdk_name]
 
 
 def _link_tail() -> list[object]:
@@ -444,7 +416,7 @@ class SwiftToolchain(UnixToolchain):
         # targets in the same env) but replace the link ones.
         contribs = [c for c in contribs if c.tool != "link"]
         swift_flags: list[str] = ["-target", str(triple)]
-        sdk = getattr(cross, "sysroot", None) or _apple_sdk_for_triple(str(triple))
+        sdk = getattr(cross, "sysroot", None) or apple_sdk_for_triple(str(triple))
         if sdk:
             swift_flags += ["-sdk", str(sdk)]
         contribs.append(ToolContribution("swiftc", flags=tuple(swift_flags)))

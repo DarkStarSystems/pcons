@@ -2838,7 +2838,8 @@ from pcons.toolchains.presets import android, ios, emscripten, wasi_sdk, linux_c
 # Android NDK
 env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a"))
 
-# iOS
+# iOS — works with both the Swift and LLVM (C/C++/Objective-C++) toolchains;
+# the iPhoneOS SDK is resolved via xcrun unless sdk= is given
 env.apply_cross_preset(ios(arch="arm64", min_version="15.0"))
 
 # iOS Simulator

@@ -19,6 +19,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.preset import ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.tools.toolchain import BaseToolchain
+from pcons.util.macos import apple_sdk_for_triple
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -274,14 +275,25 @@ class UnixToolchain(BaseToolchain):
 
         GCC uses different toolchain binaries rather than a --target flag, and
         rejects --target= outright, so it's only emitted for Clang-family
-        drivers (see IS_CLANG_DRIVER).
+        drivers (see IS_CLANG_DRIVER). Clang also drives the link, so the
+        triple goes on the link command too. For Apple triples with no
+        explicit sysroot, the matching SDK is resolved via xcrun (mirroring
+        the Swift toolchain), so ios() works out of the box for C/C++.
         """
         contribs = super()._target_contributions(cross)
         contribs.extend(self._sysroot_contributions(cross))
         triple = getattr(cross, "triple", None)
         if triple and self.IS_CLANG_DRIVER:
-            contribs.append(ToolContribution("cc", flags=(f"--target={triple}",)))
-            contribs.append(ToolContribution("cxx", flags=(f"--target={triple}",)))
+            target_flag = f"--target={triple}"
+            for tool in ("cc", "cxx", "link"):
+                contribs.append(ToolContribution(tool, flags=(target_flag,)))
+            if not getattr(cross, "sysroot", None):
+                sdk = apple_sdk_for_triple(str(triple))
+                if sdk:
+                    for tool in ("cc", "cxx", "link"):
+                        contribs.append(
+                            ToolContribution(tool, flags=("-isysroot", sdk))
+                        )
         return contribs
 
     def _variant_contributions(

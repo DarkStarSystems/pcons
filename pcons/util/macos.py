@@ -8,6 +8,7 @@ These utilities help with common macOS build tasks like:
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -18,6 +19,39 @@ if TYPE_CHECKING:
     from pcons.core.node import FileNode
     from pcons.core.project import Project
     from pcons.core.target import Target
+
+logger = logging.getLogger(__name__)
+
+_APPLE_SDK_CACHE: dict[str, str | None] = {}
+
+
+def apple_sdk_for_triple(triple: str) -> str | None:
+    """Resolve the Apple SDK path for a target triple via xcrun (cached).
+
+    Maps ``*-apple-ios*`` triples to the iPhoneOS (or iPhoneSimulator)
+    SDK and other Apple/Darwin triples to the macOS SDK. Returns None
+    for non-Apple triples or if xcrun fails.
+    """
+    t = triple.lower()
+    if "-ios" in t:
+        sdk_name = "iphonesimulator" if "simulator" in t else "iphoneos"
+    elif "apple" in t or "darwin" in t or "macos" in t:
+        sdk_name = "macosx"
+    else:
+        return None
+    if sdk_name not in _APPLE_SDK_CACHE:
+        try:
+            _APPLE_SDK_CACHE[sdk_name] = subprocess.run(
+                ["xcrun", "--sdk", sdk_name, "--show-sdk-path"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            logger.warning("Could not resolve %s SDK path via xcrun", sdk_name)
+            _APPLE_SDK_CACHE[sdk_name] = None
+    return _APPLE_SDK_CACHE[sdk_name]
 
 
 def get_dylib_install_name(path: Path | str) -> str:
