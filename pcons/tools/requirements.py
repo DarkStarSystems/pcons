@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pcons.core.flags import get_separated_arg_flags_from_toolchains, merge_flags
 
@@ -115,6 +115,85 @@ class EffectiveRequirements:
             link_dirs=list(self.link_dirs),
             separated_arg_flags=self.separated_arg_flags,
         )
+
+
+def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None:
+    """Apply usage requirements env-wide onto tool variables (``env.use()``).
+
+    Uses the same merge semantics as target resolution
+    (:meth:`EffectiveRequirements.merge`): order-preserving dedup, with
+    separated-arg flag pairs (``-framework Foo``) treated as units. Compile
+    requirements land on cc/cxx; link requirements on link. Structured
+    frameworks map to the ``link.frameworks``/``link.frameworkdirs``
+    variables (as ``env.Framework()`` does).
+
+    A ``Target`` in ``link_libs`` is an error here: linking a build target
+    is per-target dependency information — use ``target.link(...)``.
+    """
+    from pcons.core.target import Target as _Target
+
+    sep = get_separated_arg_flags_from_toolchains(env.toolchains)
+    eff = EffectiveRequirements(separated_arg_flags=sep)
+    eff.merge(reqs)
+
+    for lib in eff.link_libs:
+        if isinstance(lib, _Target):
+            raise ValueError(
+                f"env.use() got a Target ('{lib.name}') in link_libs; "
+                f"linking a build target is per-target information — use "
+                f"target.link({lib.name!r}) instead."
+            )
+
+    def var(tool: Any, name: str) -> list[Any]:
+        """The tool's list variable, created empty on first need."""
+        if not hasattr(tool, name):
+            setattr(tool, name, [])
+        return getattr(tool, name)
+
+    for tool_name in ("cc", "cxx"):
+        if not env.has_tool(tool_name):
+            continue
+        tool = getattr(env, tool_name)
+        if eff.includes:
+            includes = var(tool, "includes")
+            for inc in eff.includes:
+                if str(inc) not in includes:
+                    includes.append(str(inc))
+        if eff.defines:
+            defines = var(tool, "defines")
+            for define in eff.defines:
+                if define not in defines:
+                    defines.append(define)
+        if eff.compile_flags:
+            merge_flags(var(tool, "flags"), eff.compile_flags, sep)
+
+    if env.has_tool("link"):
+        link = env.link
+        if eff.link_dirs:
+            libdirs = var(link, "libdirs")
+            for lib_dir in eff.link_dirs:
+                if str(lib_dir) not in libdirs:
+                    libdirs.append(str(lib_dir))
+        if eff.link_libs:
+            libs = var(link, "libs")
+            for lib in eff.link_libs:
+                if lib not in libs:
+                    libs.append(lib)
+        if eff.link_flags:
+            merge_flags(var(link, "flags"), eff.link_flags, sep)
+        # Structured frameworks (macOS) — same variables env.Framework() uses.
+        frameworks = list(reqs.frameworks)
+        if frameworks:
+            fw_var = var(link, "frameworks")
+            for fw in frameworks:
+                if fw not in fw_var:
+                    fw_var.append(fw)
+        framework_dirs = list(reqs.framework_dirs)
+        if framework_dirs:
+            fwd_var = var(link, "frameworkdirs")
+            for fw_dir in framework_dirs:
+                if str(fw_dir) not in fwd_var:
+                    fwd_var.append(str(fw_dir))
 
 
 def _resolve_and_add_includes_for(

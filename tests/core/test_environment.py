@@ -381,3 +381,81 @@ class TestEnvironmentRepr:
         r = repr(env)
         assert "Environment" in r
         assert "cc" in r
+
+
+class TestUseUnifiedWithRequirements:
+    """env.use() flows through the same translation and merge path as
+    target.link() (docs/plan-design-cleanup.md 2d)."""
+
+    def _env(self):
+        env = Environment()
+        for name in ("cc", "cxx", "link"):
+            tool = env.add_tool(name)
+            tool.set("cmd", name)
+            tool.set("flags", [])
+            tool.set("includes", [])
+            tool.set("defines", [])
+        env.link.set("libs", [])
+        env.link.set("libdirs", [])
+        return env
+
+    def _pkg(self):
+        from pcons.packages.description import PackageDescription
+
+        return PackageDescription(
+            name="fancy",
+            include_dirs=["/opt/fancy/include"],
+            defines=["USING_FANCY"],
+            libraries=["fancy"],
+            library_dirs=["/opt/fancy/lib"],
+            link_flags=["-Wl,-rpath,/opt/fancy/lib"],
+        )
+
+    def test_use_applies_package(self, test_project):  # noqa: F811
+        env = self._env()
+        env.use(self._pkg())
+
+        inc = str(Path("/opt/fancy/include"))
+        assert inc in env.cc.includes
+        assert inc in env.cxx.includes
+        assert "USING_FANCY" in env.cc.defines
+        assert "fancy" in env.link.libs
+        assert str(Path("/opt/fancy/lib")) in env.link.libdirs
+        assert "-Wl,-rpath,/opt/fancy/lib" in env.link.flags
+
+    def test_repeated_use_dedups(self, test_project):  # noqa: F811
+        """Same merge semantics as target resolution: no duplicate -I/-l on
+        repeat application (the old ad-hoc path duplicated them)."""
+        env = self._env()
+        pkg = self._pkg()
+        env.use(pkg)
+        env.use(pkg)
+
+        assert env.cc.includes.count(str(Path("/opt/fancy/include"))) == 1
+        assert env.link.libs.count("fancy") == 1
+        assert env.link.flags.count("-Wl,-rpath,/opt/fancy/lib") == 1
+
+    def test_use_imported_target_public_requirements(self, test_project):  # noqa: F811
+        """use(ImportedTarget) consumes its public UsageRequirements — the
+        same data targets link against."""
+        from pcons.packages.imported import ImportedTarget
+
+        env = self._env()
+        env.use(ImportedTarget.from_package(self._pkg()))
+
+        assert str(Path("/opt/fancy/include")) in env.cc.includes
+        assert "fancy" in env.link.libs
+
+    def test_use_rejects_target_link_libs(self, test_project):  # noqa: F811
+        """A build Target in link_libs is per-target info; use() fails fast."""
+        from pcons.core.target import Target, UsageRequirements
+
+        env = self._env()
+        reqs = UsageRequirements()
+        reqs.link_libs.append(Target("mylib"))
+
+        class Duck:
+            public = reqs
+
+        with pytest.raises(ValueError, match="target.link"):
+            env.use(Duck())

@@ -1003,60 +1003,22 @@ class Environment(_EnvironmentStubs):
             for pkg in [fmt_pkg, spdlog_pkg]:
                 env.use(pkg)
         """
-        # Compile settings - apply to cxx (and cc if present)
-        if hasattr(package, "include_dirs"):
-            for inc_dir in package.include_dirs:
-                if self.has_tool("cxx"):
-                    self.cxx.includes.append(str(inc_dir))
-                if self.has_tool("cc"):
-                    self.cc.includes.append(str(inc_dir))
+        # One translation, one merge path (docs/plan-design-cleanup.md 2d):
+        # a package's vocabulary becomes UsageRequirements via the same
+        # mapping ImportedTarget uses, then applies with the same
+        # order-preserving, flag-pair-aware dedup target resolution uses.
+        from pcons.tools.requirements import apply_requirements_to_env
 
-        if hasattr(package, "defines"):
-            for define in package.defines:
-                if self.has_tool("cxx"):
-                    self.cxx.defines.append(define)
-                if self.has_tool("cc"):
-                    self.cc.defines.append(define)
+        if hasattr(package, "public"):
+            # A Target (e.g. ImportedTarget): its public requirements are
+            # already in requirements vocabulary.
+            reqs = package.public
+        else:
+            from pcons.packages.imported import requirements_from_package
 
-        if hasattr(package, "compile_flags"):
-            for flag in package.compile_flags:
-                if self.has_tool("cxx"):
-                    self.cxx.flags.append(flag)
-                if self.has_tool("cc"):
-                    self.cc.flags.append(flag)
+            reqs = requirements_from_package(package)
 
-        # Link settings
-        if hasattr(package, "library_dirs"):
-            if self.has_tool("link"):
-                for lib_dir in package.library_dirs:
-                    self.link.libdirs.append(str(lib_dir))
-
-        if hasattr(package, "libraries"):
-            if self.has_tool("link"):
-                for lib in package.libraries:
-                    self.link.libs.append(lib)
-
-        if hasattr(package, "link_flags"):
-            if self.has_tool("link"):
-                for flag in package.link_flags:
-                    self.link.flags.append(flag)
-
-        # Framework settings (macOS)
-        if hasattr(package, "frameworks"):
-            if self.has_tool("link"):
-                for fw in package.frameworks:
-                    if not hasattr(self.link, "frameworks"):
-                        self.link.frameworks = []
-                    if fw not in self.link.frameworks:
-                        self.link.frameworks.append(fw)
-
-        if hasattr(package, "framework_dirs"):
-            if self.has_tool("link"):
-                for fw_dir in package.framework_dirs:
-                    if not hasattr(self.link, "frameworkdirs"):
-                        self.link.frameworkdirs = []
-                    if str(fw_dir) not in self.link.frameworkdirs:
-                        self.link.frameworkdirs.append(str(fw_dir))
+        apply_requirements_to_env(self, reqs)
 
     def Command(
         self,

@@ -11,10 +11,42 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pcons.core.target import Target
+from pcons.core.target import Target, UsageRequirements
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from pcons.packages.description import PackageDescription
+
+
+def requirements_from_package(package: Any) -> UsageRequirements:
+    """Translate a package description into :class:`UsageRequirements`.
+
+    The single home of the package→requirements vocabulary mapping
+    (``libraries``→``link_libs``, ``library_dirs``→``link_dirs``, ...),
+    used by both :class:`ImportedTarget` and ``env.use()``. Fields the
+    package doesn't have are treated as empty, so any duck-typed
+    description works. Frameworks stay structured (``frameworks``/
+    ``framework_dirs``); consumers lower them as needed.
+    """
+    reqs = UsageRequirements()
+    for inc_dir in getattr(package, "include_dirs", ()) or ():
+        reqs.include_dirs.append(Path(inc_dir))
+    for define in getattr(package, "defines", ()) or ():
+        reqs.defines.append(define)
+    for flag in getattr(package, "compile_flags", ()) or ():
+        reqs.compile_flags.append(flag)
+    for lib in getattr(package, "libraries", ()) or ():
+        reqs.link_libs.append(lib)
+    for lib_dir in getattr(package, "library_dirs", ()) or ():
+        reqs.link_dirs.append(Path(lib_dir))
+    for flag in getattr(package, "link_flags", ()) or ():
+        reqs.link_flags.append(flag)
+    for fw in getattr(package, "frameworks", ()) or ():
+        reqs.frameworks.append(fw)
+    for fw_dir in getattr(package, "framework_dirs", ()) or ():
+        reqs.framework_dirs.append(str(fw_dir))
+    return reqs
 
 
 class ImportedTarget(Target):
@@ -78,36 +110,27 @@ class ImportedTarget(Target):
         This ensures that when a target links to this ImportedTarget,
         the package's include dirs, libraries, and flags are properly
         propagated through the standard usage requirements mechanism.
+
+        Frameworks are lowered to ``-F``/``-framework`` link-flag pairs
+        here because the resolve path consumes ``link_flags`` (the pairs
+        merge as units via the separated-arg flag machinery).
         """
-        # Include directories
-        for inc_dir in package.include_dirs:
-            path = Path(inc_dir) if isinstance(inc_dir, str) else inc_dir
-            self.public.include_dirs.append(path)
-
-        # Defines
-        for define in package.defines:
-            self.public.defines.append(define)
-
-        # Compile flags
-        for flag in package.compile_flags:
-            self.public.compile_flags.append(flag)
-
-        # Link libraries (just the names, not -l prefixed)
-        for lib in package.libraries:
-            self.public.link_libs.append(lib)
-
-        for lib_dir in package.library_dirs:
-            self.public.link_dirs.append(Path(lib_dir))
-
-        # Framework directories and frameworks (macOS)
-        for fw_dir in package.framework_dirs:
-            self.public.link_flags.extend(["-F", fw_dir])
-        for fw in package.frameworks:
+        reqs = requirements_from_package(package)
+        for name in (
+            "include_dirs",
+            "defines",
+            "compile_flags",
+            "link_libs",
+            "link_dirs",
+            "link_flags",
+        ):
+            dst = getattr(self.public, name)
+            for value in getattr(reqs, name):
+                dst.append(value)
+        for fw_dir in reqs.framework_dirs:
+            self.public.link_flags.extend(["-F", str(fw_dir)])
+        for fw in reqs.frameworks:
             self.public.link_flags.extend(["-framework", fw])
-
-        # Other link flags (-Wl,-rpath, etc.)
-        for flag in package.link_flags:
-            self.public.link_flags.append(flag)
 
     @classmethod
     def from_package(

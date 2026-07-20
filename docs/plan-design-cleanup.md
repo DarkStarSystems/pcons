@@ -66,6 +66,8 @@ as a "Preset application" section in docs/presets.md first, then implement.
 
 ## Theme 2 — One concept, two mechanisms
 
+**Status: implemented** (2a/2b/2c/2d/2e all done, 2026-07-20).
+
 ### 2a. emscripten()/wasi_sdk() presets under-realize vs dedicated toolchains — **done** (fail-fast chosen: wasm presets on native toolchains raise; wasm is toolchain-shaped)
 - `_cmd_contributions` (toolchain.py:998) repoints only cc/cxx from
   `env_vars`; the dedicated toolchains also repoint `link`, change output
@@ -96,7 +98,7 @@ as a "Preset application" section in docs/presets.md first, then implement.
   applied `Preset` (reusing `_cmd_contributions`/`_sysroot_contributions`),
   so `explain()` shows `cc.cmd <- wasi-sdk`.
 
-### 2d. `env.use(package)` vs `target.link(imported)` — **todo**
+### 2d. `env.use(package)` vs `target.link(imported)` — **done** (requirements_from_package() is the single vocabulary translation; apply_requirements_to_env() shares EffectiveRequirements.merge dedup; use() dedups and rejects Target link_libs)
 - Two paths for "consume this dependency": `use()` flattens onto tool vars
   with ad-hoc dedup and `libraries`/`library_dirs` vocabulary
   (environment.py:873-959); `target.link()` routes through

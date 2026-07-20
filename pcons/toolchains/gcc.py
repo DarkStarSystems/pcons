@@ -384,6 +384,10 @@ class GccToolchain(UnixToolchain):
         triple = getattr(preset, "triple", None)
         resolve = getattr(preset, "resolved_tool_cmds", None)
         cmds = resolve() if resolve is not None else {}
+        # wasm triples get the more specific "use the dedicated toolchain"
+        # error from UnixToolchain (via super()), not the binary-retarget one.
+        if triple and str(triple).startswith("wasm32"):
+            triple = None
         if triple and not ("cc" in cmds or "cxx" in cmds):
             name = getattr(preset, "name", preset)
             raise ValueError(
