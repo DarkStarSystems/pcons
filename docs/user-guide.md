@@ -962,7 +962,20 @@ project.add_package_finder(ConanFinder(config, conanfile="conanfile.txt"))
 fmt = project.find_package("fmt")
 ```
 
-Results are cached: calling `find_package("zlib")` twice returns the same target.
+**The finder-chain contract**: precedence is insertion order — each
+`add_package_finder()` call prepends, so the most recently added finder is
+consulted first, then the defaults (PkgConfig, then System). The first finder
+to return a result wins; a finder that comes up empty (wrong version, tool
+missing the package) falls through to the next, and the winning source is
+recorded on the package as `found_by` (e.g. `"pkg-config"`, `"rez+pkg-config"`,
+`"system"`). A finder whose tool isn't installed is skipped with a warning at
+registration rather than silently never matching. Run with debug logging to
+see which finder answered (or passed on) each package.
+
+Results are cached per `(name, version, components)` — including *negative*
+results, so repeated `find_package(..., required=False)` probes don't re-run
+the finder chain and its subprocesses; a later `required=True` call for the
+same key raises from the cache.
 
 ### Header-Only and Manual Packages
 

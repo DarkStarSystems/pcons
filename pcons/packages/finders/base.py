@@ -7,11 +7,14 @@ and creating PackageDescription objects for them.
 
 from __future__ import annotations
 
+import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pcons.packages.description import PackageDescription
+
+logger = logging.getLogger(__name__)
 
 
 class BaseFinder(ABC):
@@ -85,7 +88,32 @@ class FinderChain:
         Args:
             finders: List of finders to try in order.
         """
-        self._finders = [f for f in finders if f.is_available()]
+        self._finders = []
+        for f in finders:
+            self.add(f, front=False)
+
+    def add(self, finder: BaseFinder, *, front: bool = True) -> None:
+        """Add a finder, applying the same availability filter as __init__.
+
+        An unavailable finder (its tool isn't installed) is skipped with a
+        warning rather than silently inserted-and-never-matching.
+
+        Args:
+            finder: The finder to add.
+            front: Insert at the front (highest precedence, the default for
+                user-added finders) or append at the back.
+        """
+        if not finder.is_available():
+            logger.warning(
+                "Package finder %s is not available (its tool was not "
+                "found); skipping it",
+                type(finder).__name__,
+            )
+            return
+        if front:
+            self._finders.insert(0, finder)
+        else:
+            self._finders.append(finder)
 
     def find(
         self,
@@ -106,7 +134,18 @@ class FinderChain:
         for finder in self._finders:
             result = finder.find(package_name, version, components)
             if result is not None:
+                logger.debug(
+                    "Package '%s' found by %s (found_by=%s)",
+                    package_name,
+                    type(finder).__name__,
+                    getattr(result, "found_by", "?"),
+                )
                 return result
+            logger.debug(
+                "Package '%s' not found by %s; trying next finder",
+                package_name,
+                type(finder).__name__,
+            )
         return None
 
     @property

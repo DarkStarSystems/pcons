@@ -151,7 +151,10 @@ class Project(_ProjectBuilders):
         self._default_targets: list[Target] = []
         self._config = config
         self._resolved = False
-        self._found_packages: dict[tuple[str, str | None, tuple[str, ...]], Target] = {}
+        # None caches a negative find_package result for the key.
+        self._found_packages: dict[
+            tuple[str, str | None, tuple[str, ...]], Target | None
+        ] = {}
         self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
         self.defined_at = defined_at or get_caller_location()
         self._subdir = None
@@ -1062,7 +1065,16 @@ class Project(_ProjectBuilders):
         """
         cache_key = (name, version, tuple(components or []))
         if cache_key in self._found_packages:
-            return self._found_packages[cache_key]
+            cached = self._found_packages[cache_key]
+            if cached is None:
+                # Negative result cached: don't re-run the finder chain
+                # (and its subprocesses) for every repeat probe.
+                if required:
+                    from pcons.core.errors import PackageNotFoundError
+
+                    raise PackageNotFoundError(name, version)
+                return None
+            return cached
 
         if self._package_finder_chain is None:
             from pcons.packages.finders import (
@@ -1077,6 +1089,7 @@ class Project(_ProjectBuilders):
 
         pkg = self._package_finder_chain.find(name, version, components)
         if pkg is None:
+            self._found_packages[cache_key] = None
             if required:
                 from pcons.core.errors import PackageNotFoundError
 
@@ -1115,7 +1128,7 @@ class Project(_ProjectBuilders):
                 [finder, PkgConfigFinder(), SystemFinder()]
             )
         else:
-            self._package_finder_chain._finders.insert(0, finder)
+            self._package_finder_chain.add(finder)
 
     # Command is kept as a wrapper since it delegates to env.Command()
     # and doesn't fit the registry pattern well

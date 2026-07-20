@@ -177,7 +177,7 @@ works (meson-style exe-wrapper support can be added later if ever needed).
 - Direction: one `BaseGenerator` relativize helper + a written contract
   (architecture.md), all generators call it.
 
-### 4e. Package-finder chain: precedence, found_by, negative caching — **todo**
+### 4e. Package-finder chain: precedence, found_by, negative caching — **done** (contract documented in user-guide; FinderChain.add() applies availability filtering with a warning; negative results cached; debug logging of winner/pass per finder)
 - Precedence is list-insertion order, undocumented (project.py:1064);
   a finder that almost-matched falls through silently (the msys2 pkg-config
   incident was this shape); `required=False` misses skip the cache

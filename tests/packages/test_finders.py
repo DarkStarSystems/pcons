@@ -324,3 +324,54 @@ class TestPkgConfigFinderMocked:
             assert finder.find("testpkg", version="<1.2.3") is None
             assert finder.find("testpkg", version=">=1.2.3") is not None
             assert finder.find("testpkg", version="<=1.2.3") is not None
+
+
+class TestFinderChainContract:
+    """The chain's contract (docs/plan-design-cleanup.md 4e): precedence is
+    insertion order (user-added finders go to the front), availability is
+    filtered on add, and negative find_package results are cached."""
+
+    def test_add_front_takes_precedence(self) -> None:
+        first = PackageDescription(name="p", version="1.0")
+        second = PackageDescription(name="p", version="2.0")
+        chain = FinderChain([MockFinder({"p": first})])
+        chain.add(MockFinder({"p": second}))  # front by default
+
+        found = chain.find("p")
+        assert found is not None and found.version == "2.0"
+
+    def test_add_filters_unavailable(self, caplog) -> None:
+        class Unavailable(MockFinder):
+            def is_available(self) -> bool:
+                return False
+
+        chain = FinderChain([])
+        with caplog.at_level("WARNING"):
+            chain.add(Unavailable({}))
+        assert chain.finders == []
+        assert "not available" in caplog.text
+
+    def test_negative_find_package_is_cached(self, test_project) -> None:  # noqa: F811
+        """A required=False miss is remembered: the chain (and its
+        subprocesses) don't re-run per repeat probe, and a later
+        required=True call raises from cache."""
+        from pcons.core.errors import PackageNotFoundError
+        from pcons.core.project import Project
+
+        project = Project.current()
+        calls = {"n": 0}
+
+        class CountingFinder(MockFinder):
+            def find(self, package_name, version=None, components=None):
+                calls["n"] += 1
+                return None
+
+        project._package_finder_chain = FinderChain([CountingFinder({})])
+
+        assert project.find_package("nope", required=False) is None
+        assert project.find_package("nope", required=False) is None
+        assert calls["n"] == 1  # second probe answered from cache
+
+        with pytest.raises(PackageNotFoundError):
+            project.find_package("nope")  # required=True raises from cache
+        assert calls["n"] == 1
