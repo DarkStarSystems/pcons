@@ -350,11 +350,28 @@ class TestPkgConfigOverride:
     """Cover the pkg-config path: a ``.pc`` file overrides convention scan."""
 
     @pytest.fixture(autouse=True)
-    def _require_pkg_config(self) -> None:
+    def _require_pkg_config(self, tmp_path: Path) -> None:
+        import os
         import shutil
+        import subprocess
 
         if shutil.which("pkg-config") is None:
             pytest.skip("pkg-config not installed")
+        # msys2's pkg-config expects colon-separated POSIX paths in
+        # PKG_CONFIG_PATH; a native Windows path (with its drive colon) gets
+        # mangled and nothing is found. Probe the capability rather than
+        # sniffing the binary's origin.
+        probe = tmp_path / "pkgconfig-probe"
+        probe.mkdir()
+        (probe / "probe.pc").write_text("Name: probe\nDescription: x\nVersion: 1.0\n")
+        result = subprocess.run(
+            ["pkg-config", "--exists", "probe"],
+            env={**os.environ, "PKG_CONFIG_PATH": str(probe)},
+        )
+        if result.returncode != 0:
+            pytest.skip(
+                "pkg-config cannot use native paths in PKG_CONFIG_PATH (msys2 build?)"
+            )
 
     def test_pkgconfig_overrides_convention(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path

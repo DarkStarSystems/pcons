@@ -36,7 +36,7 @@ class TestMermaidGeneratorGraph:
 
     def test_empty_project(self, tmp_path):
         """Test generation with no targets."""
-        project = Project("empty", build_dir=tmp_path)
+        project = Project("empty", root_dir=tmp_path, build_dir=tmp_path)
         gen = MermaidGenerator()
 
         gen.generate(project)
@@ -48,7 +48,7 @@ class TestMermaidGeneratorGraph:
 
     def test_single_target(self, tmp_path):
         """Test generation with single target."""
-        project = Project("single", build_dir=tmp_path)
+        project = Project("single", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("myapp", target_type="program")
 
         # Add mock nodes
@@ -71,7 +71,7 @@ class TestMermaidGeneratorGraph:
 
     def test_target_dependencies(self, tmp_path):
         """Test generation shows target dependencies."""
-        project = Project("deps", build_dir=tmp_path)
+        project = Project("deps", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create libmath
         libmath = Target("libmath", target_type="static_library")
@@ -116,7 +116,7 @@ class TestMermaidGeneratorGraph:
 
     def test_target_shapes(self, tmp_path):
         """Test different target types get different shapes."""
-        project = Project("shapes", build_dir=tmp_path)
+        project = Project("shapes", root_dir=tmp_path, build_dir=tmp_path)
 
         # Static library
         lib = Target("mylib", target_type="static_library")
@@ -153,7 +153,7 @@ class TestMermaidGeneratorHeaders:
     """Tests for header-dependency parsing (include_headers=True)."""
 
     def test_header_dependencies(self, tmp_path):
-        project = Project("hdr", build_dir=tmp_path)
+        project = Project("hdr", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("app", target_type="program")
         src = FileNode(tmp_path / "main.c")
         obj = FileNode(tmp_path / "main.o")
@@ -182,7 +182,7 @@ class TestMermaidGeneratorHeaders:
 
     def test_output_dir_override(self, tmp_path):
         sub = tmp_path / "diagrams"
-        project = Project("p", build_dir=tmp_path)
+        project = Project("p", root_dir=tmp_path, build_dir=tmp_path)
         gen = MermaidGenerator(output_dir=sub)
         gen.generate(project)
         BaseGenerator._generate_pending(project)
@@ -195,7 +195,7 @@ class TestMermaidGeneratorDirection:
 
     def test_left_right(self, tmp_path):
         """Test LR direction."""
-        project = Project("lr", build_dir=tmp_path)
+        project = Project("lr", root_dir=tmp_path, build_dir=tmp_path)
         gen = MermaidGenerator(direction="LR")
         gen.generate(project)
         BaseGenerator._generate_pending(project)
@@ -205,7 +205,7 @@ class TestMermaidGeneratorDirection:
 
     def test_top_bottom(self, tmp_path):
         """Test TB direction."""
-        project = Project("tb", build_dir=tmp_path)
+        project = Project("tb", root_dir=tmp_path, build_dir=tmp_path)
         gen = MermaidGenerator(direction="TB")
         gen.generate(project)
         BaseGenerator._generate_pending(project)
@@ -244,7 +244,7 @@ class TestMermaidGeneratorIntegration:
 
     def test_complete_project(self, tmp_path):
         """Test with a complete multi-target project."""
-        project = Project("complete", build_dir=tmp_path)
+        project = Project("complete", root_dir=tmp_path, build_dir=tmp_path)
 
         # libmath: math.c -> math.o -> libmath.a
         libmath = Target("libmath", target_type="static_library")
@@ -288,7 +288,7 @@ class TestMermaidGeneratorIntegration:
 
     def test_directory_containment_edges(self, tmp_path):
         """Test that output nodes inside a directory get containment edges."""
-        project = Project("bundle", build_dir=tmp_path)
+        project = Project("bundle", root_dir=tmp_path, build_dir=tmp_path)
 
         # Simulate Install targets placing files into a bundle directory
         install1 = Target("install_lib", target_type="command")

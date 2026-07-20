@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Pytest configuration and shared fixtures."""
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -97,6 +98,26 @@ def clear_project_tree():
     _restore_registries(registries)
     Project._clear_tree()
     BaseGenerator._clear_pending()
+
+
+@pytest.fixture(autouse=True)
+def no_source_tree_leak(request):
+    """Fail any test that leaks generated files into the source tree.
+
+    A Project created without an explicit root_dir infers its root from the
+    caller's source file — for a test, that's a real directory under tests/ —
+    and generation then plants the compile_commands.json root symlink there.
+    Catch it at the offending test rather than as a mystery artifact later
+    (a dangling one once broke rsync-based Windows test syncing).
+    """
+    yield
+    leak = Path(request.node.path).parent / "compile_commands.json"
+    if leak.is_symlink() or leak.exists():
+        leak.unlink()
+        pytest.fail(
+            "test leaked compile_commands.json into the source tree; "
+            "pass an explicit root_dir (e.g. tmp_path) to Project()"
+        )
 
 
 @pytest.fixture

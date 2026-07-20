@@ -268,7 +268,7 @@ class TestNinjaGeneration:
         from pcons.generators.ninja import NinjaGenerator
 
         # Create a project with the concat tool
-        project = Project("test_concat", build_dir=tmp_path)
+        project = Project("test_concat", root_dir=tmp_path, build_dir=tmp_path)
         env = project.Environment()
 
         concat = ConcatTool()
@@ -337,7 +337,7 @@ class TestNinjaGeneration:
 
         # === Step 2: Create pcons project and configure ===
         build_dir = tmp_path / "build"
-        project = Project("concat_test", build_dir=build_dir)
+        project = Project("concat_test", root_dir=tmp_path, build_dir=build_dir)
         env = project.Environment()
 
         # Add our custom concat tool

@@ -19,7 +19,7 @@ class TestXcodeGeneratorBasic:
 
     def test_generates_xcodeproj_bundle(self, tmp_path):
         """Test that generation creates .xcodeproj directory."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
 
         # Add a minimal target
         Target("myapp", target_type="program")
@@ -34,7 +34,7 @@ class TestXcodeGeneratorBasic:
 
     def test_creates_project_pbxproj(self, tmp_path):
         """Test that project.pbxproj file is created."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
@@ -56,7 +56,7 @@ class TestXcodeGeneratorTargets:
 
     def test_program_target(self, tmp_path):
         """Test program target has correct product type."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
@@ -69,7 +69,7 @@ class TestXcodeGeneratorTargets:
 
     def test_static_library_target(self, tmp_path):
         """Test static library target has correct product type."""
-        project = Project("mylib", build_dir=tmp_path)
+        project = Project("mylib", root_dir=tmp_path, build_dir=tmp_path)
         Target("mylib", target_type="static_library")
 
         gen = XcodeGenerator()
@@ -82,7 +82,7 @@ class TestXcodeGeneratorTargets:
 
     def test_shared_library_target(self, tmp_path):
         """Test shared library target has correct product type."""
-        project = Project("mylib", build_dir=tmp_path)
+        project = Project("mylib", root_dir=tmp_path, build_dir=tmp_path)
         Target("mylib", target_type="shared_library")
 
         gen = XcodeGenerator()
@@ -95,7 +95,7 @@ class TestXcodeGeneratorTargets:
 
     def test_interface_target_skipped(self, tmp_path):
         """Test interface-only projects don't create xcodeproj."""
-        project = Project("mylib", build_dir=tmp_path)
+        project = Project("mylib", root_dir=tmp_path, build_dir=tmp_path)
         Target("headers", target_type="interface")
 
         gen = XcodeGenerator()
@@ -115,7 +115,7 @@ class TestXcodeGeneratorBuildSettings:
 
     def test_include_dirs_mapped(self, tmp_path):
         """Test include directories are mapped to HEADER_SEARCH_PATHS."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("myapp", target_type="program")
         target.public.include_dirs.append(Path("include"))
         target.private.include_dirs.append(Path("src"))
@@ -129,7 +129,7 @@ class TestXcodeGeneratorBuildSettings:
 
     def test_defines_mapped(self, tmp_path):
         """Test defines are mapped to GCC_PREPROCESSOR_DEFINITIONS."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("myapp", target_type="program")
         target.public.defines.append("DEBUG=1")
         target.private.defines.append("INTERNAL")
@@ -143,7 +143,7 @@ class TestXcodeGeneratorBuildSettings:
 
     def test_compile_flags_mapped(self, tmp_path):
         """Test compile flags are mapped to OTHER_CFLAGS."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("myapp", target_type="program")
         target.private.compile_flags.extend(["-Wall", "-Wextra"])
 
@@ -163,7 +163,7 @@ class TestXcodeGeneratorBuildSettings:
         of ``<project_root>/libfoo/include``, causing Xcode builds to fail with
         'file not found' errors.
         """
-        project = Project("myapp", build_dir=tmp_path / "build")
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path / "build")
         # Simulate a target that lives in a subdirectory
         target = Target("foo", target_type="static_library")
         target._subdir = "libfoo"
@@ -186,7 +186,7 @@ class TestXcodeGeneratorDependencies:
 
     def test_target_dependencies(self, tmp_path):
         """Test dependencies are linked correctly."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create library
         lib = Target("mylib", target_type="static_library")
@@ -208,7 +208,7 @@ class TestXcodeGeneratorDependencies:
 
     def test_library_dep_added_to_link_phase(self, tmp_path):
         """Test that a library dependency's product is in the frameworks link phase."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
 
         lib = Target("mylib", target_type="static_library")
 
@@ -236,7 +236,7 @@ class TestXcodeGeneratorDependencies:
 
     def test_target_lib_not_stringified_into_ldflags(self, tmp_path):
         """Library Target deps must not leak into OTHER_LDFLAGS as -l flags."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
 
         pub_lib = Target("publib", target_type="static_library")
         priv_lib = Target("privlib", target_type="static_library")
@@ -259,7 +259,7 @@ class TestXcodeGeneratorDependencies:
 
         Covers both the public and private link_libs branches.
         """
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
 
         app = Target("myapp", target_type="program")
         app.public.link_libs.append("pubsys")
@@ -279,7 +279,7 @@ class TestXcodeGeneratorBuildPhases:
 
     def test_has_sources_phase(self, tmp_path):
         """Test targets have PBXSourcesBuildPhase."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
@@ -291,7 +291,7 @@ class TestXcodeGeneratorBuildPhases:
 
     def test_has_frameworks_phase(self, tmp_path):
         """Test targets have PBXFrameworksBuildPhase."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
@@ -307,7 +307,7 @@ class TestXcodeGeneratorConfigurations:
 
     def test_has_debug_configuration(self, tmp_path):
         """Test project has Debug configuration."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
@@ -319,7 +319,7 @@ class TestXcodeGeneratorConfigurations:
 
     def test_has_release_configuration(self, tmp_path):
         """Test project has Release configuration."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
@@ -335,7 +335,7 @@ class TestXcodeGeneratorGroups:
 
     def test_has_products_group(self, tmp_path):
         """Test project has Products group."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
@@ -347,7 +347,7 @@ class TestXcodeGeneratorGroups:
 
     def test_has_sources_group(self, tmp_path):
         """Test project has Sources group."""
-        project = Project("myapp", build_dir=tmp_path)
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
         Target("myapp", target_type="program")
 
         gen = XcodeGenerator()
@@ -363,7 +363,7 @@ class TestXcodeGeneratorMultiTarget:
 
     def test_multiple_targets(self, tmp_path):
         """Test project with multiple targets."""
-        project = Project("multi", build_dir=tmp_path)
+        project = Project("multi", root_dir=tmp_path, build_dir=tmp_path)
 
         # Add multiple targets
         lib1 = Target("libmath", target_type="static_library")
@@ -396,7 +396,7 @@ class TestXcodeGeneratorInstall:
         """Test Install target creates PBXAggregateTarget."""
         from pcons.core.node import FileNode
 
-        project = Project("install_test", build_dir=tmp_path)
+        project = Project("install_test", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create an interface target mimicking Install
         install_target = Target("install_bin", target_type="interface")
@@ -437,7 +437,7 @@ class TestXcodeGeneratorInstall:
         """Test Install target has proper shell script phase."""
         from pcons.core.node import FileNode
 
-        project = Project("install_script", build_dir=tmp_path)
+        project = Project("install_script", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create a source file
         source = FileNode(Path("src/app"))
@@ -478,7 +478,7 @@ class TestXcodeGeneratorInstallDir:
         """Test InstallDir target creates PBXAggregateTarget with cp -R."""
         from pcons.core.node import FileNode
 
-        project = Project("install_dir_test", build_dir=tmp_path)
+        project = Project("install_dir_test", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create InstallDir target
         install_dir_target = Target("install_assets", target_type="interface")
@@ -523,7 +523,7 @@ class TestXcodeGeneratorArchive:
         """Test Tarfile target creates PBXAggregateTarget with tar command."""
         from pcons.core.node import FileNode
 
-        project = Project("archive_test", build_dir=tmp_path)
+        project = Project("archive_test", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create Tarfile target
         tar_target = Target("my_archive", target_type="archive")
@@ -569,7 +569,7 @@ class TestXcodeGeneratorArchive:
         """Test Zipfile target creates PBXAggregateTarget with zip command."""
         from pcons.core.node import FileNode
 
-        project = Project("zip_test", build_dir=tmp_path)
+        project = Project("zip_test", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create Zipfile target
         zip_target = Target("my_zip", target_type="archive")
@@ -616,7 +616,7 @@ class TestXcodeGeneratorInstallDependencies:
         """Test Install target depending on a compiled program."""
         from pcons.core.node import FileNode
 
-        project = Project("dep_test", build_dir=tmp_path)
+        project = Project("dep_test", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create a program target
         prog = Target("myapp", target_type="program")
@@ -659,7 +659,7 @@ class TestXcodeGeneratorInstallDependencies:
         """Test Archive target depending on a compiled program."""
         from pcons.core.node import FileNode
 
-        project = Project("archive_dep_test", build_dir=tmp_path)
+        project = Project("archive_dep_test", root_dir=tmp_path, build_dir=tmp_path)
 
         # Create a program target
         prog = Target("myapp", target_type="program")

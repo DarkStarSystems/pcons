@@ -17,7 +17,7 @@ class TestDotGeneratorBasic:
         assert gen.name == "dot"
 
     def test_empty_project(self, tmp_path):
-        project = Project("empty", build_dir=tmp_path)
+        project = Project("empty", root_dir=tmp_path, build_dir=tmp_path)
         gen = DotGenerator()
         gen.generate(project)
         BaseGenerator._generate_pending(project)
@@ -28,7 +28,7 @@ class TestDotGeneratorBasic:
 
     def test_object_and_output_nodes(self, tmp_path):
         """Object nodes (ellipse) and output nodes are emitted."""
-        project = Project("app", build_dir=tmp_path)
+        project = Project("app", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("myapp", target_type="program")
         src = FileNode(Path("src/main.c"))
         obj = FileNode(Path("build/main.o"))
@@ -49,7 +49,7 @@ class TestDotGeneratorBasic:
 
     def test_header_dependencies(self, tmp_path):
         """include_headers parses .d files and emits header (note) nodes."""
-        project = Project("hdr", build_dir=tmp_path)
+        project = Project("hdr", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("app", target_type="program")
         src = FileNode(tmp_path / "main.c")
         obj = FileNode(tmp_path / "main.o")
@@ -77,7 +77,7 @@ class TestDotGeneratorBasic:
 
     def test_include_headers_without_depfile(self, tmp_path):
         """include_headers=True with no .d file present yields no header nodes."""
-        project = Project("nodep", build_dir=tmp_path)
+        project = Project("nodep", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("app", target_type="program")
         obj = FileNode(tmp_path / "main.o")
         obj.depends([FileNode(tmp_path / "main.c")])
@@ -94,7 +94,7 @@ class TestDotGeneratorBasic:
 
     def test_depfile_read_error_is_swallowed(self, tmp_path):
         """A depfile that cannot be read (e.g. a directory) is ignored."""
-        project = Project("baddep", build_dir=tmp_path)
+        project = Project("baddep", root_dir=tmp_path, build_dir=tmp_path)
         target = Target("app", target_type="program")
         obj = FileNode(tmp_path / "main.o")
         obj.depends([FileNode(tmp_path / "main.c")])
@@ -113,7 +113,7 @@ class TestDotGeneratorBasic:
 
     def test_output_dir_override(self, tmp_path):
         sub = tmp_path / "diagrams"
-        project = Project("p", build_dir=tmp_path)
+        project = Project("p", root_dir=tmp_path, build_dir=tmp_path)
         gen = DotGenerator(output_dir=sub)
         gen.generate(project)
         BaseGenerator._generate_pending(project)
