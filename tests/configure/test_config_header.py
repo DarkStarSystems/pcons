@@ -5,7 +5,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pcons.configure.config import Configure
+from pcons.core.environment import Environment
+
+from .test_checks import _cc_path, has_cc
+
+
+def _cc_env() -> Environment:
+    env = Environment()
+    env.add_tool("cc")
+    if _cc_path:
+        env.cc.cmd = _cc_path
+    return env
 
 
 class TestDefine:
@@ -83,13 +96,15 @@ class TestDefine:
         assert config2.get("some_check_key") is True
 
 
+@pytest.mark.skipif(not has_cc, reason="No C compiler available")
 class TestCheckSizeof:
-    """Tests for check_sizeof method."""
+    """check_sizeof delegates to the compiler-based check_type_size, so
+    answers come from the target compiler, never host ctypes."""
 
-    def test_sizeof_int(self, tmp_path: Path) -> None:
+    def test_sizeof_int(self, tmp_path: Path, test_project) -> None:  # noqa: F811
         """Test sizeof(int)."""
         config = Configure(build_dir=tmp_path)
-        size = config.check_sizeof("int")
+        size = config.check_sizeof("int", env=_cc_env())
 
         assert size is not None
         assert size == 4  # int is typically 4 bytes
@@ -97,10 +112,10 @@ class TestCheckSizeof:
         defines = config._defines
         assert defines.get("SIZEOF_INT") == 4
 
-    def test_sizeof_pointer(self, tmp_path: Path) -> None:
+    def test_sizeof_pointer(self, tmp_path: Path, test_project) -> None:  # noqa: F811
         """Test sizeof(void*)."""
         config = Configure(build_dir=tmp_path)
-        size = config.check_sizeof("void*")
+        size = config.check_sizeof("void*", env=_cc_env())
 
         assert size is not None
         # Should be 8 on 64-bit, 4 on 32-bit
@@ -109,18 +124,18 @@ class TestCheckSizeof:
         defines = config._defines
         assert "SIZEOF_VOIDP" in defines
 
-    def test_sizeof_custom_define_name(self, tmp_path: Path) -> None:
+    def test_sizeof_custom_define_name(self, tmp_path: Path, test_project) -> None:  # noqa: F811
         """Test sizeof with custom define name."""
         config = Configure(build_dir=tmp_path)
-        config.check_sizeof("long", define_name="MY_LONG_SIZE")
+        config.check_sizeof("long", env=_cc_env(), define_name="MY_LONG_SIZE")
 
         defines = config._defines
         assert "MY_LONG_SIZE" in defines
 
-    def test_sizeof_unknown_type(self, tmp_path: Path) -> None:
+    def test_sizeof_unknown_type(self, tmp_path: Path, test_project) -> None:  # noqa: F811
         """Test sizeof with unknown type returns default."""
         config = Configure(build_dir=tmp_path)
-        size = config.check_sizeof("unknown_type_xyz", default=0)
+        size = config.check_sizeof("unknown_type_xyz", env=_cc_env(), default=0)
 
         assert size == 0
 
@@ -135,7 +150,7 @@ class TestWriteConfigHeader:
         # Add some defines
         config.define("MY_FEATURE")
         config.define("VERSION_MAJOR", 1)
-        config.check_sizeof("int")
+        config.define("SIZEOF_INT", 4)
 
         header_path = tmp_path / "config.h"
         config.write_config_header(header_path)
@@ -214,8 +229,8 @@ class TestWriteConfigHeader:
         config.define("VERSION_MAJOR", 1)
         config.define("VERSION_MINOR", 2)
         config.define("VERSION_STRING", "1.2.0")
-        config.check_sizeof("int")
-        config.check_sizeof("long")
+        config.define("SIZEOF_INT", 4)
+        config.define("SIZEOF_LONG", 8)
         config.undefine("MISSING_FEATURE")
 
         header_path = tmp_path / "config.h"

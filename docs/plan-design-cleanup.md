@@ -118,7 +118,11 @@ as a "Preset application" section in docs/presets.md first, then implement.
 
 ## Theme 3 — Configure cache conflates host and target
 
-### 3a. `check_sizeof` host fallback + target-blind cache keys — **todo**
+**Status: implemented** (2026-07-20). Decided principle: configure checks are
+compile/link-time only — no execution, so cross-compilation configure always
+works (meson-style exe-wrapper support can be added later if ever needed).
+
+### 3a. `check_sizeof` host fallback + target-blind cache keys — **done** (check_sizeof delegates to compiler-based check_type_size, ctypes path removed; checks now compile with the tool's flags so cross targets answer correctly; cache keys carry a compiler+flags signature)
 - `_get_sizeof_ctypes` returns the host Python's ctypes sizes
   (config.py:394-413); cache key is `sizeof:<type>` with no toolchain/target
   discriminator (config.py:372). Cross builds can bake host `SIZEOF_*` into
@@ -128,7 +132,7 @@ as a "Preset application" section in docs/presets.md first, then implement.
   compiler id); refuse or clearly mark the ctypes fallback under a cross
   preset.
 
-### 3b. `find_program` cache staleness — **todo**
+### 3b. `find_program` cache staleness — **done** (cache key includes a PATH signature; hints still override)
 - Cached under `program:<name>` (config.py:175), invalidated only by
   `path.exists()` (config.py:200) — not by PATH changes or toolchain switch.
   Similarly `PkgConfigFinder.is_available()` caches its path once per

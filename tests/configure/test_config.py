@@ -122,12 +122,15 @@ class TestConfigureFindProgram:
         # Find twice - second should use cache
         result1 = config.find_program("python3") or config.find_program("python")
         if result1:
-            # The path should be cached
-            cache_key = (
-                "program:python3" if config.get("program:python3") else "program:python"
-            )
-            cached = config.get(cache_key)
-            assert cached is not None
+            # The path is cached under a PATH-signature key (a changed PATH
+            # must re-search rather than reuse a stale result).
+            cached_keys = [
+                k
+                for k in config._cache
+                if k.startswith(("program:python3:", "program:python:"))
+            ]
+            assert cached_keys
+            assert config.get(cached_keys[0]) is not None
 
     def _make_fake_exe(self, dir_path, name="fake_program"):
         import sys

@@ -339,10 +339,16 @@ class TestToolChecksWithoutCompiler:
         checks = ToolChecks(config, env, "cc")
         key = checks._cache_key("flag", "-Wall")
 
+        # The compiler and its flags are folded into a signature hash so the
+        # same binary targeting different platforms never shares answers.
         assert "cc" in key
-        assert "gcc" in key
         assert "flag" in key
         assert "-Wall" in key
+
+        # Changing the tool's flags (e.g. a cross preset's --target) must
+        # change the key.
+        env.cc.set("flags", ["--target=wasm32-wasi"])
+        assert checks._cache_key("flag", "-Wall") != key
 
 
 class TestMsvcStyleDispatch:
@@ -444,3 +450,29 @@ class TestMsvcStyleDispatch:
         cmd = captured["cmd"]
         assert "-c" in cmd
         assert "-o" in cmd
+
+
+class TestCrossTargetChecks:
+    """Checks compile with the tool's flags, so a cross preset's --target
+    makes them answer for the target, not the host (docs/presets.md,
+    host independence)."""
+
+    def test_check_answers_for_target_not_host(self, tmp_path, test_project):  # noqa: F811
+        import shutil
+
+        clang = shutil.which("clang")
+        if clang is None:
+            pytest.skip("clang not available")
+
+        config = Configure(build_dir=tmp_path)
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.cmd = clang
+        # i686 needs only the x86 backend, present in every clang build
+        # (Apple's clang lacks e.g. the wasm backend).
+        env.cc.set("flags", ["--target=i686-unknown-linux-gnu"])
+
+        checks = ToolChecks(config, env, "cc")
+        # i686 pointers are 4 bytes; virtually every host is 8. The old
+        # behavior (bare compiler, host ctypes) would answer 8.
+        assert checks.check_type_size("void*") == 4

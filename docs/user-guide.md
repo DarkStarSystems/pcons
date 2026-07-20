@@ -3096,8 +3096,8 @@ if checks.check_header("sys/mman.h").success:
 
 config.define("VERSION_MAJOR", 1)
 config.define("VERSION_STRING", "1.2.0")
-config.check_sizeof("int")     # Defines SIZEOF_INT
-config.check_sizeof("void*")   # Defines SIZEOF_VOIDP
+config.check_sizeof("int", env=env)     # Defines SIZEOF_INT
+config.check_sizeof("void*", env=env)   # Defines SIZEOF_VOIDP
 config.undefine("MISSING_FEATURE")
 
 # Generate the header
@@ -3133,7 +3133,7 @@ This generates:
 #endif /* MY_CONFIG_H */
 ```
 
-Note: `config.check_sizeof()` uses Python's `ctypes` to determine sizes on the host machine. For cross-compilation where host and target sizes differ, use `ToolChecks.check_type_size()` instead — it compiles a test program with the target compiler.
+Note: all configure checks — including `check_sizeof()` — are **compile-time only**: they ask the configured compiler (with the environment's flags, so cross presets apply) and never execute anything, which makes them correct under cross-compilation. Values like type sizes are computed with compile-time probes (`int check[sizeof(T) == N ? 1 : -1]`), the same technique autoconf, CMake, and Meson use. If a genuinely run-time answer is ever needed, provide it explicitly with `config.define()`.
 
 ### Template-Based Config Files with `configure_file()`
 
@@ -3308,7 +3308,7 @@ This is especially useful when porting CMake projects to pcons, since the templa
 | `Configure(build_dir)` | Create configuration context |
 | `config.define(name, value=1)` | Define a preprocessor symbol |
 | `config.undefine(name)` | Mark a symbol as undefined |
-| `config.check_sizeof(type)` | Get the size of a type and define `SIZEOF_*` |
+| `config.check_sizeof(type, env=env)` | Get the size of a type via the target compiler and define `SIZEOF_*` |
 | `config.write_config_header(path)` | Generate a config.h file |
 | `ToolChecks(config, env, tool)` | Create feature checker for a tool |
 | `checks.check_flag(flag)` | Check if compiler accepts a flag |

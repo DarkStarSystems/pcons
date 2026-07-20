@@ -98,10 +98,34 @@ class ToolChecks:
             return None
         return getattr(self._tool_config, "cmd", None)
 
+    def _tool_flags(self) -> list[str]:
+        """The tool's current string flags, included in every check compile.
+
+        This is what makes checks answer for the *target*: cross presets
+        put ``--target=``/``-isysroot``/``--sysroot`` here, so a check
+        probes the same compilation the build will do (the same reason
+        autoconf includes CFLAGS in its probes).
+        """
+        if self._tool_config is None:
+            return []
+        flags = self._tool_config.get("flags")
+        if not isinstance(flags, list):
+            return []
+        return [f for f in flags if isinstance(f, str)]
+
     def _cache_key(self, check_type: str, *args: str) -> str:
-        """Generate a cache key for a check."""
+        """Generate a cache key for a check.
+
+        Keyed by a signature of the compiler command *and its flags*, so
+        the same clang binary targeting different platforms (host vs
+        ``--target=wasm32-wasi``) never shares cached answers.
+        """
+        import hashlib
+
         compiler = self._get_compiler() or "unknown"
-        return f"check:{self._tool_name}:{compiler}:{check_type}:{':'.join(args)}"
+        sig_src = "\x00".join([compiler, *self._tool_flags()])
+        sig = hashlib.sha1(sig_src.encode()).hexdigest()[:12]
+        return f"check:{self._tool_name}:{sig}:{check_type}:{':'.join(args)}"
 
     def _cached_or_compiler(self, cache_key: str) -> CheckResult | str:
         """Shared preamble for the check_* methods.
@@ -611,9 +635,14 @@ int main(void) {{
             src_path = dir_path / f"check{suffix}"
             src_path.write_text(source)
 
+            # The tool's own flags come first: cross presets put the
+            # target selection (--target=, -isysroot) there, and a check
+            # must probe the same compilation the build will do.
+            tool_flags = self._tool_flags()
             if self._is_msvc_style():
                 out_path = dir_path / ("check.exe" if link else "check.obj")
                 cmd = [compiler, "/nologo"]
+                cmd.extend(tool_flags)
                 if extra_flags:
                     cmd.extend(extra_flags)
                 if not link:
@@ -623,6 +652,7 @@ int main(void) {{
             else:
                 out_path = dir_path / "check.out"
                 cmd = [compiler]
+                cmd.extend(tool_flags)
                 if not link:
                     cmd.append("-c")
                 cmd.extend(["-o", str(out_path), str(src_path)])
@@ -680,10 +710,12 @@ int main(void) {{
             src_path = dir_path / f"check{suffix}"
             src_path.write_text(source)
 
+            # Include tool flags: predefined macros are target-dependent
+            # (e.g. __wasm__ under --target=wasm32-wasi).
             if self._is_msvc_style():
-                cmd = [compiler, "/nologo", "/E", str(src_path)]
+                cmd = [compiler, "/nologo", *self._tool_flags(), "/E", str(src_path)]
             else:
-                cmd = [compiler, "-E", str(src_path)]
+                cmd = [compiler, *self._tool_flags(), "-E", str(src_path)]
             trace("configure", "  cmd: %s", " ".join(cmd))
 
             try:

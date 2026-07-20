@@ -172,7 +172,16 @@ class Configure:
         """
         trace("configure", "Finding program: %s", name)
 
-        cache_key = f"program:{name}"
+        # Key the cache by a PATH signature so a changed PATH (different
+        # dev shell, added SDK bin dir) re-searches instead of returning a
+        # result found under a different environment. Stale-but-existing
+        # binaries were previously returned indefinitely.
+        import hashlib
+
+        path_sig = hashlib.sha1(
+            os.environ.get("PATH", "").encode(errors="replace")
+        ).hexdigest()[:12]
+        cache_key = f"program:{name}:{path_sig}"
 
         # Explicit hints are the caller's most specific instruction, so they
         # take priority over both the cache and PATH. This lets a caller
@@ -348,38 +357,41 @@ class Configure:
         self,
         type_name: str,
         *,
+        env: Any,
+        tool: str = "cc",
         define_name: str | None = None,
         headers: list[str] | None = None,
         default: int | None = None,
     ) -> int | None:
-        """Check the size of a type.
+        """Check the size of a type with the configured compiler.
 
-        Defines SIZEOF_<TYPE> with the size in bytes.
+        Defines SIZEOF_<TYPE> with the size in bytes. Delegates to
+        :meth:`ToolChecks.check_type_size`, which asks the *target*
+        compiler via a compile-time probe — no code is executed, so this
+        is correct under cross-compilation (a host-side ctypes fallback
+        used to answer with host sizes; see docs/presets.md on host
+        independence).
 
         Args:
             type_name: C type name (e.g., "int", "void*", "long long").
+            env: Environment whose configured compiler answers the check.
+            tool: Tool to compile with ("cc" or "cxx").
             define_name: Override for the define name.
             headers: Headers to include before checking.
-            default: Default value if check fails.
+            default: Default value if the check fails.
 
         Returns:
-            Size in bytes, or default if check fails.
+            Size in bytes, or default if the check fails.
 
         Example:
-            int_size = config.check_sizeof("int")  # Defines SIZEOF_INT
-            ptr_size = config.check_sizeof("void*")  # Defines SIZEOF_VOIDP
+            int_size = config.check_sizeof("int", env=env)  # SIZEOF_INT
+            ptr_size = config.check_sizeof("void*", env=env)  # SIZEOF_VOIDP
         """
-        cache_key = f"sizeof:{type_name}"
-        if cache_key in self._cache:
-            cached = self._cache[cache_key]
-            size: int | None = int(cached) if cached is not None else None
-        else:
-            # For now, use ctypes to get sizes for common types
-            # Real implementation would compile and run a test program
-            size = self._get_sizeof_ctypes(type_name)
-            if size is None:
-                size = default
-            self._cache[cache_key] = size
+        from pcons.configure.checks import ToolChecks
+
+        size = ToolChecks(self, env, tool).check_type_size(type_name, headers=headers)
+        if size is None:
+            size = default
 
         # Generate define name
         if define_name is None:
@@ -390,27 +402,6 @@ class Configure:
             self.define(define_name, size)
 
         return size
-
-    def _get_sizeof_ctypes(self, type_name: str) -> int | None:
-        """Get size of a type using ctypes (fallback method)."""
-        import ctypes
-
-        # Map of type names to their sizes
-        # We use sizeof directly with the type object
-        size_map: dict[str, int] = {
-            "char": ctypes.sizeof(ctypes.c_char),
-            "short": ctypes.sizeof(ctypes.c_short),
-            "int": ctypes.sizeof(ctypes.c_int),
-            "long": ctypes.sizeof(ctypes.c_long),
-            "long long": ctypes.sizeof(ctypes.c_longlong),
-            "float": ctypes.sizeof(ctypes.c_float),
-            "double": ctypes.sizeof(ctypes.c_double),
-            "void*": ctypes.sizeof(ctypes.c_void_p),
-            "size_t": ctypes.sizeof(ctypes.c_size_t),
-            "ssize_t": ctypes.sizeof(ctypes.c_ssize_t),
-        }
-
-        return size_map.get(type_name.lower())
 
     def write_config_header(
         self,
