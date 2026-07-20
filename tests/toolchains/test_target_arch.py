@@ -9,13 +9,29 @@ define what flags it means.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import patch
+
+import pytest
 
 from pcons.core.environment import Environment
 from pcons.toolchains.clang_cl import ClangClToolchain
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
 from pcons.toolchains.msvc import MsvcToolchain
+
+
+@pytest.fixture
+def flags_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin /MACHINE and --target mapping tests to flag behavior only.
+
+    The Windows cross-toolset repoint (bin/lib discovery) has its own
+    tests in TestMsvcCrossToolset; these mapping tests should behave the
+    same on every host.
+    """
+    not_windows = lambda: SimpleNamespace(is_windows=False)  # noqa: E731
+    monkeypatch.setattr("pcons.toolchains.msvc.get_platform", not_windows)
+    monkeypatch.setattr("pcons.toolchains.clang_cl.get_platform", not_windows)
 
 
 class TestGccTargetArch:
@@ -144,8 +160,9 @@ class TestLlvmTargetArch:
         assert "arm64" in link.flags
 
 
+@pytest.mark.usefixtures("flags_only")
 class TestMsvcTargetArch:
-    """Tests for MSVC toolchain target architecture."""
+    """Tests for MSVC toolchain target architecture (flag mapping only)."""
 
     def test_x64_machine_flag(self, test_project):  # noqa: F811
         """Test MSVC x64 target adds /MACHINE:X64."""
@@ -233,8 +250,9 @@ class TestMsvcTargetArch:
         assert "/MACHINE:ARM64" in link.flags
 
 
+@pytest.mark.usefixtures("flags_only")
 class TestClangClTargetArch:
-    """Tests for Clang-CL toolchain target architecture."""
+    """Tests for Clang-CL toolchain target architecture (flag mapping only)."""
 
     def test_x64_target_and_machine(self, test_project):  # noqa: F811
         """Test Clang-CL x64 target adds --target flag and /MACHINE."""
@@ -401,3 +419,123 @@ class TestBaseToolchainTargetArch:
 
         # Base implementation should not add any flags
         assert len(cc.flags) == 0
+
+
+class TestMsvcCrossToolset:
+    """MSVC/clang-cl cross-arch selects the cross toolset binaries and libs.
+
+    Uses a fake VC + Windows SDK tree; behaves identically on every host.
+    """
+
+    def _fake_windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        is_windows = lambda: SimpleNamespace(is_windows=True)  # noqa: E731
+        monkeypatch.setattr("pcons.toolchains.msvc.get_platform", is_windows)
+        monkeypatch.setattr("pcons.toolchains.clang_cl.get_platform", is_windows)
+        monkeypatch.setattr("platform.machine", lambda: "AMD64")
+        monkeypatch.delenv("VCToolsInstallDir", raising=False)
+        monkeypatch.delenv("WindowsSDKLibVersion", raising=False)
+
+    def _fake_vc_tree(self, tmp_path, monkeypatch: pytest.MonkeyPatch):
+        """Build a fake VS install with an x64-hosted arm64 cross toolset.
+
+        Returns the cross bin dir.
+        """
+        version_dir = tmp_path / "VC" / "Tools" / "MSVC" / "14.40.1"
+        bin_dir = version_dir / "bin" / "Hostx64" / "arm64"
+        bin_dir.mkdir(parents=True)
+        for exe in ("cl.exe", "link.exe", "lib.exe"):
+            (bin_dir / exe).touch()
+        (version_dir / "lib" / "arm64").mkdir(parents=True)
+        monkeypatch.setattr(
+            "pcons.toolchains.msvc._find_msvc_install", lambda: tmp_path
+        )
+        sdk_lib = tmp_path / "kits" / "Lib" / "10.0.22621.0"
+        for sub in ("um", "ucrt"):
+            (sdk_lib / sub / "arm64").mkdir(parents=True)
+        monkeypatch.setenv("WindowsSdkDir", str(tmp_path / "kits"))
+        return bin_dir
+
+    def _make_env(self, cmds: dict[str, str]) -> Environment:
+        env = Environment()
+        for name, cmd in cmds.items():
+            tool = env.add_tool(name)
+            tool.set("cmd", cmd)
+            tool.set("flags", [])
+        return env
+
+    def test_msvc_arm64_repoints_tools_and_libs(
+        self,
+        test_project,
+        tmp_path,
+        monkeypatch,  # noqa: F811
+    ):
+        self._fake_windows(monkeypatch)
+        bin_dir = self._fake_vc_tree(tmp_path, monkeypatch)
+        env = self._make_env(
+            {"cc": "cl.exe", "cxx": "cl.exe", "link": "link.exe", "lib": "lib.exe"}
+        )
+
+        MsvcToolchain().apply_target_arch(env, "arm64")
+
+        assert env.cc.cmd == str(bin_dir / "cl.exe")
+        assert env.cxx.cmd == str(bin_dir / "cl.exe")
+        assert env.link.cmd == str(bin_dir / "link.exe")
+        assert env.lib.cmd == str(bin_dir / "lib.exe")
+        assert "/MACHINE:ARM64" in env.link.flags
+        libpaths = [f for f in env.link.flags if str(f).startswith("/LIBPATH:")]
+        assert len(libpaths) == 3  # VC lib/arm64 + SDK um/arm64 + ucrt/arm64
+        assert all("arm64" in p for p in libpaths)
+
+    def test_msvc_native_arch_no_repoint(
+        self,
+        test_project,
+        tmp_path,
+        monkeypatch,  # noqa: F811
+    ):
+        """Host-native arch keeps the dev-shell tools; /MACHINE only."""
+        self._fake_windows(monkeypatch)
+        self._fake_vc_tree(tmp_path, monkeypatch)
+        env = self._make_env({"link": "link.exe", "lib": "lib.exe"})
+
+        MsvcToolchain().apply_target_arch(env, "x64")
+
+        assert env.link.cmd == "link.exe"
+        assert "/MACHINE:X64" in env.link.flags
+        assert not any(str(f).startswith("/LIBPATH:") for f in env.link.flags)
+
+    def test_msvc_missing_cross_toolset_raises(
+        self,
+        test_project,
+        tmp_path,
+        monkeypatch,  # noqa: F811
+    ):
+        """No installed arm64 toolset must fail fast, not silently misbuild."""
+        self._fake_windows(monkeypatch)
+        monkeypatch.setattr(
+            "pcons.toolchains.msvc._find_msvc_install", lambda: tmp_path
+        )
+        env = self._make_env({"link": "link.exe", "lib": "lib.exe"})
+
+        with pytest.raises(ValueError, match="cross toolset not found"):
+            MsvcToolchain().apply_target_arch(env, "arm64")
+
+    def test_clang_cl_arm64_adds_cross_libs_keeps_cmd(
+        self,
+        test_project,
+        tmp_path,
+        monkeypatch,  # noqa: F811
+    ):
+        """clang-cl retargets by flag: same binary, cross /LIBPATH: dirs."""
+        self._fake_windows(monkeypatch)
+        self._fake_vc_tree(tmp_path, monkeypatch)
+        env = self._make_env(
+            {"cc": "clang-cl", "cxx": "clang-cl", "link": "lld-link", "lib": "llvm-lib"}
+        )
+
+        ClangClToolchain().apply_target_arch(env, "arm64")
+
+        assert env.cc.cmd == "clang-cl"
+        assert "--target=aarch64-pc-windows-msvc" in env.cc.flags
+        assert "/MACHINE:ARM64" in env.link.flags
+        libpaths = [f for f in env.link.flags if str(f).startswith("/LIBPATH:")]
+        assert len(libpaths) == 3

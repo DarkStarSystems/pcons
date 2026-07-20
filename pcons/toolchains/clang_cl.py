@@ -305,13 +305,42 @@ class ClangClToolchain(MsvcCompatibleToolchain):
         - x64 (or amd64, x86_64): 64-bit Intel/AMD
         - x86 (or i386, i686): 32-bit Intel/AMD
         - arm64 (or aarch64): 64-bit ARM
+
+        clang-cl retargets with a flag (one binary), but a cross arch still
+        needs the target's VC and Windows SDK libraries — the dev shell's LIB
+        covers only the host arch — so those are added as /LIBPATH: flags.
         """
+        from pcons.toolchains.msvc import (
+            _ARCH_DIR_MAP,
+            _cross_lib_flags,
+            _find_cross_toolset,
+            _host_arch_dirs,
+        )
+
         contribs = super()._arch_contributions(arch)
         target_triple = self.CLANG_CL_TARGET_MAP.get(arch.lower())
         if target_triple:
             flag = f"--target={target_triple}"
             contribs.append(ToolContribution("cc", flags=(flag,)))
             contribs.append(ToolContribution("cxx", flags=(flag,)))
+
+        if not get_platform().is_windows:
+            return contribs
+        target = _ARCH_DIR_MAP.get(arch.lower())
+        _, native = _host_arch_dirs()
+        if target is None or target == native:
+            return contribs
+        toolset = _find_cross_toolset(target)
+        if toolset is None:
+            raise ValueError(
+                f"MSVC {target} libraries not found for cross-compiling with "
+                f"clang-cl. Install the 'MSVC ... {target.upper()} build tools' "
+                f"component in the Visual Studio Installer."
+            )
+        _, vc_lib_dir = toolset
+        lib_flags = _cross_lib_flags(target, vc_lib_dir)
+        if lib_flags:
+            contribs.append(ToolContribution("link", flags=lib_flags))
         return contribs
 
 

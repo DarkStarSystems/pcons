@@ -970,14 +970,14 @@ class BaseToolchain(ABC):
         )
 
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
-        """Tool contributions for a cross target (arch flags, extra flags, cmd).
+        """Tool contributions for a cross target (extra flags, cmd overrides).
 
         Toolchains extend this (UnixToolchain adds triple/sysroot; WasmToolchain
-        narrows it to extra flags only).
+        narrows it to extra flags only). The preset's `arch` is metadata, not a
+        flag source: the triple already encodes the CPU, and arch-flag
+        vocabulary belongs to the set_target_arch knob (see docs/presets.md).
         """
         contribs: list[ToolContribution] = []
-        if getattr(cross, "arch", None):
-            contribs.extend(self._arch_contributions(cross.arch))
         contribs.extend(self._extra_flag_contributions(cross))
         contribs.extend(self._cmd_contributions(cross))
         return contribs

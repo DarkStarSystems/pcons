@@ -26,10 +26,11 @@ class CrossPreset:
 
     Attributes:
         name: Human-readable preset name (e.g., "android-arm64-v8a").
-        arch: Target architecture (e.g., "arm64", "x86_64").
+        arch: Target CPU name in the target ecosystem's own vocabulary
+              (e.g., "arm64", "arm64-v8a", "wasm32"). Metadata only —
+              never a flag source; the triple encodes the CPU.
         triple: Compiler target triple (e.g., "aarch64-linux-android21").
-        sysroot: Path to the target sysroot.
-        sdk_path: Path to the SDK root (e.g., iOS SDK).
+        sysroot: Root of the target's headers/libraries (sysroot, SDK).
         extra_compile_flags: Additional compile flags for this target.
         extra_link_flags: Additional link flags for this target.
         env_vars: Environment variable overrides (e.g., CC, CXX commands).
@@ -39,7 +40,6 @@ class CrossPreset:
     arch: str
     triple: str | None = None
     sysroot: str | None = None
-    sdk_path: str | None = None
     extra_compile_flags: tuple[str, ...] = ()
     extra_link_flags: tuple[str, ...] = ()
     env_vars: dict[str, str] = field(default_factory=dict)
@@ -94,7 +94,6 @@ def android(
         arch=arch,
         triple=triple,
         sysroot=sysroot,
-        sdk_path=str(ndk_path),
         env_vars={
             "CC": str(bin_dir / f"{triple}-clang"),
             "CXX": str(bin_dir / f"{triple}-clang++"),
@@ -110,10 +109,14 @@ def ios(
 ) -> CrossPreset:
     """Create a cross-compilation preset for iOS.
 
+    Works with any Apple-aware toolchain: Swift, and LLVM/clang for
+    C/C++/Objective-C++.
+
     Args:
         arch: Target architecture ("arm64" or "x86_64" for simulator).
         min_version: Minimum iOS deployment target.
-        sdk: Path to iOS SDK. If None, auto-detected via xcrun.
+        sdk: Path to iOS SDK. If None, the toolchain resolves it via
+             xcrun when the preset is applied.
 
     Returns:
         CrossPreset configured for iOS.
@@ -127,14 +130,11 @@ def ios(
 
     compile_flags = [f"-mios-version-min={min_version}"]
 
-    # SDK path can be resolved at configure time via xcrun
-    sysroot = sdk
-
     return CrossPreset(
         name=f"ios-{arch}",
         arch=arch,
         triple=triple,
-        sysroot=sysroot,
+        sysroot=sdk,
         extra_compile_flags=tuple(compile_flags),
     )
 

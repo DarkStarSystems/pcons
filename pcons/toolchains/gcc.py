@@ -373,6 +373,26 @@ class GccToolchain(UnixToolchain):
     def __init__(self) -> None:
         super().__init__("gcc")
 
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """Apply a cross preset, requiring cross binaries for foreign triples.
+
+        GCC cannot retarget by flag (it rejects --target=); a different-triple
+        build needs different tool binaries. A preset that carries a triple but
+        no CC/CXX overrides cannot be realized — fail fast rather than silently
+        building host-arch objects (see docs/presets.md).
+        """
+        triple = getattr(preset, "triple", None)
+        env_vars = getattr(preset, "env_vars", None) or {}
+        if triple and not ("CC" in env_vars or "CXX" in env_vars):
+            name = getattr(preset, "name", preset)
+            raise ValueError(
+                f"Cross preset '{name}' targets triple '{triple}', but GCC "
+                f"selects targets by binary, not by flag. Provide cross-compiler "
+                f"commands in the preset's env_vars (e.g. CC={triple}-gcc), or "
+                f"use a clang-based toolchain, which retargets via --target."
+            )
+        super().apply_cross_preset(env, preset)
+
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, including C++20 module interfaces."""
         from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES

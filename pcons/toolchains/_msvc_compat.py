@@ -13,6 +13,7 @@ from pcons.core.preset import ToolContribution
 from pcons.tools.toolchain import BaseToolchain
 
 if TYPE_CHECKING:
+    from pcons.core.environment import Environment
     from pcons.toolchains.build_context import CompileLinkContext
     from pcons.tools.toolchain import AuxiliaryInputHandler, SourceHandler
 
@@ -172,6 +173,19 @@ class MsvcCompatibleToolchain(BaseToolchain):
         if standard <= 14:
             return "/std:c++14"
         return f"/std:c++{standard}"
+
+    def apply_cross_preset(self, env: Environment, preset: Any) -> None:
+        """MSVC-compatible toolchains have no different-platform targets.
+
+        Everything they can build for is Windows, so CPU selection is the
+        set_target_arch knob's job (see docs/presets.md).
+        """
+        name = getattr(preset, "name", preset)
+        raise ValueError(
+            f"Cross preset '{name}' does not apply to the {self.name} toolchain: "
+            f"it targets only Windows. To select the CPU, use "
+            f'env.set_target_arch(...) (e.g. "arm64") instead.'
+        )
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Add /MACHINE:xxx to linker and librarian."""

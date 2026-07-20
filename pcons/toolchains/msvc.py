@@ -234,6 +234,87 @@ def _find_msvc_bin_dir() -> Path | None:
     return None
 
 
+# Arch names as they appear as MSVC/SDK path components
+# (bin/Host<host>/<arch>, lib/<arch>, Lib/<sdkver>/um/<arch>).
+_ARCH_DIR_MAP: dict[str, str] = {
+    "x64": "x64",
+    "amd64": "x64",
+    "x86_64": "x64",
+    "x86": "x86",
+    "i386": "x86",
+    "i686": "x86",
+    "arm64": "arm64",
+    "aarch64": "arm64",
+}
+
+
+def _find_cross_toolset(target: str) -> tuple[Path, Path] | None:
+    """Locate (bin_dir, vc_lib_dir) for the given target arch dir name.
+
+    Searches VCToolsInstallDir (set by any vcvars shell) first, then
+    vswhere; picks the newest toolset version whose bin/Host<host>/<target>
+    contains the cross compiler.
+    """
+    host, _ = _host_arch_dirs()
+    candidates: list[Path] = []
+    env_root = os.environ.get("VCToolsInstallDir")
+    if env_root:
+        candidates.append(Path(env_root))
+    vs_path = _find_msvc_install()
+    if vs_path is not None:
+        vc_tools = vs_path / "VC" / "Tools" / "MSVC"
+        if vc_tools.exists():
+            candidates.extend(_sorted_version_dirs(vc_tools))
+    for version_dir in candidates:
+        bin_dir = version_dir / "bin" / host / target
+        if (bin_dir / "cl.exe").exists():
+            return bin_dir, version_dir / "lib" / target
+    return None
+
+
+def _find_sdk_lib_dirs(target: str) -> list[Path]:
+    """Windows SDK um/<arch> and ucrt/<arch> lib dirs, newest SDK first.
+
+    Honors WindowsSdkDir/WindowsSDKLibVersion (set by a dev shell), falling
+    back to the default Windows Kits install location.
+    """
+    sdk_root = os.environ.get("WindowsSdkDir")
+    if sdk_root:
+        lib_root = Path(sdk_root) / "Lib"
+    else:
+        program_files = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        lib_root = Path(program_files) / "Windows Kits" / "10" / "Lib"
+
+    version_dirs: list[Path] = []
+    sdk_ver = os.environ.get("WindowsSDKLibVersion")  # e.g. "10.0.22621.0\"
+    if sdk_ver:
+        version_dir = lib_root / sdk_ver.strip("\\/")
+        if version_dir.is_dir():
+            version_dirs.append(version_dir)
+    if not version_dirs and lib_root.is_dir():
+        version_dirs = _sorted_version_dirs(lib_root)
+
+    for version_dir in version_dirs:
+        dirs = [version_dir / "um" / target, version_dir / "ucrt" / target]
+        if all(d.is_dir() for d in dirs):
+            return dirs
+    return []
+
+
+def _cross_lib_flags(target: str, vc_lib_dir: Path) -> tuple[str, ...]:
+    """/LIBPATH: flags for a cross target: VC lib/<arch> + SDK um|ucrt/<arch>."""
+    libdirs = [d for d in [vc_lib_dir, *_find_sdk_lib_dirs(target)] if d.is_dir()]
+    if len(libdirs) < 3:
+        logger.warning(
+            "Incomplete %s library directories found (%s); the dev-shell LIB "
+            "environment is host-arch and will not cover the %s target",
+            target,
+            ", ".join(str(d) for d in libdirs) or "none",
+            target,
+        )
+    return tuple(f"/LIBPATH:{d}" for d in libdirs)
+
+
 class MsvcCompiler(BaseTool):
     """MSVC C/C++ compiler tool."""
 
@@ -613,6 +694,46 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
     def __init__(self) -> None:
         super().__init__("msvc")
+
+    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
+        """Add /MACHINE: (via base) and, for a cross arch, repoint the tools.
+
+        Answering "which CPU" on MSVC can require different binaries: the
+        cross toolset lives at bin/Host<host>/<arch> in the same VC install,
+        with matching lib/<arch> and Windows SDK um|ucrt/<arch> libraries
+        (the dev shell's LIB covers only the host arch). Everything is an
+        ordinary contribution, so explain() attributes each change to the
+        arch preset. See docs/presets.md.
+        """
+        contribs = super()._arch_contributions(arch)
+        if not get_platform().is_windows:
+            return contribs
+        target = _ARCH_DIR_MAP.get(arch.lower())
+        _, native = _host_arch_dirs()
+        if target is None or target == native:
+            return contribs
+
+        toolset = _find_cross_toolset(target)
+        if toolset is None:
+            host, _ = _host_arch_dirs()
+            raise ValueError(
+                f"MSVC {target} cross toolset not found: no bin/{host}/{target}/"
+                f"cl.exe in any installed VC tools version. Install the "
+                f"'MSVC ... {target.upper()} build tools' component in the "
+                f"Visual Studio Installer."
+            )
+        bin_dir, vc_lib_dir = toolset
+        for tool, exe in (
+            ("cc", "cl.exe"),
+            ("cxx", "cl.exe"),
+            ("link", "link.exe"),
+            ("lib", "lib.exe"),
+        ):
+            contribs.append(ToolContribution(tool, cmd=str(bin_dir / exe)))
+        lib_flags = _cross_lib_flags(target, vc_lib_dir)
+        if lib_flags:
+            contribs.append(ToolContribution("link", flags=lib_flags))
+        return contribs
 
     def setup(self, env: Environment) -> None:
         """Set up MSVC tools, resolving full paths when needed.

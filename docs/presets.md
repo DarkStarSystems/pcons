@@ -120,6 +120,123 @@ Fortran), so the same `warnings`/`werror` names map to the right tool per
 toolchain. WASM toolchains (`emscripten`/`wasi`) are clang-based and inherit the
 C/C++ realizations on `cc`/`cxx` directly.
 
+## Cross-compilation targets: the contract
+
+A `CrossPreset` describes **what to build for**; each toolchain decides **how**
+to get there. This section is the contract between the two — what each field
+means, which mechanisms exist, and what a toolchain must do when it can't
+honor a preset. The goal is *no silent misbuilds and no hidden magic*: every
+realized flag is attributable via `explain()`, every auto-detected value is
+overridable, and every unsupported combination is a loud error.
+
+### Two surfaces, one distinction
+
+pcons has two target-related surfaces. They answer different questions and
+must not be conflated:
+
+| Surface | Question it answers | Example |
+|---------|--------------------|---------|
+| `env.set_target_arch(arch)` (knob) | *which CPU*, same platform as the toolchain's default | macOS universal builds (`-arch`), MSVC arm64-on-x64 (cross toolset + `/MACHINE:`) |
+| `env.apply_cross_preset(p)` (target) | *which platform* — different OS/SDK/libc | iOS, Android, WASI, Linux-on-ARM |
+
+A cross preset is realized **only** from its own fields (triple, sysroot,
+env_vars, extra flags). It never routes through the arch knob — the knob's
+vocabulary is per-toolchain-and-platform, while a preset's `arch` uses its
+ecosystem's names (`arm64-v8a`, `wasm32`), and mixing the two produces flags
+like `-arch arm64-v8a`. When a triple is present it already encodes the CPU;
+a separate arch flag is at best redundant.
+
+### Exactly two retarget mechanisms
+
+Every toolchain reaches a foreign target in one (or both) of two ways:
+
+1. **Flag-retargeted** — one driver binary, target selected by flags.
+   Clang-family (`--target=<triple>`, sysroot flags) and swiftc
+   (`-target`, `-sdk`).
+2. **Binary-retargeted** — a different tool binary per target. GCC cross
+   binaries (`aarch64-linux-gnu-gcc`), Emscripten (`emcc`), wasi-sdk's
+   bundled clang. Selected via the preset's `env_vars` (`CC`/`CXX`).
+
+A preset may carry both (Android does: per-triple clang wrappers *and* a
+triple); each toolchain consumes the mechanism it understands. A toolchain
+that can realize **neither** mechanism from a given preset must **raise at
+apply time** with a message naming what's missing — never partially apply
+(GCC rejects triple-only presets, telling you to provide cross binaries or
+use clang).
+
+MSVC has no different-platform targets at all — everything it can build for
+is Windows, so arch selection there is the *knob's* job (below), and
+`apply_cross_preset` on MSVC is always an error directing you to
+`set_target_arch`.
+
+### The knob can retarget binaries too
+
+The knob/preset split is by *question*, not mechanism — and the knob's
+realization is per-toolchain like everything else. Answering "which CPU" may
+itself require different binaries: building for arm64 on x64 Windows needs
+the cross toolset (`bin/Hostx64/arm64/cl.exe` and the matching `lib/arm64`
+directories, all in the same VC install). MSVC's `set_target_arch` resolves
+those paths itself — the same way CMake's `-A ARM64` does — rather than only
+emitting `/MACHINE:` and relying on the user having run the right `vcvars`
+variant. clang-cl keeps its one binary (`--target` retargets it) but gets
+the cross VC/SDK library directories the same way, since the dev shell's
+`LIB` covers only the host arch. A missing cross toolset is a hard error
+naming the Visual Studio Installer component to add. `explain()` keeps it
+transparent: every repointed `cmd` and added `/LIBPATH:` is attributed to
+the arch preset.
+
+### Field contract
+
+| Field | Meaning | Realized as |
+|-------|---------|-------------|
+| `name` | preset identity; appears in `explain()` provenance | — |
+| `triple` | **canonical target identity** for flag-retargeted drivers; encodes CPU, vendor, OS, ABI (and for Apple, min version) | clang `--target=`, swiftc `-target`; ignored by binary-retargeted drivers (their binary *is* the triple) |
+| `arch` | CPU name in the target ecosystem's own vocabulary (`arm64`, `arm64-v8a`, `wasm32`); metadata for naming and platform-suffix decisions | **nothing** — never a flag source |
+| `sysroot` | root of target headers/libraries (sysroot, SDK, NDK sysroot) | `--sysroot=` (GNU-style), `-isysroot` (Apple clang), `-sdk` (swiftc) |
+| `env_vars` | tool-binary overrides (`CC`, `CXX`) — the binary-retarget mechanism | replaces `cc.cmd` / `cxx.cmd` |
+| `extra_compile_flags` / `extra_link_flags` | verbatim escape hatch for target-required flags (`-mios-version-min=`, `-sSIDE_MODULE=1`) | appended to `cc`+`cxx` / `link` as-is |
+
+### Bounded auto-detection
+
+Factories and toolchains may auto-detect paths (the iOS SDK via `xcrun`,
+`find_wasi_sdk()`, NDK layout), because requiring users to paste SDK paths is
+worse. But detection is bounded by three rules, which keep it transparent
+rather than magic:
+
+1. **Always overridable** — every detected value has an explicit parameter
+   (`ios(sdk=...)`, `wasi_sdk(sdk_path=...)`) that bypasses detection
+   entirely.
+2. **Always attributable** — detected values land in ordinary contributions
+   under the preset's name, so `env.explain()` shows exactly what was
+   resolved and by whom.
+3. **Loud on failure** — failed detection is a warning or error naming the
+   tool it tried (`xcrun`, `WASI_SDK_PATH`), never a silent omission.
+
+### Host independence
+
+Which flags a preset realizes depends only on the **target descriptor and the
+toolchain** — never on the host OS. The host may affect *detection* (whether
+`xcrun` exists) but not *semantics*: the same `ios()` preset on the same
+toolchain must produce the same command lines on any host that has the SDK.
+
+
+### Authoring checklist
+
+For a new target factory in `pcons/toolchains/presets.py`:
+
+- Pick the **triple** first; derive `name` and `arch` from it, not the
+  reverse. Use the ecosystem's own arch vocabulary.
+- Carry the platform's required flags in `extra_*_flags`; don't invent new
+  fields for them.
+- If the target needs specific binaries, set `env_vars` — with paths derived
+  from one user-supplied root parameter, not guessed.
+- Auto-detect only per the bounded rules above.
+
+For toolchain realization, override `_target_contributions()` (see
+`UnixToolchain` for the flag-retargeted pattern, `SwiftToolchain` for a
+driver with its own flag spelling, `WasmToolchain` for narrowing to extra
+flags only) and keep the fail-fast rule: realize a mechanism or raise.
+
 ## Authoring a feature preset
 
 **Built-in (in a toolchain) — the common case.** Add an entry to the toolchain's
@@ -199,6 +316,10 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | `warnings` + `werror` (orthogonal), Fortran/WASM coverage | implemented |
 | `env.set_variant` / `env.set_target_arch` | implemented |
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
+| Cross-preset field contract: triple/sysroot/env_vars realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |
+| `CrossPreset.arch` decoupled from flag emission (host-independent) | implemented |
+| Fail fast on unrealizable cross presets (MSVC + any, GCC + triple-only) | implemented |
+| MSVC/clang-cl `set_target_arch` selects the cross toolset (cl/lib dirs), not just `/MACHINE:` | implemented |
 | `env.cxx.set_standard` (tool-namespace setting via `tool_setting`) | implemented |
 | Registry, `scope/name` namespacing, `register_preset`/`preset`/`list_presets` | implemented |
 | Imperative escape hatch (`register_preset(..., imperative=True)`) | implemented |

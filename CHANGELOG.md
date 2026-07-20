@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`ios()` cross preset now works for C/C++/Objective-C++**: with the LLVM toolchain, the preset sets `--target` on compile *and* link, and the iPhoneOS (or iPhoneSimulator) SDK is resolved via `xcrun` automatically — same out-of-the-box experience as Swift. New example `51_ios_objcxx` builds a mixed C++/Objective-C++ iOS binary linking Foundation.
+- **Windows arm64 cross-compilation via `env.set_target_arch("arm64")`**: on an x64 host, MSVC now selects the cross toolset itself — `bin/Hostx64/arm64/cl.exe` plus the matching VC and Windows SDK `arm64` library directories — instead of only adding `/MACHINE:ARM64` and requiring the right `vcvars` dev shell. clang-cl gets the cross library directories the same way (its single binary retargets via `--target`). A missing cross toolset is a clear error naming the Visual Studio Installer component to add.
+
+### Changed
+
+- **Cross presets follow a documented contract** (new "Cross-compilation targets" section in `docs/presets.md`): a preset's `arch` is metadata only and never becomes a flag (previously it could leak ecosystem arch names into `-arch` on macOS hosts); unrealizable combinations now fail fast with actionable errors instead of silently misbuilding (GCC + a triple-only preset, MSVC/clang-cl + any cross preset — CPU selection on Windows is `set_target_arch`'s job); the unused `CrossPreset.sdk_path` field is removed (use `sysroot`).
+
 ## [0.22.0] - 2026-07-19
 
 ### Added
