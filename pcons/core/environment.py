@@ -66,6 +66,7 @@ class Environment(_EnvironmentStubs):
         "_created_nodes",
         "_applied_presets",
         "_applied_imperative",
+        "_fanout_seen",
         "_name",
         "defined_at",
     )
@@ -113,6 +114,8 @@ class Environment(_EnvironmentStubs):
         self._applied_presets: list[Preset] = []  # Presets applied, in order
         # Imperative escape-hatch presets that ran: (name, description)
         self._applied_imperative: list[tuple[str, str]] = []
+        # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
+        self._fanout_seen: set[Any] | None = None
         self._name = name
         self.defined_at = defined_at or get_caller_location()
 
@@ -516,10 +519,28 @@ class Environment(_EnvironmentStubs):
         a second, differently-named preset in the group raises ``ValueError``.
         Clone the environment to build multiple variants.
 
+        Application follows the contract in docs/presets.md ("Preset
+        application"): a preset applies fully or raises. A ``cmd``
+        contribution to a tool this environment doesn't have is an error
+        (a command swap is a retargeting mechanism that must not vanish);
+        flag/define contributions to a subset of missing tools are skipped
+        (broadcast semantics), but a preset none of whose contributions
+        land raises. A preset with no contributions at all is the
+        realizer's deliberate no-op and is accepted.
+
         The core is tool-agnostic — toolchains build presets via
         ``make_variant_preset``/``make_feature_preset``/``make_target_preset``;
         this method just applies the opaque tokens they carry.
         """
+        if self._fanout_seen is not None:
+            # Inside a set_*/apply_* fan-out over toolchains: identical
+            # resolved presets apply once, however many toolchains resolved
+            # them (shared tools like cc/link would double flags otherwise).
+            key = (preset.name, preset.category, preset.contributions)
+            if key in self._fanout_seen:
+                return
+            self._fanout_seen.add(key)
+
         if preset.exclusive_group is not None:
             for applied in self._applied_presets:
                 if (
@@ -533,6 +554,33 @@ class Environment(_EnvironmentStubs):
                         f"variants."
                     )
 
+        # Validate up front so application is atomic: raise before any
+        # contribution has been applied.
+        if preset.contributions:
+            tools = self._get_tools()
+            missing_cmd = sorted(
+                {
+                    c.tool
+                    for c in preset.contributions
+                    if c.cmd is not None and c.tool not in tools
+                }
+            )
+            if missing_cmd:
+                raise ValueError(
+                    f"Preset '{preset.name}' replaces the command of "
+                    f"tool(s) {', '.join(missing_cmd)}, which this "
+                    f"environment does not have (available: "
+                    f"{', '.join(sorted(tools))}). A command override is a "
+                    f"retargeting mechanism and cannot be dropped silently."
+                )
+            if not any(c.tool in tools for c in preset.contributions):
+                targets = sorted({c.tool for c in preset.contributions})
+                raise ValueError(
+                    f"Preset '{preset.name}' would have no effect: none of "
+                    f"its target tools ({', '.join(targets)}) exist in this "
+                    f"environment (available: {', '.join(sorted(tools))})."
+                )
+
         for contribution in preset.contributions:
             self._apply_contribution(contribution)
 
@@ -540,7 +588,9 @@ class Environment(_EnvironmentStubs):
 
         if preset.category == "variant":
             self.variant = preset.name
-        if preset.arch is not None:
+        # env.target_arch has a single writer: the set_target_arch knob
+        # (category "arch"). Cross presets carry arch as metadata only.
+        if preset.category == "arch" and preset.arch is not None:
             self.target_arch = preset.arch
 
     @property
@@ -611,8 +661,26 @@ class Environment(_EnvironmentStubs):
                 )
             )
 
+    @contextmanager
+    def _dedup_fanout(self) -> Iterator[None]:
+        """Scope a set_*/apply_* fan-out so identical resolved presets apply once.
+
+        See apply(): within this scope, presets with the same (name, category,
+        contributions) are applied a single time even when several configured
+        toolchains resolve them onto shared tools.
+        """
+        self._fanout_seen = set()
+        try:
+            yield
+        finally:
+            self._fanout_seen = None
+
     def _apply_contribution(self, c: ToolContribution) -> None:
-        """Apply a single tool contribution (extend flags/defines, set cmd)."""
+        """Apply a single tool contribution (extend flags/defines, set cmd).
+
+        Missing tools were validated by apply(); a remaining miss here is a
+        flag/define broadcast to a tool this env doesn't have — skipped.
+        """
         if not self.has_tool(c.tool):
             return
         tool = self._get_tools()[c.tool]
@@ -648,8 +716,9 @@ class Environment(_EnvironmentStubs):
         """
         trace("env", "Setting variant: %s", name)
         if self.toolchains:
-            for toolchain in self.toolchains:
-                toolchain.apply_variant(self, name, **kwargs)
+            with self._dedup_fanout():
+                for toolchain in self.toolchains:
+                    toolchain.apply_variant(self, name, **kwargs)
         else:
             # No toolchains - just set the variant name
             self.variant = name
@@ -685,8 +754,19 @@ class Environment(_EnvironmentStubs):
             env.set_target_arch("arm64")  # Uses /MACHINE:ARM64 for MSVC
         """
         if self.toolchains:
-            for toolchain in self.toolchains:
-                toolchain.apply_target_arch(self, arch, **kwargs)
+            with self._dedup_fanout():
+                realized = [
+                    toolchain.apply_target_arch(self, arch, **kwargs)
+                    for toolchain in self.toolchains
+                ]
+            if not any(realized):
+                names = ", ".join(t.name for t in self.toolchains)
+                raise ValueError(
+                    f"No configured toolchain ({names}) realizes target "
+                    f"arch '{arch}'. Retargeting the CPU on this platform "
+                    f"may need a cross toolchain or cross preset instead "
+                    f"(see docs/presets.md)."
+                )
         else:
             self.target_arch = arch
 
@@ -766,22 +846,35 @@ class Environment(_EnvironmentStubs):
             return
 
         applied = False
-        for toolchain in self.toolchains:
-            preset = toolchain.make_feature_preset(name)  # built-in
-            if preset is None:
-                preset = resolve_registered_feature(name, toolchain)  # registry
-            if preset is not None:
-                self.apply(preset)
-                applied = True
+        with self._dedup_fanout():
+            for toolchain in self.toolchains:
+                preset = toolchain.make_feature_preset(name)  # built-in
+                if preset is None:
+                    preset = resolve_registered_feature(name, toolchain)  # registry
+                if preset is not None:
+                    self.apply(preset)
+                    applied = True
         # Imperative escape-hatch preset: runs once against the whole env.
         description = apply_imperative_preset(name, self)
         if description is not None:
             self._applied_imperative.append((name, description))
             applied = True
         # A registered preset whose resolver returned None for these toolchains is
-        # a deliberate no-op (not applicable), not an unknown name.
+        # a deliberate no-op (not applicable). An unknown name is an error:
+        # a typo'd preset must not produce a quietly less-configured build.
         if not applied and not is_registered_preset(name):
-            logger.warning("Unknown preset '%s'", name)
+            available = sorted(
+                {
+                    p
+                    for toolchain in self.toolchains
+                    for p in getattr(toolchain, "FEATURE_PRESETS", {})
+                }
+            )
+            raise ValueError(
+                f"Unknown preset '{name}'. Toolchain built-ins here: "
+                f"{', '.join(available) or '(none)'}; contributed presets "
+                f"are listed by pcons.list_presets()."
+            )
 
     def apply_cross_preset(self, preset: Any) -> None:
         """Apply a cross-compilation preset to this environment.
@@ -800,8 +893,9 @@ class Environment(_EnvironmentStubs):
             env.apply_cross_preset(ios(arch="arm64"))
         """
         if self.toolchains:
-            for toolchain in self.toolchains:
-                toolchain.apply_cross_preset(self, preset)
+            with self._dedup_fanout():
+                for toolchain in self.toolchains:
+                    toolchain.apply_cross_preset(self, preset)
         else:
             logger.warning(
                 "No toolchains configured; cannot apply cross-preset '%s'",

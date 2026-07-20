@@ -80,13 +80,21 @@ class WasmToolchain(UnixToolchain):
 
     # -- Variant / arch overrides -------------------------------------------
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        # wasm32 is the only architecture; ignore the requested arch.
-        super().apply_target_arch(env, "wasm32", **kwargs)
+    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
+        """wasm32 is the only architecture; anything else is an error.
 
-    def _arch_contributions(self, arch: str) -> list[ToolContribution]:
-        # wasm32 needs no -arch flag (unlike macOS); arch is recorded only.
-        return []
+        wasm32 needs no flags (the tools imply it), so this is a declared
+        no-op realization: it records the arch and returns True rather than
+        letting the empty realization read as "unrealized" (docs/presets.md).
+        """
+        from pcons.core.preset import Preset
+
+        if arch.lower() != "wasm32":
+            raise ValueError(
+                f"{self.name} targets wasm32 only; cannot set target arch '{arch}'."
+            )
+        env.apply(Preset(name="wasm32", category="arch", arch="wasm32"))
+        return True
 
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
         # Sysroot/triple are handled by setup(); only extra flags apply here.

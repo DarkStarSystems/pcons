@@ -97,8 +97,9 @@ class TestGccTargetArch:
         assert "-arch" in link.flags
         assert "x86_64" in link.flags
 
-    def test_linux_no_arch_flags(self, test_project):  # noqa: F811
-        """Test GCC on Linux doesn't add -arch flags (requires cross-toolchain)."""
+    def test_linux_arch_is_unrealizable(self, test_project):  # noqa: F811
+        """On Linux a bare arch can't retarget GCC; fail fast, pointing at
+        cross presets (docs/presets.md, "Preset application")."""
         env = Environment()
 
         cc = env.add_tool("cc")
@@ -116,9 +117,9 @@ class TestGccTargetArch:
             mock_platform.return_value.is_linux = True
             mock_platform.return_value.is_posix = True
 
-            toolchain.apply_target_arch(env, "arm64")
+            with pytest.raises(ValueError, match="cross preset"):
+                toolchain.apply_target_arch(env, "arm64")
 
-        # Linux GCC doesn't use -arch flags (need cross-compiler instead)
         assert "-arch" not in cc.flags
         assert "-arch" not in link.flags
 
@@ -539,3 +540,71 @@ class TestMsvcCrossToolset:
         assert "/MACHINE:ARM64" in env.link.flags
         libpaths = [f for f in env.link.flags if str(f).startswith("/LIBPATH:")]
         assert len(libpaths) == 3
+
+
+class TestArchRealizationContract:
+    """set_target_arch fails loudly when nothing realizes the arch."""
+
+    def test_env_raises_when_no_toolchain_realizes(self, test_project):
+        """A toolchain with no arch realization (the base default) must not
+        silently record an arch that changed nothing."""
+        from pcons.tools.toolchain import BaseToolchain
+
+        class MinimalToolchain(BaseToolchain):
+            def _configure_tools(self, config: object) -> bool:
+                return True
+
+        env = Environment()
+        cc = env.add_tool("cc")
+        cc.set("flags", [])
+        env._toolchain = MinimalToolchain("minimal")
+
+        with pytest.raises(ValueError, match="realizes target arch"):
+            env.set_target_arch("arm64")
+
+    def test_env_ok_when_one_of_several_realizes(self, test_project, monkeypatch):
+        """A non-realizing toolchain alongside a realizing one is fine —
+        enforcement is per-environment, not per-toolchain."""
+        from types import SimpleNamespace
+
+        from pcons.tools.toolchain import BaseToolchain
+
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform",
+            lambda: SimpleNamespace(is_macos=True, is_linux=False, is_posix=True),
+        )
+
+        class MinimalToolchain(BaseToolchain):
+            def _configure_tools(self, config: object) -> bool:
+                return True
+
+        env = Environment()
+        for name in ("cc", "cxx", "link"):
+            tool = env.add_tool(name)
+            tool.set("flags", [])
+        env._toolchain = LlvmToolchain()
+        env._additional_toolchains.append(MinimalToolchain("minimal"))
+
+        env.set_target_arch("arm64")
+
+        assert "-arch" in env.cc.flags
+        assert env.target_arch == "arm64"
+
+    def test_two_unix_toolchains_no_double_arch(self, test_project, monkeypatch):
+        """Fan-out dedup: identical arch realizations apply once."""
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(
+            "pcons.toolchains.unix.get_platform",
+            lambda: SimpleNamespace(is_macos=True, is_linux=False, is_posix=True),
+        )
+        env = Environment()
+        for name in ("cc", "cxx", "link"):
+            tool = env.add_tool(name)
+            tool.set("flags", [])
+        env._toolchain = LlvmToolchain()
+        env._additional_toolchains.append(GccToolchain())
+
+        env.set_target_arch("arm64")
+
+        assert list(env.cc.flags).count("-arch") == 1

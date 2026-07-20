@@ -258,17 +258,23 @@ class UnixToolchain(BaseToolchain):
         return f"-std=c++{standard}"
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
-        """On macOS, add -arch for universal builds; elsewhere no flags.
+        """On macOS, add -arch for universal builds; elsewhere unrealizable.
 
-        On Linux, cross-compilation uses a different toolchain (or a triple via
-        a cross-preset), so a bare arch adds nothing here.
+        Off macOS a bare arch name cannot retarget GCC/Clang — that needs a
+        triple (cross preset) or different tool binaries — so this raises
+        rather than silently building for the host CPU.
         """
         if get_platform().is_macos:
             return [
                 ToolContribution(t, flags=("-arch", arch))
                 for t in ("cc", "cxx", "link")
             ]
-        return []
+        raise ValueError(
+            f"{self.name} cannot retarget the CPU to '{arch}' by flag on "
+            f"this platform. Use a cross preset (e.g. "
+            f"linux_cross(triple=...)) or a cross toolchain instead; see "
+            f"docs/presets.md."
+        )
 
     def _target_contributions(self, cross: Any) -> list[ToolContribution]:
         """Base contributions plus --target triple (Clang only) and --sysroot.
@@ -307,7 +313,9 @@ class UnixToolchain(BaseToolchain):
             )
         flags = list(spec[0]) + list(kwargs.get("extra_flags", []))
         defines = list(spec[1]) + list(kwargs.get("extra_defines", []))
+        # Realized on the same compile tools as feature presets, so
+        # Fortran-style toolchains (fc) get working variants too.
         return [
-            ToolContribution("cc", flags=tuple(flags), defines=tuple(defines)),
-            ToolContribution("cxx", flags=tuple(flags), defines=tuple(defines)),
+            ToolContribution(tool, flags=tuple(flags), defines=tuple(defines))
+            for tool in self._feature_preset_tools()
         ]

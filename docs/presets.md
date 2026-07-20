@@ -120,6 +120,79 @@ Fortran), so the same `warnings`/`werror` names map to the right tool per
 toolchain. WASM toolchains (`emscripten`/`wasi`) are clang-based and inherit the
 C/C++ realizations on `cc`/`cxx` directly.
 
+## Preset application: the contract
+
+How a preset lands on an environment is itself a contract: **a preset either
+applies fully or fails loudly, and every bookkeeping field has exactly one
+writer.** Silent partial application is the same defect as GCC ignoring a
+cross triple — the build proceeds looking configured while part of the
+request evaporated.
+
+This section is a specification of what the **core apply machinery
+enforces**, not a checklist for preset or toolchain authors. Contributed
+and site-specific presets flow through the same `apply` path as built-ins,
+so they get these guarantees (and these errors) without doing anything.
+The entire authoring obligation remains the two rules already documented
+above: return `None` when a preset doesn't apply to a toolchain, and
+return contributions when it does — the machinery treats what a resolver
+returns as the complete realization. Custom *toolchains* that override the
+realization hooks (`_arch_contributions`, `apply_cross_preset`, …) keep
+their freedom, but the base classes default to fail-fast — e.g. an empty
+arch realization raises from the base `apply_target_arch` unless the
+toolchain explicitly declares the no-op — so an extension that simply
+doesn't handle a case is safe by default rather than silently wrong.
+
+### Apply fully or raise
+
+When a preset is applied, exactly one of three things happens:
+
+1. **It applies** — its contributions land on the tools they name.
+2. **It is inapplicable** — the resolver (toolchain or registry) returned
+   `None` for this toolchain. This is the *only* sanctioned silent no-op,
+   and it is a decision made by the realizer, never by the apply machinery.
+3. **It fails** — anything else raises at apply time with a message naming
+   what was missing. In particular:
+   - An **unknown preset name** (no toolchain built-in, no registry entry)
+     is an error, not a warning — a typo'd `apply_preset("waarnings")` must
+     not produce a quietly less-strict build.
+   - A **`cmd` contribution to a tool the environment doesn't have** is an
+     error: a command swap (`cc` → `emcc`) *is* the retargeting mechanism,
+     and dropping it silently un-crosses the build. Validation happens
+     before any contribution is applied, so application is atomic.
+   - A preset **none of whose contributions landed** is an error — it
+     "applied" and changed nothing, which is indistinguishable from a
+     no-op the user didn't ask for. Flag/define contributions to a subset
+     of missing tools are tolerated (broadcast semantics); losing *all* of
+     them is not.
+   - A **knob value the toolchain cannot realize** is an error, enforced in
+     the *base* `apply_target_arch` when the realization comes back empty —
+     so custom toolchains inherit fail-fast without remembering to raise.
+     A toolchain that legitimately wants a no-op declares it explicitly.
+     Concretely: on Linux, `set_target_arch` cannot retarget GCC/LLVM (use
+     `linux_cross(triple=...)`) and says so; wasm toolchains reject any
+     arch other than `wasm32` rather than silently coercing.
+
+### One writer per bookkeeping field
+
+`env.variant` is written only by variant presets (enforced by their
+exclusive group). `env.target_arch` is written **only by the
+`set_target_arch` knob**: cross presets carry `arch` as metadata (see the
+cross-target contract below) and must not stamp it onto the environment —
+otherwise the field's value depends on call order and can disagree with the
+flags actually in effect.
+
+### One application per resolution
+
+The `set_*`/`apply_*` surfaces resolve a preset against each configured
+toolchain, but toolchains share tools (`cc`, `cxx`, `link`), so resolution
+and application are distinct steps: a resolved preset is applied **at most
+once per environment**, however many toolchains resolved it. Applying per
+toolchain would double flags (`-arch arm64 -arch arm64`, `-Werror
+-Werror`) on any env with `add_toolchain()`.
+
+Deliberate *user* re-application is unaffected: applying the same feature
+preset twice on purpose remains additive, as composition requires.
+
 ## Cross-compilation targets: the contract
 
 A `CrossPreset` describes **what to build for**; each toolchain decides **how**
@@ -317,6 +390,9 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | `env.set_variant` / `env.set_target_arch` | implemented |
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
 | Cross-preset field contract: triple/sysroot/env_vars realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |
+| Preset application contract: apply-fully-or-raise (unknown names, missing-tool cmd, zero-effect presets, unrealizable knobs) | implemented |
+| `env.target_arch` single-writer (knob only; cross presets are metadata) | implemented |
+| One application per resolution (no per-toolchain double-apply) | implemented |
 | `CrossPreset.arch` decoupled from flag emission (host-independent) | implemented |
 | Fail fast on unrealizable cross presets (MSVC + any, GCC + triple-only) | implemented |
 | MSVC/clang-cl `set_target_arch` selects the cross toolset (cl/lib dirs), not just `/MACHINE:` | implemented |

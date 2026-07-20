@@ -452,14 +452,19 @@ class TestCrossPresetApplication:
         assert "-DWASM" in env.cxx.flags
         assert "-sUSE_PTHREADS" in env.link.flags
 
-    def test_wasm_apply_target_arch_forces_wasm32(self, test_project):  # noqa: F811
-        """WasmToolchain ignores the requested arch and uses wasm32."""
+    def test_wasm_target_arch_wasm32_only(self, test_project):  # noqa: F811
+        """WasmToolchain accepts wasm32 (a declared no-op realization) and
+        rejects any other arch rather than silently coercing."""
         from pcons.toolchains.emscripten import EmscriptenToolchain
 
         env = _make_unix_env()
         toolchain = EmscriptenToolchain()
-        # Any requested arch is accepted but treated as wasm32 (no error).
-        toolchain.apply_target_arch(env, "x86_64")
+
+        assert toolchain.apply_target_arch(env, "wasm32") is True
+        assert env.target_arch == "wasm32"
+
+        with pytest.raises(ValueError, match="wasm32 only"):
+            toolchain.apply_target_arch(env, "x86_64")
 
     def test_env_apply_cross_preset_delegates(self, test_project):  # noqa: F811
         """Environment.apply_cross_preset() should delegate to toolchains."""

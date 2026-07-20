@@ -75,7 +75,21 @@ class TestApply:
             )
         )
         assert env.cc.cmd == "emcc"
-        assert env.target_arch == "wasm32"
+        # target_arch has a single writer (the arch knob); a target-category
+        # preset carries arch as metadata only.
+        assert getattr(env, "target_arch", None) is None
+
+    def test_arch_preset_records_target_arch(self, test_project):
+        env = _make_env()
+        env.apply(
+            Preset(
+                name="arm64",
+                category="arch",
+                arch="arm64",
+                contributions=(ToolContribution("cc", flags=("-arch", "arm64")),),
+            )
+        )
+        assert env.target_arch == "arm64"
 
     def test_skips_absent_tools(self, test_project):
         env = Environment()
@@ -95,6 +109,47 @@ class TestApply:
         assert "-Wall" in env.cc.flags
         assert not env.has_tool("link")
 
+    def test_cmd_to_absent_tool_raises(self, test_project):
+        """A cmd swap is a retargeting mechanism; dropping it silently
+        un-crosses the build (docs/presets.md, "Preset application")."""
+        env = Environment()
+        cxx = env.add_tool("cxx")
+        cxx.set("flags", [])
+        with pytest.raises(ValueError, match="command"):
+            env.apply(
+                Preset(
+                    name="cross",
+                    category="target",
+                    contributions=(ToolContribution("cc", cmd="emcc"),),
+                )
+            )
+        # Atomic: nothing was recorded.
+        assert env.applied_presets == ()
+
+    def test_zero_effect_preset_raises(self, test_project):
+        """A preset none of whose contributions land is an error, not a
+        silent no-op."""
+        env = Environment()
+        cc = env.add_tool("cc")
+        cc.set("flags", [])
+        with pytest.raises(ValueError, match="no effect"):
+            env.apply(
+                Preset(
+                    name="linkstuff",
+                    category="feature",
+                    contributions=(ToolContribution("link", flags=("-pie",)),),
+                )
+            )
+        assert env.applied_presets == ()
+
+    def test_empty_contributions_preset_is_deliberate_noop(self, test_project):
+        """No contributions at all = the realizer's declared no-op; allowed
+        (e.g. wasm32 arch, which needs no flags)."""
+        env = Environment()
+        env.apply(Preset(name="wasm32", category="arch", arch="wasm32"))
+        assert env.target_arch == "wasm32"
+        assert [p.name for p in env.applied_presets] == ["wasm32"]
+
     def test_records_applied_presets(self, test_project):
         env = _make_env()
         warnings = Preset(name="warnings", category="feature")
@@ -105,6 +160,61 @@ class TestApply:
         env.apply(release)
         names = [p.name for p in env._applied_presets]
         assert names == ["warnings", "release"]
+
+
+class TestFanoutDedup:
+    """Identical resolved presets apply once across the toolchain fan-out.
+
+    Toolchains share tools (cc/cxx/link); without dedup, two toolchains
+    resolving the same preset would double flags like -Werror or -arch
+    (docs/presets.md, "Preset application").
+    """
+
+    def test_identical_presets_apply_once_in_fanout(self, test_project):
+        env = _make_env()
+        p = Preset(
+            name="werror",
+            category="feature",
+            contributions=(ToolContribution("cc", flags=("-Werror",)),),
+        )
+        with env._dedup_fanout():
+            env.apply(p)
+            env.apply(p)
+        assert list(env.cc.flags).count("-Werror") == 1
+
+    def test_differing_realizations_both_apply(self, test_project):
+        """Same name, different contributions (e.g. gcc's cc/cxx warnings vs
+        gfortran's fc warnings) are distinct resolutions — both apply."""
+        env = _make_env()
+        with env._dedup_fanout():
+            env.apply(
+                Preset(
+                    name="warnings",
+                    category="feature",
+                    contributions=(ToolContribution("cc", flags=("-Wall",)),),
+                )
+            )
+            env.apply(
+                Preset(
+                    name="warnings",
+                    category="feature",
+                    contributions=(ToolContribution("cxx", flags=("-Wall",)),),
+                )
+            )
+        assert "-Wall" in env.cc.flags
+        assert "-Wall" in env.cxx.flags
+
+    def test_user_reapplication_stays_additive(self, test_project):
+        """Deliberate re-application outside a fan-out remains additive."""
+        env = _make_env()
+        p = Preset(
+            name="werror",
+            category="feature",
+            contributions=(ToolContribution("cc", flags=("-Werror",)),),
+        )
+        env.apply(p)
+        env.apply(p)
+        assert list(env.cc.flags).count("-Werror") == 2
 
 
 class TestExclusiveGroup:

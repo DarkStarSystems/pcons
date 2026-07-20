@@ -445,12 +445,13 @@ class TestPresetRegistry:
         assert env.cc.flags == []
         assert "Unknown preset" not in caplog.text
 
-    def test_truly_unknown_warns(self, test_project, clean_registry, caplog):  # noqa: F811
+    def test_truly_unknown_raises(self, test_project, clean_registry):  # noqa: F811
+        """A typo'd preset name must not produce a quietly less-configured
+        build (docs/presets.md, "Preset application")."""
         env = _make_unix_env()
         env._toolchain = GccToolchain()
-        with caplog.at_level("WARNING"):
+        with pytest.raises(ValueError, match="Unknown preset"):
             env.apply_preset("nope/never-registered")
-        assert "Unknown preset" in caplog.text
 
     def test_bare_name_warns(self, test_project, clean_registry, caplog):  # noqa: F811
         from pcons.core.preset import register_preset
@@ -512,3 +513,30 @@ class TestImperativePreset:
 
         register_preset("acme/y", lambda env: None, imperative=True)
         assert resolve_registered_feature("acme/y", GccToolchain()) is None
+
+
+class TestFortranVariants:
+    """Variants realize on fc for Fortran toolchains.
+
+    Regression: gfortran inherited Unix's cc/cxx variant realization, so
+    Fortran debug/release variants silently did nothing (the zero-effect
+    rule in docs/presets.md "Preset application" would now raise instead).
+    """
+
+    def test_debug_variant_targets_fc(self, test_project):  # noqa: F811
+        from pcons.toolchains.gfortran import GfortranToolchain
+
+        env = _make_fortran_env()
+        GfortranToolchain().apply_variant(env, "debug")
+
+        assert "-O0" in env.fc.flags
+        assert "-g" in env.fc.flags
+
+    def test_release_variant_targets_fc(self, test_project):  # noqa: F811
+        from pcons.toolchains.gfortran import GfortranToolchain
+
+        env = _make_fortran_env()
+        GfortranToolchain().apply_variant(env, "release")
+
+        assert "-O2" in env.fc.flags
+        assert "NDEBUG" in env.fc.defines

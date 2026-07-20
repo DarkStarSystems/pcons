@@ -527,7 +527,7 @@ class Toolchain(Protocol):
         """
         ...
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
+    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
         """Apply target architecture flags to the environment.
 
         Toolchains implement this to configure their tools for different
@@ -536,8 +536,11 @@ class Toolchain(Protocol):
 
         For example:
         - GCC/LLVM on macOS: adds -arch flags to compiler and linker
-        - MSVC: adds /MACHINE:xxx to linker
+        - MSVC: selects the cross toolset and adds /MACHINE:xxx
         - Clang-CL: adds --target flag to compiler
+
+        Returns True if this toolchain realized the arch; the environment
+        raises when no configured toolchain did (docs/presets.md).
 
         Args:
             env: Environment to configure.
@@ -868,19 +871,25 @@ class BaseToolchain(ABC):
         """Tool contributions for a variant. Base knows no variants."""
         return []
 
-    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> None:
-        """Apply target architecture flags to the environment."""
-        env.apply(
-            Preset(
-                name=arch,
-                category="arch",
-                arch=arch,
-                contributions=tuple(self._arch_contributions(arch)),
-            )
-        )
+    def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
+        """Apply target architecture flags to the environment.
+
+        Returns True if this toolchain realized the arch (produced
+        contributions). An empty realization returns False and applies
+        nothing; the environment raises if *no* configured toolchain
+        realized the arch (docs/presets.md, "Preset application"), so a
+        custom toolchain that simply doesn't handle an arch is fail-fast
+        by default. A toolchain for which an arch is legitimately a no-op
+        declares that by overriding this method (see WasmToolchain).
+        """
+        contribs = tuple(self._arch_contributions(arch))
+        if not contribs:
+            return False
+        env.apply(Preset(name=arch, category="arch", arch=arch, contributions=contribs))
+        return True
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
-        """Tool contributions for a target arch. Base adds none (just records)."""
+        """Tool contributions for a target arch. Base realizes none."""
         return []
 
     def apply_preset(self, env: Environment, name: str) -> None:

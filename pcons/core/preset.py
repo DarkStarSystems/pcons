@@ -51,8 +51,10 @@ class Preset:
             single environment (variants share "build_variant"); applying a
             second, differently-named preset in the group raises. Clone the
             environment to build multiple variants.
-        arch: Target architecture this preset selects, if any. Recorded on the
-            environment as bookkeeping (``env.target_arch``).
+        arch: Target architecture this preset selects, if any. Only presets
+            with category "arch" (the ``set_target_arch`` knob) record it on
+            the environment as ``env.target_arch``; on other categories it is
+            metadata (docs/presets.md, "Preset application").
     """
 
     name: str
