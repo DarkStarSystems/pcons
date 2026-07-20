@@ -73,8 +73,8 @@ See `ARCHITECTURE.md` for full design documentation.
 
 - **Node paths include build_dir prefix**: e.g., `build/obj.hello/hello.o`
 - **Ninja generator strips build_dir prefix**: Runs from build directory, so paths are relative to build dir
-- **Makefile generator keeps build_dir prefix**: Runs from project root, so paths need the build dir prefix
-- **Use PathResolver for consistent path normalization**: Available via `project._path_resolver`
+- **Makefile generator also strips build_dir prefix**: make runs from the build directory (via `-C`), same contract as ninja
+- **Use PathResolver for consistent path normalization**: Available via `project._path_resolver`; the generator-side contract (paths as seen from the execution dir) is `pcons.core.paths.execution_relative` — never re-derive it per generator
 - **Source paths**: Relative to project root (use `path_resolver.make_project_relative()`)
 - **Target paths**: Relative to build_dir (use `path_resolver.normalize_target_path()`)
 - **Never check filesystem existence**: Trust node paths, don't use `path.exists()` checks

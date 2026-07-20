@@ -784,40 +784,17 @@ class NinjaGenerator(BaseGenerator):
     def _make_output_relative(self, path: Path | str) -> str:
         """Make an output path relative to the ninja file location.
 
-        Since the ninja file is written to the build directory, output paths
-        should be relative to that directory. For example, if the build dir
-        is '/abs/path/build/' and a path is '/abs/path/build/my_program',
-        this returns 'my_program'.
-
-        Always uses forward slashes for cross-platform compatibility.
+        The ninja file is written to (and ninja runs from) the build
+        directory; the shared contract lives in
+        pcons.core.paths.execution_relative.
         """
-        path_obj = Path(path)
+        from pcons.core.paths import execution_relative
 
-        # Handle absolute paths
-        if path_obj.is_absolute():
-            if self._output_dir is not None:
-                try:
-                    return str(path_obj.relative_to(self._output_dir)).replace(
-                        "\\", "/"
-                    )
-                except ValueError:
-                    # Path is not under output_dir - return as-is
-                    return str(path).replace("\\", "/")
-            return str(path).replace("\\", "/")
-
-        # Handle relative paths - strip the build dir prefix if present
-        # e.g., "build/my_program" when output_dir is "build"
-        # or "build/release/my_program" when output_dir is "build/release"
-        if self._build_dir_parts:
-            parts = path_obj.parts
-            n = len(self._build_dir_parts)
-            if parts[:n] == self._build_dir_parts:
-                # Strip the full build dir prefix
-                if len(parts) > n:
-                    return str(Path(*parts[n:])).replace("\\", "/")
-                return "."
-
-        return str(path).replace("\\", "/")
+        return execution_relative(
+            path,
+            execution_dir=self._output_dir,
+            build_dir_parts=self._build_dir_parts or (),
+        )
 
     def _escape_output_path(self, path: Path | str) -> str:
         """Make an output path relative to build dir and escape for Ninja."""

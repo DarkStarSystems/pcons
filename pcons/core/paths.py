@@ -189,6 +189,23 @@ class PathResolver:
                 return path_obj
         return Path(os.path.normpath(str(path_obj)))
 
+    def make_execution_relative(self, path: Path | str) -> str:
+        """Path as seen from the build (execution) directory.
+
+        This is THE path contract for build-file generators that run from
+        the build dir (Ninja, Make): canonical node paths carry the
+        build_dir prefix (``build/obj/foo.o``) and must be emitted
+        relative to it (``obj/foo.o``). See execution_relative() for the
+        rules.
+        """
+        return execution_relative(
+            path,
+            execution_dir=self._resolved_build_dir,
+            build_dir_parts=self.build_dir.parts
+            if not self.build_dir.is_absolute()
+            else (),
+        )
+
     def make_project_relative(self, path: Path) -> str:
         """Make a path relative to the project root.
 
@@ -207,3 +224,46 @@ class PathResolver:
                 # Not under project root - return as-is
                 return str(path).replace("\\", "/")
         return str(path).replace("\\", "/")
+
+
+def execution_relative(
+    path: Path | str,
+    *,
+    execution_dir: Path | None,
+    build_dir_parts: tuple[str, ...],
+) -> str:
+    """Render *path* relative to the directory a build tool executes in.
+
+    The single home of the generator path contract (ninja and make both run
+    from the build directory; see ARCHITECTURE.md "Path handling"):
+
+    - An absolute path under *execution_dir* becomes relative to it.
+    - A relative path carrying the *build_dir_parts* prefix (the canonical
+      node form, e.g. ``build/obj/foo.o``) has the prefix stripped;
+      the build dir itself renders as ``"."``.
+    - Anything else (external absolute paths, project-relative sources —
+      the caller decides how to anchor those, e.g. ninja's ``$topdir``)
+      passes through unchanged.
+
+    Always uses forward slashes, which every supported tool accepts on
+    every platform.
+    """
+    path_obj = Path(path)
+
+    if path_obj.is_absolute():
+        if execution_dir is not None:
+            try:
+                return str(path_obj.relative_to(execution_dir)).replace("\\", "/")
+            except ValueError:
+                pass
+        return str(path_obj).replace("\\", "/")
+
+    if build_dir_parts:
+        parts = path_obj.parts
+        n = len(build_dir_parts)
+        if parts[:n] == build_dir_parts:
+            if len(parts) > n:
+                return str(Path(*parts[n:])).replace("\\", "/")
+            return "."
+
+    return str(path_obj).replace("\\", "/")

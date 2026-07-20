@@ -728,25 +728,15 @@ class MakefileGenerator(BaseGenerator):
         Returns:
             Path as string with build_dir prefix stripped if present.
         """
-        path_obj = Path(path)
+        from pcons.core.paths import execution_relative
 
-        if not path_obj.is_absolute():
-            # Try stripping the output_dir prefix (absolute)
-            if self._build_dir:
-                try:
-                    rel = path_obj.relative_to(self._build_dir)
-                    return str(rel)
-                except ValueError:
-                    pass
-            # Try stripping the project's relative build_dir prefix
-            if self._relative_build_dir:
-                try:
-                    rel = path_obj.relative_to(self._relative_build_dir)
-                    return str(rel)
-                except ValueError:
-                    pass
-
-        return str(path_obj)
+        return execution_relative(
+            path,
+            execution_dir=self._build_dir,
+            build_dir_parts=self._relative_build_dir.parts
+            if self._relative_build_dir
+            else (),
+        )
 
     def _escape_path(self, path: Path | str) -> str:
         """Escape a path for use in Makefiles.

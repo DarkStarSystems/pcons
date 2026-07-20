@@ -142,6 +142,8 @@ works (meson-style exe-wrapper support can be added later if ever needed).
 
 ## Theme 4 — Contracts that exist only as folklore
 
+**Status: implemented** (4a-4f all done, 2026-07-20).
+
 ### 4a. Surprise default-Ninja generation — **done (resolved as intended behavior)** — first attempt (default only when nothing registered) broke the documented example-05 pattern "diagrams alongside the build"; the correct contract is the existing one: auxiliary generators are additive, a top-level project always gets a build generation unless a build generator ran, and PCONS_GENERATOR/--generator is the sanctioned way to run an auxiliary generator alone. Now documented in generator.py + tests.
 - `_generate_pending` calls `project.generate()` (generator.py:217), which
   runs default Ninja generation unless a *build* generator already ran
@@ -169,7 +171,7 @@ works (meson-style exe-wrapper support can be added later if ever needed).
   preset (the natural "switch variant" op) — imperative contributions of the
   replaced preset may need thought; or clone drops group members.
 
-### 4d. Path relativization re-derived per generator — **todo**
+### 4d. Path relativization re-derived per generator — **done** (execution_relative() in core/paths.py is the single implementation; ninja + makefile delegate; contract documented in ARCHITECTURE.md; compile_commands' project-root directory field documented as deliberately different per clang spec)
 - Three independent implementations of "paths relative to execution dir":
   ninja (ninja.py:800-931 area), makefile (makefile.py:716-773),
   compile_commands (compile_commands.py:203, 283) — plus a fourth label

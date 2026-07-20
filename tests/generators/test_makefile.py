@@ -113,8 +113,11 @@ class TestMakefileBuildStatements:
         BaseGenerator._generate_pending(project)
 
         content = normalize_path((tmp_path / "build" / "Makefile").read_text())
-        # Check that a build rule exists for the output
-        assert "build/app.o:" in content
+        # Build rules are emitted relative to the build dir (make runs
+        # there via -C); absolute node paths under the build dir normalize
+        # the same way as canonical build/-prefixed ones.
+        assert "app.o:" in content
+        assert "build/app.o:" not in content
         assert "main.c" in content
 
     def test_writes_directory_rules(self, tmp_path):
