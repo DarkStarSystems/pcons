@@ -197,3 +197,77 @@ class TestMultiGenerator:
         multi = MultiGenerator([MockGenerator(), MockGenerator()])
         assert "MultiGenerator" in repr(multi)
         assert "mock:mock" in repr(multi)
+
+
+class TestDefaultGenerationContract:
+    """A top-level project always gets a build generation unless a build
+    generator was explicitly requested: auxiliary generators (dot,
+    mermaid, metadata) are additive companions — adding a diagram must
+    not cancel the build. Run an auxiliary generator alone via
+    PCONS_GENERATOR / --generator (docs/plan-design-cleanup.md 4a)."""
+
+    def test_auxiliary_generator_is_additive(self, tmp_path):
+        from pcons.core.project import Project
+        from pcons.generators.dot import DotGenerator
+        from pcons.generators.generator import BaseGenerator
+
+        project = Project("graphs", root_dir=tmp_path, build_dir=tmp_path)
+        DotGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert (tmp_path / "deps.dot").exists()
+        assert (tmp_path / "build.ninja").exists()  # build still happens
+
+    def test_explicit_build_generator_no_double_default(self, tmp_path):
+        from pcons.core.project import Project
+        from pcons.generators.generator import BaseGenerator
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("explicit", root_dir=tmp_path, build_dir=tmp_path)
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert (tmp_path / "build.ninja").exists()
+
+    def test_no_generator_project_gets_default(self, tmp_path):
+        from pcons.core.project import Project
+        from pcons.generators.generator import BaseGenerator
+
+        project = Project("plain", root_dir=tmp_path, build_dir=tmp_path)
+        BaseGenerator._generate_pending(project)
+
+        assert (tmp_path / "build.ninja").exists()
+
+
+class TestRootSymlinkOptOut:
+    """root_symlink=False keeps generation strictly inside build_dir
+    (docs/plan-design-cleanup.md 4b)."""
+
+    def test_root_symlink_disabled(self, tmp_path):
+        from pcons.core.project import Project
+        from pcons.generators.generator import BaseGenerator
+        from pcons.generators.ninja import NinjaGenerator
+
+        root = tmp_path / "src"
+        build = tmp_path / "src" / "build"
+        root.mkdir()
+        project = Project("app", root_dir=root, build_dir=build)
+        NinjaGenerator().generate(project, root_symlink=False)
+        BaseGenerator._generate_pending(project)
+
+        assert (build / "compile_commands.json").exists()
+        assert not (root / "compile_commands.json").exists()
+
+    def test_root_symlink_default_on(self, tmp_path):
+        from pcons.core.project import Project
+        from pcons.generators.generator import BaseGenerator
+        from pcons.generators.ninja import NinjaGenerator
+
+        root = tmp_path / "src"
+        build = tmp_path / "src" / "build"
+        root.mkdir()
+        project = Project("app", root_dir=root, build_dir=build)
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert (root / "compile_commands.json").is_symlink()

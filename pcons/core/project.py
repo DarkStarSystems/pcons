@@ -133,6 +133,16 @@ class Project(_ProjectBuilders):
             caller_file = Path(caller.filename)
             if caller_file.exists():
                 root_dir = str(caller_file.parent)
+            else:
+                # Stale .pyc files (paths baked in on another machine) or
+                # frozen callers land here; the cwd fallback below can put
+                # the root somewhere surprising, so leave a trace.
+                logger.debug(
+                    "Project root inference: caller file %r does not exist; "
+                    "falling back to cwd %s (pass root_dir= to be explicit)",
+                    caller.filename,
+                    Path.cwd(),
+                )
         self.root_dir = Path(root_dir) if root_dir else Path.cwd()
         self._environments: list[Env] = []
         self._targets: list[Target] = []

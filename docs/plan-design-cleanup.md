@@ -142,7 +142,7 @@ works (meson-style exe-wrapper support can be added later if ever needed).
 
 ## Theme 4 — Contracts that exist only as folklore
 
-### 4a. Surprise default-Ninja generation — **todo**
+### 4a. Surprise default-Ninja generation — **done (resolved as intended behavior)** — first attempt (default only when nothing registered) broke the documented example-05 pattern "diagrams alongside the build"; the correct contract is the existing one: auxiliary generators are additive, a top-level project always gets a build generation unless a build generator ran, and PCONS_GENERATOR/--generator is the sanctioned way to run an auxiliary generator alone. Now documented in generator.py + tests.
 - `_generate_pending` calls `project.generate()` (generator.py:217), which
   runs default Ninja generation unless a *build* generator already ran
   (`_is_build_generator` → `_mark_generated`, generator.py:133). A
@@ -151,7 +151,7 @@ works (meson-style exe-wrapper support can be added later if ever needed).
   compile_commands + root symlink.
 - Direction: default generation fires only when *no* generator ran at all.
 
-### 4b. compile_commands root symlink: undocumented, no opt-out — **todo**
+### 4b. compile_commands root symlink: undocumented, no opt-out — **done** (generate(root_symlink=False); documented incl. multi-config last-writer-wins)
 - `_create_root_symlink` (compile_commands.py:76) writes into the project
   root (outside build_dir) unconditionally; multi-preset builds fight over
   the single link, last writer wins.
@@ -187,7 +187,7 @@ works (meson-style exe-wrapper support can be added later if ever needed).
   negative results (sentinel); route insertion through availability
   filtering; debug-log which finder won/was skipped.
 
-### 4f. Stack-frame root_dir inference as quiet fallback — **todo** (small)
+### 4f. Stack-frame root_dir inference as quiet fallback — **done** (debug log when the frame path doesn't exist and cwd fallback engages)
 - project.py:130-135 infers root from the caller's `co_filename`, guarded by
   `exists()` — exactly what stale .pyc paths defeat (bit us on tower1, and
   in tests until the conftest guard). PCONS_SOURCE_DIR is already checked

@@ -51,8 +51,14 @@ class CompileCommandsGenerator(BaseGenerator):
     # Languages that should be included in compile_commands.json
     COMPILE_LANGUAGES = {"c", "cxx", "cpp", "objc", "objcxx", "cuda", "swift"}
 
-    def __init__(self) -> None:
+    def __init__(self, *, root_symlink: bool = True) -> None:
+        """Args:
+        root_symlink: Maintain the project-root compile_commands.json
+            symlink (see BaseGenerator.generate); False keeps all output
+            inside build_dir.
+        """
         super().__init__("compile_commands")
+        self._root_symlink = root_symlink
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate compile_commands.json.
@@ -73,7 +79,8 @@ class CompileCommandsGenerator(BaseGenerator):
             json.dump(commands, f, indent=2)
             f.write("\n")
 
-        self._create_root_symlink(output_file, project)
+        if self._root_symlink:
+            self._create_root_symlink(output_file, project)
 
     def _create_root_symlink(self, output_file: Path, project: Project) -> None:
         """Create a symlink to compile_commands.json in the project root.

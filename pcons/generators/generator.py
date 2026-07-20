@@ -85,7 +85,13 @@ class BaseGenerator:
     def name(self) -> str:
         return self._name
 
-    def generate(self, project: Project, *, compile_commands: bool = True) -> None:
+    def generate(
+        self,
+        project: Project,
+        *,
+        compile_commands: bool = True,
+        root_symlink: bool = True,
+    ) -> None:
         """Register a deferred generate for this project.
 
         Enqueues the generation work to run later — either when
@@ -104,6 +110,12 @@ class BaseGenerator:
             compile_commands: If True (default) and this generator supports
                 it, automatically generate ``compile_commands.json`` alongside
                 the build files.
+            root_symlink: If True (default), the compile_commands step also
+                maintains a ``compile_commands.json`` symlink at the project
+                root (outside build_dir) so IDEs/clangd find it without
+                configuration. Pass False to keep generation strictly inside
+                build_dir. With multiple build configurations, the last
+                generation to run owns the root link.
         """
 
         def _generate_later():
@@ -117,7 +129,7 @@ class BaseGenerator:
                     CompileCommandsGenerator,
                 )
 
-                cc_gen = CompileCommandsGenerator()
+                cc_gen = CompileCommandsGenerator(root_symlink=root_symlink)
                 cc_gen._generate_impl(project, cc_gen._resolve_output_dir(project))
 
             # Write the test manifest if the project declares any tests.
@@ -213,7 +225,14 @@ class BaseGenerator:
                         return
                     raise
 
-            # ensure project generation is pending, no-op if already marked as generated
+            # A top-level project always gets a build generation unless a
+            # build generator (Ninja/Make/Xcode) was explicitly requested:
+            # auxiliary generators (dot, mermaid, metadata,
+            # compile_commands) are additive companions — "also generate
+            # diagrams alongside the build" must not cancel the build.
+            # project.generate() is a no-op if a build generator already
+            # ran, and respects PCONS_GENERATOR / --generator, which is
+            # also the sanctioned way to run an auxiliary generator alone.
             project.generate()
 
             pending = BaseGenerator.__pending.pop(id(project), [])
