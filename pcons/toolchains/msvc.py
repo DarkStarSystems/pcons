@@ -861,40 +861,19 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         """
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
-            bmi_key_for_flags,
-            build_keyed_entries,
+            add_tu_spec,
+            finish_module_pass,
             keyed_bmi_path,
             map_module_providers,
+            merge_scan_compile_flags,
             scan_translation_units,
-            select_modules_scope,
-            wire_std_into_targets,
-            write_dyndep_entries,
+            setup_module_pass,
         )
 
-        flag_spec = _msvc_std_module_flag_spec()
-
-        cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
-        all_cxx_pairs = cxx_module_pairs + cxx_pairs
-        if not all_cxx_pairs:
+        setup = setup_module_pass(project, source_obj_by_language, "cl.exe")
+        if setup is None:
             return
-
-        build_dir = project.build_dir
-        moddir = "cxx_modules"
-        dyndep_path = build_dir / "cxx_modules.dyndep"
-        dyndep_rel = "cxx_modules.dyndep"
-
-        first_env = None
-        _, first_obj = all_cxx_pairs[0]
-        build_info = getattr(first_obj, "_build_info", None)
-        if build_info:
-            first_env = build_info.get("env")
-
-        cxx_tool = getattr(first_env, "cxx", None) if first_env else None
-        compiler_cmd = str(getattr(cxx_tool, "cmd", "cl.exe") or "cl.exe")
-        base_flags = list(getattr(cxx_tool, "flags", None) or [])
-
-        build_dir.mkdir(parents=True, exist_ok=True)
-        (build_dir / moddir).mkdir(exist_ok=True)
+        flag_spec = _msvc_std_module_flag_spec()
 
         # Pre-flag every extension-tagged module unit with /TP so cl.exe
         # treats the file as C++ during scan and compile (.cppm isn't a
@@ -902,7 +881,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         # /interface here — that's a per-TU decision driven by the scan
         # output (interface units get /interface, internal partition
         # implementations get /internalPartition; the two are incompatible).
-        for _, obj_node in cxx_module_pairs:
+        for _, obj_node in setup.cxx_module_pairs:
             bi = getattr(obj_node, "_build_info", None)
             if bi:
                 context = bi.get("context")
@@ -910,65 +889,33 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                     if "/TP" not in context.flags:
                         context.flags.append("/TP")
 
-        # Build per-TU scan specs. obj_key maps each participating object to a
-        # hash of its BMI-sensitive flags: IFCs live under cxx_modules/<key>/
-        # so the same logical module compiled with incompatible flags (e.g.
-        # /std:c++23 vs /std:c++latest) never writes to a single shared path.
         specs: list[TuScanSpec] = []
-        spec_to_obj: dict[int, FileNode] = {}
-        obj_key: dict[int, str] = {}
-        for src, obj_node in all_cxx_pairs:
+        for src, obj_node in setup.all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
-            seen: set[str] = set(base_flags)
-            compile_flags = list(base_flags)
-            if context:
-                for f in context.flags:
-                    if f not in seen:
-                        compile_flags.append(f)
-                        seen.add(f)
-                for inc in context.includes:
-                    compile_flags.append(f"/I{inc}")
-                for d in context.defines:
-                    compile_flags.append(f"/D{d}")
-
-            spec = TuScanSpec(
-                src=src.resolve(),
-                obj_rel=str(obj_node.path.relative_to(build_dir)).replace("\\", "/"),
-                compiler=compiler_cmd,
-                compile_flags=compile_flags,
+            compile_flags = merge_scan_compile_flags(
+                setup.base_flags, context, iprefix="/I", dprefix="/D"
             )
-            specs.append(spec)
-            spec_to_obj[id(spec)] = obj_node
-            obj_key[id(obj_node)] = bmi_key_for_flags(compile_flags, flag_spec)
+            specs.append(add_tu_spec(setup, src, obj_node, compile_flags, flag_spec))
 
         # Run cl.exe /scanDependencies on each TU. Failures (e.g. compiler
         # not on PATH) leave that result with p1689=None — propagated as
         # "not a module provider" so the build doesn't get an /ifcOutput it
         # can't satisfy. Errors are logged to stderr by the runner.
         results = scan_translation_units(
-            specs, scanner=compiler_cmd, scanner_style="msvc"
+            specs, scanner=setup.compiler_cmd, scanner_style="msvc"
         )
 
         # Synthesize std/std.compat module builds where imported (appended
         # to `results` so the dyndep file declares their .ifc outputs).
         std_obj_nodes = self._inject_std_module_builds(
-            project,
-            build_dir,
-            moddir,
-            compiler_cmd,
-            base_flags,
-            results,
-            first_env,
-            flag_spec,
-            obj_key,
-            spec_to_obj,
+            project, setup, results, flag_spec
         )
 
         # Detect same-class provider collisions and map each (key, module) to
         # its providing object.
         provider_obj = map_module_providers(
-            results, spec_to_obj, obj_key, moddir, ".ifc"
+            results, setup.spec_to_obj, setup.obj_key, setup.moddir, ".ifc"
         )
 
         # Inject per-TU module flags driven by the scan output, with a keyed
@@ -979,17 +926,17 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                 continue
             # Skip synthetic std-module entries — their flags are already in
             # the literal command list, not in a CompileLinkContext.
-            if id(r.spec) not in spec_to_obj:
+            if id(r.spec) not in setup.spec_to_obj:
                 continue
-            obj_node = spec_to_obj[id(r.spec)]
-            key = obj_key[id(obj_node)]
+            obj_node = setup.spec_to_obj[id(r.spec)]
+            key = setup.obj_key[id(obj_node)]
             bi = getattr(obj_node, "_build_info", None)
             if bi is None:
                 continue
             context = bi.get("context")
             if context is None or not hasattr(context, "flags"):
                 continue
-            ifc_path = keyed_bmi_path(r.logical_name, moddir, key, ".ifc")
+            ifc_path = keyed_bmi_path(r.logical_name, setup.moddir, key, ".ifc")
             if "/ifcOutput" in context.flags:
                 continue
             # /interface and /internalPartition are mutually exclusive (D8016).
@@ -1004,57 +951,25 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         # Every participating TU searches its own key's directory for the IFCs
         # it imports. All of a TU's imports share its BMI-sensitive flags, so
         # one /ifcSearchDir per key suffices.
-        for _, obj_node in all_cxx_pairs:
+        for _, obj_node in setup.all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             if not bi:
                 continue
             context = bi.get("context")
             if context is None or not hasattr(context, "flags"):
                 continue
-            searchdir = f"{moddir}/{obj_key[id(obj_node)]}"
+            searchdir = f"{setup.moddir}/{setup.obj_key[id(obj_node)]}"
             if searchdir not in context.flags:
                 context.flags.extend(["/ifcSearchDir", searchdir])
 
-        for key in set(obj_key.values()):
-            (build_dir / moddir / key).mkdir(parents=True, exist_ok=True)
-
-        # Keyed dyndep: each TU's provides/requires resolve to IFCs in its own
-        # compatibility class's directory.
-        entries = build_keyed_entries(
-            results, spec_to_obj, obj_key, provider_obj, moddir, ".ifc"
-        )
-        write_dyndep_entries(entries, dyndep_path)
-        logger.debug("Wrote C++ module dyndep to %s", dyndep_path)
-
-        dyndep_node = project.node(dyndep_path)
-        for _, obj_node in all_cxx_pairs:
-            bi = getattr(obj_node, "_build_info", None)
-            if bi is not None:
-                bi["dyndep"] = dyndep_rel
-            obj_node.implicit_deps.append(dyndep_node)
-        for std_obj_node in std_obj_nodes.values():
-            std_bi = std_obj_node._build_info
-            assert std_bi is not None  # set in _inject_std_module_builds
-            std_bi["dyndep"] = dyndep_rel
-            std_obj_node.implicit_deps.append(dyndep_node)
-
-        # Link the std .obj into importing targets so the standard module's
-        # explicit-instantiation symbols resolve.
-        if std_obj_nodes:
-            wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+        finish_module_pass(project, setup, results, provider_obj, std_obj_nodes, ".ifc")
 
     def _inject_std_module_builds(
         self,
         project: Project,
-        build_dir: Path,
-        moddir: str,
-        compiler_cmd: str,
-        base_flags: list[str],
+        setup: Any,
         results: list[Any],
-        first_env: Environment | None,
         flag_spec: Any,
-        obj_key: dict[int, str],
-        spec_to_obj: dict[int, FileNode],
     ) -> dict[str, FileNode]:
         """Synthesize build nodes for `import std;` / `import std.compat;`.
 
@@ -1079,6 +994,9 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         if not wanted:
             return {}
 
+        compiler_cmd = setup.compiler_cmd
+        moddir = setup.moddir
+
         std_modules_dir = _find_msvc_modules_dir()
         if std_modules_dir is None:
             raise RuntimeError(
@@ -1095,10 +1013,9 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         # mismatched `_ITERATOR_DEBUG_LEVEL` corrupts the heap.
         from pcons.toolchains.cxx_module_scanner import select_std_module_flags
 
-        cxx_tool = getattr(first_env, "cxx", None) if first_env else None
-        env_defines = list(getattr(cxx_tool, "defines", None) or [])
-        dprefix = str(getattr(cxx_tool, "dprefix", "/D") or "/D")
-        all_user_flags = list(base_flags) + [f"{dprefix}{d}" for d in env_defines]
+        env_defines = list(getattr(setup.cxx_tool, "defines", None) or [])
+        dprefix = str(getattr(setup.cxx_tool, "dprefix", "/D") or "/D")
+        all_user_flags = list(setup.base_flags) + [f"{dprefix}{d}" for d in env_defines]
 
         passthrough = select_std_module_flags(
             all_user_flags, _msvc_std_module_flag_spec()
@@ -1129,7 +1046,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
             ifc_rel = f"{std_moddir}/{logical}.ifc"
             obj_rel = f"{moddir}/{logical}.obj"
-            obj_path = build_dir / obj_rel
+            obj_path = setup.build_dir / obj_rel
 
             std_obj_node = project.node(obj_path)
             std_obj_node._build_info = {
@@ -1153,8 +1070,8 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                     str(ixx_path).replace("\\", "/"),
                 ],
             }
-            if first_env is not None:
-                first_env.register_node(std_obj_node)
+            if setup.first_env is not None:
+                setup.first_env.register_node(std_obj_node)
 
             # Synthesize a TuScanResult so the dyndep file emits a
             # `build <obj> | <ifc>` entry for it.
@@ -1173,8 +1090,8 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                 ]
             }
             results.append(TuScanResult(spec=synthetic_spec, p1689=synthetic_p1689))
-            obj_key[id(std_obj_node)] = std_key
-            spec_to_obj[id(synthetic_spec)] = std_obj_node
+            setup.obj_key[id(std_obj_node)] = std_key
+            setup.spec_to_obj[id(synthetic_spec)] = std_obj_node
             std_obj_nodes[logical] = std_obj_node
 
         return std_obj_nodes

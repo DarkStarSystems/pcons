@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import sys
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -30,6 +31,62 @@ if TYPE_CHECKING:
     from pcons.core.node import Node
     from pcons.core.project import Project
     from pcons.util.source_location import SourceLocation
+
+
+@dataclass
+class InstallContext:
+    """Context for install operations (copy, copytree).
+
+    Attributes:
+        destdir: Destination directory for InstallDir operations.
+        install_type: Type of install ("copy" or "copytree").
+    """
+
+    destdir: str = ""
+    install_type: str = "copy"
+
+    def get_env_overrides(self) -> dict[str, str]:
+        """Return values to set on env.install.* before subst()."""
+        result: dict[str, str] = {}
+
+        if self.destdir:
+            result["destdir"] = self.destdir
+
+        return result
+
+    @classmethod
+    def from_target(
+        cls, target: Target, env: Environment | None = None, destdir: str = ""
+    ) -> InstallContext:
+        """Create an InstallContext from a target and optional environment.
+
+        Target settings take precedence over environment settings.
+
+        Args:
+            target: The install target being built.
+            env: Optional environment with install defaults.
+            destdir: Destination directory (for InstallDir).
+        """
+        effective_destdir = destdir
+
+        builder_name = getattr(target, "_builder_name", "Install")
+        install_type = "copytree" if builder_name == "InstallDir" else "copy"
+
+        if env is not None:
+            install_config = getattr(env, "install", None)
+            if install_config is not None:
+                env_destdir = getattr(install_config, "destdir", None)
+                if env_destdir is not None and not effective_destdir:
+                    effective_destdir = str(env_destdir)
+
+        target_destdir = getattr(target, "_install_destdir", None)
+        if target_destdir is not None:
+            effective_destdir = target_destdir
+
+        return cls(
+            destdir=effective_destdir,
+            install_type=install_type,
+        )
 
 
 def _stamp_name_for(path: Path) -> str:
@@ -308,8 +365,6 @@ class InstallNodeFactory(PendingSourceFactory):
 
         Same copytreecmd + depfile/stamp mechanism as InstallDir.
         """
-        from pcons.tools.archive_context import InstallContext
-
         source_path = source_node.path
         dest_path = dest_dir / source_path.name
 
@@ -395,8 +450,6 @@ class InstallNodeFactory(PendingSourceFactory):
         self, target: Target, sources: list[FileNode], dest_dir: Path
     ) -> None:
         """Create copytree node for InstallDir target."""
-        from pcons.tools.archive_context import InstallContext
-
         if not sources:
             return
 

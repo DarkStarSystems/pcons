@@ -371,44 +371,24 @@ class GccToolchain(UnixToolchain):
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
             _write_text_if_changed,
-            bmi_key_for_flags,
-            build_keyed_entries,
+            add_tu_spec,
+            finish_module_pass,
             keyed_bmi_path,
             map_module_providers,
             merge_scan_compile_flags,
             scan_translation_units,
-            select_modules_scope,
-            wire_std_into_targets,
-            write_dyndep_entries,
+            setup_module_pass,
         )
 
-        flag_spec = _gcc_std_module_flag_spec()
-
-        cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
-        all_cxx_pairs = cxx_module_pairs + cxx_pairs
-        if not all_cxx_pairs:
+        setup = setup_module_pass(project, source_obj_by_language, "g++")
+        if setup is None:
             return
-
-        build_dir = project.build_dir
-        moddir = "cxx_modules"
-        dyndep_path = build_dir / "cxx_modules.dyndep"
-        dyndep_rel = "cxx_modules.dyndep"
-        (build_dir / moddir).mkdir(parents=True, exist_ok=True)
-
-        first_env = None
-        _, first_obj = all_cxx_pairs[0]
-        build_info = getattr(first_obj, "_build_info", None)
-        if build_info:
-            first_env = build_info.get("env")
-
-        cxx_tool = getattr(first_env, "cxx", None) if first_env else None
-        compiler_cmd = str(getattr(cxx_tool, "cmd", "g++") or "g++")
-        base_flags = list(getattr(cxx_tool, "flags", None) or [])
-        module_src_paths = {src for src, _ in cxx_module_pairs}
+        flag_spec = _gcc_std_module_flag_spec()
+        module_src_paths = {src for src, _ in setup.cxx_module_pairs}
 
         # Enable modules for all participating C++ TUs.
         modules_flag = "-fmodules"
-        for src, obj_node in all_cxx_pairs:
+        for src, obj_node in setup.all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             if bi is None:
                 continue
@@ -422,19 +402,12 @@ class GccToolchain(UnixToolchain):
                 bi["deps_style"] = None
                 bi["depfile"] = None
 
-        # Build per-TU scan specs and run GCC p1689 scanning.
-        # obj_key maps each participating object node to the hash of its
-        # BMI-sensitive flags. TUs sharing a key may share one compiled
-        # module interface under cxx_modules/<key>/; TUs with different
-        # keys (e.g. -std=c++23 vs -std=c++26) get separate BMIs.
         specs: list[TuScanSpec] = []
-        spec_to_obj: dict[int, FileNode] = {}
-        obj_key: dict[int, str] = {}
-        for src, obj_node in all_cxx_pairs:
+        for src, obj_node in setup.all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
             compile_flags = merge_scan_compile_flags(
-                base_flags, context, extra_flags=(modules_flag,)
+                setup.base_flags, context, extra_flags=(modules_flag,)
             )
 
             # For module interfaces, insert a scan step to generate the depfile.
@@ -444,27 +417,19 @@ class GccToolchain(UnixToolchain):
                     src,
                     obj_node,
                     compile_flags,
-                    compiler_cmd,
-                    build_dir,
+                    setup.compiler_cmd,
+                    setup.build_dir,
                     modules_flag,
                 )
 
-                if first_env is not None:
-                    first_env.register_node(scan_node)
+                if setup.first_env is not None:
+                    setup.first_env.register_node(scan_node)
                 obj_node.implicit_deps.append(scan_node)
 
-            spec = TuScanSpec(
-                src=src.resolve(),
-                obj_rel=str(obj_node.path.relative_to(build_dir)).replace("\\", "/"),
-                compiler=compiler_cmd,
-                compile_flags=compile_flags,
-            )
-            specs.append(spec)
-            spec_to_obj[id(spec)] = obj_node
-            obj_key[id(obj_node)] = bmi_key_for_flags(compile_flags, flag_spec)
+            specs.append(add_tu_spec(setup, src, obj_node, compile_flags, flag_spec))
 
         results = scan_translation_units(
-            specs, scanner=compiler_cmd, scanner_style="gcc"
+            specs, scanner=setup.compiler_cmd, scanner_style="gcc"
         )
 
         required_logical_names: set[str] = set()
@@ -472,44 +437,29 @@ class GccToolchain(UnixToolchain):
             required_logical_names.update(r.required_logical_names)
         std_wanted = required_logical_names & {"std", "std.compat"}
 
-        std_obj_nodes = self._inject_gcc_std_module_builds(
-            project,
-            build_dir,
-            moddir,
-            compiler_cmd,
-            base_flags,
-            std_wanted,
-            first_env,
-            cxx_tool,
-        )
+        std_obj_nodes = self._inject_gcc_std_module_builds(project, setup, std_wanted)
 
         # Scan synthesized std module sources too, so dyndep can capture
         # std/std.compat provides/requires relationships accurately.
         if std_obj_nodes:
             std_specs: list[TuScanSpec] = []
-            for _logical, std_obj_node in std_obj_nodes.items():
+            for std_obj_node in std_obj_nodes.values():
                 std_bi = std_obj_node._build_info
                 assert std_bi is not None
-                std_src = std_bi["sources"][0].path
-                std_obj_rel = str(std_obj_node.path.relative_to(build_dir)).replace(
-                    "\\", "/"
-                )
-                std_spec = TuScanSpec(
-                    src=std_src,
-                    obj_rel=std_obj_rel,
-                    compiler=compiler_cmd,
-                    compile_flags=[*base_flags, modules_flag],
-                )
-                std_specs.append(std_spec)
-                spec_to_obj[id(std_spec)] = std_obj_node
-                obj_key[id(std_obj_node)] = bmi_key_for_flags(
-                    std_spec.compile_flags, flag_spec
+                std_specs.append(
+                    add_tu_spec(
+                        setup,
+                        std_bi["sources"][0].path,
+                        std_obj_node,
+                        [*setup.base_flags, modules_flag],
+                        flag_spec,
+                    )
                 )
 
             results.extend(
                 scan_translation_units(
                     std_specs,
-                    scanner=compiler_cmd,
+                    scanner=setup.compiler_cmd,
                     scanner_style="gcc",
                 )
             )
@@ -519,69 +469,53 @@ class GccToolchain(UnixToolchain):
         # class owns cxx_modules/<key>/<module>.gcm, so the same logical
         # module compiled with incompatible flags never collides on one path.
         provider_obj = map_module_providers(
-            results, spec_to_obj, obj_key, moddir, ".gcm"
+            results, setup.spec_to_obj, setup.obj_key, setup.moddir, ".gcm"
         )
         key_to_modules: dict[str, dict[str, str]] = {}
         for (key, logical), _obj in provider_obj.items():
             key_to_modules.setdefault(key, {})[logical] = keyed_bmi_path(
-                logical, moddir, key, ".gcm"
+                logical, setup.moddir, key, ".gcm"
             )
 
         mapper_flag_for_key: dict[str, str] = {}
         for key, modules in key_to_modules.items():
-            (build_dir / moddir / key).mkdir(parents=True, exist_ok=True)
-            mapper_rel = f"{moddir}/{key}/modules.modmap"
+            (setup.build_dir / setup.moddir / key).mkdir(parents=True, exist_ok=True)
+            mapper_rel = f"{setup.moddir}/{key}/modules.modmap"
             lines = ["$root ."]
             for logical in sorted(modules):
                 lines.append(f"{logical} {modules[logical]}")
-            _write_text_if_changed(build_dir / mapper_rel, "\n".join(lines) + "\n")
+            _write_text_if_changed(
+                setup.build_dir / mapper_rel, "\n".join(lines) + "\n"
+            )
             mapper_flag_for_key[key] = f"-fmodule-mapper={mapper_rel}"
 
-        # Build a keyed dyndep: each TU's provides/requires resolve to BMIs in
-        # its own compatibility class's directory.
-        entries = build_keyed_entries(
-            results, spec_to_obj, obj_key, provider_obj, moddir, ".gcm"
-        )
-        write_dyndep_entries(entries, dyndep_path)
-        logger.debug("Wrote GCC C++ module dyndep to %s", dyndep_path)
-
-        dyndep_node = project.node(dyndep_path)
-        for src, obj_node in all_cxx_pairs:
+        # Every TU compiles with its key's module mapper; non-module TUs also
+        # get -Mno-modules so header depfiles keep working.
+        for src, obj_node in setup.all_cxx_pairs:
             bi = getattr(obj_node, "_build_info", None)
-            if bi is not None:
-                bi["dyndep"] = dyndep_rel
-                extra = bi.setdefault("extra_command_flags", [])
-                mapper_flag = mapper_flag_for_key.get(obj_key[id(obj_node)])
-                if mapper_flag and mapper_flag not in extra:
-                    extra.append(mapper_flag)
-                if src not in module_src_paths and "-Mno-modules" not in extra:
-                    extra.append("-Mno-modules")
-            if dyndep_node not in obj_node.implicit_deps:
-                obj_node.implicit_deps.append(dyndep_node)
+            if bi is None:
+                continue
+            extra = bi.setdefault("extra_command_flags", [])
+            mapper_flag = mapper_flag_for_key.get(setup.obj_key[id(obj_node)])
+            if mapper_flag and mapper_flag not in extra:
+                extra.append(mapper_flag)
+            if src not in module_src_paths and "-Mno-modules" not in extra:
+                extra.append("-Mno-modules")
         for std_obj_node in std_obj_nodes.values():
             std_bi = std_obj_node._build_info
             assert std_bi is not None
-            std_bi["dyndep"] = dyndep_rel
             extra = std_bi.setdefault("extra_command_flags", [])
-            mapper_flag = mapper_flag_for_key.get(obj_key[id(std_obj_node)])
+            mapper_flag = mapper_flag_for_key.get(setup.obj_key[id(std_obj_node)])
             if mapper_flag and mapper_flag not in extra:
                 extra.append(mapper_flag)
-            if dyndep_node not in std_obj_node.implicit_deps:
-                std_obj_node.implicit_deps.append(dyndep_node)
 
-        if std_obj_nodes:
-            wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
+        finish_module_pass(project, setup, results, provider_obj, std_obj_nodes, ".gcm")
 
     def _inject_gcc_std_module_builds(
         self,
         project: Project,
-        build_dir: Path,
-        moddir: str,
-        compiler_cmd: str,
-        base_flags: list[str],
+        setup: Any,
         wanted: set[str],
-        first_env: Environment | None,
-        cxx_tool: Any,
     ) -> dict[str, FileNode]:
         """Synthesize build nodes compiling libstdc++'s std/std.compat sources.
 
@@ -596,9 +530,12 @@ class GccToolchain(UnixToolchain):
         if not wanted:
             return {}
 
+        compiler_cmd = setup.compiler_cmd
+        base_flags = setup.base_flags
+
         # Carry ABI-affecting flags onto the std-module compile.
-        env_defines = list(getattr(cxx_tool, "defines", None) or [])
-        dprefix = str(getattr(cxx_tool, "dprefix", "-D") or "-D")
+        env_defines = list(getattr(setup.cxx_tool, "defines", None) or [])
+        dprefix = str(getattr(setup.cxx_tool, "dprefix", "-D") or "-D")
         all_user_flags = list(base_flags) + [f"{dprefix}{d}" for d in env_defines]
 
         passthrough = select_std_module_flags(
@@ -621,8 +558,8 @@ class GccToolchain(UnixToolchain):
                     f"On Ubuntu/Debian: apt install gcc g++ libstdc++-15-dev"
                 )
 
-            obj_rel = f"{moddir}/{logical}.o"
-            obj_path = build_dir / obj_rel
+            obj_rel = f"{setup.moddir}/{logical}.o"
+            obj_path = setup.build_dir / obj_rel
 
             std_obj_node = project.node(obj_path)
             cmd_list: list[str] = [
@@ -643,8 +580,8 @@ class GccToolchain(UnixToolchain):
                 "sources": [project.node(src_path)],
                 "command": cmd_list,
             }
-            if first_env is not None:
-                first_env.register_node(std_obj_node)
+            if setup.first_env is not None:
+                setup.first_env.register_node(std_obj_node)
 
             std_obj_nodes[logical] = std_obj_node
 

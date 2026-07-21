@@ -421,25 +421,16 @@ class MakefileGenerator(BaseGenerator):
         $in includes both sources and explicit_deps, matching ninja's $in.
         """
 
-        # Must match prerequisite handling in _write_build_rule
-        def get_source_path(s: FileNode) -> str:
-            if getattr(s, "_build_info", None) is not None or s.is_target:
-                return self._strip_build_dir_prefix(s.path)
-            path_obj = s.path
-            if not path_obj.is_absolute() and self._project_root is not None:
-                path_obj = self._project_root / path_obj
-            return str(path_obj)
-
         in_paths: list[str] = []
 
         for s in sources:
             if isinstance(s, FileNode):
-                in_paths.append(get_source_path(s))
+                in_paths.append(self._input_path(s))
 
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                in_paths.append(get_source_path(dep))
+                in_paths.append(self._input_path(dep))
 
         source_paths = " ".join(in_paths)
 
@@ -601,6 +592,21 @@ class MakefileGenerator(BaseGenerator):
         f.write("clean:\n")
         f.write(f"\trm -rf {self._escape_path(output_dir)}\n")
 
+    def _input_path(self, s: FileNode) -> str:
+        """Render an input node for a recipe command line.
+
+        Build artifacts are build-dir-relative; sources are absolute so they
+        work from any directory. Must classify nodes the same way as the
+        prerequisite list in _write_build_rule, or a recipe would name a
+        file its rule doesn't depend on.
+        """
+        if getattr(s, "_build_info", None) is not None or s.is_target:
+            return self._strip_build_dir_prefix(s.path)
+        path_obj = s.path
+        if not path_obj.is_absolute() and self._project_root is not None:
+            path_obj = self._project_root / path_obj
+        return str(path_obj)
+
     def _strip_build_dir_prefix(self, path: Path | str) -> str:
         """Strip the build_dir prefix from a path, since make runs from the
         build dir (contract: pcons.core.paths.execution_relative)."""
@@ -705,23 +711,15 @@ class MakefileGenerator(BaseGenerator):
         """
         from pcons.core.subst import SourcePath, TargetPath
 
-        def get_source_path(s: FileNode) -> str:
-            if getattr(s, "_build_info", None) is not None or s.is_target:
-                return self._strip_build_dir_prefix(s.path)
-            path_obj = s.path
-            if not path_obj.is_absolute() and self._project_root is not None:
-                path_obj = self._project_root / path_obj
-            return str(path_obj)
-
         # All input paths (sources + explicit_deps)
         in_paths: list[str] = []
         for s in sources:
             if isinstance(s, FileNode):
-                in_paths.append(get_source_path(s))
+                in_paths.append(self._input_path(s))
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                in_paths.append(get_source_path(dep))
+                in_paths.append(self._input_path(dep))
 
         # Role-aware so install outputs resolve to their absolute
         # destination, matching the rule target.

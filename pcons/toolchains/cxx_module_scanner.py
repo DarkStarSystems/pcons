@@ -48,12 +48,15 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 class CxxModuleScannerNotFound(RuntimeError):
@@ -612,12 +615,15 @@ def merge_scan_compile_flags(
     base_flags: list[str],
     context: Any,
     extra_flags: tuple[str, ...] = (),
+    *,
+    iprefix: str = "-I",
+    dprefix: str = "-D",
 ) -> list[str]:
     """Build a per-TU compile-flag list for module scanning.
 
     Starts from *base_flags*, injects *extra_flags* (deduped, e.g. GCC's
-    ``-fmodules``), then appends the build context's flags (deduped), ``-I``
-    includes, and ``-D`` defines, in that order.
+    ``-fmodules``), then appends the build context's flags (deduped),
+    includes, and defines, in that order.
     """
     seen = set(base_flags)
     compile_flags = list(base_flags)
@@ -631,10 +637,131 @@ def merge_scan_compile_flags(
                 compile_flags.append(flag)
                 seen.add(flag)
         for inc in context.includes:
-            compile_flags.append(f"-I{inc}")
+            compile_flags.append(f"{iprefix}{inc}")
         for define in context.defines:
-            compile_flags.append(f"-D{define}")
+            compile_flags.append(f"{dprefix}{define}")
     return compile_flags
+
+
+@dataclass
+class ModulePassSetup:
+    """Scaffolding shared by every toolchain's C++ modules pass.
+
+    Built by :func:`setup_module_pass`; ``spec_to_obj`` and ``obj_key`` are
+    filled by :func:`add_tu_spec` as the toolchain builds its scan specs.
+    """
+
+    cxx_module_pairs: list[tuple[Path, Any]]
+    cxx_pairs: list[tuple[Path, Any]]
+    build_dir: Path
+    moddir: str
+    dyndep_path: Path
+    dyndep_rel: str
+    first_env: Any
+    cxx_tool: Any
+    compiler_cmd: str
+    base_flags: list[str]
+    spec_to_obj: dict[int, Any] = field(default_factory=dict)
+    obj_key: dict[int, str] = field(default_factory=dict)
+
+    @property
+    def all_cxx_pairs(self) -> list[tuple[Path, Any]]:
+        return self.cxx_module_pairs + self.cxx_pairs
+
+
+def setup_module_pass(
+    project: Any,
+    source_obj_by_language: dict[str, list[tuple[Path, Any]]],
+    default_compiler: str,
+) -> ModulePassSetup | None:
+    """Select the modules scope and gather paths/compiler for a modules pass.
+
+    Returns None when no environment participates. The compiler command and
+    base flags come from the first participating object's environment.
+    """
+    cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
+    if not cxx_module_pairs and not cxx_pairs:
+        return None
+
+    build_dir = project.build_dir
+    moddir = "cxx_modules"
+    (build_dir / moddir).mkdir(parents=True, exist_ok=True)
+
+    first_obj = (cxx_module_pairs + cxx_pairs)[0][1]
+    build_info = getattr(first_obj, "_build_info", None)
+    first_env = build_info.get("env") if build_info else None
+    cxx_tool = getattr(first_env, "cxx", None) if first_env else None
+    compiler_cmd = str(getattr(cxx_tool, "cmd", default_compiler) or default_compiler)
+    base_flags = list(getattr(cxx_tool, "flags", None) or [])
+
+    return ModulePassSetup(
+        cxx_module_pairs=cxx_module_pairs,
+        cxx_pairs=cxx_pairs,
+        build_dir=build_dir,
+        moddir=moddir,
+        dyndep_path=build_dir / "cxx_modules.dyndep",
+        dyndep_rel="cxx_modules.dyndep",
+        first_env=first_env,
+        cxx_tool=cxx_tool,
+        compiler_cmd=compiler_cmd,
+        base_flags=base_flags,
+    )
+
+
+def add_tu_spec(
+    setup: ModulePassSetup,
+    src: Path,
+    obj_node: Any,
+    compile_flags: list[str],
+    flag_spec: StdModuleFlagSpec,
+) -> TuScanSpec:
+    """Create a scan spec for one TU and register the object's BMI key."""
+    spec = TuScanSpec(
+        src=src.resolve(),
+        obj_rel=str(obj_node.path.relative_to(setup.build_dir)).replace("\\", "/"),
+        compiler=setup.compiler_cmd,
+        compile_flags=compile_flags,
+    )
+    setup.spec_to_obj[id(spec)] = obj_node
+    setup.obj_key[id(obj_node)] = bmi_key_for_flags(compile_flags, flag_spec)
+    return spec
+
+
+def finish_module_pass(
+    project: Any,
+    setup: ModulePassSetup,
+    results: list[TuScanResult],
+    provider_obj: dict[tuple[str, str], Any],
+    std_obj_nodes: dict[str, Any],
+    bmi_ext: str,
+) -> None:
+    """Write the keyed dyndep file and wire it into the build graph.
+
+    The tail every toolchain's modules pass shares: per-key BMI dirs, dyndep
+    entries, ``dyndep`` + implicit deps on every participating object (std
+    objects included), and std objects linked into importing targets.
+    """
+    for key in set(setup.obj_key.values()):
+        (setup.build_dir / setup.moddir / key).mkdir(parents=True, exist_ok=True)
+
+    entries = build_keyed_entries(
+        results, setup.spec_to_obj, setup.obj_key, provider_obj, setup.moddir, bmi_ext
+    )
+    write_dyndep_entries(entries, setup.dyndep_path)
+    logger.debug("Wrote C++ module dyndep to %s", setup.dyndep_path)
+
+    dyndep_node = project.node(setup.dyndep_path)
+    participants = [obj for _, obj in setup.all_cxx_pairs]
+    participants.extend(std_obj_nodes.values())
+    for obj_node in participants:
+        bi = getattr(obj_node, "_build_info", None)
+        if bi is not None:
+            bi["dyndep"] = setup.dyndep_rel
+        if dyndep_node not in obj_node.implicit_deps:
+            obj_node.implicit_deps.append(dyndep_node)
+
+    if std_obj_nodes:
+        wire_std_into_targets(project, results, setup.spec_to_obj, std_obj_nodes)
 
 
 def wire_std_into_targets(
@@ -844,19 +971,11 @@ def write_dyndep(
     # Module file key in manifest entries ("pcm" for clang, "ifc" for msvc)
     mod_key = "ifc" if scanner_style == "msvc" else "pcm"
 
-    # First pass: build module_name -> mod_path map from interface units.
-    # The mod path comes from the manifest "pcm"/"ifc" field when present,
-    # or is derived from the logical-name after scanning.
+    # module_name -> mod_path, from the manifest "pcm"/"ifc" field when
+    # present, else derived from the logical name after scanning.
     module_to_pcm: dict[str, str] = {}
 
-    # Pre-populate from manifest entries that are module interfaces and have
-    # an explicit pcm field (we know this before scanning).
-    for item in manifest:
-        if item.get("is_module_interface") and "pcm" in item:
-            # We don't know the logical name yet; defer until after scan.
-            pass
-
-    # Second pass: scan all files and build the full dependency picture.
+    # Scan all files and build the full dependency picture.
     # entries: list of (obj, provides_pcms, requires_pcms)
     entries: list[tuple[str, list[str], list[str]]] = []
 
