@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-umami-auto-track data-umami-auto-track-all-clicks="true">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -315,6 +315,10 @@
   </style>
   <script defer src="https://analytics.oberbrunner.com/script.js"
           data-website-id="710a3851-2903-4550-ba69-74b8aa49ed70"></script>
+  <!-- umami-kit (vendored from https://github.com/rhelmer/umami-kit):
+       scroll depth, time-on-page, idle, click, and page-exit events.
+       Auto-inits from the data-umami-* attributes on <html>. -->
+  <script defer src="umami-kit.js"></script>
 </head>
 <body>
   <header>
@@ -348,12 +352,15 @@
       <a href="https://pcons.readthedocs.io"><img src="https://readthedocs.org/projects/pcons/badge/?version=latest" alt="Docs"></a>
     </div>
     <div class="hero-actions">
-      <a href="https://pcons.readthedocs.io" class="btn btn-primary">Read the Docs</a>
-      <a href="https://github.com/DarkStarSystems/pcons" class="btn btn-secondary">View on GitHub</a>
+      <a href="https://pcons.readthedocs.io" class="btn btn-primary"
+         data-umami-track="cta" data-umami-data-name="hero-docs">Read the Docs</a>
+      <a href="https://github.com/DarkStarSystems/pcons" class="btn btn-secondary"
+         data-umami-track="cta" data-umami-data-name="hero-github">View on GitHub</a>
     </div>
     <div class="install-banner">
       <code><span class="prompt">$</span> uvx pcons</code>
-      <button class="copy-btn" onclick="navigator.clipboard.writeText('uvx pcons');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
+      <button class="copy-btn" data-umami-track="copy-install"
+              onclick="navigator.clipboard.writeText('uvx pcons');this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',1500)">Copy</button>
     </div>
   </div>
 
@@ -561,8 +568,10 @@ project.<span class="fn">generate</span>()</code></pre>
       <h2>Ready for small-scale production use</h2>
       <p>pcons is working in several medium-sized projects, and still under active development. Core C/C++/Fortran compilation, static and shared libraries, programs, install targets, installers, and mixed-language builds are all tested and working across Linux, macOS, and Windows.</p>
       <div class="hero-actions">
-        <a href="https://pcons.readthedocs.io" class="btn btn-primary">Get Started</a>
-        <a href="https://github.com/DarkStarSystems/pcons" class="btn btn-secondary">Contribute on GitHub</a>
+        <a href="https://pcons.readthedocs.io" class="btn btn-primary"
+           data-umami-track="cta" data-umami-data-name="bottom-get-started">Get Started</a>
+        <a href="https://github.com/DarkStarSystems/pcons" class="btn btn-secondary"
+           data-umami-track="cta" data-umami-data-name="bottom-contribute">Contribute on GitHub</a>
       </div>
     </div>
   </section>
