@@ -884,8 +884,11 @@ uvx pcons --variant=debug
 In addition to build variants (debug/release), pcons provides **presets** for common development workflows. Presets are orthogonal to variants — you can combine them freely.
 
 ```python
-# Apply warning flags (all warnings + warnings-as-errors)
+# Apply warning flags (all warnings; add "werror" to make them errors)
 env.apply_preset("warnings")
+
+# Promote warnings to errors (compose with "warnings")
+env.apply_preset("werror")
 
 # Apply address/undefined behavior sanitizers
 env.apply_preset("sanitize")
@@ -904,7 +907,8 @@ Presets are toolchain-specific — each toolchain produces the appropriate flags
 
 | Preset | Unix (GCC/LLVM) | MSVC |
 |--------|----------------|------|
-| `warnings` | `-Wall -Wextra -Wpedantic -Werror` | `/W4 /WX` |
+| `warnings` | `-Wall -Wextra -Wpedantic` | `/W4` |
+| `werror` | `-Werror` | `/WX` |
 | `sanitize` | `-fsanitize=address,undefined -fno-omit-frame-pointer` | `/fsanitize=address` |
 | `profile` | `-pg -g` (compile+link) | `/PROFILE` (linker) |
 | `lto` | `-flto` (compile+link) | `/GL` (compile) + `/LTCG` (link) |
@@ -917,6 +921,46 @@ env.set_variant("release")
 env.apply_preset("warnings")
 env.apply_preset("lto")
 ```
+
+Variants act like a knob: calling `set_variant()` again *replaces* the
+previous variant's flags rather than piling on top of them, so
+`env.set_variant("release")` followed by `env.set_variant("debug")` switches
+cleanly. To build both variants side by side, clone the environment (see
+[Environment Cloning](#environment-cloning)).
+
+### Where Did This Flag Come From? (`env.explain()`)
+
+Once variants, presets, and manual edits combine, it can be unclear which
+setting produced a given flag. `env.explain()` attributes every flag, define,
+and command override on the environment to the preset that contributed it;
+anything you set directly (or a toolchain default) is labelled `(manual)`.
+
+```python
+env = project.Environment(toolchain="c")
+env.set_variant("release")
+env.apply_preset("warnings")
+env.cc.flags.append("-fno-strict-aliasing")
+
+print(env.explain("cc"))       # one tool; env.explain() covers all tools
+```
+
+Output:
+
+```text
+cc.flags:
+  -O2                   <- release (variant)
+  -Wall                 <- warnings (feature)
+  -Wextra               <- warnings (feature)
+  -Wpedantic            <- warnings (feature)
+  -fno-strict-aliasing  <- (manual)
+cc.defines:
+  NDEBUG                <- release (variant)
+```
+
+`env.cc.explain()` is shorthand for `env.explain("cc")`. Cross presets and
+SDK wiring show up the same way (e.g. `cc.cmd <- wasi-sdk`), so `explain()`
+is the first tool to reach for when a build uses a flag — or a compiler —
+you didn't expect.
 
 ---
 
@@ -2005,13 +2049,18 @@ msvcup is particularly useful in CI environments where you want reproducible bui
 
 Build generators (Ninja, Makefile, Xcode) automatically generate `compile_commands.json` alongside build files. A symlink is also created at the project root so tools find it automatically. No extra code is needed.
 
-To disable it, generate explicitly:
+To disable generation entirely, or to keep everything inside the build
+directory (no project-root symlink), generate explicitly:
 
 ```python
 from pcons import Generator
 
-Generator().generate(project, compile_commands=False)
+Generator().generate(project, compile_commands=False)   # no compile_commands.json
+Generator().generate(project, root_symlink=False)       # no root symlink
 ```
+
+With multiple build configurations in one project root, the last generation
+to run owns the root symlink.
 
 This enables features in:
 - **VS Code** with clangd extension
@@ -2145,6 +2194,9 @@ app_profile = project.Program("app_profile", profile_env)
 - Each `project.Environment()` call creates a fresh environment with toolchain defaults
 - `env.clone()` creates a deep copy - changes to the clone don't affect the original
 - Environments don't share state - there's no "base" environment that accumulates
+- You can clone at any point and re-tune the clone: `set_variant()` (and other
+  exclusive presets) *replace* the previous setting, so
+  `debug_env = release_env.clone(); debug_env.set_variant("debug")` works
 - If you see duplicate flags, check if you're accidentally adding flags multiple times in your script
 
 ### Temporary Environment Overrides
@@ -2791,12 +2843,35 @@ env.set_target_arch("arm64")
 
 **Windows (MSVC):**
 - Adds `/MACHINE:<ARCH>` to linker and librarian
+- For a non-native arch, selects the matching cross toolset: the
+  `bin/Host<host>/<arch>` compiler binaries plus the VC and Windows SDK
+  `<arch>` library directories (the dev shell's `LIB` covers only the host
+  arch). Raises with install guidance if the cross toolset component isn't
+  installed in Visual Studio.
 - Supported architectures: `x64`, `x86`, `arm64`, `arm64ec`
 - Aliases: `amd64`→`x64`, `x86_64`→`x64`, `aarch64`→`arm64`
 
 **Windows (Clang-CL):**
 - Adds `--target=<triple>` to compilers (e.g., `--target=aarch64-pc-windows-msvc`)
 - Adds `/MACHINE:<ARCH>` to linker
+- For a non-native arch, also adds the VC and Windows SDK `<arch>` library
+  directories (same requirement as MSVC: the cross build-tools component
+  must be installed)
+
+**Linux (GCC/LLVM):**
+- A bare arch name can't retarget the compiler on Linux, so
+  `set_target_arch()` **raises**. Use a cross preset instead — e.g.
+  `linux_cross(triple="aarch64-linux-gnu")` — or a dedicated cross
+  toolchain (see [Cross-Compilation Presets](#cross-compilation-presets)).
+
+For example, on a Windows x64 machine this builds an ARM64 binary — no
+vcvars cross shell needed, just the ARM64 build-tools component:
+
+```python
+env = project.Environment(toolchain="c")   # MSVC or clang-cl
+env.set_target_arch("arm64")
+app = project.Program("myapp", env, sources=["main.c"])
+```
 
 #### macOS Universal Binaries
 
@@ -2846,7 +2921,7 @@ This works for static libraries, dynamic libraries, and executables.
 For cross-compiling to other platforms, pcons provides ready-made presets that configure sysroot, target triple, architecture flags, and SDK paths.
 
 ```python
-from pcons.toolchains.presets import android, ios, emscripten, wasi_sdk, linux_cross
+from pcons.toolchains.presets import android, ios, linux_cross, pyodide
 
 # Android NDK
 env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a"))
@@ -2885,9 +2960,13 @@ project.Program("hello", env, sources=["src/hello.c"])
 |---------|--------------|-------------|
 | `android(ndk, arch, api)` | `arch`: arm64-v8a, armeabi-v7a, x86_64, x86; `api`: minimum API level (default 21) | Android NDK cross-compilation |
 | `ios(arch, min_version, sdk)` | `arch`: arm64 or x86_64 (simulator); `min_version`: deployment target | iOS cross-compilation |
-| `emscripten(emsdk)` | `emsdk`: path to Emscripten SDK (optional if emcc in PATH) | WebAssembly via Emscripten |
-| `wasi_sdk(sdk_path)` | `sdk_path`: path to wasi-sdk (optional, auto-detected) | WebAssembly via wasi-sdk (cross-preset) |
+| `emscripten(emsdk)` | `emsdk`: path to Emscripten SDK (optional if emcc in PATH) | WebAssembly via Emscripten (requires `toolchain="emscripten"`) |
+| `wasi_sdk(sdk_path)` | `sdk_path`: path to wasi-sdk (optional, auto-detected) | WebAssembly via wasi-sdk (requires `toolchain="wasi"`) |
+| `pyodide(abi, emsdk)` | `abi`: Pyodide ABI version (default "2026_0") | Pyodide extension modules (requires `toolchain="emscripten"`) |
 | `linux_cross(triple, sysroot)` | `triple`: GCC/Clang target triple; `sysroot`: target sysroot path | Generic Linux cross-compilation |
+
+The WebAssembly presets apply only to their dedicated toolchains; applying
+one to a native toolchain raises.
 
 #### Custom Cross-Compilation Presets
 
@@ -2904,26 +2983,33 @@ preset = CrossPreset(
     sysroot="/opt/riscv/sysroot",
     extra_compile_flags=("-march=rv64gc", "-mabi=lp64d"),
     extra_link_flags=("-nostdlib",),
-    env_vars={
-        "CC": "/opt/riscv/bin/riscv64-unknown-elf-gcc",
-        "CXX": "/opt/riscv/bin/riscv64-unknown-elf-g++",
+    tool_cmds={
+        "cc": "/opt/riscv/bin/riscv64-unknown-elf-gcc",
+        "cxx": "/opt/riscv/bin/riscv64-unknown-elf-g++",
+        "link": "/opt/riscv/bin/riscv64-unknown-elf-g++",
+        "ar": "/opt/riscv/bin/riscv64-unknown-elf-ar",
     },
 )
 env.apply_cross_preset(preset)
 ```
+
+GCC selects targets by binary, not by flag, so a GCC cross preset must name
+the cross binaries in `tool_cmds` — including `link` and `ar`, or those
+steps silently run the host tools. Clang-family toolchains retarget via
+`triple` and can usually omit `tool_cmds`.
 
 The `CrossPreset` fields:
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | `str` | Human-readable name |
-| `arch` | `str` | Target architecture |
+| `arch` | `str` | Target CPU name in the target ecosystem's vocabulary (metadata; the triple encodes the CPU) |
 | `triple` | `str \| None` | Compiler target triple (used with `--target` on Clang) |
-| `sysroot` | `str \| None` | Path to target sysroot (`--sysroot`) |
-| `sdk_path` | `str \| None` | Path to SDK root |
+| `sysroot` | `str \| None` | Root of the target's headers/libraries (`--sysroot`, or `-isysroot`/SDK on Apple) |
 | `extra_compile_flags` | `tuple[str, ...]` | Additional compile flags |
 | `extra_link_flags` | `tuple[str, ...]` | Additional link flags |
-| `env_vars` | `dict[str, str]` | CC/CXX command overrides |
+| `tool_cmds` | `dict[str, str]` | Per-tool command overrides keyed by pcons tool name (`cc`, `cxx`, `link`, `ar`, ...) |
+| `env_vars` | `dict[str, str]` | Deprecated alias for `tool_cmds` using CC/CXX/LD/AR vocabulary; `tool_cmds` wins on conflict |
 
 ### Compiler Cache
 
@@ -3070,7 +3156,7 @@ result2 = checks.check_flag("-Wall")
 assert result2.cached is True     # Second run: from cache
 ```
 
-The cache key includes the compiler path, so switching compilers invalidates the relevant entries automatically.
+The cache key includes a signature of the compiler command *and its current flags*, so switching compilers — or retargeting the same compiler with a cross preset (`--target=`, `-isysroot`) — invalidates the relevant entries automatically. Checks probe the same compilation the build will do.
 
 ### Configure: Caching, Defines, and Config Headers
 
@@ -3079,7 +3165,8 @@ The cache key includes the compiler path, so switching compilers invalidates the
 ```python
 config = Configure(build_dir=Path("build"))
 
-# Find a program in PATH (result is cached)
+# Find a program in PATH (result is cached, keyed by a PATH signature —
+# a changed PATH re-searches instead of returning stale results)
 ninja = config.find_program("ninja")
 if ninja:
     print(f"Found ninja {ninja.version} at {ninja.path}")
@@ -3278,8 +3365,9 @@ This is especially useful when porting CMake projects to pcons, since the templa
 |--------|-------------|
 | `env.set_variant(name)` | Set debug/release variant |
 | `env.set_target_arch(arch)` | Set target CPU architecture |
-| `env.apply_preset(name)` | Apply flag preset (warnings, sanitize, profile, lto, hardened) |
+| `env.apply_preset(name)` | Apply flag preset (warnings, werror, sanitize, profile, lto, hardened) |
 | `env.apply_cross_preset(preset)` | Apply cross-compilation preset |
+| `env.explain(tool=None)` | Attribute each flag/define/command to the preset that set it |
 | `env.use_compiler_cache(tool=None)` | Wrap compilers with ccache/sccache |
 | `env.use(package)` | Apply package settings |
 | `env.clone()` | Create a copy |

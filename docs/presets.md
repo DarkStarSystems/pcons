@@ -240,7 +240,7 @@ must not be conflated:
 | `env.apply_cross_preset(p)` (target) | *which platform* — different OS/SDK/libc | iOS, Android, WASI, Linux-on-ARM |
 
 A cross preset is realized **only** from its own fields (triple, sysroot,
-env_vars, extra flags). It never routes through the arch knob — the knob's
+tool_cmds, extra flags). It never routes through the arch knob — the knob's
 vocabulary is per-toolchain-and-platform, while a preset's `arch` uses its
 ecosystem's names (`arm64-v8a`, `wasm32`), and mixing the two produces flags
 like `-arch arm64-v8a`. When a triple is present it already encodes the CPU;
@@ -337,7 +337,8 @@ For a new target factory in `pcons/toolchains/presets.py`:
   reverse. Use the ecosystem's own arch vocabulary.
 - Carry the platform's required flags in `extra_*_flags`; don't invent new
   fields for them.
-- If the target needs specific binaries, set `env_vars` — with paths derived
+- If the target needs specific binaries, set `tool_cmds` (every tool that
+  must be retargeted: `cc`, `cxx`, `link`, `ar`, ...) — with paths derived
   from one user-supplied root parameter, not guessed.
 - Auto-detect only per the bounded rules above.
 
@@ -425,7 +426,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | `warnings` + `werror` (orthogonal), Fortran/WASM coverage | implemented |
 | `env.set_variant` / `env.set_target_arch` | implemented |
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
-| Cross-preset field contract: triple/sysroot/env_vars realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |
+| Cross-preset field contract: triple/sysroot/tool_cmds realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |
 | Preset application contract: apply-fully-or-raise (unknown names, missing-tool cmd, zero-effect presets, unrealizable knobs) | implemented |
 | `env.target_arch` single-writer (knob only; cross presets are metadata) | implemented |
 | One application per resolution (no per-toolchain double-apply) | implemented |
@@ -434,6 +435,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | Fail fast on unrealizable cross presets (MSVC + any, GCC + triple-only) | implemented |
 | MSVC/clang-cl `set_target_arch` selects the cross toolset (cl/lib dirs), not just `/MACHINE:` | implemented |
 | `tool_cmds` binary-retarget (any tool; `env_vars` deprecated alias); wasm presets require the wasm toolchains | implemented |
+| `Toolchain.setup_presets()` — SDK wiring applied as attributable presets (emsdk, wasi-sdk) | implemented |
 | `env.cxx.set_standard` (tool-namespace setting via `tool_setting`) | implemented |
 | Registry, `scope/name` namespacing, `register_preset`/`preset`/`list_presets` | implemented |
 | Imperative escape hatch (`register_preset(..., imperative=True)`) | implemented |

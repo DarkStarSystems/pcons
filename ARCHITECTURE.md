@@ -23,8 +23,8 @@ A modern Python-based build system that generates Ninja (or other) build files.
 | HeaderOnlyLibrary, ObjectLibrary | Implemented | Interface and object-only |
 | Command | Implemented | Custom shell commands |
 | **Configure Phase** | | |
-| Configure class | Partial | Basic program/toolchain finding |
-| Feature checks (compile tests) | Partial | Methods exist, need toolchain integration |
+| Configure class | Implemented | Program/toolchain finding, PATH-keyed caching |
+| Feature checks (compile tests) | Implemented | ToolChecks; probes include tool flags (cross-correct) |
 | Configuration caching | Implemented | JSON-based |
 | Config header generation | Implemented | write_config_header() |
 | load_config() function | Implemented | Loads saved config |
@@ -88,7 +88,7 @@ A modern Python-based build system that generates Ninja (or other) build files.
 ## Execution Model: Three Distinct Phases
 
 ### Phase 1: Configure
-> **Status: Partial** - Configure class exists with program finding, caching, and config header generation. Feature checks (compile tests) require toolchain integration.
+> **Status: Implemented** - Program finding, caching, config header generation, and compile-test feature checks (`ToolChecks`). Checks compile with the tool's configured command *and flags*, so they answer for the actual target, including under cross-compilation.
 
 **Separate from build description.** Tool detection is complex and must complete before builds are defined.
 
@@ -166,7 +166,7 @@ The resolver takes the build description, and:
 The resolve phase is significant; before that, the node graph is sparse, with build info for targets but many nodes not yet defined. After `resolve()`, the node graph is complete and we can generate the build file. Some targets, like Install, defer much of their actual work until `resolve()`. For instance, when Install is passed a Target or a directory, it doesn't know at that point what exact nodes or files will be contained in it, so it can't yet know how exactly to install the given files or dirs. During resolve, it lazily creates that info so it's up to date when the generator asks for it.
 
 ### Phase 4: Generate
-> **Status: Partial** - Ninja generator fully implemented. compile_commands.json and Mermaid diagram generators available. Makefile and IDE generators planned.
+> **Status: Implemented** - Ninja (default), Makefile, and Xcode generators; compile_commands.json, Mermaid/dot diagram, and metadata generators available as additive companions.
 
 1. Generator traverses the dependency graph
 2. Adjust paths as needed for the generator (e.g. Ninja target paths are specified relative to build dir)
