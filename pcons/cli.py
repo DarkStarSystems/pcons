@@ -32,7 +32,6 @@ def setup_logging(verbose: bool = False, debug: str | None = None) -> None:
     """
     from pcons.core.debug import init_debug
 
-    # Check CLI arg first, then environment variable
     debug_spec = debug or os.environ.get("PCONS_DEBUG")
 
     if debug_spec:
@@ -46,21 +45,12 @@ def setup_logging(verbose: bool = False, debug: str | None = None) -> None:
         level = logging.WARNING
         fmt = "%(levelname)s: %(message)s"
 
-    # Force reconfiguration even if basicConfig was already called
-    # This is needed because debug mode may be set after logging is initialized
+    # force=True: debug mode may be set after logging is initialized
     logging.basicConfig(level=level, format=fmt, force=True)
 
 
 def find_script(name: str, search_dir: Path | None = None) -> Path | None:
-    """Find a build script by name.
-
-    Args:
-        name: Script name (e.g., 'pcons-build.py')
-        search_dir: Directory to search in (default: current dir)
-
-    Returns:
-        Path to script if found, None otherwise.
-    """
+    """Find a build script by name in search_dir (default: cwd)."""
     if search_dir is None:
         search_dir = Path.cwd()
 
@@ -108,14 +98,7 @@ def _needs_generation(build_dir: Path, build_script: str | None = None) -> bool:
 
 
 def parse_variables(args: list[str]) -> tuple[dict[str, str], list[str]]:
-    """Parse KEY=value arguments from a list.
-
-    Args:
-        args: List of arguments.
-
-    Returns:
-        Tuple of (variables dict, remaining args).
-    """
+    """Parse KEY=value arguments; return (variables dict, remaining args)."""
     variables: dict[str, str] = {}
     remaining: list[str] = []
 
@@ -151,10 +134,8 @@ def run_script(
     reconfigure: bool = False,
     extra_env: dict[str, str] | None = None,
 ) -> tuple[int, list[Project]]:
-    """Execute a Python build script in-process.
-
-    Runs the script using exec() so we can access the Project objects
-    created by the script via the global registry.
+    """Execute a Python build script in-process via exec(), so its Project
+    objects are accessible through the global registry.
 
     Args:
         script_path: Path to the script to run.
@@ -181,13 +162,10 @@ def run_script(
         updated_keys.add(key)
         os.environ[key] = value
 
-    # Clear any previously registered projects
     pcons._clear_registered_projects()
-
-    # Also clear cached CLI vars so they get re-read
+    # Clear cached CLI vars so they get re-read
     pcons.core.vars._clear_cli_vars()
 
-    # Set environment variables (scripts still read these)
     set_env_var("PCONS_BUILD_DIR", str(build_dir.absolute()))
     set_env_var("PCONS_SOURCE_DIR", str(script_path.parent.absolute()))
 
@@ -226,7 +204,6 @@ def run_script(
         os.chdir(script_path.parent)
         sys.path.insert(0, str(script_path.parent))
 
-        # Execute the script
         script_source = script_path.read_text()
         code = compile(script_source, str(script_path), "exec")
         namespace: dict[str, object] = {
@@ -235,7 +212,7 @@ def run_script(
         }
         exec(code, namespace)
 
-        # Execute any deferred generate requests registered by the build script
+        # Run any deferred generate requests registered by the script
         try:
             from pcons import Project
             from pcons.generators.generator import BaseGenerator
@@ -248,7 +225,6 @@ def run_script(
             return 1, []
 
     except SystemExit as e:
-        # Script called sys.exit()
         exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
         if exit_code != 0:
             _cancel_pending_generation()
@@ -378,7 +354,6 @@ def run_xcodebuild(
     Returns:
         Exit code from xcodebuild.
     """
-    # Find the .xcodeproj
     xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
     if not xcodeproj_files:
         logger.error("No .xcodeproj found in %s", build_dir)
@@ -386,7 +361,6 @@ def run_xcodebuild(
 
     xcodeproj = xcodeproj_files[0]
 
-    # Find xcodebuild
     xcodebuild = shutil.which("xcodebuild")
     if xcodebuild is None:
         logger.error("xcodebuild not found in PATH")
@@ -396,7 +370,6 @@ def run_xcodebuild(
     # Map variant to Xcode configuration (capitalize first letter)
     xcode_config = configuration.capitalize() if configuration else "Release"
 
-    # Build xcodebuild command
     cmd = [xcodebuild, "-project", str(xcodeproj), "-configuration", xcode_config]
 
     if jobs:
@@ -441,13 +414,11 @@ def run_make(
         logger.error("No Makefile found in %s", build_dir)
         return 1
 
-    # Find make
     make = shutil.which("make")
     if make is None:
         logger.error("make not found in PATH")
         return 1
 
-    # Build make command
     cmd = [make, "-C", str(build_dir)]
 
     if jobs:
@@ -467,15 +438,9 @@ def run_make(
 
 
 def cmd_default(args: argparse.Namespace) -> int:
-    """Default command: generate and build.
-
-    This is what runs when you just type 'pcons' with no subcommand.
-    Equivalent to: pcons generate && pcons build
-    """
-    # Load user modules before running build script
+    """Default command (bare 'pcons'): generate, then build."""
     load_user_modules(args)
 
-    # First, generate
     result, project = cmd_generate(args)
     if result != 0:
         return result
@@ -484,31 +449,23 @@ def cmd_default(args: argparse.Namespace) -> int:
     if project:
         args.build_dir = str(project.build_dir)
 
-    # Then, build
     return cmd_build(args)
 
 
 def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
-    """Run the generate phase.
-
-    This command:
-    1. Finds pcons-build.py in the current directory
-    2. Runs pcons-build.py to define the build (includes configure if needed)
-    3. Generates build.ninja in the build directory
+    """Run the generate phase: find and run pcons-build.py, which
+    generates build files in the build directory.
 
     Returns:
-        Tuple of (exit_code, project) where project is the first registered
-        Project, or None if no project was created.
+        Tuple of (exit_code, first registered Project or None).
     """
     setup_logging(args.verbose, args.debug)
 
     build_dir = Path(args.build_dir)
     script_path = getattr(args, "build_script", None)
 
-    # Parse variables from extra args
     variables, _ = parse_variables(getattr(args, "extra", []))
 
-    # Find build script
     script: Path
     if script_path:
         script = Path(script_path)
@@ -523,24 +480,20 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
             return 1, None
         script = found_script
 
-    # Create build directory if it doesn't exist
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # Get variant, generator, and reconfigure flags
     variant = getattr(args, "variant", None)
     generator = getattr(args, "generator", None)
     reconfigure = getattr(args, "reconfigure", False)
     graph = getattr(args, "graph", None)
     mermaid = getattr(args, "mermaid", None)
 
-    # Set up extra environment for graph output
     extra_env: dict[str, str] = {}
     if graph:
         extra_env["PCONS_GRAPH"] = graph
     if mermaid:
         extra_env["PCONS_MERMAID"] = mermaid
 
-    # Run build script
     exit_code, _projects = run_script(
         script,
         build_dir,
@@ -558,23 +511,15 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
 
 
 def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
-    """Wrapper for cmd_generate that returns only the exit code.
-
-    Used as the handler for the 'generate' subcommand.
-    """
-    # Load user modules before running build script
+    """'generate' subcommand handler: cmd_generate, exit code only."""
     load_user_modules(args)
     exit_code, _ = cmd_generate(args)
     return exit_code
 
 
 def cmd_build(args: argparse.Namespace) -> int:
-    """Build targets using the appropriate build tool.
-
-    This command detects which generator was used (ninja, make, xcode)
-    and runs the corresponding build tool. If build files are missing
-    or out of date, generates them first.
-    """
+    """Build targets with the build tool matching the generated files
+    (ninja, make, or xcodebuild), regenerating them first if stale."""
     setup_logging(args.verbose, args.debug)
 
     build_dir = Path(args.build_dir)
@@ -595,7 +540,6 @@ def cmd_build(args: argparse.Namespace) -> int:
                 args.build_dir = str(project.build_dir)
                 build_dir = Path(args.build_dir)
 
-    # Get targets from args
     _, targets_list = parse_variables(getattr(args, "extra", []))
     targets = targets_list or None
 
@@ -604,7 +548,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     variant = getattr(args, "variant", None)
     ninja_runner = getattr(args, "ninja", None)
 
-    # Detect which generator was used and run the appropriate build tool
+    # Detect which generator was used and run the matching build tool
     ninja_file = build_dir / "build.ninja"
     makefile = build_dir / "Makefile"
     xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
@@ -630,18 +574,13 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 def cmd_clean(args: argparse.Namespace) -> int:
-    """Clean build artifacts.
-
-    This command:
-    1. Runs 'ninja -t clean' if build.ninja exists
-    2. Optionally removes the entire build directory with --all
-    """
+    """Clean build artifacts: 'ninja -t clean', or remove the whole
+    build directory with --all."""
     setup_logging(args.verbose, args.debug)
 
     build_dir = Path(args.build_dir)
 
     if args.all:
-        # Remove entire build directory
         if build_dir.exists():
             logger.info("Removing build directory: %s", build_dir)
             shutil.rmtree(build_dir)
@@ -650,7 +589,6 @@ def cmd_clean(args: argparse.Namespace) -> int:
             logger.info("Build directory does not exist: %s", build_dir)
         return 0
 
-    # Use ninja -t clean
     ninja_file = build_dir / "build.ninja"
     if not ninja_file.exists():
         logger.info("No build.ninja found, nothing to clean")
@@ -679,17 +617,12 @@ def cmd_clean(args: argparse.Namespace) -> int:
 
 
 def cmd_info(args: argparse.Namespace) -> int:
-    """Show information about the build script.
-
-    Displays the docstring from pcons-build.py which should document
-    available build variables and usage. With --targets, runs the build
-    script and lists all defined targets grouped by type.
-    """
+    """Show the build script's docstring; with --targets, run the script
+    and list all defined targets grouped by type."""
     setup_logging(args.verbose, args.debug)
 
     script_path = getattr(args, "build_script", None)
 
-    # Find build script
     if script_path:
         script = Path(script_path)
         if not script.exists():
@@ -705,7 +638,6 @@ def cmd_info(args: argparse.Namespace) -> int:
     if getattr(args, "targets", False):
         return _info_targets(args, script)
 
-    # Extract docstring using AST
     import ast
 
     try:
@@ -767,12 +699,10 @@ def _info_targets(args: argparse.Namespace, script: Path) -> int:
 
     project = projects[0]
 
-    # Aliases
     aliases = project.aliases
     if aliases:
         print("Aliases:")
         for name, alias_node in aliases.items():
-            # Collect the target names this alias refers to
             dep_names: list[str] = []
             for node in alias_node.targets:
                 if isinstance(node, FileNode):
@@ -785,9 +715,7 @@ def _info_targets(args: argparse.Namespace, script: Path) -> int:
             print(f"  {name:30s} -> {deps_str}")
         print()
 
-    # Group targets by type
     by_type: dict[str, list[tuple[str, str]]] = {}
-    # Order: programs, shared libs, static libs, then the rest
     type_order = [
         "program",
         "shared_library",
@@ -1010,11 +938,7 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def load_user_modules(args: argparse.Namespace) -> None:
-    """Load user modules from search paths.
-
-    Args:
-        args: Parsed command-line arguments.
-    """
+    """Load user modules from search paths."""
     from pcons import modules
 
     extra_paths: list[Path | str] | None = None
@@ -1028,15 +952,12 @@ def load_user_modules(args: argparse.Namespace) -> None:
 def _find_command_index(argv: list[str]) -> int | None:
     """Find the index of the subcommand token in argv, or None.
 
-    Skips options and their values so an option value that happens to
-    equal a command name (e.g. ``--build-dir test``) is not mistaken for
-    the subcommand. Shared by :func:`find_command_in_argv` and the
-    ``pcons test`` dispatch in :func:`main`, so both agree on *where*
-    the command lives, not just its name.
+    Skips options and their values so an option value that equals a
+    command name (e.g. ``--build-dir test``) is not mistaken for the
+    subcommand.
     """
     valid_commands = {"info", "init", "generate", "build", "clean", "test"}
-    # Options that take a value
-    # Note: -C/--directory is consumed before this runs
+    # Options that take a value (-C/--directory is consumed before this runs)
     options_with_value = {
         "-B",
         "--build-dir",
@@ -1076,10 +997,7 @@ def _find_command_index(argv: list[str]) -> int | None:
 
 
 def find_command_in_argv(argv: list[str]) -> str | None:
-    """Find a valid command in argv, skipping options and their values.
-
-    Returns the command name if found, None otherwise.
-    """
+    """Return the command name found in argv, or None."""
     idx = _find_command_index(argv)
     return argv[idx] if idx is not None else None
 
@@ -1123,11 +1041,8 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
 
 
 def create_default_parser() -> argparse.ArgumentParser:
-    """Create a parser for default mode (no subcommand).
-
-    This parser is used when no valid subcommand is found in argv.
-    It accepts KEY=value args and targets as positional arguments.
-    """
+    """Create the no-subcommand parser: accepts KEY=value args and targets
+    as positionals."""
     from pcons import __version__
 
     parser = argparse.ArgumentParser(
@@ -1161,10 +1076,7 @@ def create_default_parser() -> argparse.ArgumentParser:
 
 
 def create_full_parser() -> argparse.ArgumentParser:
-    """Create a parser with subcommands.
-
-    This parser is used when a valid subcommand is found in argv.
-    """
+    """Create the parser with subcommands, used when argv names one."""
     from pcons import __version__
 
     parser = argparse.ArgumentParser(
@@ -1301,11 +1213,8 @@ def create_full_parser() -> argparse.ArgumentParser:
 
 
 def _apply_directory_arg() -> None:
-    """Handle -C/--directory before any other argument parsing.
-
-    Scans sys.argv for -C DIR or --directory DIR (or --directory=DIR),
-    changes to that directory, and removes the consumed args from sys.argv.
-    """
+    """Handle -C DIR / --directory DIR (or --directory=DIR) before any
+    other parsing: chdir there and remove the consumed args from sys.argv."""
     i = 1
     while i < len(sys.argv):
         arg = sys.argv[i]
@@ -1337,9 +1246,6 @@ def main() -> int:
     """Main entry point for the pcons CLI."""
     _apply_directory_arg()
 
-    # Check if argv contains a valid command
-    # If not, use the default parser (no subcommands) to avoid
-    # positional arguments being mistaken for commands
     command = find_command_in_argv(sys.argv[1:])
 
     # `pcons test` is dispatched directly to the test runner, which has
@@ -1348,10 +1254,8 @@ def main() -> int:
     if command == "test":
         from pcons.test_runner import main as test_main
 
-        # Locate the subcommand positionally (same rules as
-        # find_command_in_argv) rather than scanning raw argv for the
-        # literal string "test", which could match an option's value
-        # (e.g. `pcons build --target test`).
+        # Locate the subcommand positionally, not by scanning for the
+        # literal "test", which could match an option's value.
         idx = _find_command_index(sys.argv[1:])
         assert idx is not None  # command == "test" guarantees a match
         return test_main(sys.argv[idx + 2 :])
@@ -1364,31 +1268,25 @@ def main() -> int:
         return 0
 
     if command is None:
-        # No command found - use default mode parser
         parser = create_default_parser()
         args = parser.parse_args()
         args.command = None
 
-        # Check if any extra args look like targets (don't contain =)
         extra = getattr(args, "extra", [])
         variables, remaining = parse_variables(extra)
 
-        # If we have remaining args and no pcons-build.py, they might be targets
+        # Non-KEY=value args with no pcons-build.py: treat as targets
         # for an existing build.ninja
         if remaining and not find_script("pcons-build.py"):
-            # Just run build with the targets
             args.targets = remaining
             return cmd_build(args)
 
-        # Default: generate and build
         return cmd_default(args)
 
-    # Command found - use full parser with subcommands
     parser = create_full_parser()
     args = parser.parse_args()
     args.extra = getattr(args, "extra", [])
 
-    # Run the specified command
     return args.func(args)
 
 

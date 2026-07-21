@@ -176,15 +176,11 @@ class Configure:
 
         # Key the cache by a PATH signature so a changed PATH (different
         # dev shell, added SDK bin dir) re-searches instead of returning a
-        # result found under a different environment. Stale-but-existing
-        # binaries were previously returned indefinitely.
+        # result found under a different environment.
         path_sig = cache_signature(os.environ.get("PATH", ""))
         cache_key = f"program:{name}:{path_sig}"
 
-        # Explicit hints are the caller's most specific instruction, so they
-        # take priority over both the cache and PATH. This lets a caller
-        # override a stale/cached result (e.g. a different compiler install)
-        # by passing hints=[...].
+        # Explicit hints take priority over both the cache and PATH.
         found_path: Path | None = None
         if hints:
             for hint in hints:
@@ -307,25 +303,12 @@ class Configure:
         """
         self._toolchains[toolchain.name] = toolchain
 
-    # Feature check methods that track results for config header generation
-    #
-    # Note: there is no Configure.check_header()/check_symbol()/check_compile()
-    # here. Compiling a test program requires a real compiler, which means an
-    # Environment and a specific tool (e.g. "cc"/"cxx") — state that Configure
-    # itself does not have. Use ToolChecks (pcons.configure.checks) to run the
-    # actual compile probes, then record the outcome with define()/undefine():
-    #
-    #     checks = ToolChecks(config, env, "cc")
-    #     if checks.check_header("stdint.h").success:
-    #         config.define("HAVE_STDINT_H")
-    #     else:
-    #         config.undefine("HAVE_STDINT_H")
+    # Compile probes (check_header etc.) need an Environment and a tool,
+    # which Configure doesn't have — they live in ToolChecks
+    # (pcons.configure.checks); record outcomes here via define()/undefine().
 
     def define(self, name: str, value: str | int | bool = 1) -> None:
-        """Define a preprocessor macro for the config header.
-
-        This adds a #define to the config header. Use this when you
-        know a feature is present without needing to check.
+        """Add a #define to the config header (no check needed).
 
         Args:
             name: Macro name (e.g., "HAVE_FEATURE_X").
@@ -342,13 +325,7 @@ class Configure:
             self._defines[name] = value
 
     def undefine(self, name: str) -> None:
-        """Mark a macro as undefined for the config header.
-
-        This adds a /* #undef NAME */ comment to the config header.
-
-        Args:
-            name: Macro name.
-        """
+        """Mark a macro as undefined (/* #undef NAME */) in the config header."""
         self._defines[name] = None
 
     def check_sizeof(
@@ -363,12 +340,9 @@ class Configure:
     ) -> int | None:
         """Check the size of a type with the configured compiler.
 
-        Defines SIZEOF_<TYPE> with the size in bytes. Delegates to
-        :meth:`ToolChecks.check_type_size`, which asks the *target*
-        compiler via a compile-time probe — no code is executed, so this
-        is correct under cross-compilation (a host-side ctypes fallback
-        used to answer with host sizes; see docs/presets.md on host
-        independence).
+        Defines SIZEOF_<TYPE> with the size in bytes. Uses a compile-time
+        probe against the *target* compiler — no code is executed, so it
+        is correct under cross-compilation.
 
         Args:
             type_name: C type name (e.g., "int", "void*", "long long").
@@ -391,7 +365,6 @@ class Configure:
         if size is None:
             size = default
 
-        # Generate define name
         if define_name is None:
             safe_name = type_name.upper().replace(" ", "_").replace("*", "P")
             define_name = f"SIZEOF_{safe_name}"
@@ -425,29 +398,9 @@ class Configure:
             config.check_sizeof("int")
             config.define("VERSION", "1.0.0")
             config.write_config_header("config.h")
-
-        Generated header:
-            #ifndef CONFIG_H
-            #define CONFIG_H
-
-            /* Platform detection */
-            #define PCONS_OS_DARWIN 1
-            #define PCONS_ARCH_ARM64 1
-
-            /* Header checks */
-            #define HAVE_STDINT_H 1
-
-            /* Type sizes */
-            #define SIZEOF_INT 4
-
-            /* Custom definitions */
-            #define VERSION "1.0.0"
-
-            #endif /* CONFIG_H */
         """
         path = Path(path)
 
-        # Generate include guard
         if guard is None:
             guard = path.name.upper().replace(".", "_").replace("-", "_")
 
@@ -469,10 +422,8 @@ class Configure:
                 lines.append("#define PCONS_64BIT 1")
             lines.append("")
 
-        # Collect defines by category
+        # Group defines by category
         defines = self._defines
-
-        # Separate into categories
         have_defs = {k: v for k, v in defines.items() if k.startswith("HAVE_")}
         sizeof_defs = {k: v for k, v in defines.items() if k.startswith("SIZEOF_")}
         other_defs = {
@@ -481,7 +432,6 @@ class Configure:
             if not k.startswith("HAVE_") and not k.startswith("SIZEOF_")
         }
 
-        # Write header checks
         if have_defs:
             lines.append("/* Feature and header checks */")
             for name in sorted(have_defs.keys()):
@@ -492,7 +442,6 @@ class Configure:
                     lines.append(f"#define {name} {value}")
             lines.append("")
 
-        # Write sizeof checks
         if sizeof_defs:
             lines.append("/* Type sizes */")
             for name in sorted(sizeof_defs.keys()):
@@ -501,7 +450,6 @@ class Configure:
                     lines.append(f"#define {name} {value}")
             lines.append("")
 
-        # Write other definitions
         if other_defs:
             lines.append("/* Custom definitions */")
             for name in sorted(other_defs.keys()):
@@ -509,7 +457,6 @@ class Configure:
                 if value is None:
                     lines.append(f"/* #undef {name} */")
                 elif isinstance(value, str):
-                    # Quote string values
                     lines.append(f'#define {name} "{value}"')
                 else:
                     lines.append(f"#define {name} {value}")
@@ -518,9 +465,8 @@ class Configure:
         lines.append(f"#endif /* {guard} */")
         lines.append("")
 
-        # Write-if-changed: avoid bumping the file's mtime (and triggering a
-        # full rebuild of everything that includes it) when the content is
-        # unchanged from the previous run.
+        # Write-if-changed: don't bump the mtime (and rebuild everything
+        # that includes it) when content is unchanged.
         content = "\n".join(lines)
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists() and path.read_text() == content:

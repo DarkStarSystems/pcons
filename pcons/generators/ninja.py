@@ -35,20 +35,8 @@ if TYPE_CHECKING:
 class NinjaGenerator(BaseGenerator):
     """Generator that produces Ninja build files.
 
-    Generates a complete build.ninja file including:
-    - Variable definitions
-    - Rule definitions (one per unique command pattern)
-    - Build statements with dependencies
-    - Phony rules for aliases
-    - Default targets
-
-    Example:
-        project = Project("myapp", build_dir="build")
-        # ... configure project ...
-
-        generator = NinjaGenerator()
-        generator.generate(project)
-        # Creates build/build.ninja
+    Writes a complete build.ninja: variables, deduplicated rules, build
+    statements, phony aliases, and default targets.
     """
 
     _supports_compile_commands = True
@@ -68,12 +56,7 @@ class NinjaGenerator(BaseGenerator):
         self._build_dir_parts: tuple[str, ...] = ()  # Parts of relative build_dir
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
-        """Generate build.ninja file.
-
-        Args:
-            project: Configured project to generate for.
-            output_dir: Directory to write build.ninja to.
-        """
+        """Generate build.ninja in output_dir."""
         trace("generate", "Generating ninja files to: %s", output_dir)
         trace_value("generate", "targets", len(project.targets))
 
@@ -85,11 +68,8 @@ class NinjaGenerator(BaseGenerator):
         self._rule_counter = 0
         self._output_dir = output_dir.resolve()
         self._project_root = project.root_dir.resolve()
-        # Store path_resolver from project if available
         self._path_resolver = getattr(project, "_path_resolver", None)
-        # Store build_dir parts for stripping prefix from relative paths
         self._build_dir_parts = Path(project.build_dir).parts
-        # Compute relative path from output_dir to project root
         try:
             self._topdir = str(
                 Path(os.path.relpath(self._project_root, self._output_dir))
@@ -119,21 +99,14 @@ class NinjaGenerator(BaseGenerator):
         f.write("# Global variables\n")
         # builddir is "." since the ninja file is in the build directory
         f.write("builddir = .\n")
-        # topdir is the relative path from build dir to project root
-        # Used for source files, include paths, etc.
+        # topdir: relative path from build dir to project root
         f.write(f"topdir = {self._escape_path(self._topdir)}\n")
         f.write("\n")
 
     def _write_rules(self, f: TextIO, project: Project) -> None:
-        """Write rule definitions.
-
-        Rules are deduplicated - identical commands share a rule.
-        """
+        """Write rule definitions (identical commands share a rule)."""
         f.write("# Rules\n")
-        # Note: Ninja automatically creates output directories before running
-        # commands, so we don't need explicit mkdir rules.
 
-        # Collect all unique rules from targets
         for target in project.targets:
             env = target._env
             for node in self._get_target_build_nodes(target):
@@ -168,18 +141,8 @@ class NinjaGenerator(BaseGenerator):
     ) -> tuple[str, str]:
         """Resolve the rule key and expanded command for a build node.
 
-        This is the single source of truth for computing a rule key from a
-        node's build info.  Both _ensure_rule() and _write_build_statement()
-        use this to guarantee consistent rule naming.
-
-        Args:
-            node: The file node being built.
-            build_info: The node's build info dict.
-            target: The owning target (may be None).
-            env: The environment (may be None).
-
-        Returns:
-            (rule_key, command) tuple.
+        Single source of truth for rule naming: both _ensure_rule() and
+        _write_build_statement() use it.
         """
         from pcons.core.subst import to_shell_command
 
@@ -251,12 +214,8 @@ class NinjaGenerator(BaseGenerator):
     ) -> str:
         """Ensure a rule exists for this node's builder, return rule name.
 
-        Commands are now fully expanded by the resolver. The generator uses
-        the pre-expanded command from _build_info["command"] and deduplicates
-        rules based on command hash.
-
-        For nodes without a pre-expanded command (e.g., tests that manually
-        create build_info), falls back to the old expansion logic.
+        Uses the resolver's pre-expanded command from _build_info["command"];
+        nodes without one fall back to _expand_command_fallback().
         """
         build_info = getattr(node, "_build_info", None)
         if build_info is None:
@@ -319,13 +278,11 @@ class NinjaGenerator(BaseGenerator):
         node: FileNode,
         target: Target | None,
     ) -> str:
-        """Get post-build command suffix if this node needs it.
+        """Return ' && cmd1 && cmd2' if this is an output node with
+        post-build commands, else "".
 
-        Returns ' && cmd1 && cmd2' if the node is an output node with post-build
-        commands, otherwise returns empty string.
-
-        Post-build commands are baked directly into the rule command, so targets
-        with different post-build commands get different rules (via command hash).
+        Post-build commands are baked into the rule command, so targets with
+        different post-build commands get different rules (via command hash).
         """
         if target is None:
             return ""
@@ -354,22 +311,8 @@ class NinjaGenerator(BaseGenerator):
         build_info: dict[str, Any],
         env: Environment | None,
     ) -> str:
-        """Fallback command expansion when build_info["command"] is not set.
-
-        This fallback exists for two cases:
-        1. Unit tests that manually create _build_info without using the resolver
-        2. Direct node creation without going through project.resolve()
-
-        In normal use, the resolver sets build_info["command"] with the
-        pre-expanded command, so this fallback is not triggered.
-
-        Args:
-            _node: The file node being built (unused, kept for API consistency).
-            build_info: The node's build info.
-            env: The environment (may be None for standalone tools).
-
-        Returns:
-            Expanded command string, or a placeholder if no env/tool available.
+        """Fallback command expansion when build_info["command"] is not set
+        (manually-created _build_info or nodes that bypassed project.resolve()).
         """
         tool_name = build_info.get("tool", "unknown")
         command_var = build_info.get("command_var", "cmdline")
@@ -420,9 +363,6 @@ class NinjaGenerator(BaseGenerator):
 
         written_nodes: set[Path] = set()
 
-        # Note: No explicit mkdir statements needed - Ninja automatically
-        # creates output directories before running commands.
-
         for target in project.targets:
             self._write_target_builds(f, target, project, written_nodes)
 
@@ -457,8 +397,8 @@ class NinjaGenerator(BaseGenerator):
     ) -> None:
         """Write a single build statement.
 
-        Handles both single-output and multi-output builds. Multi-output builds
-        use Ninja's implicit output syntax: build out1 out2 | implicit_out: rule deps
+        Multi-output builds use Ninja's implicit output syntax:
+        build out1 out2 | implicit_out: rule deps
         """
         build_info = getattr(node, "_build_info", None)
         if build_info is None:
@@ -470,9 +410,6 @@ class NinjaGenerator(BaseGenerator):
 
         sources = cast(list[Node], build_info.get("sources", []))
 
-        # Get the environment for this build (needed for per-env rule naming)
-        # For target-centric builds, use target._env
-        # For direct builder calls, find the env that created the node
         env: Environment | None = None
         if target:
             env = target._env
@@ -509,32 +446,26 @@ class NinjaGenerator(BaseGenerator):
             output = self._output_ref(node)
 
         # Explicit dependencies (sources + library dependencies)
-        # For source files, we need to reference them from the build directory
         def get_dep_path(s: FileNode) -> str:
-            # Install outputs live outside the build dir — render relocatably.
             if getattr(s, "role", None) == "install_output":
                 return self._install_output_ref(s)
 
-            # Check if this is a build output (has _build_info from resolver)
+            # Build outputs are relative to the build dir
             if getattr(s, "_build_info", None) is not None or s.is_target:
-                # Build output - make relative to build dir
                 return self._escape_output_path(s.path)
 
-            # Files inside the build dir are build artifacts even when
-            # they have no _build_info — e.g., dyndep files that
-            # toolchains write directly during after_resolve. They must
-            # match the build-relative path used elsewhere (e.g., in the
-            # dyndep = directive), so strip the build prefix here too.
+            # Files inside the build dir are build artifacts even without
+            # _build_info (e.g., dyndep files written during after_resolve);
+            # they must match the build-relative path used elsewhere.
             if self._is_under_build_dir(s.path):
                 return self._escape_output_path(s.path)
 
-            # Source file - try to make relative with $topdir
+            # Source file: reference via $topdir when under the project root
             rel = self._make_source_relative(s.path)
             if rel is not None:
-                # $topdir is a ninja variable - escape the path part
                 return "$topdir/" + self._escape_path(rel)
 
-            # Fall back: escape the path as-is (external files)
+            # External file: escape as-is
             return self._escape_path(s.path)
 
         # Start with sources from build_info
@@ -551,9 +482,7 @@ class NinjaGenerator(BaseGenerator):
 
         explicit_deps = " ".join(explicit_deps_list)
 
-        # Implicit dependencies (from node.implicit_deps).
-        # Source files (those not produced by any rule) need $topdir/
-        # since ninja runs from the build dir; build outputs do not.
+        # Implicit dependencies (from node.implicit_deps)
         implicit_deps = ""
         if node.implicit_deps:
             implicit = " ".join(
@@ -568,13 +497,11 @@ class NinjaGenerator(BaseGenerator):
             f"build {output}: {rule_name} {explicit_deps}{implicit_deps}{order_only}\n"
         )
 
-        # Write dyndep attribute for Fortran module dependencies
+        # Dyndep attribute for module dependencies
         dyndep = build_info.get("dyndep")
         if dyndep:
             f.write(f"  dyndep = {self._escape_path(str(dyndep))}\n")
 
-        # Write per-build variables
-        # These override the rule's command with actual values
         self._write_build_variables(f, node, target, build_info, project)
 
     def _write_build_variables(
@@ -585,66 +512,49 @@ class NinjaGenerator(BaseGenerator):
         build_info: dict[str, object],
         project: Project | None = None,
     ) -> None:
-        """Write variables for a build statement.
+        """Write per-build variables for a build statement.
 
-        Note: We don't write $in or $out - ninja sets these automatically
-        from the build statement's inputs and outputs.
-
-        For multi-output builds, writes out_<name> variables for each output.
-        For generic commands, writes source_N and target_N for indexed access.
+        $in/$out are never written — ninja sets them from the build
+        statement. Multi-output builds get out_<name> variables; generic
+        commands get source_N/target_N for indexed access.
         """
         sources = cast(list[Node], build_info.get("sources", []))
 
-        # Helper to format source paths
         def get_source_path(s: FileNode) -> str:
-            # Check if this is a build output (has _build_info from resolver)
             if getattr(s, "_build_info", None) is not None or s.is_target:
-                # Build output - make relative to build dir
                 return self._make_output_relative(s.path)
 
-            # Source file - try to make relative with $topdir
             rel = self._make_source_relative(s.path)
             if rel is not None:
-                # $topdir is a ninja variable, expanded when used in command
                 return f"$topdir/{rel}"
 
-            # Fall back to original path (external files)
             return str(s.path)
 
         source_file_nodes = [s for s in sources if isinstance(s, FileNode)]
 
-        # For generic commands with indexed access, write source_N and target_N
-        # variables for each source and target
         all_targets = build_info.get("all_targets")
         if all_targets:
-            # Write indexed source variables
             for i, src in enumerate(source_file_nodes):
                 f.write(f"  source_{i} = {get_source_path(src)}\n")
-            # Write indexed target variables
             target_nodes = cast(list[FileNode], all_targets)
             for i, tgt in enumerate(target_nodes):
                 f.write(f"  target_{i} = {self._make_output_relative(tgt.path)}\n")
 
-        # For multi-output builds, write out_<name> for each output
-        # Also write target_N for indexed access (used by TargetPath(index=N) in commands)
         outputs_info = build_info.get("outputs")
         if outputs_info and isinstance(outputs_info, dict):
             for i, (name, info) in enumerate(outputs_info.items()):
-                # Write out_<name> variable for each output
                 if isinstance(info, dict):
                     info_dict = cast(dict[str, Any], info)
                     out_path = self._make_output_relative(info_dict["path"])
                     f.write(f"  out_{name} = {out_path}\n")
-                    # Also write target_N for indexed access
+                    # target_N supports TargetPath(index=N) in commands
                     f.write(f"  target_{i} = {out_path}\n")
 
-        # Write custom per-build variables from build_info (legacy support)
-        # Note: New code should use context objects instead
+        # Custom per-build variables from build_info (legacy support)
         custom_vars = build_info.get("variables")
         if custom_vars and isinstance(custom_vars, dict):
             for var_name, var_value in custom_vars.items():
                 if var_value:  # Only write non-empty values
-                    # Escape for Ninja variable substitution
                     escaped_value = self._escape_for_ninja_variable(str(var_value))
                     f.write(f"  {var_name} = {escaped_value}\n")
 
@@ -663,23 +573,11 @@ class NinjaGenerator(BaseGenerator):
         f.write("\n")
 
     def _write_tests(self, f: TextIO, project: Project) -> None:
-        """Write phony targets and a runner rule for declared tests.
+        """Write ``test-build`` (compile tests) and ``test`` (run them) phonies.
 
-        Emits nothing if the project declared no tests. Otherwise:
-
-        - ``test-build`` is a phony that depends on every test program's
-          output node, so ``ninja test-build`` compiles tests without
-          running them.
-        - ``test`` runs the test runner (``pcons test``) against the
-          manifest written next to ``build.ninja``. The rule uses
-          ``pool = console`` so output streams live to the terminal,
-          and ``test`` depends on ``test-build`` so things compile first.
-
-        The runner invocation deliberately uses ``python -m
-        pcons.test_runner`` rather than the ``pcons`` script: the latter
-        may not be on PATH for users running ``uvx pcons``, and the
-        Python module form works as long as the ``pcons`` package is
-        importable in the active environment.
+        Emits nothing if the project declared no tests. The runner is invoked
+        as ``python -m pcons.test_runner`` because the ``pcons`` script may
+        not be on PATH (e.g. ``uvx pcons``).
         """
         test_targets = [t for t in project.targets if t.target_type == "test"]
         if not test_targets:
@@ -702,16 +600,11 @@ class NinjaGenerator(BaseGenerator):
         else:
             f.write("build test-build: phony\n")
 
-        # Runner rule. `pool = console` keeps stdout/stderr unbuffered
-        # and serial relative to other build steps, which is what you
-        # want when invoking a test runner. We embed the Python used to
-        # run pcons itself so the runner is guaranteed to find the
-        # `pcons` package, even when the user's `python` on PATH is a
-        # different interpreter.
-        # Quote for the shell (not just ninja's $-escaping) so an
-        # interpreter path containing spaces survives as a single argument:
-        # _escape_path's "$ " for spaces is unescaped by ninja to a bare
-        # space, which the shell then splits on.
+        # `pool = console` keeps runner output unbuffered and serial. Embed
+        # the Python running pcons itself so the runner can import `pcons`.
+        # Shell-quote (not just ninja $-escaping) so an interpreter path with
+        # spaces survives: ninja unescapes "$ " to a bare space, which the
+        # shell would split on.
         from pcons.core.subst import to_shell_command
 
         python_exe = to_shell_command(
@@ -782,17 +675,11 @@ class NinjaGenerator(BaseGenerator):
         return self.ESCAPE_CHARS.sub(r"$\1", path_str)
 
     def _make_output_relative(self, path: Path | str) -> str:
-        """Make an output path relative to the ninja file location.
-
-        The ninja file is written to (and ninja runs from) the build
-        directory; the shared contract lives in
-        pcons.core.paths.execution_relative, with the project's
-        PathResolver as the one source of the contract's arguments.
-        """
+        """Make an output path relative to the build dir, where ninja runs
+        (contract: pcons.core.paths.execution_relative)."""
         if self._path_resolver is not None:
             return self._path_resolver.make_execution_relative(path)
-        # Resolver-less project (tests with bare stubs): same contract,
-        # arguments derived from generator state.
+        # Resolver-less project (tests with bare stubs)
         from pcons.core.paths import execution_relative
 
         return execution_relative(
@@ -828,24 +715,17 @@ class NinjaGenerator(BaseGenerator):
         return self._escape_output_path(node.path)
 
     def _make_source_relative(self, path: Path | str) -> str | None:
-        """Try to make a source path relative to project root.
+        """Make a source path relative to the project root, or None if it
+        can't be (outside project, or different drive on Windows).
 
-        Returns a path like "src/file.c" (relative to project root) if the path
-        is within the project root, or None if it cannot be made relative
-        (e.g., path is outside project or on different drive on Windows).
-
-        The caller is responsible for prepending $topdir if needed.
-
-        Uses PathResolver if available for consistent path handling.
+        The caller prepends $topdir if needed.
         """
-        # Use PathResolver if available
         if self._path_resolver is not None:
             path_obj = Path(path)
-            # Make absolute if relative, so we can check if it's under project root
             if not path_obj.is_absolute() and self._project_root is not None:
                 path_obj = self._project_root / path_obj
             result = self._path_resolver.make_project_relative(path_obj.resolve())
-            # Check if result is absolute (meaning it couldn't be made relative)
+            # An absolute result means it couldn't be made relative
             if Path(result).is_absolute():
                 return None
             return result
@@ -855,36 +735,22 @@ class NinjaGenerator(BaseGenerator):
             return None
 
         path_obj = Path(path)
-
-        # Make absolute if relative
         if not path_obj.is_absolute():
             path_obj = self._project_root / path_obj
-
         path_obj = path_obj.resolve()
 
-        # Try to make path relative to project root
         try:
             rel_to_root = path_obj.relative_to(self._project_root)
-            # Use forward slashes for cross-platform compatibility
             return str(rel_to_root).replace("\\", "/")
         except ValueError:
-            # Path is not under project root
             return None
 
     def _is_build_dir_path(self, path: str) -> bool:
-        """Check if a path refers to the build directory.
-
-        Args:
-            path: Path string (can be relative or absolute).
-
-        Returns:
-            True if the path resolves to the build directory.
-        """
+        """Check if a path resolves to the build directory itself."""
         if self._output_dir is None:
             return False
         path_obj = Path(path)
         if not path_obj.is_absolute():
-            # Make relative path absolute from project root
             if self._project_root:
                 path_obj = self._project_root / path_obj
         try:
@@ -893,12 +759,7 @@ class NinjaGenerator(BaseGenerator):
             return False
 
     def _is_under_build_dir(self, path: Path | str) -> bool:
-        """Check if a path is inside the build directory.
-
-        Unlike _is_build_dir_path (which checks equality), this returns
-        True for any path below the build dir — including the dir itself.
-        Used to identify build artifacts that lack _build_info.
-        """
+        """Check if a path is inside (or is) the build directory."""
         if self._output_dir is None:
             return False
         path_obj = Path(path)
@@ -914,25 +775,17 @@ class NinjaGenerator(BaseGenerator):
         return False
 
     def _relativize_flag_with_path(self, token: str) -> str:
-        """Relativize a compiler flag that contains a path.
+        """Relativize a path-carrying compiler flag (-I, -L, -isystem, /I,
+        /LIBPATH:) to $topdir form, or "." when the path is the build dir.
 
-        Handles flags like:
-        - -I/path/to/include -> -I$topdir/relative/path
-        - /I/path/to/include -> /I$topdir/relative/path (MSVC)
-        - -L/path/to/lib -> -L$topdir/relative/path
-        - /LIBPATH:/path -> /LIBPATH:$topdir/relative/path (MSVC)
-
-        Special case: if path equals the build directory, returns prefix + "."
-        since ninja runs from the build directory.
-
-        Returns the token unchanged if it's not a path flag or can't be relativized.
+        Returns the token unchanged if it's not a path flag or can't be
+        relativized.
         """
-        # Common Unix-style flags with path
+        # Unix-style flags
         for prefix in ("-I", "-L", "-isystem"):
             if token.startswith(prefix):
                 path = token[len(prefix) :]
-                if path:  # Has a path after the prefix
-                    # Special case: path equals build directory -> use "."
+                if path:
                     if self._is_build_dir_path(path):
                         return f"{prefix}."
                     rel = self._make_source_relative(path)
@@ -944,7 +797,6 @@ class NinjaGenerator(BaseGenerator):
         if token.startswith("/I"):
             path = token[2:]
             if path:
-                # Special case: path equals build directory -> use "."
                 if self._is_build_dir_path(path):
                     return "/I."
                 rel = self._make_source_relative(path)
@@ -956,7 +808,6 @@ class NinjaGenerator(BaseGenerator):
             prefix = token[:9]  # Preserve original case
             path = token[9:]
             if path:
-                # Special case: path equals build directory -> use "."
                 if self._is_build_dir_path(path):
                     return f"{prefix}."
                 rel = self._make_source_relative(path)
@@ -969,25 +820,16 @@ class NinjaGenerator(BaseGenerator):
     def _relativize_command_tokens(
         self, tokens: list[str] | list[CommandToken]
     ) -> list[str]:
-        """Relativize path tokens in command for ninja execution.
+        """Relativize command tokens for ninja execution.
 
-        Processes PathToken objects using their relativize() method with
-        ninja-appropriate path transformation. Converts SourcePath/TargetPath
-        markers to Ninja's $in/$out variables. For regular strings, falls
-        back to pattern-based detection of path flags.
-
-        Args:
-            tokens: List of command tokens (str, PathToken, SourcePath, TargetPath).
-
-        Returns:
-            List of string tokens with paths relativized for ninja.
+        SourcePath/TargetPath markers become $in/$out (or $source_N/$target_N
+        in indexed mode), PathTokens are relativized, and plain strings fall
+        back to pattern-based path-flag detection.
         """
         from pcons.core.subst import PathToken, SourcePath, TargetPath
 
-        # Pre-compute whether tokens contain indexed SourcePath/TargetPath markers,
-        # which determines whether index-0 tokens use $in/$out or $source_0/$target_0.
-        # index=None means "auto" ($in/$out); index with an explicit int (even 0)
-        # triggers indexed mode ($source_N/$target_N) for all markers of that type.
+        # An explicit index on any marker (even 0) switches all markers of
+        # that type to indexed mode; index=None means "auto" ($in/$out).
         has_indexed_source = any(
             isinstance(t, SourcePath) and t.index is not None for t in tokens
         )
@@ -998,77 +840,50 @@ class NinjaGenerator(BaseGenerator):
         result: list[str] = []
         for token in tokens:
             if isinstance(token, SourcePath):
-                # Convert SourcePath marker to Ninja's $in or $source_N variable
                 if token.index is not None or has_indexed_source:
                     ninja_var = f"$source_{token.index or 0}"
                 else:
                     ninja_var = "$in"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
             elif isinstance(token, TargetPath):
-                # Convert TargetPath marker to Ninja's $out or $target_N variable
                 if token.index is not None or has_indexed_target:
                     ninja_var = f"$target_{token.index or 0}"
                 else:
                     ninja_var = "$out"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
             elif isinstance(token, PathToken):
-                # Use PathToken's relativize() with ninja path transformer
                 result.append(token.relativize(self._relativize_path_for_ninja))
             else:
-                # Fall back to pattern-based detection for plain strings
                 s = str(token)
-                # Replace $SRCDIR with $topdir for ninja (both are build-dir-relative
-                # references to the project source tree root)
+                # $SRCDIR and $topdir both mean the project source root
                 s = s.replace("$SRCDIR", "$topdir")
                 result.append(self._relativize_flag_with_path(s))
         return result
 
     def _relativize_path_for_ninja(self, path: str) -> str:
-        """Transform a path for ninja execution context.
-
-        Since ninja runs from the build directory, paths relative to project
-        root need to be prefixed with $topdir. Paths that equal the build
-        directory become ".".
-
-        Args:
-            path: Path string (project-root-relative or absolute).
-
-        Returns:
-            Transformed path suitable for ninja command.
-        """
-        # Special case: path equals build directory -> use "."
+        """Transform a path for ninja execution: $topdir/... for project
+        paths, "." for the build dir, unchanged for external paths."""
         if self._is_build_dir_path(path):
             return "."
 
-        # Try to make relative to project root with $topdir
         rel = self._make_source_relative(path)
         if rel is not None:
             return f"$topdir/{rel}"
 
-        # Fall back to original path (external/absolute paths)
         return path
 
     def _escape_for_ninja_variable(self, token: str) -> str:
         """Escape a token for use in a Ninja variable value.
 
-        Used for variable values that get substituted into commands.
-        Uses Ninja escaping ($ prefix) rather than shell quoting,
-        which works consistently across all platforms.
-
-        Ninja escaping: space -> $  (dollar-space), colon -> $:, dollar -> $$
-        Also normalizes backslashes to forward slashes for cross-platform paths.
-
-        Preserves Ninja variable references like $topdir, $in, $out.
+        Ninja escaping (space -> $ , colon -> $:, dollar -> $$) works
+        consistently across platforms, unlike shell quoting. Preserves
+        $topdir references and normalizes backslashes to forward slashes.
         """
-        # Normalize backslashes to forward slashes
         token = token.replace("\\", "/")
 
-        # Escape special characters for Ninja, but preserve $topdir and other
-        # Ninja variables. We do this by temporarily replacing known patterns.
-        # $topdir is the main one we use for relative paths.
+        # Shield $topdir from the $$ escaping below
         token = token.replace("$topdir", "\x00TOPDIR\x00")
 
-        # Escape remaining $ to $$
         token = token.replace("$", "$$")
         token = token.replace(" ", "$ ")
         token = token.replace(":", "$:")
@@ -1080,22 +895,11 @@ class NinjaGenerator(BaseGenerator):
     def _get_standalone_tool_command(
         self, tool_name: str, command_var: str
     ) -> str | None:
-        """Get command template from a standalone tool.
-
-        Used when no environment is available (e.g., Install targets without
-        an associated env). Instantiates the standalone tool to get its
-        default command template.
-
-        Args:
-            tool_name: Tool name (e.g., "install", "archive").
-            command_var: Command variable name (e.g., "copycmd", "tarcmd").
-
-        Returns:
-            Command template string, or None if not available.
+        """Get a command template from a standalone tool (install/archive),
+        for nodes with no associated environment. Returns None if unavailable.
         """
         from pcons.core.subst import to_shell_command
 
-        # Import standalone tools here to avoid circular imports
         if tool_name == "install":
             from pcons.tools.install import InstallTool
 
@@ -1112,12 +916,9 @@ class NinjaGenerator(BaseGenerator):
         if cmd_template is None:
             return None
 
-        # Convert list templates to shell command string
-        # List templates may contain SourcePath/TargetPath markers that need
-        # to be converted to Ninja's $in/$out variables
+        # List templates may contain SourcePath/TargetPath markers that
+        # become Ninja's $in/$out variables
         if isinstance(cmd_template, list):
-            # Relativize path tokens and convert markers to Ninja variables
-            # Cast to list[CommandToken] - type checker doesn't narrow from isinstance
             from pcons.core.subst import CommandToken
 
             relativized = self._relativize_command_tokens(

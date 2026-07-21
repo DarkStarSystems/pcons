@@ -14,13 +14,6 @@ Run as:
         --scanner clang-scan-deps \\
         --scanner-style clang
 
-    python -m pcons.toolchains.cxx_module_scanner \\
-        --manifest cxx.manifest.json \\
-        --out cxx_modules.dyndep \\
-        --mod-dir cxx_modules \\
-        --scanner cl.exe \\
-        --scanner-style msvc
-
 The manifest JSON format (clang):
     [
       {
@@ -66,10 +59,8 @@ from typing import Any
 class CxxModuleScannerNotFound(RuntimeError):
     """Raised when the C++ module scanner executable is not on PATH.
 
-    Carries an actionable message telling the user how to make the scanner
-    available (e.g., run vcvars64.bat for cl.exe, install LLVM for
-    clang-scan-deps). Toolchain after_resolve() should let this propagate
-    so configure fails loudly instead of producing empty/silent scans.
+    Let this propagate so configure fails loudly instead of producing
+    empty/silent scans.
     """
 
 
@@ -297,12 +288,10 @@ def run_scan_deps_gcc(
 # =============================================================================
 # Configure-time API: TU scan specs, results, and dyndep generation.
 #
-# Used by toolchains' after_resolve() to invoke the scanner inline (instead
-# of at build time via Ninja). Configure-time scanning lets the scanner
-# output drive flag injection (e.g., /internalPartition for partition
-# implementation units), since Ninja dyndep can only modify deps/outputs,
-# not flags. Build-time entry-points (write_dyndep, main) remain for
-# debugging and any external callers.
+# Toolchains' after_resolve() invokes the scanner inline so its output can
+# drive flag injection (e.g. /internalPartition) — Ninja dyndep can only
+# modify deps/outputs, not flags. Build-time entry points (write_dyndep,
+# main) remain for debugging and external callers.
 # =============================================================================
 
 
@@ -421,11 +410,10 @@ def select_modules_scope(
     A C++ environment opts in to module scanning either:
       - Implicitly: the env has at least one source whose suffix is in
         CXX_MODULE_INTERFACE_SUFFIXES (so the resolver tagged it as
-        `cxx_module`). This preserves the historical "drop a `.cppm`
-        in the target and pcons figures it out" behavior.
-      - Explicitly: `env.cxx.modules = True`. Use this when your module
-        units live in `.cpp`/`.cc` files (e.g., fmt's primary interface
-        in `.cc`, or a target whose only module use is `import std;`).
+        `cxx_module`).
+      - Explicitly: `env.cxx.modules = True`, for module units in
+        `.cpp`/`.cc` files (e.g. fmt's primary interface in `.cc`, or a
+        target whose only module use is `import std;`).
 
     Returns:
         (cxx_module_pairs, cxx_pairs) restricted to qualifying envs. If
@@ -471,36 +459,10 @@ def select_modules_scope(
     )
 
 
-# TODO(scan-cache): Cache TuScanResults across configure runs.
-#
-# Configure-time scanning currently re-invokes clang-scan-deps / cl.exe on
-# every TU every run. For large module-heavy projects (jt-computing,
-# mp-units) this dominates configure latency even when nothing has changed.
-#
-# Design sketch (n2-style content-addressed cache):
-#   key   = sha256 of (source content + transitive #includes the scanner
-#           reads, scanner version string, compiler version string,
-#           normalized compile_flags, scanner_style)
-#   value = parsed P1689R5 dict (small JSON)
-#   store = .pcons-cache/scan/<first 2 hex chars>/<rest>.json under build_dir
-#
-# Invalidation comes for free from the key — no mtime-only shortcuts; an
-# `--include` path change or a compiler upgrade must miss the cache. mtime
-# can short-circuit the hash computation when (path, mtime, size) match a
-# prior entry, the same trick n2 uses for its build-step cache.
-#
-# Open questions before implementing:
-#   - Where does "transitive #includes the scanner reads" come from? P1689
-#     output lists requires (modules) but not headers; need either a -MD-
-#     style depfile pass, or accept that header changes won't invalidate
-#     (acceptable for module-only deps but not for `import std;` header
-#     units once those land).
-#   - Scope: per-build-dir cache (simple), or shared across build dirs
-#     (faster for monorepos, harder to garbage-collect).
-#   - Eviction: bound on entries? LRU? Probably fine to never evict and
-#     let users `rm -rf .pcons-cache` if it grows.
-#
-# Until this lands, scans are O(TUs) per configure. That's the cost.
+# TODO(scan-cache): cache TuScanResults across configure runs
+# (content-addressed by source content, scanner/compiler versions, and
+# normalized flags). Scans are currently O(TUs) per configure, which
+# dominates configure latency on large module-heavy projects.
 def scan_translation_units(
     specs: list[TuScanSpec],
     scanner: str,

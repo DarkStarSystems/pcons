@@ -546,19 +546,16 @@ class MsvcResourceCompiler(BaseTool):
         if not platform.is_windows:
             return None
 
-        # Try to find rc.exe in PATH first
         rc = config.find_program("rc.exe", version_flag="")
         if rc is None:
-            # Look in Windows SDK
+            # Fall back to the Windows SDK install, newest version first
             program_files_x86 = os.environ.get(
                 "ProgramFiles(x86)", r"C:\Program Files (x86)"
             )
             sdk_path = Path(program_files_x86) / "Windows Kits" / "10" / "bin"
             if sdk_path.exists():
-                # Find the latest SDK version
                 for version_dir in _sorted_version_dirs(sdk_path):
                     if version_dir.name.startswith("10."):
-                        # Check architecture-specific paths
                         for arch in ["x64", "arm64", "x86"]:
                             rc_path = version_dir / arch / "rc.exe"
                             if rc_path.exists():
@@ -578,15 +575,7 @@ class MsvcResourceCompiler(BaseTool):
 
 
 class MsvcAssembler(BaseTool):
-    """MSVC macro assembler tool (ml64.exe for x64, ml.exe for x86).
-
-    Variables:
-        cmd: Assembler command (default: 'ml64.exe')
-        flags: Assembler flags (list)
-        iprefix: Include directory prefix (default: '/I')
-        includes: Include directories (list of paths, no prefix)
-        asmcmd: Command template for assembling to object
-    """
+    """MSVC macro assembler tool (ml64.exe for x64, ml.exe for x86)."""
 
     def __init__(self) -> None:
         super().__init__("ml")
@@ -630,13 +619,13 @@ class MsvcAssembler(BaseTool):
         if not platform.is_windows:
             return None
 
-        # Try to find ml64.exe (x64) first, then ml.exe (x86)
+        # ml64.exe (x64) first, then ml.exe (x86)
         ml = config.find_program("ml64.exe", version_flag="")
         if ml is None:
             ml = config.find_program("ml.exe", version_flag="")
         if ml is None:
-            # Try to find in Visual Studio installation (host-aware, like
-            # _find_msvc_bin_dir: ARM64 hosts get HostARM64/arm64, not x64).
+            # Fall back to the VS install (host-aware: ARM64 hosts get
+            # HostARM64/arm64, not x64)
             bin_dir = _find_msvc_bin_dir()
             if bin_dir is not None:
                 ml_path = bin_dir / "ml64.exe"
@@ -727,10 +716,7 @@ class MsvcLinker(BaseTool):
 
 
 class MsvcToolchain(MsvcCompatibleToolchain):
-    """Microsoft Visual C++ toolchain (Windows only).
-
-    Inherits common MSVC-compatible functionality from MsvcCompatibleToolchain.
-    """
+    """Microsoft Visual C++ toolchain (Windows only)."""
 
     TOOL_NAMES = ("cc", "cxx", "lib", "link", "rc", "ml")
 
@@ -740,12 +726,10 @@ class MsvcToolchain(MsvcCompatibleToolchain):
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Add /MACHINE: (via base) and, for a cross arch, repoint the tools.
 
-        Answering "which CPU" on MSVC can require different binaries: the
-        cross toolset lives at bin/Host<host>/<arch> in the same VC install,
-        with matching lib/<arch> and Windows SDK um|ucrt/<arch> libraries
-        (the dev shell's LIB covers only the host arch). Everything is an
-        ordinary contribution, so explain() attributes each change to the
-        arch preset. See docs/presets.md.
+        A cross arch on MSVC requires different binaries: the cross toolset
+        lives at bin/Host<host>/<arch> in the same VC install, with matching
+        lib/<arch> and Windows SDK um|ucrt/<arch> libraries (the dev
+        shell's LIB covers only the host arch).
         """
         contribs = super()._arch_contributions(arch)
         contribs.extend(cross_arch_contributions(arch, repoint_tools=True))
@@ -867,23 +851,13 @@ class MsvcToolchain(MsvcCompatibleToolchain):
     ) -> None:
         """Configure C++20 module compilation (MSVC).
 
-        Runs `cl.exe /scanDependencies` at configure time on every C++ TU in
-        any target that uses modules, then drives flag injection from the
-        scan output rather than from file extension. This handles partition
-        units that live in `.cpp` files (interface partitions and internal
-        partitions both) and lets us inject `/internalPartition` exactly
-        when the scanner reports `provides[].is-interface == false`.
-
-        Per-TU flag injection:
-          - module-providing TU: `/TP /interface /ifcOutput <ifc>`
-          - internal partition unit (provides + is-interface=false):
-            also `/internalPartition`
-        Project-wide:
-          - `/ifcSearchDir <moddir>` on every C++ TU so importers find IFCs
-
-        The Ninja dyndep file is written directly here (no build-time scan
-        rule). Its provides/requires come from the scan output and use IFC
-        paths derived from logical module names (so partitions resolve).
+        Runs `cl.exe /scanDependencies` at configure time on every
+        participating C++ TU and drives flag injection from the scan
+        output rather than file extension: module providers get `/TP
+        /interface /ifcOutput <ifc>` (or `/internalPartition` when the
+        scanner reports is-interface=false), and every C++ TU gets
+        `/ifcSearchDir`. The Ninja dyndep file is written directly here,
+        with IFC paths derived from logical module names.
         """
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
@@ -899,8 +873,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
 
         flag_spec = _msvc_std_module_flag_spec()
 
-        # Restrict scanning to envs that opted in (extension-driven or
-        # explicit `env.cxx.modules = True`). If no env qualifies, skip.
         cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
         all_cxx_pairs = cxx_module_pairs + cxx_pairs
         if not all_cxx_pairs:
@@ -978,12 +950,8 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             specs, scanner=compiler_cmd, scanner_style="msvc"
         )
 
-        # `import std;`/`import std.compat;` support: if any TU requires the
-        # standard library module, synthesize a build node for it from
-        # %VCToolsInstallDir%/modules/std.ixx. The synthetic TU is appended
-        # to `results` so the dyndep file declares the .ifc as an implicit
-        # output. The synthesized std build is keyed like any other module
-        # (cxx_modules/<key>/std.ifc) so it matches its importers.
+        # Synthesize std/std.compat module builds where imported (appended
+        # to `results` so the dyndep file declares their .ifc outputs).
         std_obj_nodes = self._inject_std_module_builds(
             project,
             build_dir,
@@ -1006,8 +974,6 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         # Inject per-TU module flags driven by the scan output, with a keyed
         # /ifcOutput so the same logical module compiled with incompatible
         # flags never writes to a single shared .ifc path.
-        # A TU is a module provider iff scan reports a non-empty provides[].
-        # An *internal* partition (is-interface=false) needs /internalPartition.
         for r in results:
             if not r.is_module_provider:
                 continue
@@ -1072,9 +1038,8 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             std_bi["dyndep"] = dyndep_rel
             std_obj_node.implicit_deps.append(dyndep_node)
 
-        # Add the synthesized std/std.compat .obj files to the link inputs of
-        # every target whose TUs import them, so the standard module's
-        # explicit-instantiation symbols resolve at link time.
+        # Link the std .obj into importing targets so the standard module's
+        # explicit-instantiation symbols resolve.
         if std_obj_nodes:
             wire_std_into_targets(project, results, spec_to_obj, std_obj_nodes)
 
@@ -1093,19 +1058,11 @@ class MsvcToolchain(MsvcCompatibleToolchain):
     ) -> dict[str, FileNode]:
         """Synthesize build nodes for `import std;` / `import std.compat;`.
 
-        If the scan reports that any TU requires the `std` or `std.compat`
-        logical module, locate Microsoft's `std.ixx` / `std.compat.ixx`
-        under `%VCToolsInstallDir%/modules/`, create a build node that
-        compiles them, and append a synthetic TuScanResult to `results` so
-        the dyndep file declares the corresponding .ifc as an implicit
-        output. The std module's BMI is keyed like any other (its key is
-        derived from the same BMI-sensitive flags its importers use), so they
-        resolve it from the same cxx_modules/<key>/ directory.
-
-        Returns:
-            Dict mapping logical module name -> std obj FileNode for
-            modules that were synthesized. Caller is responsible for
-            wiring these into target link inputs.
+        Locates Microsoft's `std.ixx` / `std.compat.ixx` under
+        `%VCToolsInstallDir%/modules/`, creates build nodes compiling them,
+        and appends synthetic TuScanResults to `results` so the dyndep file
+        declares the .ifc outputs. Returns {logical_name: obj_node}; the
+        caller wires these into target link inputs.
         """
         from pcons.toolchains.cxx_module_scanner import (
             TuScanResult,
@@ -1153,9 +1110,8 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         if not any(f in {"/EHs", "/EHsc", "/EHa"} for f in passthrough):
             passthrough.append("/EHsc")
 
-        # The std module's BMI is keyed like any other; its key is derived from
-        # the same BMI-sensitive flags its importers use, so they resolve it
-        # from the same cxx_modules/<key>/ directory.
+        # Keyed by the same BMI-sensitive flags its importers use, so they
+        # resolve it from the same cxx_modules/<key>/ directory.
         std_key = bmi_key_for_flags(passthrough, flag_spec)
         std_moddir = f"{moddir}/{std_key}"
 
@@ -1201,8 +1157,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
                 first_env.register_node(std_obj_node)
 
             # Synthesize a TuScanResult so the dyndep file emits a
-            # `build <obj> | <ifc>` entry for it. The synthesized std build is
-            # keyed (cxx_modules/<key>/std.ifc) so it matches its importers.
+            # `build <obj> | <ifc>` entry for it.
             synthetic_spec = TuScanSpec(
                 src=ixx_path,
                 obj_rel=obj_rel,
@@ -1239,27 +1194,12 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         env: Environment,
         for_compilation: bool = True,
     ) -> ToolchainContext | None:
-        """Create a toolchain-specific build context for MSVC.
-
-        Overrides the base implementation to use MsvcCompileLinkContext,
-        which provides MSVC-style flag prefixes (/I, /D, /LIBPATH:).
-
-        Args:
-            target: The target being built.
-            env: The build environment.
-            for_compilation: If True, create context for compilation.
-                            If False, create context for linking.
-
-        Returns:
-            A MsvcCompileLinkContext providing MSVC-formatted variables.
-        """
+        """Create an MsvcCompileLinkContext (/I, /D, /LIBPATH: prefixes)."""
         from pcons.toolchains.build_context import MsvcCompileLinkContext
         from pcons.tools.requirements import compute_effective_requirements
 
-        # Compute effective requirements
         effective = compute_effective_requirements(target, env, for_compilation)
 
-        # Create and return MSVC-specific context
         mode = "compile" if for_compilation else "link"
         return MsvcCompileLinkContext.from_effective_requirements(
             effective,

@@ -3,20 +3,9 @@
 
 Reads the JSON manifest written by the build (``<build_dir>/tests.json``)
 and executes each test as a subprocess. Pure stdlib — no test framework
-dependency.
-
-The runner is invoked in two ways:
-
-1. Directly by the user: ``pcons test`` (from anywhere — searches up for
-   the manifest) or ``cd build && pcons test``.
-2. From Ninja: ``ninja test`` runs a rule that invokes
-   ``python -m pcons.test_runner --manifest=tests.json``.
-
-Both paths share the same implementation: :func:`main`.
-
-Output protocol is exit-code only in v1. Future versions may parse TAP
-or gtest XML on a per-test basis (``protocol`` field on the spec) but
-the runner contract — exit 0 means pass — is forward-compatible.
+dependency. Invoked directly (``pcons test``, which searches up for the
+manifest) or from Ninja (``python -m pcons.test_runner --manifest=...``).
+The runner contract is exit-code only: exit 0 means pass.
 """
 
 from __future__ import annotations
@@ -159,11 +148,9 @@ def filter_tests(
 
 # ----- Test-case discovery (gtest / doctest / catch2) ----------------------
 #
-# When a test entry has `discover` set, the runner invokes the binary's
-# "list test cases" flag at run time, parses the output, and expands the
-# entry into one test per discovered case. This avoids requiring the
-# build description to know the case names upfront (which CMake addresses
-# at build time via gtest_discover_tests / doctest_discover_tests).
+# A test entry with `discover` set is expanded at run time into one test
+# per case, by invoking the binary's "list test cases" flag — so the
+# build description need not know the case names upfront.
 
 
 def _resolve_program_for_discovery(binary: str, build_dir: Path) -> str:
@@ -402,10 +389,8 @@ def _resolve_cwd(test: dict, build_dir: Path) -> Path:
 def run_one_test(test: dict, build_dir: Path) -> TestResult:
     """Execute one test and return its TestResult.
 
-    The command's first element is the program; if it's a
-    build-dir-relative path we prefix ``./`` so POSIX shells (or rather,
-    POSIX path resolution rules) actually find it. Absolute paths and
-    paths with a directory prefix are left alone.
+    Relative program paths are resolved against the build dir; absolute
+    paths are left alone.
     """
     name = test["name"]
     labels = tuple(test.get("labels", []) or [])
@@ -586,11 +571,8 @@ def run_all(
     deps_of = {t["name"]: list(t.get("depends_on") or ()) for t in tests}
     _validate_deps(tests)
 
-    # Normalize once, and use this value for both the pool size and the
-    # launch gate below — using the raw (possibly non-positive) `jobs`
-    # for the gate while sizing the pool off `max(1, jobs)` meant `-j0`
-    # (or a negative value) made `len(running) >= jobs` always true, so
-    # no non-serial test was ever submitted.
+    # One normalized value for both the pool size and the launch gate:
+    # gating on a raw non-positive `jobs` would block every submission.
     effective_jobs = jobs if jobs > 0 else max(len(tests), 1)
 
     results: dict[str, TestResult] = {}
@@ -926,13 +908,10 @@ def main(argv: list[str] | None = None) -> int:
     # The "build_dir" entry in the manifest is informational only.
     build_dir = manifest_path.parent.resolve()
 
-    # Labels survive discovery expansion unchanged (each discovered case
-    # inherits its parent's labels), so -L/-LE can be applied up front,
-    # against the pre-discovery entries. This lets a whole discover-enabled
-    # binary be skipped by label without ever invoking its "list test
-    # cases" flag. Name regexes (-R/-E) can't be applied yet: a discover
-    # entry's own name isn't one of the case names it will expand into, so
-    # those filters are re-applied below, once expansion has run.
+    # Labels survive discovery expansion, so -L/-LE apply up front — a
+    # label-excluded binary's cases are never enumerated. Name regexes
+    # (-R/-E) must wait until after expansion, since a discover entry's
+    # own name isn't one of the case names it expands into.
     label_filtered = filter_tests(
         tests,
         include_labels=args.L,
@@ -943,10 +922,8 @@ def main(argv: list[str] | None = None) -> int:
     label_filtered = expand_filter_with_deps(label_filtered, tests)
 
     if args.list:
-        # --list only needs names, so there's no reason to actually run
-        # discovery binaries just to enumerate their cases; list the
-        # manifest-level entries instead (annotating discover entries,
-        # since their real case names are only known once run).
+        # --list shows manifest-level entries without running discovery
+        # binaries; discover entries are annotated instead.
         listed = filter_tests(
             label_filtered,
             include_labels=[],
@@ -962,11 +939,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  {t['name']}{label_str}{discover_str}")
         return 0
 
-    # Discover test cases inside binaries that asked for it. This rewrites
-    # the test list in place: a "discover" entry is replaced by N entries,
-    # one per case found by running the binary's listing flag. Only the
-    # label-filtered survivors reach this point, so an excluded binary's
-    # cases are never enumerated.
+    # Expand discover entries into one test per case
     tests, _expansion_map = expand_discovered_tests(label_filtered, build_dir)
 
     filtered = filter_tests(
@@ -976,8 +949,6 @@ def main(argv: list[str] | None = None) -> int:
         include_regex=args.R,
         exclude_regex=args.E,
     )
-    # Auto-include any deps that the filter would otherwise drop, so that
-    # `pcons test -L api` still pulls in a `setup_server` fixture.
     filtered = expand_filter_with_deps(filtered, tests)
 
     if not filtered:

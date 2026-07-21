@@ -86,11 +86,8 @@ def copytree(
                 # Use forward slashes for ninja compatibility
                 source_files.append(str(item).replace("\\", "/"))
 
-        # Write ninja depfile format: stamp_file: deps
-        # Use the stamp file (or dest) as the "target" for dependency purposes
+        # Ninja depfile format, with the stamp file (or dest) as the target
         target_str = (stamp or str(dest_path)).replace("\\", "/")
-        # Escape spaces so ninja doesn't treat them as dependency separators
-        # (mirrors the escaping in pcons/util/latex_deps.py).
         escaped_files = [_escape_depfile_path(f) for f in source_files]
         deps_str = " \\\n  ".join(escaped_files)
         with open(depfile_path, "w") as f:

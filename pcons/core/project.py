@@ -333,12 +333,7 @@ class Project(_ProjectBuilders):
 
         Args:
             path: Path to the file.
-            role: Optional path role recorded on the node (see FileNode).
-                ``"install_output"`` marks a build output that lives outside
-                the build directory so generators render it relocatably.
-
-        Returns:
-            FileNode for the path.
+            role: Optional path role recorded on the node (see PathRole).
         """
         path = self._canonicalize_path(Path(path))
 
@@ -356,15 +351,7 @@ class Project(_ProjectBuilders):
         return node
 
     def dir_node(self, path: Path | str, *, role: PathRole | None = None) -> DirNode:
-        """Get or create a directory node for a path.
-
-        Args:
-            path: Path to the directory.
-            role: Optional path role recorded on the node (see FileNode).
-
-        Returns:
-            DirNode for the path.
-        """
+        """Get or create a directory node for a path (deduplicated)."""
         path = self._canonicalize_path(Path(path))
         if path not in self._nodes:
             self._nodes[path] = DirNode(
@@ -380,13 +367,7 @@ class Project(_ProjectBuilders):
         return node
 
     def _add_target(self, target: Target) -> None:
-        """Register a target with the project (should not be called directly).
-
-        Only Target should call this method, via Target.__init__,
-        to ensure that targets are registered as soon as they are created.
-
-        Args:
-            target: Target to register.
+        """Register a target; called only by Target.__init__.
 
         Raises:
             ValueError: If a target with the same name already exists.
@@ -415,17 +396,10 @@ class Project(_ProjectBuilders):
     def get_target(
         self, name: str, raise_if_missing: bool = True, recursive: bool = True
     ) -> Target | None:
-        """Get a target by name.
+        """Get a target by (possibly qualified) name.
 
-        Args:
-            name: Target name.
-            raise_if_missing: Whether to raise an exception if the target is not found.
-
-        Returns:
-            The target, or None if not found and raise_if_missing is False.
-
-        Raises:
-            KeyError: If the target is not found and raise_if_missing is True.
+        Returns None if not found and raise_if_missing is False;
+        otherwise raises KeyError.
         """
 
         project, target_name = split_qualified_name(name)
@@ -464,17 +438,7 @@ class Project(_ProjectBuilders):
         return None
 
     def get_targets(self, *names: str) -> list[Target]:
-        """Get multiple targets by name.
-
-        Args:
-            *names: Target names.
-
-        Returns:
-            List of targets.
-
-        Raises:
-            KeyError: If any target is not found.
-        """
+        """Get multiple targets by name; raises KeyError if any is missing."""
         return [self.get_target(name) for name in names]
 
     @property
@@ -504,17 +468,8 @@ class Project(_ProjectBuilders):
     def Alias(
         self, name: str, *targets: Target | Node | list[Target | Node]
     ) -> AliasNode:
-        """Create a named alias for targets.
-
-        Aliases can be used as build targets (e.g., 'ninja test').
-
-        Args:
-            name: Alias name.
-            *targets: Targets, nodes, or lists of them.
-
-        Returns:
-            AliasNode for this alias.
-        """
+        """Create a named alias for targets, usable as a build target
+        (e.g. 'ninja test'). Accepts Targets, Nodes, or lists of them."""
         if name not in self._aliases:
             self._aliases[name] = AliasNode(name, defined_at=get_caller_location())
 
@@ -780,33 +735,19 @@ class Project(_ProjectBuilders):
                 print(f"    links: {', '.join(deps)}")
 
     def resolve(self, strict: bool = False) -> None:
-        """Resolve all targets in two phases.
-
-        Phase 1: Resolve build targets (compiles, links)
-            This populates intermediate_nodes and output_nodes for libraries/programs.
-
-        Phase 2: Resolve pending sources (Install, InstallAs, etc.)
-            This handles targets that reference outputs from other targets.
-            Because Phase 1 has run, output_nodes are now populated.
-
-        After resolution, each target's nodes are fully populated and ready
-        for generation. Validation is run automatically and warnings logged.
+        """Resolve all targets, populating their nodes for generation
+        (see pcons.core.resolver for the phases), then validate.
 
         Args:
-            strict: If True, raise an exception on validation errors.
-                   If False (default), log warnings but continue.
+            strict: If True, raise on validation errors; otherwise
+                log warnings and continue.
         """
         from pcons.core.resolver import Resolver
 
         resolver = Resolver(self)
-
-        # Phase 1: Resolve build targets
         resolver.resolve()
-
-        # Phase 2: Resolve pending sources (Install, etc.)
         resolver.resolve_pending_sources()
 
-        # Validate and report issues
         errors = self.validate()
         if errors:
             for error in errors:
@@ -872,13 +813,7 @@ class Project(_ProjectBuilders):
             logger.info("Wrote %s graph to %s", format_name, output_path_str)
 
     def _mark_generated(self):
-        """Mark the project build's generation have been requested.
-
-        This is called by generators that produce build files (e.g., Ninja)
-        to indicate that generation has been requested. It prevents multiple
-        generators from running on the same project and allows generate() to
-        be a no-op after the first generation.
-        """
+        """Called by build-file generators; makes later generate() calls no-ops."""
         self.__generated = True
 
     def generate(self) -> None:
@@ -1201,15 +1136,8 @@ class Project(_ProjectBuilders):
         # attributes to type checkers and require a `type: ignore` /
         # `ty: ignore` at the call site (see examples/15_custom_builder).
         def __getattr__(self, name: str) -> Any:
-            """Dynamic attribute access for registered builders.
-
-            Allows registered builders to be called as methods on Project
-            instances, e.g. `project.InstallSymlink(...)` for a custom
-            `@builder` named "InstallSymlink".
-
-            Raises:
-                AttributeError: If the attribute is not a registered builder.
-            """
+            """Dispatch registered builders as Project methods,
+            e.g. `project.InstallSymlink(...)` for @builder("InstallSymlink")."""
             registration = BuilderRegistry.get(name)
             if registration is not None:
                 if registration.platforms:
@@ -1228,44 +1156,26 @@ class Project(_ProjectBuilders):
             )
 
     def __dir__(self) -> list[str]:
-        """Include registered builder names in dir() output.
-
-        This enables IDE auto-completion for dynamically available builders.
-        """
-        # Get the default attributes
+        """Include registered builder names so IDEs can complete them."""
         attrs = list(super().__dir__())
-        # Add registered builder names
         attrs.extend(BuilderRegistry.names())
         return attrs
 
     def _make_builder_method(self, registration: Any) -> Any:
-        """Create a bound method for a registered builder.
-
-        The returned callable handles argument routing based on whether
-        the builder requires an environment.
-
-        Args:
-            registration: BuilderRegistration from the registry.
-
-        Returns:
-            A callable that creates targets using the builder.
-        """
+        """Create a bound method for a registered builder, injecting the
+        project and capturing the caller location."""
         create_target = registration.create_target
 
-        # Check if create_target accepts defined_at parameter
         import inspect
 
         sig = inspect.signature(create_target)
         accepts_defined_at = "defined_at" in sig.parameters
 
-        # Wrap to inject project as first argument and capture caller location
         def builder_method(*args: Any, **kwargs: Any) -> Target:
-            # Capture source location if builder accepts it
             if accepts_defined_at and "defined_at" not in kwargs:
                 kwargs["defined_at"] = get_caller_location()
             return create_target(self, *args, **kwargs)
 
-        # Copy the docstring if available
         if hasattr(create_target, "__doc__"):
             builder_method.__doc__ = create_target.__doc__
 

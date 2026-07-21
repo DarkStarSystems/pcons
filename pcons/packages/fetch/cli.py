@@ -1,9 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Command-line interface for pcons-fetch.
 
-pcons-fetch is a tool for downloading and building external dependencies
-from source. It reads a deps.toml file that specifies which packages to
-build and how to build them.
+Downloads and builds external dependencies from source, driven by a
+deps.toml file.
 """
 
 from __future__ import annotations
@@ -24,7 +23,6 @@ from typing import Any
 
 from pcons.packages.description import PackageDescription
 
-# Set up logging
 logger = logging.getLogger("pcons-fetch")
 
 
@@ -171,14 +169,12 @@ def download_source(
 
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    # Determine download method
-    # Check for git URL — strip @ref suffix before checking .git extension
+    # Strip @ref suffix before checking for a .git extension
     bare_url = url.split("@")[0] if "@" in url and "://" in url else url
     is_git = (
         url.startswith("git://") or url.startswith("git+") or bare_url.endswith(".git")
     )
     if is_git:
-        # Git clone
         git_url, ref = _split_git_url_and_ref(url)
 
         logger.info("Cloning %s", git_url)
@@ -211,7 +207,6 @@ def download_source(
                 raise RuntimeError(f"Git clone failed: {result.stderr}")
 
     elif url.endswith((".tar.gz", ".tgz", ".tar.bz2", ".tar.xz", ".zip")):
-        # Download archive
         archive_name = url.split("/")[-1]
         archive_path = dest_dir / archive_name
 
@@ -219,7 +214,6 @@ def download_source(
         urllib.request.urlretrieve(url, archive_path)
         _verify_sha256(archive_path, sha256)
 
-        # Extract archive
         logger.info("Extracting %s", archive_path)
         source_dir.mkdir(parents=True, exist_ok=True)
 
@@ -264,7 +258,6 @@ def build_cmake(
     """
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # Find cmake
     cmake = shutil.which("cmake")
     if cmake is None:
         logger.error("CMake not found")
@@ -335,7 +328,6 @@ def build_autotools(
     """
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    # Check for configure script
     configure_script = source_dir / "configure"
     if not configure_script.exists():
         # Try to generate it
@@ -530,7 +522,6 @@ def fetch_package(
     build_system = pkg_config.get("build", "cmake")
     sha256 = pkg_config.get("sha256")
 
-    # Download source
     source_dir_parent = deps_dir / "src"
     try:
         source_dir = download_source(url, source_dir_parent, name, sha256=sha256)
@@ -538,7 +529,6 @@ def fetch_package(
         logger.error("Failed to download %s: %s", name, e)
         return False
 
-    # Set up build and install directories
     build_dir = deps_dir / "build" / name
     install_prefix = deps_dir / "install"
 
@@ -564,12 +554,10 @@ def fetch_package(
         logger.error("Failed to build %s", name)
         return False
 
-    # Generate package description
     pkg_desc, pc_files = generate_package_description(
         name, version, install_prefix, build_system
     )
 
-    # Write package description
     output_dir.mkdir(parents=True, exist_ok=True)
     pkg_file = output_dir / f"{name}.pcons-pkg.toml"
     pkg_desc.to_toml(pkg_file)
@@ -609,7 +597,6 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         logger.error("Failed to parse deps file: %s", e)
         return 1
 
-    # Get configuration
     packages = deps_config.get("packages", {})
     if not packages:
         logger.warning("No packages defined in %s", deps_file)
@@ -618,7 +605,6 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     deps_dir = Path(args.deps_dir)
     output_dir = Path(args.output_dir)
 
-    # Process packages
     failed: list[str] = []
     for name, pkg_config in packages.items():
         if not fetch_package(name, pkg_config, deps_dir, output_dir):

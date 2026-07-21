@@ -26,24 +26,9 @@ if TYPE_CHECKING:
 class MakefileGenerator(BaseGenerator):
     """Generator that produces GNU Makefiles.
 
-    Generates a complete Makefile including:
-    - Variable definitions
-    - Directory creation rules
-    - Build rules with dependencies
-    - Phony targets for aliases
-    - Default target
-    - Depfile includes for incremental builds
-    - Clean target
-
-    Note: Requires GNU Make 3.80+ for order-only prerequisites.
-
-    Example:
-        project = Project("myapp", build_dir="build")
-        # ... configure project ...
-
-        generator = MakefileGenerator()
-        generator.generate(project)
-        # Creates build/Makefile
+    Writes a complete Makefile: variables, directory rules, build rules,
+    phony aliases, depfile includes, and a clean target. Requires GNU
+    Make 3.80+ for order-only prerequisites.
     """
 
     _supports_compile_commands = True
@@ -63,12 +48,7 @@ class MakefileGenerator(BaseGenerator):
         self._path_resolver: PathResolver | None = None  # Set during generate()
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
-        """Generate Makefile.
-
-        Args:
-            project: Configured project to generate for.
-            output_dir: Directory to write Makefile to.
-        """
+        """Generate Makefile in output_dir."""
         output_dir.mkdir(parents=True, exist_ok=True)
         makefile_path = output_dir / "Makefile"
 
@@ -113,8 +93,6 @@ class MakefileGenerator(BaseGenerator):
     def _write_phony_declaration(self, f: TextIO, project: Project) -> None:
         """Write .PHONY declaration for all phony targets."""
         phony_targets = ["all", "clean", *project.aliases]
-        # Include test phonies if any Test targets are declared so that
-        # `make test` / `make test-build` are correctly treated as phony.
         if any(t.target_type == "test" for t in project.targets):
             phony_targets.extend(["test", "test-build"])
         f.write("# Phony targets\n")
@@ -159,7 +137,6 @@ class MakefileGenerator(BaseGenerator):
 
         f.write("# Directory creation\n")
         for directory in sorted(self._directories):
-            # Directories need build_dir prefix stripped since make runs from build_dir
             escaped = self._make_build_relative_path(directory)
             f.write(f"{escaped}:\n")
             f.write("\tmkdir -p $@\n")
@@ -214,11 +191,8 @@ class MakefileGenerator(BaseGenerator):
 
         sources: list[Node] = build_info.get("sources", [])
 
-        # Handle multi-output builds
-        # Output paths need build_dir prefix stripped since make runs from build_dir
         outputs_info = build_info.get("outputs")
         if outputs_info:
-            # Multi-output build - list all outputs
             all_outputs = [
                 self._make_build_relative_path(info["path"])
                 for info in outputs_info.values()
@@ -227,46 +201,37 @@ class MakefileGenerator(BaseGenerator):
         else:
             output = self._node_path(node)
 
-        # Get source paths - use PathResolver for consistent handling
-        # Make runs from build directory (via make -C), so:
-        # - Build outputs: strip build_dir prefix
-        # - Source files: use absolute paths to work from any directory
+        # Build outputs are build-dir-relative; source files are absolute so
+        # they work from any directory.
         def get_source_path(s: FileNode) -> str:
-            # Install outputs live outside the build dir.
             if getattr(s, "role", None) == "install_output":
                 return self._node_path(s)
-            # Build outputs need build_dir prefix stripped
             if getattr(s, "_build_info", None) is not None or s.is_target:
                 return self._make_build_relative_path(s.path)
 
-            # Source file - make absolute using project root
             path_obj = s.path
             if not path_obj.is_absolute() and self._project_root is not None:
                 path_obj = self._project_root / path_obj
             return self._escape_path(path_obj)
 
-        # Build list of prerequisites
         prereqs: list[str] = []
 
-        # Add sources
         for s in sources:
             if isinstance(s, FileNode):
                 prereqs.append(get_source_path(s))
 
-        # Add explicit deps (e.g., libraries for linking, generated headers)
-        # All paths are stripped of build_dir prefix since make runs from build_dir
+        # Explicit deps (e.g., libraries for linking, generated headers)
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
                 prereqs.append(self._make_build_relative_path(dep.path))
 
-        # Add implicit deps (e.g., headers discovered by scanners)
+        # Implicit deps (e.g., headers discovered by scanners)
         for dep in node.implicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
                 prereqs.append(self._make_build_relative_path(dep.path))
 
         # Order-only prerequisites (directories)
-        # Directories need build_dir prefix stripped since make runs from build_dir
         order_only: list[str] = []
         output_dir = node.path.parent
         if (
@@ -276,7 +241,6 @@ class MakefileGenerator(BaseGenerator):
         ):
             order_only.append(self._make_build_relative_path(output_dir))
 
-        # Build the target line
         prereq_str = " ".join(prereqs)
         if order_only:
             order_only_str = " | " + " ".join(order_only)
@@ -285,7 +249,6 @@ class MakefileGenerator(BaseGenerator):
 
         f.write(f"{output}: {prereq_str}{order_only_str}\n")
 
-        # Write the command
         command = self._get_command(node, target, project, sources)
         if command:
             f.write(f"\t{self._escape_dollar_for_recipe(command)}\n")
@@ -304,86 +267,68 @@ class MakefileGenerator(BaseGenerator):
         tool_name = build_info.get("tool", "unknown")
         command_var = build_info.get("command_var", "cmdline")
 
-        # Get the environment from target or build_info
         env: Environment | None = None
         if target is not None:
             env = getattr(target, "_env", None)
 
         if env is None:
-            # Check if env is stored in build_info (e.g., Install nodes)
+            # e.g., Install nodes store env in build_info
             env = build_info.get("env")
 
         if env is None:
-            # Try to find from project environments
             for e in project.environments:
                 if node in getattr(e, "_created_nodes", []):
                     env = e
                     break
 
-        # Check for command in build_info first (generic commands, install, archive)
-        # This covers: Install, InstallAs, InstallDir, Tarfile, Zipfile, lipo, and
-        # any custom builder that sets command in _build_info
+        # Builder-provided command (generic commands, install, archive)
         custom_command = build_info.get("command")
         if custom_command:
-            # Builder provided command directly - use it
-            # Command can be a list of tokens or a string
             if isinstance(custom_command, list):
-                # Process PathToken objects (Makefile runs from project root,
-                # so paths relative to project root don't need transformation)
                 processed_tokens = self._process_path_tokens(custom_command)
 
-                # Expand $SOURCES/$TARGET tokens to actual file paths at token level.
-                # This must happen BEFORE to_shell_command() so each path is a separate
-                # token and gets quoted individually (not as one space-separated string).
+                # Expand $SOURCES/$TARGET before to_shell_command() so each
+                # path is a separate, individually quoted token.
                 expanded_tokens = self._expand_source_target_tokens(
                     processed_tokens, node, sources, build_info
                 )
 
-                # Convert token list to shell command with proper quoting
                 from pcons.core.subst import to_shell_command
 
                 command = to_shell_command(expanded_tokens, shell="bash")
             else:
-                # String command - use old substitution approach
                 command = str(custom_command)
                 command = self._convert_command_variables(command)
                 command = self._substitute_make_vars(command, node, sources, build_info)
             return self._append_post_build(command, node, target, sources)
 
-        # Get context overrides if available
         context = build_info.get("context")
         context_overrides: dict[str, object] = {}
         if context is not None and hasattr(context, "get_env_overrides"):
             context_overrides = context.get_env_overrides()
 
         if env is None:
-            # Try standalone tools (install, archive) when no environment is available
+            # Standalone tools (install, archive) need no environment
             cmd_template = self._get_standalone_tool_command(tool_name, command_var)
             if cmd_template is None:
                 return f"@echo 'No environment for {node.path}'"
 
-            # Process the command template
             from pcons.core.subst import to_shell_command
 
-            # Process PathToken and SourcePath/TargetPath objects
             processed_tokens = self._process_path_tokens(cmd_template)
 
-            # Apply context overrides for standalone tools
             if context_overrides:
                 processed_tokens = self._apply_context_overrides(
                     processed_tokens, tool_name, context_overrides
                 )
 
-            # Expand SourcePath/TargetPath markers to actual paths
             expanded_tokens = self._expand_source_target_tokens(
                 processed_tokens, node, sources, build_info
             )
 
-            # Convert to shell command
             command = to_shell_command(expanded_tokens, shell="bash")
             return self._append_post_build(command, node, target, sources)
 
-        # Get command template from tool config
         tool_config = getattr(env, tool_name, None)
         if tool_config is None:
             return f"@echo 'Unknown tool: {tool_name}'"
@@ -392,41 +337,32 @@ class MakefileGenerator(BaseGenerator):
         if command_template is None:
             return f"@echo 'No command template: {tool_name}.{command_var}'"
 
-        # Expand the command template to get tokens (may include PathTokens)
-        # We use the raw subst() function to get tokens, not env.subst() which
-        # converts to string without proper path relativization for make.
+        # Use raw subst() for tokens, not env.subst(), so PathTokens can be
+        # relativized for make before shell quoting.
         from pcons.core.subst import subst as subst_fn
         from pcons.core.subst import to_shell_command
 
-        # Check if env has _build_namespace (real Environment objects do,
-        # but mock objects in tests may not)
+        # Mock envs in tests may lack _build_namespace
         if hasattr(env, "_build_namespace"):
             namespace = env._build_namespace()
             tokens = subst_fn(command_template, namespace)
 
-            # Relativize PathTokens for make's execution context (make runs from build_dir)
             relativized_tokens = self._process_path_tokens(tokens)
 
-            # Expand $SOURCES/$TARGET tokens to actual file paths at token level.
-            # This must happen BEFORE to_shell_command() so each path is a separate
-            # token and gets quoted individually (not as one space-separated string).
+            # Expand $SOURCES/$TARGET before to_shell_command() so each
+            # path is a separate, individually quoted token.
             expanded_tokens = self._expand_source_target_tokens(
                 relativized_tokens, node, sources, build_info
             )
 
-            # Convert token list to shell command string
             command = to_shell_command(expanded_tokens, shell="bash")
         else:
             # Fallback for mock objects or non-standard environments
             command = env.subst(command_template, shell="bash")
-            # For fallback, still need to substitute variables
             command = self._convert_command_variables(command)
             command = self._substitute_make_vars(command, node, sources, build_info)
 
-        # Append post-build commands if any
-        command = self._append_post_build(command, node, target, sources)
-
-        return command
+        return self._append_post_build(command, node, target, sources)
 
     def _append_post_build(
         self,
@@ -435,14 +371,13 @@ class MakefileGenerator(BaseGenerator):
         target: Target | None,
         sources: list[Node],
     ) -> str:
-        """Append post-build commands to the main command."""
+        """Append the target's post-build commands (if this is an output node)."""
         if target is None:
             return command
 
-        # Check if this is an output node (not an intermediate object file)
         is_output_node = hasattr(target, "output_nodes") and node in target.output_nodes
-        # Also check output nodes in target.nodes (for interface targets like Install)
         if not is_output_node:
+            # Interface targets like Install keep outputs in target.nodes
             is_output_node = node in target.nodes
 
         if not is_output_node:
@@ -453,7 +388,6 @@ class MakefileGenerator(BaseGenerator):
         if not post_build_cmds:
             return command
 
-        # Substitute $out and $in in each command
         out_path = str(node.path)
         in_paths = " ".join(str(s.path) for s in sources if isinstance(s, FileNode))
 
@@ -463,20 +397,14 @@ class MakefileGenerator(BaseGenerator):
             cmd = cmd.replace("$in", in_paths)
             substituted_cmds.append(cmd)
 
-        # Chain commands with &&
         return command + " && " + " && ".join(substituted_cmds)
 
     def _escape_dollar_for_recipe(self, text: str) -> str:
         """Escape literal ``$`` as ``$$`` in a Makefile recipe line.
 
-        Recipe text here is a fully-expanded shell command whose tokens are
-        already quoted for bash (e.g. via :func:`~pcons.core.subst.to_shell_command`).
-        Make performs its own ``$``-expansion pass over the raw recipe text
-        *before* handing it to the shell, and that pass doesn't know or care
-        about shell quotes. So a shell-protected token like the rpath idiom
-        ``'-Wl,-rpath,$ORIGIN/../lib'`` still has its ``$O`` consumed by Make
-        as a reference to (usually undefined) variable ``O`` unless the ``$``
-        is doubled here.
+        Make's ``$``-expansion pass runs before the shell sees the line and
+        ignores shell quotes, so even ``'-Wl,-rpath,$ORIGIN/../lib'`` needs
+        its ``$`` doubled.
         """
         return self.ESCAPE_DOLLAR.sub("$$", text)
 
@@ -487,41 +415,27 @@ class MakefileGenerator(BaseGenerator):
         sources: list[Node],
         build_info: dict[str, object],
     ) -> str:
-        """Substitute $in/$out with actual paths (not Make automatic vars).
+        """Substitute $in/$out with explicit paths (not Make automatic vars,
+        whose semantics don't match our source lists exactly).
 
-        We use explicit paths rather than $< and $@ because the sources
-        may not match Make's automatic variable semantics exactly.
-
-        Note: Make runs from the build directory (via -C), so:
-        - Output paths use node.path directly (relative to build_dir)
-        - Source paths are made absolute to work from any directory
-
-        $in includes both sources (from build_info) and explicit_deps (e.g.,
-        libraries for linking). This matches ninja's behavior where $in is
-        ALL explicit dependencies in the build statement.
+        $in includes both sources and explicit_deps, matching ninja's $in.
         """
 
-        # Get source paths - must match prerequisite handling in _write_build_rule
+        # Must match prerequisite handling in _write_build_rule
         def get_source_path(s: FileNode) -> str:
-            # Build outputs - strip build_dir prefix since make runs from build_dir
             if getattr(s, "_build_info", None) is not None or s.is_target:
                 return self._strip_build_dir_prefix(s.path)
-            # Source files - make absolute using project root
             path_obj = s.path
             if not path_obj.is_absolute() and self._project_root is not None:
                 path_obj = self._project_root / path_obj
             return str(path_obj)
 
-        # Build $in from sources AND explicit_deps (e.g., libraries)
-        # This matches ninja's behavior where $in includes all explicit deps
         in_paths: list[str] = []
 
-        # Add sources first
         for s in sources:
             if isinstance(s, FileNode):
                 in_paths.append(get_source_path(s))
 
-        # Add explicit deps that aren't already in sources (e.g., libraries)
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
@@ -529,20 +443,16 @@ class MakefileGenerator(BaseGenerator):
 
         source_paths = " ".join(in_paths)
 
-        # Substitute $in and $out
-        # $out uses the role-aware output path (build-relative, or absolute for
-        # install outputs) so the recipe writes exactly where the rule target
-        # points (make runs from build_dir).
+        # $out is role-aware so the recipe writes exactly where the rule
+        # target points.
         command = command.replace("$in", source_paths)
         command = command.replace("$out", self._node_out_raw(node))
 
-        # Handle depfile if present (also strip build_dir prefix)
         depfile = build_info.get("depfile")
         if depfile:
             from pcons.core.subst import PathToken
 
             if isinstance(depfile, PathToken):
-                # PathToken: construct actual depfile path from path + suffix
                 depfile_actual = depfile.path + depfile.suffix
                 command = command.replace(
                     "$out.d", self._strip_build_dir_prefix(depfile_actual)
@@ -557,7 +467,6 @@ class MakefileGenerator(BaseGenerator):
 
         f.write("# Aliases\n")
         for name, alias in project.aliases.items():
-            # Alias targets need build_dir prefix stripped since make runs from build_dir
             targets = " ".join(
                 self._node_path(t) for t in alias.targets if isinstance(t, FileNode)
             )
@@ -566,16 +475,11 @@ class MakefileGenerator(BaseGenerator):
         f.write("\n")
 
     def _write_tests(self, f: TextIO, project: Project) -> None:
-        """Emit `test-build` and `test` phony targets if any tests exist.
+        """Emit ``test-build`` (compile tests) and ``test`` (run them) phonies.
 
-        ``test-build`` depends on every test program's output node so that
-        ``make test-build`` compiles tests without running them. ``test``
-        invokes the runner (``pcons.test_runner``) and depends on
-        ``test-build`` so things compile first.
-
-        The runner invocation embeds ``sys.executable`` so it finds the
-        pcons package regardless of what ``python`` is on PATH — same
-        reasoning as the Ninja backend.
+        Emits nothing if the project declared no tests. Embeds
+        ``sys.executable`` so the runner can import pcons regardless of
+        what ``python`` is on PATH.
         """
         test_targets = [t for t in project.targets if t.target_type == "test"]
         if not test_targets:
@@ -594,11 +498,7 @@ class MakefileGenerator(BaseGenerator):
 
         f.write("# Tests\n")
         f.write(f"test-build: {' '.join(program_outputs)}\n")
-        # Embed sys.executable so the runner is found in whatever venv
-        # pcons was invoked from. Quote it for the shell (in case the
-        # interpreter path has spaces) and escape $ for Make (which
-        # otherwise treats $ in the raw recipe text as a variable
-        # reference before the shell ever sees the line).
+        # Shell-quote (interpreter path may have spaces) and $-escape for Make
         python_exe = shlex.quote(sys.executable.replace("\\", "/"))
         python_exe = self._escape_dollar_for_recipe(python_exe)
         f.write("test: test-build\n")
@@ -611,7 +511,6 @@ class MakefileGenerator(BaseGenerator):
         """Write the default and 'all' targets."""
         user_defaults: list[str] = []
 
-        # Add nodes from user-specified default targets
         for target in project.default_targets:
             if target.output_nodes:
                 for out_node in target.output_nodes:
@@ -666,24 +565,15 @@ class MakefileGenerator(BaseGenerator):
         f.write("\n")
 
     def _find_final_nodes(self, project: Project) -> list[str]:
-        """Find nodes that are 'final' outputs (nothing depends on them).
-
-        This handles cases where examples create nodes directly via
-        env.cc.Object() / env.link.Program() without registering targets.
-
-        Returns:
-            List of relative paths for final output nodes.
-        """
-        # Collect all nodes with builders (outputs, not sources)
+        """Find output nodes nothing depends on, for builds that create
+        nodes directly without registering targets."""
         output_nodes: set[Path] = set()
-        # Collect all nodes that are dependencies of something
         dependency_nodes: set[Path] = set()
 
         for env in project.environments:
             for node in getattr(env, "_created_nodes", []):
                 if isinstance(node, FileNode) and node.builder is not None:
                     output_nodes.add(node.path)
-                    # Track what this node depends on
                     build_info = getattr(node, "_build_info", None) or {}
                     for source in build_info.get("sources", []):
                         if isinstance(source, FileNode):
@@ -692,10 +582,7 @@ class MakefileGenerator(BaseGenerator):
                         if isinstance(dep, FileNode):
                             dependency_nodes.add(dep.path)
 
-        # Final nodes are outputs that aren't dependencies of other nodes
         final_nodes = output_nodes - dependency_nodes
-
-        # Return relative paths
         return [self._make_build_relative_path(path) for path in sorted(final_nodes)]
 
     def _write_depfile_includes(self, f: TextIO) -> None:
@@ -704,8 +591,6 @@ class MakefileGenerator(BaseGenerator):
             return
 
         f.write("# Include dependency files (generated by compiler -MD flag)\n")
-        # Include .d files from all directories that might have objects
-        # Directories need build_dir prefix stripped since make runs from build_dir
         for directory in sorted(self._directories):
             f.write(f"-include {self._make_build_relative_path(directory)}/*.d\n")
         f.write("\n")
@@ -717,24 +602,11 @@ class MakefileGenerator(BaseGenerator):
         f.write(f"\trm -rf {self._escape_path(output_dir)}\n")
 
     def _strip_build_dir_prefix(self, path: Path | str) -> str:
-        """Strip the build_dir prefix from a path.
-
-        Since make runs from the build directory (via -C), paths that have
-        the build_dir prefix need to have it stripped.
-
-        Tries both the output_dir (which may be absolute) and the project's
-        relative build_dir to handle canonical node paths.
-
-        Args:
-            path: Path that may have build_dir prefix.
-
-        Returns:
-            Path as string with build_dir prefix stripped if present.
-        """
+        """Strip the build_dir prefix from a path, since make runs from the
+        build dir (contract: pcons.core.paths.execution_relative)."""
         if self._path_resolver is not None:
             return self._path_resolver.make_execution_relative(path)
-        # Resolver-less project (tests with bare stubs): same contract,
-        # arguments derived from generator state.
+        # Resolver-less project (tests with bare stubs)
         from pcons.core.paths import execution_relative
 
         return execution_relative(
@@ -746,42 +618,22 @@ class MakefileGenerator(BaseGenerator):
         )
 
     def _escape_path(self, path: Path | str) -> str:
-        """Escape a path for use in Makefiles.
-
-        In Makefiles, $ must be escaped as $$. Spaces are tricky
-        and generally should be avoided in build paths.
-        """
+        """Escape a path for use in Makefiles ($ -> $$). Spaces in build
+        paths are generally unsupported by make and best avoided."""
         path_str = str(path)
-        # Escape $ as $$
         return self.ESCAPE_DOLLAR.sub("$$", path_str)
 
     def _make_build_relative_path(self, path: Path | str) -> str:
-        """Convert a path to be relative to build_dir and escape it.
-
-        Since make runs from the build directory (via -C), output paths that
-        have the build_dir prefix need to have it stripped.
-
-        Args:
-            path: Path that may have build_dir prefix.
-
-        Returns:
-            Path escaped for Makefile, with build_dir prefix stripped if present.
-        """
+        """Strip the build_dir prefix and $-escape for the Makefile."""
         path_str = self._strip_build_dir_prefix(path)
         return self.ESCAPE_DOLLAR.sub("$$", path_str)
 
     def _node_out_raw(self, node: FileNode) -> str:
         """Return the unescaped output path for *node*, honoring its role.
 
-        Install outputs (``role == "install_output"``) live outside the build
-        dir; since make runs from the build dir (via ``-C``) they are emitted
-        as absolute paths (anchored at the project root when stored
-        project-relative). All other nodes are build-dir-relative.
-
-        Returned unescaped so it can be used both in rule targets (after
-        ``$``-escaping via :meth:`_node_path`) and in recipe command tokens
-        (which are escaped/quoted separately). The two must agree so make's
-        target matches the path the recipe actually writes.
+        Install outputs live outside the build dir and are emitted absolute;
+        other nodes are build-dir-relative. Returned unescaped so rule
+        targets and recipe tokens (escaped separately) agree on the path.
         """
         if node.role == "install_output":
             p = node.path
@@ -795,72 +647,43 @@ class MakefileGenerator(BaseGenerator):
         return self.ESCAPE_DOLLAR.sub("$$", self._node_out_raw(node))
 
     def _process_path_tokens(self, tokens: list) -> list:
-        """Process PathToken objects in a command token list.
+        """Relativize PathTokens in a command token list for make.
 
-        Since make runs from the build directory (via -C), paths need to be
-        transformed:
-        - Build directory paths become "."
-        - Project-relative paths need to be made absolute
-
-        SourcePath/TargetPath markers are passed through unchanged for
-        _expand_source_target_tokens() to handle (it has access to node/sources).
-
-        Uses PathToken.relativize() with _relativize_path_for_make().
-
-        Args:
-            tokens: List of command tokens (str, PathToken, SourcePath, TargetPath).
-
-        Returns:
-            List of tokens with PathTokens relativized; SourcePath/TargetPath preserved.
+        SourcePath/TargetPath markers pass through unchanged for
+        _expand_source_target_tokens() to handle.
         """
         from pcons.core.subst import PathToken, SourcePath, TargetPath
 
         result: list = []
         for token in tokens:
             if isinstance(token, (SourcePath, TargetPath)):
-                # Pass through for _expand_source_target_tokens() to handle
                 result.append(token)
             elif isinstance(token, PathToken):
-                # Use PathToken's relativize() with make path transformer
                 result.append(token.relativize(self._relativize_path_for_make))
             else:
                 s = str(token)
-                # Replace $SRCDIR with project root path for make
-                # (make runs from build dir, so source-tree paths need to be absolute)
+                # $SRCDIR becomes the absolute project root (make runs from
+                # the build dir)
                 if "$SRCDIR" in s and self._project_root:
                     s = s.replace("$SRCDIR", str(self._project_root))
                 result.append(s)
         return result
 
     def _relativize_path_for_make(self, path: str) -> str:
-        """Transform a path for make's execution context.
-
-        Since make runs from the build directory (via -C), paths that reference
-        the build directory become ".", and project-relative paths need to be
-        made absolute (so they work from any directory).
-
-        Args:
-            path: Path string (project-root-relative or absolute).
-
-        Returns:
-            Transformed path suitable for make command.
-        """
+        """Transform a path for make's execution context: "." for the build
+        dir, build-relative below it, absolute for project paths."""
         path_obj = Path(path)
 
-        # Absolute paths stay unchanged
         if path_obj.is_absolute():
             return path
 
-        # Build directory becomes "."
         if self._build_dir:
             build_dir_str = str(self._build_dir)
             if path == build_dir_str:
                 return "."
-            # Paths starting with build_dir/ should strip that prefix
             if path.startswith(build_dir_str + "/"):
                 return path[len(build_dir_str) + 1 :]
 
-        # Project-relative paths need to be made absolute since make runs from build_dir
         if self._project_root:
             return str(self._project_root / path)
 
@@ -873,85 +696,58 @@ class MakefileGenerator(BaseGenerator):
         sources: list[Node],
         build_info: dict[str, object],
     ) -> list[str]:
-        """Expand source/target tokens to actual file paths at the token level.
+        """Expand source/target markers and $SOURCES/$TARGET-style variables
+        to actual file paths at the token level.
 
-        This expands pcons template variables to actual paths BEFORE shell quoting,
-        so each path becomes a separate token that gets quoted individually.
-        This is critical for commands like linkers where $SOURCES expands to
-        multiple files.
-
-        Handles:
-        - SourcePath markers -> all input files (sources + explicit_deps)
-        - TargetPath markers -> output file (with optional suffix like ".d")
-        - $SOURCES, $SOURCE -> all input files (legacy string support)
-        - $TARGET, $TARGETS -> output file (legacy string support)
-        - $TARGET.d -> depfile path (legacy string support)
-        - Embedded variables like /Fo$TARGET -> /Fo<actual_path>
-
-        Args:
-            tokens: Command tokens (str, SourcePath, or TargetPath).
-            node: The output node being built.
-            sources: Source nodes from build_info.
-            build_info: Build info dict (for depfile).
-
-        Returns:
-            Expanded token list with sources/targets replaced by actual paths.
+        Expansion happens before shell quoting so each path becomes a
+        separate, individually quoted token — critical for commands like
+        linkers where $SOURCES expands to multiple files.
         """
         from pcons.core.subst import SourcePath, TargetPath
 
-        # Helper to get a source path for make's execution context
         def get_source_path(s: FileNode) -> str:
-            # Build outputs - strip build_dir prefix since make runs from build_dir
             if getattr(s, "_build_info", None) is not None or s.is_target:
                 return self._strip_build_dir_prefix(s.path)
-            # Source files - make absolute using project root
             path_obj = s.path
             if not path_obj.is_absolute() and self._project_root is not None:
                 path_obj = self._project_root / path_obj
             return str(path_obj)
 
-        # Build list of all input paths (sources + explicit_deps)
+        # All input paths (sources + explicit_deps)
         in_paths: list[str] = []
         for s in sources:
             if isinstance(s, FileNode):
                 in_paths.append(get_source_path(s))
-        # Add explicit deps (e.g., libraries) that aren't already in sources
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
         for dep in node.explicit_deps:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
                 in_paths.append(get_source_path(dep))
 
-        # Output path (single path), role-aware so install outputs resolve to
-        # their absolute destination, matching the rule target.
+        # Role-aware so install outputs resolve to their absolute
+        # destination, matching the rule target.
         out_path = self._node_out_raw(node)
 
-        # Depfile path - get from build_info (PathToken with suffix)
         depfile = build_info.get("depfile")
         depfile_path = ""
         if depfile:
             from pcons.core.subst import PathToken
 
             if isinstance(depfile, PathToken):
-                # PathToken: construct actual depfile path from path + suffix
-                # Path is relative to build dir, strip that prefix
                 depfile_path = self._strip_build_dir_prefix(
                     depfile.path + depfile.suffix
                 )
 
-        # Get all target paths for multi-output commands
-        # Check both all_targets (generic commands) and outputs dict (MultiOutputBuilder)
+        # All target paths for multi-output commands: all_targets (generic
+        # commands) or outputs dict (MultiOutputBuilder)
         all_targets = build_info.get("all_targets")
         outputs_info = build_info.get("outputs")
         out_paths: list[str] = []
         if all_targets and isinstance(all_targets, list):
-            # Generic command with multiple output nodes
             for t in all_targets:
                 path = getattr(t, "path", None)
                 if path is not None:
                     out_paths.append(self._strip_build_dir_prefix(path))
         elif outputs_info and isinstance(outputs_info, dict):
-            # MultiOutputBuilder with outputs dict (e.g., SharedLibrary on Windows)
-            # Outputs are ordered by insertion order in dict
             for _name, info in outputs_info.items():
                 if isinstance(info, dict) and "path" in info:
                     info_dict = cast(dict[str, Any], info)
@@ -959,9 +755,8 @@ class MakefileGenerator(BaseGenerator):
         if not out_paths:
             out_paths = [out_path]
 
-        # Expand tokens
-        # Pre-compute whether tokens contain indexed SourcePath/TargetPath markers.
-        # index=None means "auto"; an explicit int (even 0) triggers indexed mode.
+        # An explicit index on any marker (even 0) switches all markers of
+        # that type to indexed mode; index=None means "auto".
         has_indexed_source = any(
             isinstance(t, SourcePath) and t.index is not None for t in tokens
         )
@@ -969,39 +764,30 @@ class MakefileGenerator(BaseGenerator):
             isinstance(t, TargetPath) and t.index is not None for t in tokens
         )
 
-        # Handle typed markers (SourcePath/TargetPath) first, then string patterns
         result: list[str] = []
         for token in tokens:
-            # Handle typed marker objects (clean path)
             if isinstance(token, SourcePath):
-                # Indexed access or all sources
                 if token.index is not None or has_indexed_source:
-                    # Indexed access: use specific source
                     idx = token.index or 0
                     if idx < len(in_paths):
                         result.append(f"{token.prefix}{in_paths[idx]}{token.suffix}")
                     elif in_paths:
                         result.append(f"{token.prefix}{in_paths[0]}{token.suffix}")
                 else:
-                    # Non-indexed: expand to all input paths
                     for p in in_paths:
                         result.append(f"{token.prefix}{p}{token.suffix}")
             elif isinstance(token, TargetPath):
-                # Indexed access or single output
                 if token.index is not None or has_indexed_target:
-                    # Indexed access: use specific target
                     idx = token.index or 0
                     if idx < len(out_paths):
                         result.append(f"{token.prefix}{out_paths[idx]}{token.suffix}")
                     else:
                         result.append(f"{token.prefix}{out_path}{token.suffix}")
                 else:
-                    # Non-indexed: use primary output
                     result.append(f"{token.prefix}{out_path}{token.suffix}")
-            # Handle string patterns (legacy support)
+            # String patterns (legacy support)
             elif isinstance(token, str):
                 if token in ("$SOURCES", "$SOURCE", "$in"):
-                    # Expand to multiple path tokens (one per file)
                     result.extend(in_paths)
                 elif token in ("$TARGET", "$TARGETS", "$out"):
                     result.append(out_path)
@@ -1013,12 +799,10 @@ class MakefileGenerator(BaseGenerator):
                     or "$in" in token
                     or "$out" in token
                 ):
-                    # Handle embedded variables like /Fo$TARGET or -MF$TARGET.d
-                    # These are single tokens with variables inside
-                    # Also handles ninja-style $in/$out embedded in tokens
-                    expanded = token
+                    # Embedded variables like /Fo$TARGET or -MF$TARGET.d.
                     # Order matters: $TARGET.d/$out.d before $TARGET/$out,
-                    # $TARGETS before $TARGET, $SOURCES before $SOURCE
+                    # $TARGETS before $TARGET, $SOURCES before $SOURCE.
+                    expanded = token
                     if "$TARGET.d" in expanded:
                         expanded = expanded.replace(
                             "$TARGET.d", depfile_path if depfile_path else "$TARGET.d"
@@ -1034,60 +818,35 @@ class MakefileGenerator(BaseGenerator):
                     if "$out" in expanded:
                         expanded = expanded.replace("$out", out_path)
                     if "$SOURCES" in expanded:
-                        # For embedded $SOURCES, join with space (unusual case)
                         expanded = expanded.replace("$SOURCES", " ".join(in_paths))
                     if "$SOURCE" in expanded:
-                        # For embedded $SOURCE, use first source
                         first_source = in_paths[0] if in_paths else ""
                         expanded = expanded.replace("$SOURCE", first_source)
                     if "$in" in expanded:
-                        # For embedded $in, join with space (unusual case)
                         expanded = expanded.replace("$in", " ".join(in_paths))
                     result.append(expanded)
                 else:
                     result.append(token)
             else:
-                # Unknown type - convert to string
                 result.append(str(token))
 
         return result
 
     def _convert_command_variables(self, command: str) -> str:
-        """Convert generator-agnostic variables to Make-compatible variables.
-
-        Converts pcons template variables to intermediate $in/$out:
-        - $SOURCE, $SOURCES -> $in
-        - $TARGET, $TARGETS -> $out
-        - $TARGET.d -> $out.d (depfile pattern)
-        - $TARGET_xxx -> $out_xxx (multi-output pattern)
-        - ${SOURCES[n]} -> indexed source (handled later)
-        - ${TARGETS[n]} -> indexed target (handled later)
-
-        These intermediate variables are then substituted with actual paths
-        by _substitute_make_vars().
-
-        Args:
-            command: The command template with generator-agnostic variables.
-
-        Returns:
-            Command with Make-compatible variables.
-        """
-        # Convert plural forms first (so they don't match singular)
+        """Convert pcons template variables ($SOURCES, $TARGET, ...) to
+        intermediate $in/$out, which _substitute_make_vars() later replaces
+        with actual paths."""
+        # Plural forms first, so they don't match singular
         command = command.replace("$SOURCES", "$in")
         command = command.replace("$TARGETS", "$out")
 
-        # Convert singular forms
         command = command.replace("$SOURCE", "$in")
-        # Handle $TARGET_xxx patterns before plain $TARGET (e.g., $TARGET_import_lib)
+        # $TARGET_xxx (multi-output) before plain $TARGET
         command = re.sub(r"\$TARGET_(\w+)", r"$out_\1", command)
-        # Handle $TARGET.d pattern for depfiles
         command = command.replace("$TARGET.d", "$out.d")
-        # Convert plain $TARGET
         command = command.replace("$TARGET", "$out")
 
-        # Handle indexed access ${SOURCES[n]} and ${TARGETS[n]}
-        # These need special handling - for now, expand to all sources/targets
-        # (Makefile doesn't have a direct equivalent for indexed access)
+        # Indexed access has no Make equivalent; expand to all sources/targets
         command = re.sub(r"\$\{SOURCES\[\d+\]\}", "$in", command)
         command = re.sub(r"\$\{TARGETS\[\d+\]\}", "$out", command)
 
@@ -1096,21 +855,10 @@ class MakefileGenerator(BaseGenerator):
     def _get_standalone_tool_command(
         self, tool_name: str, command_var: str
     ) -> list | None:
-        """Get command template from a standalone tool.
-
-        Used when no environment is available (e.g., Install targets without
-        an associated env). Instantiates the standalone tool to get its
-        default command template.
-
-        Args:
-            tool_name: Tool name (e.g., "install", "archive").
-            command_var: Command variable name (e.g., "copycmd", "tarcmd").
-
-        Returns:
-            Command template as list of tokens (may include SourcePath/TargetPath
-            markers), or None if not available.
+        """Get a command template from a standalone tool (install/archive),
+        for nodes with no associated environment. Returns a token list (may
+        include SourcePath/TargetPath markers), or None if unavailable.
         """
-        # Import standalone tools here to avoid circular imports
         if tool_name == "install":
             from pcons.tools.install import InstallTool
 
@@ -1136,23 +884,11 @@ class MakefileGenerator(BaseGenerator):
     def _apply_context_overrides(
         self, tokens: list[str], tool_name: str, context_overrides: dict[str, object]
     ) -> list[str]:
-        """Apply context overrides to command tokens.
-
-        Replaces $tool.var patterns with actual values from context overrides.
-
-        Args:
-            tokens: List of command tokens.
-            tool_name: Tool name for pattern matching.
-            context_overrides: Dict of override values.
-
-        Returns:
-            Modified token list with overrides applied.
-        """
+        """Replace $tool.var patterns in tokens with context override values."""
         from pcons.core.subst import SourcePath, TargetPath
 
         result: list[str] = []
         for token in tokens:
-            # Pass through marker objects without modification
             if isinstance(token, (SourcePath, TargetPath)):
                 result.append(token)
                 continue

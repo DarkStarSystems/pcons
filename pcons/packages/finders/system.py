@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Package finder that searches standard system paths.
 
-This finder looks for libraries and headers in standard system locations
-without relying on pkg-config. It's a fallback when pkg-config files
-aren't available.
+Fallback for when pkg-config files aren't available.
 """
 
 from __future__ import annotations
@@ -292,7 +290,6 @@ class SystemFinder(BaseFinder):
         Returns:
             PackageDescription if found, None otherwise.
         """
-        # Look up package info
         pkg_info = PACKAGE_ALIASES.get(package_name)
         if pkg_info is None:
             return None

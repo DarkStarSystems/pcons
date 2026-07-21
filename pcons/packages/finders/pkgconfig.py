@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Package finder using pkg-config.
-
-This finder uses the pkg-config tool to locate packages on the system.
-It's the most reliable way to find packages on Unix-like systems.
-"""
+"""Package finder using pkg-config."""
 
 from __future__ import annotations
 
@@ -61,20 +57,13 @@ class PkgConfigFinder(BaseFinder):
         return bool(self._pkg_config_path)
 
     def _run_pkg_config(self, *args: str) -> tuple[bool, str]:
-        """Run pkg-config with arguments.
+        """Run pkg-config; return (success, output).
 
-        Invokes the full executable path resolved by is_available() rather
-        than the bare command name: on Windows, pkg-config may be a .bat/.cmd
-        shim (e.g. Strawberry Perl's), which shutil.which() finds via PATHEXT
-        but a bare-name subprocess launch cannot (CreateProcess's PATH search
-        only appends .exe). Using the bare name would make every query fail
-        silently, so packages would be reported as not found.
-
-        Args:
-            *args: Arguments to pass to pkg-config.
-
-        Returns:
-            Tuple of (success, output).
+        Invokes the full path resolved by is_available(), not the bare
+        name: on Windows pkg-config may be a .bat/.cmd shim (e.g.
+        Strawberry Perl's), which shutil.which() finds via PATHEXT but a
+        bare-name subprocess launch cannot (CreateProcess only appends
+        .exe).
         """
         self.is_available()  # Resolve the executable path if not done yet.
         cmd = self._pkg_config_path or self.pkg_config_cmd
@@ -89,10 +78,7 @@ class PkgConfigFinder(BaseFinder):
             return False, ""
 
     def _parse_flags(self, flags_str: str) -> list[str]:
-        """Parse a flags string into a list.
-
-        Handles shell quoting properly.
-        """
+        """Parse a flags string into a list, respecting shell quoting."""
         if not flags_str:
             return []
         return shlex.split(flags_str)

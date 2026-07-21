@@ -18,15 +18,7 @@ if TYPE_CHECKING:
 
 
 def topological_sort_targets(targets: list[Target]) -> list[Target]:
-    """Sort targets in dependency order (dependencies first).
-
-    Uses Kahn's algorithm for topological sorting.
-
-    Args:
-        targets: List of targets to sort.
-
-    Returns:
-        Targets in dependency order (independent targets first).
+    """Sort targets in dependency order (dependencies first) via Kahn's algorithm.
 
     Raises:
         DependencyCycleError: If there's a cycle in the dependency graph.
@@ -72,16 +64,10 @@ def topological_sort_targets(targets: list[Target]) -> list[Target]:
 
 
 def detect_cycles_in_targets(targets: list[Target]) -> list[list[str]]:
-    """Find all cycles in the target dependency graph.
-
-    Uses DFS with coloring to find back edges (cycles).
-
-    Args:
-        targets: Targets to check for cycles.
+    """Find all cycles in the target dependency graph (DFS back edges).
 
     Returns:
-        List of cycles, where each cycle is a list of target names.
-        Empty list if no cycles.
+        List of cycles, each a list of target names; empty if none.
     """
     cycles: list[list[str]] = []
     # Keyed on qualified_name (project::target): two targets in different
@@ -133,12 +119,6 @@ def detect_cycles_in_targets(targets: list[Target]) -> list[list[str]]:
 def topological_sort_nodes(nodes: list[Node]) -> list[Node]:
     """Sort nodes in dependency order (dependencies first).
 
-    Args:
-        nodes: List of nodes to sort.
-
-    Returns:
-        Nodes in dependency order.
-
     Raises:
         DependencyCycleError: If there's a cycle in the dependency graph.
     """
@@ -179,16 +159,7 @@ def topological_sort_nodes(nodes: list[Node]) -> list[Node]:
 
 
 def collect_all_nodes(targets: list[Target]) -> set[Node]:
-    """Collect all nodes from a list of targets.
-
-    Recursively collects nodes from targets and their dependencies.
-
-    Args:
-        targets: Targets to collect nodes from.
-
-    Returns:
-        Set of all nodes.
-    """
+    """Collect all nodes from targets and their dependencies, recursively."""
     result: set[Node] = set()
     visited_targets: set[str] = set()
 
@@ -212,15 +183,8 @@ def collect_all_nodes(targets: list[Target]) -> set[Node]:
 
 
 def collect_build_order(target: Target) -> list[Target]:
-    """Get all targets needed to build a given target, in build order.
-
-    Returns targets in the order they should be built (dependencies first).
-
-    Args:
-        target: The target to build.
-
-    Returns:
-        List of targets in build order, ending with the given target.
+    """Return all targets needed to build *target*, dependencies first,
+    ending with the target itself.
     """
     all_targets: list[Target] = []
     visited: set[str] = set()

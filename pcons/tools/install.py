@@ -1,18 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Install tool and builders for copying files to destinations.
+"""Install tool (copy command templates) and the Install/InstallAs/InstallDir
+builders.
 
-This module provides:
-- InstallTool: Standalone tool with command templates (copycmd, copytreecmd)
-- Install: Builder for copying multiple files to a destination directory
-- InstallAs: Builder for copying a single file to a specific path (with rename)
-- InstallDir: Builder for recursively copying a directory tree
-
-Users can customize the copy commands via the tool namespace:
-    env.install.copycmd = ["cp", SourcePath(), TargetPath()]  # Use system cp
-
-Target-level overrides are supported for InstallDir:
-    install_dir = project.InstallDir("dist/", source_dir)
-    install_dir.destdir = "custom_dest"  # Override for this target
+Users can customize the copy commands via the tool namespace
+(env.install.copycmd) or override destdir per InstallDir target.
 """
 
 from __future__ import annotations
@@ -44,12 +35,10 @@ if TYPE_CHECKING:
 def _stamp_name_for(path: Path) -> str:
     """Convert a path to a flat stamp file name.
 
-    POSIX absolute paths start with "/" which becomes "_".
-    Windows absolute paths start with "C:\", the colon is replaced so they
-    become "_C_..." matching the POSIX pattern.
+    POSIX absolute paths start with "/" which becomes "_"; a Windows
+    drive colon is replaced so "C:\\..." becomes "_C_..." to match.
     """
     s = str(path)
-    # Replace Windows drive colon so "C:\..." becomes "_C_..." like POSIX "_/..."
     if len(s) >= 2 and s[1] == ":":
         s = "_" + s[0] + s[2:]
     return s.replace("/", "_").replace("\\", "_") + ".stamp"
@@ -78,15 +67,7 @@ def _install_role(dest: Path) -> PathRole | None:
 
 
 def _deduplicate_target_name(project: Project, base_name: str) -> str:
-    """Generate a unique target name, appending a numeric suffix if needed.
-
-    Args:
-        project: The project to check for existing targets.
-        base_name: The desired target name.
-
-    Returns:
-        A target name that does not conflict with existing targets.
-    """
+    """Generate a unique target name, appending a numeric suffix if needed."""
     target_name = base_name
     counter = 1
     while project.get_target(target_name, False) is not None:
@@ -194,20 +175,12 @@ class InstallTool(StandaloneTool):
     """
 
     def __init__(self) -> None:
-        """Initialize the install tool."""
         super().__init__("install")
 
     def default_vars(self) -> dict[str, object]:
-        """Return default command templates.
-
-        Uses Python helper scripts for cross-platform compatibility.
-        Commands are lists of tokens for proper handling of paths with spaces.
-        SourcePath/TargetPath markers are converted by generators to appropriate
-        syntax ($in/$out for Ninja, actual paths for Makefile).
-        """
+        """Return default command templates (cross-platform Python helpers)."""
         python_cmd = sys.executable.replace("\\", "/")
         return {
-            # Simple file copy: copy source to target
             "copycmd": [
                 python_cmd,
                 "-m",
@@ -217,7 +190,6 @@ class InstallTool(StandaloneTool):
                 TargetPath(),
             ],
             # Directory tree copy with depfile support
-            # $install.destdir is expanded by pcons subst() at generation time
             "copytreecmd": [
                 python_cmd,
                 "-m",
@@ -230,32 +202,22 @@ class InstallTool(StandaloneTool):
                 SourcePath(),
                 "$install.destdir",
             ],
-            # Default destination directory (can be overridden per-target)
             "destdir": "",
         }
 
     def builders(self) -> dict[str, Builder]:
-        """Return builders provided by this tool.
-
-        Returns empty dict - builders are registered via @builder decorator
-        below and accessed via project.Install() / project.InstallAs() /
-        project.InstallDir().
-        """
+        """Empty: builders are registered via the @builder decorator below."""
         return {}
 
 
 class InstallNodeFactory(PendingSourceFactory):
-    """Factory for creating install/copy nodes.
-
-    Handles creation of nodes for Install, InstallAs, and InstallDir targets.
-    This factory is used during the pending-sources resolution phase.
-    """
+    """Factory creating install/copy nodes during pending-sources resolution."""
 
     def resolve_pending(self, target: Target) -> None:
         """Resolve pending sources for an install target (phase 2).
 
-        This is called after main resolution when output_nodes are populated,
-        allowing Install targets to reference outputs from other targets.
+        Runs after main resolution when output_nodes are populated, so
+        Install targets can reference outputs from other targets.
         """
         if not target._builder_data:
             return
@@ -264,7 +226,6 @@ class InstallNodeFactory(PendingSourceFactory):
         if builder_name not in ("Install", "InstallAs", "InstallDir"):
             return
 
-        # Resolve pending sources to FileNodes
         resolved_sources = self._resolve_sources(target)
 
         if builder_name == "Install":
@@ -278,17 +239,11 @@ class InstallNodeFactory(PendingSourceFactory):
             self._create_install_dir_node(target, resolved_sources, dest_dir)
 
     def _get_install_env(self, target: Target) -> Environment | None:
-        """Get an environment that has the install tool.
-
-        First tries to get env from target, then falls back to finding
-        an environment from the project that has the install tool set up.
-        """
-        # Try target's env first
+        """Get the target's env, or any project env with the install tool."""
         env = getattr(target, "_env", None)
         if env is not None:
             return env
 
-        # Fall back to project environments
         for e in self.project.environments:
             if hasattr(e, "install"):
                 return e
@@ -300,18 +255,14 @@ class InstallNodeFactory(PendingSourceFactory):
     ) -> None:
         """Create copy nodes for Install target.
 
-        For each source, checks whether the source represents a directory
-        (by examining the project node graph for child nodes).  Directory
-        sources are handled with copytreecmd (depfile + stamp), while file
-        sources use copycmd.
+        Directory sources (those with child nodes in the project graph)
+        use copytreecmd (depfile + stamp); file sources use copycmd.
         """
-        # Normalize destination directory using PathResolver
         path_resolver = target.path_resolver
         dest_dir = path_resolver.normalize_target_path(
             dest_dir, target_name=target.name
         )
 
-        # Get environment with install tool
         env = self._get_install_env(target)
 
         installed_nodes: list[FileNode] = []
@@ -319,23 +270,19 @@ class InstallNodeFactory(PendingSourceFactory):
             if not isinstance(file_node, FileNode):
                 continue
 
-            # Check if this source is a directory by examining the node graph
             if self.project.has_child_nodes(file_node.path):
                 self._create_install_dir_node_for(
                     target, file_node, dest_dir, env, installed_nodes
                 )
                 continue
 
-            # Destination path
             dest_path = dest_dir / file_node.path.name
 
-            # Create destination node via project for deduplication.
-            # Mark it as an install output only for absolute (outside-build) destinations; see _install_role.
+            # Via project.node() for deduplication; install_output role
+            # only for outside-build destinations (see _install_role).
             dest_node = self.project.node(dest_path, role=_install_role(dest_path))
             dest_node.depends([file_node])
 
-            # Store build info referencing env.install.copycmd
-            # The command template comes from the install tool's default_vars
             dest_node._build_info = {
                 "tool": "install",
                 "command_var": "copycmd",
@@ -346,7 +293,6 @@ class InstallNodeFactory(PendingSourceFactory):
 
             installed_nodes.append(dest_node)
 
-        # Add installed files as output nodes
         target._install_nodes = installed_nodes
         target.output_nodes.extend(installed_nodes)
 
@@ -360,22 +306,19 @@ class InstallNodeFactory(PendingSourceFactory):
     ) -> None:
         """Create a copytree node for a directory source within Install.
 
-        This is used when _create_install_nodes detects that a source is
-        a directory (has child nodes in the project graph).  Uses the same
-        copytreecmd + depfile/stamp mechanism as InstallDir.
+        Same copytreecmd + depfile/stamp mechanism as InstallDir.
         """
         from pcons.tools.archive_context import InstallContext
 
         source_path = source_node.path
         dest_path = dest_dir / source_path.name
 
-        # Compute dest relative to build dir for a platform-neutral stamp name
+        # Dest relative to build dir for a platform-neutral stamp name
         try:
             rel_dest = dest_path.relative_to(target.build_dir)
         except ValueError:
             rel_dest = dest_path
 
-        # Stamp file for ninja tracking
         stamps_dir = target.build_dir / ".stamps"
         stamp_name = _stamp_name_for(rel_dest)
         stamp_path = stamps_dir / stamp_name
@@ -426,18 +369,16 @@ class InstallNodeFactory(PendingSourceFactory):
                 location=target.defined_at,
             )
 
-        # Normalize destination path using PathResolver
         path_resolver = target.path_resolver
         dest = path_resolver.normalize_target_path(dest, target_name=target.name)
 
         source_node = sources[0]
 
-        # Create destination node via project for deduplication.
-        # Mark it as an install output only for absolute (outside-build) destinations; see _install_role.
+        # Via project.node() for deduplication; install_output role only
+        # for outside-build destinations (see _install_role).
         dest_node = self.project.node(dest, role=_install_role(dest))
         dest_node.depends([source_node])
 
-        # Store build info referencing env.install.copycmd
         env = self._get_install_env(target)
         dest_node._build_info = {
             "tool": "install",
@@ -447,7 +388,6 @@ class InstallNodeFactory(PendingSourceFactory):
             "env": env,
         }
 
-        # Add installed file as output node
         target._install_nodes = [dest_node]
         target.output_nodes.append(dest_node)
 
@@ -468,7 +408,6 @@ class InstallNodeFactory(PendingSourceFactory):
                 location=target.defined_at,
             )
 
-        # Normalize destination directory using PathResolver
         path_resolver = target.path_resolver
         dest_dir = path_resolver.normalize_target_path(
             dest_dir, target_name=target.name
@@ -477,24 +416,20 @@ class InstallNodeFactory(PendingSourceFactory):
         source_node = sources[0]
         source_path = source_node.path
 
-        # Destination is dest_dir / source directory name
         dest_path = dest_dir / source_path.name
 
-        # Compute dest relative to build dir for a platform-neutral stamp name
+        # Dest relative to build dir for a platform-neutral stamp name
         try:
             rel_dest = dest_path.relative_to(target.build_dir)
         except ValueError:
             rel_dest = dest_path
 
-        # Put stamp files in a dedicated .stamps directory
         stamps_dir = target.build_dir / ".stamps"
         stamp_name = _stamp_name_for(rel_dest)
         stamp_path = stamps_dir / stamp_name
 
-        # Create stamp node via project for deduplication (this is what ninja
-        # tracks). The stamp lives under build/.stamps, so it is a normal
-        # build output; the copied tree's destination is handled separately
-        # via the copytree command's destdir argument.
+        # The stamp under build/.stamps is what ninja tracks; the copied
+        # tree's destination is passed via the copytree command's destdir.
         stamp_node = self.project.node(stamp_path)
         # Source directory is the explicit dep (becomes $in for copytree).
         # Child nodes are implicit deps — they trigger rebuilds but don't
@@ -503,15 +438,11 @@ class InstallNodeFactory(PendingSourceFactory):
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
 
-        # Create context from target (merges env defaults with target overrides)
         env = self._get_install_env(target)
         context = InstallContext.from_target(
             target, env, destdir=str(rel_dest).replace("\\", "/")
         )
 
-        # Store build info referencing env.install.copytreecmd
-        # The context provides env overrides for command expansion
-        # Depfile is PathToken with the stamp path + ".d" suffix
         stamp_node._build_info = cast(
             BuildInfo,
             {
@@ -523,13 +454,12 @@ class InstallNodeFactory(PendingSourceFactory):
                 ),
                 "deps_style": "gcc",
                 "description": "INSTALLDIR $out",
-                # Context provides get_env_overrides() for template expansion
+                # Provides get_env_overrides() for template expansion
                 "context": context,
                 "env": env,
             },
         )
 
-        # Add stamp node as output
         target._install_nodes = [stamp_node]
         target.output_nodes.append(stamp_node)
 
@@ -610,7 +540,6 @@ class InstallAsBuilder:
         Raises:
             BuilderError: If source is a list (use Install() for multiple files).
         """
-        # Validate source is not a list - common user error
         if isinstance(source, (list, tuple)):
             from pcons.core.errors import BuilderError
 

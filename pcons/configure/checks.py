@@ -114,10 +114,8 @@ class ToolChecks:
     def _tool_flags(self) -> list[str]:
         """The tool's current string flags, included in every check compile.
 
-        This is what makes checks answer for the *target*: cross presets
-        put ``--target=``/``-isysroot``/``--sysroot`` here, so a check
-        probes the same compilation the build will do (the same reason
-        autoconf includes CFLAGS in its probes).
+        Cross presets put ``--target=``/``-isysroot``/``--sysroot`` here,
+        so a check probes the same compilation the build will do.
         """
         if self._tool_config is None:
             return []
@@ -274,11 +272,7 @@ class ToolChecks:
             return outcome
         compiler = outcome
 
-        # Minimal C program
         source = "int main(void) { return 0; }\n"
-
-        # Use -Werror / /WX so that flags producing warnings (like clang's
-        # "unknown warning option") are treated as failures.
         werror = self._get_werror_flag()
 
         cdir = self._make_check_dir()
@@ -322,7 +316,7 @@ class ToolChecks:
             self._tool_name,
             self._caller_location(),
         )
-        # Include defines in cache key so different define combos are cached separately
+        # Defines/flags go in the cache key: different combos, different answers.
         cache_parts = [header]
         if defines:
             cache_parts.extend(sorted(defines))
@@ -370,9 +364,8 @@ class ToolChecks:
             self._tool_name,
             self._caller_location(),
         )
-        # Include headers in the cache key: the same type name can exist or
-        # not depending on which headers are included (e.g. a typedef only
-        # visible via a specific header).
+        # Headers go in the cache key: a type may only exist via a
+        # specific header.
         cache_parts = [type_name]
         if headers:
             cache_parts.extend(sorted(headers))
@@ -416,7 +409,7 @@ class ToolChecks:
             self._tool_name,
             self._caller_location(),
         )
-        # Include headers in the cache key, same rationale as check_type().
+        # Headers go in the cache key, as in check_type().
         cache_parts = [type_name]
         if headers:
             cache_parts.extend(sorted(headers))
@@ -434,8 +427,7 @@ class ToolChecks:
         if headers:
             includes = "\n".join(f"#include <{h}>" for h in headers)
 
-        # Use compile-time assertion to encode the size
-        # This avoids needing to run the compiled program
+        # Compile-time assertion encodes the size; nothing is executed.
         cdir = self._make_check_dir()
         try:
             for size in [1, 2, 4, 8, 16]:
@@ -539,9 +531,8 @@ PCONS_UNDEFINED
             self._tool_name,
             self._caller_location(),
         )
-        # Include headers/libs in the cache key: they change what the probe
-        # actually compiles/links against, so a different combo must not
-        # collide with (or hit) another combo's cached result.
+        # Headers/libs go in the cache key: they change what the probe
+        # compiles/links against.
         cache_parts = [function]
         if headers:
             cache_parts.extend(sorted(headers))
@@ -645,9 +636,8 @@ int main(void) {{
             src_path = dir_path / f"check{suffix}"
             src_path.write_text(source)
 
-            # The tool's own flags come first: cross presets put the
-            # target selection (--target=, -isysroot) there, and a check
-            # must probe the same compilation the build will do.
+            # Tool flags first, so the check probes the target the build
+            # will use (see _tool_flags).
             tool_flags = self._tool_flags()
             if self._is_msvc_style():
                 out_path = dir_path / ("check.exe" if link else "check.obj")

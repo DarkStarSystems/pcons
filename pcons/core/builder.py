@@ -26,38 +26,22 @@ if TYPE_CHECKING:
 
 @dataclass
 class OutputSpec:
-    """Specification for a builder output.
+    """Specification for a builder output."""
 
-    Args:
-        name: Output name for variable reference (e.g., "import_lib")
-        suffix: File suffix (e.g., ".lib")
-        implicit: If True, this is a Ninja implicit output (|)
-        required: If True, must always be produced
-    """
-
-    name: str
-    suffix: str
-    implicit: bool = False  # Ninja implicit output
-    required: bool = True
+    name: str  # Output name for variable reference (e.g. "import_lib")
+    suffix: str  # File suffix (e.g. ".lib")
+    implicit: bool = False  # Ninja implicit output (|)
+    required: bool = True  # Must always be produced
 
 
 class OutputGroup:
     """Container for multiple output nodes with named access.
 
-    Allows: outputs.primary, outputs.import_lib, outputs["import_lib"]
-    Also supports list() for iteration and len().
-
-    This class provides backward compatibility by behaving like a list
-    when used in contexts that expect iterables (e.g., objs += env.link.SharedLibrary(...))
+    Allows outputs.primary, outputs.import_lib, outputs["import_lib"], and
+    behaves like an iterable of nodes (e.g. objs += env.link.SharedLibrary(...)).
     """
 
     def __init__(self, nodes: dict[str, FileNode], primary_name: str) -> None:
-        """Initialize an OutputGroup.
-
-        Args:
-            nodes: Dictionary mapping output names to FileNode instances
-            primary_name: The name of the primary output in the nodes dict
-        """
         self._nodes = nodes
         self._primary_name = primary_name
 
@@ -146,17 +130,7 @@ class Builder(Protocol):
         sources: list[str | Path | Node],
         **kwargs: Any,
     ) -> list[Node] | OutputGroup:
-        """Build targets from sources.
-
-        Args:
-            env: The build environment.
-            target: Target file path, or None to auto-generate.
-            sources: Source files or nodes.
-            **kwargs: Additional builder-specific options.
-
-        Returns:
-            List of created target nodes.
-        """
+        """Build targets from sources (target=None auto-generates paths)."""
         ...
 
 
@@ -176,15 +150,6 @@ class BaseBuilder(ABC):
         target_suffixes: list[str] | None = None,
         language: str | None = None,
     ) -> None:
-        """Initialize a builder.
-
-        Args:
-            name: Builder name.
-            tool_name: Name of the tool this builder belongs to.
-            src_suffixes: Accepted input suffixes (e.g., ['.c', '.h']).
-            target_suffixes: Output suffixes (e.g., ['.o']).
-            language: Language for linker selection (e.g., 'c', 'cxx').
-        """
         self._name = name
         self._tool_name = tool_name
         self._src_suffixes = src_suffixes or []
@@ -218,20 +183,14 @@ class BaseBuilder(ABC):
         sources: list[str | Path | Node],
         **kwargs: Any,
     ) -> list[Node] | OutputGroup:
-        """Build targets from sources.
-
-        Normalizes inputs and delegates to _build().
-        """
-        # Normalize sources to nodes (use project for deduplication when available)
+        """Build targets from sources: normalize inputs, delegate to _build()."""
         source_nodes = self._normalize_sources(sources, env)
 
-        # Get target path(s)
         if target is None:
             target_paths = self._default_targets(source_nodes, env)
         else:
             target_paths = [Path(target) if isinstance(target, str) else target]
 
-        # Build
         return self._build(env, target_paths, source_nodes, **kwargs)
 
     def _normalize_sources(
@@ -239,10 +198,7 @@ class BaseBuilder(ABC):
         sources: list[str | Path | Node],
         env: Environment | None = None,
     ) -> list[Node]:
-        """Convert sources to nodes.
-
-        When env has a project, uses project.node() for deduplication.
-        """
+        """Convert sources to nodes, via project.node() (dedup) when available."""
         result: list[Node] = []
         project = getattr(env, "_project", None) if env else None
         for src in sources:
@@ -259,11 +215,8 @@ class BaseBuilder(ABC):
         sources: list[Node],
         env: Environment,
     ) -> list[Path]:
-        """Generate default target paths from sources.
-
-        Default implementation: replace suffix with first target suffix.
-        Subclasses can override for different behavior.
-        """
+        """Default target paths: source names in build_dir with the first
+        target suffix. Subclasses can override."""
         if not self._target_suffixes:
             raise ValueError(f"Builder {self.name} has no target suffixes")
 
@@ -286,20 +239,7 @@ class BaseBuilder(ABC):
         sources: list[Node],
         **kwargs: Any,
     ) -> list[Node] | OutputGroup:
-        """Actually create the target nodes.
-
-        Subclasses implement this to create FileNodes with proper
-        dependencies and builder references.
-
-        Args:
-            env: Build environment.
-            targets: Target file paths.
-            sources: Source nodes.
-            **kwargs: Builder-specific options.
-
-        Returns:
-            List of created target nodes.
-        """
+        """Create the target nodes with dependencies and builder references."""
         ...
 
     def _get_tool_config(self, env: Environment) -> ToolConfig:
@@ -335,20 +275,14 @@ class CommandBuilder(BaseBuilder):
         """Initialize a command builder.
 
         Args:
-            name: Builder name.
-            tool_name: Tool name.
-            command_var: Variable name containing command template
-                        (e.g., 'cmdline' for $cc.cmdline).
-            src_suffixes: Accepted input suffixes.
-            target_suffixes: Output suffixes.
-            language: Language for linker selection.
-            single_source: If True, create one target per source.
-                          If False, all sources go to one target.
-            depfile: Depfile specification - TargetPath(suffix=".d") for depfile
-                    path derived from target output, or None.
+            command_var: Variable holding the command template
+                (e.g. 'cmdline' for $cc.cmdline).
+            single_source: If True, create one target per source;
+                otherwise all sources go to one target.
+            depfile: TargetPath(suffix=".d") to derive the depfile path
+                from the target output, or None.
             deps_style: Dependency style for Ninja ("gcc" or "msvc").
             restat: If True, Ninja re-checks output timestamp after build.
-                   Useful when a command may not change its output.
         """
         super().__init__(
             name,
@@ -423,8 +357,6 @@ class CommandBuilder(BaseBuilder):
                 suffix=self._depfile.suffix,
             )
 
-        # Store build info for generator
-        # These will be used by the generator to create ninja rules
         node._build_info = BuildInfo(
             tool=self._tool_name,
             command_var=self._command_var,
@@ -474,17 +406,8 @@ class MultiOutputBuilder(CommandBuilder):
     ) -> None:
         """Initialize a multi-output builder.
 
-        Args:
-            name: Builder name.
-            tool_name: Tool name.
-            command_var: Variable name containing command template.
-            outputs: List of OutputSpec defining the outputs. First is primary.
-            src_suffixes: Accepted input suffixes.
-            language: Language for linker selection.
-            single_source: If True, create one target per source.
-            depfile: Depfile specification - TargetPath(suffix=".d") for depfile
-                    path derived from target output, or None.
-            deps_style: Dependency style for Ninja ("gcc" or "msvc").
+        Parameters are those of CommandBuilder, plus ``outputs``: the
+        OutputSpecs defining the outputs, first is primary.
         """
         # Primary output determines target_suffixes
         primary = outputs[0]
@@ -513,12 +436,7 @@ class MultiOutputBuilder(CommandBuilder):
         sources: list[Node],
         **kwargs: Any,
     ) -> list[Node] | OutputGroup:
-        """Create target nodes for command execution.
-
-        For multi-output builders, returns an OutputGroup instead of a list
-        when there are multiple outputs. The OutputGroup is iterable for
-        backward compatibility.
-        """
+        """Create target nodes; returns an OutputGroup for a single build."""
         tool_config = self._get_tool_config(env)
         defined_at = kwargs.get("defined_at") or get_caller_location()
 
@@ -549,10 +467,7 @@ class MultiOutputBuilder(CommandBuilder):
         sources: list[Node],
         defined_at: SourceLocation,
     ) -> OutputGroup:
-        """Create multiple output nodes for a single build.
-
-        Returns an OutputGroup containing all output nodes.
-        """
+        """Create all output nodes for a single build."""
         nodes: dict[str, FileNode] = {}
         primary_name = self._outputs[0].name
         project = getattr(env, "_project", None)
@@ -578,8 +493,7 @@ class MultiOutputBuilder(CommandBuilder):
         primary_node = nodes[primary_name]
         primary_node.depends(sources)
 
-        # Store build info on the primary node
-        # Include information about all outputs for the generator
+        # Build info lives on the primary node, covering all outputs
         output_info: dict[str, OutputInfo] = {
             spec.name: {
                 "path": nodes[spec.name].path,
@@ -623,11 +537,8 @@ class MultiOutputBuilder(CommandBuilder):
 
 
 class GenericCommandBuilder(BaseBuilder):
-    """A builder for arbitrary shell commands.
-
-    This builder allows users to run arbitrary shell commands as part of
-    the build process. It supports variable substitution for common patterns
-    like $SOURCE, $TARGET, $SOURCES, $TARGETS.
+    """A builder for arbitrary shell commands, with $SOURCE/$TARGET-style
+    variable substitution.
 
     Example:
         # Generate a header from a template
@@ -655,19 +566,14 @@ class GenericCommandBuilder(BaseBuilder):
         """Initialize a generic command builder.
 
         Args:
-            command: The shell command to run. Supports variable substitution:
-                    - $SOURCE, $SOURCES: Source file(s)
-                    - $TARGET, $TARGETS: Target file(s)
-                    - ${SOURCES[n]}, ${TARGETS[n]}: Indexed access
-            rule_name: Optional custom rule name for Ninja. If not provided,
-                      a unique name is generated using uuid.
-            restat: If True, Ninja will re-stat the output after running the
-                   command. If the output didn't change, downstream targets
-                   won't be rebuilt. Useful for code generators that may
-                   produce identical output.
+            command: The shell command. Supports $SOURCE(S), $TARGET(S),
+                and indexed ${SOURCES[n]}/${TARGETS[n]}.
+            rule_name: Optional custom Ninja rule name; auto-generated
+                if not provided.
+            restat: If True, Ninja re-stats the output after the command,
+                so unchanged output doesn't rebuild downstream targets.
         """
-        # Generate unique rule name if not provided
-        # Using uuid4 ensures uniqueness without thread synchronization
+        # uuid4 gives uniqueness without thread synchronization
         if rule_name is None:
             rule_name = f"command_{uuid.uuid4().hex[:8]}"
 
@@ -694,7 +600,6 @@ class GenericCommandBuilder(BaseBuilder):
 
         from pcons.core.subst import SourcePath, TargetPath
 
-        # Convert to token list
         if isinstance(command, str):
             tokens = command.split()
         else:
@@ -712,13 +617,9 @@ class GenericCommandBuilder(BaseBuilder):
             elif token in ("$TARGET", "$TARGETS"):
                 result.append(TargetPath())
             elif match := indexed_source_pattern.match(token):
-                # ${SOURCES[n]} -> SourcePath(index=n)
-                index = int(match.group(1))
-                result.append(SourcePath(index=index))
+                result.append(SourcePath(index=int(match.group(1))))
             elif match := indexed_target_pattern.match(token):
-                # ${TARGETS[n]} -> TargetPath(index=n)
-                index = int(match.group(1))
-                result.append(TargetPath(index=index))
+                result.append(TargetPath(index=int(match.group(1))))
             else:
                 # Keep as string (covers embedded variables like /Fo$TARGET
                 # and plain tokens)
@@ -758,7 +659,6 @@ class GenericCommandBuilder(BaseBuilder):
         defined_at = kwargs.get("defined_at") or get_caller_location()
         project = getattr(env, "_project", None)
 
-        # Create target nodes (all FileNode, tracked for type safety)
         result: list[FileNode] = []
         for target in targets:
             node = (
@@ -781,8 +681,7 @@ class GenericCommandBuilder(BaseBuilder):
                     continue
                 env.subst_list(token)
 
-        # Store build info on the first (primary) target
-        # This is used by the Ninja generator to create build rules
+        # Build info lives on the first (primary) target
         if result:
             primary = result[0]
             primary._build_info = {

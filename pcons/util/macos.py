@@ -203,13 +203,12 @@ def create_universal_binary(
     input_nodes: list[FileNode] = []
     for inp in inputs:
         if isinstance(inp, Target):
-            # Get the target's output nodes
             if inp.output_nodes:
                 for node in inp.output_nodes:
                     if isinstance(node, FileNode):
                         input_nodes.append(node)
             elif inp.nodes:
-                # Fallback to nodes for unresolved targets
+                # Fallback for unresolved targets
                 for node in inp.nodes:
                     if isinstance(node, FileNode):
                         input_nodes.append(node)
@@ -221,20 +220,15 @@ def create_universal_binary(
     if not input_nodes:
         raise ValueError("create_universal_binary requires at least one input")
 
-    # Get any environment from the project to use for Command()
-    # We need an environment to call Command(), but lipo doesn't need
-    # toolchain-specific settings
+    # Command() needs an environment; lipo needs no toolchain settings,
+    # so any (or a minimal) one will do.
     if project.environments:
         env = project.environments[0]
     else:
-        # Create a minimal environment if none exists
         from pcons.core.environment import Environment
 
         env = Environment()
 
-    # Create the lipo command
-    # The command uses $SOURCES and $TARGET (generator-agnostic variables)
-    # Convert FileNodes to paths for the source argument
     source_paths: list[Path | str] = [node.path for node in input_nodes]
 
     lipo_target = env.Command(
@@ -245,7 +239,6 @@ def create_universal_binary(
     )
 
     # Mark the build info with tool="lipo" for the ninja generator
-    # This is used after resolve() populates output_nodes
     build_info = lipo_target._build_info if lipo_target._build_info is not None else {}
     build_info["tool"] = "lipo"
     lipo_target._build_info = build_info

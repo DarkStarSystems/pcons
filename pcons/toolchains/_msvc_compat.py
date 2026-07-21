@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Shared base class for MSVC-compatible toolchains.
-
-This module provides common functionality for toolchains that produce
-MSVC-compatible binaries on Windows (MSVC and clang-cl).
-"""
+"""Shared base class for MSVC-compatible toolchains (MSVC and clang-cl)."""
 
 from __future__ import annotations
 
@@ -21,20 +17,12 @@ if TYPE_CHECKING:
 class MsvcCompatibleToolchain(BaseToolchain):
     """Base class for MSVC-compatible toolchains (MSVC and clang-cl).
 
-    Provides shared implementations for methods that are identical between
-    MSVC and clang-cl toolchains, including:
-    - Source file handling (.c, .cpp, .rc, .asm)
-    - Auxiliary input handling (.def, .manifest)
-    - Output naming conventions (.obj, .lib, .dll, .exe)
-    - Architecture flag handling (/MACHINE:xxx)
-    - Build variant handling (debug, release, etc.)
-
-    Subclasses should override methods where behavior differs, such as
-    cross-compilation flags or tool configuration.
+    Shares source/auxiliary-input handling, output naming, /MACHINE:
+    arch flags, and build variants; subclasses override where the two
+    toolchains differ.
     """
 
-    # Named feature presets (MSVC-compatible). See docs/presets.md. `warnings`
-    # enables warnings; `werror` (/WX) promotes them to errors — compose both.
+    # Named feature presets; see docs/presets.md.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {
             "compile_flags": ["/W4"],
@@ -94,11 +82,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         return MsvcCompileLinkContext
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Return handler for source file suffix.
-
-        Handles C, C++, resource (.rc), and assembly (.asm) files with
-        MSVC-compatible settings.
-        """
+        """Return handler for C, C++, resource (.rc), or assembly (.asm) files."""
         from pcons.tools.toolchain import SourceHandler
 
         suffix_lower = suffix.lower()
@@ -118,11 +102,7 @@ class MsvcCompatibleToolchain(BaseToolchain):
         return None
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
-        """Return handler for auxiliary input files.
-
-        Handles .def (module definition) and .manifest files.
-        Both MSVC and lld-link require /MANIFEST:EMBED with /MANIFESTINPUT.
-        """
+        """Return handler for .def (module definition) and .manifest files."""
         from pcons.tools.toolchain import AuxiliaryInputHandler
 
         suffix_lower = suffix.lower()
@@ -175,11 +155,8 @@ class MsvcCompatibleToolchain(BaseToolchain):
         return f"/std:c++{standard}"
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """MSVC-compatible toolchains have no different-platform targets.
-
-        Everything they can build for is Windows, so CPU selection is the
-        set_target_arch knob's job (see docs/presets.md).
-        """
+        """Raise: these toolchains target only Windows; CPU selection is
+        set_target_arch's job."""
         name = getattr(preset, "name", preset)
         raise ValueError(
             f"Cross preset '{name}' does not apply to the {self.name} toolchain: "

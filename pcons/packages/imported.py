@@ -1,10 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Imported targets for external dependencies.
-
-This module provides ImportedTarget, which represents an external library
-that was found by a package finder. Unlike regular targets that are built
-from source, imported targets represent pre-built libraries.
-"""
+"""Imported targets: pre-built external libraries found by package finders."""
 
 from __future__ import annotations
 
@@ -105,15 +100,10 @@ class ImportedTarget(Target):
             self._populate_public_from_package(package)
 
     def _populate_public_from_package(self, package: PackageDescription) -> None:
-        """Populate public usage requirements from package description.
-
-        This ensures that when a target links to this ImportedTarget,
-        the package's include dirs, libraries, and flags are properly
-        propagated through the standard usage requirements mechanism.
+        """Populate public usage requirements from the package description.
 
         Frameworks are lowered to ``-F``/``-framework`` link-flag pairs
-        here because the resolve path consumes ``link_flags`` (the pairs
-        merge as units via the separated-arg flag machinery).
+        here because the resolve path consumes ``link_flags``.
         """
         reqs = requirements_from_package(package)
         for name in (

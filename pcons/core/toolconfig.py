@@ -167,12 +167,9 @@ class ToolConfig(_ToolConfigStubs):
     def as_namespace(self) -> dict[str, Any]:
         """Return as a namespace dict for substitution.
 
-        Returns a shallow copy of the variables dict with deep copies of
-        mutable values (lists, dicts) to prevent accidental mutation of
-        the original tool configuration during variable substitution.
+        Lists and dicts are copied so substitution can't mutate the tool config.
         """
         vars_dict: dict[str, Any] = object.__getattribute__(self, "_vars")
-        # Return a copy with deep-copied mutable values to prevent mutation
         result: dict[str, Any] = {}
         for key, value in vars_dict.items():
             if isinstance(value, list):
@@ -188,7 +185,6 @@ class ToolConfig(_ToolConfigStubs):
         vars_dict: dict[str, Any] = object.__getattribute__(self, "_vars")
         new_vars: dict[str, Any] = {}
         for key, value in vars_dict.items():
-            # Deep copy lists to avoid shared mutation
             if isinstance(value, list):
                 new_vars[key] = list(value)
             elif isinstance(value, dict):

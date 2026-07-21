@@ -88,17 +88,12 @@ class FinderChain:
         Args:
             finders: List of finders to try in order.
         """
-        # Built-in chains skip unavailable finders quietly — a machine
-        # without pkg-config is normal, not noteworthy. An explicit add()
-        # warns instead: the user asked for that finder by name.
+        # Skip unavailable finders quietly — a machine without pkg-config
+        # is normal, not noteworthy.
         self._finders = [f for f in finders if f.is_available()]
 
     def add(self, finder: BaseFinder, *, front: bool = True) -> None:
-        """Add a finder, applying the same availability filter as __init__.
-
-        An explicitly added finder that is unavailable (its tool isn't
-        installed) is skipped with a warning rather than silently
-        inserted-and-never-matching.
+        """Add a finder; an unavailable one is skipped with a warning.
 
         Args:
             finder: The finder to add.

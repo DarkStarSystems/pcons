@@ -135,11 +135,8 @@ class Environment(_EnvironmentStubs):
         # Initialize tools from toolchain if provided
         if toolchain is not None:
             toolchain.setup(self)
-            # Record the toolchain's base flags before any user/preset edits, so
-            # explain() can attribute them (e.g. /nologo) to the toolchain.
             self._record_toolchain_baseline(toolchain, list(self._get_tools().keys()))
-            # Toolchain-declared presets (e.g. SDK cmd/sysroot wiring) apply
-            # after the baseline so explain() attributes them by name.
+            # After the baseline, so explain() attributes these by name.
             for preset in toolchain.setup_presets(self):
                 self.apply(preset)
 
@@ -515,44 +512,23 @@ class Environment(_EnvironmentStubs):
     # Convenience methods for common patterns
 
     def apply(self, preset: Preset) -> None:
-        """Apply a :class:`Preset`, recording it for later explanation.
+        """Apply a :class:`Preset`, recording it for :meth:`explain`.
 
-        Extends each contribution's tool flag/define lists and, for ``cmd``
-        contributions, replaces the tool command. The applied preset is
-        appended to this environment's history (see :meth:`explain`).
-
-        Presets sharing an ``exclusive_group`` behave like a knob: applying
-        another preset in the group (same or different name) *replaces* the
-        one already applied — its contributions are removed first — so
-        ``env.set_variant("release"); env.set_variant("debug")`` switches
-        cleanly and cloning works at any point. (Cloning is still how you
-        build *both* variants side by side.)
-
-        Application follows the contract in docs/presets.md ("Preset
-        application"): a preset applies fully or raises. A ``cmd``
-        contribution to a tool this environment doesn't have is an error
-        (a command swap is a retargeting mechanism that must not vanish);
-        flag/define contributions to a subset of missing tools are skipped
-        (broadcast semantics), but a preset none of whose contributions
-        land raises. A preset with no contributions at all is the
-        realizer's deliberate no-op and is accepted.
-
-        The core is tool-agnostic — toolchains build presets via
-        ``make_variant_preset``/``make_feature_preset``/``make_target_preset``;
-        this method just applies the opaque tokens they carry.
+        Extends each contribution's tool flag/define lists; a ``cmd``
+        contribution replaces the tool's command. Presets sharing an
+        ``exclusive_group`` act as a knob: applying one first un-applies
+        any group member already applied. A preset applies fully or
+        raises (docs/presets.md, "Preset application").
         """
         if self._fanout_seen is not None:
-            # Inside a set_*/apply_* fan-out over toolchains: identical
-            # resolved presets apply once, however many toolchains resolved
-            # them (shared tools like cc/link would double flags otherwise).
+            # Identical presets resolved by several toolchains apply once
+            # (shared tools like cc would double flags otherwise).
             key = (preset.name, preset.category, preset.contributions)
             if key in self._fanout_seen:
                 return
             self._fanout_seen.add(key)
 
-        # All validation happens before any mutation (including the
-        # exclusive-group un-apply below), so application is atomic: a
-        # rejected preset leaves the environment exactly as it was.
+        # Validate before any mutation, including the un-apply below.
         self._validate_preset(preset)
 
         if preset.exclusive_group is not None:
@@ -569,8 +545,8 @@ class Environment(_EnvironmentStubs):
 
         if preset.category == "variant":
             self.variant = preset.name
-        # env.target_arch has a single writer: the set_target_arch knob
-        # (category "arch"). Cross presets carry arch as metadata only.
+        # Only the set_target_arch knob writes target_arch; on cross
+        # presets, arch is metadata.
         if preset.category == "arch" and preset.arch is not None:
             self.target_arch = preset.arch
 
@@ -580,11 +556,7 @@ class Environment(_EnvironmentStubs):
         return tuple(self._applied_presets)
 
     def explain(self, tool: str | None = None) -> Explanation:
-        """Explain where each tool flag/define came from.
-
-        Replays the presets applied to this environment and attributes each
-        flag, define, and replaced command to the preset that contributed it;
-        tokens from toolchain defaults or direct edits are labelled ``(manual)``.
+        """Attribute each tool flag/define/command to the preset that set it.
 
         Args:
             tool: Restrict to a single tool (e.g. "cc"); otherwise all tools.
@@ -612,12 +584,8 @@ class Environment(_EnvironmentStubs):
     def _record_toolchain_baseline(
         self, toolchain: Toolchain, tool_names: list[str]
     ) -> None:
-        """Record a toolchain's base flags/defines as a 'toolchain' preset.
-
-        Called right after ``toolchain.setup()`` (before any user or preset
-        edits), so the captured tokens are exactly the toolchain's defaults
-        (e.g. ``/nologo``, ``rcs``). explain() then attributes them to the
-        toolchain instead of labelling them ``(manual)``.
+        """Record a toolchain's post-setup flags/defines as a 'toolchain' preset,
+        so explain() attributes its defaults (e.g. ``/nologo``) to it.
         """
         from pcons.core.preset import Preset, ToolContribution
 
@@ -643,16 +611,9 @@ class Environment(_EnvironmentStubs):
             )
 
     def _validate_preset(self, preset: Preset) -> None:
-        """Raise unless *preset* can be applied to this environment.
-
-        Called by apply() before any mutation (docs/presets.md, "Preset
-        application"): a preset applies fully or raises, leaving the
-        environment untouched on rejection.
-        """
+        """Raise unless *preset* can be applied to this environment."""
         if preset.exclusive_group is not None:
-            # Group presets are a knob (replace-on-apply), so they must be
-            # invertible: purely additive contributions, no cmd. Enforced
-            # here — at authoring/apply time — not at switch time.
+            # Group presets must be invertible (no cmd) to be un-applied.
             cmd_tools = sorted(
                 {c.tool for c in preset.contributions if c.cmd is not None}
             )
@@ -667,7 +628,7 @@ class Environment(_EnvironmentStubs):
                 )
 
         if not preset.contributions:
-            # No contributions at all is the realizer's deliberate no-op.
+            # An empty preset is a deliberate no-op.
             return
 
         tools = self._get_tools()
@@ -695,13 +656,7 @@ class Environment(_EnvironmentStubs):
             )
 
     def _unapply_contributions(self, preset: Preset) -> None:
-        """Remove a preset's contributions (exclusive-group replacement).
-
-        Group presets are validated additive-only at apply time, so this is
-        total for them: flags and defines are removed by first occurrence
-        (tolerating tokens an imperative preset or manual edit already
-        removed, and preserving user-added duplicates by count).
-        """
+        """Remove one occurrence of each of a preset's flags and defines."""
         tools = self._get_tools()
         for c in preset.contributions:
             tool = tools.get(c.tool)
@@ -720,12 +675,7 @@ class Environment(_EnvironmentStubs):
 
     @contextmanager
     def _dedup_fanout(self) -> Iterator[None]:
-        """Scope a set_*/apply_* fan-out so identical resolved presets apply once.
-
-        See apply(): within this scope, presets with the same (name, category,
-        contributions) are applied a single time even when several configured
-        toolchains resolve them onto shared tools.
-        """
+        """Scope a per-toolchain fan-out so identical presets apply once."""
         self._fanout_seen = set()
         try:
             yield
@@ -733,11 +683,7 @@ class Environment(_EnvironmentStubs):
             self._fanout_seen = None
 
     def _apply_contribution(self, c: ToolContribution) -> None:
-        """Apply a single tool contribution (extend flags/defines, set cmd).
-
-        Missing tools were validated by apply(); a remaining miss here is a
-        flag/define broadcast to a tool this env doesn't have — skipped.
-        """
+        """Apply a single tool contribution (extend flags/defines, set cmd)."""
         if not self.has_tool(c.tool):
             return
         tool = self._get_tools()[c.tool]
@@ -753,15 +699,7 @@ class Environment(_EnvironmentStubs):
             tool.cmd = c.cmd
 
     def set_variant(self, name: str, **kwargs: Any) -> None:
-        """Set the build variant.
-
-        Delegates to each toolchain's apply_variant() method for all
-        configured toolchains. Each toolchain is responsible for translating
-        the variant name into appropriate tool-specific settings.
-
-        The core knows nothing about what variants mean - it's just a name.
-        Each toolchain defines its own semantics (e.g., GCC defines "debug"
-        as -O0 -g, while a CUDA toolchain might add -G for device debugging).
+        """Set the build variant; each toolchain translates the name to flags.
 
         Args:
             name: Variant name (e.g., "debug", "release").
@@ -781,34 +719,17 @@ class Environment(_EnvironmentStubs):
             self.variant = name
 
     def set_target_arch(self, arch: str, **kwargs: Any) -> None:
-        """Set the target CPU architecture for cross-compilation.
+        """Set the target CPU arch; each toolchain translates the name to flags.
 
-        Delegates to each toolchain's apply_target_arch() method for all
-        configured toolchains. Each toolchain is responsible for translating
-        the architecture name into appropriate tool-specific flags.
-
-        The core knows nothing about what architectures mean - it's just a
-        string. Each toolchain defines its own semantics (e.g., GCC/LLVM on
-        macOS uses -arch flags, while MSVC uses /MACHINE: linker flags).
-
-        This is orthogonal to the variant system - you can combine them:
-            env.set_variant("release")
-            env.set_target_arch("arm64")
+        Raises if no configured toolchain can retarget to *arch* (e.g. on
+        Linux, where retargeting needs a cross preset or cross toolchain).
 
         Args:
             arch: Architecture name (e.g., "arm64", "x86_64", "x64").
             **kwargs: Toolchain-specific options passed to apply_target_arch().
 
         Example:
-            # macOS universal binary build
-            env_arm64 = project.Environment(toolchain=toolchain)
-            env_arm64.set_target_arch("arm64")
-
-            env_x86_64 = project.Environment(toolchain=toolchain)
-            env_x86_64.set_target_arch("x86_64")
-
-            # Windows cross-compilation
-            env.set_target_arch("arm64")  # Uses /MACHINE:ARM64 for MSVC
+            env.set_target_arch("arm64")  # -arch on macOS, /MACHINE: on MSVC
         """
         if self.toolchains:
             with self._dedup_fanout():
@@ -916,9 +837,8 @@ class Environment(_EnvironmentStubs):
         if description is not None:
             self._applied_imperative.append((name, description))
             applied = True
-        # A registered preset whose resolver returned None for these toolchains is
-        # a deliberate no-op (not applicable). An unknown name is an error:
-        # a typo'd preset must not produce a quietly less-configured build.
+        # A registered preset that resolved to None is a deliberate no-op;
+        # an unrecognized name is an error.
         if not applied and not is_registered_preset(name):
             available = sorted(
                 {
@@ -1054,15 +974,10 @@ class Environment(_EnvironmentStubs):
             for pkg in [fmt_pkg, spdlog_pkg]:
                 env.use(pkg)
         """
-        # One translation, one merge path (docs/plan-design-cleanup.md 2d):
-        # a package's vocabulary becomes UsageRequirements via the same
-        # mapping ImportedTarget uses, then applies with the same
-        # order-preserving, flag-pair-aware dedup target resolution uses.
         from pcons.tools.requirements import apply_requirements_to_env
 
         if hasattr(package, "public"):
-            # A Target (e.g. ImportedTarget): its public requirements are
-            # already in requirements vocabulary.
+            # A Target's public requirements are already UsageRequirements.
             reqs = package.public
         else:
             from pcons.packages.imported import requirements_from_package

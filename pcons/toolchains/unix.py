@@ -1,14 +1,7 @@
 # SPDX-License-Identifier: MIT
-"""Unix toolchain base class for GCC and LLVM.
-
-Provides a shared base class with common functionality for Unix-like
-toolchains including:
-- Source handler logic for C/C++/Objective-C/assembly files
-- Separated argument flags (flags that take arguments as separate tokens)
-- Target architecture handling (e.g., -arch on macOS)
-- Build variant handling (debug, release, etc.)
-- Platform-aware compile flags (e.g., -fPIC for shared libraries)
-"""
+"""Unix toolchain base class for GCC and LLVM: shared source handling,
+separated-argument flags, arch/variant handling, and platform-aware
+compile flags."""
 
 from __future__ import annotations
 
@@ -35,14 +28,8 @@ logger = logging.getLogger(__name__)
 class UnixToolchain(BaseToolchain):
     """Base class for Unix-like toolchains (GCC, LLVM/Clang).
 
-    This class provides common functionality shared between GCC and LLVM
-    toolchains, including source file handling, separated argument flags,
-    and variant/architecture application.
-
-    Subclasses should:
-    - Call super().__init__(name) in their __init__
-    - Override _configure_tools() to configure toolchain-specific tools
-    - Override get_source_handler() if they handle additional file types
+    Subclasses override _configure_tools(), and get_source_handler() if
+    they handle additional file types.
     """
 
     # True when this toolchain's declared cc/cxx tools are Clang-family
@@ -63,11 +50,9 @@ class UnixToolchain(BaseToolchain):
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross preset, rejecting wasm targets on native toolchains.
 
-        WebAssembly is toolchain-shaped, not preset-shaped: emscripten/wasi
-        own output suffixes (.js/.wasm), shared-library rejection, and the
-        link driver. A wasm preset on a native toolchain would half-apply
-        (compile with emcc, link with the host driver), so it raises
-        instead (docs/presets.md).
+        A wasm preset on a native toolchain would half-apply (compile with
+        emcc, link with the host driver) — output suffixes, shared-library
+        rules, and the link driver live in the dedicated wasm toolchains.
         """
         triple = str(getattr(preset, "triple", None) or "")
         if triple.startswith("wasm32") and not self.TARGETS_WASM:
@@ -80,9 +65,7 @@ class UnixToolchain(BaseToolchain):
             )
         super().apply_cross_preset(env, preset)
 
-    # Named feature presets for common development workflows (see docs/presets.md).
-    # Keep them small and orthogonal: `warnings` enables warnings; `werror`
-    # promotes them to errors — compose both for the strict combination.
+    # Named feature presets; see docs/presets.md.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {
             "compile_flags": ["-Wall", "-Wextra", "-Wpedantic"],
@@ -115,9 +98,8 @@ class UnixToolchain(BaseToolchain):
         },
     }
 
-    # Flags that take their argument as a separate token (e.g., "-F path" not "-Fpath")
-    # These are common GCC/Unix compiler/linker flags where the argument must be
-    # a separate element. Both GCC and Clang share these flags.
+    # Flags that take their argument as a separate token ("-F path", not
+    # "-Fpath"). Shared by GCC and Clang.
     SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
         [
             # Framework/library paths (macOS)
@@ -162,20 +144,9 @@ class UnixToolchain(BaseToolchain):
     # =========================================================================
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Return handler for source file suffix, or None if not handled.
-
-        Handles common C/C++/Objective-C and assembly file types that are
-        supported by both GCC and LLVM.
-
-        Args:
-            suffix: File suffix including the dot (e.g., ".c", ".cpp").
-
-        Returns:
-            SourceHandler if the suffix is handled, None otherwise.
-        """
+        """Return handler for C/C++/Objective-C/assembly suffixes, or None."""
         from pcons.tools.toolchain import SourceHandler
 
-        # Use TargetPath for depfile - resolved to PathToken during resolution
         depfile = TargetPath(suffix=".d")
 
         suffix_lower = suffix.lower()
@@ -183,7 +154,7 @@ class UnixToolchain(BaseToolchain):
             return SourceHandler("cc", "c", ".o", depfile, "gcc")
         if suffix_lower in (".cpp", ".cxx", ".cc", ".c++"):
             return SourceHandler("cxx", "cxx", ".o", depfile, "gcc")
-        # Handle case-sensitive .C (C++ on Unix)
+        # Case-sensitive .C is C++ on Unix
         if suffix == ".C":
             return SourceHandler("cxx", "cxx", ".o", depfile, "gcc")
         # Objective-C
@@ -191,14 +162,12 @@ class UnixToolchain(BaseToolchain):
             return SourceHandler("cc", "objc", ".o", depfile, "gcc")
         if suffix_lower == ".mm":
             return SourceHandler("cxx", "objcxx", ".o", depfile, "gcc")
-        # Assembly files - GCC/Clang handles .s (preprocessed) and .S (needs preprocessing)
-        # Both are processed by the C compiler which invokes the assembler
-        # Check .S (uppercase) first since .S.lower() == ".s"
+        # Assembly goes through the C compiler driver. Check .S (uppercase)
+        # first since .S.lower() == ".s": .S needs C preprocessing (so it can
+        # have dependencies); .s is already preprocessed.
         if suffix == ".S":
-            # .S files need C preprocessing, so they can have dependencies
             return SourceHandler("cc", "asm-cpp", ".o", depfile, "gcc")
         if suffix_lower == ".s":
-            # .s files are already preprocessed assembly, no dependency tracking
             return SourceHandler("cc", "asm", ".o", None, None)
         return None
 
@@ -209,25 +178,15 @@ class UnixToolchain(BaseToolchain):
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
         """Return additional compile flags needed for the target type.
 
-        For Unix toolchains on Linux, shared libraries need -fPIC.
-        On macOS, PIC is the default for 64-bit, so no flag is needed.
-
-        Args:
-            target_type: The target type (e.g., "shared_library", "static_library").
-
-        Returns:
-            List of additional compile flags.
+        Shared libraries need -fPIC on Linux and other non-macOS POSIX
+        systems; on 64-bit macOS PIC is the default.
         """
         platform = get_platform()
 
         if target_type == "shared_library":
-            # On Linux (and other non-macOS POSIX systems), we need -fPIC
-            # for position-independent code in shared libraries.
-            # On macOS 64-bit, PIC is the default, so no flag needed.
             if platform.is_linux or (platform.is_posix and not platform.is_macos):
                 return ["-fPIC"]
 
-        # Static libraries, programs, and other types don't need special flags
         return []
 
     def get_link_flags_for_target(
@@ -265,11 +224,7 @@ class UnixToolchain(BaseToolchain):
         return []
 
     def get_separated_arg_flags(self) -> frozenset[str]:
-        """Return flags that take their argument as a separate token.
-
-        Returns:
-            A frozenset of GCC/Unix flags that take separate arguments.
-        """
+        """Return flags that take their argument as a separate token."""
         return self.SEPARATED_ARG_FLAGS
 
     # =========================================================================

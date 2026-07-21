@@ -221,12 +221,7 @@ class ClangClLinker(BaseTool):
 
 
 class ClangClToolchain(MsvcCompatibleToolchain):
-    """Clang-CL toolchain for Windows development.
-
-    Uses clang-cl with MSVC-compatible flags, producing binaries
-    compatible with the MSVC ecosystem. Inherits common MSVC-compatible
-    functionality from MsvcCompatibleToolchain.
-    """
+    """Clang-CL toolchain: MSVC-compatible flags and binaries on Windows."""
 
     TOOL_NAMES = ("cc", "cxx", "lib", "link", "rc", "ml")
 
@@ -300,11 +295,6 @@ class ClangClToolchain(MsvcCompatibleToolchain):
 
     def _arch_contributions(self, arch: str) -> list[ToolContribution]:
         """Add /MACHINE:xxx (via base) plus --target for cross-compilation.
-
-        Supported architectures:
-        - x64 (or amd64, x86_64): 64-bit Intel/AMD
-        - x86 (or i386, i686): 32-bit Intel/AMD
-        - arm64 (or aarch64): 64-bit ARM
 
         clang-cl retargets with a flag (one binary), but a cross arch still
         needs the target's VC and Windows SDK libraries — the dev shell's LIB

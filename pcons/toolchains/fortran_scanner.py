@@ -112,7 +112,6 @@ def write_dyndep(
         mod_dir: Module directory, relative to build dir (e.g., "modules").
         out_path: Output dyndep file path, relative to build dir.
     """
-    # Scan each source file
     entries: list[tuple[str, list[str], list[str]]] = []
     for item in manifest:
         src_path = item["src"]
@@ -127,7 +126,6 @@ def write_dyndep(
         produces, consumes = scan_fortran_source(text)
         entries.append((obj_path, produces, consumes))
 
-    # Write dyndep file
     lines = ["ninja_dyndep_version = 1", ""]
     for obj_path, produces, consumes in entries:
         mod_files = [f"{mod_dir}/{name}.mod" for name in produces]

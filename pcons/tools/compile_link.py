@@ -1,13 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Compile-link factory for building programs and libraries.
 
-This module provides the CompileLinkFactory, which handles the resolution
-of compile-then-link targets (Program, StaticLibrary, SharedLibrary, Object).
-It implements the NodeFactory protocol from the builder registry.
-
-This logic was extracted from pcons/core/resolver.py to keep the core
-tool-agnostic. The resolver dispatches to this factory via the builder
-registry, just like it dispatches to InstallNodeFactory or ArchiveNodeFactory.
+CompileLinkFactory resolves compile-then-link targets (Program,
+StaticLibrary, SharedLibrary, Object). It implements the NodeFactory
+protocol; the core resolver dispatches to it via the builder registry.
 """
 
 from __future__ import annotations
@@ -73,9 +69,6 @@ class CompileLinkFactory:
     - Source handler dispatch (tool-agnostic: delegates to toolchain)
     - Auxiliary input handling (.def files, etc.)
     - Language detection for linker selection
-
-    This class combines the logic that was previously in ObjectNodeFactory
-    and OutputNodeFactory in the resolver.
     """
 
     def __init__(self, project: Project) -> None:
@@ -109,7 +102,6 @@ class CompileLinkFactory:
             logger.debug("Skipping target '%s' without env", target.name)
             return
 
-        # Check that the environment has toolchains for compilation
         if not env.toolchains and target.target_type != "interface":
             from pcons.core.errors import PconsError
 
@@ -131,7 +123,6 @@ class CompileLinkFactory:
                 "resolve", "dependencies", [d.name for d in target.dependencies]
             )
 
-        # Compute effective requirements for compilation
         effective = compute_effective_requirements(target, env, for_compilation=True)
 
         if is_enabled("resolve"):
@@ -140,8 +131,7 @@ class CompileLinkFactory:
             trace_value("resolve", "defines", effective.defines)
             trace_value("resolve", "compile_flags", effective.compile_flags)
 
-        # Get additional compile flags for this target type from the toolchain
-        # (e.g., -fPIC for shared libraries on Linux)
+        # Target-type compile flags (e.g. -fPIC for shared libs on Linux)
         toolchain = env._toolchain
         if toolchain is not None and target.target_type is not None:
             target_type_flags = toolchain.get_compile_flags_for_target_type(
@@ -151,12 +141,10 @@ class CompileLinkFactory:
                 if flag not in effective.compile_flags:
                     effective.compile_flags.append(flag)
 
-        # Determine the language for this target based on sources
         language = self._determine_language(target, env)
         if language:
             target.required_languages.add(language)
 
-        # Separate sources into compilable sources and auxiliary inputs
         auxiliary_inputs: list[tuple[FileNode, str, AuxiliaryInputHandler]] = []
 
         # Create object nodes for each source (delegated to helper methods).
@@ -167,7 +155,6 @@ class CompileLinkFactory:
         grouped = {}
         for source in target.sources:
             if isinstance(source, FileNode):
-                # Check if this is an auxiliary input file
                 aux_handler = self._get_auxiliary_input_handler(source.path, env)
                 if aux_handler is not None:
                     flag = aux_handler.flag_template.replace("$file", str(source.path))
@@ -182,7 +169,6 @@ class CompileLinkFactory:
                     grouped.setdefault(key, (handler, toolchain, []))[2].append(source)
                     continue
 
-                # Normal source file - create object node
                 obj_node = self._create_object_node(target, source, effective, env)
                 if obj_node:
                     target.intermediate_nodes.append(obj_node)
@@ -201,11 +187,10 @@ class CompileLinkFactory:
                 obj_node.path,
             )
 
-        # Store auxiliary inputs on the target for use by output creation
+        # For use by output creation
         if auxiliary_inputs:
             target._builder_data["auxiliary_inputs"] = auxiliary_inputs
 
-        # Create output node(s) based on target type
         trace("resolve", "  Creating output for type: %s", target.target_type)
         if target.target_type == "static_library":
             self._create_static_library_output(target, env)

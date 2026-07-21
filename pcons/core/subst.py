@@ -76,12 +76,8 @@ class MultiCmd:
 class PathToken:
     """A command token containing a path that needs generator-specific relativization.
 
-    This class marks tokens that contain paths (like include directories or library
-    paths) so that generators can apply appropriate relativization without needing
-    to parse flag prefixes with regex.
-
-    The context creates PathToken objects for path values, and generators call
-    relativize() with their path transformation function.
+    Marks path-containing tokens (include dirs, library paths, ...) so
+    generators can relativize them without parsing flag prefixes.
 
     Attributes:
         prefix: The flag prefix (e.g., "-I", "-L", "/LIBPATH:").
@@ -112,19 +108,9 @@ class PathToken:
     suffix: str = ""
 
     def relativize(self, relativizer: Callable[[str], str]) -> str:
-        """Apply a relativization function and return the complete token.
-
-        For "project" paths, the relativizer transforms the path for the target
-        generator (e.g., prepending $topdir for ninja). For "build" paths (already
-        relative to the build directory) and "absolute" paths, the path is used
-        as-is since no transformation is needed.
-
-        Args:
-            relativizer: Function that transforms project-relative paths for the
-                        target generator. Only called for path_type="project".
-
-        Returns:
-            The complete token: prefix + (possibly relativized) path + suffix.
+        """Return the complete token: prefix + path + suffix, with the
+        relativizer applied only to "project" paths (e.g. prepending $topdir
+        for ninja); "build" and "absolute" paths pass through unchanged.
         """
         if self.path_type in ("build", "absolute"):
             return self.prefix + self.path + self.suffix
@@ -137,18 +123,8 @@ class PathToken:
 
 @dataclass
 class ProjectPath:
-    """Marker for a path relative to project root.
-
-    Used by contexts to mark include/lib paths that need relativization
-    for the target generator. The prefix() function converts these to
-    PathToken objects with path_type="project".
-
-    Example:
-        context.get_env_overrides() returns:
-            {"includes": [ProjectPath("src/include"), ProjectPath("lib/headers")]}
-
-        prefix() converts to:
-            [PathToken("-I", "src/include", "project"), ...]
+    """Marker for a path relative to project root; the prefix() function
+    converts it to a PathToken with path_type="project".
     """
 
     path: str
@@ -156,17 +132,8 @@ class ProjectPath:
 
 @dataclass
 class BuildPath:
-    """Marker for a path relative to build directory.
-
-    Used for paths that are within the build output directory.
-    The prefix() function converts these to PathToken with path_type="build".
-
-    Example:
-        context.get_env_overrides() returns:
-            {"includes": [BuildPath("generated")]}
-
-        prefix() converts to:
-            [PathToken("-I", "generated", "build"), ...]
+    """Marker for a path relative to the build directory; the prefix()
+    function converts it to a PathToken with path_type="build".
     """
 
     path: str
@@ -174,11 +141,8 @@ class BuildPath:
 
 @dataclass(frozen=True)
 class TargetPath:
-    """Marker for target output path, resolved during resolve phase.
-
-    This marker is used in SourceHandler.depfile to indicate a path derived
-    from the target output. During resolution, it's converted to a PathToken
-    with the actual target path.
+    """Marker for the target output path, converted to a PathToken with the
+    actual path during resolution.
 
     Attributes:
         index: Which target file.  ``None`` (default) means "the" target —
@@ -204,10 +168,8 @@ class TargetPath:
 
 @dataclass(frozen=True)
 class SourcePath:
-    """Marker for source input path, resolved during resolve phase.
-
-    This marker is used in command templates to reference source files.
-    During resolution, it's converted to a PathToken with the actual source path.
+    """Marker for a source input path, converted to a PathToken with the
+    actual path during resolution.
 
     Attributes:
         index: Which source file.  ``None`` (default) means "the" source —
@@ -403,14 +365,10 @@ def _subst_command(
     namespace: Namespace,
     location: SourceLocation | None,
 ) -> list[CommandToken]:
-    """Substitute a single command template, returning token list.
+    """Substitute a single command template, returning a token list.
 
-    Returns list of CommandToken (str or PathToken). PathToken objects
-    are created when path markers (ProjectPath, BuildPath) are used with
-    prefix() function, allowing generators to apply relativization.
-
-    SourcePath and TargetPath marker objects in the template are preserved
-    as-is, allowing generators to convert them to appropriate syntax.
+    SourcePath/TargetPath/PathToken markers in the template are preserved
+    as-is for generators to handle.
     """
     tokens = (
         _split_template_string(template)

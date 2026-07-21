@@ -1,18 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Core type definitions and Protocol classes.
-
-This module provides type aliases and Protocol classes used across the pcons
-codebase. By centralizing these definitions, we reduce circular import issues
-and provide a single source of truth for shared types.
-
-Type Aliases:
-    SourceSpec: A union type for specifying sources (Target, Node, Path, or str)
-
-Protocol Classes:
-    TargetLike: Protocol for objects that behave like targets
-    NodeLike: Protocol for objects that behave like nodes
-    EnvironmentLike: Protocol for objects that behave like environments
-"""
+"""Shared type aliases and Protocol classes (avoids circular imports)."""
 
 from __future__ import annotations
 
@@ -24,18 +11,13 @@ if TYPE_CHECKING:
     from pcons.util.source_location import SourceLocation
 
 
-# Type alias for source specifications
-# This represents the various ways a source can be specified in the API
+# The ways a source can be specified in the API
 SourceSpec = Union["TargetLike", "NodeLike", Path, str]
 
 
 @runtime_checkable
 class NodeLike(Protocol):
-    """Protocol for objects that behave like nodes in the dependency graph.
-
-    This protocol captures the essential interface of a Node without
-    requiring inheritance from the Node base class.
-    """
+    """Protocol for objects that behave like nodes in the dependency graph."""
 
     @property
     def name(self) -> str:
@@ -64,10 +46,7 @@ class NodeLike(Protocol):
 
 @runtime_checkable
 class FileNodeLike(NodeLike, Protocol):
-    """Protocol for objects that behave like file nodes.
-
-    Extends NodeLike with file-specific attributes.
-    """
+    """Protocol for objects that behave like file nodes."""
 
     @property
     def path(self) -> Path:
@@ -86,12 +65,7 @@ class FileNodeLike(NodeLike, Protocol):
 
 @runtime_checkable
 class TargetLike(Protocol):
-    """Protocol for objects that behave like build targets.
-
-    This protocol captures the essential interface of a Target without
-    requiring inheritance from the Target class. Useful for type hints
-    that need to accept target-like objects without creating import cycles.
-    """
+    """Protocol for objects that behave like build targets."""
 
     @property
     def name(self) -> str:
@@ -148,11 +122,7 @@ class TargetLike(Protocol):
 
 @runtime_checkable
 class EnvironmentLike(Protocol):
-    """Protocol for objects that behave like build environments.
-
-    This protocol captures the essential interface of an Environment without
-    requiring inheritance from the Environment class.
-    """
+    """Protocol for objects that behave like build environments."""
 
     def has_tool(self, name: str) -> bool:
         """Check if a tool namespace exists."""
@@ -177,11 +147,7 @@ class EnvironmentLike(Protocol):
 
 @runtime_checkable
 class ProjectLike(Protocol):
-    """Protocol for objects that behave like projects.
-
-    This protocol captures the essential interface of a Project without
-    requiring inheritance from the Project class.
-    """
+    """Protocol for objects that behave like projects."""
 
     @property
     def name(self) -> str:

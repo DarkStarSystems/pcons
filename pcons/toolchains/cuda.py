@@ -1,26 +1,8 @@
 # SPDX-License-Identifier: MIT
-"""CUDA toolchain implementation.
+"""CUDA toolchain: .cu compilation via NVIDIA's nvcc.
 
-Provides CUDA GPU compilation support using NVIDIA's nvcc compiler.
-This toolchain is designed to be used alongside a C/C++ toolchain
-(GCC, LLVM, or MSVC) for linking.
-
-The CUDA toolchain handles:
-- .cu file compilation via nvcc
-- GPU architecture selection
-- CUDA-specific variant settings (debug symbols, optimization)
-
-Example:
-    from pcons.toolchains import find_c_toolchain, find_cuda_toolchain
-
-    cxx = find_c_toolchain()
-    cuda = find_cuda_toolchain()
-
-    env = project.Environment(toolchain=cxx)
-    env.add_toolchain(cuda)  # Adds CUDA support
-
-    # Or create CUDA-only environment
-    cuda_env = project.Environment(toolchain=cuda)
+Typically added alongside a C/C++ toolchain (GCC, LLVM, or MSVC), which
+provides the linker: env.add_toolchain(find_cuda_toolchain()).
 """
 
 from __future__ import annotations
@@ -42,10 +24,7 @@ if TYPE_CHECKING:
 
 
 class CudaToolchain(BaseToolchain):
-    """CUDA toolchain for GPU development.
-
-    This toolchain provides CUDA compilation support. It's typically used
-    alongside a C/C++ toolchain which provides the linker.
+    """CUDA toolchain, typically added alongside a C/C++ toolchain for linking.
 
     GPU Architectures:
         - sm_50: Maxwell
@@ -73,7 +52,6 @@ class CudaToolchain(BaseToolchain):
         """Return handler for CUDA source files."""
         suffix_lower = suffix.lower()
         if suffix_lower == ".cu":
-            # Use TargetPath for depfile - resolved to PathToken during resolution
             return SourceHandler(
                 "cuda",
                 "cuda",
@@ -132,20 +110,7 @@ class CudaToolchain(BaseToolchain):
 
 
 def find_cuda_toolchain() -> CudaToolchain | None:
-    """Find CUDA installation and create toolchain.
-
-    Checks for nvcc in PATH. Returns None if CUDA is not available.
-
-    Returns:
-        CudaToolchain if nvcc is found, None otherwise.
-
-    Example:
-        cuda = find_cuda_toolchain()
-        if cuda:
-            env.add_toolchain(cuda)
-        else:
-            print("CUDA not available, building without GPU support")
-    """
+    """Return a CudaToolchain if nvcc is in PATH, else None."""
     if shutil.which("nvcc"):
         toolchain = CudaToolchain()
         # Quick setup without full configure

@@ -204,10 +204,7 @@ class StandaloneTool(BaseTool):
     """
 
     def configure(self, config: object) -> ToolConfig | None:
-        """Standalone tools are always available.
-
-        Returns a valid ToolConfig since no external detection is needed.
-        """
+        """Standalone tools are always available; no detection needed."""
         from pcons.core.toolconfig import ToolConfig
 
         return ToolConfig(self.name)

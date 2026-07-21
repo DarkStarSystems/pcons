@@ -1,12 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""GNU Fortran (gfortran) toolchain implementation.
-
-Provides gfortran-based Fortran compilation toolchain including:
-- GNU Fortran compiler (gfortran)
-- GNU archiver (ar) - reused from gcc
-- Linker (using gfortran for proper runtime linkage)
-- Ninja dyndep support for correct Fortran module dependency ordering
-"""
+"""GNU Fortran (gfortran) toolchain, with Ninja dyndep for Fortran
+module dependency ordering."""
 
 from __future__ import annotations
 
@@ -68,19 +62,8 @@ def _find_gfortran_libdir() -> str | None:
 
 
 class GfortranCompiler(BaseTool):
-    """GNU Fortran compiler tool.
-
-    Variables:
-        cmd: Compiler command (default: 'gfortran')
-        flags: General compiler flags (list)
-        iprefix: Include directory prefix (default: '-I')
-        includes: Include directories (list of paths, no prefix)
-        dprefix: Define prefix (default: '-D')
-        defines: Preprocessor definitions (list of names, no prefix)
-        depflags: Dependency generation flags
-        moddir: Module output/search directory (default: 'modules')
-        objcmd: Command template for compiling to object
-    """
+    """GNU Fortran compiler tool. ``moddir`` (default 'modules') is the
+    module output/search directory, passed as -J and -I."""
 
     def __init__(self) -> None:
         super().__init__("fc", language="fortran")
@@ -132,12 +115,7 @@ class GfortranCompiler(BaseTool):
 
 
 class GfortranLinker(BaseTool):
-    """GNU Fortran linker tool.
-
-    Uses gfortran as the linker command to ensure proper Fortran runtime linkage.
-
-    Variables: same as GccLinker but cmd defaults to 'gfortran'
-    """
+    """Linker using gfortran as the driver, for Fortran runtime linkage."""
 
     def __init__(self) -> None:
         super().__init__("link")
@@ -153,18 +131,14 @@ class GfortranLinker(BaseTool):
 
 
 class GfortranToolchain(UnixToolchain):
-    """GNU Fortran toolchain.
+    """GNU Fortran toolchain: gfortran, ar, gfortran as linker.
 
-    Includes: Fortran compiler (gfortran), archiver (ar), linker (gfortran)
-
-    Supports Ninja dyndep for correct Fortran module dependency ordering.
+    Uses Ninja dyndep for Fortran module dependency ordering.
     """
 
     TOOL_NAMES = ("fc", "ar", "link")
 
-    # Fortran feature presets, realized on the `fc` compiler (not cc/cxx).
-    # gfortran shares the GNU flag vocabulary; -Wpedantic is omitted as it is
-    # noisy for legal Fortran. See docs/presets.md.
+    # Realized on `fc`; -Wpedantic omitted as it is noisy for legal Fortran.
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {"compile_flags": ["-Wall", "-Wextra"]},
         "werror": {"compile_flags": ["-Werror"]},
@@ -173,8 +147,7 @@ class GfortranToolchain(UnixToolchain):
     def _feature_preset_tools(self) -> tuple[str, ...]:
         return ("fc",)
 
-    # Include "fortran" with priority 3 so Fortran wins over C/C++ when
-    # GfortranToolchain is the primary toolchain.
+    # Priority 3 so Fortran wins over C/C++ when this is the primary toolchain.
     @property
     def language_priority(self) -> dict[str, int]:
         return {**self.DEFAULT_LANGUAGE_PRIORITY, "fortran": 3}
@@ -207,12 +180,11 @@ class GfortranToolchain(UnixToolchain):
         """Return handler for Fortran source file suffixes."""
         from pcons.tools.toolchain import SourceHandler
 
-        # First check Fortran extensions (case-sensitive for .F, .F90)
+        # Case-sensitive check (.F/.F90 are preprocessed forms)
         if suffix in FORTRAN_EXTENSIONS:
             # No depfile: Fortran has no header includes; module deps use dyndep
             return SourceHandler("fc", "fortran", ".o", None, None)
 
-        # Fall back to C/C++ handlers from UnixToolchain
         return super().get_source_handler(suffix)
 
     def get_runtime_libs(
@@ -251,15 +223,9 @@ class GfortranToolchain(UnixToolchain):
     ) -> None:
         """Set up Ninja dyndep for Fortran module dependencies.
 
-        Called after all targets are resolved. Creates:
-        1. A manifest JSON file (at configure time) mapping sources to objects
-        2. A Ninja dyndep build step that scans sources for MODULE/USE statements
-        3. Attaches dyndep to each Fortran object node
-
-        Args:
-            project: The project being built.
-            source_obj_by_language: All (source_path, obj_node) pairs grouped
-                by language. GfortranToolchain extracts "fortran" entries.
+        Writes a source-to-object manifest at configure time, adds a
+        build-time dyndep scanner step, and attaches the dyndep file to
+        each Fortran object node.
         """
         fortran_source_obj_pairs = source_obj_by_language.get("fortran", [])
         if not fortran_source_obj_pairs:
@@ -282,21 +248,17 @@ class GfortranToolchain(UnixToolchain):
         manifest_path.write_text(json.dumps(manifest, indent=2))
         logger.debug("Wrote Fortran module manifest to %s", manifest_path)
 
-        # Get environment from first Fortran object node for registration
         first_env = None
         _, first_obj = fortran_source_obj_pairs[0]
         build_info = getattr(first_obj, "_build_info", None)
         if build_info:
             first_env = build_info.get("env")
 
-        # Create source file nodes for scanner dependencies
         source_nodes = [project.node(src) for src, _ in fortran_source_obj_pairs]
 
-        # Create the dyndep scanner build node
         dyndep_node = project.node(dyndep_path)
         dyndep_node.depends(source_nodes)
 
-        # Build the scanner command using sys.executable for portability
         dyndep_node._build_info = {
             "tool": "fc_scanner",
             "command_var": "scancmd",
@@ -315,11 +277,10 @@ class GfortranToolchain(UnixToolchain):
             ],
         }
 
-        # Register dyndep node with environment so generator writes its build statement
+        # Register so the generator writes the dyndep build statement
         if first_env is not None:
             first_env.register_node(dyndep_node)
 
-        # Attach dyndep to each Fortran object node
         dyndep_rel = "fortran_modules.dyndep"
         for _, obj_node in fortran_source_obj_pairs:
             obj_build_info = getattr(obj_node, "_build_info", None)
@@ -349,25 +310,16 @@ toolchain_registry.register(
 def find_fortran_toolchain(
     prefer: list[str] | None = None,
 ) -> GfortranToolchain:
-    """Find the first available Fortran toolchain.
-
-    Currently only gfortran is supported.
+    """Find the first available Fortran toolchain (currently only gfortran).
 
     Args:
-        prefer: List of toolchain names to try, in order.
-                Defaults to ["gfortran"].
+        prefer: Toolchain names to try, in order. Defaults to ["gfortran"].
 
     Returns:
         A configured Fortran toolchain ready for use.
 
     Raises:
         RuntimeError: If no Fortran toolchain is available.
-
-    Example:
-        from pcons.toolchains import find_fortran_toolchain
-
-        toolchain = find_fortran_toolchain()
-        env = project.Environment(toolchain=toolchain)
     """
     if prefer is None:
         prefer = ["gfortran"]

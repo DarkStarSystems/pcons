@@ -314,7 +314,6 @@ def linux_cross(
     Returns:
         CrossPreset configured for Linux cross-compilation.
     """
-    # Extract architecture from triple
     arch = triple.split("-")[0]
 
     return CrossPreset(

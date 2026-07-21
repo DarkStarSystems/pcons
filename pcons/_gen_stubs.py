@@ -1,45 +1,20 @@
 # SPDX-License-Identifier: MIT
 """Generate typed-stub mixin classes for pcons's dynamic-attribute classes.
 
-Four pcons classes use `__getattr__` for dispatch and lose static type
-checking as a result:
+Four classes use `__getattr__` for dispatch and lose static type checking:
 
-  - `Project` → `pcons/core/_project_builder_stubs.py`. Builders
-    (Program, StaticLibrary, ...) come from `BuilderRegistry` and are
-    fully introspected.
+  - `Project` → `core/_project_builder_stubs.py` (introspected from
+    BuilderRegistry)
+  - `Environment` → `core/_environment_stubs.py` (introspected from each
+    toolchain's TOOL_NAMES plus Environment.STANDALONE_TOOL_NAMES)
+  - `ToolConfig` → `core/_toolconfig_stubs.py` (hand-maintained list here)
+  - `UsageRequirements` → `core/_usage_requirements_stubs.py`
+    (hand-maintained list here)
 
-  - `Environment` → `pcons/core/_environment_stubs.py`. Tool namespaces
-    (cc, cxx, link, install, archive, ...) populated per-toolchain.
-    The list is collected by walking `BaseToolchain.__subclasses__()`
-    and reading each subclass's `TOOL_NAMES: ClassVar[tuple[str, ...]]`,
-    plus `Environment.STANDALONE_TOOL_NAMES` for the always-available
-    install / archive tools.
-
-  - `ToolConfig` → `pcons/core/_toolconfig_stubs.py`. Common per-tool
-    variables (cmd, flags, includes, ...). Hardcoded; toolchains can
-    invent new names that fall through to __getattr__ at type-check time.
-
-  - `UsageRequirements` → `pcons/core/_usage_requirements_stubs.py`.
-    The C/C++ conventional set (include_dirs, compile_flags, ...).
-    Hardcoded for the same reason as ToolConfig.
-
-For Project, __getattr__ is hidden from type checkers so typos are
-caught (the cost: user @builder methods need `type: ignore`). For the
-other three, __getattr__ stays visible so user-defined names continue
-to work without ceremony — known names are typed more specifically and
-take precedence.
-
-The mixin classes are inherited only under `TYPE_CHECKING`; at runtime
-the base class is `object` and the original `__getattr__` dispatches as
-before.
-
-The freshness test catches drift between the generator output and the
-committed files. For Environment, the introspection of `TOOL_NAMES` on
-each Toolchain subclass also catches the case where a new tool is added
-to a toolchain without being added to a hardcoded list. ToolConfig and
-UsageRequirements still rely on hand-maintained lists in this module
-because their variables aren't registered anywhere at runtime — they're
-written to the underlying dict on first access.
+ToolConfig/UsageRequirements lists must be hand-maintained because their
+variables aren't registered anywhere at runtime. The mixins are inherited
+only under `TYPE_CHECKING`; a freshness test catches drift between the
+generator output and the committed files.
 
 Usage:
     python -m pcons._gen_stubs              # rewrite all stub files
@@ -73,9 +48,8 @@ def _stub_targets() -> dict[str, Callable[[], str]]:
 
 def generate_toolchain_names() -> str:
     """Produce the full content of `core/_toolchain_names.py`."""
-    # Importing populates the registry. contrib toolchains register on
-    # import too and must be listed explicitly (order-independent of the
-    # other stub generators, which import them for their own reasons).
+    # Importing populates the registry; contrib toolchains must be
+    # listed explicitly.
     import pcons.contrib.latex.toolchain  # noqa: F401
     import pcons.toolchains  # noqa: F401
     from pcons.tools.toolchain import toolchain_registry
@@ -266,17 +240,12 @@ _ENVIRONMENT_VAR_TYPES: tuple[tuple[str, str], ...] = (
 def _collect_tool_names() -> list[tuple[str, str]]:
     """Walk every BaseToolchain subclass and union their TOOL_NAMES.
 
-    Returns a sorted list of (tool_name, comma-joined-source-toolchain-names).
-    Standalone tools installed by Environment._setup_standalone_tools are
-    added separately. The toolchain modules must be imported for their
-    subclasses to be registered with BaseToolchain.__subclasses__().
+    Returns a sorted list of (tool_name, comma-joined-source-toolchain-names),
+    including Environment's standalone tools.
     """
-    # Force import of every toolchain that ships with pcons (core +
-    # contrib) so that its class is registered as a BaseToolchain
-    # subclass. Missing entries here are the most likely failure mode
-    # when adding a new toolchain — the TOOL_NAMES-vs-installed-tools
-    # invariant test in tests/toolchains/ guards the other direction
-    # (toolchain present but TOOL_NAMES out of sync).
+    # Every shipped toolchain (core + contrib) must be imported so its
+    # class registers as a BaseToolchain subclass; a missing entry here
+    # is the most likely failure mode when adding a new toolchain.
     import pcons.contrib.latex.toolchain  # noqa: F401
     import pcons.toolchains.clang_cl  # noqa: F401
     import pcons.toolchains.cuda  # noqa: F401
@@ -317,12 +286,8 @@ def _format_attribute_stubs_file(
     class_doc: str,
     entries: Sequence[tuple[str, str, str | None]],  # name, type, optional comment
 ) -> str:
-    """Format an attribute-stub file: header + class with `name: Type  # comment`.
-
-    Used for the simpler stub files (Environment, ToolConfig, UsageRequirements)
-    where there is no method-signature complexity — just a flat list of
-    typed instance attributes.
-    """
+    """Format an attribute-stub file: header + class with
+    `name: Type  # comment` lines (the method-less stub files)."""
     lines: list[str] = [
         "# SPDX-License-Identifier: MIT",
         "# ruff: noqa",

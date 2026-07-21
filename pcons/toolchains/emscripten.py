@@ -1,17 +1,9 @@
 # SPDX-License-Identifier: MIT
 """Emscripten toolchain for compiling C/C++ to WebAssembly + JavaScript.
 
-Provides an ``emcc``/``em++`` based toolchain for compiling C/C++ to
-WebAssembly targeting the browser or Node.js.  Unlike the WASI toolchain
-which produces standalone ``.wasm`` files, Emscripten linking produces
-**two files**: a ``.js`` loader and a companion ``.wasm`` module.  The
-``.js`` file is the entry point (``node out.js``).
-
-Detection order for emsdk:
-1. ``EMSDK`` environment variable
-2. Common install locations (``~/emsdk``, ``/opt/emsdk``,
-   ``~/.local/share/emsdk``)
-3. Bare ``emcc`` already on PATH (user has activated emsdk)
+Unlike the WASI toolchain, which produces standalone ``.wasm`` files,
+Emscripten linking produces **two files**: a ``.js`` loader (the entry
+point, ``node out.js``) and a companion ``.wasm`` module.
 """
 
 from __future__ import annotations
@@ -181,16 +173,10 @@ class EmccArchiver(BaseTool):
 
 
 class EmccLinker(BaseTool):
-    """Emscripten linker (emcc).
+    """Emscripten linker (emcc): links objects into a ``.js`` + ``.wasm`` pair.
 
-    Links wasm object files into a ``.js`` + ``.wasm`` pair.
-    The ``.js`` file is the primary output (entry point that loads the wasm).
-
-    Supports ``-s`` settings via ``env.link.settings`` list and
+    Supports ``-s`` settings via the ``env.link.settings`` list and
     ``env.link.sprefix`` (defaults to ``-s``).
-
-    Shared libraries are not supported — Emscripten's dynamic linking
-    (SIDE_MODULE) is niche.  Calling ``SharedLibrary()`` will raise an error.
     """
 
     def __init__(self) -> None:
@@ -272,7 +258,6 @@ class EmscriptenToolchain(WasmToolchain):
         if not isinstance(config, Configure):
             return False
 
-        # Check that emcc is available
         if not is_emcc_available():
             logger.info("Emscripten (emcc) not found; toolchain unavailable")
             return False
@@ -328,14 +313,7 @@ class EmscriptenToolchain(WasmToolchain):
 
 
 def find_emscripten_toolchain() -> EmscriptenToolchain:
-    """Find and return a configured Emscripten toolchain.
-
-    Returns:
-        A configured EmscriptenToolchain ready for use.
-
-    Raises:
-        RuntimeError: If Emscripten is not installed.
-    """
+    """Return a configured Emscripten toolchain, or raise RuntimeError."""
     from pcons.tools.toolchain import toolchain_registry
 
     toolchain = toolchain_registry.find_available("wasm", ["emscripten", "emcc"])

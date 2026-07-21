@@ -2,19 +2,9 @@
 """Generator protocol for build file generation.
 
 Generators take a configured Project and produce build system files
-(e.g., Ninja, Makefiles, IDE project files).
-
-NOTE: Build scripts may use the ``Generator()`` factory from the
-top-level ``pcons`` package to register which generator(s) to use::
-
-    from pcons import Generator, Project
-    project = Project("myapp", build_dir="build")
-    # ... define targets ...
-    Generator().generate(project)   # requests Ninja by default
-
-Actual generation is deferred: it runs when ``BaseGenerator._generate_pending()``
-is called — either by the CLI after executing the build script, or via the
-atexit handler when the script is run directly with ``python pcons-build.py``.
+(e.g., Ninja, Makefiles, IDE project files). Generation is deferred:
+``generate()`` enqueues work that runs via ``_generate_pending()`` —
+called by the CLI, or by an atexit hook on direct script runs.
 """
 
 from __future__ import annotations
@@ -34,10 +24,8 @@ if TYPE_CHECKING:
 class Generator(Protocol):
     """Protocol for build file generators.
 
-    A Generator takes a configured Project and writes build files.
-    The output directory is derived from project.build_dir.
-    Different generators produce different formats (Ninja, Make,
-    IDE projects, etc.).
+    Takes a configured Project and writes build files under
+    project.build_dir.
     """
 
     @property
@@ -46,11 +34,7 @@ class Generator(Protocol):
         ...
 
     def generate(self, project: Project) -> None:
-        """Generate build files for a project.
-
-        Args:
-            project: The configured project to generate for.
-        """
+        """Generate build files for a project."""
         ...
 
 
@@ -60,9 +44,8 @@ class BaseGenerator:
     _supports_compile_commands: bool = False
 
     _is_build_generator: bool = False
-    """Whether this generator produces build files (vs. auxiliary files like compile_commands.json).
-    Used to determine whether to mark project as generated.
-    """
+    """True for generators that produce build files (vs. auxiliary files
+    like compile_commands.json)."""
 
     __pending = dict[int, list[Callable[[], None]]]()
     """Pending generate requests"""
@@ -74,11 +57,6 @@ class BaseGenerator:
     """Whether the crash-cancellation excepthook has been installed"""
 
     def __init__(self, name: str) -> None:
-        """Initialize a generator.
-
-        Args:
-            name: Generator name.
-        """
         self._name = name
 
     @property
@@ -94,28 +72,16 @@ class BaseGenerator:
     ) -> None:
         """Register a deferred generate for this project.
 
-        Enqueues the generation work to run later — either when
-        ``_generate_pending()`` is called by the CLI, or at process exit
-        via the atexit handler when the script is run directly.
-
-        The output directory is computed from ``project.build_dir``. The
-        project is auto-resolved if not already resolved at the time the
-        generation actually runs.
-
-        For build generators (Ninja, Make, Xcode), also auto-generates
-        ``compile_commands.json`` for IDE integration unless disabled.
+        The project is auto-resolved when generation actually runs.
 
         Args:
             project: The configured project to generate for.
             compile_commands: If True (default) and this generator supports
-                it, automatically generate ``compile_commands.json`` alongside
-                the build files.
-            root_symlink: If True (default), the compile_commands step also
-                maintains a ``compile_commands.json`` symlink at the project
-                root (outside build_dir) so IDEs/clangd find it without
-                configuration. Pass False to keep generation strictly inside
-                build_dir. With multiple build configurations, the last
-                generation to run owns the root link.
+                it, also generate ``compile_commands.json``.
+            root_symlink: If True (default), maintain a
+                ``compile_commands.json`` symlink at the project root so
+                IDEs/clangd find it. With multiple build configurations,
+                the last generation to run owns the root link.
         """
 
         def _generate_later():
@@ -132,18 +98,14 @@ class BaseGenerator:
                 cc_gen = CompileCommandsGenerator(root_symlink=root_symlink)
                 cc_gen._generate_impl(project, cc_gen._resolve_output_dir(project))
 
-            # Write the test manifest if the project declares any tests.
-            # Generator-agnostic: every backend gets it for free. Skipped
-            # silently when there are no Test targets.
+            # No-op when the project declares no Test targets.
             from pcons.core.test import write_test_manifest
 
             write_test_manifest(project, output_dir)
 
-        # Register the actual generation, will be actually executed either by CLI or atexit
         BaseGenerator.__pending.setdefault(id(project), []).append(_generate_later)
 
         if self._is_build_generator:
-            # Mark project as generated when a build generator is registered
             project._mark_generated()
 
         BaseGenerator._register_atexit()
@@ -152,11 +114,9 @@ class BaseGenerator:
     def _register_atexit() -> None:
         """Install the atexit hook that runs pending generation (idempotent).
 
-        Called when a top-level Project is created (so build scripts need no
-        explicit generate call) and when a generate is enqueued. Also installs
-        a sys.excepthook wrapper, once per process, that cancels pending
-        generation when the script dies on an unhandled exception — build
-        files must not be generated from a partially-executed script.
+        Also installs a sys.excepthook wrapper that cancels pending
+        generation on an unhandled exception — build files must not be
+        generated from a partially-executed script.
         """
         if BaseGenerator.__atexit_registered:
             return
@@ -181,10 +141,8 @@ class BaseGenerator:
     def _clear_pending() -> None:
         """Clear all pending generates and drop the atexit hook (for testing).
 
-        Tests that call ``generate()`` register a process-wide atexit handler.
-        Clearing the queue without also unregistering it would leave the hook
-        to fire at interpreter shutdown against an already-torn-down project
-        tree, so cleanup must remove both.
+        Both must go: a leftover hook would fire at interpreter shutdown
+        against an already-torn-down project tree.
         """
         BaseGenerator.__pending.clear()
         if BaseGenerator.__atexit_registered:
@@ -199,18 +157,11 @@ class BaseGenerator:
     ) -> None:
         """Execute and clear pending generate requests for a project.
 
-        If *project* is ``None``, the top-level project is used.  When called
-        explicitly (e.g. by the CLI), errors propagate to the caller, which
-        turns them into a nonzero exit status.  When fired from the atexit
-        hook, a missing top-level project (e.g. one torn down by tests) is a
-        silent no-op, but a *real* generation error is reported to stderr and
-        forces a nonzero process exit — Python would otherwise ignore an
-        exception raised at shutdown and still exit 0.  Safe to call when
-        nothing is pending (no-op).
-
-        Args:
-            project: The project whose pending generate requests should be executed.
-                     Defaults to ``Project.top_level()``.
+        Defaults to the top-level project; safe to call when nothing is
+        pending. Called explicitly, errors propagate. From the atexit hook,
+        a missing top-level project is a silent no-op, but a real generation
+        error forces a nonzero process exit — Python ignores exceptions
+        raised at shutdown and would otherwise exit 0.
         """
         try:
             if project is None:
@@ -220,19 +171,14 @@ class BaseGenerator:
                     project = _Project.top_level()
                 except ValueError:
                     if _is_atexit:
-                        # Project tree was already torn down (e.g. tests
-                        # cleared it); nothing left to generate.
+                        # Project tree already torn down; nothing to generate.
                         return
                     raise
 
-            # A top-level project always gets a build generation unless a
-            # build generator (Ninja/Make/Xcode) was explicitly requested:
-            # auxiliary generators (dot, mermaid, metadata,
-            # compile_commands) are additive companions — "also generate
-            # diagrams alongside the build" must not cancel the build.
-            # project.generate() is a no-op if a build generator already
-            # ran, and respects PCONS_GENERATOR / --generator, which is
-            # also the sanctioned way to run an auxiliary generator alone.
+            # Auxiliary generators (dot, mermaid, metadata, compile_commands)
+            # are additive: requesting one must not cancel the build
+            # generation. project.generate() is a no-op if a build generator
+            # already ran, and respects PCONS_GENERATOR / --generator.
             project.generate()
 
             pending = BaseGenerator.__pending.pop(id(project), [])
@@ -240,7 +186,7 @@ class BaseGenerator:
                 func()
 
             if BaseGenerator.__atexit_registered:
-                # Unregister the atexit handler if there are no more pending generates to avoid running it unnecessarily at exit
+                # Nothing pending anymore; drop the atexit hook.
                 import atexit
 
                 atexit.unregister(BaseGenerator._generate_pending)
@@ -250,11 +196,8 @@ class BaseGenerator:
             import traceback
 
             if _is_atexit:
-                # Interpreter shutdown: Python *ignores* exceptions raised from
-                # atexit handlers (and sys.exit too) and would still exit 0, so
-                # re-raising here would silently hide a real generation failure.
-                # Report it and force a nonzero exit. (The benign "no project"
-                # case returns earlier and never reaches here.)
+                # Python ignores exceptions from atexit handlers (and
+                # sys.exit) and would exit 0; report and force nonzero.
                 import os
 
                 print(
@@ -269,17 +212,8 @@ class BaseGenerator:
             raise
 
     def _resolve_output_dir(self, project: Project) -> Path:
-        """Compute the output directory from the project.
-
-        If build_dir is absolute, use it directly; otherwise
-        resolve it relative to root_dir.
-
-        Args:
-            project: The project to get the output dir for.
-
-        Returns:
-            Absolute or resolved output directory path.
-        """
+        """Compute the output directory: build_dir, resolved against
+        root_dir if relative."""
         if project.build_dir.is_absolute():
             return project.build_dir
         return project.root_dir / project.build_dir
@@ -289,19 +223,9 @@ class BaseGenerator:
         raise NotImplementedError
 
     def _get_target_build_nodes(self, target: Target) -> list[FileNode]:
-        """Get all buildable file nodes from a target.
-
-        This extracts nodes that have build information from resolved targets.
-
-        Args:
-            target: The target to get nodes from.
-
-        Returns:
-            List of FileNodes that have build information.
-        """
+        """Get all FileNodes with build information from a resolved target."""
         nodes: list[FileNode] = []
 
-        # Add object nodes and output nodes
         for obj_node in target.intermediate_nodes:
             if isinstance(obj_node, FileNode):
                 nodes.append(obj_node)

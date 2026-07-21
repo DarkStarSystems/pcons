@@ -232,22 +232,7 @@ class LlvmArchiver(BaseTool):
 
 
 class LlvmLinker(BaseTool):
-    """LLVM linker tool.
-
-    Variables:
-        cmd: Linker command (default: 'clang')
-        flags: Linker flags (list)
-        lprefix: Library prefix (default: '-l')
-        libs: Libraries to link (list of names, no prefix)
-        Lprefix: Library directory prefix (default: '-L')
-        libdirs: Library directories (list of paths, no prefix)
-        Fprefix: Framework directory prefix (default: '-F', macOS only)
-        frameworkdirs: Framework directories (list of paths, no prefix)
-        fprefix: Framework prefix (default: '-framework', macOS only)
-        frameworks: Frameworks to link (list of names, no prefix)
-        progcmd: Command template for linking program
-        sharedcmd: Command template for linking shared library
-    """
+    """LLVM linker tool (variables come from gnu_link_vars)."""
 
     def __init__(self) -> None:
         super().__init__("link")
@@ -263,17 +248,10 @@ class LlvmLinker(BaseTool):
 
 
 class MetalCompiler(BaseTool):
-    """Apple Metal shader compiler tool (macOS only).
+    """Apple Metal shader compiler (macOS only).
 
-    Compiles .metal shader files to .air (Apple Intermediate Representation).
-    The resulting .air files can be linked with metallib to create .metallib archives.
-
-    Variables:
-        cmd: Compiler command (default: 'xcrun metal')
-        flags: Compiler flags (list)
-        iprefix: Include directory prefix (default: '-I')
-        includes: Include directories (list of paths, no prefix)
-        metalcmd: Command template for compiling to .air
+    Compiles .metal files to .air (Apple Intermediate Representation),
+    which metallib can link into .metallib archives.
     """
 
     def __init__(self) -> None:
@@ -320,7 +298,6 @@ class MetalCompiler(BaseTool):
         if not platform.is_macos:
             return None
 
-        # Check if xcrun metal is available
         xcrun = config.find_program("xcrun", version_flag="")
         if xcrun is None:
             return None
@@ -333,15 +310,8 @@ class MetalCompiler(BaseTool):
 class LlvmToolchain(UnixToolchain):
     """LLVM/Clang toolchain for C and C++ development.
 
-    Inherits from UnixToolchain which provides:
-    - get_source_handler() for C/C++/Objective-C/assembly files
-    - get_object_suffix(), get_static_library_name(), etc.
-    - get_compile_flags_for_target_type() for -fPIC handling
-    - get_separated_arg_flags() for flags like -arch, -framework, etc.
-    - apply_target_arch() for macOS cross-compilation
-    - apply_variant() for debug/release/etc. configurations
-
-    Additionally supports Metal shaders on macOS.
+    Source handling, naming conventions, arch/variant handling come from
+    UnixToolchain. Additionally supports Metal shaders on macOS.
     """
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
@@ -355,14 +325,13 @@ class LlvmToolchain(UnixToolchain):
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled.
 
-        Extends the base Unix toolchain handler to add Metal shader support
-        on macOS.
+        Adds C++20 module interfaces and Metal shaders (macOS) to the base
+        Unix handlers.
         """
         from pcons.tools.toolchain import SourceHandler
 
-        # First check base Unix toolchain for standard C/C++/Objective-C/assembly.
-        # Then replace the hardcoded ".o" with the platform object suffix so that
-        # on Windows we get ".obj" (Clang on Windows uses MSVC object file conventions).
+        # Replace the base handler's ".o" with the platform object suffix:
+        # Clang on Windows uses MSVC object conventions (".obj").
         handler = super().get_source_handler(suffix)
         if handler is not None:
             obj_suffix = get_platform().object_suffix
@@ -383,11 +352,9 @@ class LlvmToolchain(UnixToolchain):
                 "cxx", "cxx_module", get_platform().object_suffix, depfile, "gcc"
             )
 
-        # Metal shaders (macOS only)
+        # Metal shaders (macOS only) compile to .air
         platform = get_platform()
         if suffix.lower() == ".metal" and platform.is_macos:
-            # Metal shaders compile to .air (Apple Intermediate Representation)
-            # Uses the 'metal' tool with 'metalcmd' command variable
             return SourceHandler("metal", "metal", ".air", None, None, "metalcmd")
 
         return None
@@ -414,7 +381,7 @@ class LlvmToolchain(UnixToolchain):
 
         self._tools = {"cc": cc, "cxx": cxx, "ar": ar, "link": link}
 
-        # Add Metal compiler on macOS (optional - not required for toolchain to work)
+        # Metal compiler is optional (macOS only)
         platform = get_platform()
         if platform.is_macos:
             metal = MetalCompiler()
@@ -513,12 +480,8 @@ class LlvmToolchain(UnixToolchain):
             specs, scanner="clang-scan-deps", scanner_style="clang"
         )
 
-        # `import std;` / `import std.compat;` support: if any TU requires
-        # the standard library module, locate libc++'s std.cppm via the
-        # manifest the compiler ships and synthesize a build node for it.
-        # Appended to `results` so the dyndep file lists the .pcm as an
-        # implicit output. The synthesized std build is keyed like any other
-        # module (cxx_modules/<key>/std.pcm) so it matches its importers.
+        # Synthesize std/std.compat module builds where imported (appended
+        # to `results` so the dyndep file declares their .pcm outputs).
         std_obj_nodes = self._inject_clang_std_module_builds(
             project,
             build_dir,
@@ -680,9 +643,8 @@ class LlvmToolchain(UnixToolchain):
         if not any(f.startswith("-stdlib=") for f in passthrough):
             passthrough.append("-stdlib=libc++")
 
-        # The std module's BMI is keyed like any other, its key is derived from
-        # the same BMI-sensitive flags its importers use, so they resolve it
-        # from the same cxx_modules/<key>/ directory.
+        # Keyed by the same BMI-sensitive flags its importers use, so they
+        # resolve it from the same cxx_modules/<key>/ directory.
         std_key = bmi_key_for_flags(passthrough, flag_spec)
         std_moddir = f"{moddir}/{std_key}"
 

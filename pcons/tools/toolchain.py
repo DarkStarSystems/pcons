@@ -68,33 +68,17 @@ def _cxx_set_standard(env: Environment, standard: int | str) -> None:
 class ToolchainContext(Protocol):
     """Toolchain-specific build context.
 
-    Provides values that fill placeholders in command templates.
-    The toolchain controls what variables exist and how they're formatted.
-
-    This protocol allows toolchains to define domain-specific build contexts
-    without polluting the core BuildInfo with C/C++ specific fields like
-    effective_includes, effective_defines, etc.
-
-    The context provides get_env_overrides() which returns values to be set
-    on the environment's tool namespace before command template expansion.
-    This allows the resolver to expand commands with effective requirements
-    at generation time, rather than writing per-build Ninja variables.
-
-    Example implementations:
-    - CompileLinkContext: For C/C++ compilation and linking
-    - DocumentContext: For document generation (hypothetical)
-    - AssetBundleContext: For asset bundling (hypothetical)
+    Provides values that fill placeholders in command templates, keeping
+    domain-specific fields (effective includes/defines, ...) out of the
+    core BuildInfo. CompileLinkContext is the C/C++ implementation.
     """
 
     def get_env_overrides(self) -> dict[str, object]:
         """Return values to set on env.<tool>.* before command expansion.
 
-        These values are set on the environment's tool namespace so that
-        template expressions like ${prefix(cc.iprefix, cc.includes)} are
-        expanded during subst() with the effective requirements.
-
-        Returns:
-            Dictionary mapping variable names to values.
+        Set on the tool namespace so template expressions like
+        ${prefix(cc.iprefix, cc.includes)} expand with the effective
+        requirements.
         """
         ...
 
@@ -120,9 +104,6 @@ for clang) regardless of which extension the user picks.
 class SourceHandler:
     """Describes how a toolchain handles a source file type.
 
-    This allows toolchains to define what source file types they can process
-    without hardcoding this information in the resolver.
-
     Attributes:
         tool_name: Name of the tool to use (e.g., "cc", "cxx", "latex").
         language: Language of the source (e.g., "c", "cxx", "latex").
@@ -132,13 +113,10 @@ class SourceHandler:
             - None: No dependency tracking
         deps_style: Dependency file style (e.g., "gcc", "msvc") or None.
         command_var: Name of the command variable (e.g., "objcmd", "rccmd").
-                     Defaults to "objcmd" for backwards compatibility.
         group_sources: If True, all of a target's sources matching this
                        handler compile in ONE invocation producing one
-                       object (whole-module compilation — Swift-style
-                       languages where the compilation unit is the module,
-                       not the file). The command template sees all sources
-                       (bare SourcePath() renders them all); the toolchain
+                       object (whole-module compilation, e.g. Swift). The
+                       command template sees all sources; the toolchain
                        can augment the grouped node via setup_group_node().
     """
 
@@ -517,52 +495,21 @@ class Toolchain(Protocol):
         ...
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
-        """Apply a build variant to the environment.
-
-        Toolchains implement this to configure their tools for different
-        build variants (e.g., "debug", "release"). The core knows nothing
-        about what these variants mean - each toolchain defines its own
-        semantics.
-
-        Args:
-            env: Environment to configure.
-            variant: Variant name (e.g., "debug", "release").
-            **kwargs: Toolchain-specific options.
-        """
+        """Apply a build variant (e.g. "debug", "release"); each toolchain
+        defines its own semantics."""
         ...
 
     def apply_target_arch(self, env: Environment, arch: str, **kwargs: Any) -> bool:
-        """Apply target architecture flags to the environment.
-
-        Toolchains implement this to configure their tools for different
-        CPU architectures. The core knows nothing about what these
-        architectures mean - each toolchain defines its own semantics.
-
-        For example:
-        - GCC/LLVM on macOS: adds -arch flags to compiler and linker
-        - MSVC: selects the cross toolset and adds /MACHINE:xxx
-        - Clang-CL: adds --target flag to compiler
+        """Apply target-arch flags (e.g. -arch on macOS, /MACHINE: on MSVC).
 
         Returns True if this toolchain realized the arch; the environment
         raises when no configured toolchain did (docs/presets.md).
-
-        Args:
-            env: Environment to configure.
-            arch: Architecture name (e.g., "arm64", "x86_64", "x64").
-            **kwargs: Toolchain-specific options.
         """
         ...
 
     def apply_preset(self, env: Environment, name: str) -> None:
-        """Apply a named flag preset to the environment.
-
-        Presets provide commonly-used flag combinations (warnings, sanitize,
-        profile, lto, hardened). Each toolchain defines its own flags.
-
-        Args:
-            env: Environment to configure.
-            name: Preset name.
-        """
+        """Apply a named flag preset (warnings, sanitize, lto, ...);
+        each toolchain defines its own flags."""
         ...
 
     def make_feature_preset(self, name: str) -> Preset | None:
@@ -570,23 +517,12 @@ class Toolchain(Protocol):
         ...
 
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
-        """Apply a cross-compilation preset to the environment.
-
-        Cross-compilation presets configure sysroot, target triple,
-        architecture flags, and SDK paths.
-
-        Args:
-            env: Environment to configure.
-            preset: A CrossPreset dataclass instance.
-        """
+        """Apply a cross-compilation preset (sysroot, triple, SDK paths)."""
         ...
 
     def make_cxx_standard_preset(self, standard: int) -> Preset | None:
-        """Build a Preset selecting the C++ *standard*, or None if not C++.
-
-        Args:
-            standard: C++ standard as an integer (e.g. 20 for C++20).
-        """
+        """Build a Preset selecting the C++ *standard* (e.g. 20), or None
+        if not C++."""
         ...
 
     def tool_setting(self, tool: str, name: str) -> Callable[..., None] | None:
@@ -657,71 +593,32 @@ class Toolchain(Protocol):
         output_name: str,
         existing_flags: Sequence[str | PathToken],
     ) -> list[str]:
-        """Return additional link flags for a specific target.
-
-        Called during resolution to inject target-specific link flags
-        such as install_name (macOS) or SONAME (Linux) for shared
-        libraries. The *existing_flags* are provided so that the
-        toolchain can skip defaults when the user has already set
-        an explicit override.
-
-        Args:
-            target: The target being linked.
-            output_name: The output filename (e.g., ``libfoo.dylib``).
-            existing_flags: Link flags already collected for this target.
-
-        Returns:
-            List of additional link flags. Default returns empty list.
+        """Return additional target-specific link flags (e.g. install_name,
+        SONAME). *existing_flags* lets the toolchain skip defaults the user
+        already overrode.
         """
         ...
 
     def get_separated_arg_flags(self) -> frozenset[str]:
-        """Return flags that take their argument as a separate token.
-
-        These are flags like -F, -framework, -arch where the argument
-        is a separate command-line token rather than attached to the flag.
-        This information is needed for proper flag deduplication.
-
-        Returns:
-            A frozenset of flag strings that take separate arguments.
-        """
+        """Return flags (like -framework, -arch) whose argument is a separate
+        token, for flag deduplication."""
         ...
 
     def get_archiver_tool_name(self) -> str:
-        """Return the name of the archiver tool for this toolchain.
-
-        Different toolchains use different tool names:
-        - GCC uses "ar"
-        - MSVC uses "lib"
-        """
+        """Return the archiver tool name ("ar" for GCC, "lib" for MSVC)."""
         ...
 
     def get_runtime_libs(
         self, linker_language: str, object_languages: set[str]
     ) -> list[str]:
-        """Return runtime libraries needed for mixed-language builds.
-
-        Args:
-            linker_language: The language driving the link.
-            object_languages: All languages present in the object files.
-
-        Returns:
-            List of library names to add (without -l prefix).
-        """
+        """Return runtime library names (no -l prefix) needed for
+        mixed-language builds."""
         ...
 
     def get_runtime_libdirs(
         self, linker_language: str, object_languages: set[str]
     ) -> list[str]:
-        """Return library search directories for mixed-language runtime libs.
-
-        Args:
-            linker_language: The language driving the link.
-            object_languages: All languages present in the object files.
-
-        Returns:
-            List of directory paths to add as library search dirs.
-        """
+        """Return library search dirs for mixed-language runtime libs."""
         ...
 
     def create_build_context(
@@ -730,22 +627,8 @@ class Toolchain(Protocol):
         env: Environment,
         for_compilation: bool = True,
     ) -> ToolchainContext | None:
-        """Create a toolchain-specific build context for a target.
-
-        This is the factory method that creates the appropriate context
-        object for this toolchain. The context provides variables that
-        fill placeholders in command templates.
-
-        Args:
-            target: The target being built.
-            env: The build environment.
-            for_compilation: If True, create context for compilation.
-                            If False, create context for linking.
-
-        Returns:
-            A ToolchainContext providing variables for the build statement,
-            or None if this toolchain doesn't use the context mechanism.
-        """
+        """Create a toolchain-specific build context for a target, or None
+        if this toolchain doesn't use the context mechanism."""
         ...
 
     def after_resolve(
@@ -753,11 +636,7 @@ class Toolchain(Protocol):
         project: Any,
         source_obj_by_language: dict[str, list[Any]],
     ) -> None:
-        """Optional post-resolution hook.
-
-        Called after all targets are resolved but before command expansion.
-        Override to inspect or modify the resolved build graph (e.g., Fortran
-        dyndep generation). The base implementation does nothing.
+        """Optional post-resolution hook, called before command expansion.
 
         Args:
             project: The resolved project.
@@ -1049,39 +928,15 @@ class BaseToolchain(ABC):
     def get_runtime_libs(
         self, linker_language: str, object_languages: set[str]
     ) -> list[str]:
-        """Return runtime libraries needed for mixed-language builds.
-
-        Called during link setup when the set of object languages is known.
-        The base implementation returns an empty list. Toolchains that
-        require runtime libraries for mixed-language builds should override
-        this method.
-
-        Args:
-            linker_language: The language driving the link (e.g., "fortran").
-            object_languages: All languages present in the object files.
-
-        Returns:
-            List of library names to add (without -l prefix).
-        """
+        """Return runtime library names (no -l prefix) needed for
+        mixed-language builds. Base: none."""
         return []
 
     def get_runtime_libdirs(
         self, linker_language: str, object_languages: set[str]
     ) -> list[str]:
-        """Return library search directories for mixed-language runtime libs.
-
-        Companion to get_runtime_libs(). Called with the same arguments to
-        provide the search paths needed to find the runtime libraries.
-        Required when runtime libraries are installed in non-standard
-        locations (e.g., Homebrew gfortran on macOS).
-
-        Args:
-            linker_language: The language driving the link.
-            object_languages: All languages present in the object files.
-
-        Returns:
-            List of directory paths to add as library search dirs.
-        """
+        """Return search dirs for get_runtime_libs() libraries installed in
+        non-standard locations (e.g. Homebrew gfortran). Base: none."""
         return []
 
     # =========================================================================
@@ -1093,35 +948,22 @@ class BaseToolchain(ABC):
         project: Any,
         source_obj_by_language: dict[str, list[Any]],
     ) -> None:
-        """Optional post-resolution hook.
+        """Optional post-resolution hook, called before command expansion.
 
-        Called by the resolver after all targets have been resolved but
-        before command expansion. Toolchains that need to inspect or modify
-        the resolved build graph (e.g., to generate dyndep files for Fortran
-        module dependencies) should override this method.
-
-        The base implementation does nothing.
+        Override to inspect or modify the resolved build graph (e.g.
+        Fortran dyndep generation). Base does nothing.
 
         Args:
             project: The resolved project.
-            source_obj_by_language: All compiled (source_path, obj_node) pairs,
-                grouped by language name. For example:
-                    {"fortran": [(Path("foo.f90"), FileNode(...)), ...],
-                     "cxx":     [(Path("bar.cpp"), FileNode(...)), ...]}
+            source_obj_by_language: All compiled (source_path, obj_node)
+                pairs, grouped by language name.
         """
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
-        """Return handler for source file suffix, or None if not handled.
+        """Return handler for a source suffix (".c", ".tex"), or None.
 
-        Override in subclasses to define what sources this toolchain handles.
-        This allows the resolver to be tool-agnostic - it queries the toolchain
-        instead of having hardcoded knowledge about file types.
-
-        Args:
-            suffix: File suffix including dot (e.g., ".c", ".cpp", ".tex").
-
-        Returns:
-            SourceHandler describing how to compile, or None if not handled.
+        Override to define what sources this toolchain handles; the
+        resolver queries this instead of hardcoding file types.
         """
         return None
 
@@ -1130,57 +972,26 @@ class BaseToolchain(ABC):
     ) -> None:
         """Augment a grouped (whole-module) compile node. No-op by default.
 
-        Called by CompileLinkFactory after it creates the single compile
-        node for a SourceHandler with ``group_sources=True``. Toolchains
-        override this to add per-node template variables
-        (``node._build_info["vars"]``, expanded into the command template),
-        extra outputs (``node._build_info["outputs"]``), or implicit deps —
+        Called after the single compile node for a ``group_sources=True``
+        handler is created. Override to add per-node template variables
+        (``node._build_info["vars"]``), extra outputs, or implicit deps —
         e.g. Swift's ``-module-name`` and ``.swiftmodule`` emission.
-
-        Args:
-            node: The grouped compile FileNode (``_build_info`` populated).
-            target: The target whose sources the node compiles.
-            env: The environment the node was created with.
         """
 
     def get_auxiliary_input_handler(self, suffix: str) -> AuxiliaryInputHandler | None:
-        """Return handler for auxiliary input files, or None if not handled.
+        """Return handler for an auxiliary input suffix (".def"), or None.
 
-        Override in subclasses to define what auxiliary input files this toolchain
-        handles. Auxiliary inputs are passed directly to a downstream tool with
-        specific flags rather than being compiled to object files.
-
-        Args:
-            suffix: File suffix including dot (e.g., ".def").
-
-        Returns:
-            AuxiliaryInputHandler describing how to pass to downstream tool,
-            or None if not an auxiliary input.
+        Auxiliary inputs are passed directly to a downstream tool with
+        specific flags rather than compiled to object files.
         """
         return None
 
     def get_object_suffix(self) -> str:
-        """Return the object file suffix for this toolchain.
-
-        Override in subclasses. Defaults to ".o" for Unix-like systems.
-
-        Returns:
-            Object file suffix (e.g., ".o", ".obj").
-        """
+        """Return the object file suffix (".o", ".obj"). Default ".o"."""
         return ".o"
 
     def get_archiver_tool_name(self) -> str:
-        """Return the name of the archiver tool for this toolchain.
-
-        Different toolchains use different tool names:
-        - GCC uses "ar"
-        - MSVC uses "lib"
-
-        Override in subclasses. Default is "ar" for Unix-like systems.
-
-        Returns:
-            Archiver tool name (e.g., "ar", "lib").
-        """
+        """Return the archiver tool name ("ar" for GCC, "lib" for MSVC)."""
         return "ar"
 
     def get_output_prefix(self, target_type: str) -> str:
@@ -1247,19 +1058,8 @@ class BaseToolchain(ABC):
         return f"{self.get_output_prefix('program')}{name}{self.get_output_suffix('program')}"
 
     def get_compile_flags_for_target_type(self, target_type: str) -> list[str]:
-        """Return additional compile flags needed for the target type.
-
-        Override in subclasses for platform/toolchain-specific flags.
-        For example, GCC/LLVM on Linux need -fPIC for shared libraries.
-
-        Args:
-            target_type: The target type (e.g., "shared_library", "static_library",
-                        "program", "interface", "object").
-
-        Returns:
-            List of additional compile flags needed for this target type.
-            Default implementation returns an empty list.
-        """
+        """Return additional compile flags for a target type (e.g. -fPIC for
+        shared libraries on Linux). Base: none."""
         return []
 
     def get_link_flags_for_target(
@@ -1268,30 +1068,14 @@ class BaseToolchain(ABC):
         output_name: str,
         existing_flags: Sequence[str | PathToken],
     ) -> list[str]:
-        """Return additional link flags for a specific target.
-
-        Override in subclasses for platform/toolchain-specific flags
-        like install_name (macOS) or SONAME (Linux).
-
-        Args:
-            target: The target being linked.
-            output_name: The output filename (e.g., ``libfoo.dylib``).
-            existing_flags: Link flags already collected for this target.
-
-        Returns:
-            List of additional link flags. Default returns empty list.
+        """Return additional target-specific link flags (e.g. install_name,
+        SONAME). *existing_flags* lets subclasses skip defaults the user
+        already overrode. Base: none.
         """
         return []
 
     def get_separated_arg_flags(self) -> frozenset[str]:
-        """Return flags that take their argument as a separate token.
-
-        Override in subclasses to provide toolchain-specific flags.
-        Default implementation returns an empty frozenset.
-
-        Returns:
-            A frozenset of flag strings that take separate arguments.
-        """
+        """Return flags whose argument is a separate token. Base: none."""
         return frozenset()
 
     def compile_link_context_class(self) -> type[CompileLinkContext]:
@@ -1314,28 +1098,17 @@ class BaseToolchain(ABC):
     ) -> ToolchainContext | None:
         """Create a toolchain-specific build context for a target.
 
-        Default implementation returns None, meaning the toolchain doesn't
-        use the context mechanism. Subclasses should override this to return
-        an appropriate context object (e.g., CompileLinkContext for C/C++).
-
         Args:
             target: The target being built.
             env: The build environment.
-            for_compilation: If True, create context for compilation.
-                            If False, create context for linking.
-
-        Returns:
-            A ToolchainContext providing variables for the build statement,
-            or None if this toolchain doesn't use the context mechanism.
+            for_compilation: If True, create context for compilation;
+                             if False, for linking.
         """
-        # Import here to avoid circular imports
         from pcons.toolchains.build_context import CompileLinkContext
         from pcons.tools.requirements import compute_effective_requirements
 
-        # Compute effective requirements
         effective = compute_effective_requirements(target, env, for_compilation)
 
-        # Create and return context
         mode = "compile" if for_compilation else "link"
         return CompileLinkContext.from_effective_requirements(
             effective,

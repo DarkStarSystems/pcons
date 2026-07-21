@@ -1,11 +1,8 @@
 # SPDX-License-Identifier: MIT
-"""Effective requirements computation for target-centric builds.
+"""Effective requirements: a target's merged compile/link settings.
 
-This module provides the EffectiveRequirements class that holds the complete
-compilation/link requirements for a target, computed by merging:
-1. Base environment settings
-2. Target's private requirements
-3. All dependencies' public requirements (transitive)
+Merges base environment settings, the target's private requirements, and
+all dependencies' public requirements (transitive).
 """
 
 from __future__ import annotations
@@ -31,12 +28,6 @@ logger = logging.getLogger(__name__)
 class EffectiveRequirements:
     """Complete compilation/link requirements for a target.
 
-    This represents the final, resolved set of flags and paths that should
-    be used when compiling sources for a specific target. It combines:
-    - Base environment settings (env.cc.includes, etc.)
-    - Target's private requirements
-    - All dependencies' public requirements (transitive)
-
     Attributes:
         includes: Include directories for compilation.
         defines: Preprocessor definitions.
@@ -57,14 +48,8 @@ class EffectiveRequirements:
     separated_arg_flags: frozenset[str] = field(default_factory=frozenset)
 
     def merge(self, reqs: UsageRequirements) -> None:
-        """Merge UsageRequirements into this EffectiveRequirements.
-
-        Avoids duplicates while preserving order. For compiler and linker
-        flags, handles flags that take separate arguments (like -F path,
-        -framework Foo) by treating the flag+argument pair as a unit.
-
-        Args:
-            reqs: UsageRequirements to merge in.
+        """Merge in UsageRequirements: order-preserving dedup, with
+        separated-arg flag pairs (``-framework Foo``) treated as units.
         """
         for inc_dir in reqs.include_dirs:
             inc_path = Path(inc_dir) if isinstance(inc_dir, str) else inc_dir
@@ -73,7 +58,6 @@ class EffectiveRequirements:
         for define in reqs.defines:
             if define not in self.defines:
                 self.defines.append(define)
-        # Use flag-aware merge for compile and link flags
         merge_flags(self.compile_flags, reqs.compile_flags, self.separated_arg_flags)
         merge_flags(self.link_flags, reqs.link_flags, self.separated_arg_flags)
         for lib in reqs.link_libs:
@@ -85,14 +69,7 @@ class EffectiveRequirements:
                 self.link_dirs.append(dir_path)
 
     def as_hashable_tuple(self) -> tuple:
-        """Return hashable representation for caching.
-
-        This can be used as a dictionary key or set member to identify
-        unique compilation configurations.
-
-        Returns:
-            A tuple containing all requirements in a hashable form.
-        """
+        """Return a hashable representation for caching."""
         return (
             tuple(str(p) for p in self.includes),
             tuple(self.defines),
@@ -103,11 +80,7 @@ class EffectiveRequirements:
         )
 
     def clone(self) -> EffectiveRequirements:
-        """Create a deep copy of this EffectiveRequirements.
-
-        Returns:
-            A new EffectiveRequirements with copied lists.
-        """
+        """Create a deep copy with copied lists."""
         return EffectiveRequirements(
             includes=list(self.includes),
             defines=list(self.defines),
@@ -122,14 +95,9 @@ class EffectiveRequirements:
 def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None:
     """Apply usage requirements env-wide onto tool variables (``env.use()``).
 
-    Uses the same merge semantics as target resolution
-    (:meth:`EffectiveRequirements.merge`): order-preserving dedup, with
-    separated-arg flag pairs (``-framework Foo``) treated as units. Compile
-    requirements land on cc/cxx; link requirements on link. Structured
-    frameworks map to the ``link.frameworks``/``link.frameworkdirs``
-    variables (as ``env.Framework()`` does).
-
-    A ``Target`` in ``link_libs`` is an error here: linking a build target
+    Compile requirements land on cc/cxx; link requirements on link, with
+    the same merge semantics as :meth:`EffectiveRequirements.merge`. A
+    ``Target`` in ``link_libs`` is an error here: linking a build target
     is per-target dependency information — use ``target.link(...)``.
     """
     from pcons.core.target import Target as _Target
@@ -153,11 +121,7 @@ def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None
         return getattr(tool, name)
 
     def extend_unique(tool: Any, name: str, values: Iterable[Any]) -> None:
-        """Append each value to the tool's list variable unless present.
-
-        Nothing to add leaves the tool untouched (no empty variable is
-        created).
-        """
+        """Append each absent value; with nothing to add, don't create the var."""
         items = list(values)
         if not items:
             return
@@ -213,10 +177,9 @@ def compute_effective_requirements(
 ) -> EffectiveRequirements:
     """Compute complete requirements for a target.
 
-    Layers (in order of application):
-    1. Base environment (env.cc.includes, env.cc.defines, etc.)
-    2. Target's private requirements
-    3. All dependencies' public requirements (transitive)
+    Layers (in order of application): base environment, the target's
+    private then public requirements, dependencies' public requirements
+    (transitive), then implicit target deps.
 
     Args:
         target: The target to compute requirements for.
@@ -227,17 +190,14 @@ def compute_effective_requirements(
     Returns:
         EffectiveRequirements containing the merged requirements.
     """
-    # Get separated arg flags from toolchains for proper flag deduplication
     separated_arg_flags = get_separated_arg_flags_from_toolchains(env.toolchains)
     result = EffectiveRequirements(separated_arg_flags=separated_arg_flags)
 
-    # Layer 1: Base environment
-    # Try to get tool config for the primary language
+    # Layer 1: Base environment (primary tool's includes and defines).
     tool_name = _get_primary_tool(target, env)
     if tool_name and env.has_tool(tool_name):
         tool_config = getattr(env, tool_name)
 
-        # Get includes from tool config
         includes = getattr(tool_config, "includes", None)
         if includes:
             for inc in includes:
@@ -245,39 +205,30 @@ def compute_effective_requirements(
                 if path not in result.includes:
                     result.includes.append(path)
 
-        # Get defines from tool config
         defines = getattr(tool_config, "defines", None)
         if defines:
             for define in defines:
                 if define not in result.defines:
                     result.defines.append(define)
 
-        # NOTE: We intentionally do NOT merge env.<tool>.flags here.
-        # In mixed-language targets (C + C++), the primary tool's flags
-        # (e.g., cxx.flags with -std=c++20) would leak to all sources.
-        # Instead, per-tool base flags are applied in resolver.py's
-        # _expand_single_node_command(), where tool_name is per-source.
+        # NOT env.<tool>.flags: in mixed-language targets the primary
+        # tool's flags (e.g. cxx.flags with -std=c++20) would leak to all
+        # sources. Per-tool base flags are applied per-source in
+        # resolver.py. env.link settings are likewise baked into the
+        # ninja rule via template expansion, not merged here.
 
-    # Note: env.link settings (frameworks, libs, libdirs) are baked into the
-    # ninja rule via template expansion. Effective requirements only contain
-    # target-specific settings (private/public requirements from targets and
-    # their dependencies).
-
-    # Layer 2: Target's own requirements
-    # Private: only for this target
+    # Layer 2: Target's own requirements. Public is also available to the
+    # target's own sources, not just consumers.
     result.merge(_resolve_and_add_includes_for(target.private, target))
-    # Public: also available to this target's own sources (not just consumers)
     result.merge(_resolve_and_add_includes_for(target.public, target))
 
-    # Layer 3: All dependencies' public requirements (transitive)
-    # transitive_dependencies() includes direct dependencies via DFS
+    # Layer 3: All dependencies' public requirements (transitive).
     for dep in target.transitive_dependencies():
         result.merge(_resolve_and_add_includes_for(dep.public, dep))
 
-    # Layer 4: Implicit target deps from target.depends(other_target)
-    # These propagate public usage requirements (includes, defines) to
-    # compile steps, just like link() deps, but without adding outputs
-    # to the linker's $in.  Only propagated deps (not output-only).
+    # Layer 4: Implicit target deps from target.depends(other_target):
+    # propagate public usage requirements to compile steps without adding
+    # outputs to the linker's $in.
     if for_compilation:
         for dep in target._implicit_target_deps:
             result.merge(_resolve_and_add_includes_for(dep.public, dep))
@@ -288,34 +239,26 @@ def compute_effective_requirements(
 def _get_primary_tool(target: Target, env: Environment) -> str | None:
     """Determine the primary compilation tool for a target.
 
-    Uses all toolchains to determine the tool (tool-agnostic), falling back
-    to hardcoded suffixes if no toolchain handles the source.
-
-    Args:
-        target: The target to analyze.
-        env: The environment to check for available tools.
+    Checks required_languages, then asks each toolchain for a source
+    handler, then falls back to cxx/cc.
 
     Returns:
         Tool name (e.g., 'cc', 'cxx') or None if not determinable.
     """
-    # Check required_languages first
     if "cxx" in target.required_languages:
         return "cxx"
     if "c" in target.required_languages:
         return "cc"
 
-    # Try toolchain-based detection (tool-agnostic approach)
     from pcons.core.node import FileNode
 
     for source in target.sources:
         if isinstance(source, FileNode):
-            # Check all toolchains in order
             for toolchain in env.toolchains:
                 handler = toolchain.get_source_handler(source.path.suffix)
                 if handler is not None:
                     return handler.tool_name
 
-    # Default to C++ if available
     if env.has_tool("cxx"):
         return "cxx"
     if env.has_tool("cc"):

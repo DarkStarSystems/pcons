@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Package description for external dependencies.
-
-This module defines the PackageDescription class which represents
-an external library or package that can be used in a pcons build.
-"""
+"""Package description for external dependencies."""
 
 from __future__ import annotations
 
@@ -78,9 +74,7 @@ class ComponentDescription:
 class PackageDescription:
     """Description of an external package.
 
-    This class represents all the information needed to use an external
-    library in a pcons build. It can be serialized to/from TOML for
-    caching discovered package information.
+    Serializable to/from TOML for caching discovered package information.
 
     Attributes:
         name: Package name (e.g., "zlib", "openssl", "boost").
@@ -316,18 +310,7 @@ class PackageDescription:
         return self.components.get(name)
 
     def merge_component(self, component: ComponentDescription) -> PackageDescription:
-        """Return a new description with component settings merged.
-
-        This is useful when a user requests a specific component of a
-        package - the component's settings are merged with the base
-        package settings.
-
-        Args:
-            component: Component to merge.
-
-        Returns:
-            New PackageDescription with merged settings.
-        """
+        """Return a new description with the component's settings merged in."""
         return PackageDescription(
             name=self.name,
             version=self.version,

@@ -34,23 +34,17 @@ def get_python_info() -> dict[str, str]:
 
     info: dict[str, str] = {}
 
-    # Include directory
     info["include_dir"] = sysconfig.get_path("include") or ""
-
-    # Extension suffix (e.g., ".cpython-312-darwin.so")
+    # e.g. ".cpython-312-darwin.so"
     info["ext_suffix"] = sysconfig.get_config_var("EXT_SUFFIX") or ".so"
-
-    # Library directory and libraries (for linking)
     info["lib_dir"] = sysconfig.get_config_var("LIBDIR") or ""
 
-    # On some platforms, we need to link against Python
     platform = get_platform()
     if platform.is_windows:
-        # Windows always needs to link against pythonXY.lib
+        # Windows extensions must link against pythonXY.lib; on Unix the
+        # importing interpreter already provides the symbols.
         info["libs"] = f"python{sys.version_info.major}{sys.version_info.minor}"
     else:
-        # Unix: typically don't need to explicitly link against Python
-        # for extension modules (they're loaded by Python which has the symbols)
         info["libs"] = ""
 
     return info
@@ -105,7 +99,6 @@ class CythonTranspiler(BaseTool):
 
         cython = config.find_program("cython")
         if cython is None:
-            # Try cython3
             cython = config.find_program("cython3")
 
         if cython is None:
@@ -153,18 +146,15 @@ class CythonCCompiler(_PythonInfoTool):
         platform = get_platform()
         python_info = self._get_python_info()
 
-        # Use clang on macOS, gcc elsewhere
         cmd = "clang" if platform.is_macos else "gcc"
 
-        # Include directories (without -I prefix)
         includes = []
         if python_info["include_dir"]:
             includes.append(python_info["include_dir"])
 
-        # Flags for position-independent code (needed for shared libs)
         flags = ["-fPIC"]
         if platform.is_macos:
-            # Suppress some common warnings from Cython-generated code
+            # Suppress common warnings from Cython-generated code
             flags.append("-Wno-unreachable-code")
 
         return {
@@ -213,7 +203,6 @@ class CythonCCompiler(_PythonInfoTool):
 
         platform = get_platform()
 
-        # Try clang first on macOS, gcc elsewhere
         if platform.is_macos:
             compiler = config.find_program("clang")
         else:
@@ -254,10 +243,8 @@ class CythonLinker(_PythonInfoTool):
         platform = get_platform()
         python_info = self._get_python_info()
 
-        # Use clang on macOS, gcc elsewhere
         cmd = "clang" if platform.is_macos else "gcc"
 
-        # Shared library flags
         if platform.is_macos:
             # macOS uses -bundle for Python extensions, not -shared
             flags = ["-bundle", "-undefined", "dynamic_lookup"]
@@ -266,7 +253,6 @@ class CythonLinker(_PythonInfoTool):
         else:
             flags = ["-shared"]
 
-        # Library directories (without -L prefix) and libraries (without -l prefix)
         libdirs = []
         libs = []
         if python_info["lib_dir"]:
@@ -317,7 +303,6 @@ class CythonLinker(_PythonInfoTool):
 
         platform = get_platform()
 
-        # Try clang first on macOS, gcc elsewhere
         if platform.is_macos:
             linker = config.find_program("clang")
         else:
@@ -335,12 +320,8 @@ class CythonLinker(_PythonInfoTool):
 
 
 class CythonToolchain(BaseToolchain):
-    """Cython toolchain for building Python extension modules.
-
-    A complete toolchain for compiling Cython code into Python extensions:
-    - Cython transpiler (.pyx → .c)
-    - C compiler configured for Python extensions
-    - Linker for creating .so/.pyd files
+    """Cython toolchain for building Python extension modules
+    (.pyx → .c → .o → .so/.pyd).
 
     Example:
         config = Configure()
@@ -366,25 +347,21 @@ class CythonToolchain(BaseToolchain):
         if not isinstance(config, Configure):
             return False
 
-        # Configure Cython transpiler
         cython = CythonTranspiler()
         cython_config = cython.configure(config)
         if cython_config is None:
             return False
 
-        # Configure C compiler for Cython
         cycc = CythonCCompiler()
         cycc_config = cycc.configure(config)
         if cycc_config is None:
             return False
 
-        # Configure linker for Cython
         cylink = CythonLinker()
         cylink_config = cylink.configure(config)
         if cylink_config is None:
             return False
 
-        # Store configured tools
         self._tools = {
             "cython": cython,
             "cycc": cycc,
@@ -423,7 +400,6 @@ def find_cython_toolchain() -> CythonToolchain:
 # Registration
 # =============================================================================
 
-# Register Cython toolchain for auto-discovery
 from pcons.tools.toolchain import toolchain_registry  # noqa: E402
 
 toolchain_registry.register(

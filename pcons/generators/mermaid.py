@@ -21,35 +21,8 @@ if TYPE_CHECKING:
 class MermaidGenerator(GraphGenerator):
     """Generator that produces Mermaid flowchart diagrams.
 
-    Generates the complete dependency graph showing all files:
-    sources, objects, libraries, and programs with their relationships.
-
-    Example output:
-        ```mermaid
-        flowchart LR
-          math_c>math.c]
-          math_o(math.o)
-          libmath_a[libmath.a]
-          main_c>main.c]
-          main_o(main.o)
-          app[[app]]
-
-          math_c --> math_o
-          math_o --> libmath_a
-          main_c --> main_o
-          main_o --> app
-          libmath_a --> app
-        ```
-
-    Usage:
-        generator = MermaidGenerator()
-        generator.generate(project)
-        # Creates <build_dir>/deps.mmd
-
-        # Write to a specific directory:
-        generator = MermaidGenerator(output_dir=Path("/tmp"))
-        generator.generate(project)
-        # Creates /tmp/deps.mmd
+    Writes the complete dependency graph — sources, objects, libraries,
+    and programs — to <build_dir>/deps.mmd by default.
     """
 
     def __init__(
@@ -64,9 +37,8 @@ class MermaidGenerator(GraphGenerator):
 
         Args:
             include_headers: If True, parse .d files to include header
-                           dependencies. Requires a prior build.
-            direction: Graph direction - "LR" (left-right), "TB" (top-bottom),
-                      "RL" (right-left), or "BT" (bottom-top).
+                dependencies. Requires a prior build.
+            direction: Graph direction - "LR", "TB", "RL", or "BT".
             output_filename: Name of the output file.
             output_dir: Override output directory (default: project.build_dir).
         """
@@ -105,14 +77,14 @@ class MermaidGenerator(GraphGenerator):
         """Get Mermaid shape for output node based on target type."""
         target_type = getattr(target, "target_type", None)
         if target_type == "program":
-            return ("[[", "]]")  # Stadium for executables
+            return ("[[", "]]")
         elif target_type == "shared_library":
-            return ("([", "])")  # Stadium
+            return ("([", "])")
         elif target_type == "static_library":
-            return ("[", "]")  # Rectangle
+            return ("[", "]")
         elif target_type == "interface":
-            return ("{{", "}}")  # Hexagon for header-only
+            return ("{{", "}}")
         elif target_type == "command":
-            return ("([", "])")  # Rounded rectangle for command outputs
+            return ("([", "])")
         else:
             return ("[", "]")

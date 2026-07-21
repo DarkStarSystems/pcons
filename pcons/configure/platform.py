@@ -93,11 +93,7 @@ class Platform:
 
 
 def detect_platform() -> Platform:
-    """Detect the current platform.
-
-    Returns:
-        Platform object with detected values.
-    """
+    """Detect the current platform."""
     # Detect OS
     system = platform.system().lower()
     if system == "darwin":
@@ -168,11 +164,7 @@ _platform: Platform | None = None
 
 
 def get_platform() -> Platform:
-    """Get the cached platform instance.
-
-    Returns:
-        The current platform.
-    """
+    """Get the cached platform instance."""
     global _platform
     if _platform is None:
         _platform = detect_platform()

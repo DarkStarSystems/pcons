@@ -1,46 +1,23 @@
 # SPDX-License-Identifier: MIT
 """Target resolution system — tool-agnostic factory dispatch.
 
-Resolution Overview
--------------------
-The Resolver transforms high-level Target descriptions into concrete build nodes
-that generators can emit. This happens in three phases:
+The Resolver turns high-level Target descriptions into concrete build nodes
+in three phases:
 
-**Phase 1: Main Resolution** (resolve() -> _resolve_target())
-    For each target in dependency order, dispatch to the target's registered
-    factory (via BuilderRegistry) to create build nodes. All tool-specific logic
-    lives in factories — the resolver is completely tool-agnostic.
+1. **Main resolution** (resolve() -> _resolve_target()): for each target in
+   dependency order, dispatch to its registered factory (via BuilderRegistry)
+   to create build nodes. All tool-specific logic lives in the factories
+   (CompileLinkFactory, InstallNodeFactory, ArchiveNodeFactory,
+   CommandNodeFactory below).
+2. **Pending source resolution** (resolve_pending_sources()): targets that
+   reference other targets' outputs (Install, Tarfile, ...) store those
+   sources as "pending" and resolve them here, after output_nodes exist.
+3. **Command expansion** (_expand_node_commands()): expand each node's
+   command template (env.<tool>.<command_var> plus ToolchainContext
+   overrides) into node._build_info["command"].
 
-    Built-in factories:
-    - CompileLinkFactory (pcons/tools/compile_link.py): Program, Library, Object
-    - InstallNodeFactory (pcons/tools/install.py): Install, InstallAs, InstallDir
-    - ArchiveNodeFactory (pcons/tools/archive.py): Tarfile, Zipfile
-    - CommandNodeFactory (below): env.Command targets
-
-**Phase 2: Pending Source Resolution** (resolve_pending_sources())
-    Some targets (Install, Tarfile, etc.) reference other targets' outputs.
-    Since output_nodes aren't populated until Phase 1 completes, these targets
-    store their sources as "pending" and resolve them in this phase.
-
-**Phase 3: Command Expansion** (_expand_node_commands())
-    After all nodes are created, expand command templates by:
-    1. Getting the command template from env.<tool>.<command_var>
-    2. Applying context overrides (includes, defines, flags) from ToolchainContext
-    3. Calling env.subst_list() to expand variables
-    4. Storing fully-expanded command tokens in node._build_info["command"]
-
-Key Design Decisions
---------------------
-- **Tool-agnostic core**: The resolver knows nothing about compilers, linkers,
-  or any specific tools. All tool-specific resolution logic is in factories
-  registered via the BuilderRegistry.
-
-- **Unified factory dispatch**: All target types (compile-link, install, archive,
-  command) are resolved through the same factory dispatch mechanism. No target
-  type gets special-cased in the resolver.
-
-- **Lazy resolution**: Targets are just descriptions until resolve() is called.
-  This allows customization (output_name, flags) after target creation.
+Targets are just descriptions until resolve() is called, so output_name,
+flags, etc. can be customized after target creation.
 """
 
 from __future__ import annotations
@@ -127,12 +104,8 @@ class CommandNodeFactory(PendingSourceFactory):
     """
 
     def resolve_pending(self, target: Target) -> None:
-        """Resolve pending Target sources for a Command target.
-
-        Adds the output nodes from each source Target as dependencies
-        to the command's output nodes. Also updates the _build_info
-        to include the additional source files.
-        """
+        """Add each source Target's outputs as dependencies of the command's
+        output nodes and include them in _build_info's sources."""
         additional_sources = self._resolve_sources(target)
 
         if not additional_sources:
@@ -155,30 +128,15 @@ class CommandNodeFactory(PendingSourceFactory):
 class Resolver:
     """Resolves targets: computes effective flags and creates nodes.
 
-    The resolver processes all targets in build order (dependencies first),
-    dispatching each target to its registered factory for resolution.
-    All target types — compile-link, install, archive, command — are handled
-    uniformly through factory dispatch via the BuilderRegistry.
-
-    The resolver itself is tool-agnostic: it knows nothing about compilation,
-    linking, or any specific tools. All tool-specific logic lives in factories
-    (e.g., CompileLinkFactory for Program/Library, InstallNodeFactory for Install).
-
-    Attributes:
-        project: The project being resolved.
-        _builder_factories: Factory instances from registered builders.
+    Processes all targets in build order (dependencies first), dispatching
+    each — uniformly, whatever its type — to its registered factory. See
+    the module docstring for the phase overview.
     """
 
     def __init__(self, project: Project) -> None:
-        """Initialize the resolver.
-
-        Args:
-            project: The project to resolve.
-        """
         self.project = project
 
-        # Build factory dispatch table from BuilderRegistry.
-        # All builders (Program, Install, Tarfile, etc.) register their factories here.
+        # Factory dispatch table from BuilderRegistry
         self._builder_factories: dict[str, Any] = {}
         for name, registration in BuilderRegistry.all().items():
             if registration.factory_class is not None:
@@ -197,12 +155,7 @@ class Resolver:
         self._resolving: list[str] = []
 
     def resolve(self) -> None:
-        """Resolve all targets in build order.
-
-        Processes targets in dependency order, ensuring all dependencies
-        are resolved before their dependents. After all targets are resolved,
-        expands command templates so generators receive fully-expanded commands.
-        """
+        """Resolve all targets in build order, then expand command templates."""
         trace("resolve", "Starting resolution phase")
         trace_value("resolve", "total_targets", len(self.project.targets))
 
@@ -238,31 +191,11 @@ class Resolver:
         trace("resolve", "Resolution complete")
 
     def _targets_in_build_order(self) -> list[Target]:
-        """Get targets in the order they should be resolved.
-
-        Dependencies come before dependents.
-
-        Returns:
-            List of targets in build order.
-        """
+        """Get targets in resolution order (dependencies before dependents)."""
         return topological_sort_targets(self.project.targets)
 
     def _resolve_target(self, target: Target) -> None:
-        """Resolve a single target via factory dispatch.
-
-        All target types are resolved through their registered factory:
-        - CompileLinkFactory: Program, StaticLibrary, SharedLibrary, ObjectLibrary
-        - InstallNodeFactory: Install, InstallAs, InstallDir
-        - ArchiveNodeFactory: Tarfile, Zipfile
-        - CommandNodeFactory: env.Command targets
-
-        The factory handles all tool-specific logic (compilation, linking, etc.).
-        The resolver only handles generic concerns: dependency ordering, implicit
-        deps, and command expansion.
-
-        Args:
-            target: The target to resolve.
-        """
+        """Resolve a single target via its registered factory."""
         if target._resolved:
             return
 
@@ -331,10 +264,8 @@ class Resolver:
     def resolve_pending_sources(self) -> None:
         """Resolve _pending_sources for all targets that have them.
 
-        Called after main resolution so output_nodes are populated.
-        This handles Install, InstallAs, and similar targets that need
-        to reference outputs from other targets. After resolving all
-        pending sources, expands command templates for any new nodes.
+        Must run after main resolution so output_nodes are populated;
+        afterwards expands command templates for any new nodes.
         """
         for target in self._targets_in_build_order():
             if target._pending_sources is not None:
@@ -344,15 +275,8 @@ class Resolver:
         self._expand_node_commands()
 
     def _resolve_target_pending_sources(self, target: Target) -> None:
-        """Resolve pending sources for a single target.
-
-        Recursively ensures any source targets have their pending sources
-        resolved first, then creates the appropriate nodes.
-
-        Uses factory dispatch via _builder_name from the BuilderRegistry.
-        All built-in builders (Install, InstallAs, InstallDir, Tarfile, Zipfile)
-        are registered there with their factory classes.
-        """
+        """Resolve pending sources for a single target, recursing into
+        source targets that themselves have pending sources first."""
         from pcons.core.target import Target
 
         if target._pending_sources is None:
@@ -384,21 +308,8 @@ class Resolver:
         target._pending_sources = None
 
     def _expand_node_commands(self) -> None:
-        """Expand command templates for all nodes with _build_info.
-
-        This method is called at the end of resolution to expand all command
-        templates so generators receive fully-expanded commands with
-        $SOURCE/$TARGET as placeholders (converted by generators to native syntax).
-
-        For each node with _build_info containing 'tool' and 'command_var'
-        but no 'command', this method:
-        1. Gets the command template from env.<tool>.<command_var>
-        2. If context has get_env_overrides(), sets those values on the tool
-        3. Calls env.subst() to expand the template
-        4. Stores the result in _build_info["command"]
-        """
-
-        # Collect all nodes with _build_info, deduplicating via seen set
+        """Expand command templates for all nodes with _build_info, leaving
+        $SOURCE/$TARGET markers for generators to convert to native syntax."""
         nodes_to_expand: list[FileNode] = []
         seen: set[FileNode] = set()
 
@@ -421,16 +332,11 @@ class Resolver:
             for node in getattr(env, "_created_nodes", []):
                 _add_node(node)
 
-        # Expand commands for each node
         for node in nodes_to_expand:
             self._expand_single_node_command(node)
 
     def _expand_single_node_command(self, node: FileNode) -> None:
-        """Expand command template for a single node.
-
-        Args:
-            node: FileNode with _build_info to expand.
-        """
+        """Expand the command template for a single node."""
         from pcons.core.environment import Environment
 
         build_info = node._build_info
@@ -502,9 +408,8 @@ class Resolver:
             for key, val in context_overrides.items():
                 tool_overrides[f"{tool_name}.{key}"] = val
 
-        # Use typed marker objects for generator-agnostic path references
-        # SourcePath/TargetPath are preserved through subst() and converted
-        # to generator-specific syntax by each generator (e.g., $in/$out for Ninja)
+        # SourcePath/TargetPath markers are preserved through subst() and
+        # converted to generator-specific syntax (e.g. $in/$out for Ninja)
         from pcons.core.subst import SourcePath
 
         extra_vars: dict[str, object] = {}
@@ -513,8 +418,7 @@ class Resolver:
         extra_vars["TARGET"] = TargetPath()
         extra_vars["TARGETS"] = TargetPath()  # Generator handles single vs. multiple
 
-        # Add tool-specific overrides from context (includes, defines, flags, libs, etc.)
-        # These take precedence over tool_config values in namespace lookup
+        # Context overrides take precedence over tool_config values
         extra_vars.update(tool_overrides)
 
         # Per-node template variables (e.g. a grouped compile node's
@@ -523,14 +427,8 @@ class Resolver:
         if node_vars:
             extra_vars.update(node_vars)
 
-        # Expand the command template to a list of tokens
-        # Tokens stay separate for proper quoting - generator joins with shell quoting
+        # Tokens stay separate; the generator joins them with shell quoting
         command_tokens = env.subst_list(cmd_template, **extra_vars)
-
-        # Store expanded command tokens in build_info
-        # All context variables (includes, defines, flags, libs, etc.) are now
-        # fully expanded into the token list via get_env_overrides()
-        # Generator will join tokens with shell-appropriate quoting
         build_info["command"] = command_tokens
         trace(
             "subst",

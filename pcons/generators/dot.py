@@ -21,39 +21,8 @@ if TYPE_CHECKING:
 class DotGenerator(GraphGenerator):
     """Generator that produces GraphViz DOT diagrams.
 
-    Generates the complete dependency graph showing all files:
-    sources, objects, libraries, and programs with their relationships.
-
-    Example output:
-        digraph "project_name" {
-          rankdir=LR;
-          node [fontname="Helvetica"];
-
-          // Sources
-          math_c [label="math.c" shape=note];
-
-          // Objects
-          math_o [label="math.o" shape=ellipse];
-
-          // Outputs
-          libmath_a [label="libmath.a" shape=box];
-          app [label="app" shape=box3d];
-
-          // Edges
-          math_c -> math_o;
-          math_o -> libmath_a;
-          libmath_a -> app;
-        }
-
-    Usage:
-        generator = DotGenerator()
-        generator.generate(project)
-        # Creates <build_dir>/deps.dot
-
-        # Write to a specific directory:
-        generator = DotGenerator(output_dir=Path("/tmp"))
-        generator.generate(project)
-        # Creates /tmp/deps.dot
+    Writes the complete dependency graph — sources, objects, libraries,
+    and programs — to <build_dir>/deps.dot by default.
     """
 
     def __init__(
@@ -68,9 +37,8 @@ class DotGenerator(GraphGenerator):
 
         Args:
             include_headers: If True, parse .d files to include header
-                           dependencies. Requires a prior build.
-            rankdir: Graph direction - "LR" (left-right), "TB" (top-bottom),
-                    "RL" (right-left), or "BT" (bottom-top).
+                dependencies. Requires a prior build.
+            rankdir: Graph direction - "LR", "TB", "RL", or "BT".
             output_filename: Name of the output file.
             output_dir: Override output directory (default: project.build_dir).
         """
@@ -118,21 +86,17 @@ class DotGenerator(GraphGenerator):
         return f"  {src} -> {dst};\n"
 
     def _get_output_shape(self, target: Target) -> tuple[str, str]:
-        """Get DOT shape for output node based on target type.
-
-        Returns:
-            Tuple of (shape, style) for the node.
-        """
+        """Return (shape, style) for an output node based on target type."""
         target_type = getattr(target, "target_type", None)
         if target_type == "program":
-            return ("box3d", "")  # 3D box for executables
+            return ("box3d", "")
         elif target_type == "shared_library":
-            return ("component", "")  # Component shape
+            return ("component", "")
         elif target_type == "static_library":
-            return ("box", "")  # Rectangle
+            return ("box", "")
         elif target_type == "interface":
-            return ("hexagon", "")  # Hexagon for header-only
+            return ("hexagon", "")
         elif target_type == "command":
-            return ("box", "rounded")  # Rounded box for command outputs
+            return ("box", "rounded")
         else:
             return ("box", "")

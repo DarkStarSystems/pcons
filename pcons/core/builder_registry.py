@@ -1,15 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Builder registration system for extensible builders.
+"""Builder registration system.
 
-This module provides the infrastructure for registering builders (both built-in
-and user-defined) so they can be accessed as methods on Project instances.
-
-All builders, including built-in ones like Program, Install, and Tarfile,
-register through this system. This ensures user-defined builders are on equal
-footing with built-ins.
+All builders — built-in (Program, Install, Tarfile, ...) and user-defined —
+register here to become methods on Project instances.
 
 Example:
-    # Register a builder using the decorator
     @builder("InstallSymlink", target_type="interface")
     class InstallSymlinkBuilder:
         @staticmethod
@@ -18,11 +13,6 @@ Example:
 
     # The builder is now available on any Project instance
     project.InstallSymlink("dist/latest", app)
-
-    # Expansion packs can register multiple builders
-    def register(project=None):
-        BuilderRegistry.register("CompileShaders", ...)
-        BuilderRegistry.register("PackageAssets", ...)
 """
 
 from __future__ import annotations
@@ -41,8 +31,8 @@ if TYPE_CHECKING:
 class NodeFactory(Protocol):
     """Protocol for builder-specific node factories.
 
-    Each builder type has a factory that knows how to resolve targets
-    of that type into concrete build nodes.
+    Each builder type has a factory that resolves targets of that type
+    into concrete build nodes.
     """
 
     def __init__(self, project: Project) -> None:
@@ -50,37 +40,18 @@ class NodeFactory(Protocol):
         ...
 
     def resolve(self, target: Target, env: Environment | None) -> None:
-        """Resolve the target, creating output nodes.
-
-        This is called during the first resolution phase to create
-        object nodes and output nodes based on the target's configuration.
-        """
+        """First resolution phase: create the target's object/output nodes."""
         ...
 
     def resolve_pending(self, target: Target) -> None:
-        """Resolve pending sources for the target.
-
-        This is called during the second resolution phase to handle
-        targets with pending sources (like Install targets that reference
-        other targets).
-        """
+        """Second resolution phase: resolve sources that reference other
+        targets (e.g. Install targets)."""
         ...
 
 
 @dataclass
 class BuilderRegistration:
-    """Metadata for a registered builder.
-
-    Attributes:
-        name: The builder name (e.g., "Program", "Install").
-        create_target: Function to create a target for this builder.
-        target_type: The str for targets created by this builder.
-        factory_class: Optional NodeFactory class for resolution.
-        requires_env: Whether the builder requires an Environment argument.
-        description: Human-readable description of the builder.
-        platforms: Platform names where this builder is available
-                   (e.g., ["linux", "darwin", "win32"]). Empty means all platforms.
-    """
+    """Metadata for a registered builder; see :meth:`BuilderRegistry.register`."""
 
     name: str
     create_target: Callable[..., Target]
@@ -94,15 +65,7 @@ class BuilderRegistration:
 
 
 class BuilderRegistry:
-    """Global registry for builders.
-
-    This class maintains a registry of all available builders. Both built-in
-    builders and user-defined builders register here, ensuring they're all
-    on equal footing.
-
-    The registry is a class with class methods so it can be used globally
-    without needing to pass around an instance.
-    """
+    """Global registry for builders (class methods only; no instance needed)."""
 
     _builders: dict[str, BuilderRegistration] = {}
 
@@ -146,41 +109,22 @@ class BuilderRegistry:
 
     @classmethod
     def unregister(cls, name: str) -> None:
-        """Unregister a builder.
-
-        Args:
-            name: The builder name to unregister.
-        """
+        """Unregister a builder."""
         cls._builders.pop(name, None)
 
     @classmethod
     def get(cls, name: str) -> BuilderRegistration | None:
-        """Get a builder registration by name.
-
-        Args:
-            name: The builder name.
-
-        Returns:
-            The BuilderRegistration, or None if not found.
-        """
+        """Get a builder registration by name, or None."""
         return cls._builders.get(name)
 
     @classmethod
     def names(cls) -> list[str]:
-        """Get all registered builder names.
-
-        Returns:
-            List of builder names.
-        """
+        """Get all registered builder names."""
         return list(cls._builders.keys())
 
     @classmethod
     def all(cls) -> dict[str, BuilderRegistration]:
-        """Get all builder registrations.
-
-        Returns:
-            Dictionary mapping names to registrations.
-        """
+        """Get all builder registrations, keyed by name."""
         return dict(cls._builders)
 
     @classmethod
@@ -201,8 +145,9 @@ def builder(
 ) -> Callable[[type], type]:
     """Decorator to register a builder class.
 
-    The decorated class must have a `create_target` static method or class method
-    that creates and returns a Target.
+    The decorated class must have a `create_target` static or class method
+    that creates and returns a Target. Parameters are those of
+    :meth:`BuilderRegistry.register`.
 
     Example:
         @builder("InstallSymlink", target_type="interface")
@@ -213,23 +158,9 @@ def builder(
                 target._builder_name = "InstallSymlink"
                 target._builder_data = {"dest": dest, "source": source}
                 return target
-
-    Args:
-        name: The builder name.
-        target_type: The str for targets created by this builder.
-        factory_class: Optional NodeFactory class for resolution.
-        requires_env: Whether the builder requires an Environment argument.
-        description: Human-readable description of the builder.
-        platforms: Platform names where this builder is available
-                   (e.g., ["linux", "darwin", "win32"]). None/empty means all.
-        **options: Additional builder-specific options.
-
-    Returns:
-        Decorator function.
     """
 
     def decorator(cls: type) -> type:
-        # Get the create_target method from the class
         create_target = getattr(cls, "create_target", None)
         if create_target is None:
             raise ValueError(

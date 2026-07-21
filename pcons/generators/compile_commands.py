@@ -29,23 +29,7 @@ class CompileCommandsGenerator(BaseGenerator):
     """Generator for compile_commands.json.
 
     Creates a JSON compilation database in the format expected by
-    clang tools, IDEs, and language servers.
-
-    Format:
-        [
-            {
-                "directory": "/path/to/project",
-                "file": "src/main.cpp",
-                "command": "clang++ -c -o build/main.o src/main.cpp",
-                "output": "build/main.o"
-            },
-            ...
-        ]
-
-    Example:
-        generator = CompileCommandsGenerator()
-        generator.generate(project)
-        # Creates <build_dir>/compile_commands.json
+    clang tools, IDEs, and language servers, in <build_dir>.
     """
 
     # Languages that should be included in compile_commands.json
@@ -61,12 +45,7 @@ class CompileCommandsGenerator(BaseGenerator):
         self._root_symlink = root_symlink
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
-        """Generate compile_commands.json.
-
-        Args:
-            project: Configured project to generate for.
-            output_dir: Directory to write compile_commands.json to.
-        """
+        """Generate compile_commands.json in output_dir."""
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / "compile_commands.json"
 
@@ -83,19 +62,12 @@ class CompileCommandsGenerator(BaseGenerator):
             self._create_root_symlink(output_file, project)
 
     def _create_root_symlink(self, output_file: Path, project: Project) -> None:
-        """Create a symlink to compile_commands.json in the project root.
+        """Create a symlink to compile_commands.json in the project root
+        so clangd/IDEs find it without configuration.
 
-        This allows IDEs and tools like clangd to find the file at the
-        project root without configuration. If the symlink cannot be
-        created (e.g., on Windows without privileges), a warning is logged.
-
-        The link is created atomically (a uniquely-named temp symlink swapped
-        into place with os.replace), so concurrent generate() runs — parallel
-        test workers, or simultaneous pcons invocations — cannot race on it.
-
-        Args:
-            output_file: Path to the generated compile_commands.json.
-            project: The project (used for root_dir).
+        Created atomically (temp symlink + os.replace) so concurrent
+        generate() runs cannot race on it. Failure to create (e.g. Windows
+        without privileges) logs a warning.
         """
         root_dir = project.root_dir
         link_path = root_dir / "compile_commands.json"
@@ -224,15 +196,11 @@ class CompileCommandsGenerator(BaseGenerator):
     ) -> str:
         """Format the command for a source file.
 
-        Prefers the real, fully-expanded command tokens the resolver already
-        computed in ``build_info["command"]`` — the same tokens the Ninja and
-        Makefile generators build the actual invocation from — so the emitted
-        command matches the real toolchain call (e.g. MSVC's ``/c /Fo<out>``
-        rather than a hardcoded GCC ``-c -o <out>``). Falls back to
-        hand-assembling GCC-style flags from the context only when
-        ``build_info`` lacks pre-expanded tokens, which happens for
-        hand-built ``_build_info`` in unit tests that skip
-        ``project.resolve()`` (the resolver is what populates ``"command"``).
+        Prefers the resolver's pre-expanded tokens in
+        ``build_info["command"]`` so the emitted command matches the real
+        toolchain call (e.g. MSVC's ``/c /Fo<out>``); hand-assembles
+        GCC-style flags only when those tokens are absent (hand-built
+        ``_build_info`` in tests that skip ``project.resolve()``).
         """
         command_tokens = build_info.get("command") if build_info else None
         if isinstance(command_tokens, list):
@@ -264,16 +232,11 @@ class CompileCommandsGenerator(BaseGenerator):
     ) -> list[str]:
         """Expand SourcePath/TargetPath markers and PathToken paths to literals.
 
-        Unlike Ninja/Make, compile_commands.json entries run with
-        ``directory`` set to the project root, so project-relative
-        ``PathToken`` paths are used unchanged. ``"build"``-typed paths
-        (relative to build_dir) get the build_dir prepended since the
-        working directory here isn't the build dir the way ninja/make use.
-
-        For grouped (whole-module) compiles, ``all_sources`` carries every
-        source of the node: a bare SourcePath expands to the full file list
-        (each per-file entry repeats the whole command, the convention
-        sourcekit-lsp and CMake use for Swift).
+        Entries run with ``directory`` = project root (not the build dir),
+        so project-relative paths pass through and ``"build"``-typed paths
+        get build_dir prepended. For grouped (whole-module) compiles, a bare
+        SourcePath expands to all of ``all_sources`` — each per-file entry
+        repeats the whole command, the sourcekit-lsp/CMake Swift convention.
         """
         from pcons.core.subst import PathToken, SourcePath, TargetPath
 
@@ -305,14 +268,10 @@ class CompileCommandsGenerator(BaseGenerator):
         output: FileNode,
         build_info: dict[str, object] | None = None,
     ) -> str:
-        """Hand-assemble a command when build_info has no pre-expanded tokens.
-
-        Includes effective flags from build_info context if available.
-        The command is formatted as a shell command string with proper quoting.
-        """
+        """Hand-assemble a shell command when build_info has no pre-expanded
+        tokens, including effective flags from the context if available."""
         import shlex
 
-        # Get the actual compiler command from the environment
         tool_cmd = tool_name
         flags = []
         if build_info:
@@ -324,7 +283,6 @@ class CompileCommandsGenerator(BaseGenerator):
                     if cmd:
                         tool_cmd = str(cmd)
                     if hasattr(tool_config, "flags"):
-                        # Collect flags
                         flags.extend(str(f) for f in tool_config.flags)
 
         # Fallback to generic names if no env available
@@ -335,11 +293,10 @@ class CompileCommandsGenerator(BaseGenerator):
 
         parts: list[str] = [tool_cmd, "-c", *flags]
 
-        # Add effective requirements from context
+        # Effective requirements from context
         if build_info:
             context = build_info.get("context")
             if context is not None and isinstance(context, CompileLinkContext):
-                # Format flags using context's prefix attributes
                 for inc in context.includes:
                     parts.append(f"{context.include_prefix}{inc}")
                 for define in context.defines:
@@ -350,5 +307,4 @@ class CompileCommandsGenerator(BaseGenerator):
 
         parts.extend(["-o", str(output.path), str(source.path)])
 
-        # Quote each part for shell, then join
         return " ".join(shlex.quote(p) for p in parts)

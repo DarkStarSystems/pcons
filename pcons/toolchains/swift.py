@@ -1,20 +1,15 @@
 # SPDX-License-Identifier: MIT
 """Swift toolchain: whole-module compilation with swiftc.
 
-Swift's compilation unit is the module, not the file: every file in a
-module sees the others without imports. pcons maps one Target to one
-Swift module — all of a target's ``.swift`` sources compile in a single
-whole-module (``-wmo``) invocation producing one object file and one
-``.swiftmodule`` (via ``SourceHandler.group_sources``). Importing
-another target's module works through the ``.swiftmodule`` search path;
-no dyndep scanner is needed (unlike Fortran): inter-module ordering
-falls out of ordinary target dependencies, and intra-module ordering is
-handled by whole-module compilation.
+Swift's compilation unit is the module, not the file. pcons maps one
+Target to one Swift module: all of a target's ``.swift`` sources compile
+in a single whole-module (``-wmo``) invocation producing one object file
+and one ``.swiftmodule``. Imports resolve through the ``.swiftmodule``
+search path, so no dyndep scanner is needed — inter-module ordering
+falls out of ordinary target dependencies.
 
 The module name is the target name sanitized to a Swift identifier.
-Library targets compile with ``-parse-as-library`` (top-level code is
-only meaningful in programs); the program entry point is top-level code
-in ``main.swift`` or an ``@main`` type, as usual for Swift.
+Library targets compile with ``-parse-as-library``.
 """
 
 from __future__ import annotations
@@ -127,15 +122,8 @@ def _link_tail() -> list[object]:
 class SwiftCompiler(BaseTool):
     """Swift compiler tool (whole-module compilation).
 
-    Variables:
-        cmd: Compiler command (default: 'swiftc')
-        flags: General compiler flags (list)
-        iprefix/includes: .swiftmodule (and header) search directories
-        dprefix/defines: Conditional-compilation flags (swiftc -D NAME)
-        depflags: Dependency-file generation flags
-        objcmd: Whole-module compile command template. MODULE_NAME,
-                MODULE_PATH, and MODULE_FLAGS are per-node variables
-                provided by SwiftToolchain.setup_group_node().
+    objcmd's MODULE_NAME, MODULE_PATH, MODULE_FLAGS, and HEADER_FLAGS are
+    per-node variables provided by SwiftToolchain.setup_group_node().
     """
 
     def __init__(self) -> None:
@@ -413,11 +401,8 @@ class SwiftToolchain(UnixToolchain):
         # swiftc drives this toolchain's link and rejects clang-style
         # -arch/--target/--sysroot link flags; the Swift -target triple
         # carries the architecture, so replace the base link contributions
-        # with swiftc-style ones. (Any cc/cxx-targeted contributions from
-        # the base are inert here — this toolchain declares no cc/cxx
-        # tools, so they're skipped as broadcast misses at apply time; a
-        # mixed C/C++ build gets its cc/cxx retargeting from a co-resident
-        # LLVM toolchain's own realization.)
+        # with swiftc-style ones. (Base cc/cxx contributions are inert —
+        # this toolchain declares no cc/cxx tools.)
         contribs = [c for c in contribs if c.tool != "link"]
         swift_flags: list[str] = ["-target", str(triple)]
         sdk = getattr(cross, "sysroot", None) or apple_sdk_for_triple(str(triple))

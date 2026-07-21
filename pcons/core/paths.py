@@ -30,31 +30,15 @@ class PathResolver:
     __slots__ = ("project_root", "build_dir", "_resolved_build_dir")
 
     def __init__(self, project_root: Path, build_dir: Path) -> None:
-        """Initialize the path resolver.
-
-        Args:
-            project_root: The root directory of the project.
-            build_dir: The build output directory (can be relative or absolute).
-        """
         self.project_root = project_root.resolve()
         self.build_dir = build_dir
-        # Pre-compute the resolved build_dir for comparison
         if build_dir.is_absolute():
             self._resolved_build_dir = build_dir.resolve()
         else:
             self._resolved_build_dir = (self.project_root / build_dir).resolve()
 
     def subdir(self, subdir: str | Path) -> PathResolver:
-        """Create a new PathResolver for a subdirectory.
-
-        The new resolver will have both project_root and build_dir adjusted
-        to the subdirectory.
-
-        Args:
-            subdir: The subdirectory name to append.
-        Returns:
-            A new PathResolver instance for the subdirectory.
-        """
+        """Return a new PathResolver with project_root and build_dir in *subdir*."""
         return PathResolver(self.project_root / subdir, self.build_dir / subdir)
 
     def normalize_target_path(
@@ -62,38 +46,22 @@ class PathResolver:
     ) -> Path:
         """Normalize a target (output) path to be relative to build_dir.
 
-        Handles three cases:
-        1. Absolute path under build_dir: Normalize to relative (idempotent)
-        2. Relative path starting with build_dir name: WARN but KEEP the path
-        3. Normal relative path: Just use it as-is
-
-        Args:
-            path: The target path to normalize (Path or str).
-            target_name: Optional target name for better warning messages.
-
-        Returns:
-            Normalized path relative to build_dir.
+        A relative path that starts with the build_dir prefix warns but is
+        kept as-is.
         """
-        # Accept both Path and str, treat identically
-        path_str = str(path)
-        # Normalize backslashes to forward slashes
-        path_str = path_str.replace("\\", "/")
+        path_str = str(path).replace("\\", "/")
         path_obj = Path(path_str)
 
-        # Case 1: Absolute path
         if path_obj.is_absolute():
             try:
-                # Try to make it relative to build_dir
                 return path_obj.relative_to(self._resolved_build_dir)
             except ValueError:
-                # Path is not under build_dir - return as-is (external output)
+                # Not under build_dir - external output
                 return path_obj
 
-        # Case 2: Relative path starting with build_dir prefix
-        # This is almost always a mistake: the user passed a project-root-relative
-        # path (like "build/foo") but target paths should be build-dir-relative
-        # (just "foo"). The build system prepends build_dir, so "build/foo"
-        # becomes "build/build/foo".
+        # A build_dir prefix on a relative path is almost always a mistake:
+        # target paths are build-dir-relative, so "build/foo" would become
+        # "build/build/foo".
         bd_parts = self.build_dir.parts
         parts = path_obj.parts
         if bd_parts and parts[: len(bd_parts)] == bd_parts:
@@ -109,77 +77,39 @@ class PathResolver:
                 UserWarning,
                 stacklevel=3,  # Skip normalize_target_path and caller
             )
-            # Keep the path as-is (don't strip the prefix)
             return path_obj
 
-        # Case 3: Normal relative path - use as-is
         return path_obj
 
     def normalize_source_path(self, path: Path | str) -> Path:
-        """Normalize a source (input) path to be relative to project root.
-
-        Source paths are expected to be relative to the project root.
-        Absolute paths within the project are converted to relative.
-
-        Args:
-            path: The source path to normalize (Path or str).
-
-        Returns:
-            Normalized path (relative to project root if possible).
-        """
-        # Accept both Path and str, treat identically
-        path_str = str(path)
-        # Normalize backslashes to forward slashes
-        path_str = path_str.replace("\\", "/")
+        """Normalize a source (input) path to be relative to project root."""
+        path_str = str(path).replace("\\", "/")
         path_obj = Path(path_str)
 
-        # Absolute path - try to make relative to project root
         if path_obj.is_absolute():
             try:
                 return path_obj.relative_to(self.project_root)
             except ValueError:
-                # Path is not under project root - return as-is (external source)
+                # Not under project root - external source
                 return path_obj
 
-        # Already relative - use as-is
         return path_obj
 
     def make_build_relative(self, path: Path) -> Path:
-        """Make a path relative to the build directory.
-
-        Useful for converting absolute paths to build-relative paths
-        for use in ninja files.
-
-        Args:
-            path: The path to make relative.
-
-        Returns:
-            Path relative to build_dir.
-        """
+        """Make an absolute path under build_dir relative to it."""
         if path.is_absolute():
             try:
                 return path.relative_to(self._resolved_build_dir)
             except ValueError:
-                # Not under build_dir - return as-is
                 return path
         return path
 
     def canonicalize(self, path: Path | str) -> Path:
         """Convert to canonical form: project-root-relative or absolute.
 
-        Canonical form means:
-        - Paths under project root become relative to project root
-        - External absolute paths stay absolute
-        - Relative paths are normalized (dot segments removed)
-        - Backslashes are normalized to forward slashes
-
-        Uses pure path arithmetic (no filesystem access).
-
-        Args:
-            path: The path to canonicalize (Path or str).
-
-        Returns:
-            Canonicalized path.
+        Paths under the project root become relative to it; external absolute
+        paths stay absolute; dot segments and backslashes are normalized.
+        Pure path arithmetic — no filesystem access.
         """
         path_obj = Path(str(path).replace("\\", "/"))
         if path_obj.is_absolute():
@@ -192,11 +122,8 @@ class PathResolver:
     def make_execution_relative(self, path: Path | str) -> str:
         """Path as seen from the build (execution) directory.
 
-        This is THE path contract for build-file generators that run from
-        the build dir (Ninja, Make): canonical node paths carry the
-        build_dir prefix (``build/obj/foo.o``) and must be emitted
-        relative to it (``obj/foo.o``). See execution_relative() for the
-        rules.
+        The path contract for generators that run from the build dir
+        (Ninja, Make); see execution_relative() for the rules.
         """
         return execution_relative(
             path,
@@ -207,21 +134,12 @@ class PathResolver:
         )
 
     def make_project_relative(self, path: Path) -> str:
-        """Make a path relative to the project root.
-
-        Returns a string representation for use in generated files.
-
-        Args:
-            path: The path to make relative.
-
-        Returns:
-            String representation of the path relative to project root.
-        """
+        """Make a path relative to the project root, as a forward-slash string."""
         if path.is_absolute():
             try:
                 return str(path.relative_to(self.project_root)).replace("\\", "/")
             except ValueError:
-                # Not under project root - return as-is
+                # Not under project root
                 return str(path).replace("\\", "/")
         return str(path).replace("\\", "/")
 

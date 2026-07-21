@@ -15,9 +15,6 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
 
 # Re-export commonly used classes for convenient imports
-# These imports must be after __version__ is defined but we use noqa to allow it
-# Register built-in builders with the BuilderRegistry
-# This must happen after core imports but before any user code runs
 from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
 from pcons.configure.config_file import configure_file  # noqa: E402
@@ -52,9 +49,10 @@ from pcons.toolchains import (
 from pcons.tools.install import install_dir  # noqa: E402
 from pcons.util.add_subdirectory import add_subdirectory  # noqa: E402
 
+# Register built-in builders before any user code runs
 register_builtin_builders()
 
-# Import modules namespace to make pcons.modules accessible
+# Make pcons.modules accessible
 from pcons import modules as modules  # noqa: E402, F401
 
 __version__ = "0.22.0"
@@ -99,30 +97,16 @@ def Generator(
 ):
     """Get a generator instance based on CLI option or environment.
 
-    The generator can be set with:
-        pcons -G ninja
-        pcons -G ninja -G metadata
-        pcons -G xcode
-
-    Or when running directly:
-        GENERATOR=make python pcons-build.py
-        PCONS_GENERATOR=ninja:metadata python pcons-build.py
-
-    Precedence (highest to lowest):
-        1. PCONS_GENERATOR (set by pcons CLI)
-        2. GENERATOR environment variable
-        3. default parameter
-
-    Multiple generators can be specified with colon-separated names
-    (e.g., ``PCONS_GENERATOR=ninja:metadata``). Each generator runs
-    in order on the same project.
+    Precedence: PCONS_GENERATOR (set by ``pcons -G``), then the GENERATOR
+    environment variable, then *default*. Colon-separated names (e.g.
+    ``ninja:metadata``) run each generator in order on the same project.
 
     Args:
-        default: Default generator name if not set ("ninja", "make", "metadata", or "xcode").
+        default: Generator name if not otherwise set ("ninja", "make",
+            "metadata", or "xcode").
 
     Returns:
-        A generator instance. When multiple names are given, a MultiGenerator
-        that runs each in sequence.
+        A generator instance; a MultiGenerator when multiple names are given.
 
     Raises:
         ValueError: If any generator name is not recognized.

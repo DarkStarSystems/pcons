@@ -1,12 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""GCC toolchain implementation.
-
-Provides GCC-based C and C++ compilation toolchain including:
-- GCC C compiler (gcc)
-- GCC C++ compiler (g++)
-- GNU archiver (ar)
-- Linker (using gcc/g++)
-"""
+"""GCC toolchain: gcc, g++, ar, and gcc/g++ as linker."""
 
 from __future__ import annotations
 
@@ -166,18 +159,7 @@ def _find_gcc_std_module_source(
 
 
 class GccCCompiler(BaseTool):
-    """GCC C compiler tool.
-
-    Variables:
-        cmd: Compiler command (default: 'gcc')
-        flags: General compiler flags (list)
-        iprefix: Include directory prefix (default: '-I')
-        includes: Include directories (list of paths, no prefix)
-        dprefix: Define prefix (default: '-D')
-        defines: Preprocessor definitions (list of names, no prefix)
-        depflags: Dependency generation flags
-        objcmd: Command template for compiling to object
-    """
+    """GCC C compiler tool (variables come from gnu_compile_vars)."""
 
     def __init__(self) -> None:
         super().__init__("cc", language="c")
@@ -193,18 +175,7 @@ class GccCCompiler(BaseTool):
 
 
 class GccCxxCompiler(BaseTool):
-    """GCC C++ compiler tool.
-
-    Variables:
-        cmd: Compiler command (default: 'g++')
-        flags: General compiler flags (list)
-        iprefix: Include directory prefix (default: '-I')
-        includes: Include directories (list of paths, no prefix)
-        dprefix: Define prefix (default: '-D')
-        defines: Preprocessor definitions (list of names, no prefix)
-        depflags: Dependency generation flags
-        objcmd: Command template for compiling to object
-    """
+    """GCC C++ compiler tool (variables come from gnu_compile_vars)."""
 
     def __init__(self) -> None:
         super().__init__("cxx", language="cxx")
@@ -220,13 +191,7 @@ class GccCxxCompiler(BaseTool):
 
 
 class GccArchiver(BaseTool):
-    """GNU archiver tool for creating static libraries.
-
-    Variables:
-        cmd: Archiver command (default: 'ar')
-        flags: Archiver flags (default: 'rcs')
-        libcmd: Command template for creating static library
-    """
+    """GNU archiver (ar) for creating static libraries."""
 
     def __init__(self) -> None:
         super().__init__("ar")
@@ -242,22 +207,7 @@ class GccArchiver(BaseTool):
 
 
 class GccLinker(BaseTool):
-    """GCC linker tool.
-
-    Variables:
-        cmd: Linker command (default: 'gcc')
-        flags: Linker flags (list)
-        lprefix: Library prefix (default: '-l')
-        libs: Libraries to link (list of names, no prefix)
-        Lprefix: Library directory prefix (default: '-L')
-        libdirs: Library directories (list of paths, no prefix)
-        Fprefix: Framework directory prefix (default: '-F', macOS only)
-        frameworkdirs: Framework directories (list of paths, no prefix)
-        fprefix: Framework prefix (default: '-framework', macOS only)
-        frameworks: Frameworks to link (list of names, no prefix)
-        progcmd: Command template for linking program
-        sharedcmd: Command template for linking shared library
-    """
+    """GCC linker tool (variables come from gnu_link_vars)."""
 
     def __init__(self) -> None:
         super().__init__("link")
@@ -355,17 +305,10 @@ def _build_scan_node(
 
 
 class GccToolchain(UnixToolchain):
-    """GCC toolchain for C and C++ development.
+    """GCC toolchain: gcc, g++, ar, and gcc/g++ as linker.
 
-    Includes: C compiler (gcc), C++ compiler (g++), archiver (ar), linker (gcc/g++)
-
-    Inherits from UnixToolchain which provides:
-    - get_source_handler() for C/C++/Objective-C/assembly files
-    - get_object_suffix(), get_static_library_name(), etc.
-    - get_compile_flags_for_target_type() for -fPIC handling
-    - get_separated_arg_flags() for flags like -arch, -framework, etc.
-    - apply_target_arch() for macOS cross-compilation
-    - apply_variant() for debug/release/etc. configurations
+    Source handling, naming conventions, arch/variant handling come from
+    UnixToolchain.
     """
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link")
@@ -376,10 +319,9 @@ class GccToolchain(UnixToolchain):
     def apply_cross_preset(self, env: Environment, preset: Any) -> None:
         """Apply a cross preset, requiring cross binaries for foreign triples.
 
-        GCC cannot retarget by flag (it rejects --target=); a different-triple
-        build needs different tool binaries. A preset that carries a triple but
-        no CC/CXX overrides cannot be realized — fail fast rather than silently
-        building host-arch objects (see docs/presets.md).
+        GCC rejects --target=; a different-triple build needs different tool
+        binaries, so a preset with a triple but no CC/CXX overrides fails
+        fast rather than silently building host-arch objects.
         """
         triple = getattr(preset, "triple", None)
         resolve = getattr(preset, "resolved_tool_cmds", None)
@@ -418,26 +360,13 @@ class GccToolchain(UnixToolchain):
         project: Project,
         source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
     ) -> None:
-        """Configure `import std;` / `import std.compat;` support for GCC.
+        """Configure C++20 module support for GCC (including ``import std;``).
 
-        Triggered when module scanning is enabled — either implicitly (the
-        env has a C++ module-interface source such as ``.cppm``) or
-        explicitly (``env.cxx.modules = True``). The method:
-
-            1. Uses GCC's p1689 scanner mode (``-fdeps-format=p1689r5``)
-                to discover module provides/requires for each TU.
-            2. Locates the corresponding ``bits/std.cc`` /
-                ``bits/std.compat.cc`` source via the preprocessor.
-            3. Synthesizes a build node that compiles the std module with
-                ``-fmodules``.  GCC automatically places the resulting
-                ``std.gcm`` in ``gcm.cache/`` relative to the build dir,
-                where Ninja runs.
-            4. Adds ``-fmodules`` to every qualifying C++ TU.
-            5. Writes Ninja dyndep from the scan results and attaches it to
-                all module-participating object nodes.
-            6. Wires the std object into link inputs of importing targets.
-
-        Requires GCC 15+ (which ships ``bits/std.cc`` as part of libstdc++).
+        Runs GCC's p1689 scanner over the participating TUs, adds
+        ``-fmodules``, synthesizes std/std.compat module builds where
+        imported, writes the dyndep file, and wires std objects into
+        importing targets' link inputs. Requires GCC 15+ (which ships
+        ``bits/std.cc`` as part of libstdc++).
         """
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
@@ -586,10 +515,9 @@ class GccToolchain(UnixToolchain):
             )
 
         # Map every module provider to a BMI path under its key's directory,
-        # then write a GCC module mapper file per key. Module interfaces no
-        # longer land in the shared gcm.cache/; each compatibility class owns
-        # cxx_modules/<key>/<module>.gcm, so the same logical module compiled
-        # with incompatible flags never collides on a single output path.
+        # then write a GCC module mapper file per key. Each compatibility
+        # class owns cxx_modules/<key>/<module>.gcm, so the same logical
+        # module compiled with incompatible flags never collides on one path.
         provider_obj = map_module_providers(
             results, spec_to_obj, obj_key, moddir, ".gcm"
         )
@@ -655,18 +583,11 @@ class GccToolchain(UnixToolchain):
         first_env: Environment | None,
         cxx_tool: Any,
     ) -> dict[str, FileNode]:
-        """Synthesize build nodes for ``import std;`` / ``import std.compat;`` (GCC).
+        """Synthesize build nodes compiling libstdc++'s std/std.compat sources.
 
-        For each logical module name in *wanted* (``"std"`` or
-        ``"std.compat"``):
-
-        * Locates the corresponding libstdc++ source via the preprocessor.
-        * Creates a build node that compiles it with ``-fmodules`` and the
-          user's ABI-affecting flags.  GCC automatically writes
-          ``gcm.cache/<logical>.gcm`` next to the build directory CWD.
-
-        Returns a ``{logical_name: obj_node}`` dict for the modules that
-        were successfully synthesized.
+        Locates each wanted module's source via the preprocessor and builds
+        it with ``-fmodules`` plus the user's ABI-affecting flags. Returns
+        ``{logical_name: obj_node}`` for the synthesized modules.
         """
         from pcons.toolchains.cxx_module_scanner import (
             select_std_module_flags,
@@ -763,8 +684,8 @@ from pcons.tools.toolchain import SourceHandler, toolchain_registry  # noqa: E40
 def _gcc_is_available() -> bool:
     """Check whether a *real* GCC is available as ``gcc``.
 
-    On Github-hosted macOS runners, gcc is a shim to apple-clang,
-    we should not treat it as a real GCC.
+    On macOS (e.g. GitHub-hosted runners), ``gcc`` is often a shim for
+    apple-clang; refuse those.
     """
     gcc = shutil.which("gcc")
     if gcc is None:
@@ -781,7 +702,6 @@ def _gcc_is_available() -> bool:
         # assume it's usable for now
         return True
 
-    # On Github-hosted macOS runners, gcc is a shim to apple-clang, let refuse it.
     return "clang" not in result.stdout.lower()
 
 

@@ -269,11 +269,8 @@ class CargoBuildBuilder:
         )
 
         if is_bin:
-            # A bin crate has no linkable output — the executable itself is
-            # the product, so the cargo Command target (whose output node is
-            # the executable) is returned directly. Consumers can depend on
-            # it or run it via its output path; there are no link/include
-            # usage requirements to propagate.
+            # A bin crate has nothing to link: return the cargo Command
+            # target directly; its output node is the executable.
             return cargo_target
 
         # Optional cbindgen header generation.

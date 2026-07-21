@@ -131,36 +131,28 @@ class ConanFinder(BaseFinder):
         6. "uv tool run conan" if uv is found in PATH
         7. Falls back to ["conan"] (will fail if not available)
         """
-        # 1. Explicit command from constructor
         if self._conan_cmd:
             return shlex.split(self._conan_cmd)
 
-        # 2-3. Environment variables
         for env_var in ("PCONS_CONAN", "CONAN"):
             env_val = os.environ.get(env_var)
             if env_val:
                 return shlex.split(env_val)
 
-        # 4. Check if conan is in PATH
         if shutil.which("conan"):
             return ["conan"]
 
-        # 5. Try uvx conan
         if shutil.which("uvx"):
             return ["uvx", "conan"]
 
-        # 6. Try uv tool run conan
         if shutil.which("uv"):
             return ["uv", "tool", "run", "conan"]
 
-        # 7. Fall back to conan (will fail in is_available)
         return ["conan"]
 
     def is_available(self) -> bool:
         """Check if conan is available."""
-        cmd = self.conan_cmd
-        # Check if the first command in the list exists
-        return bool(shutil.which(cmd[0]))
+        return bool(shutil.which(self.conan_cmd[0]))
 
     @property
     def profile_path(self) -> Path:
@@ -223,12 +215,9 @@ class ConanFinder(BaseFinder):
         elif self._platform.arch in ("x86", "i686", "i386"):
             settings["arch"] = "x86"
 
-        # Compiler settings from toolchain. No real Toolchain exposes a
-        # `.version` attribute (only test doubles do), so the version is
-        # always detected by running the toolchain's actual compiler
-        # command below — never a bare "gcc"/"clang" looked up on PATH,
-        # which could silently be a different compiler than the one
-        # [buildenv] CC/CXX configures for the build itself.
+        # The version is detected by running the toolchain's actual
+        # compiler command below — never a bare "gcc"/"clang" from PATH,
+        # which could silently differ from the [buildenv] CC/CXX compiler.
         compiler_cmd: str | None = None
         if toolchain is not None:
             compiler_name = toolchain.name.lower()
@@ -435,34 +424,29 @@ class ConanFinder(BaseFinder):
         Returns:
             Path to the generated profile.
         """
-        # Ensure output folder exists
         self.output_folder.mkdir(parents=True, exist_ok=True)
 
-        # Build profile content
         lines: list[str] = []
         lines.append("[settings]")
 
-        # Get base settings from toolchain
         settings = self._detect_compiler_settings(toolchain, build_type)
         settings["build_type"] = build_type
 
-        # Set compiler.cppstd — explicit parameter wins, then infer from env
+        # Explicit parameter wins, then infer from env
         resolved_cppstd = cppstd or self._infer_cppstd(env)
         if resolved_cppstd:
             settings["compiler.cppstd"] = resolved_cppstd
 
-        # Add custom settings (can override anything above)
+        # Custom settings can override anything above
         settings.update(self._profile_settings)
 
-        # Write settings
         for key, value in sorted(settings.items()):
             lines.append(f"{key}={value}")
 
-        # Add buildenv section to set CC/CXX for CMake when building packages
-        # This ensures Conan uses the same compiler as the toolchain
+        # [buildenv] CC/CXX so Conan builds packages with the same
+        # compiler as the toolchain
         buildenv: dict[str, str] = {}
         if toolchain is not None:
-            # Get compiler commands from toolchain tools
             cc_cmd = self._get_toolchain_compiler_cmd(toolchain, "cc")
             cxx_cmd = self._get_toolchain_compiler_cmd(toolchain, "cxx")
             if cc_cmd:
@@ -476,7 +460,6 @@ class ConanFinder(BaseFinder):
             for key, value in sorted(buildenv.items()):
                 lines.append(f"{key}={value}")
 
-        # Add conf section if there are conf values
         if self._profile_conf:
             lines.append("")
             lines.append("[conf]")
@@ -486,7 +469,6 @@ class ConanFinder(BaseFinder):
                 else:
                     lines.append(f"{key}={value}")
 
-        # Write profile
         profile_content = "\n".join(lines) + "\n"
         self.profile_path.write_text(profile_content)
 
@@ -504,40 +486,31 @@ class ConanFinder(BaseFinder):
         Returns:
             Compiler command string, or None if not found.
         """
-        # Try to get the tool from toolchain
         if hasattr(toolchain, "tools"):
             tools_dict = toolchain.tools
             if tool_name in tools_dict:
                 tool = tools_dict[tool_name]
-                # Get default vars which contain the cmd
                 default_vars_method = getattr(tool, "default_vars", None)
                 if callable(default_vars_method):
                     defaults = default_vars_method()
                     cmd = defaults.get("cmd")
                     if cmd:
-                        # cmd could be a string or path-like
                         return str(cmd)
         return None
 
     def _compute_cache_key(self) -> str:
         """Compute a hash for caching purposes.
 
-        The key is based on:
-        - conanfile content
-        - profile content
-        - build_missing setting
+        Keyed by conanfile content, profile content, and build_missing.
         """
         hasher = hashlib.sha256()
 
-        # Include conanfile content
         if self.conanfile.exists():
             hasher.update(self.conanfile.read_bytes())
 
-        # Include profile content
         if self.profile_path.exists():
             hasher.update(self.profile_path.read_bytes())
 
-        # Include build_missing
         hasher.update(str(self.build_missing).encode())
 
         return hasher.hexdigest()[:16]
@@ -584,24 +557,20 @@ class ConanFinder(BaseFinder):
         if conanfile is not None:
             self.conanfile = Path(conanfile)
 
-        # Check if we need to run conan install. A stale cache key file
-        # whose .pc files were deleted out from under it (output folder
-        # wiped, cache key left behind) must not be treated as valid —
-        # fall through to a real install instead of silently returning {}.
+        # A stale cache key whose .pc files were deleted out from under it
+        # must not be treated as valid — fall through to a real install
+        # instead of silently returning {}.
         if not force and self._is_cache_valid():
             packages = self._parse_pkgconfig_files()
             if packages:
                 return packages
 
-        # Ensure profile exists
         if not self.profile_path.exists():
             self.sync_profile()
 
-        # Ensure output folder exists
         self.output_folder.mkdir(parents=True, exist_ok=True)
 
-        # Build conan install command
-        # Use --profile:host and --profile:build to avoid requiring a default profile
+        # --profile:host and --profile:build avoid requiring a default profile
         cmd: list[str] = [
             *self.conan_cmd,
             "install",
@@ -616,7 +585,6 @@ class ConanFinder(BaseFinder):
         if self.build_missing:
             cmd.append("--build=missing")
 
-        # Run conan install
         result = subprocess.run(
             cmd,
             capture_output=True,
@@ -631,10 +599,8 @@ class ConanFinder(BaseFinder):
                 f"Stderr: {result.stderr}"
             )
 
-        # Save cache key
         self._save_cache_key()
 
-        # Parse the generated .pc files
         packages = self._parse_pkgconfig_files()
         if not packages:
             raise RuntimeError(
@@ -648,19 +614,11 @@ class ConanFinder(BaseFinder):
     def _parse_pkgconfig_files(self) -> dict[str, PackageDescription]:
         """Parse the .pc files Conan's PkgConfigDeps generator produced.
 
-        Conan fully controls these files, so we parse them directly rather
-        than shelling out to a system pkg-config. Relying on pkg-config made
-        the result depend on whether one happens to be installed and on which
-        implementation it is: GitHub's windows-latest runners carry Strawberry
-        Perl's old pkg-config on PATH, and it fails to resolve nanobind's
-        transitive ``Requires`` — silently dropping the package, which
-        surfaces later as ``KeyError 'nanobind'`` — whereas the same build
-        works on machines with no pkg-config because the manual parser runs
-        instead. One deterministic, cross-platform path removes that
-        fragility.
-
-        Automatically searches cmake_layout subfolders if no .pc files are in
-        the main output folder.
+        Conan fully controls these files, so they are parsed directly
+        rather than via a system pkg-config, whose presence and
+        implementation vary (e.g. Strawberry Perl's fails to resolve
+        transitive Requires). Searches cmake_layout subfolders if no .pc
+        files are in the main output folder.
 
         Returns:
             Dict mapping package names to PackageDescription objects.
@@ -707,11 +665,9 @@ class ConanFinder(BaseFinder):
             if pkg is not None:
                 packages[pkg.name] = pkg
 
-        # Resolve Requires: transitively and fold each required package's flags into the dependent.
-        # Real pkg-config does this when emitting
-        # --cflags/--libs (e.g. nanobind Requires tsl-robin-map, so building
-        # against nanobind must see robin-map's include dir).
-        # The manual parser sees each .pc in isolation, so we replicate the merge here.
+        # Real pkg-config folds transitive Requires into --cflags/--libs;
+        # the manual parser sees each .pc in isolation, so replicate that
+        # merge here.
         self._merge_transitive_requires(packages)
 
         self._packages = packages
@@ -895,10 +851,8 @@ class ConanFinder(BaseFinder):
             else:
                 link_flags.append(flag)
 
-        # Parse Requires names.
-        # Entries are separated by commas/whitespace and
-        # may carry a version constraint (e.g. "foo >= 1.2"),
-        # keep only names.
+        # Requires entries are separated by commas/whitespace and may carry
+        # a version constraint (e.g. "foo >= 1.2"); keep only names.
         dependencies: list[str] = []
         operators = {"=", "<", ">", "<=", ">=", "!="}
         expect_version = False
@@ -944,7 +898,6 @@ class ConanFinder(BaseFinder):
             PackageDescription if found, None otherwise.
         """
         if self._packages is None:
-            # Try to parse existing .pc files
             if self.pkgconfig_dir.exists():
                 self._parse_pkgconfig_files()
             else:

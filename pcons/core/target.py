@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 from pcons.core.flags import merge_flags
-
-# Import SourceSpec from centralized types module
 from pcons.core.types import SourceSpec
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -71,31 +69,26 @@ class ValidatedUniqueList(UniqueList[_T]):
 
 
 class UsageRequirements(_UsageRequirementsStubs):
-    """Requirements that propagate from a target to its consumers.
+    """Requirements that propagate from a target to its consumers (CMake-style):
+    when A depends on B, B's public usage requirements are added to A's build.
 
-    When target A depends on target B, B's public usage requirements
-    are added to A's build. This enables CMake-style transitive
-    dependency management.
-
-    Stores named lists of values via attribute access. Any toolchain can
-    define its own requirement names. C/C++ toolchains use include_dirs,
-    defines, compile_flags, link_flags, link_libs. Other toolchains can
-    use any names they need (e.g., python_packages, data_schemas).
+    Stores named lists of values via attribute access. C/C++ toolchains use
+    include_dirs, defines, compile_flags, link_flags, link_libs; any toolchain
+    can define its own names.
 
     The ``link_libs`` list is special: appending a ``Target`` creates a full
     dependency (the owner inherits that target's public usage requirements —
     headers, defines, transitive link libs — and links its output), while
     appending a ``str`` adds only a raw link token (``"m"`` → ``-lm``) with
-    no usage requirements. As with all requirements, the ``public`` scope
-    re-exports to consumers; ``private`` does not. ``target.link(...)`` and
-    ``target.link_private(...)`` are the recommended high-level equivalents.
+    no usage requirements. The ``public`` scope re-exports to consumers;
+    ``private`` does not. ``target.link(...)`` and ``target.link_private(...)``
+    are the recommended high-level equivalents.
 
     A field may use a special list type (``UniqueList`` dedup, or
     ``ValidatedUniqueList`` whose ``on_append`` hook enforces invariants and
     invalidates caches). Whole-list assignment preserves those semantics:
-    ``__setattr__`` replaces an existing list's *contents* in place (clear +
-    extend through ``append``), so ``reqs.link_libs = [a, b]`` behaves like
-    repeated ``.append()`` instead of swapping in a plain list.
+    ``__setattr__`` replaces an existing list's *contents* in place, so
+    ``reqs.link_libs = [a, b]`` behaves like repeated ``.append()``.
     """
 
     _data: dict[str, list[Any] | UserList[Any]]
@@ -192,14 +185,7 @@ _INVALID_TARGET_NAME_RE = re.compile(r"[^\w./+-]")
 
 
 def _validate_target_name(name: str) -> None:
-    """Validate that a target name is well-formed.
-
-    Target names must be non-empty strings without spaces, slashes, or
-    special characters that would break ninja build syntax.
-
-    Raises:
-        ValueError: If the name is empty or contains invalid characters.
-    """
+    """Raise ValueError unless the target name is well-formed."""
     if not name:
         raise ValueError("Target name must not be empty.")
     bad = _INVALID_TARGET_NAME_RE.findall(name)
@@ -215,15 +201,8 @@ def _validate_target_name(name: str) -> None:
 def split_qualified_name(
     name: str, raise_on_invalid: bool = True
 ) -> tuple[str | None, str]:
-    """Split a qualified name into (project, target).
-
-    A qualified name contains a project qualifier, in the form "project::target".
-    If the name is not qualified, returns (None, name).
-
-    Args:
-        name: The qualified or unqualified name to split.
-    Returns:
-        A tuple of (project, target) where project is None if not qualified.
+    """Split a qualified "project::target" name into (project, target);
+    an unqualified name returns (None, name).
     """
     parts = name.split("::")
     count = len(parts)
@@ -240,10 +219,7 @@ def split_qualified_name(
 
 
 def is_qualified_name(name: str) -> bool:
-    """Check if a name is a qualified name.
-
-    A qualified name contains a project qualifier, in the form "project::target".
-    """
+    """Check if a name has a project qualifier ("project::target")."""
     project, _target = split_qualified_name(name, raise_on_invalid=False)
     return project is not None
 
@@ -262,16 +238,8 @@ def _make_default_requirements(
     # usage requirements are merged. Direct appends are preserved verbatim.
     reqs.compile_flags = []
     reqs.link_flags = []
-    # link_libs is the link-dependency list. Entries are either:
-    #   - a Target: a full dependency — the owner inherits its PUBLIC usage
-    #     requirements (include_dirs/headers, defines, flags, transitive
-    #     link_libs) and links its output. NOT just a link-line entry.
-    #   - a str (e.g. "m"): a raw link token, formatted by the toolchain
-    #     (-lm / m.lib) and placed after objects. No usage requirements.
-    # Scope controls propagation: entries on target.public re-export to the
-    # target's consumers; entries on target.private stay local.
-    # target.link(...) / target.link_private(...) are the equivalent
-    # high-level API; this list is the low-level/power form.
+    # link_libs semantics (Target vs str, public vs private): see the
+    # UsageRequirements docstring.
     reqs.link_libs = ValidatedUniqueList([], on_append=link_libs_validator)
     return reqs
 
@@ -306,10 +274,8 @@ class Target:
         required_languages: Languages used by this target (set by toolchains).
         defined_at: Where this target was created in user code.
         target_type: Type of target (e.g., "program", "static_library").
-        _env: Reference to the Environment used for building.
         intermediate_nodes: Intermediate build artifacts (e.g., object files).
-        output_nodes: Final output nodes (library/program, populated by resolver).
-        _resolved: Whether resolve() has been called on this target.
+        output_nodes: Final output nodes (populated by resolver).
     """
 
     __slots__ = (
@@ -372,15 +338,7 @@ class Target:
         builder: Builder | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
-        """Create a target.
-
-        Args:
-            name: Target name (e.g., "mylib", "myapp").
-            target_type: Type of target (e.g., "program", "static_library").
-                        Toolchains define their own type strings.
-            builder: Builder to use for this target.
-            defined_at: Source location where target was created.
-        """
+        """Create a target. Toolchains define their own target_type strings."""
         _validate_target_name(name)
         self.name = name
         self.builder = builder
@@ -403,15 +361,11 @@ class Target:
         # Override platform prefix/suffix (e.g., output_prefix="" to drop "lib"):
         self.output_prefix: str | None = None
         self.output_suffix: str | None = None
-        # Lazy source resolution (for Install, etc.):
-        # Sources that need resolution after main resolve phase
+        # Sources resolved after the main resolve phase (for Install, etc.)
         self._pending_sources: list[Target | Node | Path | str] | None = None
         # Build info for archive and command targets
         self._build_info: BuildInfo | dict[str, Any] | None = None
-        # Generic builder support (extensible builder architecture)
         self._builder_name: str | None = None
-        # Builder-specific data dict, initialized to empty dict (not None)
-        # Contains: post_build_commands, auxiliary_inputs, and builder-specific data
         self._builder_data: dict[str, Any] = {}
         # Implicit file deps (from target.depends(file/path/node))
         self._extra_implicit_deps: list[Node] = []
@@ -440,11 +394,7 @@ class Target:
 
     @property
     def qualified_name(self) -> str:
-        """Get the qualified name.
-
-        Returns:
-            The qualified name, in the form "<project>::<target>".
-        """
+        """The qualified name, "<project>::<target>"."""
         return f"{self.project.name}::{self.name}"
 
     @property
@@ -460,14 +410,10 @@ class Target:
 
     @property
     def sources(self) -> list[Node]:
-        """Get the list of source nodes for this target.
+        """Source nodes for this target (a new list; use add_source(s) to modify).
 
-        This includes both immediate sources (_sources) and resolved
-        Target sources from _pending_sources. Target sources are only
-        included after those Targets have been resolved (output_nodes populated).
-
-        Note: This returns a new list. Use add_source() or add_sources() to
-        modify the source list.
+        Target sources from _pending_sources appear only after those Targets
+        have been resolved (output_nodes populated).
         """
         result = list(self._sources)
 
@@ -481,15 +427,7 @@ class Target:
 
     @sources.setter
     def sources(self, value: list[Node]) -> None:
-        """Raise an error on direct assignment to sources.
-
-        Direct assignment to .sources is not allowed. Use add_source() or
-        add_sources() instead. This ensures consistent source management
-        and proper handling of Target sources (which need deferred resolution).
-
-        Raises:
-            AttributeError: Always, with guidance on proper methods to use.
-        """
+        """Always raises; use add_source() or add_sources()."""
         raise AttributeError(
             f"Cannot assign directly to {self.name}.sources. "
             f"Use add_source() or add_sources() instead. "
@@ -531,26 +469,13 @@ class Target:
     def link(self, *libs: Target | str) -> Target:
         """Add PUBLIC link dependencies (fluent API).
 
-        Each ``Target`` argument becomes a full dependency, not just a link
-        line entry: when this target is built it inherits the dependency's
-        PUBLIC usage requirements — include_dirs (headers), defines, flags,
-        and transitive link_libs — and links against the dependency's
-        output. Because the dependency is added PUBLICLY, it is also
-        re-exported: anything that later links *this* target inherits it
-        too (like CMake's ``target_link_libraries(... PUBLIC ...)``). Use
-        :meth:`link_private` for implementation-only dependencies that
-        consumers should not see.
-
-        Each ``str`` argument is a raw library name (e.g. ``"m"``,
-        ``"pthread"``), formatted by the toolchain (``-lm``, ``m.lib``) and
-        placed after object files on the link line. A string brings no
-        usage requirements — no headers, no defines — it is just a link
-        token. Being public, it too propagates to consumers' link lines.
-
-        Equivalent to appending each argument to ``self.public.link_libs``;
-        the methods and the lists are interchangeable, the lists being the
-        low-level form. Duplicates are silently ignored; argument order is
-        preserved (link order can matter for static libraries).
+        Appends each argument to ``self.public.link_libs``: a ``Target``
+        becomes a full dependency (its public headers, defines, flags, and
+        transitive link libs propagate here), a ``str`` is a raw link token;
+        see :class:`UsageRequirements`. Public dependencies are re-exported
+        to this target's consumers, like CMake's ``target_link_libraries(...
+        PUBLIC ...)``. Duplicates are ignored; argument order is preserved
+        (link order can matter for static libraries).
 
         Args:
             *libs: Targets to depend on, and/or raw library-name strings.
@@ -580,32 +505,15 @@ class Target:
     def link_private(self, *libs: Target | str) -> Target:
         """Add PRIVATE link dependencies (fluent API).
 
-        Exactly like :meth:`link`, but the dependencies are NOT re-exported
-        to this target's consumers (like CMake's ``target_link_libraries(...
-        PRIVATE ...)``): a ``Target`` argument still brings its PUBLIC usage
-        requirements (headers, defines, transitive link_libs) into *this*
-        target's build, and a ``str`` argument is still a raw link token —
-        but targets that link this one inherit none of it. Use this for
-        implementation details; it is the right choice for programs, which
-        have no consumers.
-
-        Equivalent to appending each argument to ``self.private.link_libs``.
+        Like :meth:`link`, but appends to ``self.private.link_libs``: the
+        dependencies still apply to *this* target's build but are NOT
+        re-exported to its consumers (CMake's ``target_link_libraries(...
+        PRIVATE ...)``). The right choice for implementation details and for
+        programs, which have no consumers.
 
         Note: a private dependency of a *static* library still reaches the
         final program's link line (an archive does not contain its
         dependencies), without propagating headers or defines.
-
-        Args:
-            *libs: Targets to depend on, and/or raw library-name strings.
-
-        Returns:
-            self, for method chaining.
-
-        Raises:
-            TypeError: If an argument is not a Target or str. Pass lists
-                unpacked: ``target.link_private(*libs)``.
-            ValueError: If a target links itself, or a library name is empty.
-            RuntimeError: If called after the target has been resolved.
 
         Example:
             core = project.StaticLibrary("core", env, sources=["core.c"])
@@ -653,20 +561,9 @@ class Target:
     def add_dependency(self, *targets: Target) -> Target:
         """Add Targets as build dependencies of this target.
 
-        Each becomes a full dependency: it is included in
-        ``transitive_dependencies()`` and ``dependencies``, so its public
-        usage requirements propagate here. Unlike ``link_libs``, this does not
-        treat the targets as libraries to link, use ``target.link()`` /
-        ``target.link_private()`` for that. Duplicates are ignored.
-
-        Args:
-            *targets: Targets to depend on.
-
-        Returns:
-            self for method chaining.
-
-        Raises:
-            RuntimeError: If called after the target has been resolved.
+        Public usage requirements propagate here, but unlike ``link()`` /
+        ``link_private()`` the targets are not linked as libraries.
+        Duplicates are ignored. Returns self for chaining.
         """
         if self._resolved:
             raise RuntimeError(
@@ -688,18 +585,12 @@ class Target:
     ) -> Target:
         """Add implicit dependencies (fluent API).
 
-        Dependencies are added as implicit deps (after ``|`` in ninja)
-        on this target's build nodes. They must be up to date before
-        building this target, but their outputs are NOT passed as
-        sources (not in ``$in``). Use ``target.link()`` for that.
-
-        By default, deps are added to **all** build nodes — both
-        intermediate and final output steps. This ensures generated
-        files exist before any build step starts. For Target deps,
-        public usage requirements also propagate, just like ``link()``.
-
-        With ``propagate=False``, deps are only added to the final
-        output nodes. Intermediate steps are unaffected.
+        Implicit deps (after ``|`` in ninja) must be up to date before this
+        target builds, but are NOT passed as sources (not in ``$in``) — use
+        ``target.link()`` for that. By default deps apply to **all** build
+        nodes (so generated files exist before any compile starts), and
+        Target deps propagate public usage requirements like ``link()``.
+        With ``propagate=False``, deps apply only to the final output nodes.
 
         Args:
             *items: Files or targets to depend on. Strings and Paths are
@@ -755,11 +646,8 @@ class Target:
         return self
 
     def _apply_extra_implicit_deps(self) -> None:
-        """Apply file-level implicit deps to build nodes.
-
-        Propagated deps go on all nodes (intermediate + output).
-        Output-only deps go on output nodes only.
-        """
+        """Apply file-level implicit deps to build nodes (propagated deps on
+        all nodes, output-only deps on output nodes)."""
         all_nodes = self.intermediate_nodes + self.output_nodes
         for dep in self._extra_implicit_deps:
             for node in all_nodes:
@@ -773,21 +661,15 @@ class Target:
     def add_source(self, source: Target | Node | Path | str) -> Target:
         """Add a source to this target (fluent API).
 
-        Args:
-            source: Source file (Target, Node, Path, or string path).
-                   If a Target is passed, its output files become sources
-                   after that Target is resolved.
-
-        Returns:
-            self for method chaining.
+        A Target source's output files become sources after that Target is
+        resolved.
 
         Example:
-            # Add a generated source file
             generated = env.Command(target="gen.cpp", source="gen.y", command="...")
             program.add_source(generated)
         """
         if isinstance(source, Target):
-            # Store Target sources for deferred resolution
+            # Defer resolution of Target sources
             if self._pending_sources is None:
                 self._pending_sources = []
             self._pending_sources.append(source)
@@ -809,20 +691,13 @@ class Target:
 
         Args:
             sources: Source files (Targets, Nodes, Paths, or string paths).
-                    If Targets are included, their output files become sources
-                    after those Targets are resolved.
-            base: Optional base directory for relative paths (only applies
-                  to Path and string sources, not Targets).
+                A Target's output files become sources after it is resolved.
+            base: Optional base directory for relative Path/string sources.
 
         Returns:
             self for method chaining.
 
-        Raises:
-            TypeError: If sources is a string or bare Path instead of a list.
-            RuntimeError: If called after the target has been resolved.
-
         Example:
-            # Mix regular and generated sources
             generated = env.Command(target="gen.cpp", source="gen.y", command="...")
             target.add_sources([generated, "main.cpp", "util.cpp"], base=src_dir)
         """
@@ -844,7 +719,7 @@ class Target:
         base_path = Path(base) if base else None
         for source in sources:
             if isinstance(source, Target):
-                # Store Target sources for deferred resolution
+                # Defer resolution of Target sources
                 if self._pending_sources is None:
                     self._pending_sources = []
                 self._pending_sources.append(source)
@@ -876,52 +751,23 @@ class Target:
     def set_option(self, key: str, value: Any) -> Target:
         """Set a builder/toolchain option on this target (fluent API).
 
-        Stores arbitrary key-value metadata that builders and toolchains
-        can read during resolution.  The core does not interpret these
-        values — their meaning is defined by the builder or toolchain.
-
-        Common options (depends on target type and toolchain):
-
-        - ``"install_name"`` — shared-library install name (macOS) or
-          SONAME (Linux).  Set to ``""`` to disable the automatic default.
-
-        Args:
-            key: Option name.
-            value: Option value.
-
-        Returns:
-            self for method chaining.
+        The core does not interpret these values — their meaning is defined
+        by the builder or toolchain. E.g. ``"install_name"``: shared-library
+        install name (macOS) or SONAME (Linux); ``""`` disables the
+        automatic default. Returns self for chaining.
         """
         self._builder_data[key] = value
         return self
 
     def get_option(self, key: str, default: Any = None) -> Any:
-        """Get a builder/toolchain option previously set with :meth:`set_option`.
-
-        Args:
-            key: Option name.
-            default: Value to return if *key* was never set.
-
-        Returns:
-            The stored value, or *default*.
-        """
+        """Get an option previously set with :meth:`set_option`."""
         return self._builder_data.get(key, default)
 
     def post_build(self, command: str) -> Target:
-        """Add a post-build command (fluent API).
+        """Add a shell command to run after the target is built (fluent API).
 
-        Post-build commands are shell commands that run after the target
-        is built. Commands support variable substitution:
-        - $out: The primary output file path
-        - $in: The input files (space-separated)
-
-        Commands run in the order they are added.
-
-        Args:
-            command: Shell command to run after building.
-
-        Returns:
-            self for method chaining.
+        Commands run in the order added and support $out (primary output
+        path) and $in (input files, space-separated).
 
         Example:
             plugin = project.SharedLibrary("myplugin", env)
@@ -934,22 +780,12 @@ class Target:
         return self
 
     def collect_usage_requirements(self) -> UsageRequirements:
-        """Collect transitive public requirements from all dependencies.
-
-        Returns a UsageRequirements containing this target's private
-        requirements plus all public requirements from the dependency
-        tree.
-
-        Returns:
-            Combined usage requirements.
-        """
+        """Return this target's private requirements plus all public
+        requirements from the dependency tree (cached)."""
         if self._collected_requirements is not None:
             return self._collected_requirements
 
-        # Start with this target's private requirements
         result = self.private.clone()
-
-        # Merge in public requirements from all dependencies (DFS)
         visited: set[str] = set()
         self._collect_from_deps(result, visited)
 
@@ -973,13 +809,8 @@ class Target:
             result.merge(dep.public)
 
     def get_all_languages(self) -> set[str]:
-        """Get all languages required by this target and its dependencies.
-
-        Used to determine which linker to use.
-
-        Returns:
-            Set of language names (e.g., {'c', 'cxx'}).
-        """
+        """All languages required by this target and its dependencies
+        (e.g. {'c', 'cxx'}); used to pick the linker."""
         languages = set(self.required_languages)
         visited: set[str] = {self.qualified_name}
 
@@ -991,22 +822,15 @@ class Target:
         return languages
 
     def transitive_dependencies(self, *, for_link: bool = False) -> list[Target]:
-        """Return all dependencies transitively (DFS, no duplicates).
-
-        Returns dependencies in the order they are discovered via DFS,
-        which means dependencies are listed before their dependents.
+        """Return all transitive dependencies (DFS order, no duplicates,
+        not including self).
 
         Args:
             for_link: When True, collect link inputs rather than propagated
-                usage requirements. A static library does not link its own
-                dependencies in, so its *private* link_libs must still reach
-                the final link line.
-                This follows private link_libs through static-library targets.
-                Usage-requirement propagation (for_link=False) never follows
-                private deps.
-
-        Returns:
-            List of all transitive dependencies (not including self).
+                usage requirements: private link_libs are followed through
+                static-library targets, since an archive does not contain
+                its dependencies. With for_link=False, private deps are
+                never followed.
         """
         result: list[Target] = []
         visited: set[str] = set()
@@ -1094,14 +918,6 @@ class ImportedTarget(Target):
         version: str | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
-        """Create an imported target.
-
-        Args:
-            name: Target name (often same as package name).
-            package_name: Name of the package this came from.
-            version: Package version if known.
-            defined_at: Source location where created.
-        """
         super().__init__(name, defined_at=defined_at)
         self.is_imported = True
         self.package_name = package_name or name

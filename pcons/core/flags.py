@@ -1,16 +1,9 @@
 # SPDX-License-Identifier: MIT
-"""Flag handling utilities for pcons.
+"""Flag de-duplication utilities.
 
-This module provides utilities for working with compiler and linker flags,
-particularly for de-duplicating flags that take arguments.
-
-The key insight is that flags like -I, -D, -F, -L, -framework, etc. take
-an argument that may be either attached (e.g., -Ipath) or separate (e.g., -I path).
-When de-duplicating flags, we need to treat the flag+argument pair as a unit.
-
-Note: The actual flag definitions are now maintained in the toolchain classes
-(see pcons/toolchains/*.py). The functions in this module accept the flag set
-as a parameter, allowing toolchain-specific behavior.
+Flags like -I or -framework may take their argument as a separate token, so
+de-duplication must treat the flag+argument pair as a unit. Which flags do so
+is toolchain-specific; the functions here take the flag set as a parameter.
 """
 
 from __future__ import annotations
@@ -30,17 +23,11 @@ if TYPE_CHECKING:
 class FlagPair:
     """A flag and its argument, kept together during deduplication.
 
-    Use this to explicitly mark flag+argument pairs that should be kept
-    together during deduplication, even if the flag isn't in the toolchain's
+    Marks a pair as atomic even if the flag isn't in the toolchain's
     SEPARATED_ARG_FLAGS list.
 
     Example:
-        from pcons import FlagPair
-
         env.cxx.flags.append(FlagPair("-custom-flag", "value"))
-
-        # Equivalent to adding "-custom-flag" to separated_arg_flags
-        # but only for this specific pair
     """
 
     flag: str
@@ -51,35 +38,14 @@ class FlagPair:
         return iter([self.flag, self.argument])
 
 
-# Default separated arg flags (empty set).
-# The actual flags are defined in toolchain classes.
-# This is provided for backwards compatibility and for cases
-# where no toolchain is available.
+# Default when no toolchain provides a flag set.
 DEFAULT_SEPARATED_ARG_FLAGS: frozenset[str] = frozenset()
 
 
 def is_separated_arg_flag(
     flag: str | PathToken, separated_arg_flags: frozenset[str] | None = None
 ) -> bool:
-    """Check if a flag takes its argument as a separate token.
-
-    Args:
-        flag: The flag to check.
-        separated_arg_flags: Set of flags that take separate arguments.
-                           If None, uses DEFAULT_SEPARATED_ARG_FLAGS (empty).
-
-    Returns:
-        True if this flag expects its argument in the next token.
-
-    Examples:
-        >>> gcc_flags = frozenset(["-F", "-framework", "-arch"])
-        >>> is_separated_arg_flag("-F", gcc_flags)
-        True
-        >>> is_separated_arg_flag("-framework", gcc_flags)
-        True
-        >>> is_separated_arg_flag("-O2", gcc_flags)
-        False
-    """
+    """Check if a flag takes its argument as a separate token."""
     return flag in (separated_arg_flags or DEFAULT_SEPARATED_ARG_FLAGS)
 
 
@@ -88,47 +54,25 @@ def deduplicate_flags(
     separated_arg_flags: frozenset[str] | None = None,
     passthrough_flags: frozenset[str] | None = None,
 ) -> list[str]:
-    """De-duplicate a list of flags, preserving flag+argument pairs.
+    """De-duplicate a list of flags, first occurrence wins, order preserved.
 
-    This function handles:
-    1. Simple flags like -O2, -Wall: de-duplicated individually
-    2. Flags with attached arguments like -DFOO, -Ipath: de-duplicated as complete tokens
-    3. Flags with separate arguments like -F path, -framework Foo: de-duplicated as pairs
-    4. FlagPair objects: treated as atomic flag+argument pairs
-    5. Pass-through flags like -Xlinker: flag+next-token kept verbatim, never
-       de-duplicated, because consecutive ones form one directive
-       (``-Xlinker -rpath -Xlinker /p`` is ``-rpath /p`` to the linker) and
-       de-duping a repeated ``-Xlinker -rpath`` would orphan its path.
-
-    The function preserves order (first occurrence wins) and handles the case where
-    a flag might appear both with and without an argument (unusual but possible).
-
-    Args:
-        flags: List of flag strings or FlagPair objects.
-        separated_arg_flags: Set of flags that take separate arguments.
-                           If None, uses DEFAULT_SEPARATED_ARG_FLAGS (empty).
-        passthrough_flags: Set of driver pass-through flags (e.g. -Xlinker)
-                           whose flag+argument pairs are kept verbatim.
+    Flags in *separated_arg_flags* and FlagPair objects de-duplicate as
+    flag+argument pairs; other flags de-duplicate as single tokens.
+    Pass-through flags (e.g. -Xlinker) are kept verbatim and never
+    de-duplicated: consecutive ones form one directive (``-Xlinker -rpath
+    -Xlinker /p`` is ``-rpath /p`` to the linker), so de-duping a repeated
+    ``-Xlinker -rpath`` would orphan its path.
 
     Returns:
-        De-duplicated list of flags with order preserved (FlagPairs expanded to strings).
+        De-duplicated flags with FlagPairs expanded to strings.
 
     Examples:
         >>> gcc_flags = frozenset(["-F", "-framework", "-I"])
         >>> deduplicate_flags(["-O2", "-Wall", "-O2"], gcc_flags)
         ['-O2', '-Wall']
 
-        >>> deduplicate_flags(["-I", "path1", "-I", "path1"], gcc_flags)
-        ['-I', 'path1']
-
         >>> deduplicate_flags(["-F", "path1", "-F", "path2"], gcc_flags)
         ['-F', 'path1', '-F', 'path2']
-
-        >>> deduplicate_flags(["-framework", "Cocoa", "-framework", "CoreFoundation"], gcc_flags)
-        ['-framework', 'Cocoa', '-framework', 'CoreFoundation']
-
-        >>> deduplicate_flags([FlagPair("-custom", "val1"), FlagPair("-custom", "val1")])
-        ['-custom', 'val1']
     """
     if not flags:
         return []
@@ -199,18 +143,10 @@ def merge_flags(
     new: Sequence[str | FlagPair | PathToken],
     separated_arg_flags: frozenset[str] | None = None,
 ) -> None:
-    """Merge new flags into existing list, avoiding duplicates.
+    """Merge new flags into *existing* in place, skipping duplicates.
 
-    This modifies `existing` in place, adding flags from `new` that
-    aren't already present. It properly handles flags with separate arguments
-    and FlagPair objects. FlagPair objects are expanded to their component
-    strings when appended.
-
-    Args:
-        existing: List of existing flags (modified in place). Should contain strings.
-        new: List of new flags to merge in. May contain strings or FlagPair objects.
-        separated_arg_flags: Set of flags that take separate arguments.
-                           If None, uses DEFAULT_SEPARATED_ARG_FLAGS (empty).
+    Separated-argument flags and FlagPairs compare as flag+argument pairs;
+    FlagPairs are expanded to strings when appended.
 
     Examples:
         >>> gcc_flags = frozenset(["-F"])
@@ -277,18 +213,7 @@ def merge_flags(
 def get_separated_arg_flags_from_toolchains(
     toolchains: Iterable[Any],
 ) -> frozenset[str]:
-    """Collect separated arg flags from all toolchains.
-
-    This function queries each toolchain for its separated arg flags
-    and returns the union of all flags.
-
-    Args:
-        toolchains: Iterable of toolchain objects that may have
-                   get_separated_arg_flags() method.
-
-    Returns:
-        Union of all separated arg flags from all toolchains.
-    """
+    """Return the union of all toolchains' separated-argument flags."""
     all_flags: set[str] = set()
     for toolchain in toolchains:
         if hasattr(toolchain, "get_separated_arg_flags"):

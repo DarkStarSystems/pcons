@@ -33,11 +33,8 @@ logger = logging.getLogger(__name__)
 class OutputInfo(TypedDict, total=False):
     """Information about a single output in a multi-output build.
 
-    Attributes:
-        path: Path to the output file.
-        suffix: File suffix for the output.
-        implicit: If True, this is an implicit output (not tracked by Ninja).
-        required: If True, this output must be generated.
+    ``implicit`` outputs are not tracked by Ninja; ``required`` outputs
+    must be generated.
     """
 
     path: Path
@@ -47,60 +44,33 @@ class OutputInfo(TypedDict, total=False):
 
 
 class BuildInfo(TypedDict, total=False):
-    """Build information stored on nodes for code generation.
+    """Build information stored in a node's ``_build_info`` for code generation.
 
-    This TypedDict documents all the fields that can appear in a node's
-    _build_info dictionary. Different builders populate different subsets
-    of these fields.
-
-    Common fields (most builders):
-        tool: Name of the tool to use (e.g., "cc", "cxx", "link", "ar", "copy").
-        command_var: Variable name containing command template (e.g., "objcmd").
-        language: Language for linker selection (e.g., "c", "cxx").
-        sources: List of source Node objects.
-        depfile: Depfile path pattern for Ninja (e.g., "$out.d").
-        deps_style: Dependency style for Ninja ("gcc" or "msvc").
-        command: Direct command to run (for generic/custom builders).
-        description: Human-readable description for build output.
-
-    Toolchain context:
-        context: ToolchainContext providing env overrides for command expansion.
-                 The resolver uses context.get_env_overrides() to set values
-                 on the environment before expanding command templates.
-
-    Multi-output builds:
-        outputs: Dict mapping output name to OutputInfo.
-        all_output_nodes: Dict mapping output name to FileNode.
-        primary_node: Reference to primary node (for secondary outputs).
-        output_name: Name of this output (for secondary outputs).
-
-    Generic command builder:
-        rule_name: Custom rule name for Ninja.
-        all_targets: List of all target nodes.
+    Different builders populate different subsets of these fields.
     """
 
     # Common fields
-    tool: str
-    command_var: str
-    language: str | None
+    tool: str  # Tool name (e.g. "cc", "link", "copy")
+    command_var: str  # Variable holding the command template (e.g. "objcmd")
+    language: str | None  # Language for linker selection (e.g. "c", "cxx")
     sources: list[Any]  # list[Node], but avoid circular import
     depfile: PathToken | None  # PathToken with suffix for depfile path
-    deps_style: str | None
-    command: str | list[str]  # Command as string or list of tokens
+    deps_style: str | None  # Ninja dependency style ("gcc" or "msvc")
+    command: str | list[str]  # Direct command (generic/custom builders)
     description: str  # Human-readable build description
 
-    # Toolchain-provided context
-    # Resolver uses context.get_env_overrides() for command expansion
+    # Toolchain-provided context; the resolver uses
+    # context.get_env_overrides() when expanding command templates
     context: ToolchainContext | None
 
     # Multi-output builds
     outputs: dict[str, OutputInfo]
     all_output_nodes: dict[str, Any]  # dict[str, FileNode]
-    primary_node: Any  # FileNode
-    output_name: str
+    primary_node: Any  # FileNode (set on secondary outputs)
+    output_name: str  # This output's name (set on secondary outputs)
 
     # Generic command builder
-    rule_name: str
+    rule_name: str  # Custom Ninja rule name
     all_targets: list[Any]  # list[Node]
     restat: bool  # Ninja restat: re-check output timestamp after build
 
@@ -140,12 +110,6 @@ class Node(ABC):
     __slots__ = ("explicit_deps", "implicit_deps", "builder", "defined_at", "_hash")
 
     def __init__(self, *, defined_at: SourceLocation | None = None) -> None:
-        """Initialize a node.
-
-        Args:
-            defined_at: Source location where this node was created.
-                       If None, captures the caller's location.
-        """
         self.explicit_deps: list[Node] = []
         self.implicit_deps: list[Node] = []
         self.builder: Builder | None = None
@@ -158,12 +122,7 @@ class Node(ABC):
         return self.explicit_deps + self.implicit_deps
 
     def depends(self, *nodes: Node | Sequence[Node]) -> None:
-        """Add explicit dependencies.
-
-        Args:
-            *nodes: Node(s) which must be up to date before building this one.
-                   Can be individual nodes or sequences of nodes.
-        """
+        """Add explicit dependencies (nodes or sequences of nodes)."""
         for item in nodes:
             if isinstance(item, Node):
                 self.explicit_deps.append(item)
@@ -218,15 +177,11 @@ class FileNode(Node):
 
     Attributes:
         path: The path to the file.
-        role: Optional path role. ``None`` (the default) means the node is a
-              normal source or build output, distinguished by whether it has
-              a builder. ``"install_output"`` marks a build output whose path
-              lives outside the build directory (e.g. ``<root>/dist/bin/x``);
-              generators render it relative to the project root (the source
-              relativization) rather than the build directory, so build files
-              stay relocatable.
-        _build_info: Builder-specific information for code generation.
-                    See BuildInfo TypedDict for documented fields.
+        role: Optional path role (see PathRole). ``None`` means a normal
+              source or build output, distinguished by whether it has a
+              builder.
+        _build_info: Builder-specific information for code generation
+                     (see BuildInfo).
     """
 
     __slots__ = ("path", "role", "_build_info")
@@ -238,13 +193,6 @@ class FileNode(Node):
         role: PathRole | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
-        """Create a file node.
-
-        Args:
-            path: Path to the file (will be converted to Path).
-            role: Optional path role, ``None`` by default.
-            defined_at: Source location where this node was created.
-        """
         super().__init__(defined_at=defined_at)
         self.path = Path(path) if isinstance(path, str) else path
         self.role: PathRole | None = role
@@ -285,24 +233,11 @@ class FileNode(Node):
 
 
 class DirNode(Node):
-    """A node representing a directory.
+    """A node representing a directory. Not currently used in production.
 
-    Not currently used in production. This class exists as the intended
-    abstraction for directory nodes and could be wired into Install/InstallDir
-    builders in the future.
-
-    Directory nodes have different semantics depending on usage:
-
-    As a target:
-        The directory is up-to-date when all its member files are up-to-date.
-        Members are explicitly registered via add_member().
-
-    As a source:
-        Represents the directory and all declared files within it.
-        Files not declared in the build are ignored.
-
-    As an order-only dependency:
-        Just ensures the directory exists before dependents are built.
+    As a target, the directory is up-to-date when all its registered members
+    (add_member) are; as a source it represents only the declared files; as
+    an order-only dependency it just ensures the directory exists.
 
     Attributes:
         path: The path to the directory.
@@ -318,13 +253,6 @@ class DirNode(Node):
         role: PathRole | None = None,
         defined_at: SourceLocation | None = None,
     ) -> None:
-        """Create a directory node.
-
-        Args:
-            path: Path to the directory.
-            role: Optional path role, ``None`` by default.
-            defined_at: Source location where this node was created.
-        """
         super().__init__(defined_at=defined_at)
         self.path = Path(path) if isinstance(path, str) else path
         self.role: PathRole | None = role
@@ -339,14 +267,7 @@ class DirNode(Node):
         return self.path.exists() and self.path.is_dir()
 
     def add_member(self, node: FileNode) -> None:
-        """Add a file as a member of this directory.
-
-        When this directory is used as a target, it's up-to-date
-        when all its members are up-to-date.
-
-        Args:
-            node: A file node that belongs to this directory.
-        """
+        """Add a file as a member of this directory."""
         self.members.append(node)
 
     def __str__(self) -> str:
@@ -370,11 +291,8 @@ class DirNode(Node):
 
 
 class ValueNode(Node):
-    """A node representing a computed value.
-
-    ValueNodes are used for things like configuration hashes,
-    version strings, or other computed values that can trigger
-    rebuilds when they change.
+    """A computed value (config hash, version string, ...) that can trigger
+    rebuilds when it changes.
 
     Attributes:
         value_name: A unique name identifying this value.
@@ -390,13 +308,6 @@ class ValueNode(Node):
         *,
         defined_at: SourceLocation | None = None,
     ) -> None:
-        """Create a value node.
-
-        Args:
-            value_name: A unique name for this value.
-            value: The value (can be set later).
-            defined_at: Source location where this node was created.
-        """
         super().__init__(defined_at=defined_at)
         self.value_name = value_name
         self.value = value
@@ -421,16 +332,11 @@ class ValueNode(Node):
 
 
 class AliasNode(Node):
-    """A node representing a named group of targets (phony target).
-
-    AliasNodes don't correspond to files - they're just names
-    that group other targets together. In Ninja, these become
-    phony rules.
+    """A named group of targets (a Ninja phony rule); no file of its own.
 
     Target references added via add_deferred_target() are resolved lazily:
-    their output_nodes are read when the ``targets`` property is accessed,
-    not when the alias is created. This allows aliases to reference targets
-    whose output_nodes are populated later during resolve().
+    their output_nodes are read when ``targets`` is accessed, so an alias can
+    reference targets whose output_nodes are populated later by resolve().
 
     Attributes:
         alias_name: The name of this alias.
@@ -446,13 +352,6 @@ class AliasNode(Node):
         *,
         defined_at: SourceLocation | None = None,
     ) -> None:
-        """Create an alias node.
-
-        Args:
-            alias_name: The name of the alias (e.g., "all", "test").
-            targets: Initial targets for this alias.
-            defined_at: Source location where this node was created.
-        """
         super().__init__(defined_at=defined_at)
         self.alias_name = alias_name
         self._nodes: list[Node] = list(targets) if targets else []

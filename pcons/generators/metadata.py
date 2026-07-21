@@ -29,12 +29,7 @@ class MetadataGenerator(BaseGenerator):
         self._output_filename = output_filename
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
-        """Generate metadata JSON file.
-
-        Args:
-            project: Configured project to introspect.
-            output_dir: Directory to write metadata file to.
-        """
+        """Generate the metadata JSON file in output_dir."""
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / self._output_filename
 
@@ -114,13 +109,8 @@ class MetadataGenerator(BaseGenerator):
             "defined_at": location,
         }
 
-        # For Test() targets, embed the resolved TestSpec so IDE
-        # integrations (e.g., the VSCode TestExplorer) have everything
-        # they need to discover, group, and run tests from this one
-        # metadata file — no need to also parse tests.json. The outer
-        # entry's `defined_at` already gives CodeLens-style {file, line};
-        # the embedded spec includes its own stringified defined_at for
-        # diagnostic completeness.
+        # Embed the resolved TestSpec so IDE integrations can discover and
+        # run tests from this file alone, without also parsing tests.json.
         spec = target._builder_data.get("spec") if target._builder_data else None
         if isinstance(spec, TestSpec):
             entry["test"] = spec.to_jsonable()

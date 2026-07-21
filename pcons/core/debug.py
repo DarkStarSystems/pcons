@@ -105,27 +105,12 @@ def reset_debug() -> None:
 
 
 def is_enabled(subsystem: str) -> bool:
-    """Check if a subsystem has tracing enabled.
-
-    Args:
-        subsystem: Subsystem name (e.g., "resolve", "subst").
-
-    Returns:
-        True if tracing is enabled for this subsystem.
-    """
+    """Check if a subsystem has tracing enabled."""
     return subsystem in _enabled_subsystems
 
 
 def trace(subsystem: str, message: str, *args: Any, **kwargs: Any) -> None:
-    """Log a trace message if subsystem is enabled.
-
-    Uses Python's logging at DEBUG level with a pcons.<subsystem> logger.
-
-    Args:
-        subsystem: Subsystem name.
-        message: Log message (can contain %s format specifiers).
-        *args: Format arguments for the message.
-        **kwargs: Additional keyword arguments for the logger.
+    """Log a trace message (logging DEBUG on pcons.<subsystem>) if enabled.
 
     Example:
         trace("resolve", "Resolving target: %s", target.name)
@@ -136,18 +121,7 @@ def trace(subsystem: str, message: str, *args: Any, **kwargs: Any) -> None:
 
 
 def trace_value(subsystem: str, name: str, value: object) -> None:
-    """Log a named value if subsystem is enabled.
-
-    Convenience function for tracing variable values with consistent indentation.
-
-    Args:
-        subsystem: Subsystem name.
-        name: Variable/attribute name being traced.
-        value: The value to log.
-
-    Example:
-        trace_value("resolve", "sources", [str(s.path) for s in target.sources])
-    """
+    """Log a named value, indented, if the subsystem is enabled."""
     if subsystem in _enabled_subsystems:
         logger = logging.getLogger(f"pcons.{subsystem}")
         logger.debug("    %s = %s", name, value)

@@ -23,14 +23,8 @@ from typing import Literal
 def create_tarfile(
     output: Path, files: list[Path], compression: str | None, base_dir: Path
 ) -> None:
-    """Create a tar archive.
-
-    Args:
-        output: Output archive path.
-        files: List of files to include.
-        compression: Compression type (None, "gzip", "bz2", "xz").
-        base_dir: Base directory for computing archive paths.
-    """
+    """Create a tar archive with optional compression (gzip/bz2/xz);
+    archive paths are relative to base_dir."""
     compression_modes: dict[str, Literal["w:gz", "w:bz2", "w:xz"]] = {
         "gzip": "w:gz",
         "bz2": "w:bz2",
@@ -42,47 +36,31 @@ def create_tarfile(
 
     with tarfile.open(output, mode=mode) as tar:
         for f in files:
-            # Compute archive name relative to base_dir
             try:
                 arcname = f.relative_to(base_dir)
             except ValueError:
-                # File is not under base_dir, use just the filename
+                # Not under base_dir: use just the filename
                 arcname = Path(f.name)
             tar.add(f, arcname=str(arcname))
 
 
 def create_zipfile(output: Path, files: list[Path], base_dir: Path) -> None:
-    """Create a zip archive.
-
-    Args:
-        output: Output archive path.
-        files: List of files to include.
-        base_dir: Base directory for computing archive paths.
-    """
+    """Create a zip archive; archive paths are relative to base_dir."""
     with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in files:
-            # Compute archive name relative to base_dir
             try:
                 arcname = f.relative_to(base_dir)
             except ValueError:
-                # File is not under base_dir, use just the filename
+                # Not under base_dir: use just the filename
                 arcname = Path(f.name)
             zf.write(f, arcname=str(arcname))
 
 
 def expand_directories(paths: list[Path]) -> list[Path]:
-    """Expand directories to their contained files.
-
-    Args:
-        paths: List of paths (files and/or directories).
-
-    Returns:
-        List of file paths with directories expanded.
-    """
+    """Expand directories recursively to their contained files."""
     result: list[Path] = []
     for p in paths:
         if p.is_dir():
-            # Recursively find all files in the directory
             result.extend(f for f in p.rglob("*") if f.is_file())
         elif p.is_file():
             result.append(p)
@@ -126,7 +104,6 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    # Expand directories to file lists
     all_files = expand_directories(args.files)
 
     if not all_files:
@@ -138,10 +115,8 @@ def main() -> int:
             create_zipfile(args.output, [], args.base_dir)
         return 0
 
-    # Ensure output directory exists
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
-    # Create the archive
     if args.type == "tar":
         create_tarfile(args.output, all_files, args.compression, args.base_dir)
     else:

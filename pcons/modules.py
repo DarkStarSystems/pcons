@@ -55,19 +55,12 @@ _loaded_modules: dict[str, ModuleType] = {}
 
 
 def get_search_paths() -> list[Path]:
-    """Get ordered list of module search paths.
-
-    Returns paths in priority order (first found wins):
-        1. PCONS_MODULES_PATH environment variable (colon/semicolon-separated)
-        2. ~/.pcons/modules/ - User's global modules
-        3. ./pcons_modules/ - Project-local modules
-
-    Returns:
-        List of existing directory paths to search for modules.
+    """Get module search paths in priority order (first found wins):
+    PCONS_MODULES_PATH, then ~/.pcons/modules/, then ./pcons_modules/.
+    Only existing directories are returned.
     """
     paths: list[Path] = []
 
-    # 1. Environment variable (highest priority)
     env_paths = os.environ.get("PCONS_MODULES_PATH", "")
     if env_paths:
         for p in env_paths.split(os.pathsep):
@@ -75,12 +68,10 @@ def get_search_paths() -> list[Path]:
             if path.exists() and path.is_dir():
                 paths.append(path)
 
-    # 2. User's global modules
     user_modules = Path.home() / ".pcons" / "modules"
     if user_modules.exists() and user_modules.is_dir():
         paths.append(user_modules)
 
-    # 3. Project-local modules (relative to cwd)
     local_modules = Path.cwd() / "pcons_modules"
     if local_modules.exists() and local_modules.is_dir():
         paths.append(local_modules)
@@ -89,11 +80,8 @@ def get_search_paths() -> list[Path]:
 
 
 def load_modules(extra_paths: list[Path | str] | None = None) -> dict[str, ModuleType]:
-    """Load all modules from search paths.
-
-    Scans search paths for Python files and imports them. If a module
-    has a `register()` function, it is called after import to allow
-    registration of custom builders.
+    """Import all modules found on the search paths; a module's
+    ``register()``, if present, is called after import.
 
     Args:
         extra_paths: Additional paths to search (prepended to default paths).
@@ -133,7 +121,6 @@ def load_modules(extra_paths: list[Path | str] | None = None) -> dict[str, Modul
                 spec.loader.exec_module(module)
                 _loaded_modules[name] = module
 
-                # Call register() if present
                 if hasattr(module, "register") and callable(module.register):
                     module.register()
 
@@ -144,10 +131,8 @@ def load_modules(extra_paths: list[Path | str] | None = None) -> dict[str, Modul
                     "Failed to load module %s from %s: %s", name, module_file, e
                 )
             except Exception as e:
-                # A module is an optional add-on: any error raised while
-                # importing it or running its register() must not be fatal
-                # to the rest of pcons (KeyboardInterrupt/SystemExit still
-                # propagate since they are not Exception subclasses).
+                # Add-ons are optional: import/register() errors must not be
+                # fatal (KeyboardInterrupt/SystemExit still propagate).
                 logger.warning(
                     "Skipping module %s from %s: %s: %s",
                     name,
@@ -160,23 +145,12 @@ def load_modules(extra_paths: list[Path | str] | None = None) -> dict[str, Modul
 
 
 def get_module(name: str) -> ModuleType | None:
-    """Get a loaded module by name.
-
-    Args:
-        name: The module name.
-
-    Returns:
-        The loaded module, or None if not found.
-    """
+    """Get a loaded module by name, or None."""
     return _loaded_modules.get(name)
 
 
 def list_modules() -> list[str]:
-    """List names of all loaded modules.
-
-    Returns:
-        List of loaded module names.
-    """
+    """List names of all loaded modules."""
     return list(_loaded_modules.keys())
 
 
@@ -189,16 +163,8 @@ def clear_modules() -> None:
 
 
 class _ModulesNamespace(ModuleType):
-    """Dynamic namespace that exposes loaded modules as attributes.
-
-    This class makes loaded modules accessible via attribute access:
-        from pcons.modules import mymodule
-        # or
-        import pcons.modules
-        pcons.modules.mymodule
-
-    It also preserves access to the module-level functions.
-    """
+    """Dynamic namespace exposing loaded modules as attributes
+    (``pcons.modules.mymodule``), alongside the module-level functions."""
 
     def __getattr__(self, name: str) -> ModuleType:
         """Get a loaded module by attribute access."""

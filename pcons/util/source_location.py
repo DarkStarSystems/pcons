@@ -41,15 +41,8 @@ class SourceLocation:
 
 
 def get_source_location(depth: int = 1) -> SourceLocation:
-    """Capture the source location of the caller.
-
-    Args:
-        depth: How many frames to skip. 1 = immediate caller,
-               2 = caller's caller, etc.
-
-    Returns:
-        SourceLocation for the specified caller.
-    """
+    """Capture the source location *depth* frames up the call stack
+    (1 = immediate caller, 2 = caller's caller, ...)."""
     # Add 1 to skip this function itself
     frame = inspect.currentframe()
     try:
@@ -73,12 +66,6 @@ def get_source_location(depth: int = 1) -> SourceLocation:
 
 
 def get_caller_location() -> SourceLocation:
-    """Capture the source location of the caller's caller.
-
-    This is a convenience function for the common case where a method
-    wants to record where it was called from (skipping itself).
-
-    Returns:
-        SourceLocation for the caller's caller.
-    """
+    """Capture the source location of the caller's caller — for methods
+    recording where they were called from."""
     return get_source_location(depth=2)

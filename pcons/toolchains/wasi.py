@@ -1,18 +1,9 @@
 # SPDX-License-Identifier: MIT
 """WASI (WebAssembly System Interface) toolchain using wasi-sdk.
 
-Provides a clang-based toolchain for compiling C/C++ to WebAssembly
-targeting the WASI runtime interface. The output `.wasm` files can be
-run with any WASI-compatible runtime (wasmtime, wasmer, WasmEdge, etc.).
-
 wasi-sdk is a clang/LLVM distribution pre-configured for the wasm32-wasi
-target, bundling wasi-libc and a matching sysroot.
-
-Detection order for wasi-sdk:
-1. ``WASI_SDK_PATH`` environment variable
-2. Common install locations (``/opt/wasi-sdk``, ``~/.local/share/wasi-sdk``,
-   Homebrew prefix)
-3. Bare ``clang`` in PATH with wasm32 target support (advanced / manual setup)
+target, bundling wasi-libc and a matching sysroot. The output ``.wasm``
+files run on any WASI-compatible runtime (wasmtime, wasmer, WasmEdge).
 """
 
 from __future__ import annotations
@@ -202,12 +193,7 @@ class WasiArchiver(BaseTool):
 
 
 class WasiLinker(BaseTool):
-    """Clang linker targeting wasm32-wasi.
-
-    Links wasm object files into a ``.wasm`` executable.
-    Shared libraries are not supported by WASI; attempting to build one
-    will raise an error at build-description time.
-    """
+    """Clang linker targeting wasm32-wasi: objects into a ``.wasm`` executable."""
 
     def __init__(self) -> None:
         super().__init__("link")
@@ -283,7 +269,6 @@ class WasiToolchain(WasmToolchain):
         if not isinstance(config, Configure):
             return False
 
-        # Locate SDK and sysroot
         self._sdk_path = find_wasi_sdk()
         if self._sdk_path:
             self._sysroot = _find_sysroot(self._sdk_path)
@@ -350,14 +335,7 @@ class WasiToolchain(WasmToolchain):
 
 
 def find_wasi_toolchain() -> WasiToolchain:
-    """Find and return a configured WASI toolchain.
-
-    Returns:
-        A configured WasiToolchain ready for use.
-
-    Raises:
-        RuntimeError: If wasi-sdk is not installed.
-    """
+    """Return a configured WASI toolchain, or raise RuntimeError."""
     from pcons.tools.toolchain import toolchain_registry
 
     toolchain = toolchain_registry.find_available("wasm", ["wasi"])
