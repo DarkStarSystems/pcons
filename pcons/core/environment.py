@@ -550,54 +550,17 @@ class Environment(_EnvironmentStubs):
                 return
             self._fanout_seen.add(key)
 
+        # All validation happens before any mutation (including the
+        # exclusive-group un-apply below), so application is atomic: a
+        # rejected preset leaves the environment exactly as it was.
+        self._validate_preset(preset)
+
         if preset.exclusive_group is not None:
-            # Group presets are a knob (replace-on-apply), so they must be
-            # invertible: purely additive contributions, no cmd. Enforced
-            # here — at authoring/apply time — not at switch time.
-            cmd_tools = sorted(
-                {c.tool for c in preset.contributions if c.cmd is not None}
-            )
-            if cmd_tools:
-                raise ValueError(
-                    f"Preset '{preset.name}' is in exclusive group "
-                    f"'{preset.exclusive_group}' but replaces the command of "
-                    f"tool(s) {', '.join(cmd_tools)}. Group presets switch by "
-                    f"un-applying, so they must be purely additive "
-                    f"(flags/defines only); model a command swap as a "
-                    f"non-grouped preset instead."
-                )
             for i, applied in enumerate(self._applied_presets):
                 if applied.exclusive_group == preset.exclusive_group:
                     self._unapply_contributions(applied)
                     del self._applied_presets[i]
                     break
-
-        # Validate up front so application is atomic: raise before any
-        # contribution has been applied.
-        if preset.contributions:
-            tools = self._get_tools()
-            missing_cmd = sorted(
-                {
-                    c.tool
-                    for c in preset.contributions
-                    if c.cmd is not None and c.tool not in tools
-                }
-            )
-            if missing_cmd:
-                raise ValueError(
-                    f"Preset '{preset.name}' replaces the command of "
-                    f"tool(s) {', '.join(missing_cmd)}, which this "
-                    f"environment does not have (available: "
-                    f"{', '.join(sorted(tools))}). A command override is a "
-                    f"retargeting mechanism and cannot be dropped silently."
-                )
-            if not any(c.tool in tools for c in preset.contributions):
-                targets = sorted({c.tool for c in preset.contributions})
-                raise ValueError(
-                    f"Preset '{preset.name}' would have no effect: none of "
-                    f"its target tools ({', '.join(targets)}) exist in this "
-                    f"environment (available: {', '.join(sorted(tools))})."
-                )
 
         for contribution in preset.contributions:
             self._apply_contribution(contribution)
@@ -677,6 +640,58 @@ class Environment(_EnvironmentStubs):
                     category="toolchain",
                     contributions=tuple(contributions),
                 )
+            )
+
+    def _validate_preset(self, preset: Preset) -> None:
+        """Raise unless *preset* can be applied to this environment.
+
+        Called by apply() before any mutation (docs/presets.md, "Preset
+        application"): a preset applies fully or raises, leaving the
+        environment untouched on rejection.
+        """
+        if preset.exclusive_group is not None:
+            # Group presets are a knob (replace-on-apply), so they must be
+            # invertible: purely additive contributions, no cmd. Enforced
+            # here — at authoring/apply time — not at switch time.
+            cmd_tools = sorted(
+                {c.tool for c in preset.contributions if c.cmd is not None}
+            )
+            if cmd_tools:
+                raise ValueError(
+                    f"Preset '{preset.name}' is in exclusive group "
+                    f"'{preset.exclusive_group}' but replaces the command of "
+                    f"tool(s) {', '.join(cmd_tools)}. Group presets switch by "
+                    f"un-applying, so they must be purely additive "
+                    f"(flags/defines only); model a command swap as a "
+                    f"non-grouped preset instead."
+                )
+
+        if not preset.contributions:
+            # No contributions at all is the realizer's deliberate no-op.
+            return
+
+        tools = self._get_tools()
+        missing_cmd = sorted(
+            {
+                c.tool
+                for c in preset.contributions
+                if c.cmd is not None and c.tool not in tools
+            }
+        )
+        if missing_cmd:
+            raise ValueError(
+                f"Preset '{preset.name}' replaces the command of "
+                f"tool(s) {', '.join(missing_cmd)}, which this "
+                f"environment does not have (available: "
+                f"{', '.join(sorted(tools))}). A command override is a "
+                f"retargeting mechanism and cannot be dropped silently."
+            )
+        if not any(c.tool in tools for c in preset.contributions):
+            targets = sorted({c.tool for c in preset.contributions})
+            raise ValueError(
+                f"Preset '{preset.name}' would have no effect: none of "
+                f"its target tools ({', '.join(targets)}) exist in this "
+                f"environment (available: {', '.join(sorted(tools))})."
             )
 
     def _unapply_contributions(self, preset: Preset) -> None:

@@ -1027,19 +1027,14 @@ class BaseToolchain(ABC):
         Reads tool_cmds (keyed by pcons tool name) merged with the
         deprecated env_vars aliases via CrossPreset.resolved_tool_cmds();
         any tool the preset names can be repointed (cc, cxx, link, ar, ...).
+        A duck-typed descriptor without that helper supplies plain
+        tool_cmds only (env_vars translation lives in CrossPreset).
         """
         resolve = getattr(cross, "resolved_tool_cmds", None)
         if resolve is not None:
             cmds = resolve()
         else:
-            # Duck-typed descriptor without the helper: accept both fields.
             cmds = dict(getattr(cross, "tool_cmds", None) or {})
-            for var_name, value in (getattr(cross, "env_vars", None) or {}).items():
-                tool = {"CC": "cc", "CXX": "cxx", "LD": "link", "AR": "ar"}.get(
-                    var_name.upper()
-                )
-                if tool is not None and tool not in cmds:
-                    cmds[tool] = value
         return [ToolContribution(tool, cmd=cmd) for tool, cmd in sorted(cmds.items())]
 
     @staticmethod

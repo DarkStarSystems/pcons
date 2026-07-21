@@ -16,10 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pcons.configure.checks import cache_signature
 from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
 
 if TYPE_CHECKING:
+    from pcons.core.environment import Environment
     from pcons.tools.toolchain import Toolchain
 
 logger = logging.getLogger(__name__)
@@ -176,11 +178,7 @@ class Configure:
         # dev shell, added SDK bin dir) re-searches instead of returning a
         # result found under a different environment. Stale-but-existing
         # binaries were previously returned indefinitely.
-        import hashlib
-
-        path_sig = hashlib.sha1(
-            os.environ.get("PATH", "").encode(errors="replace")
-        ).hexdigest()[:12]
+        path_sig = cache_signature(os.environ.get("PATH", ""))
         cache_key = f"program:{name}:{path_sig}"
 
         # Explicit hints are the caller's most specific instruction, so they
@@ -357,7 +355,7 @@ class Configure:
         self,
         type_name: str,
         *,
-        env: Any,
+        env: Environment,
         tool: str = "cc",
         define_name: str | None = None,
         headers: list[str] | None = None,

@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 from pcons.core.flags import get_separated_arg_flags_from_toolchains, merge_flags
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from pcons.core.environment import Environment
     from pcons.core.subst import PathToken
     from pcons.core.target import Target, UsageRequirements
@@ -150,50 +152,38 @@ def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None
             setattr(tool, name, [])
         return getattr(tool, name)
 
+    def extend_unique(tool: Any, name: str, values: Iterable[Any]) -> None:
+        """Append each value to the tool's list variable unless present.
+
+        Nothing to add leaves the tool untouched (no empty variable is
+        created).
+        """
+        items = list(values)
+        if not items:
+            return
+        dest = var(tool, name)
+        for value in items:
+            if value not in dest:
+                dest.append(value)
+
     for tool_name in ("cc", "cxx"):
         if not env.has_tool(tool_name):
             continue
         tool = getattr(env, tool_name)
-        if eff.includes:
-            includes = var(tool, "includes")
-            for inc in eff.includes:
-                if str(inc) not in includes:
-                    includes.append(str(inc))
-        if eff.defines:
-            defines = var(tool, "defines")
-            for define in eff.defines:
-                if define not in defines:
-                    defines.append(define)
+        extend_unique(tool, "includes", (str(inc) for inc in eff.includes))
+        extend_unique(tool, "defines", eff.defines)
         if eff.compile_flags:
             merge_flags(var(tool, "flags"), eff.compile_flags, sep)
 
     if env.has_tool("link"):
         link = env.link
-        if eff.link_dirs:
-            libdirs = var(link, "libdirs")
-            for lib_dir in eff.link_dirs:
-                if str(lib_dir) not in libdirs:
-                    libdirs.append(str(lib_dir))
-        if eff.link_libs:
-            libs = var(link, "libs")
-            for lib in eff.link_libs:
-                if lib not in libs:
-                    libs.append(lib)
+        extend_unique(link, "libdirs", (str(d) for d in eff.link_dirs))
+        extend_unique(link, "libs", eff.link_libs)
         if eff.link_flags:
             merge_flags(var(link, "flags"), eff.link_flags, sep)
         # Structured frameworks (macOS) — same variables env.Framework() uses.
-        frameworks = list(reqs.frameworks)
-        if frameworks:
-            fw_var = var(link, "frameworks")
-            for fw in frameworks:
-                if fw not in fw_var:
-                    fw_var.append(fw)
-        framework_dirs = list(reqs.framework_dirs)
-        if framework_dirs:
-            fwd_var = var(link, "frameworkdirs")
-            for fw_dir in framework_dirs:
-                if str(fw_dir) not in fwd_var:
-                    fwd_var.append(str(fw_dir))
+        extend_unique(link, "frameworks", reqs.frameworks)
+        extend_unique(link, "frameworkdirs", (str(d) for d in reqs.framework_dirs))
 
 
 def _resolve_and_add_includes_for(

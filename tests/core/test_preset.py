@@ -251,6 +251,31 @@ class TestExclusiveGroup:
         assert env.variant == "release"
         assert [p.name for p in env.applied_presets] == ["release"]
 
+    def test_rejected_group_preset_leaves_current_one_applied(self, test_project):
+        """Application is atomic: a group preset that fails validation must
+        not un-apply the group member already in effect."""
+        env = _make_env()
+        env.apply(
+            Preset(
+                name="release",
+                category="variant",
+                exclusive_group="build_variant",
+                contributions=(ToolContribution("cc", flags=("-O2",)),),
+            )
+        )
+        with pytest.raises(ValueError, match="no effect"):
+            env.apply(
+                Preset(
+                    name="debug",
+                    category="variant",
+                    exclusive_group="build_variant",
+                    contributions=(ToolContribution("nonexistent", flags=("-O0",)),),
+                )
+            )
+        assert "-O2" in env.cc.flags
+        assert [p.name for p in env.applied_presets] == ["release"]
+        assert env.variant == "release"
+
     def test_reapplying_same_variant_is_idempotent(self, test_project):
         """set_variant is a knob: same name twice doesn't double flags."""
         env = _make_env()

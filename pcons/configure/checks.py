@@ -7,6 +7,7 @@ libraries, and other system capabilities.
 
 from __future__ import annotations
 
+import hashlib
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -18,6 +19,18 @@ from pcons.core.debug import trace
 if TYPE_CHECKING:
     from pcons.configure.config import Configure
     from pcons.core.environment import Environment
+
+
+def cache_signature(*parts: str) -> str:
+    """Short, stable signature over *parts* for configure cache keys.
+
+    Used wherever a cache entry's validity depends on ambient state (the
+    compiler command and its flags, the PATH): the signature goes into the
+    key, so changed state misses the cache instead of returning answers
+    computed under a different configuration.
+    """
+    joined = "\x00".join(parts)
+    return hashlib.sha1(joined.encode(errors="replace")).hexdigest()[:12]
 
 
 @dataclass
@@ -120,11 +133,8 @@ class ToolChecks:
         the same clang binary targeting different platforms (host vs
         ``--target=wasm32-wasi``) never shares cached answers.
         """
-        import hashlib
-
         compiler = self._get_compiler() or "unknown"
-        sig_src = "\x00".join([compiler, *self._tool_flags()])
-        sig = hashlib.sha1(sig_src.encode()).hexdigest()[:12]
+        sig = cache_signature(compiler, *self._tool_flags())
         return f"check:{self._tool_name}:{sig}:{check_type}:{':'.join(args)}"
 
     def _cached_or_compiler(self, cache_key: str) -> CheckResult | str:

@@ -1064,42 +1064,35 @@ class Project(_ProjectBuilders):
             env.use(openssl)
         """
         cache_key = (name, version, tuple(components or []))
-        if cache_key in self._found_packages:
-            cached = self._found_packages[cache_key]
-            if cached is None:
-                # Negative result cached: don't re-run the finder chain
-                # (and its subprocesses) for every repeat probe.
-                if required:
-                    from pcons.core.errors import PackageNotFoundError
+        if cache_key not in self._found_packages:
+            if self._package_finder_chain is None:
+                from pcons.packages.finders import (
+                    FinderChain,
+                    PkgConfigFinder,
+                    SystemFinder,
+                )
 
-                    raise PackageNotFoundError(name, version)
-                return None
-            return cached
+                self._package_finder_chain = FinderChain(
+                    [PkgConfigFinder(), SystemFinder()]
+                )
 
-        if self._package_finder_chain is None:
-            from pcons.packages.finders import (
-                FinderChain,
-                PkgConfigFinder,
-                SystemFinder,
-            )
+            pkg = self._package_finder_chain.find(name, version, components)
+            if pkg is None:
+                # Cache the negative result too: don't re-run the finder
+                # chain (and its subprocesses) for every repeat probe.
+                self._found_packages[cache_key] = None
+            else:
+                from pcons.packages.imported import ImportedTarget
 
-            self._package_finder_chain = FinderChain(
-                [PkgConfigFinder(), SystemFinder()]
-            )
+                self._found_packages[cache_key] = ImportedTarget.from_package(
+                    pkg, components=components
+                )
 
-        pkg = self._package_finder_chain.find(name, version, components)
-        if pkg is None:
-            self._found_packages[cache_key] = None
-            if required:
-                from pcons.core.errors import PackageNotFoundError
+        target = self._found_packages[cache_key]
+        if target is None and required:
+            from pcons.core.errors import PackageNotFoundError
 
-                raise PackageNotFoundError(name, version)
-            return None
-
-        from pcons.packages.imported import ImportedTarget
-
-        target = ImportedTarget.from_package(pkg, components=components)
-        self._found_packages[cache_key] = target
+            raise PackageNotFoundError(name, version)
         return target
 
     def add_package_finder(self, finder: Any) -> None:

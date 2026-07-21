@@ -786,8 +786,13 @@ class NinjaGenerator(BaseGenerator):
 
         The ninja file is written to (and ninja runs from) the build
         directory; the shared contract lives in
-        pcons.core.paths.execution_relative.
+        pcons.core.paths.execution_relative, with the project's
+        PathResolver as the one source of the contract's arguments.
         """
+        if self._path_resolver is not None:
+            return self._path_resolver.make_execution_relative(path)
+        # Resolver-less project (tests with bare stubs): same contract,
+        # arguments derived from generator state.
         from pcons.core.paths import execution_relative
 
         return execution_relative(

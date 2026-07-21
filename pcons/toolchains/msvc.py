@@ -315,6 +315,48 @@ def _cross_lib_flags(target: str, vc_lib_dir: Path) -> tuple[str, ...]:
     return tuple(f"/LIBPATH:{d}" for d in libdirs)
 
 
+def cross_arch_contributions(
+    arch: str, *, repoint_tools: bool
+) -> list[ToolContribution]:
+    """Contributions needed to target a cross *arch* on Windows.
+
+    Shared by MSVC (which also repoints cl/link/lib at the cross toolset's
+    binaries) and clang-cl (which retargets by flag but still needs the
+    target's VC and Windows SDK libraries — the dev shell's LIB covers only
+    the host arch). Returns nothing when *arch* is the native arch, unknown,
+    or we're not on Windows; raises with install guidance when the cross
+    toolset isn't installed.
+    """
+    if not get_platform().is_windows:
+        return []
+    target = _ARCH_DIR_MAP.get(arch.lower())
+    host, native = _host_arch_dirs()
+    if target is None or target == native:
+        return []
+    toolset = _find_cross_toolset(target)
+    if toolset is None:
+        raise ValueError(
+            f"MSVC {target} cross toolset not found: no bin/{host}/{target}/"
+            f"cl.exe in any installed VC tools version. Install the "
+            f"'MSVC ... {target.upper()} build tools' component in the "
+            f"Visual Studio Installer."
+        )
+    bin_dir, vc_lib_dir = toolset
+    contribs: list[ToolContribution] = []
+    if repoint_tools:
+        for tool, exe in (
+            ("cc", "cl.exe"),
+            ("cxx", "cl.exe"),
+            ("link", "link.exe"),
+            ("lib", "lib.exe"),
+        ):
+            contribs.append(ToolContribution(tool, cmd=str(bin_dir / exe)))
+    lib_flags = _cross_lib_flags(target, vc_lib_dir)
+    if lib_flags:
+        contribs.append(ToolContribution("link", flags=lib_flags))
+    return contribs
+
+
 class MsvcCompiler(BaseTool):
     """MSVC C/C++ compiler tool."""
 
@@ -706,33 +748,7 @@ class MsvcToolchain(MsvcCompatibleToolchain):
         arch preset. See docs/presets.md.
         """
         contribs = super()._arch_contributions(arch)
-        if not get_platform().is_windows:
-            return contribs
-        target = _ARCH_DIR_MAP.get(arch.lower())
-        _, native = _host_arch_dirs()
-        if target is None or target == native:
-            return contribs
-
-        toolset = _find_cross_toolset(target)
-        if toolset is None:
-            host, _ = _host_arch_dirs()
-            raise ValueError(
-                f"MSVC {target} cross toolset not found: no bin/{host}/{target}/"
-                f"cl.exe in any installed VC tools version. Install the "
-                f"'MSVC ... {target.upper()} build tools' component in the "
-                f"Visual Studio Installer."
-            )
-        bin_dir, vc_lib_dir = toolset
-        for tool, exe in (
-            ("cc", "cl.exe"),
-            ("cxx", "cl.exe"),
-            ("link", "link.exe"),
-            ("lib", "lib.exe"),
-        ):
-            contribs.append(ToolContribution(tool, cmd=str(bin_dir / exe)))
-        lib_flags = _cross_lib_flags(target, vc_lib_dir)
-        if lib_flags:
-            contribs.append(ToolContribution("link", flags=lib_flags))
+        contribs.extend(cross_arch_contributions(arch, repoint_tools=True))
         return contribs
 
     def setup(self, env: Environment) -> None:
