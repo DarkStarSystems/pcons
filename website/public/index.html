@@ -284,6 +284,21 @@
       gap: 0.4rem;
     }
 
+    /* Story */
+    .story {
+      max-width: 46rem;
+      margin: 0 auto;
+    }
+    .story p {
+      margin-bottom: 1.1rem;
+      line-height: 1.7;
+    }
+    .story .signature {
+      color: var(--text-muted);
+      font-style: italic;
+      margin-top: 1.5rem;
+    }
+
     /* CTA */
     .cta {
       text-align: center;
@@ -474,6 +489,18 @@ app.<span class="fn">link</span>(lib)</code></pre>
         <h3>Configure-time checks</h3>
         <p>check_header(), check_flag(), try_compile(), configure_file() with CMake-style template substitution. Results are cached.</p>
       </div>
+      <div class="feature">
+        <h3>C++20 modules</h3>
+        <p>Named modules, partitions, and <code>import std</code> with automatic dependency scanning &mdash; on GCC, Clang, and MSVC.</p>
+      </div>
+      <div class="feature">
+        <h3>Installers</h3>
+        <p>Generate native installers from your build script: signed and notarized .pkg and .dmg on macOS, MSIX packages on Windows.</p>
+      </div>
+      <div class="feature">
+        <h3>Test runner</h3>
+        <p>Declare tests with <code>project.Test()</code>, run them with <code>pcons test</code> &mdash; labels, timeouts, gtest/doctest/Catch2 case discovery, and fuzzing support.</p>
+      </div>
     </div>
   </section>
 
@@ -558,6 +585,17 @@ app.<span class="fn">link</span>(lib)</code></pre>
           </tr>
         </tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- Why I built pcons -->
+  <section id="story">
+    <div class="story">
+      <h2 class="section-title">Why I built pcons</h2>
+      <p>I was one of the original developers of SCons, and helped maintain it for many years. I love that Python is the config language &mdash; it makes build descriptions incredibly flexible and powerful. More recently I've used CMake on larger projects, and despite the painful configuration language I came to appreciate its strengths: dependency propagation, package integration, and the clean separation between <em>describing</em> a build and <em>running</em> it.</p>
+      <p>For years I'd been thinking about rebuilding those ideas on a modern Python stack &mdash; fixing the long-standing pain points around substitution and quoting, extensibility, and tracing along the way. Pcons is that project.</p>
+      <p>Pcons is developed with care and extensively tested on Linux, macOS, and Windows &mdash; unit, end-to-end, and example tests on every platform, every commit. As a professional software engineer with 40+ years of serious C/C++/Python experience, I stand behind it and intend to support it long-term.</p>
+      <p class="signature">&mdash; Gary Oberbrunner</p>
     </div>
   </section>
 
