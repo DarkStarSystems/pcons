@@ -718,7 +718,7 @@ class Project(_ProjectBuilders):
         print(f"Build dir: {self.build_dir}")
         print(f"Targets ({len(self._targets)}):")
 
-        for target in sorted(self._targets):
+        for target in sorted(self._targets, key=lambda t: t.name):
             print(f"  {target.name} ({target.target_type})")
             if target.sources:
                 print(f"    sources: {len(target.sources)} files")
