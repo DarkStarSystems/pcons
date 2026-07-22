@@ -379,7 +379,7 @@
       </div>
       <div class="feature">
         <h3>Fast builds via Ninja</h3>
-        <p>Pcons generates Ninja build files and lets Ninja handle execution. Fast, parallel builds with minimal overhead. Also supports Makefile, Xcode, and MSVS output.</p>
+        <p>Pcons generates Ninja build files and lets Ninja handle execution &mdash; one <code>pcons</code> command generates and builds. Fast, parallel builds with minimal overhead. Also supports Makefile and Xcode output.</p>
       </div>
       <div class="feature">
         <h3>Transitive dependencies</h3>
@@ -404,23 +404,21 @@
       <div>
         <div class="code-block">
           <div class="code-block-header">pcons-build.py &mdash; Hello World</div>
-          <pre><code><span class="kw">from</span> pcons <span class="kw">import</span> Project, find_c_toolchain
+          <pre><code><span class="kw">from</span> pcons <span class="kw">import</span> Project
 
 project = <span class="fn">Project</span>(<span class="str">"hello"</span>)
-env = project.<span class="fn">Environment</span>(toolchain=<span class="fn">find_c_toolchain</span>())
+env = project.<span class="fn">Environment</span>(toolchain=<span class="str">"c"</span>)
 
-project.<span class="fn">Program</span>(<span class="str">"hello"</span>, env, sources=[<span class="str">"src/hello.c"</span>])
-
-project.<span class="fn">generate</span>()</code></pre>
+project.<span class="fn">Program</span>(<span class="str">"hello"</span>, env, sources=[<span class="str">"src/hello.c"</span>])</code></pre>
         </div>
       </div>
       <div>
         <div class="code-block">
           <div class="code-block-header">pcons-build.py &mdash; Libraries + Transitive Deps</div>
-          <pre><code><span class="kw">from</span> pcons <span class="kw">import</span> Project, find_c_toolchain
+          <pre><code><span class="kw">from</span> pcons <span class="kw">import</span> Project
 
 project = <span class="fn">Project</span>(<span class="str">"myapp"</span>)
-env = project.<span class="fn">Environment</span>(toolchain=<span class="fn">find_c_toolchain</span>())
+env = project.<span class="fn">Environment</span>(toolchain=<span class="str">"c"</span>)
 
 <span class="cm"># Build a static library</span>
 lib = project.<span class="fn">StaticLibrary</span>(<span class="str">"core"</span>, env, sources=[<span class="str">"src/core.c"</span>])
@@ -428,9 +426,7 @@ lib.public.include_dirs.append(<span class="str">"include"</span>)
 
 <span class="cm"># Program links the library &mdash; includes propagate</span>
 app = project.<span class="fn">Program</span>(<span class="str">"myapp"</span>, env, sources=[<span class="str">"src/main.c"</span>])
-app.<span class="fn">link</span>(lib)
-
-project.<span class="fn">generate</span>()</code></pre>
+app.<span class="fn">link</span>(lib)</code></pre>
         </div>
       </div>
     </div>
@@ -438,10 +434,11 @@ project.<span class="fn">generate</span>()</code></pre>
       <div class="code-block" style="max-width: 600px;">
         <div class="code-block-header">Terminal</div>
         <pre><code><span class="prompt">$</span> uvx pcons
-<span class="cm">Generating build/build.ninja...</span>
-<span class="cm">Generating build/compile_commands.json...</span>
-<span class="prompt">$</span> ninja -C build
-<span class="cm">[3/3] Linking myapp</span></code></pre>
+<span class="cm">ninja: Entering directory `build'</span>
+<span class="cm">[1/4] CC obj.core/src/core.c.o</span>
+<span class="cm">[2/4] CC obj.myapp/src/main.c.o</span>
+<span class="cm">[3/4] AR libcore.a</span>
+<span class="cm">[4/4] LINK myapp</span></code></pre>
       </div>
     </div>
   </section>
@@ -458,6 +455,8 @@ project.<span class="fn">generate</span>()</code></pre>
       <span>CUDA</span>
       <span>Cython</span>
       <span>Fortran</span>
+      <span>Swift</span>
+      <span>Rust (via Cargo)</span>
       <span>WASI</span>
       <span>Emscripten</span>
       <span>Metal</span>
@@ -465,7 +464,7 @@ project.<span class="fn">generate</span>()</code></pre>
     <div class="features" style="margin-top: 1.5rem;">
       <div class="feature">
         <h3>Generators</h3>
-        <p>Ninja (default), Makefile, Xcode, compile_commands.json, and Mermaid dependency diagrams.</p>
+        <p>Ninja (default), Makefile, Xcode, compile_commands.json, and Mermaid or Graphviz dependency diagrams.</p>
       </div>
       <div class="feature">
         <h3>Package management</h3>
@@ -566,7 +565,7 @@ project.<span class="fn">generate</span>()</code></pre>
   <section>
     <div class="cta">
       <h2>Ready for small-scale production use</h2>
-      <p>pcons is working in several medium-sized projects, and still under active development. Core C/C++/Fortran compilation, static and shared libraries, programs, install targets, installers, and mixed-language builds are all tested and working across Linux, macOS, and Windows.</p>
+      <p>pcons is working in several medium-sized projects, and still under active development. C, C++ (including C++20 modules), Fortran, and Swift compilation, static and shared libraries, programs, install targets, installers, unit tests, and mixed-language builds are all tested and working across Linux, macOS, and Windows.</p>
       <div class="hero-actions">
         <a href="https://pcons.readthedocs.io" class="btn btn-primary"
            data-umami-track="cta" data-umami-data-name="bottom-get-started">Get Started</a>
