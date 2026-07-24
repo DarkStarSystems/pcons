@@ -151,8 +151,9 @@ class TestExternalTool:
         # Tool namespace should exist
         assert env.has_tool("concat")
 
-        # Tool variables should be accessible
-        assert env.concat.cmd == "cat"
+        # Tool variables should be accessible; bare default commands are
+        # pinned to their absolute PATH location at setup.
+        assert Path(env.concat.cmd).stem.lower() == "cat"
 
     def test_tool_builder_attached_to_environment(self, test_project):  # noqa: F811
         """Test that builders are attached to the tool namespace."""
@@ -256,7 +257,7 @@ class TestMultipleExternalTools:
         # Both should coexist
         assert env.has_tool("concat")
         assert env.has_tool("cc")
-        assert env.concat.cmd == "cat"
+        assert Path(env.concat.cmd).stem.lower() == "cat"
         assert env.cc.cmd == "gcc"
 
 
@@ -413,7 +414,7 @@ class TestToolIntegration:
         # Set a variant (no effect on concat, but shouldn't break)
         env.variant = "release"
 
-        assert env.concat.cmd == "cat"
+        assert Path(env.concat.cmd).stem.lower() == "cat"
         assert env.variant == "release"
 
     def test_tool_environment_clone(self, test_project):  # noqa: F811
@@ -444,8 +445,8 @@ class TestToolIntegration:
 
         # Test substitution
         result = env.subst("$concat.cmd")
-        assert result == "cat"
+        assert Path(result).stem.lower() == "cat"
 
         env.concat.flags = ["-n", "-v"]
         result = env.subst("$concat.cmd $concat.flags")
-        assert result == "cat -n -v"
+        assert result == f"{env.concat.cmd} -n -v"

@@ -17,6 +17,21 @@ if TYPE_CHECKING:
     from pcons.core.toolconfig import ToolConfig
 
 
+def _pin_cmd_path(cmd: str) -> str:
+    """Pin a bare command name to its absolute location on PATH.
+
+    Generated build files run with whatever PATH the user's shell has at
+    build time; pinning the path found at setup time guarantees the build
+    uses the same executable that detection saw. Commands that already
+    carry a directory, or that aren't on PATH, pass through unchanged.
+    """
+    if Path(cmd).name != cmd:
+        return cmd
+    import shutil
+
+    return shutil.which(cmd) or cmd
+
+
 @runtime_checkable
 class Tool(Protocol):
     """Protocol for tools.
@@ -64,6 +79,10 @@ class Tool(Protocol):
         Returns:
             Dict mapping builder names to Builder instances.
         """
+        ...
+
+    def default_vars(self) -> dict[str, object]:
+        """Return default variable values for this tool (e.g. ``cmd``)."""
         ...
 
 
@@ -146,6 +165,8 @@ class BaseTool(ABC):
         defaults = self.default_vars()
         for key, value in defaults.items():
             if key not in tool_config:
+                if key == "cmd" and isinstance(value, str):
+                    value = _pin_cmd_path(value)
                 tool_config.set(key, value)
 
         # Attach builders to the tool config
