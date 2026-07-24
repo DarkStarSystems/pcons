@@ -177,6 +177,8 @@ def _clang_std_module_flag_spec() -> Any:
 class ClangCCompiler(BaseTool):
     """Clang C compiler tool."""
 
+    env_var = "CC"
+
     def __init__(self) -> None:
         super().__init__("cc", language="c")
 
@@ -192,6 +194,8 @@ class ClangCCompiler(BaseTool):
 
 class ClangCxxCompiler(BaseTool):
     """Clang C++ compiler tool."""
+
+    env_var = "CXX"
 
     def __init__(self) -> None:
         super().__init__("cxx", language="cxx")
@@ -213,6 +217,8 @@ class ClangCxxCompiler(BaseTool):
 class LlvmArchiver(BaseTool):
     """LLVM archiver tool."""
 
+    env_var = "AR"
+
     def __init__(self) -> None:
         super().__init__("ar")
 
@@ -232,6 +238,8 @@ class LlvmArchiver(BaseTool):
 
 class LlvmLinker(BaseTool):
     """LLVM linker tool (variables come from gnu_link_vars)."""
+
+    env_var = "CC"
 
     def __init__(self) -> None:
         super().__init__("link")
@@ -312,6 +320,8 @@ class LlvmToolchain(UnixToolchain):
     Source handling, naming conventions, arch/variant handling come from
     UnixToolchain. Additionally supports Metal shaders on macOS.
     """
+
+    ENV_COMPILER_FAMILY = "llvm"
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link", "metal")
 

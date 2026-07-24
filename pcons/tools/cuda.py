@@ -36,6 +36,8 @@ class CudaCompiler(BaseTool):
         env.cuda.flags.append("-use_fast_math")
     """
 
+    env_var = "CUDACXX"
+
     def __init__(self) -> None:
         super().__init__("cuda", language="cuda")
 

@@ -161,6 +161,8 @@ def _find_gcc_std_module_source(
 class GccCCompiler(BaseTool):
     """GCC C compiler tool (variables come from gnu_compile_vars)."""
 
+    env_var = "CC"
+
     def __init__(self) -> None:
         super().__init__("cc", language="c")
 
@@ -176,6 +178,8 @@ class GccCCompiler(BaseTool):
 
 class GccCxxCompiler(BaseTool):
     """GCC C++ compiler tool (variables come from gnu_compile_vars)."""
+
+    env_var = "CXX"
 
     def __init__(self) -> None:
         super().__init__("cxx", language="cxx")
@@ -193,6 +197,8 @@ class GccCxxCompiler(BaseTool):
 class GccArchiver(BaseTool):
     """GNU archiver (ar) for creating static libraries."""
 
+    env_var = "AR"
+
     def __init__(self) -> None:
         super().__init__("ar")
 
@@ -208,6 +214,8 @@ class GccArchiver(BaseTool):
 
 class GccLinker(BaseTool):
     """GCC linker tool (variables come from gnu_link_vars)."""
+
+    env_var = "CC"
 
     def __init__(self) -> None:
         super().__init__("link")
@@ -310,6 +318,8 @@ class GccToolchain(UnixToolchain):
     Source handling, naming conventions, arch/variant handling come from
     UnixToolchain.
     """
+
+    ENV_COMPILER_FAMILY = "gcc"
 
     TOOL_NAMES = ("cc", "cxx", "ar", "link")
 

@@ -17,6 +17,43 @@ if TYPE_CHECKING:
     from pcons.core.toolconfig import ToolConfig
 
 
+def resolve_env_cmd_override(env_var: str | None) -> str | None:
+    """Resolve a conventional tool-selection env var (``CC``, ``CXX``, ...).
+
+    Returns the absolute path of the user's requested command, or None when
+    the variable is unset or empty. Following the autoconf/CMake/Meson
+    convention the variable is authoritative, never a hint: a set value
+    that can't be found is an error, not a fall-through to detection.
+    """
+    import os
+
+    if not env_var:
+        return None
+    value = os.environ.get(env_var, "").strip()
+    if not value:
+        return None
+    p = Path(value)
+    if p.name != value:  # has a directory component: use as-is
+        if p.is_file():
+            return str(p)
+        from pcons.core.errors import ToolNotFoundError
+
+        raise ToolNotFoundError(
+            value, hint=f"${env_var} is set to '{value}', which does not exist."
+        )
+    import shutil
+
+    found = shutil.which(value)
+    if found is None:
+        from pcons.core.errors import ToolNotFoundError
+
+        raise ToolNotFoundError(
+            value,
+            hint=f"${env_var} is set to '{value}', which was not found on PATH.",
+        )
+    return found
+
+
 def _pin_cmd_path(cmd: str) -> str:
     """Pin a bare command name to its absolute location on PATH.
 
@@ -85,6 +122,11 @@ class Tool(Protocol):
         """Return default variable values for this tool (e.g. ``cmd``)."""
         ...
 
+    @property
+    def env_var(self) -> str | None:
+        """Conventional selection env var for this tool's command, or None."""
+        ...
+
 
 class BaseTool(ABC):
     """Abstract base class for tools.
@@ -92,6 +134,12 @@ class BaseTool(ABC):
     Provides common functionality for tools. Subclasses must implement
     the abstract methods.
     """
+
+    # Conventional selection env var honored for this tool's command
+    # ("CC", "CXX", "FC", "AR", ...), or None. Authoritative when set:
+    # see resolve_env_cmd_override(). Toolchains whose commands are
+    # SDK-owned (emscripten, wasi) simply don't declare one.
+    env_var: str | None = None
 
     def __init__(self, name: str = "", *, language: str | None = None) -> None:
         """Initialize a tool.
@@ -141,6 +189,11 @@ class BaseTool(ABC):
 
         if not isinstance(config, Configure):
             return None
+        override = resolve_env_cmd_override(self.env_var)
+        if override is not None:
+            # Authoritative: the env var replaces the candidate list.
+            programs = (override,)
+            hints = None
         found = None
         for name in programs:
             found = config.find_program(name, hints=hints, version_flag=version_flag)

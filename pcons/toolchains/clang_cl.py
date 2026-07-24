@@ -88,12 +88,16 @@ class ClangClCompiler(BaseTool):
 class ClangClCCompiler(ClangClCompiler):
     """Clang-CL C compiler."""
 
+    env_var = "CC"
+
     def __init__(self) -> None:
         super().__init__("cc", "c")
 
 
 class ClangClCxxCompiler(ClangClCompiler):
     """Clang-CL C++ compiler."""
+
+    env_var = "CXX"
 
     def __init__(self) -> None:
         super().__init__("cxx", "cxx")
@@ -223,6 +227,8 @@ class ClangClLinker(BaseTool):
 
 class ClangClToolchain(MsvcCompatibleToolchain):
     """Clang-CL toolchain: MSVC-compatible flags and binaries on Windows."""
+
+    ENV_COMPILER_FAMILY = "clang-cl"
 
     TOOL_NAMES = ("cc", "cxx", "lib", "link", "rc", "ml")
 

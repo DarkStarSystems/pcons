@@ -126,6 +126,8 @@ class SwiftCompiler(BaseTool):
     per-node variables provided by SwiftToolchain.setup_group_node().
     """
 
+    env_var = "SWIFTC"
+
     def __init__(self) -> None:
         super().__init__("swiftc", language="swift")
 
@@ -217,6 +219,8 @@ class SwiftLinker(BaseTool):
     Swift objects (and any C/C++ objects mixed in) needs no manual
     runtime paths.
     """
+
+    env_var = "SWIFTC"
 
     def __init__(self) -> None:
         super().__init__("link")

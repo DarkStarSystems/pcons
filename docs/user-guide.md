@@ -155,6 +155,49 @@ IDE autocompletion for these names comes from the generated `KnownToolchain` typ
 - **Windows**: clang-cl → msvc → llvm → gcc
 - **Linux / macOS**: llvm → gcc
 
+### Selecting compilers with environment variables
+
+pcons honors the conventional tool-selection environment variables, same as
+make/autoconf/CMake/Meson — no build-script changes needed:
+
+```console
+$ CXX=g++-15 pcons          # build with a specific compiler
+$ CC=clang-19 CXX=clang++-19 pcons
+$ CXX=/opt/llvm/bin/clang++ pcons
+```
+
+| Variable | Selects | Toolchains |
+|----------|---------|------------|
+| `CC` | C compiler (and the link driver) | gcc, llvm, msvc, clang-cl |
+| `CXX` | C++ compiler | gcc, llvm, msvc, clang-cl |
+| `FC` | Fortran compiler | gfortran |
+| `AR` | archiver | gcc, llvm, swift |
+| `SWIFTC` | Swift compiler | swift |
+| `CUDACXX` | CUDA compiler (nvcc) | cuda |
+| `RC` | resource compiler | msvc, clang-cl |
+
+Following the universal convention, these are **authoritative, not hints**:
+a set variable selects that command; a value that can't be found is an
+error, never a silent fall-through to detection. The rules:
+
+- With `toolchain="c"` (auto-detect), `$CXX`/`$CC` steer detection to the
+  named compiler's *family* — `CXX=g++-15` selects the gcc toolchain even
+  where clang would normally win. Classification sniffs `--version`, so
+  macOS's `g++`-that-is-really-Apple-clang is identified correctly.
+- An explicitly requested toolchain that *contradicts* the variable
+  (`CXX=g++-15` with `toolchain="msvc"`) is an error.
+- Values a compiler-id can't classify (e.g. wrapper scripts) are used
+  as-is on whichever toolchain is selected.
+- Explicit script assignments (`env.cxx.cmd = ...`) and cross-preset
+  `tool_cmds` still win over the environment; SDK-owned toolchains
+  (emscripten, wasi) ignore these variables entirely, like CMake's
+  Visual Studio generators.
+- `env.explain()` attributes the result (`cxx.cmd <- $CXX`), so a
+  forgotten `export CXX` in a shell profile is visible, not mysterious.
+
+`CFLAGS`/`CXXFLAGS`/`LDFLAGS` are *not* read — flag policy belongs to the
+build script (variants, presets), not the ambient environment.
+
 **Swift** is available as `toolchain="swift"` (requires Xcode on macOS, or a
 swift.org toolchain on Linux and Windows). Swift's compilation unit is the module, not the
 file: each pcons target compiles as one Swift module in a single whole-module

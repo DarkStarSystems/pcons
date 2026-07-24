@@ -360,6 +360,8 @@ def cross_arch_contributions(
 class MsvcCompiler(BaseTool):
     """MSVC C/C++ compiler tool."""
 
+    env_var = "CC"
+
     def __init__(self, name: str = "cc", language: str = "c") -> None:
         super().__init__(name, language=language)
 
@@ -427,6 +429,8 @@ class MsvcCompiler(BaseTool):
 
 class MsvcCxxCompiler(MsvcCompiler):
     """MSVC C++ compiler tool (cxx namespace)."""
+
+    env_var = "CXX"
 
     def __init__(self) -> None:
         super().__init__("cxx", "cxx")
@@ -502,6 +506,8 @@ class MsvcLibrarian(BaseTool):
 
 class MsvcResourceCompiler(BaseTool):
     """MSVC resource compiler tool (rc.exe)."""
+
+    env_var = "RC"
 
     def __init__(self) -> None:
         super().__init__("rc")
@@ -717,6 +723,8 @@ class MsvcLinker(BaseTool):
 
 class MsvcToolchain(MsvcCompatibleToolchain):
     """Microsoft Visual C++ toolchain (Windows only)."""
+
+    ENV_COMPILER_FAMILY = "msvc"
 
     TOOL_NAMES = ("cc", "cxx", "lib", "link", "rc", "ml")
 

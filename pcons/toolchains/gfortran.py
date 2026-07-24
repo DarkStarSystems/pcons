@@ -65,6 +65,8 @@ class GfortranCompiler(BaseTool):
     """GNU Fortran compiler tool. ``moddir`` (default 'modules') is the
     module output/search directory, passed as -J and -I."""
 
+    env_var = "FC"
+
     def __init__(self) -> None:
         super().__init__("fc", language="fortran")
 
@@ -116,6 +118,8 @@ class GfortranCompiler(BaseTool):
 
 class GfortranLinker(BaseTool):
     """Linker using gfortran as the driver, for Fortran runtime linkage."""
+
+    env_var = "FC"
 
     def __init__(self) -> None:
         super().__init__("link")

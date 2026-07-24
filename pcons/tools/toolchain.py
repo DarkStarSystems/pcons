@@ -735,8 +735,13 @@ class BaseToolchain(ABC):
     # The apply_*() methods are thin wrappers kept for call-site readability.
     # =========================================================================
 
+    # Compiler family this toolchain's cc/cxx belong to ("gcc", "llvm",
+    # "msvc", "clang-cl"), used to validate $CC/$CXX overrides. None skips
+    # validation.
+    ENV_COMPILER_FAMILY: str | None = None
+
     def setup_presets(self, env: Environment) -> list[Preset]:
-        """Presets this toolchain applies right after setup (default: none).
+        """Presets this toolchain applies right after setup.
 
         Runs after the environment records the toolchain's baseline, so
         anything returned here is attributed by explain() to the preset
@@ -744,8 +749,59 @@ class BaseToolchain(ABC):
         toolchain defaults. This is how a toolchain points tools at a
         detected SDK declaratively rather than mutating env attributes in
         setup() (docs/presets.md).
+
+        The base implementation realizes the conventional selection env
+        vars (``$CC``, ``$CXX``, ...) each tool declares via
+        ``Tool.env_var`` — one preset per variable, so ``explain()``
+        shows e.g. ``cxx.cmd <- $CXX``. SDK-owned toolchains (emscripten,
+        wasi) override this without calling super(), deliberately ignoring
+        the env vars — the CMake/Visual-Studio-generator precedent.
         """
-        return []
+        presets: list[Preset] = []
+        by_var: dict[str, list[str]] = {}  # env var -> tool names (AR is shared)
+        for tool in self._tools.values():
+            if tool.env_var:
+                by_var.setdefault(tool.env_var, []).append(tool.name)
+        for var, tool_names in by_var.items():
+            from pcons.tools.tool import resolve_env_cmd_override
+
+            path = resolve_env_cmd_override(var)
+            if path is None:
+                continue
+            if var in ("CC", "CXX"):
+                self._validate_compiler_override(var, path)
+            presets.append(
+                Preset(
+                    name=f"${var}",
+                    category="env",
+                    contributions=tuple(
+                        ToolContribution(name, cmd=path) for name in tool_names
+                    ),
+                )
+            )
+        return presets
+
+    def _validate_compiler_override(self, var: str, path: str) -> None:
+        """Reject a $CC/$CXX override from a different compiler family.
+
+        The user asked for two contradictory things (e.g. ``CXX=g++-15``
+        with ``toolchain="msvc"``); applying one silently would misbuild.
+        An unclassifiable binary (a compiler wrapper) is accepted.
+        """
+        expected = self.ENV_COMPILER_FAMILY
+        if expected is None:
+            return
+        from pcons.configure.compiler_id import compiler_family
+
+        family = compiler_family(path)
+        if family is not None and family != expected:
+            raise ValueError(
+                f"${var} is set to '{path}', which is a {family}-family "
+                f"compiler, but the requested toolchain is '{self.name}' "
+                f"({expected} family). Unset ${var} or use the matching "
+                f"toolchain (e.g. toolchain=\"{family}\" or the 'c' "
+                f"auto-detector, which follows ${var})."
+            )
 
     def apply_variant(self, env: Environment, variant: str, **kwargs: Any) -> None:
         """Apply a build variant (e.g. "debug", "release") to the environment."""

@@ -83,6 +83,19 @@ def _restore_registries(snapshot: tuple[dict[str, Any], dict[str, Any]]) -> None
 
 
 @pytest.fixture(autouse=True)
+def clear_tool_env_vars(monkeypatch):
+    """Isolate tests from the developer's tool-selection env vars.
+
+    CC/CXX/etc. are authoritative when set (they select compilers and
+    steer toolchain auto-detection), so an exported CXX in a dev shell
+    would perturb every Environment-creating test. Tests that exercise
+    the mechanism set the vars explicitly.
+    """
+    for var in ("CC", "CXX", "FC", "AR", "SWIFTC", "CUDACXX", "RC"):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def clear_project_tree():
     """Ensure global Project/generator/registry state is isolated per test.
 

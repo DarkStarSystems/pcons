@@ -89,6 +89,32 @@ if TYPE_CHECKING:
     from pcons.tools.toolchain import BaseToolchain
 
 
+def _env_selected_c_toolchain() -> BaseToolchain | None:
+    """C/C++ toolchain implied by the $CXX/$CC env vars, or None.
+
+    When either variable names a classifiable compiler, that compiler's
+    family wins auto-detection outright (bypassing the availability probe
+    for the family's default command names — the user's compiler existing
+    is the availability proof). An unclassifiable value (a wrapper script)
+    returns None: normal detection proceeds, and the override still lands
+    on whichever toolchain wins via Tool.env_var.
+    """
+    from pcons.configure.compiler_id import compiler_family
+    from pcons.tools.tool import resolve_env_cmd_override
+
+    for var in ("CXX", "CC"):
+        path = resolve_env_cmd_override(var)
+        if path is None:
+            continue
+        family = compiler_family(path)
+        if family is None:
+            return None
+        entry = toolchain_registry.get(family)
+        if entry is not None:
+            return entry.create_toolchain()
+    return None
+
+
 def find_c_toolchain(
     prefer: list[str] | None = None,
 ) -> BaseToolchain:
@@ -112,6 +138,11 @@ def find_c_toolchain(
     Custom toolchains can be added via toolchain_registry.register().
     """
     if prefer is None:
+        # $CXX/$CC steer auto-detection: the user named a compiler, so use
+        # the toolchain family that compiler belongs to (see docs).
+        env_toolchain = _env_selected_c_toolchain()
+        if env_toolchain is not None:
+            return env_toolchain
         import sys
 
         if sys.platform == "win32":

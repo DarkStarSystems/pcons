@@ -222,9 +222,18 @@ class UnixToolchain(BaseToolchain):
             import shutil
             import subprocess
 
+            from pcons.tools.tool import resolve_env_cmd_override
+
             tool = self._tools.get("cxx") or self._tools.get("cc")
-            cmd = tool.default_vars().get("cmd") if tool is not None else None
-            exe = shutil.which(cmd) if isinstance(cmd, str) else None
+            exe: str | None = None
+            if tool is not None:
+                # A $CXX/$CC override selects the actual compiler; the
+                # default name (often macOS's g++-is-clang shim) is the
+                # fallback.
+                exe = resolve_env_cmd_override(tool.env_var)
+                if exe is None:
+                    cmd = tool.default_vars().get("cmd")
+                    exe = shutil.which(cmd) if isinstance(cmd, str) else None
             if exe:
                 try:
                     out = subprocess.run(
