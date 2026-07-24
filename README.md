@@ -99,9 +99,6 @@ uvx --from git+https://github.com/DarkStarSystems/pcons pcons
 # Install as a CLI tool
 uv tool install git+https://github.com/DarkStarSystems/pcons
 
-# Add to a project's dependencies
-uv add git+https://github.com/DarkStarSystems/pcons
-
 # Or with pip
 pip install git+https://github.com/DarkStarSystems/pcons
 ```
@@ -151,6 +148,13 @@ make fmt
 # Or use uv directly
 uv run ruff check pcons/
 uvx ty check pcons/ examples/
+
+# Use your local checkout to build a project (uv run inside the repo,
+# or point uvx/uv tool at the checkout from anywhere)
+uv run pcons                                # inside this repo
+uvx --from ~/src/pcons pcons                # one-off, from any project dir
+uvx --refresh --from ~/src/pcons pcons      # ...rebuilding uv's cached wheel
+uv tool install -e ~/src/pcons             # install the checkout, editable
 ```
 
 ## This Project is AI-Assisted
