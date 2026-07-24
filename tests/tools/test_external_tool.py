@@ -448,5 +448,7 @@ class TestToolIntegration:
         assert Path(result).stem.lower() == "cat"
 
         env.concat.flags = ["-n", "-v"]
+        # The pinned cmd may be an absolute path, quoted if it has spaces.
         result = env.subst("$concat.cmd $concat.flags")
-        assert result == f"{env.concat.cmd} -n -v"
+        assert "cat" in result.lower()
+        assert result.endswith(" -n -v")
