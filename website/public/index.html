@@ -334,6 +334,19 @@
        scroll depth, time-on-page, idle, click, and page-exit events.
        Auto-inits from the data-umami-* attributes on <html>. -->
   <script defer src="umami-kit.js"></script>
+  <!-- Matomo (trial alongside Umami); cookie-less -->
+  <script>
+    var _paq = window._paq = window._paq || [];
+    _paq.push(['disableCookies']);
+    _paq.push(['trackPageView']);
+    _paq.push(['enableLinkTracking']);
+    _paq.push(['setTrackerUrl', 'https://matomo.oberbrunner.com/matomo.php']);
+    _paq.push(['setSiteId', '1']);
+    var mg = document.createElement('script');
+    mg.async = true;
+    mg.src = 'https://matomo.oberbrunner.com/matomo.js';
+    document.head.appendChild(mg);
+  </script>
 </head>
 <body>
   <header>
@@ -393,8 +406,8 @@
         <p>Run with <code>uvx pcons</code> &mdash; no installation required beyond <a href="https://github.com/astral-sh/uv">uv</a>. No daemon, no workspace lock files, no registry setup.</p>
       </div>
       <div class="feature">
-        <h3>Fast builds via Ninja</h3>
-        <p>Pcons generates Ninja build files and lets Ninja handle execution &mdash; one <code>pcons</code> command generates and builds. Fast, parallel builds with minimal overhead. Also supports Makefile and Xcode output.</p>
+        <h3>Fast configures and fast builds</h3>
+        <p>Pcons generates Ninja build files and lets Ninja handle execution &mdash; one <code>pcons</code> command generates and builds. Fast, parallel builds with minimal overhead. Also supports Makefile and Xcode output. Pcons is typically significantly faster to configure than cmake (4-13x in my tests).</p>
       </div>
       <div class="feature">
         <h3>Transitive dependencies</h3>
