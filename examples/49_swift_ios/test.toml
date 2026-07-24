@@ -1,6 +1,8 @@
 # Test configuration for the swift_ios example
 
 [test]
+# swiftc cold-start (implicit module builds) can be slow on CI runners
+timeout = 180
 description = "Demonstrates cross-compiling Swift for iOS via the ios() cross preset"
 
 expected_outputs = [

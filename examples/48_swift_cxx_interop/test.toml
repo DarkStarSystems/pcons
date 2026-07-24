@@ -1,6 +1,8 @@
 # Test configuration for the swift_cxx_interop example
 
 [test]
+# swiftc cold-start (implicit module builds) can be slow on CI runners
+timeout = 180
 description = "Demonstrates bidirectional Swift/C/C++ interop (modulemap import + generated -Swift.h)"
 
 expected_outputs = [

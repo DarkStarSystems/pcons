@@ -1,6 +1,8 @@
 # Test configuration for the swift_hello example
 
 [test]
+# swiftc cold-start (implicit module builds) can be slow on CI runners
+timeout = 180
 description = "Demonstrates building a Swift program (whole-module compilation)"
 
 expected_outputs = [

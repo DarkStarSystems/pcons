@@ -89,7 +89,11 @@ jobs:
         run: uv run pytest -n auto --cov=pcons --cov-report=xml --ignore=tests/test_examples.py -k "not 21_msvcup_hello"
       - name: Run tests (non-Windows)
         if: runner.os != 'Windows'
-        run: uv run pytest -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
+        # Swift examples run in the dedicated test-swift job: swiftc's
+        # cold-start (implicit Glibc/Foundation module builds on Linux) is
+        # slow under xdist CPU contention and was flaking the cli-variant
+        # timeout here.
+        run: uv run pytest -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello and not 46_swift and not 47_swift and not 48_swift and not 49_swift"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
@@ -127,6 +131,39 @@ jobs:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: windows-examples
+
+  test-swift:
+    name: "test swift examples"
+    needs: lint
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync
+      - name: Verify Swift toolchain
+        id: verify-swift
+        continue-on-error: true
+        run: swiftc --version
+      - name: Run Swift example tests
+        if: steps.verify-swift.outcome == 'success'
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -v -k "46_swift or 47_swift or 48_swift or 49_swift"
+      - name: Warn if Swift missing from runner image
+        if: steps.verify-swift.outcome != 'success'
+        run: echo "::warning::swiftc not found on ${{ matrix.os }} runner image; Swift example tests skipped"
+      - name: Upload coverage to Codecov
+        if: steps.verify-swift.outcome == 'success'
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
 
   test-wasm:
     name: "test wasm (emscripten + wasi)"

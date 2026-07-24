@@ -1,6 +1,8 @@
 # Test configuration for the swift_library example
 
 [test]
+# swiftc cold-start (implicit module builds) can be slow on CI runners
+timeout = 180
 description = "Demonstrates a Swift library with cross-module import and a Test() target"
 
 expected_outputs = [
