@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from pcons.configure.platform import get_platform
-from pcons.core.preset import ToolContribution
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
 from pcons.tools.toolchain import BaseToolchain
 from pcons.util.macos import apple_sdk_for_triple
@@ -96,6 +96,22 @@ class UnixToolchain(BaseToolchain):
             ],
             "link_flags": ["-pie", "-Wl,-z,relro,-z,now"],
         },
+        "pthread": {
+            "compile_flags": ["-pthread"],
+            "link_flags": ["-pthread"],
+        },
+        "coverage": {
+            "compile_flags": ["--coverage"],
+            "link_flags": ["--coverage"],
+        },
+        "fast-math": {
+            "compile_flags": ["-ffast-math"],
+            "link_flags": ["-ffast-math"],
+        },
+        # Realized dynamically in make_feature_preset(): Apple clang has no
+        # bundled OpenMP runtime, so realization needs detection. The empty
+        # entry declares the name (error messages, KnownFeaturePreset).
+        "openmp": {},
     }
 
     # Flags that take their argument as a separate token ("-F path", not
@@ -138,6 +154,90 @@ class UnixToolchain(BaseToolchain):
             "-Xassembler",
         ]
     )
+
+    # =========================================================================
+    # Feature presets needing detection (see docs/presets.md)
+    # =========================================================================
+
+    # Homebrew libomp locations (arm64, then Intel) tried for Apple clang.
+    LIBOMP_PREFIXES: ClassVar[tuple[str, ...]] = (
+        "/opt/homebrew/opt/libomp",
+        "/usr/local/opt/libomp",
+    )
+
+    # Per-instance cache for _compiler_is_apple_clang() (class default = unset).
+    _is_apple_clang_cache: bool | None = None
+
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """Realize feature presets, resolving ``openmp`` dynamically."""
+        if name == "openmp" and "openmp" in self.FEATURE_PRESETS:
+            flags = self._openmp_flags()
+            if flags is None:
+                return None
+            compile_flags, link_flags = flags
+            contribs = [
+                ToolContribution(tool, flags=tuple(compile_flags))
+                for tool in self._feature_preset_tools()
+            ]
+            contribs.append(ToolContribution("link", flags=tuple(link_flags)))
+            return Preset(
+                name="openmp", category="feature", contributions=tuple(contribs)
+            )
+        return super().make_feature_preset(name)
+
+    def _openmp_flags(self) -> tuple[list[str], list[str]] | None:
+        """(compile_flags, link_flags) enabling OpenMP, or None if unavailable.
+
+        GCC and open-source clang bundle an OpenMP runtime, so ``-fopenmp``
+        is all that's needed. Apple clang ships the pragma support but no
+        runtime; there we look for Homebrew's libomp and pass it explicitly.
+        Note this answers "can the compiler enable OpenMP", flag-level only —
+        it cannot prove every OpenMP construct compiles.
+        """
+        if not self._compiler_is_apple_clang():
+            return (["-fopenmp"], ["-fopenmp"])
+        from pathlib import Path
+
+        for prefix in self.LIBOMP_PREFIXES:
+            if (Path(prefix) / "include" / "omp.h").is_file():
+                return (
+                    ["-Xclang", "-fopenmp", f"-I{prefix}/include"],
+                    [f"-L{prefix}/lib", "-lomp"],
+                )
+        return None
+
+    def _compiler_is_apple_clang(self) -> bool:
+        """Whether this toolchain's C++/C driver is Apple clang.
+
+        Sniffs ``--version`` output (cached): on macOS the ``gcc``/``g++``
+        names are usually Apple clang shims, so the toolchain name alone
+        can't answer this.
+        """
+        import sys
+
+        if self._is_apple_clang_cache is not None:
+            return self._is_apple_clang_cache
+        result = False
+        if sys.platform == "darwin":
+            import shutil
+            import subprocess
+
+            tool = self._tools.get("cxx") or self._tools.get("cc")
+            cmd = tool.default_vars().get("cmd") if tool is not None else None
+            exe = shutil.which(cmd) if isinstance(cmd, str) else None
+            if exe:
+                try:
+                    out = subprocess.run(
+                        [exe, "--version"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    ).stdout
+                    result = "Apple" in out.splitlines()[0] if out else False
+                except (OSError, subprocess.TimeoutExpired):
+                    result = False
+        self._is_apple_clang_cache = result
+        return result
 
     # =========================================================================
     # Source Handler Methods

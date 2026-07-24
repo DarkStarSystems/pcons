@@ -9,8 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **New feature presets: `openmp`, `pthread`, `coverage`, `fast-math`**: realized per toolchain (`-fopenmp` vs `/openmp`, `-ffast-math` vs `/fp:fast`, …). `openmp` is detected, not assumed — on Apple clang (which ships the pragmas but no runtime) it finds Homebrew's libomp and applies the `-Xclang -fopenmp` + `-lomp` realization automatically, and on clang-cl (whose `/openmp` embeds no defaultlib directive, unlike MSVC's vcomp) it links the libomp.lib shipped next to the compiler; wasm toolchains deliberately don't offer it.
+- **`env.has_preset(name)`**: reports whether `apply_preset(name)` would land contributions here, without raising — the guard for optional features, mirroring CMake's optional `find_package`: `if env.has_preset("openmp"): env.apply_preset("openmp")`. Applying a declared-but-unavailable feature now raises a clear "not available" error (pointing at `has_preset`) instead of "Unknown preset". Preset names get IDE completion via a generated `KnownFeaturePreset` Literal.
+
 - **`ios()` cross preset now works for C/C++/Objective-C++**: with the LLVM toolchain, the preset sets `--target` on compile *and* link, and the iPhoneOS (or iPhoneSimulator) SDK is resolved via `xcrun` automatically — same out-of-the-box experience as Swift. New example `51_ios_objcxx` builds a mixed C++/Objective-C++ iOS binary linking Foundation.
 - **Windows arm64 cross-compilation via `env.set_target_arch("arm64")`**: on an x64 host, MSVC now selects the cross toolset itself — `bin/Hostx64/arm64/cl.exe` plus the matching VC and Windows SDK `arm64` library directories — instead of only adding `/MACHINE:ARM64` and requiring the right `vcvars` dev shell. clang-cl gets the cross library directories the same way (its single binary retargets via `--target`). A missing cross toolset is a clear error naming the Visual Studio Installer component to add.
+
+### Fixed
+
+- **Registry-detected toolchains pin absolute tool paths**: `Environment(toolchain="c")` used to emit bare command names (`clang++`) into the generated build files, so running ninja with a different `PATH` than generation could silently use a different compiler than the one detection found. Default tool commands are now resolved to their absolute `PATH` location at setup, matching what configure-based detection already did.
 
 ### Changed
 

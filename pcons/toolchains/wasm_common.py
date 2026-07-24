@@ -36,6 +36,14 @@ class WasmToolchain(UnixToolchain):
 
     TARGETS_WASM = True
 
+    # Inherit the clang-flag presets, minus openmp: neither Emscripten nor
+    # the WASI SDK ships an OpenMP runtime.
+    FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
+        name: spec
+        for name, spec in UnixToolchain.FEATURE_PRESETS.items()
+        if name != "openmp"
+    }
+
     program_suffix: str
     platform_label: str
 

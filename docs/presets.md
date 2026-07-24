@@ -58,6 +58,30 @@ env.apply_preset("werror")        # compose freely with any warning set
 env.apply_preset("mycorp/strict") # contributed (registry)
 ```
 
+Built-in feature presets: `warnings`, `werror`, `sanitize`, `profile`, `lto`,
+`hardened`, `pthread`, `coverage`, `fast-math`, `openmp` — each realized (or
+deliberately absent) per toolchain; the generated `KnownFeaturePreset` Literal
+gives IDEs the full current list with per-toolchain coverage.
+
+**Optional features and `env.has_preset()`.** Some features aren't available
+everywhere: MSVC has no `pthread` or `coverage`; `openmp` needs a runtime the
+system may lack (Apple clang ships the pragmas but no libomp — the LLVM/GCC
+toolchains detect Homebrew's). `env.has_preset(name)` reports whether
+`apply_preset(name)` would land contributions here, without raising — the
+declarative guard for optional features, mirroring CMake's optional
+`find_package`:
+
+```python
+if env.has_preset("openmp"):
+    env.apply_preset("openmp")
+```
+
+Applying a *declared but unavailable* feature raises with a message pointing
+at `has_preset` (never a silent no-op); an *unknown name* stays the distinct
+"Unknown preset" error. Availability is flag-level: `has_preset("openmp")`
+answers "can the compiler enable OpenMP", not "does every OpenMP construct
+compile with this compiler".
+
 ### Targets
 
 Parameterized cross-compilation descriptors are factory functions, namespaced by
@@ -398,6 +422,15 @@ A declarative resolver can already make **compiler-version-specific choices** �
 it receives the toolchain, so it may branch on `tc.name`/version and return
 different contributions.
 
+**Built-ins needing detection.** A built-in whose realization depends on the
+system (not just the toolchain) declares its name in `FEATURE_PRESETS` with an
+empty spec and overrides `make_feature_preset` to resolve it dynamically,
+returning `None` when unavailable — `openmp` on `UnixToolchain` is the model
+(Apple-clang sniff + Homebrew libomp discovery, cached per instance). The
+declared-but-empty entry keeps the name in error messages and in the generated
+`KnownFeaturePreset` Literal; the `None` return is what `has_preset` and the
+"not available" error key off.
+
 **Imperative escape hatch.** Most presets only *add* flags, which the
 declarative form handles. For the rare preset that must do something else —
 **remove** or **override** a flag, or anything not expressible as additive
@@ -424,6 +457,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | `Preset`/`ToolContribution`, `env.apply()`, `explain()` provenance | implemented |
 | `env.apply_preset("name")`, per-toolchain `FEATURE_PRESETS` | implemented |
 | `warnings` + `werror` (orthogonal), Fortran/WASM coverage | implemented |
+| `pthread` / `coverage` / `fast-math` / `openmp` (detected); `env.has_preset()` guard; `KnownFeaturePreset` Literal | implemented |
 | `env.set_variant` / `env.set_target_arch` | implemented |
 | Cross-preset factories (`emscripten`/`pyodide`/…) | implemented |
 | Cross-preset field contract: triple/sysroot/tool_cmds realization, bounded auto-detection (xcrun, wasi-sdk) | implemented |

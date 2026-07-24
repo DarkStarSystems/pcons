@@ -142,6 +142,11 @@ class GfortranToolchain(UnixToolchain):
     FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
         "warnings": {"compile_flags": ["-Wall", "-Wextra"]},
         "werror": {"compile_flags": ["-Werror"]},
+        # gfortran is always real GCC (no Apple-clang shim concern), so
+        # these realize statically.
+        "openmp": {"compile_flags": ["-fopenmp"], "link_flags": ["-fopenmp"]},
+        "coverage": {"compile_flags": ["--coverage"], "link_flags": ["--coverage"]},
+        "fast-math": {"compile_flags": ["-ffast-math"], "link_flags": ["-ffast-math"]},
     }
 
     def _feature_preset_tools(self) -> tuple[str, ...]:

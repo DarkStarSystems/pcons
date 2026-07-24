@@ -10,11 +10,12 @@ diagnostics and optimizations.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder, MultiOutputBuilder, OutputSpec
-from pcons.core.preset import ToolContribution
+from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
 from pcons.toolchains.msvc import MsvcAssembler, MsvcResourceCompiler
@@ -239,6 +240,40 @@ class ClangClToolchain(MsvcCompatibleToolchain):
 
     def __init__(self) -> None:
         super().__init__("clang-cl")
+
+    def make_feature_preset(self, name: str) -> Preset | None:
+        """Realize ``openmp`` dynamically: unlike MSVC (whose objects carry a
+        vcomp /DEFAULTLIB directive), clang-cl's ``/openmp`` embeds no
+        defaultlib, so the runtime must be linked explicitly. libomp.lib
+        lives next to clang-cl (``<llvm>/<arch>/lib``); None if not found.
+        Note libomp.dll (in clang-cl's bin dir) must be on PATH at run time.
+        """
+        if name == "openmp":
+            libdir = self._libomp_dir()
+            if libdir is None:
+                return None
+            return Preset(
+                name="openmp",
+                category="feature",
+                contributions=(
+                    ToolContribution("cc", flags=("/openmp",)),
+                    ToolContribution("cxx", flags=("/openmp",)),
+                    ToolContribution(
+                        "link", flags=(f"/LIBPATH:{libdir}", "libomp.lib")
+                    ),
+                ),
+            )
+        return super().make_feature_preset(name)
+
+    def _libomp_dir(self) -> Path | None:
+        """Directory containing libomp.lib, or None if unavailable."""
+        import shutil
+
+        exe = shutil.which("clang-cl")
+        if not exe:
+            return None
+        libdir = Path(exe).parent.parent / "lib"
+        return libdir if (libdir / "libomp.lib").is_file() else None
 
     def _configure_tools(self, config: object) -> bool:
         from pcons.configure.config import Configure

@@ -125,6 +125,28 @@ class TestUnixPresets:
         assert "-pie" in env.link.flags
         assert "-Wl,-z,relro,-z,now" in env.link.flags
 
+    def test_pthread_preset(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        GccToolchain().apply_preset(env, "pthread")
+
+        assert "-pthread" in env.cc.flags
+        assert "-pthread" in env.cxx.flags
+        assert "-pthread" in env.link.flags
+
+    def test_coverage_preset(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        LlvmToolchain().apply_preset(env, "coverage")
+
+        assert "--coverage" in env.cc.flags
+        assert "--coverage" in env.link.flags
+
+    def test_fast_math_preset(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        GccToolchain().apply_preset(env, "fast-math")
+
+        assert "-ffast-math" in env.cc.flags
+        assert "-ffast-math" in env.link.flags
+
     def test_unknown_preset_warns(self, test_project):  # noqa: F811
         """Unknown preset should log a warning but not raise."""
         env = _make_unix_env()
@@ -258,6 +280,23 @@ class TestMsvcPresets:
 
         # MSVC profile is linker-only
         assert "/PROFILE" in env.link.flags
+
+    def test_openmp_preset(self, test_project):  # noqa: F811
+        env = _make_msvc_env()
+        toolchain = _concrete_msvc()
+        toolchain.apply_preset(env, "openmp")
+
+        assert "/openmp" in env.cc.flags
+        assert "/openmp" in env.cxx.flags
+        # The OpenMP runtime arrives via /DEFAULTLIB directives in the objects.
+        assert env.link.flags == []
+
+    def test_fast_math_preset(self, test_project):  # noqa: F811
+        env = _make_msvc_env()
+        toolchain = _concrete_msvc()
+        toolchain.apply_preset(env, "fast-math")
+
+        assert "/fp:fast" in env.cc.flags
 
     def test_unknown_preset_warns(self, test_project):  # noqa: F811
         from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
@@ -513,6 +552,130 @@ class TestImperativePreset:
 
         register_preset("acme/y", lambda env: None, imperative=True)
         assert resolve_registered_feature("acme/y", GccToolchain()) is None
+
+
+class TestOpenmpPreset:
+    """openmp is realized dynamically (Apple clang needs external libomp)."""
+
+    def test_non_apple_compiler_uses_fopenmp(self, test_project, monkeypatch):  # noqa: F811
+        env = _make_unix_env()
+        toolchain = GccToolchain()
+        monkeypatch.setattr(GccToolchain, "_compiler_is_apple_clang", lambda _: False)
+        toolchain.apply_preset(env, "openmp")
+
+        assert "-fopenmp" in env.cc.flags
+        assert "-fopenmp" in env.cxx.flags
+        assert "-fopenmp" in env.link.flags
+
+    def test_apple_clang_uses_homebrew_libomp(
+        self, test_project, monkeypatch, tmp_path
+    ):  # noqa: F811
+        libomp = tmp_path / "libomp"
+        (libomp / "include").mkdir(parents=True)
+        (libomp / "include" / "omp.h").write_text("")
+        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", (str(libomp),))
+
+        env = _make_unix_env()
+        LlvmToolchain().apply_preset(env, "openmp")
+
+        assert "-Xclang" in env.cxx.flags
+        assert "-fopenmp" in env.cxx.flags
+        assert f"-I{libomp}/include" in env.cxx.flags
+        assert f"-L{libomp}/lib" in env.link.flags
+        assert "-lomp" in env.link.flags
+
+    def test_apple_clang_without_libomp_is_unavailable(self, test_project, monkeypatch):  # noqa: F811
+        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
+
+        assert LlvmToolchain().make_feature_preset("openmp") is None
+
+    def test_unavailable_openmp_raises_clear_error(self, test_project, monkeypatch):  # noqa: F811
+        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
+
+        env = _make_unix_env()
+        env._toolchain = LlvmToolchain()
+        with pytest.raises(ValueError, match="not available.*has_preset"):
+            env.apply_preset("openmp")
+
+    def test_gfortran_openmp(self, test_project):  # noqa: F811
+        from pcons.toolchains.gfortran import GfortranToolchain
+
+        env = _make_fortran_env()
+        GfortranToolchain().apply_preset(env, "openmp")
+
+        assert "-fopenmp" in env.fc.flags
+        assert "-fopenmp" in env.link.flags
+
+    def test_wasm_toolchains_lack_openmp(self, test_project):  # noqa: F811
+        from pcons.toolchains.emscripten import EmscriptenToolchain
+        from pcons.toolchains.wasi import WasiToolchain
+
+        assert EmscriptenToolchain().make_feature_preset("openmp") is None
+        assert WasiToolchain().make_feature_preset("openmp") is None
+        # But they keep the other clang-flag presets.
+        assert EmscriptenToolchain().make_feature_preset("pthread") is not None
+
+
+class TestHasPreset:
+    """env.has_preset(): the declarative guard for optional features."""
+
+    def test_static_preset_available(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        assert env.has_preset("pthread")
+        assert env.has_preset("fast-math")
+
+    def test_unknown_name_is_false_not_error(self, test_project):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        assert not env.has_preset("nonexistent")
+
+    def test_msvc_lacks_pthread_and_coverage(self, test_project):  # noqa: F811
+        env = _make_msvc_env()
+        env._toolchain = _concrete_msvc()
+        assert not env.has_preset("pthread")
+        assert not env.has_preset("coverage")
+        assert env.has_preset("openmp")
+        assert env.has_preset("fast-math")
+
+    def test_openmp_mirrors_availability(self, test_project, monkeypatch):  # noqa: F811
+        env = _make_unix_env()
+        env._toolchain = LlvmToolchain()
+        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: True)
+        monkeypatch.setattr(LlvmToolchain, "LIBOMP_PREFIXES", ())
+        assert not env.has_preset("openmp")
+        monkeypatch.setattr(LlvmToolchain, "_compiler_is_apple_clang", lambda _: False)
+        assert env.has_preset("openmp")
+
+    def test_contributed_preset(self, test_project, clean_registry):  # noqa: F811
+        from pcons.core.preset import ToolContribution as TC
+        from pcons.core.preset import register_preset
+
+        register_preset("acme/strict", lambda tc: [TC("cc", flags=("-Wshadow",))])
+        register_preset("acme/na", lambda tc: None)
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        assert env.has_preset("acme/strict")
+        assert not env.has_preset("acme/na")  # resolves to None here
+
+    def test_imperative_preset(self, test_project, clean_registry):  # noqa: F811
+        from pcons.core.preset import register_preset
+
+        register_preset("acme/o3", lambda env: None, imperative=True, description="x")
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        assert env.has_preset("acme/o3")
+
+    def test_guard_then_apply_idiom(self, test_project, monkeypatch):  # noqa: F811
+        monkeypatch.setattr(GccToolchain, "_compiler_is_apple_clang", lambda _: False)
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        if env.has_preset("openmp"):
+            env.apply_preset("openmp")
+        assert "-fopenmp" in env.cxx.flags
 
 
 class TestFortranVariants:

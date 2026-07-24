@@ -20,6 +20,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
     from pcons.core._environment_stubs import _EnvironmentStubs
+    from pcons.core._preset_names import KnownFeaturePreset
     from pcons.core._toolchain_names import KnownToolchain
     from pcons.core.explain import Explanation
     from pcons.core.node import FileNode, Node
@@ -796,7 +797,7 @@ class Environment(_EnvironmentStubs):
                 if isinstance(cmd, str) and cmd and not cmd.startswith(tool):
                     t.cmd = f"{tool} {cmd}"
 
-    def apply_preset(self, name: str) -> None:
+    def apply_preset(self, name: KnownFeaturePreset | str) -> None:
         """Apply a named feature preset to this environment.
 
         Resolution is **toolchain-first, then registry**: each toolchain's
@@ -847,11 +848,50 @@ class Environment(_EnvironmentStubs):
                     for p in getattr(toolchain, "FEATURE_PRESETS", {})
                 }
             )
+            if name in available:
+                # The name is declared but its realization came back empty:
+                # an optional feature (e.g. openmp) this system can't provide.
+                raise ValueError(
+                    f"Preset '{name}' is not available with this toolchain on "
+                    f"this system. Optional features can be guarded with "
+                    f"env.has_preset({name!r})."
+                )
             raise ValueError(
                 f"Unknown preset '{name}'. Toolchain built-ins here: "
                 f"{', '.join(available) or '(none)'}; contributed presets "
                 f"are listed by pcons.list_presets()."
             )
+
+    def has_preset(self, name: KnownFeaturePreset | str) -> bool:
+        """Whether ``apply_preset(name)`` would land contributions here.
+
+        True if any configured toolchain realizes *name* (built-in or
+        contributed declarative), or *name* is a registered imperative
+        preset. False for unknown names and for optional features this
+        system can't provide (e.g. ``openmp`` when no OpenMP runtime is
+        available) — checking never raises.
+
+        Use it to guard optional features, mirroring CMake's optional
+        ``find_package``::
+
+            if env.has_preset("openmp"):
+                env.apply_preset("openmp")
+
+        Example:
+            env.has_preset("openmp")   # True where OpenMP can be enabled
+            env.has_preset("pthread")  # False on MSVC
+        """
+        from pcons.core.preset import (
+            is_imperative_preset,
+            resolve_registered_feature,
+        )
+
+        for toolchain in self.toolchains:
+            if toolchain.make_feature_preset(name) is not None:
+                return True
+            if resolve_registered_feature(name, toolchain) is not None:
+                return True
+        return is_imperative_preset(name)
 
     def apply_cross_preset(self, preset: Any) -> None:
         """Apply a cross-compilation preset to this environment.

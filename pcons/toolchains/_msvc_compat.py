@@ -44,6 +44,16 @@ class MsvcCompatibleToolchain(BaseToolchain):
             "compile_flags": ["/GS", "/guard:cf"],
             "link_flags": ["/DYNAMICBASE", "/NXCOMPAT", "/guard:cf"],
         },
+        # The compiled objects carry the OpenMP runtime as a /DEFAULTLIB
+        # directive (vcomp for MSVC, libomp for clang-cl), so no link flags.
+        "openmp": {
+            "compile_flags": ["/openmp"],
+        },
+        "fast-math": {
+            "compile_flags": ["/fp:fast"],
+        },
+        # No "pthread" or "coverage" here: guard portable scripts with
+        # env.has_preset(...).
     }
 
     # Architecture to MSVC machine type mapping (shared by MSVC and clang-cl)

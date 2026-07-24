@@ -164,6 +164,12 @@ def is_registered_preset(name: str) -> bool:
     return name in _PRESET_REGISTRY
 
 
+def is_imperative_preset(name: str) -> bool:
+    """Whether *name* is a registered imperative (escape-hatch) preset."""
+    entry = _PRESET_REGISTRY.get(name)
+    return entry is not None and entry.imperative
+
+
 def resolve_registered_feature(name: str, toolchain: Any) -> Preset | None:
     """Resolve a contributed *declarative feature* preset for a toolchain."""
     entry = _PRESET_REGISTRY.get(name)
