@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **First-class Qt 6 support** ([docs/qt.md](docs/qt.md)). A Qt Widgets app is a five-line build script:
+- **First-class Qt 6 support** (see `docs/qt.md`). A Qt Widgets app is a five-line build script:
 
   ```python
   qt = find_qt(project, env, modules=["Widgets"])
@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `QtDeploy` wires `ninja deploy` to macdeployqt or windeployqt.
   - Low-level builders (`env.qt.Moc/Uic/Rcc`) expose each step individually.
 
-  Automoc runs at generate time (never during the build) and common mistakes fail loudly with actionable messages instead of surfacing as vtable link errors; see the Qt section in [COMPARISONS.md](COMPARISONS.md) for how this differs from CMake's AUTOMOC. Tested on macOS (Homebrew Qt 6.9) and Windows (official Qt 6.4, MSVC/clang-cl); see examples `52`–`56`.
+  Automoc runs at generate time (never during the build) and common mistakes fail loudly with actionable messages instead of surfacing as vtable link errors; the Qt section in `COMPARISONS.md` details how this differs from CMake's AUTOMOC. Tested on macOS (Homebrew Qt 6.9) and Windows (official Qt 6.4, MSVC/clang-cl); see examples `52`–`56`.
 
 - **`Target.build_by_default = False`** marks utility targets (doc generation, formatters, `lupdate`, `deploy`, ...): excluded from `ninja all` and implicit defaults, built only when requested by name or listed in `Default()`.
 

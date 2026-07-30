@@ -1217,6 +1217,49 @@ env.use(pkg)
 
 ---
 
+## Qt Applications
+
+Pcons has first-class Qt 6 support — a Qt Widgets application is a
+five-line build script:
+
+```python
+from pcons import Project, find_c_toolchain
+from pcons.toolchains.qt import find_qt
+
+project = Project("myapp")
+env = project.Environment(toolchain=find_c_toolchain())
+env.cxx.set_standard(17)
+
+qt = find_qt(project, env, modules=["Widgets"])
+
+app = project.QtProgram("myapp", env,
+    sources=["main.cpp", "mainwindow.cpp", "mainwindow.ui", "icons.qrc"],
+    link=[qt.Widgets])
+```
+
+`find_qt()` locates Qt (pkg-config or qtpaths introspection — Linux
+distro packages, Homebrew, the official installer, Windows) and handles
+the platform quirks: macOS frameworks, MSVC's required flags, Windows
+debug library suffixes. `QtProgram` takes `.ui` and `.qrc` files
+directly in `sources` and finds `Q_OBJECT` classes automatically; the
+scan happens when pcons generates, never during the build, and common
+mistakes fail loudly with actionable messages.
+
+Also available: `QtQmlModule` (QML modules with `QML_ELEMENT` C++
+types), `QtResources` (embed files from a Python list — no `.qrc`
+XML), `QtTranslations` (+ a `ninja lupdate` utility target), `QtDeploy`
+(`ninja deploy` via macdeployqt/windeployqt), and the low-level
+`env.qt.Moc/Uic/Rcc` builders.
+
+**See the [Qt guide](qt.md)** for the full story: how automoc works,
+the staleness guard, generated-file layout, platform notes, and current
+limitations. Examples `52_qt_widgets` through `56_qt_deploy` are
+working starting points, and the
+[CMake porting guide](porting-from-cmake.md) maps each `qt_*` CMake
+command to its pcons equivalent.
+
+---
+
 ## Integrations
 
 Pcons ships with first-class integrations for tools that aren't build
@@ -3627,6 +3670,7 @@ if platform.is_macos():
 
 ## Further Reading
 
+- [Qt Guide](qt.md) - Building Qt applications: automoc, QML, translations, deployment
 - [Architecture Document](architecture.md) - Design details and implementation status
 - [Example Projects](https://github.com/DarkStarSystems/pcons/tree/main/examples) - Working examples to learn from
 - [Contributing Guide](contributing.md) - How to contribute to pcons
