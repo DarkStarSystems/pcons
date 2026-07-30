@@ -322,6 +322,7 @@ class TestPlatformRequirements:
         flags = qt.modules["Core"].public.compile_flags
         assert "/Zc:__cplusplus" in flags
         assert "/permissive-" in flags
+        assert "/EHsc" in flags  # Qt headers use throw; off by default on MSVC
 
     def test_debug_d_suffix_on_windows(self, project):
         qt = self._qt_with_core(project)

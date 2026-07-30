@@ -682,9 +682,11 @@ def _apply_platform_requirements(qt: QtPackage, env: Environment | None) -> None
     carry an MSVC env or a debug variant).
 
     - MSVC-style compilers: Qt 6 headers require ``/Zc:__cplusplus`` (real
-      ``__cplusplus`` value) and ``/permissive-`` (conformant two-phase
-      lookup). Qt's own CMake config injects both; so do we, on Core so
-      every dependent inherits them.
+      ``__cplusplus`` value), ``/permissive-`` (conformant two-phase
+      lookup), and ``/EHsc`` (exception handling — Qt headers use throw;
+      cl and clang-cl disable exceptions by default while CMake's default
+      flags quietly include /EHsc). Applied on Core so every dependent
+      inherits them.
     - Windows debug variant: Qt import libraries carry a ``d`` suffix.
       Limitation: decided by the variant seen at find_qt() time — on
       Windows call find_qt() *after* env.set_variant(), and build debug
@@ -715,7 +717,7 @@ def _apply_platform_requirements(qt: QtPackage, env: Environment | None) -> None
         and core is not None
         and toolchain_name in ("msvc", "clang-cl")
     ):
-        core.public.compile_flags.extend(["/Zc:__cplusplus", "/permissive-"])
+        core.public.compile_flags.extend(["/Zc:__cplusplus", "/permissive-", "/EHsc"])
         qt._msvc_flags_applied = True
 
     if env is not None and getattr(env, "variant", "") == "debug":
