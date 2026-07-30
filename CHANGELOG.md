@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `QtDeploy` wires `ninja deploy` to macdeployqt or windeployqt.
   - Low-level builders (`env.qt.Moc/Uic/Rcc`) expose each step individually.
 
-  Compared to CMake's AUTOMOC: no build-time scanning, no opaque `_autogen` step, no `mocs_compilation.cpp` aggregate. Every moc/uic/rcc run is a visible ninja edge, incrementally correct via the tools' own depfiles, and each moc output compiles as its own translation unit. A header that gains `Q_OBJECT` after generation fails the build with a clear "re-run pcons" message naming the file, and a `.cpp` with `Q_OBJECT` but no `#include "foo.moc"` is a generate-time error showing the exact line to add — both silent failures in other build systems. Tested on macOS (Homebrew Qt 6.9) and Windows (official Qt 6.4, MSVC/clang-cl); see examples `52`–`56`.
+  Automoc runs at generate time (never during the build) and common mistakes fail loudly with actionable messages instead of surfacing as vtable link errors; see the Qt section in [COMPARISONS.md](COMPARISONS.md) for how this differs from CMake's AUTOMOC. Tested on macOS (Homebrew Qt 6.9) and Windows (official Qt 6.4, MSVC/clang-cl); see examples `52`–`56`.
 
 - **`Target.build_by_default = False`** marks utility targets (doc generation, formatters, `lupdate`, `deploy`, ...): excluded from `ninja all` and implicit defaults, built only when requested by name or listed in `Default()`.
 

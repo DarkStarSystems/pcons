@@ -45,6 +45,26 @@ But what about the other popular modern build tools like Bazel and Meson?
 
 ---
 
+## Qt Support
+
+Qt is a good stress-test of a build system: three code generators (moc/uic/rcc), package discovery across wildly different install layouts, QML type registration, translations, and deployment tooling. CMake is the reference point here — Qt itself adopted it — so it's included in this comparison.
+
+**pcons** has first-class Qt 6 support (see [docs/qt.md](docs/qt.md)): `find_qt()` discovery (pkg-config or qtpaths introspection), `QtProgram` with automoc/autouic/autorcc, `QtQmlModule`, `QtResources` (no `.qrc` XML), `QtTranslations`, and `QtDeploy`. The design deliberately fixes AUTOMOC's known pain points:
+
+- **No build-time scanning.** The `Q_OBJECT` scan runs when pcons generates, mtime-cached; builds run zero scanning. CMake's `<target>_autogen` step re-scans sources on every build (a real cost on Windows).
+- **No opaque autogen step.** Every moc/uic/rcc run is an ordinary, visible ninja edge — `ninja -t commands` shows exactly what runs, and incremental correctness comes from the tools' own depfiles (`moc --output-dep-file`, `rcc --depfile`).
+- **No `mocs_compilation.cpp` aggregate.** Each moc output compiles as its own translation unit, so touching one moc'ed header recompiles one TU, and compile errors point at one class — not at a generated aggregate file.
+- **Silent failures are loud.** A header that gains `Q_OBJECT` after generation fails the build with a "re-run pcons" message naming the file (a cheap guard edge with a depfile over every scanned file and directory). A `.cpp` with `Q_OBJECT` but no `#include "foo.moc"` is a generate-time error showing the exact line to add — in CMake both cases surface as undefined-vtable link errors, often much later.
+- **One call for QML modules.** `QtQmlModule` handles qmltyperegistrar, `qmldir` synthesis, and resource embedding under `:/qt/qml/<uri>/` with no backing-target/plugin-target split.
+
+**CMake** is Qt's own build system and the most complete: `qt_add_executable`, `qt_add_qml_module`, AUTOMOC/AUTOUIC/AUTORCC, static-plugin handling, qmlcachegen AOT compilation, and deployment scripts. The cost is opacity: build-time scanning, mystery `_autogen` rebuilds, errors reported against generated files, and the aggregate-TU rebuild tax. Areas where CMake is still ahead of pcons: qmlcachegen, QML plugin libraries/singletons, static-Qt plugin imports, and `build.ninja` self-regeneration after branch switches.
+
+**Bazel** has no official Qt support; community rule sets (e.g. `rules_qt`) wrap moc/uic/rcc in explicit per-target macros. Workable, but headers must be listed by hand and hermetic Qt toolchain setup is on you.
+
+**Meson** ships a `qt6` module with explicit `compile_moc` / `compile_ui` / `compile_resources` functions — predictable, but there is no automoc (deliberately rejected upstream), so every moc'able header is listed manually, and forgetting `dependencies:` on `compile_moc` gives moc the wrong include/define view.
+
+---
+
 ## Package / Dependency Management
 
 **pcons** integrates with external package managers (pkg-config, Conan, vcpkg) but doesn't manage downloads itself at configure time. The `pcons-fetch` tool can build and install dependencies from source, wrapping CMake/autotools/Meson projects. Dependencies are represented as `ImportedTarget` objects with full usage-requirement propagation.
