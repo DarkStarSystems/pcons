@@ -262,6 +262,29 @@ use linuxdeploy/appimagetool on the installed tree.
     (e.g. QtGui → QtDBus) — a known macdeployqt limitation that affects
     CMake builds identically.
 
+### Packaging into installers
+
+Deployed Qt apps compose with the installer generators in
+`pcons.contrib.installers` (both flows are tested):
+
+```python
+# macOS: .app -> macdeployqt -> .pkg
+pkg = installers_macos.create_pkg(project, env,
+    name="MyApp", version="1.0.0", identifier="com.example.myapp",
+    sources=["build/MyApp.app"])
+pkg.depends(deploy)
+
+# Windows: windeployqt dir -> .msix (the directory stages as a
+# subfolder, so the executable path includes it)
+msix = installers_windows.create_msix(project, env,
+    name="MyApp", version="1.0.0.0", publisher="CN=Example",
+    sources=["build/deploy"], executable="deploy\\myapp.exe")
+msix.depends(deploy)
+```
+
+Build in two steps so packaging always sees the deployed tree:
+`ninja deploy && ninja MyApp-1.0.0.pkg`.
+
 ## Examples
 
 - `examples/52_qt_widgets` — the high-level QtProgram flow.

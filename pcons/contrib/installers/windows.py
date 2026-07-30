@@ -105,7 +105,10 @@ def create_msix(
         sources: Files or directories to include (Targets or paths).
             Directory sources are automatically detected and copied with
             depfile tracking after resolve().
-        executable: Name of the main executable (e.g., "myapp.exe").
+        executable: Package-relative path of the main executable (e.g.,
+            "myapp.exe"). A directory source stages as a subdirectory of
+            the package root, so an exe inside one needs that prefix
+            (e.g. sources=["build/deploy"] -> executable="deploy\\myapp.exe").
             If not specified, defaults to first source file's name.
         output: Output .msix path. Defaults to build/<name>-<version>.msix.
         display_name: Display name shown to users. Defaults to name.
