@@ -18,25 +18,30 @@ class TestHelpers:
     def test_generate_component_plist(self, tmp_path: Path) -> None:
         """Test component plist generation."""
         output = tmp_path / "component.plist"
-        _helpers.generate_component_plist(output)
+        _helpers.generate_component_plist(output, bundle_paths=["MyApp.app"])
 
         assert output.exists()
         content = output.read_text()
-        # Check for plist format
+        # Check for plist format; pkgbuild requires the bundle path key.
         assert "plist" in content
-        assert "BundleIsRelocatable" in content or "dict" in content
+        assert "RootRelativeBundlePath" in content
+        assert "MyApp.app" in content
+        assert "BundleIsRelocatable" in content
 
     def test_generate_component_plist_custom(self, tmp_path: Path) -> None:
         """Test component plist with custom settings."""
         output = tmp_path / "component.plist"
         _helpers.generate_component_plist(
             output,
+            bundle_paths=["A.app", "B.app"],
             relocatable=True,
             version_checked=False,
             overwrite_action="update",
         )
 
         assert output.exists()
+        content = output.read_text()
+        assert content.count("RootRelativeBundlePath") == 2
 
     def test_generate_distribution_xml(self, tmp_path: Path) -> None:
         """Test distribution.xml generation."""

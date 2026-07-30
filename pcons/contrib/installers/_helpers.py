@@ -92,6 +92,7 @@ def stage_files(
 def generate_component_plist(
     output: Path,
     *,
+    bundle_paths: list[str] | None = None,
     relocatable: bool = False,
     version_checked: bool = True,
     overwrite_action: str = "upgrade",
@@ -102,19 +103,26 @@ def generate_component_plist(
 
     Args:
         output: Path to write the plist file.
+        bundle_paths: Payload-relative path of each bundle (e.g.
+            ["MyApp.app"]); pkgbuild requires RootRelativeBundlePath in
+            every dictionary. One dictionary is emitted per bundle.
         relocatable: If True, installer follows if user moved the app.
         version_checked: If True, check version before upgrade.
         overwrite_action: Action when bundle exists ("upgrade" or "update").
     """
-    plist_data = {
-        "BundleIsRelocatable": relocatable,
-        "BundleIsVersionChecked": version_checked,
-        "BundleOverwriteAction": overwrite_action,
-    }
+    plist_data = [
+        {
+            "RootRelativeBundlePath": bundle,
+            "BundleIsRelocatable": relocatable,
+            "BundleIsVersionChecked": version_checked,
+            "BundleOverwriteAction": overwrite_action,
+        }
+        for bundle in (bundle_paths or [])
+    ]
 
     output.parent.mkdir(parents=True, exist_ok=True)
     with open(output, "wb") as f:
-        plistlib.dump([plist_data], f)
+        plistlib.dump(plist_data, f)
 
 
 def generate_distribution_xml(
@@ -384,6 +392,12 @@ def main() -> int:
     )
     plist_parser.add_argument("--output", "-o", required=True, help="Output path")
     plist_parser.add_argument(
+        "--bundle",
+        action="append",
+        dest="bundles",
+        help="Payload-relative bundle path (can be repeated)",
+    )
+    plist_parser.add_argument(
         "--relocatable", action="store_true", help="Bundle is relocatable"
     )
     plist_parser.add_argument(
@@ -454,6 +468,7 @@ def main() -> int:
     if args.command == "gen_plist":
         generate_component_plist(
             Path(args.output),
+            bundle_paths=args.bundles,
             relocatable=args.relocatable,
             version_checked=not args.no_version_check,
             overwrite_action=args.overwrite_action,

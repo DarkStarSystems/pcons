@@ -276,15 +276,18 @@ def create_pkg(
         no_prefix=True,
     )
 
-    # Check if any source is a .app bundle (needs component plist)
-    def is_bundle_source(src: Target | FileNode | Path | str) -> bool:
+    # Bundle sources (.app) need a component plist; pkgbuild requires
+    # each bundle's payload-relative path in it.
+    def bundle_name(src: Target | FileNode | Path | str) -> str | None:
         if hasattr(src, "output_name") and src.output_name:
-            return str(src.output_name).endswith(".app")
-        if hasattr(src, "name"):
-            return str(src.name).endswith(".app")
-        return str(src).endswith(".app")
+            name_str = str(src.output_name)
+        elif hasattr(src, "name"):
+            name_str = str(src.name)
+        else:
+            name_str = Path(str(src)).name
+        return name_str if name_str.endswith(".app") else None
 
-    has_bundle = any(is_bundle_source(src) for src in sources)
+    bundle_names = [b for b in (bundle_name(src) for src in sources) if b]
 
     # Create component package with pkgbuild
     component_pkg_path = pkg_rel / f"{name}.pkg"
@@ -305,8 +308,11 @@ def create_pkg(
     # Only use component plist for bundle sources (.app)
     # Non-bundle files (CLI tools, libraries) don't need it
     component_deps: list[Target] = [stage_target]
-    if has_bundle:
+    if bundle_names:
         component_plist_path = staging_base_rel / "component.plist"
+        bundle_args: list[str] = []
+        for bundle in bundle_names:
+            bundle_args.extend(["--bundle", bundle])
         plist_target = env.Command(
             target=component_plist_path,
             source=None,
@@ -317,6 +323,7 @@ def create_pkg(
                 "gen_plist",
                 "--output",
                 str(component_plist_path),
+                *bundle_args,
             ],
             name=f"plist_{name}",
         )
