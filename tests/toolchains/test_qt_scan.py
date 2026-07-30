@@ -177,6 +177,53 @@ class TestMocIncludeCheck:
         QtScanner(tree).check_moc_include(path)  # no raise
 
 
+class TestDiscoveryGaps:
+    """Regressions for the adversarial-review discovery findings."""
+
+    def test_angle_include_resolved_via_include_dirs(self, tree):
+        # Library-style self-includes: #include <obj.h> with -Isrc.
+        (tree / "src" / "angle.h").write_text(
+            "#pragma once\n#include <QObject>\nclass A : public QObject { Q_OBJECT };\n"
+        )
+        (tree / "src" / "uses_angle.cpp").write_text("#include <angle.h>\n")
+        scanner = QtScanner(tree)
+        scan = scanner.scan_target_sources(
+            [tree / "src" / "uses_angle.cpp"], include_dirs=[tree / "src"]
+        )
+        assert [p.name for p in scan.moc_headers] == ["angle.h"]
+
+    def test_angle_include_not_resolved_from_source_dir(self, tree):
+        # Without an include dir, <...> must not resolve (preprocessor
+        # semantics: angle form skips the including file's directory).
+        (tree / "src" / "angle2.h").write_text("Q_OBJECT\n")
+        (tree / "src" / "uses_angle2.cpp").write_text("#include <angle2.h>\n")
+        scanner = QtScanner(tree)
+        scan = scanner.scan_target_sources([tree / "src" / "uses_angle2.cpp"])
+        assert scan.moc_headers == []
+
+    def test_out_of_project_header_via_include_dir(self, tree, tmp_path_factory):
+        # Sibling-repo layout: -I../sibling-lib with a Q_OBJECT header.
+        sibling = tmp_path_factory.mktemp("sibling-lib")
+        (sibling / "remote.h").write_text(
+            "#pragma once\n#include <QObject>\nclass R : public QObject { Q_OBJECT };\n"
+        )
+        (tree / "src" / "uses_remote.cpp").write_text('#include "remote.h"\n')
+        scanner = QtScanner(tree)
+        scan = scanner.scan_target_sources(
+            [tree / "src" / "uses_remote.cpp"], include_dirs=[sibling]
+        )
+        assert [p.name for p in scan.moc_headers] == ["remote.h"]
+        # The out-of-project file is tracked for staleness too.
+        assert (sibling / "remote.h").resolve() in scan.scanned
+
+    def test_headers_listed_in_sources_are_scanned(self, tree):
+        # qt_add_executable(app main.cpp obj.h) convention.
+        scan = QtScanner(tree).scan_target_sources(
+            [tree / "src" / "widget.h"]  # a header passed as a "source"
+        )
+        assert [p.name for p in scan.moc_headers] == ["widget.h"]
+
+
 class TestIncludeCycle:
     def test_mutually_including_headers_terminate(self, tree):
         (tree / "src" / "a.h").write_text('#include "b.h"\nQ_OBJECT\n')

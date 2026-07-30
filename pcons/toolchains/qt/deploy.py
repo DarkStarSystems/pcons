@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder_registry import builder
-from pcons.toolchains.qt.builders import _require_qt_tool
+from pcons.toolchains.qt.builders import _require_qt_tool, _stamped_command
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
@@ -95,14 +95,6 @@ class QtDeployBuilder:
                     return str(path)
             return tool_name
 
-        prefix = [
-            str(qt_env.qt.python),
-            "-m",
-            "pcons.toolchains.qt._stamped",
-            "--stamp",
-            "$TARGET",
-            "--",
-        ]
         if platform.is_macos:
             if bundle is None:
                 raise ValueError(
@@ -110,12 +102,16 @@ class QtDeployBuilder:
                     "(macdeployqt operates on app bundles; see "
                     "pcons.contrib.bundle for building one)."
                 )
-            command = [*prefix, qt_tool("macdeployqt"), str(bundle), *flags]
+            command = _stamped_command(
+                qt_env, qt_tool("macdeployqt"), str(bundle), *flags
+            )
         elif platform.is_windows:
-            command = [*prefix, qt_tool("windeployqt")]
+            extra: list[str] = []
             if deploy_dir is not None:
-                command += ["--dir", str(deploy_dir)]
-            command += [*flags, "$SOURCE"]
+                extra = ["--dir", str(deploy_dir)]
+            command = _stamped_command(
+                qt_env, qt_tool("windeployqt"), *extra, *flags, "$SOURCE"
+            )
         else:
             raise RuntimeError(
                 "QtDeploy supports macOS (macdeployqt) and Windows "

@@ -12,11 +12,11 @@ or standalone when Qt's tools are discoverable without module lookup:
 The tool namespace is ``env.qt``: tool paths (``env.qt.moc``), flag lists
 (``env.qt.mocflags``), and the low-level builders:
 
-    moc_cpp = env.qt.Moc(source="mainwindow.h")      # → moc_mainwindow.cpp
-    dot_moc = env.qt.Moc(source="widget.cpp")        # → widget.moc (must be
+    moc_cpp = env.qt.Moc(sources="mainwindow.h")     # → moc_mainwindow.cpp
+    dot_moc = env.qt.Moc(sources="widget.cpp")       # → widget.moc (must be
                                                      #   #included by widget.cpp)
-    ui_hdr  = env.qt.Uic(source="mainwindow.ui")     # → ui_mainwindow.h
-    res_cpp = env.qt.Rcc(source="icons.qrc")         # → qrc_icons.cpp
+    ui_hdr  = env.qt.Uic(sources="mainwindow.ui")    # → ui_mainwindow.h
+    res_cpp = env.qt.Rcc(sources="icons.qrc")        # → qrc_icons.cpp
 
 Every generated edge is incrementally correct via depfiles: moc runs with
 ``--output-dep-file`` (re-runs when transitively-included headers change)
@@ -56,8 +56,10 @@ def _locate_tool_dirs() -> list[Path]:
     """Directories that may hold moc/uic/rcc, best first.
 
     Qt >= 6.1 keeps build tools in libexec on Unix (bin on Windows).
-    pkg-config's Qt6Core.pc records the libexec dir directly; otherwise
-    fall back to PATH.
+    pkg-config's Qt6Core.pc records the libexec dir directly; installs
+    without .pc files (official installer, Windows) are found through
+    qtpaths/qmake introspection, same as find_qt. PATH is the last
+    resort (handled by _find_tool).
     """
     from pcons.packages.finders.pkgconfig import PkgConfigFinder
 
@@ -68,6 +70,15 @@ def _locate_tool_dirs() -> list[Path]:
             value = finder.get_variable("Qt6Core", var)
             if value:
                 dirs.append(Path(value))
+    if not dirs:
+        from pcons.toolchains.qt.finder import _find_qtpaths_query
+
+        query = _find_qtpaths_query(None)
+        if query is not None:
+            for key in ("QT_HOST_LIBEXECS", "QT_HOST_BINS", "QT_INSTALL_BINS"):
+                value = query.get(key)
+                if value:
+                    dirs.append(Path(value))
     return dirs
 
 
@@ -95,12 +106,17 @@ def _source_path(source: Node) -> Path:
 
 
 def _source_rel_dir(env: Environment, source: Node) -> tuple[str, ...]:
-    """Project-relative dir parts of a source, for collision-free layout."""
+    """Project-relative dir parts of a source, for collision-free layout.
+
+    Out-of-project sources (scanned sibling repos) mirror their absolute
+    path; drive/root markers are dropped so the parts always join into a
+    plain relative subpath.
+    """
     project = getattr(env, "_project", None)
     parent = _source_path(source).parent
     if project is not None:
         parent = project._path_resolver.normalize_source_path(parent)
-    return tuple(p for p in parent.parts if p not in ("..", "/", "."))
+    return tuple(p.replace(":", "") for p in parent.parts if p not in ("..", "/", "."))
 
 
 class _QtGenBuilder(CommandBuilder):
@@ -302,7 +318,9 @@ class QtTool(BaseTool):
                 "--depfile",
                 TargetPath(suffix=".d"),
             ],
-            # Compiler-predefined macros for moc (GCC/Clang only).
+            # Compiler-predefined macros for moc (GCC/Clang only). The
+            # compiler flags matter: -std/--target/-arch change the
+            # predefined-macro set.
             "predefscmd": [
                 "$qt.python",
                 "-m",
@@ -311,6 +329,7 @@ class QtTool(BaseTool):
                 "$cxx.cmd",
                 "-o",
                 TargetPath(),
+                "$cxx.flags",
             ],
             # QML: merge per-TU moc JSON into one metatypes file ($in is
             # the moc_*.cpp nodes for ordering; the .json siblings are

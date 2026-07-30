@@ -38,6 +38,21 @@ This guide maps common CMake patterns to their pcons equivalents. It's designed 
 | `add_custom_target(name DEPENDS ...)` | `project.Alias("name", targets...)` |
 | `add_custom_command(...)` | `env.Command(target, source, cmd)` |
 
+### Qt (see [the Qt guide](qt.md))
+
+| CMake | pcons |
+|-------|-------|
+| `find_package(Qt6 COMPONENTS Widgets)` | `qt = find_qt(project, env, modules=["Widgets"])` |
+| `qt_standard_project_setup()` | (not needed — platform flags come with `find_qt`) |
+| `qt_add_executable(app main.cpp w.ui r.qrc)` | `project.QtProgram("app", env, sources=[...], link=[qt.Widgets])` |
+| `CMAKE_AUTOMOC/AUTOUIC/AUTORCC` | on by default; `automoc=False` etc. to disable |
+| `qt_add_resources(t name FILES ...)` | `project.QtResources("name", env, files=[...])` |
+| `qt_add_qml_module(t URI u QML_FILES ...)` | `project.QtQmlModule("t", env, uri="u", qml_files=[...])` |
+| `qt_add_translations(t TS_FILES ...)` | `project.QtTranslations("i18n", env, ts_files=[...])` |
+| `qt_generate_deploy_app_script(...)` | `project.QtDeploy("deploy", env, app=app, ...)` |
+| `CMAKE_PREFIX_PATH=/opt/Qt/6.7/gcc_64` | `qt_root="/opt/Qt/6.7/gcc_64"` (or `$PCONS_QT_ROOT`) |
+| `Qt6::Widgets` target | `qt.Widgets` |
+
 ---
 
 ## Project Setup

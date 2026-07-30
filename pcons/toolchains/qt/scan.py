@@ -19,16 +19,19 @@ do no I/O beyond stat calls.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import GenerateError
+
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
 #: Version stamp for the cache: bump when scan semantics change.
-SCANNER_VERSION = 2
+SCANNER_VERSION = 3
 
 _MOC_MACROS = ("Q_OBJECT", "Q_GADGET", "Q_NAMESPACE_EXPORT", "Q_NAMESPACE")
 
@@ -38,8 +41,14 @@ _MOC_MACROS = ("Q_OBJECT", "Q_GADGET", "Q_NAMESPACE_EXPORT", "Q_NAMESPACE")
 # anywhere-matching stays accurate.
 _MACRO_RE = re.compile(r"\b(" + "|".join(_MOC_MACROS) + r")\b")
 
-# Quoted local includes: #include "foo.h" (angle includes are external).
+# Quoted local includes: #include "foo.h" — resolved against the
+# including file's directory, then the include dirs.
 _INCLUDE_RE = re.compile(r'^\s*#\s*include\s+"([^"]+)"', re.MULTILINE)
+
+# Angle includes: #include <foo.h> — library-style self-includes are
+# common; resolved against the include dirs only (system headers won't
+# resolve there and are skipped naturally).
+_ANGLE_INCLUDE_RE = re.compile(r"^\s*#\s*include\s+<([^>]+)>", re.MULTILINE)
 
 # Block comments and line comments.
 _COMMENT_RE = re.compile(r"/\*.*?\*/|//[^\n]*", re.DOTALL)
@@ -58,6 +67,7 @@ class FileScan:
 
     macros: tuple[str, ...]  # moc macros found (empty = no moc needed)
     includes: tuple[str, ...]  # quoted #include names, verbatim
+    angle_includes: tuple[str, ...] = ()  # <...> include names, verbatim
 
 
 @dataclass
@@ -78,7 +88,7 @@ class TargetScan:
     scanned_dirs: list[Path] = field(default_factory=list)
 
 
-class MocIncludeError(RuntimeError):
+class MocIncludeError(GenerateError):
     """A .cpp declares Q_OBJECT but does not #include its .moc file."""
 
 
@@ -115,15 +125,20 @@ class QtScanner:
         if self._cache_path is None or not self._dirty:
             return
         self._cache_path.parent.mkdir(parents=True, exist_ok=True)
-        self._cache_path.write_text(
-            json.dumps({"version": SCANNER_VERSION, "files": self._cache})
+        # Atomic replace: a concurrent pcons in the same build dir must
+        # never observe a torn cache file.
+        tmp = self._cache_path.with_suffix(".json.tmp")
+        tmp.write_text(
+            json.dumps({"version": SCANNER_VERSION, "files": self._cache}),
+            encoding="utf-8",
         )
+        os.replace(tmp, self._cache_path)
         self._dirty = False
 
     # -- single-file scan --------------------------------------------------
 
     def scan_file(self, path: Path) -> FileScan:
-        """Scan one file for moc macros and quoted includes (cached)."""
+        """Scan one file for moc macros and includes (cached)."""
         try:
             stat = path.stat()
         except OSError:
@@ -136,7 +151,9 @@ class QtScanner:
             and entry.get("size") == stat.st_size
         ):
             return FileScan(
-                macros=tuple(entry["macros"]), includes=tuple(entry["includes"])
+                macros=tuple(entry["macros"]),
+                includes=tuple(entry["includes"]),
+                angle_includes=tuple(entry.get("angle_includes", ())),
             )
 
         try:
@@ -148,6 +165,7 @@ class QtScanner:
         # path IS a string literal); macros after, to avoid false hits
         # on "Q_OBJECT" appearing in message strings.
         includes = tuple(dict.fromkeys(_INCLUDE_RE.findall(stripped)))
+        angle_includes = tuple(dict.fromkeys(_ANGLE_INCLUDE_RE.findall(stripped)))
         macros = tuple(dict.fromkeys(_MACRO_RE.findall(_STRING_RE.sub('""', stripped))))
 
         self._cache[key] = {
@@ -155,9 +173,10 @@ class QtScanner:
             "size": stat.st_size,
             "macros": list(macros),
             "includes": list(includes),
+            "angle_includes": list(angle_includes),
         }
         self._dirty = True
-        return FileScan(macros=macros, includes=includes)
+        return FileScan(macros=macros, includes=includes, angle_includes=angle_includes)
 
     # -- target scan -------------------------------------------------------
 
@@ -167,16 +186,6 @@ class QtScanner:
             return True
         except ValueError:
             return False
-
-    def _resolve_include(
-        self, name: str, from_dir: Path, include_dirs: Sequence[Path]
-    ) -> Path | None:
-        """Resolve a quoted include to a project-local file, or None."""
-        for base in (from_dir, *include_dirs):
-            candidate = (base / name).resolve()
-            if candidate.is_file() and self._in_project(candidate):
-                return candidate
-        return None
 
     def scan_target_sources(
         self,
@@ -189,14 +198,19 @@ class QtScanner:
         For each source: the source itself is scanned (moc macros in a
         .cpp mean it needs a generated ``<stem>.moc``, which it must
         #include — enforced by the caller via check_moc_include()); its
-        same-basename header and the closure of quoted includes resolved
-        inside the project are scanned for header-mode moc.
+        same-basename header and the closure of its includes are scanned
+        for header-mode moc. Quoted includes resolve against the
+        including file's directory then include_dirs; angle includes
+        against include_dirs only. A resolved header is followed when it
+        lives in the project OR under one of the given include dirs
+        (which may point outside the project — sibling repos, vendored
+        libraries); system headers resolve nowhere here and are skipped.
 
         Args:
             sources: The target's C++ source files (absolute or
                 project-relative paths).
-            include_dirs: Project-local include dirs for resolving
-                quoted #includes.
+            include_dirs: The target's include dirs, used both to
+                resolve includes and as additional scan roots.
             no_moc: Files to exclude from moc even if they match.
 
         Returns:
@@ -205,11 +219,33 @@ class QtScanner:
         """
         result = TargetScan()
         excluded = {Path(p).resolve() for p in no_moc}
-        local_includes = [d for d in include_dirs if self._in_project(d)]
+        include_dirs = [Path(d).resolve() for d in include_dirs]
+        scan_roots = [self.project_root, *include_dirs]
+
+        def in_scan_roots(path: Path) -> bool:
+            return any(path.is_relative_to(root) for root in scan_roots)
+
+        def resolve_include(name: str, from_dir: Path | None) -> Path | None:
+            bases = ([from_dir] if from_dir is not None else []) + include_dirs
+            for base in bases:
+                candidate = (base / name).resolve()
+                if candidate.is_file() and in_scan_roots(candidate):
+                    return candidate
+            return None
+
         visited: set[Path] = set()
         moc_headers: set[Path] = set()
         moc_sources: set[Path] = set()
         scanned_dirs: set[Path] = set()
+
+        def follow_includes(scan: FileScan, from_dir: Path, depth: int) -> None:
+            for name, quoted in (
+                *((inc, True) for inc in scan.includes),
+                *((inc, False) for inc in scan.angle_includes),
+            ):
+                resolved = resolve_include(name, from_dir if quoted else None)
+                if resolved is not None and resolved.suffix in _HEADER_SUFFIXES:
+                    visit_header(resolved, depth)
 
         def visit_header(path: Path, depth: int) -> None:
             path = path.resolve()
@@ -220,14 +256,16 @@ class QtScanner:
             scan = self.scan_file(path)
             if scan.macros and path not in excluded:
                 moc_headers.add(path)
-            for include in scan.includes:
-                resolved = self._resolve_include(include, path.parent, local_includes)
-                if resolved is not None and resolved.suffix in _HEADER_SUFFIXES:
-                    visit_header(resolved, depth + 1)
+            follow_includes(scan, path.parent, depth + 1)
 
         for source in sources:
             source = Path(source).resolve()
-            if not self._in_project(source):
+            if not in_scan_roots(source):
+                continue
+            if source.suffix in _HEADER_SUFFIXES:
+                # Headers listed directly in sources (the CMake/qmake
+                # convention) are scanned like any discovered header.
+                visit_header(source, 1)
                 continue
             visited.add(source)
             scanned_dirs.add(source.parent)
@@ -240,10 +278,7 @@ class QtScanner:
                 sibling = source.with_suffix(suffix)
                 if sibling.is_file():
                     visit_header(sibling, 1)
-            for include in scan.includes:
-                resolved = self._resolve_include(include, source.parent, local_includes)
-                if resolved is not None and resolved.suffix in _HEADER_SUFFIXES:
-                    visit_header(resolved, 1)
+            follow_includes(scan, source.parent, 1)
 
         result.moc_headers = sorted(moc_headers)
         result.moc_sources = sorted(moc_sources)

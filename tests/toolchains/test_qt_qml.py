@@ -6,9 +6,8 @@ from __future__ import annotations
 import pytest
 
 from pcons.core.project import Project
-from pcons.generators.generator import BaseGenerator
-from pcons.generators.ninja import NinjaGenerator
-from pcons.toolchains.qt.toolchain import QtTool, QtToolchain
+
+from ._qt_test_utils import cxx_env_with_qt, generate_ninja
 
 
 @pytest.fixture
@@ -27,37 +26,9 @@ def qml_project(tmp_path, monkeypatch):
     return Project("qmltest", root_dir=tmp_path, build_dir=tmp_path / "build")
 
 
-def _env_with_qt(project):
-    from pcons.toolchains import find_c_toolchain
-
-    try:
-        cxx = find_c_toolchain()
-    except RuntimeError:
-        pytest.skip("no C++ toolchain available")
-    env = project.Environment(toolchain=cxx)
-    qt_toolchain = QtToolchain()
-    qt_toolchain._tools = {
-        "qt": QtTool(
-            moc="/fake/bin/moc",
-            uic="/fake/bin/uic",
-            rcc="/fake/bin/rcc",
-            qmltyperegistrar="/fake/bin/qmltyperegistrar",
-        )
-    }
-    qt_toolchain._configured = True
-    env.add_toolchain(qt_toolchain)
-    return env
-
-
-def _generate(project) -> str:
-    NinjaGenerator().generate(project)
-    BaseGenerator._generate_pending(project)
-    return (project.build_dir / "build.ninja").read_text().replace("\\", "/")
-
-
 class TestQtQmlModule:
     def test_full_pipeline(self, qml_project, tmp_path):
-        env = _env_with_qt(qml_project)
+        env = cxx_env_with_qt(qml_project)
         qml_project.QtQmlModule(
             "ui",
             env,
@@ -66,7 +37,7 @@ class TestQtQmlModule:
             qml_files=["qml/Main.qml"],
             sources=["src/backend.cpp"],
         )
-        content = _generate(qml_project)
+        content = generate_ninja(qml_project)
 
         # moc runs with JSON sidecar output.
         assert "--output-json" in content
@@ -98,11 +69,11 @@ class TestQtQmlModule:
         assert 'alias="qmldir"' in qrc
 
     def test_pure_qml_module_skips_registrar(self, qml_project, tmp_path):
-        env = _env_with_qt(qml_project)
+        env = cxx_env_with_qt(qml_project)
         qml_project.QtQmlModule(
             "puremod", env, uri="Pure.Ui", qml_files=["qml/Main.qml"]
         )
-        content = _generate(qml_project)
+        content = generate_ninja(qml_project)
         assert "qt_typeregcmd" not in content
         assert "qt_collectjsoncmd" not in content
         qmldir = (tmp_path / "build" / "qt.puremod" / "qmldir").read_text()
@@ -113,7 +84,7 @@ class TestQtQmlModule:
     def test_object_target_kind(self, qml_project):
         # Object target: registration + resources can't be dead-stripped
         # by static-library linking in the consuming app.
-        env = _env_with_qt(qml_project)
+        env = cxx_env_with_qt(qml_project)
         target = qml_project.QtQmlModule(
             "ui", env, uri="X.Y", sources=["src/backend.cpp"]
         )

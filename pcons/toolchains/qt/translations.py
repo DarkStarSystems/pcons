@@ -23,7 +23,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.builder_registry import builder
-from pcons.toolchains.qt.builders import _require_qt_tool, _write_if_changed
+from pcons.toolchains.qt.builders import (
+    _qrc_xml,
+    _require_qt_tool,
+    _stamped_command,
+    _write_if_changed,
+)
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
@@ -90,15 +95,12 @@ class QtTranslationsBuilder:
             )
 
         # Embed the .qm files under <prefix>/.
-        lines = ["<RCC>", f'    <qresource prefix="{prefix}">']
-        for ts in ts_files:
-            qm_name = f"{Path(ts).stem}.qm"
-            lines.append(
-                f'        <file alias="{qm_name}">{root / qt_dir / qm_name}</file>'
-            )
-        lines += ["    </qresource>", "</RCC>", ""]
+        entries = [
+            (f"{Path(ts).stem}.qm", root / qt_dir / f"{Path(ts).stem}.qm")
+            for ts in ts_files
+        ]
         qrc_rel = qt_dir / f"{name}.qrc"
-        _write_if_changed(root / qrc_rel, "\n".join(lines))
+        _write_if_changed(root / qrc_rel, _qrc_xml(prefix, entries))
 
         rcc_node = qt_env.qt.Rcc(qt_dir / f"qrc_{name}.cpp", qrc_rel, name=name)[0]
         rcc_node.implicit_deps.extend(qm_nodes)
@@ -131,18 +133,13 @@ def _add_lupdate_target(
     """
     stamp = qt_dir / f"{name}-lupdate.stamp"
     # env.Command has no tool-namespace expansion; use the concrete paths.
-    command = [
-        str(qt_env.qt.python),
-        "-m",
-        "pcons.toolchains.qt._stamped",
-        "--stamp",
-        "$TARGET",
-        "--",
+    command = _stamped_command(
+        qt_env,
         str(qt_env.qt.lupdate),
         "$SOURCES",
         "-ts",
         *[f"$SRCDIR/{Path(ts).as_posix()}" for ts in ts_files],
-    ]
+    )
     lupdate_target = qt_env.Command(
         target=stamp,
         source=list(sources),

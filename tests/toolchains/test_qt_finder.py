@@ -213,8 +213,11 @@ def _make_qt_tree(root: Path, *, framework: bool, modules: list[str]) -> dict[st
             (libs / f"Qt{mod}.framework" / "Headers").mkdir(parents=True)
         else:
             (headers / f"Qt{mod}").mkdir(parents=True)
+    from pcons.configure.platform import get_platform
+
+    exe_suffix = ".exe" if get_platform().is_windows else ""
     for tool in ("moc", "uic", "rcc"):
-        tool_file = libexec / tool
+        tool_file = libexec / f"{tool}{exe_suffix}"
         tool_file.write_text("#!/bin/sh\n")
         tool_file.chmod(0o755)
     return {
@@ -229,7 +232,10 @@ def _make_qt_tree(root: Path, *, framework: bool, modules: list[str]) -> dict[st
 
 def _patch_qtpaths(query: dict[str, str], tmp_path: Path):
     """Force the qtpaths probe to find a fake qtpaths6 returning `query`."""
-    fake_tool = tmp_path / "fakebin" / "qtpaths6"
+    from pcons.configure.platform import get_platform
+
+    exe = "qtpaths6.exe" if get_platform().is_windows else "qtpaths6"
+    fake_tool = tmp_path / "fakebin" / exe
     fake_tool.parent.mkdir(exist_ok=True)
     fake_tool.write_text("#!/bin/sh\n")
     fake_tool.chmod(0o755)
@@ -255,8 +261,11 @@ class TestQtPathsRoute:
         assert qt.found_via == "qtpaths6"
         assert qt.version == "6.6.1"
         assert not qt.is_framework
+        from pcons.configure.platform import get_platform
+
+        exe = "moc.exe" if get_platform().is_windows else "moc"
         assert qt.libexec_dir == tmp_path / "qt" / "libexec"
-        assert qt.tool_path("moc") == tmp_path / "qt" / "libexec" / "moc"
+        assert qt.tool_path("moc") == tmp_path / "qt" / "libexec" / exe
         widgets = qt.Widgets
         assert "Qt6Widgets" in widgets.public.link_libs
         # Transitive deps: Widgets links the Gui target, Gui links Core.
@@ -359,6 +368,77 @@ class TestPlatformRequirements:
 # =============================================================================
 # Helpers
 # =============================================================================
+
+
+class TestPlatformRequirementsReentrant:
+    """Requirements apply per-module across repeated find_qt calls."""
+
+    def _package(self, libs_by_module):
+        modules = {
+            name: qt_finder.ImportedTarget.from_package(
+                PackageDescription(name=f"Qt6{name}", libraries=libs)
+            )
+            for name, libs in libs_by_module.items()
+        }
+        return qt_finder.QtPackage(
+            version="6.7.0",
+            prefix=Path("/qt"),
+            bin_dir=Path("/qt/bin"),
+            libexec_dir=Path("/qt/libexec"),
+            is_framework=False,
+            found_via="test",
+            modules=modules,
+            module_factory=lambda name: None,
+        )
+
+    def test_dsuffix_applies_to_modules_added_later(self, project):
+        qt = self._package({"Core": ["Qt6Core"]})
+        env = SimpleNamespace(toolchain=SimpleNamespace(name="msvc"), variant="debug")
+        fake = SimpleNamespace(is_windows=True, is_macos=False)
+        with patch.object(qt_finder, "get_platform", lambda: fake):
+            _apply_platform_requirements(qt, env)
+            # A later find_qt call adds a module: it must get the suffix.
+            qt.modules["Network"] = qt_finder.ImportedTarget.from_package(
+                PackageDescription(name="Qt6Network", libraries=["Qt6Network"])
+            )
+            _apply_platform_requirements(qt, env)
+        assert "Qt6Cored" in qt.modules["Core"].public.link_libs
+        assert "Qt6Networkd" in qt.modules["Network"].public.link_libs
+
+    def test_dsuffix_handles_names_ending_in_d(self, project):
+        # Qt6VirtualKeyboard genuinely ends in 'd'; per-module tracking
+        # (not string sniffing) keeps the rewrite exact and idempotent.
+        qt = self._package({"VirtualKeyboard": ["Qt6VirtualKeyboard"]})
+        env = SimpleNamespace(toolchain=SimpleNamespace(name="msvc"), variant="debug")
+        fake = SimpleNamespace(is_windows=True, is_macos=False)
+        with patch.object(qt_finder, "get_platform", lambda: fake):
+            _apply_platform_requirements(qt, env)
+            _apply_platform_requirements(qt, env)
+        assert qt.modules["VirtualKeyboard"].public.link_libs == ["Qt6VirtualKeyboardd"]
+
+    def test_msvc_flags_apply_when_msvc_env_arrives_later(self, project):
+        qt = self._package({"Core": ["Qt6Core"]})
+        fake = SimpleNamespace(is_windows=True, is_macos=False)
+        with patch.object(qt_finder, "get_platform", lambda: fake):
+            _apply_platform_requirements(qt, None)  # first call: no env
+            assert "/permissive-" not in qt.modules["Core"].public.compile_flags
+            env = SimpleNamespace(
+                toolchain=SimpleNamespace(name="clang-cl"), variant="release"
+            )
+            _apply_platform_requirements(qt, env)
+        assert "/permissive-" in qt.modules["Core"].public.compile_flags
+
+
+class TestQtRoot:
+    def test_nonexistent_qt_root_raises(self, project):
+        with pytest.raises(QtNotFoundError, match="does not exist"):
+            find_qt(project, modules=["Core"], qt_root="/nope/qt")
+
+    def test_invalid_version_constraint_raises(self, project):
+        fake = _FakePkgConfig(_LINUX_PCS, variables={"prefix": "/usr"})
+        with _patch_pkgconfig(fake), _no_qtpaths():
+            with pytest.raises(ValueError, match="version constraint"):
+                find_qt(project, modules=["Core"], version="banana")
 
 
 class TestVersionSatisfies:

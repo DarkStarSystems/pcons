@@ -13,8 +13,9 @@ generation tools (moc/uic/rcc/...), and the Qt version, probing in order:
    ``QT_HOST_LIBEXECS``/``QT_HOST_BINS`` give the tool directory,
    ``QT_INSTALL_LIBS``/``QT_INSTALL_HEADERS`` the libraries.
 
-Discovery is cached per project (module targets register with the project,
-so each Qt module is created exactly once); repeated calls may add modules.
+Discovery is cached per project (each Qt module becomes exactly one
+ImportedTarget, so target identity is stable across the build script);
+repeated calls may add modules.
 
 Platform requirements are baked into the returned module targets so users
 never see them: MSVC-style compilers get ``/Zc:__cplusplus /permissive-``
@@ -24,14 +25,17 @@ libraries, and macOS framework builds carry ``-F``/``-framework`` flags.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+import shutil
 import subprocess
 import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, overload
 
 from pcons.configure.platform import get_platform
+from pcons.core.errors import ConfigureError
 from pcons.packages.description import PackageDescription
 from pcons.packages.finders.pkgconfig import PkgConfigFinder
 from pcons.packages.imported import ImportedTarget
@@ -42,8 +46,10 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
     from pcons.core.project import Project
 
+logger = logging.getLogger(__name__)
 
-class QtNotFoundError(RuntimeError):
+
+class QtNotFoundError(ConfigureError):
     """Qt (or a requested Qt module) could not be located."""
 
 
@@ -114,7 +120,12 @@ class QtPackage:
         self.found_via = found_via
         self.modules = modules
         self._module_factory = module_factory
-        self._platform_applied = False
+        # Per-module bookkeeping so requirements land exactly once even
+        # as later find_qt() calls add modules or pass different envs.
+        self._dsuffix_applied: set[str] = set()
+        self._debug_seen = False
+        self._msvc_flags_applied = False
+        self._arm_acle_applied = False
         self._private_applied: set[str] = set()
 
     def __getattr__(self, name: str) -> ImportedTarget:
@@ -250,8 +261,21 @@ def find_qt(
         qt_root = Path(env_root) if env_root else None
     else:
         qt_root = Path(qt_root)
+    if qt_root is not None and not qt_root.is_dir():
+        raise QtNotFoundError(
+            f"qt_root {qt_root} does not exist (from "
+            f"{'$PCONS_QT_ROOT' if 'PCONS_QT_ROOT' in os.environ else 'qt_root='})."
+        )
 
     qt = _qt_installs.get(project)
+    if qt is not None and qt_root is not None and not qt.prefix.is_relative_to(qt_root):
+        logger.warning(
+            "find_qt: qt_root=%s ignored — Qt %s at %s is already located "
+            "for this project (discovery is cached; the first call wins).",
+            qt_root,
+            qt.version,
+            qt.prefix,
+        )
     if qt is None:
         qt = _probe_pkgconfig(wanted, version, qt_root)
         if qt is None:
@@ -340,14 +364,16 @@ def _not_found_message(
 
 
 def _pkgconfig_finder(qt_root: Path | None) -> PkgConfigFinder:
-    """A PkgConfigFinder; with qt_root, its lib/pkgconfig dir joins the path."""
+    """A PkgConfigFinder scoped to qt_root when one is given.
+
+    With qt_root, PKG_CONFIG_LIBDIR *restricts* the search to that
+    prefix — a pinned root must never silently fall back to some other
+    Qt the system pkg-config happens to know about. The override is
+    per-finder; the process environment is never mutated.
+    """
     if qt_root is not None:
         pc_dir = qt_root / "lib" / "pkgconfig"
-        existing = os.environ.get("PKG_CONFIG_PATH", "")
-        if str(pc_dir) not in existing.split(os.pathsep):
-            os.environ["PKG_CONFIG_PATH"] = (
-                f"{pc_dir}{os.pathsep}{existing}" if existing else str(pc_dir)
-            )
+        return PkgConfigFinder(env_overrides={"PKG_CONFIG_LIBDIR": str(pc_dir)})
     return PkgConfigFinder()
 
 
@@ -363,11 +389,16 @@ def _probe_pkgconfig(
     """
     finder = _pkgconfig_finder(qt_root)
     if not finder.is_available():
+        logger.debug("Qt probe: pkg-config not available")
         return None
 
     descriptions: dict[str, PackageDescription] = {}
     core = finder.find("Qt6Core", version=version)
     if core is None:
+        logger.debug(
+            "Qt probe: pkg-config has no Qt6Core%s",
+            f" (restricted to {qt_root})" if qt_root else "",
+        )
         return None
     descriptions["Core"] = core
     for name in wanted:
@@ -426,8 +457,15 @@ def _qtpaths_candidates(qt_root: Path | None) -> list[tuple[str, list[Path]]]:
     if platform.is_macos:
         hints += [Path("/opt/homebrew/opt/qt/bin"), Path("/usr/local/opt/qt/bin")]
     elif platform.is_windows:
-        # Official installer layout: C:\Qt\6.x.y\<toolchain>\bin
-        for qt_dir in sorted(Path("C:/Qt").glob("6.*/*/bin"), reverse=True):
+        # Official installer layout: C:\Qt\6.x.y\<toolchain>\bin —
+        # newest first by *numeric* version (lexicographic sorting
+        # would prefer 6.9 over 6.10).
+        def version_key(bin_dir: Path) -> list[int]:
+            return [int(n) for n in re.findall(r"\d+", bin_dir.parts[-3])]
+
+        for qt_dir in sorted(
+            Path("C:/Qt").glob("6.*/*/bin"), key=version_key, reverse=True
+        ):
             hints.append(qt_dir)
     else:
         hints += [Path("/usr/lib/qt6/bin"), Path("/usr/lib64/qt6/bin")]
@@ -453,10 +491,18 @@ def _run_query(command: Path) -> dict[str, str] | None:
 
 
 def _version_satisfies(found: str, constraint: str) -> bool:
-    """Check a version string against a constraint like ">=6.4"."""
+    """Check a version string against a constraint like ">=6.4".
+
+    Raises:
+        ValueError: If the constraint has no numeric version to compare
+            against (fail fast on typos like version="banana").
+    """
     match = re.match(r"(>=|<=|=|>|<)?\s*(.+)", constraint)
-    if not match:
-        return True
+    if not match or not re.search(r"\d", match.group(2)):
+        raise ValueError(
+            f"Invalid Qt version constraint {constraint!r} "
+            f"(expected e.g. '>=6.4', '=6.7.2')."
+        )
     op = match.group(1) or "="
     want = match.group(2).strip()
 
@@ -479,14 +525,12 @@ def _find_qtpaths_query(qt_root: Path | None) -> dict[str, str] | None:
 
     The result carries the tool's name under the "" key for found_via.
     """
-    import shutil as _shutil
-
     platform = get_platform()
     for name, hints in _qtpaths_candidates(qt_root):
         candidates = [
             d / (f"{name}.exe" if platform.is_windows else name) for d in hints
         ]
-        which = _shutil.which(name)
+        which = shutil.which(name)
         if which:
             candidates.append(Path(which))
         for candidate in candidates:
@@ -495,7 +539,14 @@ def _find_qtpaths_query(qt_root: Path | None) -> dict[str, str] | None:
             query = _run_query(candidate)
             if query and query.get("QT_VERSION", "").startswith("6"):
                 query[""] = name
+                logger.debug(
+                    "Qt probe: %s reports Qt %s at %s",
+                    candidate,
+                    query.get("QT_VERSION"),
+                    query.get("QT_INSTALL_PREFIX"),
+                )
                 return query
+            logger.debug("Qt probe: %s is not a Qt 6 install", candidate)
     return None
 
 
@@ -624,50 +675,60 @@ def _module_package(
 
 
 def _apply_platform_requirements(qt: QtPackage, env: Environment | None) -> None:
-    """Bake required platform flags into the module targets (once).
+    """Bake required platform flags into the module targets.
+
+    Re-entrant and per-module: every find_qt() call applies whatever is
+    newly applicable (a later call may add modules, or be the first to
+    carry an MSVC env or a debug variant).
 
     - MSVC-style compilers: Qt 6 headers require ``/Zc:__cplusplus`` (real
       ``__cplusplus`` value) and ``/permissive-`` (conformant two-phase
       lookup). Qt's own CMake config injects both; so do we, on Core so
       every dependent inherits them.
     - Windows debug variant: Qt import libraries carry a ``d`` suffix.
+      Limitation: decided by the variant seen at find_qt() time — on
+      Windows call find_qt() *after* env.set_variant(), and build debug
+      and release in separate pcons runs.
     - Apple Silicon with Qt < 6.10: qyieldcpu.h calls the ACLE intrinsic
       ``__yield()`` bare; clang treats that as an implicit declaration
       error unless <arm_acle.h> was included first (fixed upstream in
       Qt 6.10). Pre-include it so users never see the error.
     """
-    if qt._platform_applied:
-        return
     platform = get_platform()
     if not platform.is_windows:
         if (
-            platform.is_macos
+            not qt._arm_acle_applied
+            and platform.is_macos
             and getattr(platform, "arch", "") == "arm64"
             and _version_satisfies(qt.version, "<6.10")
         ):
             qt.modules["Core"].public.compile_flags.extend(["-include", "arm_acle.h"])
-        qt._platform_applied = True
+            qt._arm_acle_applied = True
         return
 
     toolchain_name = ""
     if env is not None and env.toolchain is not None:
         toolchain_name = env.toolchain.name
-    if toolchain_name in ("msvc", "clang-cl"):
-        qt.modules["Core"].public.compile_flags.extend(
-            ["/Zc:__cplusplus", "/permissive-"]
-        )
+    core = qt.modules.get("Core")
+    if (
+        not qt._msvc_flags_applied
+        and core is not None
+        and toolchain_name in ("msvc", "clang-cl")
+    ):
+        core.public.compile_flags.extend(["/Zc:__cplusplus", "/permissive-"])
+        qt._msvc_flags_applied = True
 
     if env is not None and getattr(env, "variant", "") == "debug":
-        for target in qt.modules.values():
+        qt._debug_seen = True
+    if qt._debug_seen:
+        for name, target in qt.modules.items():
+            if name in qt._dsuffix_applied:
+                continue
             target.public.link_libs = [
-                f"{lib}d"
-                if isinstance(lib, str)
-                and lib.startswith("Qt6")
-                and not lib.endswith("d")
-                else lib
+                f"{lib}d" if isinstance(lib, str) and lib.startswith("Qt6") else lib
                 for lib in target.public.link_libs
             ]
-    qt._platform_applied = True
+            qt._dsuffix_applied.add(name)
 
 
 def _apply_private_headers(qt: QtPackage, private_headers: Sequence[str]) -> None:
@@ -677,12 +738,21 @@ def _apply_private_headers(qt: QtPackage, private_headers: Sequence[str]) -> Non
             continue
         target = qt.modules.get(name)
         if target is None:
-            raise QtNotFoundError(
+            raise ValueError(
                 f"private_headers names '{name}', which is not in modules=[...]."
             )
+        probed: list[Path] = []
         for base in list(target.public.include_dirs):
             versioned = Path(base) / qt.version / f"Qt{name}"
+            probed.append(versioned)
             if versioned.is_dir():
                 target.public.include_dirs.extend([versioned, versioned / "private"])
                 qt._private_applied.add(name)
                 break
+        else:
+            raise QtNotFoundError(
+                f"Private headers for Qt{name} not found (probed: "
+                + ", ".join(str(p) for p in probed)
+                + "). Some distributions package them separately "
+                "(e.g. qt6-base-private-dev)."
+            )

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
 import shutil
@@ -37,14 +38,24 @@ class PkgConfigFinder(BaseFinder):
         pkg_config_cmd: Command to invoke pkg-config (default: "pkg-config").
     """
 
-    def __init__(self, pkg_config_cmd: str = "pkg-config") -> None:
+    def __init__(
+        self,
+        pkg_config_cmd: str = "pkg-config",
+        *,
+        env_overrides: dict[str, str] | None = None,
+    ) -> None:
         """Create a PkgConfigFinder.
 
         Args:
             pkg_config_cmd: Path to pkg-config command.
+            env_overrides: Extra environment variables for pkg-config
+                invocations (e.g. PKG_CONFIG_PATH/PKG_CONFIG_LIBDIR to
+                search a specific prefix) — scoped to this finder, never
+                mutating the process environment.
         """
         self.pkg_config_cmd = pkg_config_cmd
         self._pkg_config_path: str | None = None
+        self._env_overrides = dict(env_overrides) if env_overrides else None
 
     @property
     def name(self) -> str:
@@ -67,11 +78,15 @@ class PkgConfigFinder(BaseFinder):
         """
         self.is_available()  # Resolve the executable path if not done yet.
         cmd = self._pkg_config_path or self.pkg_config_cmd
+        env = None
+        if self._env_overrides:
+            env = {**os.environ, **self._env_overrides}
         try:
             result = subprocess.run(
                 [cmd, *args],
                 capture_output=True,
                 text=True,
+                env=env,
             )
             return result.returncode == 0, result.stdout.strip()
         except OSError:

@@ -146,6 +146,33 @@ generated automatically for GCC/Clang).
 | QtResources | `build/qt.res/` |
 | Scan manifest + stamp | `build/qt.app/scan-manifest.json`, `scan.ok` |
 
+## Current limitations
+
+Worth knowing before porting a large CMake project:
+
+- **Flags are captured when the Qt target is created.** `QtProgram`
+  snapshots the environment (and computes moc's view of the world) at
+  the call; `env.cxx.defines.append(...)` *after* the call doesn't reach
+  that target. Pass Qt modules via `link=[...]` at construction — moc
+  needs their include paths, and a later `app.link(qt.Widgets)` is too
+  late for moc (pcons warns when this happens).
+- **Windows debug builds:** the `d`-suffixed Qt libraries are selected
+  by the variant at `find_qt()` time — call `find_qt()` *after*
+  `env.set_variant()`, and build debug and release in separate pcons
+  runs (not as two variants of one project).
+- **Prebuilt Qt-based SDKs:** the automoc scan follows includes into
+  directories you list in `env.cxx.includes` — including out-of-project
+  ones. Headers from a *prebuilt* Qt-based SDK reached that way would
+  get spurious moc edges; exclude them with `no_moc=[...]`. (Libraries
+  found via `find_package`/`find_qt` are excluded automatically.)
+- **Not yet implemented:** qmlcachegen AOT compilation, QML plugin
+  libraries / singletons / subdirectory QML files, static-Qt plugin
+  imports (`Q_IMPORT_PLUGIN`), per-file resource compression options and
+  big-resource two-pass rcc, lupdate's automatic per-target source
+  collection, and Designer plugin builds. Branch switches that change
+  the source list need a pcons re-run (there is no CMake-style
+  self-regeneration yet); the scan guard reports this for moc changes.
+
 ## Platform notes
 
 - **macOS**: framework builds (Homebrew, official installer) link with

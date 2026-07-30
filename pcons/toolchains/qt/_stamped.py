@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
 
     stamp = Path(args.stamp)
     stamp.parent.mkdir(parents=True, exist_ok=True)
-    stamp.write_text("ok\n")
+    stamp.write_text("ok\n", encoding="utf-8")
     return 0
 
 

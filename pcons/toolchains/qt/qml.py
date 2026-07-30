@@ -39,8 +39,8 @@ from typing import TYPE_CHECKING
 from pcons.core.builder_registry import builder
 from pcons.core.subst import PathToken
 from pcons.toolchains.qt.builders import (
+    _qrc_xml,
     _qt_make_target,
-    _QtGenInfo,
     _require_qt_tool,
     _write_if_changed,
 )
@@ -160,8 +160,7 @@ class QtQmlModuleBuilder:
 
         # The backing target: compiles the C++ sources with automoc,
         # moc emitting JSON sidecars for the type registrar.
-        info_out: list[_QtGenInfo] = []
-        target = _qt_make_target(
+        target, info = _qt_make_target(
             "ObjectLibrary",
             project,
             name,
@@ -171,9 +170,7 @@ class QtQmlModuleBuilder:
             no_moc=no_moc,
             moc_json=True,
             defined_at=defined_at,
-            _info_out=info_out,
         )
-        info = info_out[0]
         qt_env = info.qt_env
         qt_dir = info.qt_dir
         root = project.root_dir
@@ -186,11 +183,14 @@ class QtQmlModuleBuilder:
             qt_dir_rel = qt_dir.relative_to(build_dir)
         except ValueError:
             qt_dir_rel = qt_dir
-        if info.moc_header_nodes:
-            # moc_X.cpp.json sidecars, named relative to the build dir
-            # (PathToken path_type="build" expects build-relative paths).
+        # Both moc modes emit JSON sidecars: QML_ELEMENT in a header
+        # (moc_X.cpp.json) or in a self-mocing .cpp (X.moc.json).
+        moc_output_nodes = [*info.moc_header_nodes, *info.dot_moc_nodes]
+        if moc_output_nodes:
+            # Sidecars are named relative to the build dir (PathToken
+            # path_type="build" expects build-relative paths).
             json_tokens = []
-            for node in info.moc_header_nodes:
+            for node in moc_output_nodes:
                 node_path = _source_path(node)
                 try:
                     rel = node_path.relative_to(build_dir)
@@ -200,7 +200,7 @@ class QtQmlModuleBuilder:
                     PathToken(path=f"{rel.as_posix()}.json", path_type="build")
                 )
             metatypes = qt_env.qt.CollectJson(
-                qt_dir / f"{name}_metatypes.json", info.moc_header_nodes
+                qt_dir / f"{name}_metatypes.json", moc_output_nodes
             )[0]
             _set_node_vars(metatypes, {"JSONFILES": json_tokens})
 
@@ -242,19 +242,12 @@ class QtQmlModuleBuilder:
         _write_if_changed(root / qt_dir / "qmldir", "\n".join(qmldir_lines) + "\n")
 
         # ---- resources under :/qt/qml/<uri>/ ---------------------------
-        lines = ["<RCC>", f'    <qresource prefix="/qt/qml/{uri_path}">']
-        for qml in qml_files:
-            path = root / qml
-            lines.append(f'        <file alias="{Path(qml).name}">{path}</file>')
-        lines.append(f'        <file alias="qmldir">{root / qt_dir / "qmldir"}</file>')
+        entries = [(Path(qml).name, root / qml) for qml in qml_files]
+        entries.append(("qmldir", root / qt_dir / "qmldir"))
         if registrar_node is not None:
-            lines.append(
-                f'        <file alias="{qmltypes_name}">'
-                f"{root / qt_dir / qmltypes_name}</file>"
-            )
-        lines += ["    </qresource>", "</RCC>", ""]
+            entries.append((qmltypes_name, root / qt_dir / qmltypes_name))
         qrc_rel = qt_dir / f"{name}.qrc"
-        _write_if_changed(root / qrc_rel, "\n".join(lines))
+        _write_if_changed(root / qrc_rel, _qrc_xml(f"/qt/qml/{uri_path}", entries))
 
         rcc_node = qt_env.qt.Rcc(
             qt_dir / f"qrc_{name}.cpp", qrc_rel, name=f"qml_{name}"

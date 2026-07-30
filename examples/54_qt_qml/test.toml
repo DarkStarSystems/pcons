@@ -6,7 +6,9 @@ description = "QML module via QtQmlModule: QML_ELEMENT types, qmldir, embedded Q
 expected_outputs = [
     "build/qt.demo_ui/demo_ui_metatypes.json",
     "build/qt.demo_ui/demo_ui_qmltyperegistrations.cpp",
-    "build/qt.demo_ui/qmldir",
+    # (qmldir is generated too, but the test harness's Windows .exe
+    # heuristic can't express an extension-less expected file.)
+    "build/qt.demo_ui/demo_ui.qmltypes",
     "build/qt.demo_ui/qrc_demo_ui.cpp",
     "build/qt_qml",
 ]

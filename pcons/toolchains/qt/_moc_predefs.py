@@ -28,12 +28,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cxx", required=True, help="C++ compiler command")
     parser.add_argument("-o", "--output", required=True, help="Output header path")
-    parser.add_argument(
-        "flags", nargs="*", help="Extra compiler flags affecting predefined macros"
-    )
-    args = parser.parse_args(argv)
+    # Anything unrecognized is a compiler flag (-std=..., --target=...);
+    # they affect the predefined-macro set and pass through verbatim.
+    args, flags = parser.parse_known_args(argv)
 
-    cmd = [args.cxx, *args.flags, "-x", "c++", "-dM", "-E", "-"]
+    cmd = [args.cxx, *flags, "-x", "c++", "-dM", "-E", "-"]
     try:
         result = subprocess.run(
             cmd, input="", capture_output=True, text=True, timeout=60
@@ -52,8 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     output.parent.mkdir(parents=True, exist_ok=True)
     # Rewrite only on change: with ninja restat, downstream moc edges
     # then re-run only when the macro set actually changed.
-    if not output.exists() or output.read_text() != result.stdout:
-        output.write_text(result.stdout)
+    if not output.exists() or output.read_text(encoding="utf-8") != result.stdout:
+        output.write_text(result.stdout, encoding="utf-8")
     return 0
 
 

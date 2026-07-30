@@ -37,7 +37,7 @@ def _write_depfile(depfile: Path, stamp: Path, deps: list[str]) -> None:
     lines += [f"  {esc(d)} \\" for d in deps[:-1]]
     if deps:
         lines.append(f"  {esc(deps[-1])}")
-    depfile.write_text("\n".join(lines) + "\n")
+    depfile.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -47,7 +47,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--depfile", required=True)
     args = parser.parse_args(argv)
 
-    manifest = json.loads(Path(args.manifest).read_text())
+    manifest = json.loads(Path(args.manifest).read_text(encoding="utf-8"))
+    if manifest.get("version") != 1:
+        print(
+            "pcons Qt: unrecognized scan-manifest version "
+            f"{manifest.get('version')!r} — re-run pcons to regenerate "
+            "the build files.",
+            file=sys.stderr,
+        )
+        return 1
     scanner = QtScanner(Path(manifest["project_root"]))
     result = scanner.scan_target_sources(
         [Path(p) for p in manifest["sources"]],
@@ -91,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     _write_depfile(Path(args.depfile), stamp, deps)
     stamp.parent.mkdir(parents=True, exist_ok=True)
     if not stamp.exists():
-        stamp.write_text("ok\n")  # restat: only new stamps dirty dependents
+        stamp.write_text("ok\n", encoding="utf-8")  # restat: new stamps only
     return 0
 
 

@@ -14,6 +14,8 @@ import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.core.errors import PconsError
+
 if TYPE_CHECKING:
     from pcons.core.project import Project
 
@@ -229,6 +231,12 @@ def run_script(
         if exit_code != 0:
             _cancel_pending_generation()
         return exit_code, pcons.get_registered_projects()
+    except PconsError as e:
+        # Expected configure/generate failures carry actionable messages;
+        # a Python traceback would only bury them.
+        logger.error("%s", e)
+        _cancel_pending_generation()
+        return 1, []
     except Exception as e:
         logger.error("Build script failed: %s", e)
         traceback.print_exc()

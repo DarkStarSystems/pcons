@@ -367,8 +367,7 @@ class Target:
         self.output_suffix: str | None = None
         # Sources resolved after the main resolve phase (for Install, etc.)
         self._pending_sources: list[Target | Node | Path | str] | None = None
-        # Utility targets (lupdate, doc generation, ...) set this False.
-        self.build_by_default: bool = True
+        self.build_by_default: bool = True  # see __slots__ comment
         # Build info for archive and command targets
         self._build_info: BuildInfo | dict[str, Any] | None = None
         self._builder_name: str | None = None
