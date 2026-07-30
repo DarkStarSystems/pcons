@@ -16,10 +16,12 @@ Usage:
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 from pcons.core.builder import Builder, CommandBuilder
 from pcons.core.project import Project
+from pcons.core.subst import SourcePath, TargetPath
 from pcons.generators.ninja import NinjaGenerator
 from pcons.tools.tool import BaseTool
 
@@ -43,16 +45,23 @@ class GitInfoTool(BaseTool):
         super().__init__("gitinfo")
 
     def default_vars(self) -> dict[str, object]:
+        # A Python one-liner instead of shell substitution: commands kept
+        # as token lists need no quoting or $-escaping, and work
+        # identically on Windows. (Single line: ninja commands can't
+        # contain newlines.)
+        script = (
+            "import subprocess, sys, pathlib, datetime; "
+            "g = lambda *a: subprocess.run(a, capture_output=True, text=True)"
+            ".stdout.strip(); "
+            "ver = g('git', 'describe', '--tags', '--always') or 'dev'; "
+            "date = g('git', 'log', '-1', '--format=%cd', '--date=short') "
+            "or datetime.date.today().isoformat(); "
+            "pathlib.Path(sys.argv[1]).write_text("
+            "f'pcons {ver} | {date}\\n', encoding='utf-8')"
+        )
         return {
-            "git": "git",
-            # Command that outputs version info to stdout, redirected to file
-            # Escaping: $$$$ in pcons -> $$ in ninja -> $ in shell
-            "versioncmd": (
-                "/bin/sh -c '"
-                'echo "pcons $$$$(git describe --tags --always 2>/dev/null || echo dev) '
-                '| $$$$(git log -1 --format=%cd --date=short 2>/dev/null || date +%Y-%m-%d)"'
-                "' > $$out"
-            ),
+            "python": sys.executable,
+            "versioncmd": ["$gitinfo.python", "-c", script, TargetPath()],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -122,16 +131,26 @@ class InsertFooterTool(BaseTool):
         super().__init__("insertfooter")
 
     def default_vars(self) -> dict[str, object]:
+        # sys.argv: [html, version_file, output]. Token-list command:
+        # no shell, no escaping, cross-platform.
+        script = (
+            "import sys, pathlib; "
+            "html = pathlib.Path(sys.argv[1]).read_text(encoding='utf-8'); "
+            "ver = pathlib.Path(sys.argv[2]).read_text(encoding='utf-8').strip(); "
+            "pathlib.Path(sys.argv[3]).write_text("
+            "html.replace('{{VERSION_INFO}}', ver), encoding='utf-8')"
+        )
         return {
-            "placeholder": "{{VERSION_INFO}}",
-            # Use awk instead of sed to avoid delimiter issues
-            # Escaping: $$$$ -> $$ in ninja -> $ in shell
-            # $$in/$$out -> $in/$out in ninja (ninja variables)
-            "insertcmd": (
-                "awk -v ver=\"$$$$(cat $$$$(echo $$in | cut -d' ' -f2))\" "
-                "'{gsub(/{{VERSION_INFO}}/,ver)}1' "
-                "$$$$(echo $$in | cut -d' ' -f1) > $$out"
-            ),
+            "python": sys.executable,
+            # $in expands to both inputs in order (html, version file),
+            # then the output: argv[1..3] line up with the script.
+            "insertcmd": [
+                "$insertfooter.python",
+                "-c",
+                script,
+                SourcePath(),
+                TargetPath(),
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
