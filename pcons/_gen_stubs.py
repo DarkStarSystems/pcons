@@ -301,6 +301,7 @@ def _collect_tool_names() -> list[tuple[str, str]]:
     import pcons.toolchains.gfortran  # noqa: F401
     import pcons.toolchains.llvm  # noqa: F401
     import pcons.toolchains.msvc  # noqa: F401
+    import pcons.toolchains.qt.toolchain  # noqa: F401
     import pcons.toolchains.wasi  # noqa: F401
     from pcons.core.environment import Environment
     from pcons.tools.toolchain import BaseToolchain

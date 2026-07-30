@@ -281,3 +281,15 @@ class PkgConfigFinder(BaseFinder):
             prefix=prefix,
             found_by="pkg-config",
         )
+
+    def get_variable(self, package_name: str, variable: str) -> str | None:
+        """Read a .pc variable (e.g. ``libexecdir`` from Qt6Core.pc).
+
+        Returns:
+            The variable's value, or None when the package is missing or
+            the variable is empty/undefined.
+        """
+        if not self.is_available():
+            return None
+        success, value = self._run_pkg_config(f"--variable={variable}", package_name)
+        return value or None if success else None

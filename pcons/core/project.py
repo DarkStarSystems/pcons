@@ -89,6 +89,7 @@ class Project(_ProjectBuilders):
         "_children",
         "_subdir",
         "__generated",
+        "__weakref__",  # allow weak references (e.g. per-project caches)
     )
 
     __current: Project | None = None

@@ -1,0 +1,641 @@
+# SPDX-License-Identifier: MIT
+"""Qt 6 discovery.
+
+:func:`find_qt` locates Qt modules (as :class:`ImportedTarget`s), the code
+generation tools (moc/uic/rcc/...), and the Qt version, probing in order:
+
+1. **pkg-config** — ``Qt6Core.pc``/``Qt6Widgets.pc``. Present on Linux
+   distro packages and Homebrew macOS (where the .pc files even encode
+   framework linking), restored upstream in Qt 6.2.5/6.3.1/6.4. The tool
+   directory comes from ``pkg-config --variable=libexecdir Qt6Core``.
+2. **qtpaths/qmake introspection** — ``qtpaths6 -query`` (or ``qmake6``),
+   for installs without .pc files (official installer, Windows).
+   ``QT_HOST_LIBEXECS``/``QT_HOST_BINS`` give the tool directory,
+   ``QT_INSTALL_LIBS``/``QT_INSTALL_HEADERS`` the libraries.
+
+Discovery is cached per project (module targets register with the project,
+so each Qt module is created exactly once); repeated calls may add modules.
+
+Platform requirements are baked into the returned module targets so users
+never see them: MSVC-style compilers get ``/Zc:__cplusplus /permissive-``
+(Qt headers require both), Windows debug builds link the ``d``-suffixed
+libraries, and macOS framework builds carry ``-F``/``-framework`` flags.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import subprocess
+import weakref
+from pathlib import Path
+from typing import TYPE_CHECKING, Literal, overload
+
+from pcons.configure.platform import get_platform
+from pcons.packages.description import PackageDescription
+from pcons.packages.finders.pkgconfig import PkgConfigFinder
+from pcons.packages.imported import ImportedTarget
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from pcons.core.environment import Environment
+    from pcons.core.project import Project
+
+
+class QtNotFoundError(RuntimeError):
+    """Qt (or a requested Qt module) could not be located."""
+
+
+# Inter-module dependencies, used by the qtpaths fallback so usage
+# requirements propagate transitively (pkg-config handles this itself via
+# Requires: chains). Unlisted modules implicitly depend on Core.
+_MODULE_DEPS: dict[str, tuple[str, ...]] = {
+    "Core": (),
+    "Gui": ("Core",),
+    "Widgets": ("Gui",),
+    "Network": ("Core",),
+    "Concurrent": ("Core",),
+    "OpenGL": ("Gui",),
+    "OpenGLWidgets": ("OpenGL", "Widgets"),
+    "PrintSupport": ("Widgets",),
+    "Qml": ("Network",),
+    "Quick": ("Qml", "Gui"),
+    "QuickControls2": ("Quick",),
+    "QuickWidgets": ("Quick", "Widgets"),
+    "Sql": ("Core",),
+    "Svg": ("Gui",),
+    "SvgWidgets": ("Svg", "Widgets"),
+    "Test": ("Core",),
+    "Xml": ("Core",),
+    "Multimedia": ("Gui", "Network"),
+    "MultimediaWidgets": ("Multimedia", "Widgets"),
+}
+
+# One QtPackage per project: Qt module targets register with the project,
+# so discovery must not run twice. Weak keys let projects be collected.
+_qt_installs: weakref.WeakKeyDictionary[Project, QtPackage] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+class QtPackage:
+    """A located Qt installation: modules, tools, and version.
+
+    Attributes:
+        version: Qt version string (e.g. "6.9.3").
+        prefix: Installation prefix.
+        bin_dir: Directory holding user-facing tools (designer, lupdate...).
+        libexec_dir: Directory holding build tools (moc, uic, rcc...);
+            equals bin_dir on Windows.
+        is_framework: True for macOS framework builds.
+        found_via: "pkg-config" or a qtpaths/qmake command name.
+        modules: Located modules as ImportedTargets, keyed by short name
+            ("Widgets"). Also available as attributes: ``qt.Widgets``.
+    """
+
+    def __init__(
+        self,
+        *,
+        version: str,
+        prefix: Path,
+        bin_dir: Path,
+        libexec_dir: Path,
+        is_framework: bool,
+        found_via: str,
+        modules: dict[str, ImportedTarget],
+        module_factory: Callable[[str], ImportedTarget | None],
+    ) -> None:
+        self.version = version
+        self.prefix = prefix
+        self.bin_dir = bin_dir
+        self.libexec_dir = libexec_dir
+        self.is_framework = is_framework
+        self.found_via = found_via
+        self.modules = modules
+        self._module_factory = module_factory
+        self._platform_applied = False
+        self._private_applied: set[str] = set()
+
+    def __getattr__(self, name: str) -> ImportedTarget:
+        # Module sugar: qt.Widgets. __getattr__ is only consulted for
+        # names not found normally, so real attributes are unaffected.
+        modules = self.__dict__.get("modules", {})
+        if name in modules:
+            return modules[name]
+        raise AttributeError(
+            f"Qt module '{name}' was not requested. "
+            f"Available: {', '.join(sorted(modules))}. "
+            f"Add it to find_qt(modules=[...])."
+        )
+
+    def _ensure_module(self, name: str) -> ImportedTarget | None:
+        """Get or create a module target, resolving via this install's route."""
+        if name in self.modules:
+            return self.modules[name]
+        target = self._module_factory(name)
+        if target is not None:
+            self.modules[name] = target
+        return target
+
+    def tool_path(self, name: str, *, required: bool = False) -> Path | None:
+        """Path of a Qt tool (moc, uic, rcc, lrelease, ...), or None.
+
+        Args:
+            name: Tool name without extension.
+            required: Raise QtNotFoundError instead of returning None.
+        """
+        exe = f"{name}.exe" if get_platform().is_windows else name
+        for directory in (self.libexec_dir, self.bin_dir):
+            candidate = directory / exe
+            if candidate.is_file():
+                return candidate
+        if required:
+            raise QtNotFoundError(
+                f"Qt tool '{name}' not found in {self.libexec_dir} or "
+                f"{self.bin_dir} (Qt {self.version} at {self.prefix})."
+            )
+        return None
+
+    def __repr__(self) -> str:
+        return (
+            f"QtPackage(version={self.version!r}, prefix={str(self.prefix)!r}, "
+            f"modules={sorted(self.modules)}, via={self.found_via!r})"
+        )
+
+
+# required=True (the default) never returns None — give callers the
+# narrowed type so `qt.Widgets` needs no None-check.
+@overload
+def find_qt(
+    project: Project,
+    env: Environment | None = None,
+    *,
+    modules: Sequence[str],
+    version: str | None = None,
+    qt_root: str | Path | None = None,
+    private_headers: Sequence[str] = (),
+    required: Literal[True] = True,
+) -> QtPackage: ...
+
+
+@overload
+def find_qt(
+    project: Project,
+    env: Environment | None = None,
+    *,
+    modules: Sequence[str],
+    version: str | None = None,
+    qt_root: str | Path | None = None,
+    private_headers: Sequence[str] = (),
+    required: Literal[False],
+) -> QtPackage | None: ...
+
+
+def find_qt(
+    project: Project,
+    env: Environment | None = None,
+    *,
+    modules: Sequence[str],
+    version: str | None = None,
+    qt_root: str | Path | None = None,
+    private_headers: Sequence[str] = (),
+    required: bool = True,
+) -> QtPackage | None:
+    """Locate Qt 6 and return its modules, tools, and version.
+
+    Args:
+        project: The project; module targets register with it, and
+            discovery is cached on it (repeat calls may add modules).
+        env: When given, the ``qt`` toolchain is added to this environment
+            with moc/uic/rcc paths configured, enabling ``env.qt.*``
+            builders and ``project.QtProgram(...)``. MSVC-style toolchains
+            also get Qt's required compiler flags on the Core module.
+        modules: Qt module short names, e.g. ["Widgets", "Network"].
+            Core is always included.
+        version: Optional constraint, e.g. ">=6.4".
+        qt_root: Explicit Qt prefix (overrides probing); also taken from
+            the PCONS_QT_ROOT environment variable. First call wins: the
+            cached install is reused by later calls.
+        private_headers: Modules whose private headers should be added to
+            the include path (e.g. ["Core"] for QtCore/x.y.z/private).
+        required: If True (default), raise QtNotFoundError when Qt or any
+            requested module is missing; if False, return None.
+
+    Returns:
+        A QtPackage, or None (only when required=False).
+    """
+    wanted = list(dict.fromkeys(["Core", *modules]))  # dedupe, Core first
+    if qt_root is None:
+        env_root = os.environ.get("PCONS_QT_ROOT", "").strip()
+        qt_root = Path(env_root) if env_root else None
+    else:
+        qt_root = Path(qt_root)
+
+    qt = _qt_installs.get(project)
+    if qt is None:
+        qt = _probe_pkgconfig(wanted, version, qt_root)
+        if qt is None:
+            qt = _probe_qtpaths(wanted, version, qt_root)
+        if qt is None:
+            if not required:
+                return None
+            raise QtNotFoundError(_not_found_message(wanted, version, qt_root))
+        _qt_installs[project] = qt
+    elif version is not None and not _version_satisfies(qt.version, version):
+        if not required:
+            return None
+        raise QtNotFoundError(
+            f"Qt {qt.version} (already located at {qt.prefix}) does not "
+            f"satisfy the requested version {version}."
+        )
+
+    for name in wanted:
+        if qt._ensure_module(name) is None:
+            if not required:
+                return None
+            raise QtNotFoundError(
+                f"Qt module '{name}' not found in Qt {qt.version} at "
+                f"{qt.prefix} (located via {qt.found_via})."
+            )
+
+    _apply_platform_requirements(qt, env)
+    _apply_private_headers(qt, private_headers)
+
+    if env is not None and not any(t.name == "qt" for t in env.toolchains):
+        from pcons.toolchains.qt.toolchain import QtToolchain
+
+        env.add_toolchain(QtToolchain.from_package(qt))
+
+    return qt
+
+
+def _not_found_message(
+    wanted: list[str], version: str | None, qt_root: Path | None
+) -> str:
+    probes = [
+        "pkg-config " + ", ".join(f"Qt6{m}" for m in wanted),
+        "qtpaths6/qtpaths/qmake6/qmake -query",
+    ]
+    lines = [
+        f"Qt 6 not found (need modules: {', '.join(wanted)}"
+        + (f", version {version}" if version else "")
+        + ")."
+    ]
+    lines.append("Probed: " + "; ".join(probes) + ".")
+    if qt_root:
+        lines.append(f"qt_root was set to {qt_root}.")
+    lines.append(
+        "Install Qt (brew install qt / apt install qt6-base-dev / "
+        "https://www.qt.io) or point PCONS_QT_ROOT (or qt_root=) at its prefix."
+    )
+    return "\n".join(lines)
+
+
+# =============================================================================
+# pkg-config probe
+# =============================================================================
+
+
+def _pkgconfig_finder(qt_root: Path | None) -> PkgConfigFinder:
+    """A PkgConfigFinder; with qt_root, its lib/pkgconfig dir joins the path."""
+    if qt_root is not None:
+        pc_dir = qt_root / "lib" / "pkgconfig"
+        existing = os.environ.get("PKG_CONFIG_PATH", "")
+        if str(pc_dir) not in existing.split(os.pathsep):
+            os.environ["PKG_CONFIG_PATH"] = (
+                f"{pc_dir}{os.pathsep}{existing}" if existing else str(pc_dir)
+            )
+    return PkgConfigFinder()
+
+
+def _probe_pkgconfig(
+    wanted: list[str], version: str | None, qt_root: Path | None
+) -> QtPackage | None:
+    """Locate Qt via Qt6*.pc files.
+
+    All requested modules must resolve, otherwise return None so the
+    qtpaths probe gets a chance (incomplete .pc coverage happens; e.g.
+    Ubuntu 24.04 shipped qt6-base without .pc files for a while). No
+    targets are created until the whole probe succeeds.
+    """
+    finder = _pkgconfig_finder(qt_root)
+    if not finder.is_available():
+        return None
+
+    descriptions: dict[str, PackageDescription] = {}
+    core = finder.find("Qt6Core", version=version)
+    if core is None:
+        return None
+    descriptions["Core"] = core
+    for name in wanted:
+        if name == "Core":
+            continue
+        pkg = finder.find(f"Qt6{name}")
+        if pkg is None:
+            return None  # incomplete install; let qtpaths try
+        descriptions[name] = pkg
+
+    modules = {
+        name: ImportedTarget.from_package(pkg) for name, pkg in descriptions.items()
+    }
+    # Every module depends on Core: the .pc files flatten compile/link
+    # flags, but pcons-added platform requirements live on the Core
+    # *target* and must propagate to whatever users actually link.
+    for name, target in modules.items():
+        if name != "Core":
+            target.link(modules["Core"])
+
+    def factory(name: str) -> ImportedTarget | None:
+        pkg = finder.find(f"Qt6{name}")
+        if pkg is None:
+            return None
+        target = ImportedTarget.from_package(pkg)
+        target.link(modules["Core"])
+        return target
+
+    prefix = Path(finder.get_variable("Qt6Core", "prefix") or "/usr")
+    bin_dir = Path(finder.get_variable("Qt6Core", "bindir") or prefix / "bin")
+    libexec = finder.get_variable("Qt6Core", "libexecdir")
+
+    return QtPackage(
+        version=core.version,
+        prefix=prefix,
+        bin_dir=bin_dir,
+        libexec_dir=Path(libexec) if libexec else bin_dir,
+        is_framework="-framework" in core.link_flags,
+        found_via="pkg-config",
+        modules=modules,
+        module_factory=factory,
+    )
+
+
+# =============================================================================
+# qtpaths / qmake introspection probe
+# =============================================================================
+
+
+def _qtpaths_candidates(qt_root: Path | None) -> list[tuple[str, list[Path]]]:
+    """(command, hint dirs) pairs to try, most specific first."""
+    hints: list[Path] = []
+    if qt_root is not None:
+        hints.append(qt_root / "bin")
+    platform = get_platform()
+    if platform.is_macos:
+        hints += [Path("/opt/homebrew/opt/qt/bin"), Path("/usr/local/opt/qt/bin")]
+    elif platform.is_windows:
+        # Official installer layout: C:\Qt\6.x.y\<toolchain>\bin
+        for qt_dir in sorted(Path("C:/Qt").glob("6.*/*/bin"), reverse=True):
+            hints.append(qt_dir)
+    else:
+        hints += [Path("/usr/lib/qt6/bin"), Path("/usr/lib64/qt6/bin")]
+    return [(name, hints) for name in ("qtpaths6", "qtpaths", "qmake6", "qmake")]
+
+
+def _run_query(command: Path) -> dict[str, str] | None:
+    """Run `<command> -query` and parse KEY:value lines."""
+    try:
+        result = subprocess.run(
+            [str(command), "-query"], capture_output=True, text=True, timeout=15
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    query: dict[str, str] = {}
+    for line in result.stdout.splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            query[key.strip()] = value.strip()
+    return query or None
+
+
+def _version_satisfies(found: str, constraint: str) -> bool:
+    """Check a version string against a constraint like ">=6.4"."""
+    match = re.match(r"(>=|<=|=|>|<)?\s*(.+)", constraint)
+    if not match:
+        return True
+    op = match.group(1) or "="
+    want = match.group(2).strip()
+
+    def key(v: str) -> list[int]:
+        return [int(p) for p in re.findall(r"\d+", v)]
+
+    fk, wk = key(found), key(want)
+    # Pad to equal length so 6.9 == 6.9.0
+    length = max(len(fk), len(wk))
+    fk += [0] * (length - len(fk))
+    wk += [0] * (length - len(wk))
+    cmp = (fk > wk) - (fk < wk)
+    return {">=": cmp >= 0, ">": cmp > 0, "<=": cmp <= 0, "<": cmp < 0, "=": cmp == 0}[
+        op
+    ]
+
+
+def _probe_qtpaths(
+    wanted: list[str], version: str | None, qt_root: Path | None
+) -> QtPackage | None:
+    """Locate Qt by querying qtpaths/qmake and inspecting the install tree."""
+    import shutil as _shutil
+
+    platform = get_platform()
+    query: dict[str, str] | None = None
+    found_via = ""
+    for name, hints in _qtpaths_candidates(qt_root):
+        candidates = [
+            d / (f"{name}.exe" if platform.is_windows else name) for d in hints
+        ]
+        which = _shutil.which(name)
+        if which:
+            candidates.append(Path(which))
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            query = _run_query(candidate)
+            if query and query.get("QT_VERSION", "").startswith("6"):
+                found_via = name
+                break
+            query = None
+        if query:
+            break
+    if query is None:
+        return None
+
+    qt_version = query["QT_VERSION"]
+    if version is not None and not _version_satisfies(qt_version, version):
+        return None
+
+    prefix = Path(query.get("QT_INSTALL_PREFIX", ""))
+    libs = Path(query.get("QT_INSTALL_LIBS", prefix / "lib"))
+    headers = Path(query.get("QT_INSTALL_HEADERS", prefix / "include"))
+    bin_dir = Path(
+        query.get("QT_HOST_BINS") or query.get("QT_INSTALL_BINS") or prefix / "bin"
+    )
+    libexec_dir = Path(query.get("QT_HOST_LIBEXECS") or bin_dir)
+    is_framework = (libs / "QtCore.framework").is_dir()
+
+    # Validate before creating any targets: descriptions for the wanted
+    # modules and their implicit deps must all resolve.
+    order = _closure_in_dep_order(wanted)
+    descriptions: dict[str, PackageDescription] = {}
+    for name in order:
+        pkg = _module_package(name, qt_version, libs, headers, is_framework)
+        if pkg is None:
+            if name in wanted:
+                return None
+            continue  # missing implicit dep of an unrequested module
+        descriptions[name] = pkg
+
+    modules: dict[str, ImportedTarget] = {}
+
+    def add_module(name: str, pkg: PackageDescription) -> ImportedTarget:
+        target = ImportedTarget.from_package(pkg)
+        for dep in _MODULE_DEPS.get(name, ("Core",)):
+            if dep in modules:
+                target.link(modules[dep])
+        modules[name] = target
+        return target
+
+    for name in order:
+        if name in descriptions:
+            add_module(name, descriptions[name])
+
+    def factory(name: str) -> ImportedTarget | None:
+        # Create implicit deps first so link() targets exist.
+        for dep in _MODULE_DEPS.get(name, ("Core",)):
+            if dep not in modules and factory(dep) is None:
+                return None
+        if name in modules:
+            return modules[name]
+        pkg = _module_package(name, qt_version, libs, headers, is_framework)
+        return add_module(name, pkg) if pkg is not None else None
+
+    return QtPackage(
+        version=qt_version,
+        prefix=prefix,
+        bin_dir=bin_dir,
+        libexec_dir=libexec_dir,
+        is_framework=is_framework,
+        found_via=found_via,
+        modules=modules,
+        module_factory=factory,
+    )
+
+
+def _closure_in_dep_order(wanted: list[str]) -> list[str]:
+    """Requested modules plus implicit deps, dependencies first."""
+    order: list[str] = []
+
+    def visit(name: str) -> None:
+        if name in order:
+            return
+        for dep in _MODULE_DEPS.get(name, ("Core",)):
+            visit(dep)
+        order.append(name)
+
+    visit("Core")
+    for name in wanted:
+        visit(name)
+    return order
+
+
+def _module_package(
+    name: str, qt_version: str, libs: Path, headers: Path, is_framework: bool
+) -> PackageDescription | None:
+    """PackageDescription for one Qt module from an introspected install."""
+    define = f"QT_{name.upper()}_LIB"
+    if is_framework:
+        framework_dir = libs / f"Qt{name}.framework"
+        if not framework_dir.is_dir():
+            return None
+        return PackageDescription(
+            name=f"Qt6{name}",
+            version=qt_version,
+            include_dirs=[str(framework_dir / "Headers")],
+            defines=[define],
+            frameworks=[f"Qt{name}"],
+            framework_dirs=[str(libs)],
+            prefix=str(libs.parent),
+        )
+    module_headers = headers / f"Qt{name}"
+    if not module_headers.is_dir():
+        return None
+    return PackageDescription(
+        name=f"Qt6{name}",
+        version=qt_version,
+        include_dirs=[str(headers), str(module_headers)],
+        library_dirs=[str(libs)],
+        libraries=[f"Qt6{name}"],
+        defines=[define],
+        prefix=str(libs.parent),
+    )
+
+
+# =============================================================================
+# Platform requirements & private headers
+# =============================================================================
+
+
+def _apply_platform_requirements(qt: QtPackage, env: Environment | None) -> None:
+    """Bake required platform flags into the module targets (once).
+
+    - MSVC-style compilers: Qt 6 headers require ``/Zc:__cplusplus`` (real
+      ``__cplusplus`` value) and ``/permissive-`` (conformant two-phase
+      lookup). Qt's own CMake config injects both; so do we, on Core so
+      every dependent inherits them.
+    - Windows debug variant: Qt import libraries carry a ``d`` suffix.
+    - Apple Silicon with Qt < 6.10: qyieldcpu.h calls the ACLE intrinsic
+      ``__yield()`` bare; clang treats that as an implicit declaration
+      error unless <arm_acle.h> was included first (fixed upstream in
+      Qt 6.10). Pre-include it so users never see the error.
+    """
+    if qt._platform_applied:
+        return
+    platform = get_platform()
+    if not platform.is_windows:
+        if (
+            platform.is_macos
+            and getattr(platform, "arch", "") == "arm64"
+            and _version_satisfies(qt.version, "<6.10")
+        ):
+            qt.modules["Core"].public.compile_flags.extend(["-include", "arm_acle.h"])
+        qt._platform_applied = True
+        return
+
+    toolchain_name = ""
+    if env is not None and env.toolchain is not None:
+        toolchain_name = env.toolchain.name
+    if toolchain_name in ("msvc", "clang-cl"):
+        qt.modules["Core"].public.compile_flags.extend(
+            ["/Zc:__cplusplus", "/permissive-"]
+        )
+
+    if env is not None and getattr(env, "variant", "") == "debug":
+        for target in qt.modules.values():
+            target.public.link_libs = [
+                f"{lib}d"
+                if isinstance(lib, str)
+                and lib.startswith("Qt6")
+                and not lib.endswith("d")
+                else lib
+                for lib in target.public.link_libs
+            ]
+    qt._platform_applied = True
+
+
+def _apply_private_headers(qt: QtPackage, private_headers: Sequence[str]) -> None:
+    """Add <Module>/x.y.z/<Module>[/private] include dirs for named modules."""
+    for name in private_headers:
+        if name in qt._private_applied:
+            continue
+        target = qt.modules.get(name)
+        if target is None:
+            raise QtNotFoundError(
+                f"private_headers names '{name}', which is not in modules=[...]."
+            )
+        for base in list(target.public.include_dirs):
+            versioned = Path(base) / qt.version / f"Qt{name}"
+            if versioned.is_dir():
+                target.public.include_dirs.extend([versioned, versioned / "private"])
+                qt._private_applied.add(name)
+                break

@@ -55,6 +55,7 @@ if TYPE_CHECKING:
         link: ToolConfig  # ClangClToolchain, EmscriptenToolchain, GccToolchain, GfortranToolchain, LlvmToolchain, MsvcToolchain, SwiftToolchain, WasiToolchain
         metal: ToolConfig  # LlvmToolchain
         ml: ToolConfig  # ClangClToolchain, MsvcToolchain
+        qt: ToolConfig  # QtToolchain
         rc: ToolConfig  # ClangClToolchain, MsvcToolchain
         swiftc: ToolConfig  # SwiftToolchain
         build_dir: Path

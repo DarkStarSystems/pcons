@@ -1,0 +1,24 @@
+# Test configuration for the Qt Widgets (QtProgram/automoc) example
+
+[test]
+description = "Qt Widgets app via QtProgram: automoc, .ui and .qrc in sources"
+
+expected_outputs = [
+    "build/qt.qt_widgets/src/moc_mainwindow.cpp",
+    "build/qt.qt_widgets/src/ui_mainwindow.h",
+    "build/qt.qt_widgets/qrc_resources.cpp",
+    "build/qt.qt_widgets/scan.ok",
+    "build/qt_widgets",
+]
+
+[verify]
+commands = [
+    { run = "./build/qt_widgets", expect_stdout = "Hello from Qt Designer" },
+    { run = "./build/qt_widgets", expect_stdout = "Hello from Qt resources" },
+    { run = "./build/qt_widgets", expect_stdout = "signals ok" },
+]
+
+[skip]
+require_qt = true
+# Depfile-driven codegen is ninja territory.
+generators = ["make", "xcode"]

@@ -1,0 +1,22 @@
+# Test configuration for the explicit Qt codegen example
+
+[test]
+description = "Qt low-level builders: explicit moc (header and source mode) and rcc"
+
+expected_outputs = [
+    "build/qt.gen/src/moc_counter.cpp",
+    "build/qt.gen/src/main.moc",
+    "build/qt.gen/qrc_messages.cpp",
+    "build/qt_explicit",
+]
+
+[verify]
+commands = [
+    { run = "./build/qt_explicit", expect_stdout = "counter reached 3" },
+]
+
+[skip]
+require_qt = true
+# Depfile-driven codegen is ninja territory; make has no restat/deps support
+# and the xcode generator doesn't handle custom tools.
+generators = ["make", "xcode"]

@@ -32,6 +32,8 @@ KnownToolchain = Literal[
     "llvm",  # LLVM/Clang compiler
     "msvc",  # Microsoft Visual C/C++ compiler
     "nvcc",  # NVIDIA CUDA compiler (nvcc)
+    "qt",  # Auto-detect the Qt tool suite (moc/uic/rcc)
+    "qt6",  # Auto-detect the Qt tool suite (moc/uic/rcc)
     "swift",  # Auto-detect the Swift toolchain (swiftc)
     "swiftc",  # Swift compiler (whole-module compilation, swiftc links)
     "vc",  # Microsoft Visual C/C++ compiler

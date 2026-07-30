@@ -13,6 +13,7 @@ Tests both invocation methods:
 from __future__ import annotations
 
 import fnmatch
+import functools
 import os
 import platform
 import re
@@ -286,6 +287,7 @@ _SKIP_SECTION_KEYS = {
     "require_env",
     "requires_cxx_modules",
     "requires_cxx_std_module",
+    "require_qt",
     "generators",
     "rebuild_on_windows",
 }
@@ -367,6 +369,16 @@ def load_test_config(example_dir: Path) -> dict[str, Any]:
     return config
 
 
+@functools.cache
+def _qt_available() -> str | None:
+    """Skip reason when no usable Qt 6 is installed, else None (cached)."""
+    from pcons.toolchains.qt.toolchain import _find_tool, _locate_tool_dirs
+
+    if _find_tool("moc", _locate_tool_dirs()) is None:
+        return "Qt 6 not found (moc not discoverable via pkg-config or PATH)"
+    return None
+
+
 def should_skip(config: dict[str, Any]) -> str | None:
     """Check if this test should be skipped. Returns skip reason or None."""
     skip_config = config.get("skip", {})
@@ -395,6 +407,12 @@ def should_skip(config: dict[str, Any]) -> str | None:
     for var in require_env:
         if not os.environ.get(var):
             return f"Required environment variable '{var}' not set"
+
+    # Check for a Qt installation via the real finder (a command-name
+    # probe is unreliable: moc lives in libexec, not on PATH, and the
+    # qtpaths binary name varies by platform).
+    if skip_config.get("require_qt") and _qt_available() is not None:
+        return _qt_available()
 
     def _check_msvc_module_support() -> bool | str:
         """On Windows we expect MSVC (which has its own std-module path).

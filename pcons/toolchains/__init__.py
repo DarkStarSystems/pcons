@@ -65,6 +65,13 @@ from pcons.toolchains.msvc import (
     MsvcLinker,
     MsvcToolchain,
 )
+from pcons.toolchains.qt import (
+    QtPackage,
+    QtTool,
+    QtToolchain,
+    find_qt,
+    find_qt_toolchain,
+)
 from pcons.toolchains.swift import (
     SwiftCompiler,
     SwiftLinker,
@@ -220,6 +227,12 @@ __all__ = [
     "MsvcLibrarian",
     "MsvcLinker",
     "MsvcToolchain",
+    # Qt toolchain
+    "QtPackage",
+    "QtTool",
+    "QtToolchain",
+    "find_qt",
+    "find_qt_toolchain",
     # Emscripten toolchain
     "EmccCCompiler",
     "EmccCxxCompiler",

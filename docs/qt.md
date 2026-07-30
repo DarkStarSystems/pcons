@@ -1,0 +1,171 @@
+# Qt
+
+pcons has first-class Qt 6 support: discovery of Qt modules and tools,
+automatic moc/uic/rcc, and high-level builders that make a Qt Widgets
+application a five-line build script.
+
+```python
+from pcons import Project, find_c_toolchain
+from pcons.toolchains.qt import find_qt
+
+project = Project("myapp")
+env = project.Environment(toolchain=find_c_toolchain())
+env.cxx.set_standard(17)
+
+qt = find_qt(project, env, modules=["Widgets", "Network"])
+
+app = project.QtProgram("myapp", env,
+    sources=["main.cpp", "mainwindow.cpp", "mainwindow.ui", "icons.qrc"],
+    link=[qt.Widgets, qt.Network])
+```
+
+That's the whole build. `.ui` and `.qrc` files go straight into
+`sources`; classes with `Q_OBJECT` are found automatically; all platform
+quirks (macOS frameworks, MSVC's `/Zc:__cplusplus /permissive-`, Windows
+debug `d`-suffix libraries) are handled by `find_qt`.
+
+## How it's better than CMake's AUTOMOC
+
+pcons deliberately fixes the well-known pain points of CMake + Qt:
+
+| CMake + Qt | pcons |
+|---|---|
+| Opaque `<target>_autogen` step; mystery rebuilds | Every moc/uic/rcc run is a plain, visible ninja edge (`ninja -t commands`) |
+| `mocs_compilation.cpp` aggregate: touching one moc'ed header recompiles all moc output | Each `moc_*.cpp` is its own translation unit |
+| Build-time source scanning on every build | Scan happens once, when pcons generates; builds run zero scanning |
+| Silent no-op when a `.cpp` has `Q_OBJECT` but no `#include "foo.moc"` | Hard error at generate time, with the exact line to add |
+| Adding `Q_OBJECT` without re-running CMake → undefined-vtable link errors | A cheap guard edge fails the build with *"re-run pcons"* naming the file |
+
+Incremental correctness comes from the tools' own depfiles: moc runs with
+`--output-dep-file` (re-runs when any transitively-included header
+changes), rcc with `--depfile` (re-runs when a file listed in the .qrc
+changes), and uic is a pure `input → output` rule.
+
+## Discovery: find_qt()
+
+```python
+qt = find_qt(project, env,
+    modules=["Widgets"],          # short names; Core is always included
+    version=">=6.4",              # optional constraint
+    qt_root="/opt/Qt/6.7.0/gcc_64",  # optional; also $PCONS_QT_ROOT
+    private_headers=["Core"],     # opt-in to QtCore/x.y.z/private
+)
+
+qt.version        # "6.9.3"
+qt.Widgets        # ImportedTarget — use in link=[...] or app.link(...)
+qt.tool_path("lupdate")
+```
+
+Probing order:
+
+1. **pkg-config** (`Qt6Core.pc`, `Qt6Widgets.pc`, ...) — present on Linux
+   distributions and Homebrew macOS; handles framework linking.
+2. **qtpaths/qmake introspection** (`qtpaths6 -query`) — for installs
+   without pkg-config files, e.g. the official Qt installer and Windows.
+
+Passing `env` adds the `qt` toolchain to the environment (tool paths for
+moc/uic/rcc), enabling the builders below. Discovery is cached per
+project; call `find_qt` again to add modules.
+
+## The automoc scan
+
+`QtProgram` scans the target's sources, their same-basename headers, and
+the closure of project-local `#include "..."` files for `Q_OBJECT`,
+`Q_GADGET`, and `Q_NAMESPACE` — at **generate time**, mtime-cached, never
+during the build. Unlike CMake's line-anchored regex, declarations like
+`class C : public QObject { Q_OBJECT };` on one line are found too.
+
+Because the scan runs when pcons runs, a header that *gains* `Q_OBJECT`
+afterward would be missed — so each Qt target also gets a tiny
+`scan.ok` build edge whose depfile covers every scanned file and
+directory. When the scan result would change, the build stops:
+
+```
+pcons Qt: the moc scan for target 'myapp' is out of date:
+  src/newthing.h now needs moc (header gained a Qt macro)
+
+Re-run pcons to regenerate the build files.
+```
+
+Escape hatches: `automoc=False`, `autouic=False`, `autorcc=False`, and
+`no_moc=["src/weird.h"]`.
+
+A `.cpp` file with `Q_OBJECT` needs its moc output included at the end
+of the file (`#include "myfile.moc"`); pcons errors at generate time if
+the include is missing.
+
+## Resources without .qrc XML
+
+```python
+res = project.QtResources("assets", env,
+    files=["images/*.png", "data/config.json"], prefix="/")
+app.link(res)
+```
+
+pcons synthesizes the `.qrc` (globs expanded, aliases relative to the
+project root), runs rcc with a depfile, and returns an object target.
+Files are reachable as `:/images/logo.png` etc.
+
+!!! note "Static libraries"
+    Resources compiled into a *static* library need
+    `Q_INIT_RESOURCE(name);` in the consuming application, or the
+    linker may drop the auto-registration object.
+
+## Low-level builders
+
+The Meson-style explicit API, for when you want full control (this is
+exactly what QtProgram automates):
+
+```python
+moc_cpp = env.qt.Moc(sources="mainwindow.h")     # → moc_mainwindow.cpp
+dot_moc = env.qt.Moc(sources="widget.cpp")       # → widget.moc
+ui_hdr  = env.qt.Uic(sources="mainwindow.ui")    # → ui_mainwindow.h
+res_cpp = env.qt.Rcc(sources="icons.qrc", name="icons")
+
+app = project.Program("myapp", env,
+    sources=["main.cpp", moc_cpp[0], res_cpp[0]])
+app.link(qt.Widgets)
+app.depends(ui_hdr[0])
+env.cxx.includes.append(str(project.build_dir / "qt.gen"))
+```
+
+moc needs Qt's include paths and defines to parse headers
+(`env.qt.mocincludes`, `env.qt.mocdefines`); QtProgram fills them from
+the targets you `link=`.
+
+Related `env.qt` variables: `mocflags`, `uicflags`, `rccflags`,
+`mocpredefs` (compiler-builtin macros via `--include moc_predefs.h`,
+generated automatically for GCC/Clang).
+
+## Generated file layout
+
+| What | Where |
+|---|---|
+| QtProgram("app", ...) codegen | `build/qt.app/<source-relative-dir>/` |
+| Low-level builders (default) | `build/qt.gen/<source-relative-dir>/` |
+| QtResources | `build/qt.res/` |
+| Scan manifest + stamp | `build/qt.app/scan-manifest.json`, `scan.ok` |
+
+## Platform notes
+
+- **macOS**: framework builds (Homebrew, official installer) link with
+  `-F`/`-framework` automatically. On Apple Silicon with Qt < 6.10,
+  `find_qt` also pre-includes `<arm_acle.h>` to work around
+  `qyieldcpu.h`'s bare `__yield()` (fixed upstream in Qt 6.10).
+- **Windows**: MSVC and clang-cl get `/Zc:__cplusplus /permissive-`
+  (required by Qt headers); debug variants link the `d`-suffixed
+  libraries; moc runs with `--compiler-flavor msvc`.
+- **Linux**: distro Qt (apt/dnf/pacman) is found via pkg-config; the
+  official installer via `qtpaths` or `qt_root=`/`$PCONS_QT_ROOT`.
+
+## Examples
+
+- `examples/52_qt_widgets` — the high-level QtProgram flow.
+- `examples/53_qt_explicit` — the explicit Moc/Rcc flow.
+
+## Roadmap
+
+QML modules (`qmltyperegistrar`/`qmlcachegen`), translations
+(`lupdate`/`lrelease`), and deployment (`macdeployqt`/`windeployqt`) are
+planned; the tool layer (`qt.tool_path(...)`) already locates those
+binaries.

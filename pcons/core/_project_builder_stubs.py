@@ -238,6 +238,63 @@ if TYPE_CHECKING:
             """Create a program (executable) target."""
             ...
 
+        def QtProgram(
+            self,
+            name: str,
+            env: Env,
+            sources: list[str | Path | Node] | None = None,
+            *,
+            link: Sequence[Target] = (),
+            automoc: bool = True,
+            autouic: bool = True,
+            autorcc: bool = True,
+            no_moc: Sequence[str | Path] = (),
+        ) -> Target:
+            """A Program whose sources may include .ui/.qrc files and Q_OBJECT"""
+            ...
+
+        def QtResources(
+            self,
+            name: str,
+            env: Env,
+            *,
+            files: Sequence[str | Path],
+            prefix: str = '/',
+            base_dir: str | Path | None = None,
+        ) -> Target:
+            """Embed files as Qt resources without writing .qrc XML."""
+            ...
+
+        def QtSharedLibrary(
+            self,
+            name: str,
+            env: Env,
+            sources: list[str | Path | Node] | None = None,
+            *,
+            link: Sequence[Target] = (),
+            automoc: bool = True,
+            autouic: bool = True,
+            autorcc: bool = True,
+            no_moc: Sequence[str | Path] = (),
+        ) -> Target:
+            """SharedLibrary variant of QtProgram."""
+            ...
+
+        def QtStaticLibrary(
+            self,
+            name: str,
+            env: Env,
+            sources: list[str | Path | Node] | None = None,
+            *,
+            link: Sequence[Target] = (),
+            automoc: bool = True,
+            autouic: bool = True,
+            autorcc: bool = True,
+            no_moc: Sequence[str | Path] = (),
+        ) -> Target:
+            """StaticLibrary variant of QtProgram."""
+            ...
+
         def SharedLibrary(
             self,
             name: str,

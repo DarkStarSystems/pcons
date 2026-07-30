@@ -29,6 +29,7 @@ theme:
 nav:
   - Home: index.md
   - User Guide: user-guide.md
+  - Qt: qt.md
   - Presets: presets.md
   - Porting from CMake: porting-from-cmake.md
   - Porting from Make: porting-from-make.md
