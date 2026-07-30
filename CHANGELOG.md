@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-07-30
+
 ### Added
 
 - **First-class Qt 6 support** (see `docs/qt.md`). A Qt Widgets app is a five-line build script:
@@ -40,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`create_pkg` works with `.app` bundle sources**: packaging an application bundle (the normal way to ship a macOS GUI app, e.g. a Qt app after `QtDeploy`) failed because the generated component plist lacked the `RootRelativeBundlePath` key pkgbuild requires; the plist now includes each bundle's payload-relative path.
 - **Registry-detected toolchains pin absolute tool paths**: `Environment(toolchain="c")` used to emit bare command names (`clang++`) into the generated build files, so running ninja with a different `PATH` than generation could silently use a different compiler than the one detection found. Default tool commands are now resolved to their absolute `PATH` location at setup, matching what configure-based detection already did.
 
 ### Changed
@@ -1036,7 +1039,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/DarkStarSystems/pcons/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/DarkStarSystems/pcons/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/DarkStarSystems/pcons/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/DarkStarSystems/pcons/compare/v0.20.0...v0.20.1
