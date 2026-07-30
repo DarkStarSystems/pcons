@@ -1,0 +1,21 @@
+# Test configuration for the Qt deployment example
+
+[test]
+description = "Qt deployment: macdeployqt makes a relocatable .app (ninja deploy)"
+
+build_targets = ["deploy"]
+
+expected_outputs = [
+    "build/demo",
+    "build/Demo.app/Contents/MacOS/demo",
+    "build/Demo.app/Contents/Frameworks/QtCore.framework",
+    "build/qt.deploy/deploy.stamp",
+]
+
+[skip]
+# macdeployqt is macOS-only; the Windows windeployqt path is exercised on
+# the Windows test machine manually (needs Qt installed there).
+platforms = ["linux", "windows"]
+require_qt = true
+require_qt_tools = ["macdeployqt"]
+generators = ["make", "xcode"]

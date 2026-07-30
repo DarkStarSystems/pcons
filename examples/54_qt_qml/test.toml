@@ -1,0 +1,23 @@
+# Test configuration for the QML module example
+
+[test]
+description = "QML module via QtQmlModule: QML_ELEMENT types, qmldir, embedded QML"
+
+expected_outputs = [
+    "build/qt.demo_ui/demo_ui_metatypes.json",
+    "build/qt.demo_ui/demo_ui_qmltyperegistrations.cpp",
+    "build/qt.demo_ui/qmldir",
+    "build/qt.demo_ui/qrc_demo_ui.cpp",
+    "build/qt_qml",
+]
+
+[verify]
+commands = [
+    { run = "./build/qt_qml", expect_stdout = "QML says: Hello from C++" },
+    { run = "./build/qt_qml", expect_stdout = "counter is now 3" },
+]
+
+[skip]
+require_qt = true
+require_qt_modules = ["Qml"]
+generators = ["make", "xcode"]

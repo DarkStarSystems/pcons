@@ -158,14 +158,87 @@ generated automatically for GCC/Clang).
 - **Linux**: distro Qt (apt/dnf/pacman) is found via pkg-config; the
   official installer via `qtpaths` or `qt_root=`/`$PCONS_QT_ROOT`.
 
+## QML modules
+
+`QtQmlModule` bundles QML files and `QML_ELEMENT` C++ classes into a
+module the engine loads by URI:
+
+```python
+qt = find_qt(project, env, modules=["Qml"])
+
+ui = project.QtQmlModule("app_ui", env,
+    uri="com.example.app",
+    version="1.0",
+    qml_files=["qml/Main.qml"],
+    sources=["src/backend.cpp"],     # classes marked QML_ELEMENT
+    link=[qt.Qml])
+
+app = project.QtProgram("app", env, sources=["src/main.cpp"], link=[qt.Qml])
+app.link(ui)
+```
+
+```cpp
+QQmlApplicationEngine engine;
+engine.loadFromModule("com.example.app", "Main");   // that's it
+```
+
+One call replaces CMake's `qt_add_qml_module` plumbing: moc emits JSON
+metadata, `qmltyperegistrar` generates the type registrations (plus a
+`.qmltypes` for tooling), a `qmldir` is synthesized, and everything
+embeds under `:/qt/qml/<uri>/` — the engine's default import path. The
+module builds as an *object* target, so linking it into the app can't
+dead-strip the registrations — no plugin/backing-target split, no
+`Q_INIT_RESOURCE`, no import-path setup.
+
+Not yet included: `qmlcachegen` ahead-of-time QML compilation (the
+embedded QML runs through the normal engine path — functionally
+identical, slightly slower startup) and separate QML plugin libraries.
+
+## Translations
+
+```python
+tr = project.QtTranslations("i18n", env,
+    ts_files=["i18n/app_de.ts", "i18n/app_fr.ts"],
+    lupdate_sources=["src/main.cpp", "src/mainwindow.cpp"])
+app.link(tr)
+```
+
+Each `.ts` catalog compiles with lrelease and embeds under `:/i18n/`:
+
+```cpp
+QTranslator translator;
+translator.load(QLocale(), "app", "_", ":/i18n");
+QCoreApplication::installTranslator(&translator);
+```
+
+Refreshing the catalogs from sources is **`ninja lupdate`** — a utility
+target that is *never* part of the default build or `ninja all`, because
+it writes into the source tree. (This uses `target.build_by_default =
+False`, available for any utility target.)
+
+## Deployment
+
+```python
+project.QtDeploy("deploy", env, app=app, bundle="MyApp.app")   # macOS
+project.QtDeploy("deploy", env, app=app, deploy_dir="deploy")  # Windows
+```
+
+`ninja deploy` runs macdeployqt (fixes up a `.app` bundle in place —
+build the bundle first, e.g. with `pcons.contrib.bundle` or Install
+targets) or windeployqt (copies DLLs/plugins next to the executable).
+Never part of the default build. Linux deployment is out of scope —
+use linuxdeploy/appimagetool on the installed tree.
+
+!!! note "Homebrew Qt and macdeployqt"
+    macdeployqt is most reliable with the official Qt installer. With
+    Homebrew's framework layout it can leave stray `@rpath` references
+    (e.g. QtGui → QtDBus) — a known macdeployqt limitation that affects
+    CMake builds identically.
+
 ## Examples
 
 - `examples/52_qt_widgets` — the high-level QtProgram flow.
 - `examples/53_qt_explicit` — the explicit Moc/Rcc flow.
-
-## Roadmap
-
-QML modules (`qmltyperegistrar`/`qmlcachegen`), translations
-(`lupdate`/`lrelease`), and deployment (`macdeployqt`/`windeployqt`) are
-planned; the tool layer (`qt.tool_path(...)`) already locates those
-binaries.
+- `examples/54_qt_qml` — a QML module with C++ types.
+- `examples/55_qt_translations` — embedded catalogs + `ninja lupdate`.
+- `examples/56_qt_deploy` — a relocatable .app via `ninja deploy`.

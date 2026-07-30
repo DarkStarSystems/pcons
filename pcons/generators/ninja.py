@@ -632,8 +632,11 @@ class NinjaGenerator(BaseGenerator):
                 if isinstance(out_node, FileNode):
                     user_defaults.append(self._output_ref(out_node))
 
-        # Collect all target outputs for 'all' target
+        # Collect all target outputs for 'all' target (utility targets
+        # with build_by_default=False are only built when requested).
         for target in project.targets:
+            if not getattr(target, "build_by_default", True):
+                continue
             for node in target.output_nodes:
                 if isinstance(node, FileNode):
                     all_outputs.append(self._output_ref(node))
@@ -645,6 +648,8 @@ class NinjaGenerator(BaseGenerator):
         # Collect programs and libraries for implicit default
         prog_lib_outputs: list[str] = []
         for target in project.targets:
+            if not getattr(target, "build_by_default", True):
+                continue
             if target.target_type in (
                 "program",
                 "shared_library",

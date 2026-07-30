@@ -138,6 +138,25 @@ class QtPackage:
             self.modules[name] = target
         return target
 
+    def metatypes_files(self) -> list[Path]:
+        """Qt's own metatypes JSON files (qmltyperegistrar --foreign-types).
+
+        Layout varies: Homebrew uses <prefix>/share/qt/metatypes, most
+        Linux distros and the official installer use <libs>/metatypes or
+        <prefix>/metatypes. Empty when none found (the registrar then
+        works without foreign-type revision info).
+        """
+        candidates = [
+            self.prefix / "share" / "qt" / "metatypes",
+            self.prefix / "lib" / "metatypes",
+            self.prefix / "lib64" / "metatypes",
+            self.prefix / "metatypes",
+        ]
+        for directory in candidates:
+            if directory.is_dir():
+                return sorted(directory.glob("*_metatypes.json"))
+        return []
+
     def tool_path(self, name: str, *, required: bool = False) -> Path | None:
         """Path of a Qt tool (moc, uic, rcc, lrelease, ...), or None.
 
@@ -268,6 +287,29 @@ def find_qt(
         env.add_toolchain(QtToolchain.from_package(qt))
 
     return qt
+
+
+def qt_module_available(name: str, qt_root: str | Path | None = None) -> bool:
+    """Cheap existence probe for one Qt module (no targets created).
+
+    Used by test harnesses and feature guards; find_qt() is the real
+    discovery entry point.
+    """
+    root = Path(qt_root) if qt_root else None
+    finder = _pkgconfig_finder(root)
+    if finder.is_available() and finder.find(f"Qt6{name}") is not None:
+        return True
+    query = _find_qtpaths_query(root)
+    if query is None:
+        return False  # no Qt at all
+    prefix = Path(query.get("QT_INSTALL_PREFIX", ""))
+    libs = Path(query.get("QT_INSTALL_LIBS", prefix / "lib"))
+    headers = Path(query.get("QT_INSTALL_HEADERS", prefix / "include"))
+    is_framework = (libs / "QtCore.framework").is_dir()
+    return (
+        _module_package(name, query.get("QT_VERSION", ""), libs, headers, is_framework)
+        is not None
+    )
 
 
 def _not_found_message(
@@ -432,15 +474,14 @@ def _version_satisfies(found: str, constraint: str) -> bool:
     ]
 
 
-def _probe_qtpaths(
-    wanted: list[str], version: str | None, qt_root: Path | None
-) -> QtPackage | None:
-    """Locate Qt by querying qtpaths/qmake and inspecting the install tree."""
+def _find_qtpaths_query(qt_root: Path | None) -> dict[str, str] | None:
+    """Locate a working qtpaths/qmake and return its -query result.
+
+    The result carries the tool's name under the "" key for found_via.
+    """
     import shutil as _shutil
 
     platform = get_platform()
-    query: dict[str, str] | None = None
-    found_via = ""
     for name, hints in _qtpaths_candidates(qt_root):
         candidates = [
             d / (f"{name}.exe" if platform.is_windows else name) for d in hints
@@ -453,13 +494,19 @@ def _probe_qtpaths(
                 continue
             query = _run_query(candidate)
             if query and query.get("QT_VERSION", "").startswith("6"):
-                found_via = name
-                break
-            query = None
-        if query:
-            break
+                query[""] = name
+                return query
+    return None
+
+
+def _probe_qtpaths(
+    wanted: list[str], version: str | None, qt_root: Path | None
+) -> QtPackage | None:
+    """Locate Qt by querying qtpaths/qmake and inspecting the install tree."""
+    query = _find_qtpaths_query(qt_root)
     if query is None:
         return None
+    found_via = query.get("", "qtpaths")
 
     qt_version = query["QT_VERSION"]
     if version is not None and not _version_satisfies(qt_version, version):

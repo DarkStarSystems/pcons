@@ -194,6 +194,13 @@ class RccBuilder(_QtGenBuilder):
         return nodes
 
 
+class LreleaseBuilder(_QtGenBuilder):
+    """Run lrelease: ``<lang>.ts`` → ``<lang>.qm`` (binary catalog)."""
+
+    def _output_name(self, source: Node) -> str:
+        return f"{_source_path(source).stem}.qm"
+
+
 class QtTool(BaseTool):
     """Qt code-generation tool suite (namespace ``env.qt``).
 
@@ -213,17 +220,27 @@ class QtTool(BaseTool):
         moc: str = "moc",
         uic: str = "uic",
         rcc: str = "rcc",
+        qmltyperegistrar: str = "qmltyperegistrar",
+        lrelease: str = "lrelease",
+        lupdate: str = "lupdate",
     ) -> None:
         super().__init__("qt")
         self._moc = moc
         self._uic = uic
         self._rcc = rcc
+        self._qmltyperegistrar = qmltyperegistrar
+        self._lrelease = lrelease
+        self._lupdate = lupdate
 
     def default_vars(self) -> dict[str, object]:
         return {
             "moc": self._moc,
             "uic": self._uic,
             "rcc": self._rcc,
+            "qmltyperegistrar": self._qmltyperegistrar,
+            "lrelease": self._lrelease,
+            "lupdate": self._lupdate,
+            "lreleaseflags": [],
             # Build-time helpers run under the same Python running pcons.
             "python": sys.executable,
             "iprefix": "-I",
@@ -295,6 +312,40 @@ class QtTool(BaseTool):
                 "-o",
                 TargetPath(),
             ],
+            # QML: merge per-TU moc JSON into one metatypes file ($in is
+            # the moc_*.cpp nodes for ordering; the .json siblings are
+            # named via $JSONFILES).
+            "collectjsoncmd": [
+                "$qt.moc",
+                "--collect-json",
+                "-o",
+                TargetPath(),
+                "$JSONFILES",
+            ],
+            # Translations: compile a .ts source catalog to binary .qm.
+            "lreleasecmd": [
+                "$qt.lrelease",
+                "$qt.lreleaseflags",
+                SourcePath(),
+                "-qm",
+                TargetPath(),
+            ],
+            # QML: generate type registration code from metatypes.
+            "typeregcmd": [
+                "$qt.qmltyperegistrar",
+                "--import-name",
+                "$QMLURI",
+                "--major-version",
+                "$QMLMAJOR",
+                "--minor-version",
+                "$QMLMINOR",
+                "--generate-qmltypes",
+                "$QMLTYPES",
+                "$QMLFOREIGN",
+                "-o",
+                TargetPath(),
+                SourcePath(),
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
@@ -345,6 +396,28 @@ class QtTool(BaseTool):
                 "predefscmd",
                 target_suffixes=[".h"],
                 restat=True,
+            ),
+            "CollectJson": CommandBuilder(
+                "CollectJson",
+                "qt",
+                "collectjsoncmd",
+                target_suffixes=[".json"],
+            ),
+            "Lrelease": LreleaseBuilder(
+                "Lrelease",
+                "qt",
+                "lreleasecmd",
+                src_suffixes=[".ts"],
+                target_suffixes=[".qm"],
+                single_source=True,
+            ),
+            "TypeRegistrar": CommandBuilder(
+                "TypeRegistrar",
+                "qt",
+                "typeregcmd",
+                src_suffixes=[".json"],
+                target_suffixes=[".cpp"],
+                single_source=True,
             ),
         }
 
@@ -402,14 +475,19 @@ class QtToolchain(BaseToolchain):
     def from_package(cls, qt: QtPackage) -> QtToolchain:
         """A toolchain preconfigured from a located Qt installation."""
         toolchain = cls()
-        moc = qt.tool_path("moc", required=True)
-        uic = qt.tool_path("uic")
-        rcc = qt.tool_path("rcc")
+
+        def tool(name: str) -> str:
+            path = qt.tool_path(name)
+            return str(path) if path else name
+
         toolchain._tools = {
             "qt": QtTool(
-                moc=str(moc),
-                uic=str(uic) if uic else "uic",
-                rcc=str(rcc) if rcc else "rcc",
+                moc=str(qt.tool_path("moc", required=True)),
+                uic=tool("uic"),
+                rcc=tool("rcc"),
+                qmltyperegistrar=tool("qmltyperegistrar"),
+                lrelease=tool("lrelease"),
+                lupdate=tool("lupdate"),
             )
         }
         toolchain._configured = True

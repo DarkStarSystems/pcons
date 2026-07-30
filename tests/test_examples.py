@@ -288,6 +288,8 @@ _SKIP_SECTION_KEYS = {
     "requires_cxx_modules",
     "requires_cxx_std_module",
     "require_qt",
+    "require_qt_modules",
+    "require_qt_tools",
     "generators",
     "rebuild_on_windows",
 }
@@ -379,6 +381,22 @@ def _qt_available() -> str | None:
     return None
 
 
+@functools.cache
+def _qt_module_available(module: str) -> bool:
+    """Whether one Qt module (e.g. "Qml") is installed (cached)."""
+    from pcons.toolchains.qt.finder import qt_module_available
+
+    return qt_module_available(module)
+
+
+@functools.cache
+def _qt_tool_available(tool: str) -> bool:
+    """Whether one Qt tool (e.g. "lrelease") is discoverable (cached)."""
+    from pcons.toolchains.qt.toolchain import _find_tool, _locate_tool_dirs
+
+    return _find_tool(tool, _locate_tool_dirs()) is not None
+
+
 def should_skip(config: dict[str, Any]) -> str | None:
     """Check if this test should be skipped. Returns skip reason or None."""
     skip_config = config.get("skip", {})
@@ -413,6 +431,12 @@ def should_skip(config: dict[str, Any]) -> str | None:
     # qtpaths binary name varies by platform).
     if skip_config.get("require_qt") and _qt_available() is not None:
         return _qt_available()
+    for module in skip_config.get("require_qt_modules", []):
+        if not _qt_module_available(module):
+            return f"Qt module '{module}' not installed"
+    for tool in skip_config.get("require_qt_tools", []):
+        if not _qt_tool_available(tool):
+            return f"Qt tool '{tool}' not installed"
 
     def _check_msvc_module_support() -> bool | str:
         """On Windows we expect MSVC (which has its own std-module path).

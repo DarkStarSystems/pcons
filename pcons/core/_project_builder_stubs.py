@@ -238,6 +238,19 @@ if TYPE_CHECKING:
             """Create a program (executable) target."""
             ...
 
+        def QtDeploy(
+            self,
+            name: str,
+            env: Env,
+            *,
+            app: Target,
+            bundle: str | Path | None = None,
+            deploy_dir: str | Path | None = None,
+            flags: Sequence[str] = (),
+        ) -> Target:
+            """`ninja deploy` utility target (see module docstring)."""
+            ...
+
         def QtProgram(
             self,
             name: str,
@@ -251,6 +264,21 @@ if TYPE_CHECKING:
             no_moc: Sequence[str | Path] = (),
         ) -> Target:
             """A Program whose sources may include .ui/.qrc files and Q_OBJECT"""
+            ...
+
+        def QtQmlModule(
+            self,
+            name: str,
+            env: Env,
+            *,
+            uri: str,
+            version: str = '1.0',
+            qml_files: Sequence[str | Path] = (),
+            sources: Sequence[str | Path] = (),
+            link: Sequence[Target] = (),
+            no_moc: Sequence[str | Path] = (),
+        ) -> Target:
+            """Build a QML module as an object target (see module docstring)."""
             ...
 
         def QtResources(
@@ -293,6 +321,18 @@ if TYPE_CHECKING:
             no_moc: Sequence[str | Path] = (),
         ) -> Target:
             """StaticLibrary variant of QtProgram."""
+            ...
+
+        def QtTranslations(
+            self,
+            name: str,
+            env: Env,
+            *,
+            ts_files: Sequence[str | Path],
+            prefix: str = '/i18n',
+            lupdate_sources: Sequence[str | Path] = (),
+        ) -> Target:
+            """Compile and embed Qt translation catalogs (see module docstring)."""
             ...
 
         def SharedLibrary(

@@ -328,6 +328,10 @@ class Target:
         # no usage requirement propagation).
         "_implicit_target_deps_output_only",
         "_subdir",
+        # Utility targets (lupdate, doc generation, ...) set this False:
+        # excluded from 'all' and implicit defaults, built only when
+        # requested by name/alias or listed in Default().
+        "build_by_default",
     )
 
     def __init__(
@@ -363,6 +367,8 @@ class Target:
         self.output_suffix: str | None = None
         # Sources resolved after the main resolve phase (for Install, etc.)
         self._pending_sources: list[Target | Node | Path | str] | None = None
+        # Utility targets (lupdate, doc generation, ...) set this False.
+        self.build_by_default: bool = True
         # Build info for archive and command targets
         self._build_info: BuildInfo | dict[str, Any] | None = None
         self._builder_name: str | None = None

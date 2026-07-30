@@ -512,9 +512,12 @@ class MakefileGenerator(BaseGenerator):
                     if isinstance(target_node, FileNode):
                         user_defaults.append(self._node_path(target_node))
 
-        # Collect all target outputs for 'all'
+        # Collect all target outputs for 'all' (utility targets with
+        # build_by_default=False are only built when requested).
         all_outputs: list[str] = []
         for target in project.targets:
+            if not getattr(target, "build_by_default", True):
+                continue
             if getattr(target, "_resolved", False):
                 for node in target.output_nodes:
                     if isinstance(node, FileNode):
@@ -528,6 +531,8 @@ class MakefileGenerator(BaseGenerator):
         prog_lib_outputs: list[str] = []
         if not user_defaults:
             for target in project.targets:
+                if not getattr(target, "build_by_default", True):
+                    continue
                 if getattr(target, "_resolved", False):
                     if target.target_type in (
                         "program",

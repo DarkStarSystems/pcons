@@ -32,6 +32,7 @@ QtResources synthesizes the .qrc from a Python file list (no XML):
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -127,6 +128,16 @@ def _moc_flags_from_links(
     )
 
 
+@dataclass
+class _QtGenInfo:
+    """Internal: what _qt_make_target generated (consumed by QtQmlModule)."""
+
+    qt_env: Environment
+    qt_dir: Path  # build-relative, e.g. build/qt.<name>
+    moc_header_nodes: list[Node] = field(default_factory=list)
+    moc_header_dirs: list[Path] = field(default_factory=list)
+
+
 def _qt_make_target(
     kind: str,
     project: Project,
@@ -139,7 +150,9 @@ def _qt_make_target(
     autouic: bool = True,
     autorcc: bool = True,
     no_moc: Sequence[str | Path] = (),
+    moc_json: bool = False,
     defined_at: SourceLocation | None = None,
+    _info_out: list[_QtGenInfo] | None = None,
 ) -> Target:
     """Shared implementation of QtProgram/QtSharedLibrary/QtStaticLibrary."""
     _require_qt_tool(env, f"Qt{kind}()")
@@ -180,6 +193,9 @@ def _qt_make_target(
     includes, defines, extra_flags = _moc_flags_from_links(link)
     qt_env.qt.mocincludes = list(includes)
     qt_env.qt.mocdefines = list(defines)
+    if moc_json:
+        # QML type registration consumes moc's JSON sidecar output.
+        extra_flags = [*extra_flags, "--output-json"]
     if extra_flags:
         qt_env.qt.mocflags = list(qt_env.qt.mocflags) + extra_flags
 
@@ -214,6 +230,7 @@ def _qt_make_target(
 
     # ---- automoc ---------------------------------------------------------
     moc_nodes: list[Node] = []
+    moc_header_dirs: list[Path] = []
     dot_moc_nodes: list[Node] = []
     scan_stamp: Node | None = None
     if automoc and cpp_paths:
@@ -231,6 +248,7 @@ def _qt_make_target(
             rel = _source_rel_dir(qt_env, project.node(header))
             target_path = qt_dir.joinpath(*rel) / f"moc_{header.stem}.cpp"
             moc_nodes.append(qt_env.qt.Moc(target_path, str(header))[0])
+            moc_header_dirs.append(header.parent)
         for source in scan.moc_sources:
             rel = _source_rel_dir(qt_env, project.node(source))
             target_path = qt_dir.joinpath(*rel) / f"{source.stem}.moc"
@@ -289,6 +307,16 @@ def _qt_make_target(
     # before any of the target's TUs compile.
     for node in (*ui_nodes, *dot_moc_nodes, *moc_deps):
         target.depends(node)
+
+    if _info_out is not None:
+        _info_out.append(
+            _QtGenInfo(
+                qt_env=qt_env,
+                qt_dir=qt_dir,
+                moc_header_nodes=list(moc_nodes),
+                moc_header_dirs=list(dict.fromkeys(moc_header_dirs)),
+            )
+        )
     return target
 
 

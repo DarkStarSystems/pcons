@@ -1,0 +1,21 @@
+# Test configuration for the Qt translations example
+
+[test]
+description = "Qt translations: lrelease-compiled .qm catalogs embedded as resources"
+
+expected_outputs = [
+    "build/qt.i18n/app_de.qm",
+    "build/qt.i18n/qrc_i18n.cpp",
+    "build/qt_translations",
+]
+
+[verify]
+commands = [
+    { run = "./build/qt_translations", expect_stdout = "Hallo, Welt!" },
+]
+
+[skip]
+require_qt = true
+# lrelease ships with qttools; not every minimal Qt install has it.
+require_qt_tools = ["lrelease"]
+generators = ["make", "xcode"]
