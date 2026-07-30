@@ -191,7 +191,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y qt6-base-dev qt6-base-dev-tools \
-            qt6-declarative-dev qt6-declarative-dev-tools qml6-module-qtqml \
+            qt6-declarative-dev qt6-declarative-dev-tools \
+            qml6-module-qtqml qml6-module-qtqml-models \
+            qml6-module-qtqml-workerscript \
             qt6-tools-dev-tools qt6-l10n-tools
       - name: Install Qt (macOS)
         if: runner.os == 'macOS'
