@@ -165,6 +165,62 @@ jobs:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  test-qt:
+    name: "test qt examples"
+    needs: lint
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "latest"
+      - name: Set up MSVC (Windows only)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+      - name: Install Qt (Linux)
+        if: runner.os == 'Linux'
+        # base: moc/uic/rcc + qtpaths6; declarative: Qml module +
+        # qmltyperegistrar; qml6-module-qtqml: runtime for `import QtQml`;
+        # l10n/tools: lrelease/lupdate (package split varies by release,
+        # so install both — example 55 skips gracefully if absent).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools \
+            qt6-declarative-dev qt6-declarative-dev-tools qml6-module-qtqml \
+            qt6-tools-dev-tools qt6-l10n-tools
+      - name: Install Qt (macOS)
+        if: runner.os == 'macOS'
+        run: brew install qt
+      - name: Install Qt (Windows)
+        if: runner.os == 'Windows'
+        # aqtinstall fetches the official-installer layout (no pkg-config
+        # files) — exercising the qtpaths discovery route in CI.
+        run: uvx --from aqtinstall aqt install-qt windows desktop 6.8.3 win64_msvc2022_64 --outputdir C:\Qt
+      - name: Install dependencies
+        run: uv sync
+      - name: Verify Qt is discoverable
+        # Guard against a green job in which every example silently
+        # skipped because the Qt install step didn't produce a usable Qt.
+        run: >
+          uv run python -c "from pcons.toolchains.qt.toolchain import
+          _find_tool, _locate_tool_dirs;
+          moc = _find_tool('moc', _locate_tool_dirs());
+          print('moc:', moc);
+          raise SystemExit(0 if moc else 'Qt not discoverable')"
+      - name: Run Qt example tests
+        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -v -k "52_qt or 53_qt or 54_qt or 55_qt or 56_qt"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: qt-examples
+
   test-wasm:
     name: "test wasm (emscripten + wasi)"
     needs: lint
