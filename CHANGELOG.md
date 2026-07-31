@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.2] - 2026-07-31
+
 ### Fixed
 
 - `generate_pc_file()` now walks the full dependency closure: pkg-config
@@ -1064,7 +1066,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.23.1...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.23.2...HEAD
+[0.23.2]: https://github.com/DarkStarSystems/pcons/compare/v0.23.1...v0.23.2
 [0.23.1]: https://github.com/DarkStarSystems/pcons/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/DarkStarSystems/pcons/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/DarkStarSystems/pcons/compare/v0.21.0...v0.22.0
