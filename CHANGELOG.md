@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   contribute their usage requirements directly. Sibling libraries are linked by
   name.
 - `PCONS_BUILD_DIR` in the environment is honored again. An explicit `-B` wins.
+- Absolute source paths in a subproject (`add_subdirectory()`) no longer lose the
+  subproject directory, which made the build fail with a missing-source error.
+  Relative paths were unaffected.
 
 ### Changed
 

@@ -96,3 +96,101 @@ class TestAddSubdirectory:
         ns = add_subdirectory("a")
 
         assert ns.inner.cdir == test_project.root_dir / "a" / "aa"
+
+
+class TestSubprojectNodePaths:
+    """Node paths in a subproject are anchored at the top-level root.
+
+    A subproject's ``root_dir`` is the top-level root, with its own offset
+    held in ``_subdir``. Canonicalizing an absolute path against the
+    subproject's *current* directory instead drops that offset, so the node
+    records a path missing the subproject directory and the build fails with
+    a missing-source error. Relative sources never hit it because they are
+    explicitly prefixed with ``_subdir``, which is why this stayed latent.
+    """
+
+    CHILD = (
+        "from pathlib import Path\n"
+        "from pcons.core.project import Project\n"
+        "project = Project('child')\n"
+        "abs_node = project.node(Path(__file__).parent / 'src/foo.c')\n"
+        "dir_abs = project.dir_node(Path(__file__).parent / 'include')\n"
+        "external = project.node(Path(__file__).parent.parent.parent / 'outside/x.c')\n"
+    )
+
+    def test_absolute_source_keeps_subproject_dir(self, test_project: Project) -> None:
+        _make_subdir(test_project, "child", self.CHILD)
+
+        ns = add_subdirectory("child")
+
+        assert ns.abs_node.path == Path("child/src/foo.c")
+
+    def test_absolute_and_relative_sources_agree(self, test_project: Project) -> None:
+        """Naming one source either way must yield one node, not two.
+
+        ``Target.add_sources`` prefixes ``_subdir`` onto relative specs
+        before creating the node, so the two spellings only meet if
+        absolute paths anchor at the same place. When they don't, a file
+        used by two targets compiles twice under different paths.
+        """
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pathlib import Path\n"
+            "from pcons.core.project import Project\n"
+            "project = Project('child')\n"
+            "env = project.parent.default_environment\n"
+            "rel = project.StaticLibrary('rel', env, sources=['src/foo.c'])\n"
+            "abs_ = project.StaticLibrary('abs', env,\n"
+            "    sources=[Path(__file__).parent / 'src/foo.c'])\n",
+        )
+
+        ns = add_subdirectory("child")
+
+        assert ns.rel.sources[0] is ns.abs_.sources[0]
+        assert ns.rel.sources[0].path == Path("child/src/foo.c")
+
+    def test_absolute_dir_node_keeps_subproject_dir(
+        self, test_project: Project
+    ) -> None:
+        """dir_node() shares the canonicalization path, so it must agree."""
+        _make_subdir(test_project, "child", self.CHILD)
+
+        ns = add_subdirectory("child")
+
+        assert ns.dir_abs.path == Path("child/include")
+
+    def test_path_outside_top_root_stays_absolute(self, test_project: Project) -> None:
+        """Anchoring only applies under the root; external paths pass through."""
+        _make_subdir(test_project, "child", self.CHILD)
+
+        ns = add_subdirectory("child")
+
+        assert ns.external.path.is_absolute()
+
+    def test_two_levels_deep(self, test_project: Project) -> None:
+        """The offset is the full path from the top root, not just one level."""
+        inner = (
+            "from pathlib import Path\n"
+            "from pcons.core.project import Project\n"
+            "project = Project('inner')\n"
+            "abs_node = project.node(Path(__file__).parent / 'src/deep.c')\n"
+        )
+        _make_subdir(test_project, "a/aa", inner)
+        _make_subdir(
+            test_project,
+            "a",
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "inner = add_subdirectory('aa')\n",
+        )
+
+        ns = add_subdirectory("a")
+
+        assert ns.inner.abs_node.path == Path("a/aa/src/deep.c")
+
+    def test_top_level_absolute_path_unchanged(self, test_project: Project) -> None:
+        """Top-level projects have no offset, so behaviour is unaffected."""
+        node = test_project.node(test_project.root_dir / "src/main.c")
+
+        assert node.path == Path("src/main.c")

@@ -318,10 +318,16 @@ class Project(_ProjectBuilders):
 
         Canonical: relative to project root if under it, absolute otherwise.
         Uses pure path arithmetic (no filesystem access).
+
+        Node paths are anchored at the *top-level* root, which is what
+        generators resolve them against. In a subproject ``root_dir`` is
+        already the top-level root, with the offset held in ``_subdir``;
+        anchoring here at ``current_dir`` instead would drop that offset and
+        emit a path missing the subproject directory.
         """
         if path.is_absolute():
             try:
-                return path.relative_to(self.current_dir)
+                return path.relative_to(self.root_dir)
             except ValueError:
                 return path  # External path
         return Path(os.path.normpath(path))
