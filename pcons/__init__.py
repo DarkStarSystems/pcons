@@ -29,6 +29,7 @@ from pcons.core.preset import (  # noqa: E402
 )
 from pcons.core.project import Project  # noqa: E402, F811
 from pcons.core.subst import PathToken  # noqa: E402
+from pcons.core.target import Target  # noqa: E402
 from pcons.core.test import set_test_properties, set_test_property  # noqa: E402
 from pcons.core.vars import get_var, get_variant  # noqa: E402
 from pcons.generators.generator import MultiGenerator  # noqa: E402
@@ -155,6 +156,7 @@ __all__ = [
     "ImportedTarget",
     "PackageDescription",
     "Project",
+    "Target",
     # Presets (contributed-preset registry)
     "register_preset",
     "preset",

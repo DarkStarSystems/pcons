@@ -43,7 +43,7 @@ if TYPE_CHECKING:
             name: str,
             version: str,
             publisher: str,
-            sources: list[Target | FileNode | Path | str],
+            sources: Sequence[Target | FileNode | Path | str],
             output: str | Path | None = None,
             display_name: str | None = None,
             description: str | None = None,
@@ -87,7 +87,7 @@ if TYPE_CHECKING:
             *,
             identifier: str,
             version: str,
-            sources: list[Target | FileNode | Path | str],
+            sources: Sequence[Target | FileNode | Path | str],
             install_location: str = '/Applications',
             output: str | Path | None = None,
             scripts_dir: Path | None = None,
@@ -103,7 +103,7 @@ if TYPE_CHECKING:
             env: Env,
             *,
             name: str,
-            sources: list[Target | FileNode | Path | str],
+            sources: Sequence[Target | FileNode | Path | str],
             volume_name: str | None = None,
             output: str | Path | None = None,
             format: str = 'UDZO',
@@ -119,7 +119,7 @@ if TYPE_CHECKING:
             *,
             bundle_dir: Path | str,
             dlls: list[Target | Path | str] | None = None,
-            resources: list[Path | str] | None = None,
+            resources: Sequence[Path | str] | None = None,
         ) -> Target:
             """Create a flat directory bundle (cross-platform)"""
             ...
@@ -172,7 +172,7 @@ if TYPE_CHECKING:
             *,
             bundle_dir: Path | str,
             info_plist: str | Path | None = None,
-            resources: list[Path | str] | None = None,
+            resources: Sequence[Path | str] | None = None,
             arch_subdir: str | None = None,
         ) -> Target:
             """Create a macOS .bundle or .plugin structure [darwin only]"""
@@ -185,7 +185,7 @@ if TYPE_CHECKING:
             name: str,
             version: str,
             publisher: str,
-            sources: list[Target | FileNode | Path | str],
+            sources: Sequence[Target | FileNode | Path | str],
             executable: str | None = None,
             output: str | Path | None = None,
             display_name: str | None = None,
@@ -201,7 +201,7 @@ if TYPE_CHECKING:
             self,
             name: str,
             env: Env,
-            sources: list[str | Path | Node] | None = None,
+            sources: Sequence[str | Path | Node] | None = None,
         ) -> Target:
             """Create an object library target (compiles but doesn't link)."""
             ...
@@ -213,7 +213,7 @@ if TYPE_CHECKING:
             name: str,
             version: str,
             identifier: str,
-            sources: list[Target | FileNode | Path | str],
+            sources: Sequence[Target | FileNode | Path | str],
             install_location: str = '/Applications',
             output: str | Path | None = None,
             title: str | None = None,
@@ -233,7 +233,7 @@ if TYPE_CHECKING:
             self,
             name: str,
             env: Env,
-            sources: list[str | Path | Node] | None = None,
+            sources: Sequence[str | Path | Node] | None = None,
         ) -> Target:
             """Create a program (executable) target."""
             ...
@@ -255,7 +255,7 @@ if TYPE_CHECKING:
             self,
             name: str,
             env: Env,
-            sources: list[str | Path | Node] | None = None,
+            sources: Sequence[str | Path | Node] | None = None,
             *,
             link: Sequence[Target] = (),
             automoc: bool = True,
@@ -297,7 +297,7 @@ if TYPE_CHECKING:
             self,
             name: str,
             env: Env,
-            sources: list[str | Path | Node] | None = None,
+            sources: Sequence[str | Path | Node] | None = None,
             *,
             link: Sequence[Target] = (),
             automoc: bool = True,
@@ -312,7 +312,7 @@ if TYPE_CHECKING:
             self,
             name: str,
             env: Env,
-            sources: list[str | Path | Node] | None = None,
+            sources: Sequence[str | Path | Node] | None = None,
             *,
             link: Sequence[Target] = (),
             automoc: bool = True,
@@ -339,7 +339,7 @@ if TYPE_CHECKING:
             self,
             name: str,
             env: Env,
-            sources: list[str | Path | Node] | None = None,
+            sources: Sequence[str | Path | Node] | None = None,
         ) -> Target:
             """Create a shared library target."""
             ...
@@ -348,7 +348,7 @@ if TYPE_CHECKING:
             self,
             name: str,
             env: Env,
-            sources: list[str | Path | Node] | None = None,
+            sources: Sequence[str | Path | Node] | None = None,
         ) -> Target:
             """Create a static library target."""
             ...
@@ -358,7 +358,7 @@ if TYPE_CHECKING:
             env: Env,
             *,
             output: str | Path,
-            sources: list[str | Path | FileNode | Target] | None = None,
+            sources: Sequence[str | Path | FileNode | Target] | None = None,
             compression: str | None = None,
             base_dir: str | Path | None = None,
             name: str | None = None,
@@ -391,7 +391,7 @@ if TYPE_CHECKING:
             env: Env,
             *,
             output: str | Path,
-            sources: list[str | Path | FileNode | Target] | None = None,
+            sources: Sequence[str | Path | FileNode | Target] | None = None,
             base_dir: str | Path | None = None,
             name: str | None = None,
         ) -> ArchiveTarget:

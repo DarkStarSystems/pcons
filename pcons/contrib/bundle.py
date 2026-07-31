@@ -16,6 +16,7 @@ These are building blocks that domain-specific modules can use:
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -114,7 +115,7 @@ def create_macos_bundle(
     *,
     bundle_dir: Path | str,
     info_plist: str | Path | None = None,
-    resources: list[Path | str] | None = None,
+    resources: Sequence[Path | str] | None = None,
     arch_subdir: str | None = None,
 ) -> Target:
     """Create a macOS .bundle or .plugin structure.
@@ -196,7 +197,7 @@ def create_flat_bundle(
     *,
     bundle_dir: Path | str,
     dlls: list[Target | Path | str] | None = None,
-    resources: list[Path | str] | None = None,
+    resources: Sequence[Path | str] | None = None,
 ) -> Target:
     """Create a flat directory bundle (Windows/Linux style).
 

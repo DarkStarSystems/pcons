@@ -8,6 +8,7 @@ Users can customize the archive commands via the tool namespace
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -219,7 +220,7 @@ class TarfileBuilder:
         env: Environment,
         *,
         output: str | Path,
-        sources: list[str | Path | FileNode | Target] | None = None,
+        sources: Sequence[str | Path | FileNode | Target] | None = None,
         compression: str | None = None,
         base_dir: str | Path | None = None,
         name: str | None = None,
@@ -295,7 +296,7 @@ class ZipfileBuilder:
         env: Environment,
         *,
         output: str | Path,
-        sources: list[str | Path | FileNode | Target] | None = None,
+        sources: Sequence[str | Path | FileNode | Target] | None = None,
         base_dir: str | Path | None = None,
         name: str | None = None,
     ) -> ArchiveTarget:

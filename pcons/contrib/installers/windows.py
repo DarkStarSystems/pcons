@@ -27,6 +27,7 @@ Example:
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -82,7 +83,7 @@ def create_msix(
     name: str,
     version: str,
     publisher: str,
-    sources: list[Target | FileNode | Path | str],
+    sources: Sequence[Target | FileNode | Path | str],
     executable: str | None = None,
     output: str | Path | None = None,
     display_name: str | None = None,
@@ -285,7 +286,7 @@ def create_appx(
     name: str,
     version: str,
     publisher: str,
-    sources: list[Target | FileNode | Path | str],
+    sources: Sequence[Target | FileNode | Path | str],
     output: str | Path | None = None,
     display_name: str | None = None,
     description: str | None = None,

@@ -503,6 +503,72 @@ class TestGeneratePcFile:
         content = pc.read_text()
         assert f"-I{ext_inc}" in content
 
+    def test_pc_file_inlines_header_only_dependency(self, tmp_path):
+        """A dependency with no .pc of its own is inlined, not dropped.
+
+        Header-only packages (glm is the motivating case) can't appear in
+        Requires:, so their include dirs have to land in Cflags or anything
+        compiling against us fails on a missing header.
+        """
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        glm = ImportedTarget.from_package(
+            PackageDescription(name="glm", include_dirs=["/opt/glm/include"])
+        )
+
+        target = Target("mylib")
+        target.public.link_libs.append(glm)
+
+        pc = project.generate_pc_file(target, version="1.0")
+        content = pc.read_text()
+        assert "-I/opt/glm/include" in content
+        assert "Requires:" not in content
+
+    def test_pc_file_inlines_transitive_dependency(self, tmp_path):
+        """Usage requirements are collected across the whole closure."""
+        from pcons.packages.description import PackageDescription
+        from pcons.packages.imported import ImportedTarget
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        deep = ImportedTarget.from_package(
+            PackageDescription(name="deep", include_dirs=["/opt/deep/include"])
+        )
+        middle = ImportedTarget.from_package(PackageDescription(name="middle"))
+        middle.link(deep)
+
+        target = Target("mylib")
+        target.public.link_libs.append(middle)
+
+        pc = project.generate_pc_file(target, version="1.0")
+        assert "-I/opt/deep/include" in pc.read_text()
+
+    def test_pc_file_names_sibling_library_dependency(self, tmp_path):
+        """A sibling library in the same project is linked by name."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        base = Target("mxbase", target_type="shared_library")
+        base.public.include_dirs.append(Path("include"))
+
+        target = Target("mxgl")
+        target.public.link_libs.append(base)
+
+        pc = project.generate_pc_file(target, version="1.0")
+        content = pc.read_text()
+        assert "-lmxgl" in content
+        assert "-lmxbase" in content
+
+    def test_pc_file_skips_target_entries_in_link_libs(self, tmp_path):
+        """Target objects in link_libs never leak into Libs: as -l<repr>."""
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        dep = Target("dep", target_type="shared_library")
+        target = Target("mylib")
+        target.public.link_libs.append(dep)
+
+        content = project.generate_pc_file(target, version="1.0").read_text()
+        assert "Target" not in content
+        assert "object at" not in content
+
 
 class TestAlias:
     def test_alias_accepts_list(self, tmp_path):

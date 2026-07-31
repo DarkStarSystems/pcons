@@ -12,6 +12,7 @@ This module provides builders for compiled targets:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -42,7 +43,7 @@ class ProgramBuilder:
         project: Project,
         name: str,
         env: Environment,
-        sources: list[str | Path | Node] | None = None,
+        sources: Sequence[str | Path | Node] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a Program target.
@@ -89,7 +90,7 @@ class StaticLibraryBuilder:
         project: Project,
         name: str,
         env: Environment,
-        sources: list[str | Path | Node] | None = None,
+        sources: Sequence[str | Path | Node] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a StaticLibrary target.
@@ -136,7 +137,7 @@ class SharedLibraryBuilder:
         project: Project,
         name: str,
         env: Environment,
-        sources: list[str | Path | Node] | None = None,
+        sources: Sequence[str | Path | Node] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a SharedLibrary target.
@@ -183,7 +184,7 @@ class ObjectLibraryBuilder:
         project: Project,
         name: str,
         env: Environment,
-        sources: list[str | Path | Node] | None = None,
+        sources: Sequence[str | Path | Node] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create an ObjectLibrary target.

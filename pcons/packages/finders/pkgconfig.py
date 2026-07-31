@@ -8,6 +8,7 @@ import re
 import shlex
 import shutil
 import subprocess
+from collections.abc import Sequence
 from itertools import zip_longest
 from typing import TYPE_CHECKING
 
@@ -187,7 +188,7 @@ class PkgConfigFinder(BaseFinder):
         self,
         package_name: str,
         version: str | None = None,
-        components: list[str] | None = None,
+        components: Sequence[str] | None = None,
     ) -> PackageDescription | None:
         """Find a package using pkg-config.
 

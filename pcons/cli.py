@@ -935,7 +935,10 @@ def add_common_args(parser: argparse.ArgumentParser) -> None:
         help=f"Enable debug tracing for subsystems (comma-separated): {subsystem_names}",
     )
     parser.add_argument(
-        "-B", "--build-dir", default="build", help="Build directory (default: build)"
+        "-B",
+        "--build-dir",
+        default=os.environ.get("PCONS_BUILD_DIR", "build"),
+        help="Build directory (default: $PCONS_BUILD_DIR, or 'build')",
     )
     parser.add_argument(
         "--modules-path",

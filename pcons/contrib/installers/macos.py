@@ -37,6 +37,7 @@ Example:
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -106,7 +107,7 @@ def create_component_pkg(
     *,
     identifier: str,
     version: str,
-    sources: list[Target | FileNode | Path | str],
+    sources: Sequence[Target | FileNode | Path | str],
     install_location: str = "/Applications",
     output: str | Path | None = None,
     scripts_dir: Path | None = None,
@@ -199,7 +200,7 @@ def create_pkg(
     name: str,
     version: str,
     identifier: str,
-    sources: list[Target | FileNode | Path | str],
+    sources: Sequence[Target | FileNode | Path | str],
     install_location: str = "/Applications",
     output: str | Path | None = None,
     title: str | None = None,
@@ -419,7 +420,7 @@ def create_dmg(
     env: Environment,
     *,
     name: str,
-    sources: list[Target | FileNode | Path | str],
+    sources: Sequence[Target | FileNode | Path | str],
     volume_name: str | None = None,
     output: str | Path | None = None,
     format: str = "UDZO",

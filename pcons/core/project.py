@@ -872,55 +872,98 @@ class Project(_ProjectBuilders):
 
         name = target.name
 
-        # Build Requires: list from dependencies that came from pkg-config
+        # Split the transitive dependency closure. A dependency that came from
+        # pkg-config becomes a Requires: entry, and pkg-config resolves its
+        # flags for us. Anything else — a header-only package like glm, or a
+        # library found by prefix — has no .pc file to refer to, so its public
+        # usage requirements must be written into this one or consumers will
+        # fail to compile against us.
         requires: list[str] = []
-        for dep in target.dependencies:
-            if isinstance(dep, ImportedTarget) and dep.package is not None:
-                if getattr(dep.package, "found_by", None) == "pkg-config":
-                    requires.append(dep.name)
+        inlined: list[Target] = []
+        seen: set[int] = {id(target)}
+        queue = list(target.dependencies)
+        while queue:
+            dep = queue.pop(0)
+            if id(dep) in seen:
+                continue
+            seen.add(id(dep))
+            package = getattr(dep, "package", None)
+            if isinstance(dep, ImportedTarget) and package is not None:
+                if getattr(package, "found_by", None) == "pkg-config":
+                    if dep.name not in requires:
+                        requires.append(dep.name)
+                    # pkg-config expands this dependency's own Requires.
+                    continue
+            inlined.append(dep)
+            queue.extend(dep.dependencies)
 
         # Build Cflags: from public include_dirs and defines
         # Rewrite include dirs to use ${includedir} for relocatability:
         # - dirs under root_dir → ${includedir} (installed layout)
         # - relative dirs like "include" → ${includedir}
         # - absolute dirs outside the project → kept as-is
+        contributors = [target, *inlined]
+
         cflags_parts: list[str] = []
         seen_includedir = False
-        for inc_dir in target.public.include_dirs:
-            inc_path = Path(inc_dir)
-            # Check the original string for Unix-style absolute paths
-            # (starting with /) since Path("/opt/...") is not absolute on Windows.
-            inc_str = str(inc_dir)
-            is_abs = inc_path.is_absolute() or inc_str.startswith("/")
-            if not is_abs:
-                # Relative path (e.g., "include") — use ${includedir}
-                if not seen_includedir:
-                    cflags_parts.append("-I${includedir}")
-                    seen_includedir = True
-            else:
-                # Absolute path — check if it's under the project root
-                try:
-                    inc_path.relative_to(self.root_dir)
-                    # Under project root — will be installed to ${includedir}
+        for source in contributors:
+            for inc_dir in source.public.include_dirs:
+                inc_path = Path(inc_dir)
+                # Check the original string for Unix-style absolute paths
+                # (starting with /) since Path("/opt/...") is not absolute
+                # on Windows.
+                inc_str = str(inc_dir)
+                is_abs = inc_path.is_absolute() or inc_str.startswith("/")
+                if not is_abs:
+                    # Relative path (e.g., "include") — use ${includedir}
                     if not seen_includedir:
                         cflags_parts.append("-I${includedir}")
                         seen_includedir = True
-                except ValueError:
-                    # External path (e.g., /usr/include) — keep as-is
-                    cflags_parts.append(f"-I{inc_dir}")
-        for define in target.public.defines:
-            cflags_parts.append(f"-D{define}")
-        for flag in target.public.compile_flags:
-            cflags_parts.append(str(flag))
+                else:
+                    # Absolute path — check if it's under the project root
+                    try:
+                        inc_path.relative_to(self.root_dir)
+                        # Under project root — will be installed to ${includedir}
+                        if not seen_includedir:
+                            cflags_parts.append("-I${includedir}")
+                            seen_includedir = True
+                    except ValueError:
+                        # External path (e.g., /usr/include) — keep as-is
+                        if f"-I{inc_dir}" not in cflags_parts:
+                            cflags_parts.append(f"-I{inc_dir}")
+        for source in contributors:
+            for define in source.public.defines:
+                if f"-D{define}" not in cflags_parts:
+                    cflags_parts.append(f"-D{define}")
+            for flag in source.public.compile_flags:
+                if str(flag) not in cflags_parts:
+                    cflags_parts.append(str(flag))
 
-        # Build Libs: the library itself plus any public link flags/libs
-        # Exclude libs that are covered by Requires
+        # Build Libs: the library itself plus any public link flags/libs.
+        # Libraries covered by Requires: are left out — pkg-config adds them.
         libs_parts: list[str] = ["-L${libdir}", f"-l{name}"]
-        for flag in target.public.link_flags:
-            libs_parts.append(str(flag))
-        for lib in target.public.link_libs:
-            if lib not in requires:
-                libs_parts.append(f"-l{lib}")
+        for dep in inlined:
+            # A sibling library in this project has no .pc to refer to here,
+            # so name it directly; it installs alongside us in ${libdir}.
+            if not getattr(dep, "is_imported", False) and dep.target_type in (
+                "shared_library",
+                "static_library",
+            ):
+                if f"-l{dep.name}" not in libs_parts:
+                    libs_parts.append(f"-l{dep.name}")
+        for source in contributors:
+            for lib_dir in source.public.link_dirs:
+                if f"-L{lib_dir}" not in libs_parts:
+                    libs_parts.append(f"-L{lib_dir}")
+            for flag in source.public.link_flags:
+                libs_parts.append(str(flag))
+            for lib in source.public.link_libs:
+                # Target entries are dependencies in their own right and are
+                # already accounted for by the closure walk above.
+                if isinstance(lib, Target):
+                    continue
+                if lib not in requires and f"-l{lib}" not in libs_parts:
+                    libs_parts.append(f"-l{lib}")
 
         # Write .pc content
         lines = [
@@ -960,12 +1003,32 @@ class Project(_ProjectBuilders):
     # Package Discovery
     # =========================================================================
 
+    @overload
     def find_package(
         self,
         name: str,
         *,
         version: str | None = None,
-        components: list[str] | None = None,
+        components: Sequence[str] | None = None,
+        required: Literal[True] = True,
+    ) -> Target: ...
+
+    @overload
+    def find_package(
+        self,
+        name: str,
+        *,
+        version: str | None = None,
+        components: Sequence[str] | None = None,
+        required: bool,
+    ) -> Target | None: ...
+
+    def find_package(
+        self,
+        name: str,
+        *,
+        version: str | None = None,
+        components: Sequence[str] | None = None,
         required: bool = True,
     ) -> Target | None:
         """Find an external package and return it as an ImportedTarget.

@@ -8,6 +8,7 @@ compiling C files). Tools attach to Environments and provide Builders.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -299,7 +300,7 @@ class BuilderMethod:
     def __call__(
         self,
         target: str | Path | None = None,
-        sources: list[str | Path] | str | Path | None = None,
+        sources: Sequence[str | Path] | str | Path | None = None,
         **kwargs: object,
     ) -> list | OutputGroup:
         """Invoke the builder.

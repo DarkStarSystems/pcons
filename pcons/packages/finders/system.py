@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -278,7 +279,7 @@ class SystemFinder(BaseFinder):
         self,
         package_name: str,
         version: str | None = None,
-        components: list[str] | None = None,
+        components: Sequence[str] | None = None,
     ) -> PackageDescription | None:
         """Find a package by searching system paths.
 

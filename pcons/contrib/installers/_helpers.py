@@ -18,6 +18,7 @@ import plistlib
 import shutil
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -66,7 +67,7 @@ def check_tool(tool: str, hint: str | None = None) -> str:
 def stage_files(
     project: Project,
     env: Environment,  # noqa: ARG001 - kept for API consistency
-    sources: list[Target | FileNode | Path | str],
+    sources: Sequence[Target | FileNode | Path | str],
     staging_dir: Path,
     install_prefix: str = "",
 ) -> Target:

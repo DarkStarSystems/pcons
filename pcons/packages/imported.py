@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -81,7 +82,7 @@ class ImportedTarget(Target):
         name: str,
         *,
         package: PackageDescription | None = None,
-        requested_components: list[str] | None = None,
+        requested_components: Sequence[str] | None = None,
     ) -> None:
         """Create an imported target.
 
@@ -126,7 +127,7 @@ class ImportedTarget(Target):
     def from_package(
         cls,
         package: PackageDescription,
-        components: list[str] | None = None,
+        components: Sequence[str] | None = None,
     ) -> ImportedTarget:
         """Create an imported target from a package description.
 

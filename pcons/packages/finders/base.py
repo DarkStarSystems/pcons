@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -44,7 +45,7 @@ class BaseFinder(ABC):
         self,
         package_name: str,
         version: str | None = None,
-        components: list[str] | None = None,
+        components: Sequence[str] | None = None,
     ) -> PackageDescription | None:
         """Try to find a package.
 
@@ -116,7 +117,7 @@ class FinderChain:
         self,
         package_name: str,
         version: str | None = None,
-        components: list[str] | None = None,
+        components: Sequence[str] | None = None,
     ) -> PackageDescription | None:
         """Find a package using the chain of finders.
 

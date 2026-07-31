@@ -14,6 +14,7 @@ import re
 import shlex
 import shutil
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -883,7 +884,7 @@ class ConanFinder(BaseFinder):
         self,
         package_name: str,
         version: str | None = None,
-        components: list[str] | None = None,
+        components: Sequence[str] | None = None,
     ) -> PackageDescription | None:
         """Find a specific package from installed Conan packages.
 

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `generate_pc_file()` now walks the full dependency closure: pkg-config
+  dependencies become `Requires:`, and dependencies without a `.pc` of their own
+  contribute their usage requirements directly. Sibling libraries are linked by
+  name.
+- `PCONS_BUILD_DIR` in the environment is honored again. An explicit `-B` wins.
+
+### Changed
+
+- Builders accept any sequence for `sources=` and `resources=`, so `list[Path]`
+  no longer trips type checkers. Same for `find_package(components=)`.
+- `find_package()` with the default `required=True` is typed as returning
+  `Target`, not `Target | None`.
+- `Target` is exported from the top-level `pcons` namespace.
+
 ## [0.23.1] - 2026-07-30
 
 ### Fixed
