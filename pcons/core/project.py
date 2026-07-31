@@ -909,12 +909,11 @@ class Project(_ProjectBuilders):
         for source in contributors:
             for inc_dir in source.public.include_dirs:
                 inc_path = Path(inc_dir)
-                # Check the original string for Unix-style absolute paths
-                # (starting with /) since Path("/opt/...") is not absolute
-                # on Windows.
-                inc_str = str(inc_dir)
-                is_abs = inc_path.is_absolute() or inc_str.startswith("/")
-                if not is_abs:
+                # `anchor` is the cross-platform test for "rooted". On Windows
+                # a Unix-style path like /opt/x has an anchor but is not
+                # `is_absolute()` (no drive), and str() has already turned its
+                # separators into backslashes, so neither of those alone works.
+                if not inc_path.anchor:
                     # Relative path (e.g., "include") — use ${includedir}
                     if not seen_includedir:
                         cflags_parts.append("-I${includedir}")

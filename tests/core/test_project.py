@@ -523,7 +523,9 @@ class TestGeneratePcFile:
 
         pc = project.generate_pc_file(target, version="1.0")
         content = pc.read_text()
-        assert "-I/opt/glm/include" in content
+        # Rendered through Path, so separators match the host (see
+        # test_pc_file_external_include_kept_absolute).
+        assert f"-I{Path('/opt/glm/include')}" in content
         assert "Requires:" not in content
 
     def test_pc_file_inlines_transitive_dependency(self, tmp_path):
@@ -542,7 +544,7 @@ class TestGeneratePcFile:
         target.public.link_libs.append(middle)
 
         pc = project.generate_pc_file(target, version="1.0")
-        assert "-I/opt/deep/include" in pc.read_text()
+        assert f"-I{Path('/opt/deep/include')}" in pc.read_text()
 
     def test_pc_file_names_sibling_library_dependency(self, tmp_path):
         """A sibling library in the same project is linked by name."""

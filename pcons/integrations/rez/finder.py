@@ -9,6 +9,7 @@ otherwise it short-circuits and lets later finders run.
 from __future__ import annotations
 
 import warnings
+from collections.abc import Sequence
 
 from pcons.integrations.rez.env import (
     RezLayout,
@@ -58,7 +59,7 @@ class RezFinder(BaseFinder):
         self,
         package_name: str,
         version: str | None = None,
-        components: list[str] | None = None,
+        components: Sequence[str] | None = None,
     ) -> PackageDescription | None:
         if components:
             warnings.warn(

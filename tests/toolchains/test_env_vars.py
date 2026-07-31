@@ -263,8 +263,10 @@ class TestCompilerFamily:
         monkeypatch.setattr(
             compiler_id,
             "_version_output",
-            lambda p: "g++-15 (Homebrew GCC 15.1.0) 15.1.0\n"
-            "Copyright (C) 2025 Free Software Foundation, Inc.",
+            lambda p: (
+                "g++-15 (Homebrew GCC 15.1.0) 15.1.0\n"
+                "Copyright (C) 2025 Free Software Foundation, Inc."
+            ),
         )
         assert compiler_id.compiler_family.__wrapped__("/x/g++-15") == "gcc"
 
