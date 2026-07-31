@@ -271,6 +271,7 @@ _TEST_SECTION_KEYS = {
     "variants",
     "timeout",
     "generator",
+    "standalone_subdirs",
 }
 _TEST_SECTION_PLATFORM_KEYS = {
     "expected_outputs",
@@ -871,6 +872,49 @@ def _run_generate(
 _variable_expr = re.compile(r"\$\{([^}]+)\}")
 
 
+def _check_standalone_subdirs(
+    work_dir: Path, subdirs: list[str], test_config: dict[str, Any]
+) -> None:
+    """Build each listed subdirectory on its own, as well as embedded.
+
+    A library's ``pcons-build.py`` is meant to work both ways: run directly,
+    and pulled in by a parent via ``add_subdirectory()``. Only the embedded
+    path gets exercised by the normal example run, so composability can break
+    without any test noticing. Listing the subdirectory in
+    ``test.standalone_subdirs`` builds it the other way too.
+    """
+    ninja_cmd_base = _find_ninja()
+    if ninja_cmd_base is None:
+        pytest.skip("ninja not available")
+
+    for subdir in subdirs:
+        sub_work = work_dir / subdir
+        assert (sub_work / "pcons-build.py").exists(), (
+            f"standalone_subdirs lists '{subdir}', which has no pcons-build.py"
+        )
+        sub_build = sub_work / "build-standalone"
+        _run_generate(sub_work, sub_build, "direct", "ninja", test_config)
+
+        assert (sub_build / "build.ninja").exists(), (
+            f"'{subdir}' generated no build.ninja when built standalone"
+        )
+        result = subprocess.run(
+            [*ninja_cmd_base, "-C", str(sub_build)],
+            cwd=sub_work,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            print(f"Standalone stdout:\n{result.stdout}")
+            print(f"Standalone stderr:\n{result.stderr}")
+            pytest.fail(
+                f"'{subdir}' builds as a subdirectory but fails standalone "
+                f"(exit {result.returncode}). Its script likely depends on "
+                f"being embedded, or on paths that only resolve one way."
+            )
+
+
 def _example_template_vars() -> dict[str, str]:
     """Platform-derived substitutions for ``${...}`` placeholders in test.toml."""
     from pcons.configure.platform import get_platform
@@ -1132,6 +1176,11 @@ def run_example(
             print(f"xcodebuild stdout:\n{result.stdout}")
             print(f"xcodebuild stderr:\n{result.stderr}")
             pytest.fail(f"xcodebuild failed with code {result.returncode}")
+
+    # Any library subdirectory that claims to build standalone must do so.
+    standalone_subdirs = test_config.get("standalone_subdirs", [])
+    if standalone_subdirs and generator == "ninja":
+        _check_standalone_subdirs(work_dir, standalone_subdirs, test_config)
 
     # Check expected outputs exist (auto-adapts for Windows if no override)
     expected_outputs = get_platform_value(

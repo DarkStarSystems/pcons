@@ -166,7 +166,7 @@ class TestXcodeGeneratorBuildSettings:
         project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path / "build")
         # Simulate a target that lives in a subdirectory
         target = Target("foo", target_type="static_library")
-        target._subdir = "libfoo"
+        target._subdir = Path("libfoo")
         target.public.include_dirs.append("include")  # relative to libfoo/
 
         gen = XcodeGenerator()

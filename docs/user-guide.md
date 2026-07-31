@@ -2048,6 +2048,59 @@ protoc_tool.setup(env)
 env.protoc.Compile("build/message.pb.cc", "proto/message.proto")
 ```
 
+### Subdirectories and Composable Libraries
+
+`add_subdirectory()` runs another directory's `pcons-build.py` as part of the
+current build, and every name assigned at module scope in that script comes back
+as an attribute:
+
+```python
+libfoo = add_subdirectory("libfoo")
+app.link(libfoo.libfoo)
+```
+
+The point of this is that a library builds either way — on its own during
+development, and pulled into a larger tree when something depends on it. Write
+the script the natural way and it works in both:
+
+```python
+project = Project("libfoo")
+
+if project.is_top_level:
+    env = project.Environment(toolchain="c")
+else:
+    env = project.default_environment   # the enclosing build's toolchain
+
+config = configure_file("config.h.in", project.build_dir / "config.h", vars)
+lib = project.StaticLibrary("foo", env, sources=["src/foo.c"])
+lib.public.include_dirs.append(project.build_dir)
+```
+
+`project.root_dir` and `project.build_dir` always mean *this* project's source
+directory and *this* project's build output, wherever it sits. Built directly,
+`build_dir` is `build/`; embedded one level down, it is `build/libfoo/`. Nothing
+in the script has to know which. The same holds several levels deep, and sibling
+subdirectories stay in separate build directories.
+
+Two things are worth knowing:
+
+- The subdirectory must live under the top-level project. Pointing
+  `add_subdirectory()` at a sibling checkout elsewhere on disk is an error.
+- Only the environment needs the `is_top_level` branch, because a standalone
+  build has no parent to take a toolchain from. `default_environment` searches
+  enclosing projects, so a library nested several levels down still finds it.
+
+To keep a library working both ways, list it in its example's `test.toml` and
+the test suite will build it standalone as well as embedded:
+
+```toml
+[test]
+standalone_subdirs = ["libfoo", "libfoo/libbar"]
+```
+
+See `examples/13_subdirs` for a worked example, including a library nested two
+levels down.
+
 ### Multi-Platform Builds
 
 Handle platform differences in your build script:

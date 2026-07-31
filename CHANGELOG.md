@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.23.2] - 2026-07-31
+## [0.24.0] - 2026-07-31
+
+### Changed
+
+- **A sub-project's `root_dir` and `build_dir` now refer to its own directories**
+  rather than the top-level project's. A library's `pcons-build.py` can read
+  `project.root_dir` for its sources and `project.build_dir` for generated files
+  and get the right answers whether it is run directly or pulled in with
+  `add_subdirectory()` — no separate vocabulary for the embedded case. Node paths
+  remain anchored at the top-level root, so generators are unaffected.
+- `default_environment` falls back to the enclosing project's when a sub-project
+  registers none, so a library nested several levels down still finds the
+  toolchain the top-level build set up.
+- Examples may declare `test.standalone_subdirs`, and the suite then builds those
+  subdirectories on their own as well as embedded. `examples/13_subdirs` covers
+  both, including a library nested two levels down.
 
 ### Fixed
 
@@ -1069,8 +1084,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.23.2...HEAD
-[0.23.2]: https://github.com/DarkStarSystems/pcons/compare/v0.23.1...v0.23.2
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/DarkStarSystems/pcons/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/DarkStarSystems/pcons/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/DarkStarSystems/pcons/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/DarkStarSystems/pcons/compare/v0.21.0...v0.22.0

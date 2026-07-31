@@ -194,3 +194,88 @@ class TestSubprojectNodePaths:
         node = test_project.node(test_project.root_dir / "src/main.c")
 
         assert node.path == Path("src/main.c")
+
+
+class TestSubprojectDirectories:
+    """root_dir and build_dir mean "this project's own" in a subproject.
+
+    A library script reads project.root_dir / project.build_dir to find its
+    own sources and to place generated files. If those pointed at the
+    top-level project instead, a script that works standalone would silently
+    read and write the wrong directories once embedded.
+    """
+
+    REPORTER = (
+        "from pcons.core.project import Project\n"
+        "project = Project('{name}')\n"
+        "root = project.root_dir\n"
+        "build = project.build_dir\n"
+    )
+
+    def test_subproject_dirs_are_its_own(self, test_project: Project) -> None:
+        _make_subdir(test_project, "child", self.REPORTER.format(name="child"))
+
+        ns = add_subdirectory("child")
+
+        assert ns.root == test_project.root_dir / "child"
+        assert ns.build == test_project.build_dir / "child"
+
+    def test_parallel_subdirs_stay_separate(self, test_project: Project) -> None:
+        """Sibling subprojects must not bleed into each other's directories."""
+        _make_subdir(test_project, "alpha", self.REPORTER.format(name="alpha"))
+        _make_subdir(test_project, "beta", self.REPORTER.format(name="beta"))
+
+        alpha = add_subdirectory("alpha")
+        beta = add_subdirectory("beta")
+
+        assert alpha.root == test_project.root_dir / "alpha"
+        assert beta.root == test_project.root_dir / "beta"
+        assert alpha.build == test_project.build_dir / "alpha"
+        assert beta.build == test_project.build_dir / "beta"
+        assert alpha.build != beta.build
+
+    def test_two_levels_compose(self, test_project: Project) -> None:
+        """A subproject of a subproject accumulates both offsets."""
+        _make_subdir(test_project, "a/aa", self.REPORTER.format(name="aa"))
+        _make_subdir(
+            test_project,
+            "a",
+            "from pcons.core.project import Project\n"
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "project = Project('a')\n"
+            "root = project.root_dir\n"
+            "build = project.build_dir\n"
+            "inner = add_subdirectory('aa')\n",
+        )
+
+        ns = add_subdirectory("a")
+
+        assert ns.root == test_project.root_dir / "a"
+        assert ns.build == test_project.build_dir / "a"
+        assert ns.inner.root == test_project.root_dir / "a" / "aa"
+        assert ns.inner.build == test_project.build_dir / "a" / "aa"
+
+    def test_top_level_dirs_unchanged(self, test_project: Project) -> None:
+        """The top-level project keeps plain root/build directories."""
+        assert test_project.build_dir == Path("build")
+        assert test_project._node_offset.parts == ()
+
+    def test_parallel_subdir_targets_get_distinct_paths(
+        self, test_project: Project
+    ) -> None:
+        """Same-named sources in sibling subprojects stay distinct nodes."""
+        test_project.Environment(toolchain="c")
+        script = (
+            "from pcons.core.project import Project\n"
+            "project = Project('{name}')\n"
+            "env = project.parent.default_environment\n"
+            "lib = project.StaticLibrary('{name}', env, sources=['src/x.c'])\n"
+        )
+        _make_subdir(test_project, "alpha", script.format(name="alpha"))
+        _make_subdir(test_project, "beta", script.format(name="beta"))
+
+        alpha = add_subdirectory("alpha")
+        beta = add_subdirectory("beta")
+
+        assert alpha.lib.sources[0].path == Path("alpha/src/x.c")
+        assert beta.lib.sources[0].path == Path("beta/src/x.c")

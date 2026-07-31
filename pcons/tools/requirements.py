@@ -156,14 +156,23 @@ def _resolve_and_add_includes_for(
     """Resolve include directories in requirements and return a new UsageRequirements."""
     result = reqs.clone()
 
+    top = owner.project.top_level()
+    build_parts = () if top.build_dir.is_absolute() else top.build_dir.parts
+
     def _update_include(inc: str | Path) -> Path:
         p = Path(inc) if not isinstance(inc, Path) else inc
-        if owner._subdir and not p.is_absolute():
-            p = Path(owner._subdir) / p
+        # A relative include dir is relative to the owner's source directory,
+        # so it picks up the subproject offset — unless it already carries the
+        # build-dir prefix, which makes it a generated-header directory that
+        # is anchored at the build tree instead (e.g. project.build_dir).
+        is_build_relative = bool(build_parts) and p.parts[: len(build_parts)] == (
+            build_parts
+        )
+        if owner._subdir.parts and not p.is_absolute() and not is_build_relative:
+            p = owner._subdir / p
         # Canonicalize relative to the top-level project's resolver so
         # generators (which use the top-level resolver) see consistent
         # project-relative paths for includes coming from subprojects.
-        top = owner.project.top_level()
         return top.path_resolver.canonicalize(p)
 
     result.include_dirs = [_update_include(inc) for inc in reqs.include_dirs]

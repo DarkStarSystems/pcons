@@ -88,6 +88,7 @@ class Project(_ProjectBuilders):
         "_parent",
         "_children",
         "_subdir",
+        "_offset",
         "__generated",
         "__weakref__",  # allow weak references (e.g. per-project caches)
     )
@@ -159,6 +160,9 @@ class Project(_ProjectBuilders):
         self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
         self.defined_at = defined_at or get_caller_location()
         self._subdir = None
+        # Offset from the top-level project's root to this project's root.
+        # Empty for the top-level project; node paths are relative to it.
+        self._offset = Path()
         self._children: list[Project] = []
         self.__generated = False
 
@@ -183,14 +187,20 @@ class Project(_ProjectBuilders):
                     stacklevel=2,
                 )
             self._parent._children.append(self)
-            self.build_dir = self._parent.build_dir
-            # If the child project's root_dir is inside the top-level project,
-            # normalize it so that the child's `root_dir` becomes the top-level
-            # root and `_subdir` holds the relative path under the top-level.
-            top_root = Project.top_level().root_dir
-            rel = self.root_dir.relative_to(top_root)
-            self.root_dir = top_root
-            self._subdir = str(rel)
+            # root_dir and build_dir stay this project's own, so a script
+            # written to build standalone reads the right directories when it
+            # is embedded. The offset from the top-level root is recorded
+            # separately; node paths are anchored there (see _offset).
+            top = Project.top_level()
+            try:
+                self._offset = self.root_dir.relative_to(top.root_dir)
+            except ValueError as exc:
+                raise ValueError(
+                    f"Sub-project '{self.name}' at {self.root_dir} is not inside "
+                    f"the top-level project at {top.root_dir}. add_subdirectory() "
+                    f"only works for directories under the top-level project."
+                ) from exc
+            self.build_dir = top.build_dir / self._offset
         else:
             if build_dir is None:
                 build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
@@ -206,7 +216,10 @@ class Project(_ProjectBuilders):
                     pass  # Out-of-tree build — keep absolute
             self.build_dir = bd
 
-        self._path_resolver = PathResolver(self.root_dir, self.build_dir)
+        # Anchored at the top-level project, which is where node paths are
+        # rooted; `path_resolver` narrows it to this project's directory.
+        top = Project.top_level() if self._parent else self
+        self._path_resolver = PathResolver(top.root_dir, top.build_dir)
 
         Project.__current = self
         if Project.__top_level is None:
@@ -248,6 +261,19 @@ class Project(_ProjectBuilders):
             return self.root_dir / self._subdir
         return self.root_dir
 
+    @property
+    def _node_offset(self) -> Path:
+        """Where nodes created here sit relative to the top-level root.
+
+        Node paths are stored relative to the top-level project's root, so
+        this is the prefix that turns a path expressed relative to
+        ``current_dir`` into that canonical form. It combines this project's
+        own offset with any directory entered via ``_enter_subdir``.
+        """
+        if self._subdir:
+            return self._offset / self._subdir
+        return self._offset
+
     @contextmanager
     def _enter_subdir(self, subdir: str | Path) -> Generator[None, None, None]:
         """Context manager for entering a subdirectory in the project."""
@@ -271,11 +297,11 @@ class Project(_ProjectBuilders):
 
     @property
     def path_resolver(self) -> PathResolver:
-        """Get the path resolver for this project."""
-        if self._subdir:
-            return self._path_resolver.subdir(self._subdir)
-        else:
-            return self._path_resolver
+        """Get the path resolver for this project's current directory."""
+        offset = self._node_offset
+        if offset.parts:
+            return self._path_resolver.subdir(offset)
+        return self._path_resolver
 
     def Environment(
         self,
@@ -320,14 +346,13 @@ class Project(_ProjectBuilders):
         Uses pure path arithmetic (no filesystem access).
 
         Node paths are anchored at the *top-level* root, which is what
-        generators resolve them against. In a subproject ``root_dir`` is
-        already the top-level root, with the offset held in ``_subdir``;
-        anchoring here at ``current_dir`` instead would drop that offset and
-        emit a path missing the subproject directory.
+        generators resolve them against — not at this project's own root,
+        which for a subproject would drop the subproject directory.
         """
+        top_root = Project.top_level().root_dir if self._parent else self.root_dir
         if path.is_absolute():
             try:
-                return path.relative_to(self.root_dir)
+                return path.relative_to(top_root)
             except ValueError:
                 return path  # External path
         return Path(os.path.normpath(path))
@@ -465,12 +490,23 @@ class Project(_ProjectBuilders):
     def default_environment(self) -> Env:
         """Get the default environment (first one registered).
 
+        A sub-project that registers no environment of its own inherits the
+        enclosing project's, so a library nested several levels down still
+        finds the toolchain the top-level build set up.
+
         Raises:
-            ValueError: If no environments have been registered.
+            ValueError: If no environment is registered here or in any
+                enclosing project.
         """
-        if not self._environments:
-            raise ValueError("No environments have been registered in this project.")
-        return self._environments[0]
+        project: Project | None = self
+        while project is not None:
+            if project._environments:
+                return project._environments[0]
+            project = project._parent
+        raise ValueError(
+            f"No environments have been registered in project '{self.name}' "
+            f"or any enclosing project."
+        )
 
     def Alias(
         self, name: str, *targets: Target | Node | list[Target | Node]

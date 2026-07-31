@@ -384,7 +384,9 @@ class Target:
         project = Project.current()
 
         self.__project = project
-        self._subdir = project._subdir
+        # Where this target's paths sit relative to the top-level root, which
+        # is the form node paths are stored in.
+        self._subdir = project._node_offset
 
         if self._env is None:
             # default to the last environment in the project, if available
@@ -441,22 +443,30 @@ class Target:
 
     @property
     def build_dir(self) -> Path:
-        if self._subdir:
-            return self.project.build_dir / self._subdir
-        return self.project.build_dir
+        """This target's build directory.
+
+        ``_subdir`` is the offset from the top-level root, so these anchor
+        there rather than at the owning project's own directories (which
+        already include that offset).
+        """
+        from pcons.core.project import Project
+
+        top = Project.top_level()
+        return top.build_dir / self._subdir if self._subdir.parts else top.build_dir
 
     @property
     def source_dir(self) -> Path:
-        if self._subdir:
-            return self.project.root_dir / self._subdir
-        return self.project.root_dir
+        """This target's source directory."""
+        from pcons.core.project import Project
+
+        top = Project.top_level()
+        return top.root_dir / self._subdir if self._subdir.parts else top.root_dir
 
     @property
     def path_resolver(self) -> PathResolver:
-        """Get the Path resolver for this target's project."""
-        if self._subdir:
-            return self.project.path_resolver.subdir(self._subdir)
-        return self.project.path_resolver
+        """Get the Path resolver for this target's directory."""
+        resolver = self.project._path_resolver  # top-anchored
+        return resolver.subdir(self._subdir) if self._subdir.parts else resolver
 
     @property
     def nodes(self) -> list[FileNode]:

@@ -2,6 +2,10 @@
 
 [test]
 description = "Nested subdirectories with add_subdirectory()"
+# Both libraries claim to build either way. Build each on its own as well as
+# embedded, so that claim stays true. libfoo/libbar also covers the two-level
+# case: it sits one level down standalone and two levels down from here.
+standalone_subdirs = ["libfoo", "libfoo/libbar"]
 # Build the complete project (no build_targets means build all defaults)
 
 # Check that all expected files are built. Object files live under
@@ -9,6 +13,8 @@ description = "Nested subdirectories with add_subdirectory()"
 # subdirectory (build/<subdir>/obj.<target_name>/...).
 expected_outputs = [
     "build/libfoo/obj.foo/libfoo/src/foo.c.o",
+    "build/libfoo/libbar/obj.bar/libfoo/libbar/src/bar.c.o",
+    "build/libfoo/libbar/libbar.a",
     "build/app/obj.app/app/src/main.c.o",
     "build/app/app",
 ]
