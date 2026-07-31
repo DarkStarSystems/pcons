@@ -328,19 +328,10 @@
       .features { grid-template-columns: 1fr; }
     }
   </style>
-  <!-- Matomo analytics; cookie-less -->
-  <script>
-    var _paq = window._paq = window._paq || [];
-    _paq.push(['disableCookies']);
-    _paq.push(['enableHeartBeatTimer', 15]);
-    _paq.push(['trackPageView']);
-    _paq.push(['enableLinkTracking']);
-    _paq.push(['setTrackerUrl', 'https://analytics.oberbrunner.com/matomo.php']);
-    _paq.push(['setSiteId', '1']);
-    var mg = document.createElement('script');
-    mg.async = true;
-    mg.src = 'https://analytics.oberbrunner.com/matomo.js';
-    document.head.appendChild(mg);
+  <!-- featherstat analytics; cookie-less -->
+  <script type="module">
+    import { init } from 'https://analytics.oberbrunner.com/tracker.js';
+    init({ site: 1, endpoint: 'https://analytics.oberbrunner.com/api/collect' });
   </script>
 </head>
 <body>
