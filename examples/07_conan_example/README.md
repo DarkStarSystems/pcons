@@ -13,7 +13,7 @@ def apply_package_to_env(pkg, env):
     # Compile settings
     for inc_dir in pkg.include_dirs:
         env.cxx.includes.append(str(inc_dir))
-    for define in pkg.defines:          # <-- Important! Don't forget defines
+    for define in pkg.defines:  # <-- Important! Don't forget defines
         env.cxx.defines.append(define)
     for flag in pkg.compile_flags:
         env.cxx.flags.append(flag)
