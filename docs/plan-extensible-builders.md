@@ -17,10 +17,11 @@ This plan redesigns pcons to treat all builders and toolchains as first-class ad
 ```python
 @dataclass
 class BuilderRegistration:
-    name: str                    # e.g., "Program", "Install"
-    builder_class: type          # The builder class
-    target_type: str             # e.g., "program"
-    factory_class: type | None   # NodeFactory class for resolution
+    name: str  # e.g., "Program", "Install"
+    builder_class: type  # The builder class
+    target_type: str  # e.g., "program"
+    factory_class: type | None  # NodeFactory class for resolution
+
 
 class BuilderRegistry:
     _builders: dict[str, BuilderRegistration] = {}
@@ -31,11 +32,13 @@ class BuilderRegistry:
     @classmethod
     def get(cls, name) -> BuilderRegistration | None: ...
 
+
 # Decorator for registration
 def builder(name: str, **options):
     def decorator(cls):
         BuilderRegistry.register(name, builder_class=cls, **options)
         return cls
+
     return decorator
 ```
 
@@ -184,8 +187,10 @@ project.Install("dist/bin", [app])
 
 # Loading an expansion pack
 import pcons_gamedev
+
 pcons_gamedev.register(project)
 shaders = project.CompileShaders("shaders/", output="build/shaders")
+
 
 # Creating a custom builder
 @builder("InstallSymlink", target_type="interface")
@@ -196,6 +201,7 @@ class InstallSymlinkBuilder:
         target._builder_name = "InstallSymlink"
         target._builder_data = {"dest": dest, "source": source}
         return target
+
 
 # Immediately available
 project.InstallSymlink("dist/latest", app)

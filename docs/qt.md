@@ -14,9 +14,12 @@ env.cxx.set_standard(17)
 
 qt = find_qt(project, env, modules=["Widgets", "Network"])
 
-app = project.QtProgram("myapp", env,
+app = project.QtProgram(
+    "myapp",
+    env,
     sources=["main.cpp", "mainwindow.cpp", "mainwindow.ui", "icons.qrc"],
-    link=[qt.Widgets, qt.Network])
+    link=[qt.Widgets, qt.Network],
+)
 ```
 
 That's the whole build. `.ui` and `.qrc` files go straight into
@@ -44,15 +47,17 @@ changes), and uic is a pure `input → output` rule.
 ## Discovery: find_qt()
 
 ```python
-qt = find_qt(project, env,
-    modules=["Widgets"],          # short names; Core is always included
-    version=">=6.4",              # optional constraint
+qt = find_qt(
+    project,
+    env,
+    modules=["Widgets"],  # short names; Core is always included
+    version=">=6.4",  # optional constraint
     qt_root="/opt/Qt/6.7.0/gcc_64",  # optional; also $PCONS_QT_ROOT
-    private_headers=["Core"],     # opt-in to QtCore/x.y.z/private
+    private_headers=["Core"],  # opt-in to QtCore/x.y.z/private
 )
 
-qt.version        # "6.9.3"
-qt.Widgets        # ImportedTarget — use in link=[...] or app.link(...)
+qt.version  # "6.9.3"
+qt.Widgets  # ImportedTarget — use in link=[...] or app.link(...)
 qt.tool_path("lupdate")
 ```
 
@@ -97,8 +102,9 @@ the include is missing.
 ## Resources without .qrc XML
 
 ```python
-res = project.QtResources("assets", env,
-    files=["images/*.png", "data/config.json"], prefix="/")
+res = project.QtResources(
+    "assets", env, files=["images/*.png", "data/config.json"], prefix="/"
+)
 app.link(res)
 ```
 
@@ -117,13 +123,12 @@ The Meson-style explicit API, for when you want full control (this is
 exactly what QtProgram automates):
 
 ```python
-moc_cpp = env.qt.Moc(sources="mainwindow.h")     # → moc_mainwindow.cpp
-dot_moc = env.qt.Moc(sources="widget.cpp")       # → widget.moc
-ui_hdr  = env.qt.Uic(sources="mainwindow.ui")    # → ui_mainwindow.h
+moc_cpp = env.qt.Moc(sources="mainwindow.h")  # → moc_mainwindow.cpp
+dot_moc = env.qt.Moc(sources="widget.cpp")  # → widget.moc
+ui_hdr = env.qt.Uic(sources="mainwindow.ui")  # → ui_mainwindow.h
 res_cpp = env.qt.Rcc(sources="icons.qrc", name="icons")
 
-app = project.Program("myapp", env,
-    sources=["main.cpp", moc_cpp[0], res_cpp[0]])
+app = project.Program("myapp", env, sources=["main.cpp", moc_cpp[0], res_cpp[0]])
 app.link(qt.Widgets)
 app.depends(ui_hdr[0])
 env.cxx.includes.append(str(project.build_dir / "qt.gen"))
@@ -193,12 +198,15 @@ module the engine loads by URI:
 ```python
 qt = find_qt(project, env, modules=["Qml"])
 
-ui = project.QtQmlModule("app_ui", env,
+ui = project.QtQmlModule(
+    "app_ui",
+    env,
     uri="com.example.app",
     version="1.0",
     qml_files=["qml/Main.qml"],
-    sources=["src/backend.cpp"],     # classes marked QML_ELEMENT
-    link=[qt.Qml])
+    sources=["src/backend.cpp"],  # classes marked QML_ELEMENT
+    link=[qt.Qml],
+)
 
 app = project.QtProgram("app", env, sources=["src/main.cpp"], link=[qt.Qml])
 app.link(ui)
@@ -224,9 +232,12 @@ identical, slightly slower startup) and separate QML plugin libraries.
 ## Translations
 
 ```python
-tr = project.QtTranslations("i18n", env,
+tr = project.QtTranslations(
+    "i18n",
+    env,
     ts_files=["i18n/app_de.ts", "i18n/app_fr.ts"],
-    lupdate_sources=["src/main.cpp", "src/mainwindow.cpp"])
+    lupdate_sources=["src/main.cpp", "src/mainwindow.cpp"],
+)
 app.link(tr)
 ```
 
@@ -246,7 +257,7 @@ False`, available for any utility target.)
 ## Deployment
 
 ```python
-project.QtDeploy("deploy", env, app=app, bundle="MyApp.app")   # macOS
+project.QtDeploy("deploy", env, app=app, bundle="MyApp.app")  # macOS
 project.QtDeploy("deploy", env, app=app, deploy_dir="deploy")  # Windows
 ```
 
@@ -269,16 +280,27 @@ Deployed Qt apps compose with the installer generators in
 
 ```python
 # macOS: .app -> macdeployqt -> .pkg
-pkg = installers_macos.create_pkg(project, env,
-    name="MyApp", version="1.0.0", identifier="com.example.myapp",
-    sources=["build/MyApp.app"])
+pkg = installers_macos.create_pkg(
+    project,
+    env,
+    name="MyApp",
+    version="1.0.0",
+    identifier="com.example.myapp",
+    sources=["build/MyApp.app"],
+)
 pkg.depends(deploy)
 
 # Windows: windeployqt dir -> .msix (the directory stages as a
 # subfolder, so the executable path includes it)
-msix = installers_windows.create_msix(project, env,
-    name="MyApp", version="1.0.0.0", publisher="CN=Example",
-    sources=["build/deploy"], executable="deploy\\myapp.exe")
+msix = installers_windows.create_msix(
+    project,
+    env,
+    name="MyApp",
+    version="1.0.0.0",
+    publisher="CN=Example",
+    sources=["build/deploy"],
+    executable="deploy\\myapp.exe",
+)
 msix.depends(deploy)
 ```
 

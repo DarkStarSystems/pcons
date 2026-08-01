@@ -117,12 +117,12 @@ from pcons import Configure
 config = Configure()
 
 # Find a C++ toolchain
-cxx = config.find_toolchain('cxx', candidates=['gcc', 'clang', 'msvc'])
+cxx = config.find_toolchain("cxx", candidates=["gcc", "clang", "msvc"])
 
 # Probe features
-cxx.check_flag('-std=c++20')
-cxx.check_header('optional')
-cxx.check_define('__cpp_concepts')
+cxx.check_flag("-std=c++20")
+cxx.check_header("optional")
+cxx.check_define("__cpp_concepts")
 
 # Save configuration
 config.save()
@@ -150,7 +150,7 @@ pcons generate
 from pcons import Project, load_config
 
 config = load_config()  # Fast: loads cached results
-project = Project('myapp', config)
+project = Project("myapp", config)
 
 env = project.Environment(toolchain=config.cxx)
 # ... define builds ...
@@ -211,7 +211,7 @@ A directory target is up-to-date when **all specified files within it** are up-t
 
 ```python
 # install_dir depends on all files installed into it
-install_dir = env.InstallDir('dist/lib', [lib1, lib2, lib3])
+install_dir = env.InstallDir("dist/lib", [lib1, lib2, lib3])
 # install_dir is up-to-date iff lib1, lib2, lib3 are all installed
 ```
 
@@ -226,8 +226,8 @@ A directory source represents **the directory and all files within it** that are
 
 ```python
 # asset_dir as source - depends on all declared assets within
-assets = env.Glob('assets/*.png')  # Explicitly declared files
-packed = env.PackAssets('game.pak', asset_dir)
+assets = env.Glob("assets/*.png")  # Explicitly declared files
+packed = env.PackAssets("game.pak", asset_dir)
 # Rebuilds if any declared asset changes, not if random files appear
 ```
 
@@ -237,7 +237,7 @@ This avoids the SCons problem where touching an unrelated file in a source direc
 For cases where you only need the directory to exist (e.g., output directories), use order-only dependencies:
 
 ```python
-obj = env.cc.Object('build/obj/foo.o', 'foo.c')
+obj = env.cc.Object("build/obj/foo.o", "foo.c")
 # Generator emits: build build/obj/foo.o: cc foo.c || build/obj
 ```
 
@@ -247,24 +247,24 @@ obj = env.cc.Object('build/obj/foo.o', 'foo.c')
 Environments provide **namespaced configuration** for each tool, avoiding the SCons problem of flat variable collisions.
 
 ```python
-env = project.Environment(toolchain='gcc')
+env = project.Environment(toolchain="gcc")
 
 # Tool-specific namespaces
-env.cc.cmd = 'gcc'
-env.cc.flags = ['-Wall', '-O2']
-env.cc.includes = ['/usr/include']
-env.cc.defines = ['NDEBUG']
+env.cc.cmd = "gcc"
+env.cc.flags = ["-Wall", "-O2"]
+env.cc.includes = ["/usr/include"]
+env.cc.defines = ["NDEBUG"]
 
-env.cxx.cmd = 'g++'
-env.cxx.flags = ['-Wall', '-O2', '-std=c++20']
-env.cxx.includes = ['/usr/include']
+env.cxx.cmd = "g++"
+env.cxx.flags = ["-Wall", "-O2", "-std=c++20"]
+env.cxx.includes = ["/usr/include"]
 
-env.link.cmd = 'g++'
-env.link.flags = ['-L/usr/lib']
-env.link.libs = ['m', 'pthread']
+env.link.cmd = "g++"
+env.link.flags = ["-L/usr/lib"]
+env.link.libs = ["m", "pthread"]
 
-env.ar.cmd = 'ar'
-env.ar.flags = ['rcs']
+env.ar.cmd = "ar"
+env.ar.flags = ["rcs"]
 ```
 
 **Why namespaces matter:**
@@ -289,8 +289,8 @@ env.tarfile.compression # Compression for building a tar file (e.g. "gzip")
 
 **Cross-tool variables** live at the environment level:
 ```python
-env.build_dir = 'build'
-env.variant = 'release'
+env.build_dir = "build"
+env.variant = "release"
 ```
 
 ### Variable Substitution (Always Recursive)
@@ -299,14 +299,23 @@ env.variant = 'release'
 Variable expansion is **always recursive**. This is essential for building complex command lines.
 
 ```python
-env.cc.cmd = 'gcc'
-env.cc.flags = ['-Wall', '$cc.opt_flag']
-env.cc.opt_flag = '-O2'
-env.cc.include_flags = ['-I$inc' for inc in env.cc.includes]
-env.cc.define_flags = ['-D$d' for d in env.cc.defines]
+env.cc.cmd = "gcc"
+env.cc.flags = ["-Wall", "$cc.opt_flag"]
+env.cc.opt_flag = "-O2"
+env.cc.include_flags = ["-I$inc" for inc in env.cc.includes]
+env.cc.define_flags = ["-D$d" for d in env.cc.defines]
 
 # Command line template - references other variables
-env.cc.cmdline = ['$cc.cmd', '$cc.flags', '$cc.include_flags', '$cc.define_flags', '-c', '-o', '$out', '$in']
+env.cc.cmdline = [
+    "$cc.cmd",
+    "$cc.flags",
+    "$cc.include_flags",
+    "$cc.define_flags",
+    "-c",
+    "-o",
+    "$out",
+    "$in",
+]
 
 # Expansion happens recursively:
 # 1. $cc.cmdline expands, revealing $cc.cmd, $cc.flags, etc.
@@ -336,7 +345,7 @@ A Tool knows how to perform a specific type of transformation. Tools are **names
 
 ```python
 class Tool(Protocol):
-    name: str           # e.g., 'cc', 'cxx', 'fortran', 'ar', 'link'
+    name: str  # e.g., 'cc', 'cxx', 'fortran', 'ar', 'link'
 
     def configure(self, config: Configure) -> ToolConfig:
         """Detect and configure this tool. Called during configure phase."""
@@ -359,10 +368,10 @@ The "Object builder" problem in SCons: multiple tools produce `.o` files (C, C++
 
 ```python
 # Explicit tool selection
-c_obj = env.cc.Object('foo.o', 'foo.c')        # C compiler
-cxx_obj = env.cxx.Object('bar.o', 'bar.cpp')   # C++ compiler
-f_obj = env.fortran.Object('baz.o', 'baz.f90') # Fortran compiler
-cuda_obj = env.cuda.Object('qux.o', 'qux.cu')  # CUDA compiler
+c_obj = env.cc.Object("foo.o", "foo.c")  # C compiler
+cxx_obj = env.cxx.Object("bar.o", "bar.cpp")  # C++ compiler
+f_obj = env.fortran.Object("baz.o", "baz.f90")  # Fortran compiler
+cuda_obj = env.cuda.Object("qux.o", "qux.cu")  # CUDA compiler
 ```
 
 **Convenience with explicit defaults:**
@@ -371,14 +380,14 @@ cuda_obj = env.cuda.Object('qux.o', 'qux.cu')  # CUDA compiler
 # env.Object() can exist as a dispatcher based on suffix
 # but the mapping is explicit and user-configurable
 env.object_builders = {
-    '.c': env.cc,
-    '.cpp': env.cxx,
-    '.cxx': env.cxx,
-    '.f90': env.fortran,
-    '.cu': env.cuda,
+    ".c": env.cc,
+    ".cpp": env.cxx,
+    ".cxx": env.cxx,
+    ".f90": env.fortran,
+    ".cu": env.cuda,
 }
 
-obj = env.Object('foo.o', 'foo.cpp')  # Dispatches to env.cxx.Object
+obj = env.Object("foo.o", "foo.cpp")  # Dispatches to env.cxx.Object
 ```
 
 ### Toolchain
@@ -413,8 +422,8 @@ class Toolchain:
 
 ```python
 # configure.py
-gcc = config.find_toolchain('gcc')
-llvm = config.find_toolchain('llvm')
+gcc = config.find_toolchain("gcc")
+llvm = config.find_toolchain("llvm")
 
 # pcons-build.py
 env_gcc = project.Environment(toolchain=gcc)
@@ -432,12 +441,12 @@ All builders in pcons register through a unified `BuilderRegistry`. This ensures
 ```python
 @dataclass
 class BuilderRegistration:
-    name: str                      # e.g., "Program", "Install"
-    create_target: Callable        # Function to create a Target
-    target_type: str        # e.g., "program"
-    factory_class: type | None     # Optional NodeFactory for resolution
-    requires_env: bool             # Whether builder needs an Environment
-    description: str               # Human-readable description
+    name: str  # e.g., "Program", "Install"
+    create_target: Callable  # Function to create a Target
+    target_type: str  # e.g., "program"
+    factory_class: type | None  # Optional NodeFactory for resolution
+    requires_env: bool  # Whether builder needs an Environment
+    description: str  # Human-readable description
 ```
 
 2. **BuilderRegistry** - Global registry:
@@ -465,6 +474,7 @@ class InstallSymlinkBuilder:
         project.add_target(target)
         return target
 
+
 # Immediately available on any Project:
 project.InstallSymlink("dist/latest", app)
 ```
@@ -487,6 +497,7 @@ project.InstallSymlink("dist/latest", app)
 from pcons.core.builder_registry import builder
 from pcons.core.target import Target
 
+
 @builder("CompileShaders", target_type="command", requires_env=True)
 class ShaderBuilder:
     @staticmethod
@@ -499,6 +510,7 @@ class ShaderBuilder:
         # ... set up build info ...
         project.add_target(target)
         return target
+
 
 # Now available:
 project.CompileShaders(env, output="shaders.pak", sources=["*.glsl"])
@@ -543,12 +555,12 @@ When linking, the linker must match the "strongest" language used in the objects
 **Solution:** Objects carry their source language, which propagates to link decisions.
 
 ```python
-c_obj = env.cc.Object('a.o', 'a.c')       # c_obj.language = 'c'
-cxx_obj = env.cxx.Object('b.o', 'b.cpp')  # cxx_obj.language = 'cxx'
+c_obj = env.cc.Object("a.o", "a.c")  # c_obj.language = 'c'
+cxx_obj = env.cxx.Object("b.o", "b.cpp")  # cxx_obj.language = 'cxx'
 
 # Program builder examines all objects' languages
 # Finds 'cxx', so uses C++ linker
-exe = env.Program('myapp', [c_obj, cxx_obj])
+exe = env.Program("myapp", [c_obj, cxx_obj])
 # Automatically: uses g++ to link, adds -lstdc++ if needed
 ```
 
@@ -557,9 +569,9 @@ exe = env.Program('myapp', [c_obj, cxx_obj])
 # Higher = stronger, wins link-time tool selection
 # Default (BaseToolchain.DEFAULT_LANGUAGE_PRIORITY):
 language_strength = {
-    'c': 1,
-    'cxx': 2,
-    'cuda': 4,       # CUDA requires nvcc link step
+    "c": 1,
+    "cxx": 2,
+    "cuda": 4,  # CUDA requires nvcc link step
 }
 # GfortranToolchain adds: 'fortran': 3
 # Keeping fortran out of the default prevents C/C++ toolchains from
@@ -576,8 +588,8 @@ A Target represents a high-level build artifact with usage requirements that pro
 ```python
 class Target:
     name: str
-    nodes: list[Node]              # The actual files produced
-    required_languages: set[str]   # Languages used (for linker selection)
+    nodes: list[Node]  # The actual files produced
+    required_languages: set[str]  # Languages used (for linker selection)
 
     # Usage requirements (propagate to dependents transitively)
     public_include_dirs: list[DirNode]
@@ -595,24 +607,21 @@ class Target:
 
 ```python
 # libbase has public includes
-libbase = env.StaticLibrary('base', base_sources,
-    public_include_dirs=['include/base'])
+libbase = env.StaticLibrary("base", base_sources, public_include_dirs=["include/base"])
 
 # libfoo uses libbase, and exposes its own includes
-libfoo = env.StaticLibrary('foo', foo_sources,
-    public_include_dirs=['include/foo'],
-    private_link_libs=[libbase])  # libbase is private impl detail
+libfoo = env.StaticLibrary(
+    "foo", foo_sources, public_include_dirs=["include/foo"], private_link_libs=[libbase]
+)  # libbase is private impl detail
 
 # libbar uses libfoo publicly
-libbar = env.StaticLibrary('bar', bar_sources,
-    public_link_libs=[libfoo])
+libbar = env.StaticLibrary("bar", bar_sources, public_link_libs=[libfoo])
 
 # app links libbar, transitively gets:
 # - libbar's public includes
 # - libfoo's public includes (via libbar)
 # - libbase is NOT exposed (was private to libfoo)
-app = env.Program('app', ['main.cpp'],
-    link_libs=[libbar])
+app = env.Program("app", ["main.cpp"], link_libs=[libbar])
 ```
 
 ### Target Resolution and Lazy Node Creation
@@ -730,12 +739,12 @@ This makes build scripts declarative - the order of declarations doesn't matter.
    ```python
    @dataclass
    class CompileLinkContext:
-       includes: list[str]      # Include directories (no prefix)
-       defines: list[str]       # Preprocessor definitions (no prefix)
-       flags: list[str]         # Additional compiler flags
-       link_flags: list[str]    # Linker flags (placed before objects)
-       libs: list[str]          # Libraries to link (placed after objects)
-       libdirs: list[str]       # Library search directories (no prefix)
+       includes: list[str]  # Include directories (no prefix)
+       defines: list[str]  # Preprocessor definitions (no prefix)
+       flags: list[str]  # Additional compiler flags
+       link_flags: list[str]  # Linker flags (placed before objects)
+       libs: list[str]  # Libraries to link (placed after objects)
+       libdirs: list[str]  # Library search directories (no prefix)
 
        # Prefixes (customizable per toolchain)
        include_prefix: str = "-I"
@@ -883,12 +892,15 @@ across all output formats.
 @dataclass
 class DocumentContext:
     """Context for document generation (hypothetical)."""
+
     input_format: str = "markdown"
     output_format: str = "pdf"
     template: str | None = None
 
     def get_env_overrides(self) -> dict[str, object]:
-        result = {"format": [f"--from={self.input_format}", f"--to={self.output_format}"]}
+        result = {
+            "format": [f"--from={self.input_format}", f"--to={self.output_format}"]
+        }
         if self.template:
             result["template"] = [f"--template={self.template}"]
         return result
@@ -1071,13 +1083,13 @@ The top-level container for the entire build specification. The Project serves a
 ```python
 class Project:
     name: str
-    config: Config               # Loaded from configure phase
+    config: Config  # Loaded from configure phase
     root_dir: Path
     build_dir: Path
     environments: list[Environment]
     targets: list[Target]
     default_targets: list[Target]
-    nodes: dict[Path, Node]      # All nodes, keyed by canonical path
+    nodes: dict[Path, Node]  # All nodes, keyed by canonical path
 
     def node(self, path: Path | str) -> FileNode:
         """Get or create a file node. Same canonical path = same object."""
@@ -1119,15 +1131,18 @@ The core (`pcons/core/`) must remain completely tool-agnostic. It knows nothing 
 
 ```python
 # Core only provides apply() + thin wrappers; it carries opaque tokens:
-env.set_variant("debug")              # -> toolchain.make_variant_preset("debug")
-env.apply_preset("warnings")          # -> toolchain.make_feature_preset("warnings")
+env.set_variant("debug")  # -> toolchain.make_variant_preset("debug")
+env.apply_preset("warnings")  # -> toolchain.make_feature_preset("warnings")
 env.apply_cross_preset(emscripten())  # -> toolchain.make_target_preset(cross)
+
 
 # A toolchain builds the Preset as data (no env mutation):
 def _variant_contributions(self, variant, **kwargs):
     if variant == "debug":
-        return [ToolContribution("cc", flags=("-O0", "-g"), defines=("DEBUG",)),
-                ToolContribution("cxx", flags=("-O0", "-g"), defines=("DEBUG",))]
+        return [
+            ToolContribution("cc", flags=("-O0", "-g"), defines=("DEBUG",)),
+            ToolContribution("cxx", flags=("-O0", "-g"), defines=("DEBUG",)),
+        ]
     ...
 ```
 
@@ -1198,23 +1213,20 @@ class MyBuilder:
 
 **Toolchains are plugins:**
 ```python
-@register_toolchain('my_toolchain')
-class MyToolchain(Toolchain):
-    ...
+@register_toolchain("my_toolchain")
+class MyToolchain(Toolchain): ...
 ```
 
 **Scanners are plugins:**
 ```python
-@register_scanner('.xyz')
-class XyzScanner(Scanner):
-    ...
+@register_scanner(".xyz")
+class XyzScanner(Scanner): ...
 ```
 
 **Generators are plugins:**
 ```python
-@register_generator('bazel')
-class BazelGenerator(Generator):
-    ...
+@register_generator("bazel")
+class BazelGenerator(Generator): ...
 ```
 
 **Expansion packs** - third-party packages can add multiple builders and toolchains:
@@ -1244,8 +1256,10 @@ __pcons_module__ = {
     "version": "1.0.0",
 }
 
+
 def setup_env(env):
     env.cxx.flags.append("-fvisibility=hidden")
+
 
 def register():
     """Called automatically at load time."""
@@ -1256,6 +1270,7 @@ def register():
 ```python
 # In pcons-build.py
 from pcons.modules import ofx
+
 ofx.setup_env(env)
 ```
 
@@ -1287,11 +1302,12 @@ from pcons.contrib.windows import manifest
 
 # Create application manifest with common settings
 app_manifest = manifest.create_app_manifest(
-    project, env,
+    project,
+    env,
     output="app.manifest",
-    dpi_aware="PerMonitorV2",     # Windows 10+ DPI awareness
-    visual_styles=True,           # Modern UI controls
-    uac_level="asInvoker",        # Run without elevation
+    dpi_aware="PerMonitorV2",  # Windows 10+ DPI awareness
+    visual_styles=True,  # Modern UI controls
+    uac_level="asInvoker",  # Run without elevation
     supported_os=["win10", "win81", "win7"],
 )
 
@@ -1304,7 +1320,8 @@ For private DLL assemblies:
 ```python
 # Create assembly manifest for DLL collection
 assembly = manifest.create_assembly_manifest(
-    project, env,
+    project,
+    env,
     name="MyApp.Libraries",
     version="1.0.0.0",
     dlls=[mylib, helper_lib],
@@ -1326,7 +1343,8 @@ from pcons.contrib.installers import macos
 
 # Create a .pkg installer
 pkg = macos.create_pkg(
-    project, env,
+    project,
+    env,
     name="MyApp",
     version="1.0.0",
     identifier="com.example.myapp",
@@ -1337,7 +1355,8 @@ pkg = macos.create_pkg(
 
 # Create a drag-and-drop .dmg
 dmg = macos.create_dmg(
-    project, env,
+    project,
+    env,
     name="MyApp",
     sources=[app_bundle],
     applications_symlink=True,
@@ -1449,29 +1468,31 @@ pcons/
 ```python
 from pcons import ImportedTarget, PackageDescription, Project
 
-project = Project('myapp', build_dir='build')
-env = project.Environment(toolchain='c')
-env.cxx.flags.extend(['-std=c++20', '-Wall'])
+project = Project("myapp", build_dir="build")
+env = project.Environment(toolchain="c")
+env.cxx.flags.extend(["-std=c++20", "-Wall"])
 
 # Find dependencies via pkg-config/system search
-zlib = project.find_package('zlib')
-openssl = project.find_package('openssl', version='>=3.0')
+zlib = project.find_package("zlib")
+openssl = project.find_package("openssl", version=">=3.0")
 
 # Header-only lib without a .pc file — create manually
-httplib = ImportedTarget.from_package(PackageDescription(
-    name='cpp-httplib',
-    include_dirs=['/opt/homebrew/include'],
-    defines=['CPPHTTPLIB_OPENSSL_SUPPORT'],
-))
+httplib = ImportedTarget.from_package(
+    PackageDescription(
+        name="cpp-httplib",
+        include_dirs=["/opt/homebrew/include"],
+        defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
+    )
+)
 httplib.link(openssl)  # transitive: consumers get openssl too
 
 # Build library
-libcore = project.StaticLibrary('core', env, sources=['src/core.cpp'])
-libcore.public.include_dirs.append(Path('include'))
+libcore = project.StaticLibrary("core", env, sources=["src/core.cpp"])
+libcore.public.include_dirs.append(Path("include"))
 libcore.link_private(zlib)  # private dep: not re-exported to consumers
 
 # Build executable — gets zlib transitively through libcore's link deps
-app = project.Program('myapp', env, sources=['src/main.cpp'])
+app = project.Program("myapp", env, sources=["src/main.cpp"])
 app.link_private(libcore, openssl, httplib)
 
 project.Default(app)
@@ -1580,11 +1601,13 @@ zlib = project.find_package("zlib")
 app.link_private(zlib)  # public requirements propagate automatically
 
 # Manual: for header-only libs or packages without .pc files
-httplib = ImportedTarget.from_package(PackageDescription(
-    name="cpp-httplib",
-    include_dirs=["/usr/include"],
-    defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
-))
+httplib = ImportedTarget.from_package(
+    PackageDescription(
+        name="cpp-httplib",
+        include_dirs=["/usr/include"],
+        defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
+    )
+)
 httplib.link(openssl)  # re-exported to consumers
 ```
 
@@ -1600,11 +1623,13 @@ openssl = project.find_package("openssl", version=">=3.0")
 
 # Add Conan as the first finder to try
 from pcons.packages.finders import ConanFinder
+
 project.add_package_finder(ConanFinder(config, conanfile="conanfile.txt"))
 fmt = project.find_package("fmt")  # tries Conan → PkgConfig → System
 
 # Low-level API — use finders directly
 from pcons.packages.finders import PkgConfigFinder, SystemFinder
+
 finder = PkgConfigFinder()
 desc = finder.find("zlib", version=">=1.2")  # returns PackageDescription or None
 ```
@@ -1615,15 +1640,15 @@ desc = finder.find("zlib", version=">=1.2")  # returns PackageDescription or Non
 ```python
 from pcons import Project
 
-project = Project('myapp', build_dir='build')
+project = Project("myapp", build_dir="build")
 env = project.Environment(toolchain="c")
 
 # find_package returns ImportedTarget — link_private propagates requirements
-zlib = project.find_package('zlib')
-openssl = project.find_package('openssl')
-boost = project.find_package('boost', components=['filesystem'])
+zlib = project.find_package("zlib")
+openssl = project.find_package("openssl")
+boost = project.find_package("boost", components=["filesystem"])
 
-app = project.Program('myapp', env, sources=['main.cpp'])
+app = project.Program("myapp", env, sources=["main.cpp"])
 app.link_private(zlib, openssl, boost)
 # Automatically gets all include dirs, library dirs, libraries, flags
 ```
@@ -1697,21 +1722,25 @@ build_commands = [
 ```python
 # pcons-fetch internally does something like:
 env = os.environ.copy()
-env['CC'] = settings.env.CC
-env['CXX'] = settings.env.CXX
-env['CFLAGS'] = settings.env.CFLAGS
-env['CXXFLAGS'] = settings.env.CXXFLAGS
+env["CC"] = settings.env.CC
+env["CXX"] = settings.env.CXX
+env["CFLAGS"] = settings.env.CFLAGS
+env["CXXFLAGS"] = settings.env.CXXFLAGS
 
-if build_system == 'cmake':
-    subprocess.run([
-        'cmake', source_dir,
-        '-DCMAKE_INSTALL_PREFIX=' + prefix,
-        '-DCMAKE_C_COMPILER=' + env['CC'],
-        '-DCMAKE_CXX_COMPILER=' + env['CXX'],
-        *cmake_args
-    ], env=env)
-    subprocess.run(['cmake', '--build', '.'], env=env)
-    subprocess.run(['cmake', '--install', '.'], env=env)
+if build_system == "cmake":
+    subprocess.run(
+        [
+            "cmake",
+            source_dir,
+            "-DCMAKE_INSTALL_PREFIX=" + prefix,
+            "-DCMAKE_C_COMPILER=" + env["CC"],
+            "-DCMAKE_CXX_COMPILER=" + env["CXX"],
+            *cmake_args,
+        ],
+        env=env,
+    )
+    subprocess.run(["cmake", "--build", "."], env=env)
+    subprocess.run(["cmake", "--install", "."], env=env)
 ```
 
 #### Generated package description
@@ -1749,7 +1778,9 @@ ConanFinder runs `conan install` with `PkgConfigDeps` generator, then reads the 
 ```python
 from pcons.packages.finders import ConanFinder
 
-conan = ConanFinder(config, conanfile="conanfile.txt", output_folder=build_dir / "conan")
+conan = ConanFinder(
+    config, conanfile="conanfile.txt", output_folder=build_dir / "conan"
+)
 conan.sync_profile(toolchain, build_type="release")
 packages = conan.install()
 

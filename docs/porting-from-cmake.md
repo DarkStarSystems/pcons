@@ -77,6 +77,7 @@ Version handling is plain Python — read it from a file, set it as a variable, 
 
 ```python
 from pathlib import Path
+
 version = Path("VERSION").read_text().strip()
 ```
 
@@ -291,7 +292,7 @@ check_c_source_compiles("
 ```python
 # pcons
 have_sse2 = checks.try_compile(
-    '#include <emmintrin.h>\nint main() { __m128i x = _mm_setzero_si128(); (void)x; return 0; }',
+    "#include <emmintrin.h>\nint main() { __m128i x = _mm_setzero_si128(); (void)x; return 0; }",
     extra_flags=["-msse2"],
 ).success
 ```
@@ -375,7 +376,7 @@ set_source_files_properties(simd.c PROPERTIES COMPILE_FLAGS "-mavx2")
 ```python
 # pcons
 with env.override() as simd_env:
-    simd_env.cc.flags.append("-mavx2") # could remove, replace or modify here too!
+    simd_env.cc.flags.append("-mavx2")  # could remove, replace or modify here too!
     obj = simd_env.cc.Object(build_dir / "simd.o", "simd.c")[0]
 mylib.add_sources([obj])
 ```
@@ -395,6 +396,7 @@ target_compile_definitions(mylib PRIVATE
 ```python
 # pcons
 from pcons import get_platform
+
 plat = get_platform()
 
 if plat.is_posix:
@@ -408,10 +410,10 @@ if plat.is_windows:
 Pcons has built-in presets for common flag sets:
 
 ```python
-env.apply_preset("warnings")   # -Wall -Wextra etc.
-env.apply_preset("sanitize")   # AddressSanitizer
-env.apply_preset("lto")        # Link-time optimization
-env.apply_preset("hardened")   # Security hardening flags
+env.apply_preset("warnings")  # -Wall -Wextra etc.
+env.apply_preset("sanitize")  # AddressSanitizer
+env.apply_preset("lto")  # Link-time optimization
+env.apply_preset("hardened")  # Security hardening flags
 ```
 
 ---
@@ -431,9 +433,9 @@ set_target_properties(mylib PROPERTIES
 
 ```python
 # pcons
-mylib.output_name = "fyaml"     # base name (platform prefix/suffix still applied)
-mylib.output_prefix = ""        # override prefix (e.g., remove "lib" on Linux)
-mylib.output_suffix = ".plugin" # override suffix
+mylib.output_name = "fyaml"  # base name (platform prefix/suffix still applied)
+mylib.output_prefix = ""  # override prefix (e.g., remove "lib" on Linux)
+mylib.output_suffix = ".plugin"  # override suffix
 ```
 
 `output_name` is the **base name** — platform naming conventions are applied around it, just like CMake's `OUTPUT_NAME`. For a `SharedLibrary`:
@@ -521,10 +523,12 @@ target_include_directories(httplib INTERFACE /opt/include)
 # pcons
 from pcons import ImportedTarget, PackageDescription
 
-httplib = ImportedTarget.from_package(PackageDescription(
-    name="cpp-httplib",
-    include_dirs=["/opt/include"],
-))
+httplib = ImportedTarget.from_package(
+    PackageDescription(
+        name="cpp-httplib",
+        include_dirs=["/opt/include"],
+    )
+)
 ```
 
 ---
@@ -577,6 +581,7 @@ target_compile_definitions(app PRIVATE $<$<CONFIG:Debug>:DEBUG_MODE>)
 ```python
 # pcons
 from pcons import get_variant
+
 if get_variant() == "debug":
     app.private.defines.append("DEBUG_MODE")
 ```
@@ -599,10 +604,7 @@ A common pattern in high-performance C libraries is compiling the same source fi
 for variant_name, flags in [("sse2", ["-msse2"]), ("avx2", ["-mavx2"])]:
     with env.override() as v:
         v.cc.flags.extend(flags)
-        obj = v.cc.Object(
-            build_dir / f"simd_{variant_name}.o",
-            "simd_dispatch.c"
-        )[0]
+        obj = v.cc.Object(build_dir / f"simd_{variant_name}.o", "simd_dispatch.c")[0]
     mylib.add_sources([obj])
 ```
 

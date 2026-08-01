@@ -244,18 +244,22 @@ The idiomatic Bazel approach is:
 ```python
 # In a repository_rule (Starlark, runs at workspace load time)
 def _detect_features_impl(ctx):
-    result = ctx.execute(["gcc", "-x", "c", "-", "-o", "/dev/null"],
-                         input="#include <ucontext.h>\nint main(){}")
-    ctx.file("features.bzl",
-             "HAVE_UCONTEXT = %s" % (result.return_code == 0))
+    result = ctx.execute(
+        ["gcc", "-x", "c", "-", "-o", "/dev/null"],
+        input="#include <ucontext.h>\nint main(){}",
+    )
+    ctx.file("features.bzl", "HAVE_UCONTEXT = %s" % (result.return_code == 0))
+
 
 # In BUILD files — static selection, not dynamic probing
 cc_library(
-    name = "iex",
-    defines = select({
-        "//conditions:linux": ["HAVE_UCONTEXT_H"],
-        "//conditions:default": [],
-    }),
+    name="iex",
+    defines=select(
+        {
+            "//conditions:linux": ["HAVE_UCONTEXT_H"],
+            "//conditions:default": [],
+        }
+    ),
 )
 ```
 
@@ -327,22 +331,22 @@ This is **~15 lines of real Python**. Transitive include propagation is implicit
 ```python
 # BUILD file
 cc_library(
-    name = "math",
-    srcs = ["src/math.c"],
-    hdrs = glob(["include/**"]),
-    includes = ["include"],
+    name="math",
+    srcs=["src/math.c"],
+    hdrs=glob(["include/**"]),
+    includes=["include"],
 )
 
 cc_library(
-    name = "physics",
-    srcs = ["src/physics.c"],
-    deps = [":math"],
+    name="physics",
+    srcs=["src/physics.c"],
+    deps=[":math"],
 )
 
 cc_binary(
-    name = "sim",
-    srcs = ["src/main.c"],
-    deps = [":physics"],
+    name="sim",
+    srcs=["src/main.c"],
+    deps=[":physics"],
 )
 ```
 

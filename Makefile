@@ -22,14 +22,14 @@ install-hooks:    ## Install git pre-commit hooks.
 	@echo "Pre-commit hook installed."
 
 .PHONY: fmt
-fmt:              ## Format code using ruff.
-	uv run ruff format pcons/ tests/ examples/
-	uv run ruff check --fix pcons/ tests/ examples/
+fmt:              ## Format code using ruff (whole repo, including Python in Markdown).
+	uv run ruff format .
+	uv run ruff check --fix .
 
 .PHONY: lint
 lint:             ## Run ruff and ty linters.
-	uv run ruff check pcons/ tests/ examples/
-	uv run ruff format --check pcons/ tests/ examples/
+	uv run ruff check .
+	uv run ruff format --check .
 	uvx ty check pcons/ examples/
 
 .PHONY: lint-rez

@@ -35,7 +35,7 @@ env.set_target_arch("arm64")
 core stays tool-agnostic and each language brings its own:
 
 ```python
-env.cxx.set_standard("c++20")     # C++ setting, on the cxx namespace
+env.cxx.set_standard("c++20")  # C++ setting, on the cxx namespace
 # a Fortran toolchain would offer env.fc.set_standard("f2018"), etc.
 ```
 
@@ -53,9 +53,9 @@ env.cxx.set_standard("c++20")     # C++ setting, on the cxx namespace
 Additive, named bundles, resolved per-toolchain:
 
 ```python
-env.apply_preset("warnings")      # built-in
-env.apply_preset("werror")        # compose freely with any warning set
-env.apply_preset("mycorp/strict") # contributed (registry)
+env.apply_preset("warnings")  # built-in
+env.apply_preset("werror")  # compose freely with any warning set
+env.apply_preset("mycorp/strict")  # contributed (registry)
 ```
 
 Built-in feature presets: `warnings`, `werror`, `sanitize`, `profile`, `lto`,
@@ -89,6 +89,7 @@ Python import:
 
 ```python
 from pcons.toolchains.presets import emscripten, pyodide, android
+
 env.apply_cross_preset(pyodide("2026_0"))
 ```
 
@@ -391,8 +392,9 @@ A Fortran toolchain owns its own flags and target tool:
 class GfortranToolchain(UnixToolchain):
     FEATURE_PRESETS = {
         "warnings": {"compile_flags": ["-Wall", "-Wextra"]},
-        "werror":   {"compile_flags": ["-Werror"]},
+        "werror": {"compile_flags": ["-Werror"]},
     }
+
     def _feature_preset_tools(self):
         return ("fc",)
 ```
@@ -402,13 +404,15 @@ receives the toolchain and returns contributions, or `None` when the preset
 doesn't apply to that toolchain (a silent no-op, not an error):
 
 ```python
-from pcons import preset, ToolContribution   # or register_preset(name, fn, ...)
+from pcons import preset, ToolContribution  # or register_preset(name, fn, ...)
+
 
 @preset("acme/draft", description="LaTeX draft mode")
 def draft(tc):
     if tc.name != "latex":
-        return None                       # not applicable to this toolchain
+        return None  # not applicable to this toolchain
     return [ToolContribution("latex", flags=("-draftmode",))]
+
 
 # build script (resolution is toolchain-first, then registry):
 env.apply_preset("acme/draft")

@@ -243,10 +243,10 @@ else:
 Pcons has built-in presets for common flag sets, replacing boilerplate flag blocks:
 
 ```python
-env.apply_preset("warnings")   # -Wall -Wextra etc.
-env.apply_preset("sanitize")   # AddressSanitizer
-env.apply_preset("lto")        # Link-time optimization
-env.apply_preset("hardened")   # Security hardening flags
+env.apply_preset("warnings")  # -Wall -Wextra etc.
+env.apply_preset("sanitize")  # AddressSanitizer
+env.apply_preset("lto")  # Link-time optimization
+env.apply_preset("hardened")  # Security hardening flags
 ```
 
 ---
@@ -270,7 +270,7 @@ mylib = project.StaticLibrary("mylib", env, sources=["src/lib.c"])
 mylib.public.include_dirs.append("include")
 
 app = project.Program("app", env, sources=["app.c"])
-app.private.link_libs.append(mylib)  # Automatically gets include dirs, defines, link flags
+app.private.link_libs.append(mylib)  # Gets include dirs, defines, link flags
 ```
 
 Appending to `link_libs` applies the library's public usage requirements. No need to manually add `-I`, `-L`, or `-l` flags. Use `private.link_libs` for a dependency that stays local (like `app` here), or `public.link_libs` to re-export it to consumers of this target.
@@ -280,10 +280,10 @@ Appending to `link_libs` applies the library's public usage requirements. No nee
 Make has no concept of transitive vs local flags — you manage everything manually. Pcons distinguishes them:
 
 ```python
-mylib.public.include_dirs.append("include")    # Consumers get this
-mylib.private.include_dirs.append("src")        # Only mylib's sources get this
-mylib.public.defines.append("USE_FEATURE")      # Consumers get this
-mylib.private.defines.append("INTERNAL_FLAG")   # Only mylib gets this
+mylib.public.include_dirs.append("include")  # Consumers get this
+mylib.private.include_dirs.append("src")  # Only mylib's sources get this
+mylib.public.defines.append("USE_FEATURE")  # Consumers get this
+mylib.private.defines.append("INTERNAL_FLAG")  # Only mylib gets this
 ```
 
 When A links B and B links C, A automatically gets C's public requirements — no manual flag forwarding needed.
@@ -343,12 +343,14 @@ LDLIBS += -lmylib
 # pcons
 from pcons import ImportedTarget, PackageDescription
 
-mylib = ImportedTarget.from_package(PackageDescription(
-    name="mylib",
-    include_dirs=["/opt/mylib/include"],
-    lib_dirs=["/opt/mylib/lib"],
-    libs=["mylib"],
-))
+mylib = ImportedTarget.from_package(
+    PackageDescription(
+        name="mylib",
+        include_dirs=["/opt/mylib/include"],
+        lib_dirs=["/opt/mylib/lib"],
+        libs=["mylib"],
+    )
+)
 app.private.link_libs.append(mylib)
 ```
 
@@ -458,7 +460,7 @@ if have_wno_unused:
 
 ```python
 have_sse2 = checks.try_compile(
-    '#include <emmintrin.h>\nint main() { __m128i x = _mm_setzero_si128(); (void)x; return 0; }',
+    "#include <emmintrin.h>\nint main() { __m128i x = _mm_setzero_si128(); (void)x; return 0; }",
     extra_flags=["-msse2"],
 ).success
 ```
@@ -486,9 +488,9 @@ Results are cached — re-running pcons skips checks whose inputs haven't change
 Pcons applies platform-appropriate prefix and suffix automatically. Override any part:
 
 ```python
-mylib.output_name = "fyaml"     # base name
-mylib.output_prefix = ""        # remove "lib" prefix on Linux
-mylib.output_suffix = ".plugin" # custom suffix
+mylib.output_name = "fyaml"  # base name
+mylib.output_prefix = ""  # remove "lib" prefix on Linux
+mylib.output_suffix = ".plugin"  # custom suffix
 ```
 
 Compare with Make where you hardcode output names:
@@ -641,9 +643,8 @@ CFLAGS += -DVERSION=\"$(GIT_VERSION)\"
 ```python
 # pcons
 import subprocess
-git_version = subprocess.check_output(
-    ["git", "describe", "--tags"], text=True
-).strip()
+
+git_version = subprocess.check_output(["git", "describe", "--tags"], text=True).strip()
 env.cc.defines.append(f'VERSION="{git_version}"')
 ```
 
@@ -678,6 +679,7 @@ Or use Python to collect them:
 
 ```python
 from pathlib import Path
+
 sources = list(Path("src").glob("*.c")) + list(Path("lib").glob("*.c"))
 ```
 

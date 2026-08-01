@@ -88,6 +88,7 @@ allowing an Environment to have multiple toolchains (e.g., C++ + CUDA, or C++ + 
 self._toolchain = toolchain  # Primary toolchain (unchanged)
 self._additional_toolchains: list[Toolchain] = []
 
+
 # New method:
 def add_toolchain(self, toolchain: Toolchain) -> None:
     """Add an additional toolchain to this environment.
@@ -106,6 +107,7 @@ def add_toolchain(self, toolchain: Toolchain) -> None:
     self._additional_toolchains.append(toolchain)
     toolchain.setup(self)
 
+
 # New property:
 @property
 def toolchains(self) -> list[Toolchain]:
@@ -116,12 +118,14 @@ def toolchains(self) -> list[Toolchain]:
     result.extend(self._additional_toolchains)
     return result
 
+
 # Update clone():
 def clone(self) -> Environment:
     # ... existing code ...
     new_env._toolchain = self._toolchain
     new_env._additional_toolchains = list(self._additional_toolchains)
     return new_env
+
 
 # Update set_variant():
 def set_variant(self, name: str, **kwargs: Any) -> None:
@@ -203,6 +207,7 @@ Create `/Users/garyo/src/pcons/tests/core/test_multi_toolchain.py`:
 ```python
 """Tests for multi-toolchain support."""
 
+
 class TestMultiToolchainEnvironment:
     def test_add_toolchain(self):
         """Test adding additional toolchains."""
@@ -216,6 +221,7 @@ class TestMultiToolchainEnvironment:
     def test_set_variant_applies_to_all_toolchains(self):
         """Test that set_variant calls apply_variant on all toolchains."""
 
+
 class TestMultiToolchainResolver:
     def test_source_goes_to_correct_compiler(self):
         """Test that .cu files use nvcc, .cpp files use g++."""
@@ -225,6 +231,7 @@ class TestMultiToolchainResolver:
 
     def test_linker_selection_with_multiple_languages(self):
         """Test correct linker selection when mixing C++ and CUDA."""
+
 
 class TestCppPlusCuda:
     def test_mixed_cpp_cuda_sources(self):

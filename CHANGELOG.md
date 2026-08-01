@@ -60,9 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   ```python
   qt = find_qt(project, env, modules=["Widgets"])
-  app = project.QtProgram("myapp", env,
+  app = project.QtProgram(
+      "myapp",
+      env,
       sources=["main.cpp", "mainwindow.cpp", "mainwindow.ui", "icons.qrc"],
-      link=[qt.Widgets])
+      link=[qt.Widgets],
+  )
   ```
 
   - `find_qt()` locates Qt via pkg-config or qtpaths introspection (Linux distro packages, Homebrew, the official installer, Windows) and returns modules as linkable targets. Platform quirks are baked in: macOS framework linking, MSVC's required `/Zc:__cplusplus /permissive-`, Windows debug `d`-suffix libraries, the Apple-Silicon `qyieldcpu.h` workaround for Qt < 6.10.

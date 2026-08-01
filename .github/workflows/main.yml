@@ -23,11 +23,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run ruff
-        run: uv run ruff check pcons/ tests/
+        run: uv run ruff check .
       - name: Run ruff format check
-        run: uv run ruff format --check pcons/ tests/
+        run: uv run ruff format --check .
       - name: Run ty typecheck
-        run: uvx ty check pcons/
+        run: uvx ty check pcons/ examples/
 
   test:
     needs: lint

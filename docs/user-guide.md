@@ -141,9 +141,9 @@ Pcons ships with built-in support for several languages and toolchains. The core
 The following toolchains are auto-detected. Select one by name — `toolchain="c"` auto-detects a C/C++ toolchain, a specific name like `"gcc"` requires that toolchain, and a list is a preference order:
 
 ```python
-env = project.Environment(toolchain="c")                # auto-detect C/C++
-env = project.Environment(toolchain="msvc")             # require MSVC
-env = project.Environment(toolchain=["gcc", "llvm"])    # first available wins
+env = project.Environment(toolchain="c")  # auto-detect C/C++
+env = project.Environment(toolchain="msvc")  # require MSVC
+env = project.Environment(toolchain=["gcc", "llvm"])  # first available wins
 ```
 
 IDE autocompletion for these names comes from the generated `KnownToolchain` type; any registered name (including user-registered toolchains) also works. For programmatic control, the underlying finder functions like `find_c_toolchain(prefer=[...])` remain available and return `Toolchain` objects.
@@ -227,12 +227,14 @@ C++, enable interop mode and header emission:
 
 ```python
 env = project.Environment(toolchain="swift")
-env.add_toolchain("c")                  # C/C++ compilers for mixed targets
-env.swiftc.set_cxx_interop("c++17")     # Swift <-> C++ interop mode
-env.swiftc.interop_header = True        # libraries emit <Module>-Swift.h
+env.add_toolchain("c")  # C/C++ compilers for mixed targets
+env.swiftc.set_cxx_interop("c++17")  # Swift <-> C++ interop mode
+env.swiftc.interop_header = True  # libraries emit <Module>-Swift.h
 
 analyzer = project.StaticLibrary("Analyzer", env, sources=["analyzer.swift"])
-app = project.Program("demo", env, sources=["src/main.cpp"])  # #include "Analyzer-Swift.h"
+app = project.Program(
+    "demo", env, sources=["src/main.cpp"]
+)  # #include "Analyzer-Swift.h"
 app.link_private(analyzer)
 ```
 
@@ -312,11 +314,11 @@ rust_core = project.CargoBuild(
     "rust_core",
     env,
     manifest="rust/Cargo.toml",
-    crate_type="staticlib",       # or "cdylib", "bin"
+    crate_type="staticlib",  # or "cdylib", "bin"
     profile="release",
 )
 app = project.Program("app", env, sources=["src/main.cpp"])
-app.link(rust_core)                # -L/-l propagate automatically
+app.link(rust_core)  # -L/-l propagate automatically
 ```
 
 Pass `generate_header="rust/cbindgen.toml"` to also run cbindgen and emit a C header from the Rust sources — pcons wires the header as an implicit dep of consumer compile steps, so the header exists before any `#include` is processed. See `examples/43_rust_cxx_hybrid/` (hand-written FFI header) and `examples/44_rust_cxx_cbindgen/` (cbindgen-generated header) for end-to-end examples. Other foreign build tools can be wired up the same way using `env.Command(restat=True)`.
@@ -384,11 +386,7 @@ from pcons import Project
 project = Project("myproject", build_dir="build")
 
 # Optionally specify the root directory
-project = Project(
-    "myproject",
-    root_dir=Path(__file__).parent,
-    build_dir="build"
-)
+project = Project("myproject", root_dir=Path(__file__).parent, build_dir="build")
 ```
 
 The project provides factory methods for creating targets:
@@ -528,14 +526,14 @@ Most pcons APIs accept raw paths (strings or `Path` objects) and convert them to
 
 ```python
 # Usually NOT needed - these are equivalent:
-project.Install("dist", ["file.txt"])           # Path string - works fine
-project.Install("dist", [Path("file.txt")])     # Path object - works fine
+project.Install("dist", ["file.txt"])  # Path string - works fine
+project.Install("dist", [Path("file.txt")])  # Path object - works fine
 project.Install("dist", [project.node("file.txt")])  # Explicit node - also works
 
 # Needed when you want to add explicit dependencies to a source file:
 header = project.node("generated.h")
 header.depends([generator_target])  # Now generated.h depends on generator
-app.add_sources(["main.cpp"])       # main.cpp will rebuild when generated.h changes
+app.add_sources(["main.cpp"])  # main.cpp will rebuild when generated.h changes
 ```
 
 ### Builders
@@ -715,10 +713,12 @@ env = project.Environment(toolchain="c")
 
 # Create program with multiple sources
 calculator = project.Program("calculator", env)
-calculator.add_sources([
-    src_dir / "main.c",
-    src_dir / "math_ops.c",
-])
+calculator.add_sources(
+    [
+        src_dir / "main.c",
+        src_dir / "math_ops.c",
+    ]
+)
 
 # Add include directory (private - only for building this target)
 calculator.private.include_dirs.append(include_dir)
@@ -984,7 +984,7 @@ env.set_variant("release")
 env.apply_preset("warnings")
 env.cc.flags.append("-fno-strict-aliasing")
 
-print(env.explain("cc"))       # one tool; env.explain() covers all tools
+print(env.explain("cc"))  # one tool; env.explain() covers all tools
 ```
 
 Output:
@@ -1072,11 +1072,13 @@ Some libraries (especially header-only ones) don't have `.pc` files and can't be
 from pcons import ImportedTarget, PackageDescription
 
 # Header-only library with no .pc file
-httplib = ImportedTarget.from_package(PackageDescription(
-    name="cpp-httplib",
-    include_dirs=["/opt/homebrew/include"],
-    defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
-))
+httplib = ImportedTarget.from_package(
+    PackageDescription(
+        name="cpp-httplib",
+        include_dirs=["/opt/homebrew/include"],
+        defines=["CPPHTTPLIB_OPENSSL_SUPPORT"],
+    )
+)
 ```
 
 If the manual package depends on another package, `link()` it to wire up transitive dependencies — don't copy public requirements manually:
@@ -1185,10 +1187,10 @@ project.Default(hello)
 
 ```python
 conan.sync_profile(
-    toolchain,                # Detects compiler, version, OS, arch
-    env=env,                  # Infers cppstd from env.cxx.flags (optional)
-    build_type="Release",     # Release, Debug, RelWithDebInfo, MinSizeRel
-    cppstd="23",              # Explicit C++ standard (overrides env inference)
+    toolchain,  # Detects compiler, version, OS, arch
+    env=env,  # Infers cppstd from env.cxx.flags (optional)
+    build_type="Release",  # Release, Debug, RelWithDebInfo, MinSizeRel
+    cppstd="23",  # Explicit C++ standard (overrides env inference)
 )
 ```
 
@@ -1232,9 +1234,12 @@ env.cxx.set_standard(17)
 
 qt = find_qt(project, env, modules=["Widgets"])
 
-app = project.QtProgram("myapp", env,
+app = project.QtProgram(
+    "myapp",
+    env,
     sources=["main.cpp", "mainwindow.cpp", "mainwindow.ui", "icons.qrc"],
-    link=[qt.Widgets])
+    link=[qt.Widgets],
+)
 ```
 
 `find_qt()` locates Qt (pkg-config or qtpaths introspection — Linux
@@ -1311,7 +1316,7 @@ project = Project("my_app")
 env = project.Environment(toolchain="c")
 
 if is_in_rez_resolve():
-    rez_environment(env)   # auto-applies every resolved rez package
+    rez_environment(env)  # auto-applies every resolved rez package
 
 app = project.Program("my_app", env, sources=["src/main.cpp"])
 project.Default(app)
@@ -1389,7 +1394,7 @@ from pcons.integrations.rez import RezFinder
 
 project.add_package_finder(RezFinder())
 boost = project.find_package("boost")
-app.link(boost)            # boost flags propagate as a usage requirement
+app.link(boost)  # boost flags propagate as a usage requirement
 ```
 
 This works exactly like `find_package` does for pkg-config or Conan;
@@ -1439,7 +1444,7 @@ auto-detection from the presence of `pcons-build.py`:
 # package.py
 name = "myplugin"
 version = "1.0.0"
-build_system = "pcons"     # explicit; rez also auto-detects
+build_system = "pcons"  # explicit; rez also auto-detects
 requires = ["openfx-1.4", "boost-1.82"]
 
 
@@ -1480,7 +1485,7 @@ project.Default(app)
 install_dir = os.environ.get("PCONS_INSTALL_DIR")
 if install_dir:
     install_target = project.Install(f"{install_dir}/bin", [app])
-    project.Alias("install", install_target)   # rez-build invokes "install"
+    project.Alias("install", install_target)  # rez-build invokes "install"
 ```
 
 ###### Build options exposed to `rez-build`
@@ -1630,9 +1635,9 @@ Access them in `pcons-build.py`:
 ```python
 from pcons import get_var
 
-port = get_var('PORT', default='ofx')
-use_cuda = get_var('USE_CUDA', default='0') == '1'
-prefix = get_var('PREFIX', default='/usr/local')
+port = get_var("PORT", default="ofx")
+use_cuda = get_var("USE_CUDA", default="0") == "1"
+prefix = get_var("PREFIX", default="/usr/local")
 ```
 
 ---
@@ -1649,20 +1654,25 @@ of running things at build time.
 ### Declaring Tests
 
 ```python
-test_prog = project.Program("math_test", env,
-                            sources=["src/math.c", "src/test_math.c"])
+test_prog = project.Program("math_test", env, sources=["src/math.c", "src/test_math.c"])
 
 # Most basic: run the program; pass = exit 0.
 project.Test("math.add", test_prog, args=["add"], labels=["unit", "fast"])
 project.Test("math.mul", test_prog, args=["mul"], labels=["unit", "fast"])
 
 # should_fail=True inverts the exit code (XFAIL-style assertions).
-project.Test("math.expected_failure", test_prog, args=["bad-input"],
-             should_fail=True, labels=["xfail"])
+project.Test(
+    "math.expected_failure",
+    test_prog,
+    args=["bad-input"],
+    should_fail=True,
+    labels=["xfail"],
+)
 
 # disabled=True keeps the test in the manifest but always skips it.
-project.Test("math.slow", test_prog, args=["heavy"],
-             labels=["slow"], disabled=True, timeout=60)
+project.Test(
+    "math.slow", test_prog, args=["heavy"], labels=["slow"], disabled=True, timeout=60
+)
 ```
 
 The full set of fields (all keyword-only):
@@ -1694,12 +1704,23 @@ dependent tests are reported as skipped — no point running them.
 ```python
 # Fixture-style: start a server, run tests against it, stop it.
 start = project.Test("server.start", start_script, labels=["fixture"])
-project.Test("api.list_users", api_test, args=["list-users"],
-             depends_on=["server.start"], labels=["api"])
-project.Test("api.create_user", api_test, args=["create-user"],
-             depends_on=["server.start"], labels=["api"])
-project.Test("server.stop", stop_script, depends_on=["server.start"],
-             labels=["fixture"])
+project.Test(
+    "api.list_users",
+    api_test,
+    args=["list-users"],
+    depends_on=["server.start"],
+    labels=["api"],
+)
+project.Test(
+    "api.create_user",
+    api_test,
+    args=["create-user"],
+    depends_on=["server.start"],
+    labels=["api"],
+)
+project.Test(
+    "server.stop", stop_script, depends_on=["server.start"], labels=["fixture"]
+)
 ```
 
 When you filter with `-L` / `-R`, deps of selected tests are
@@ -1850,15 +1871,21 @@ fuzz_flags = ["-fsanitize=fuzzer,address", "-g", "-O1"]
 env.cc.flags.extend(fuzz_flags)
 env.link.flags.extend(fuzz_flags)
 
-harness = project.Program("fuzz_parser", env,
-                          sources=["fuzz_parser.c", "parser.c"])
+harness = project.Program("fuzz_parser", env, sources=["fuzz_parser.c", "parser.c"])
 
-project.Test("parser.regression", harness,
-             args=["-runs=0", corpus_dir], timeout=30)
-project.Test("parser.campaign", harness,
-             args=["-create_missing_dirs=1", "campaign-corpus", corpus_dir,
-                   "-max_total_time=60"],
-             labels=["fuzz"], timeout=90)
+project.Test("parser.regression", harness, args=["-runs=0", corpus_dir], timeout=30)
+project.Test(
+    "parser.campaign",
+    harness,
+    args=[
+        "-create_missing_dirs=1",
+        "campaign-corpus",
+        corpus_dir,
+        "-max_total_time=60",
+    ],
+    labels=["fuzz"],
+    timeout=90,
+)
 ```
 
 ```c
@@ -1878,17 +1905,38 @@ The compiler driver becomes `afl-clang-fast`; the campaign is run by
 # Easiest setup: run pcons with CC=afl-clang-fast (and CXX=afl-clang-fast++).
 # Or point a custom toolchain at the AFL++ driver explicitly.
 
-harness = project.Program("fuzz_parser", env,
-                          sources=["fuzz_parser.c", "parser.c"])
+harness = project.Program("fuzz_parser", env, sources=["fuzz_parser.c", "parser.c"])
 
-project.Test("parser.regression", "afl-showmap",
-             args=["-o", "/dev/null", "-i", corpus_dir, "--",
-                   str(harness.output_nodes[0].path), "@@"])
+project.Test(
+    "parser.regression",
+    "afl-showmap",
+    args=[
+        "-o",
+        "/dev/null",
+        "-i",
+        corpus_dir,
+        "--",
+        str(harness.output_nodes[0].path),
+        "@@",
+    ],
+)
 
-project.Test("parser.campaign", "afl-fuzz",
-             args=["-V", "60", "-i", corpus_dir, "-o", findings_dir,
-                   "--", str(harness.output_nodes[0].path)],
-             labels=["fuzz"], timeout=120)
+project.Test(
+    "parser.campaign",
+    "afl-fuzz",
+    args=[
+        "-V",
+        "60",
+        "-i",
+        corpus_dir,
+        "-o",
+        findings_dir,
+        "--",
+        str(harness.output_nodes[0].path),
+    ],
+    labels=["fuzz"],
+    timeout=120,
+)
 ```
 
 #### Honggfuzz
@@ -1899,13 +1947,24 @@ campaign is run by the `honggfuzz` binary.
 ```python
 # Easiest setup: CC=hfuzz-clang (and CXX=hfuzz-clang++).
 
-harness = project.Program("fuzz_parser", env,
-                          sources=["fuzz_parser.c", "parser.c"])
+harness = project.Program("fuzz_parser", env, sources=["fuzz_parser.c", "parser.c"])
 
-project.Test("parser.campaign", "honggfuzz",
-             args=["-i", corpus_dir, "-o", findings_dir, "--run_time", "60",
-                   "--", str(harness.output_nodes[0].path)],
-             labels=["fuzz"], timeout=120)
+project.Test(
+    "parser.campaign",
+    "honggfuzz",
+    args=[
+        "-i",
+        corpus_dir,
+        "-o",
+        findings_dir,
+        "--run_time",
+        "60",
+        "--",
+        str(harness.output_nodes[0].path),
+    ],
+    labels=["fuzz"],
+    timeout=120,
+)
 ```
 
 #### Conventions
@@ -2009,7 +2068,7 @@ app.add_sources(["app.rc"])
 
 # Assembly
 lib.add_sources(["fast_math.S"])  # Uses C preprocessor
-lib.add_sources(["startup.s"])    # Raw assembly
+lib.add_sources(["startup.s"])  # Raw assembly
 ```
 
 ### Custom Builders
@@ -2019,6 +2078,7 @@ Create custom tools for specialized build steps:
 ```python
 from pcons.core.builder import CommandBuilder
 from pcons.tools.tool import BaseTool
+
 
 class ProtobufTool(BaseTool):
     def __init__(self) -> None:
@@ -2041,6 +2101,7 @@ class ProtobufTool(BaseTool):
                 single_source=True,
             ),
         }
+
 
 # Use the tool
 protoc_tool = ProtobufTool()
@@ -2069,7 +2130,7 @@ project = Project("libfoo")
 if project.is_top_level:
     env = project.Environment(toolchain="c")
 else:
-    env = project.default_environment   # the enclosing build's toolchain
+    env = project.default_environment  # the enclosing build's toolchain
 
 config = configure_file("config.h.in", project.build_dir / "config.h", vars)
 lib = project.StaticLibrary("foo", env, sources=["src/foo.c"])
@@ -2139,6 +2200,7 @@ from pcons import Project
 
 if sys.platform == "win32":
     from pcons.contrib.windows.msvcup import ensure_msvc
+
     ensure_msvc("14.44.17.14", "10.0.22621.7")
 
 project = Project("hello", build_dir="build")
@@ -2194,8 +2256,8 @@ directory (no project-root symlink), generate explicitly:
 ```python
 from pcons import Generator
 
-Generator().generate(project, compile_commands=False)   # no compile_commands.json
-Generator().generate(project, root_symlink=False)       # no root symlink
+Generator().generate(project, compile_commands=False)  # no compile_commands.json
+Generator().generate(project, root_symlink=False)  # no root symlink
 ```
 
 With multiple build configurations in one project root, the last generation
@@ -2224,7 +2286,7 @@ Or pin it in the build script, e.g. for a project that always uses make:
 ```python
 from pcons import Generator
 
-Generator("make").generate(project)   # creates build/Makefile
+Generator("make").generate(project)  # creates build/Makefile
 ```
 
 Then build with:
@@ -2270,8 +2332,8 @@ relative destination inside the build directory instead (useful for staging).
 
 ```python
 # Install library and headers (Install takes a list of sources)
-project.Install("lib", [mylib])            # -> <prefix>/lib/
-project.Install("include", header_nodes)   # -> <prefix>/include/
+project.Install("lib", [mylib])  # -> <prefix>/lib/
+project.Install("include", header_nodes)  # -> <prefix>/include/
 
 # Install with rename (InstallAs takes a single source, not a list)
 project.InstallAs("bundle/plugin.ofx", plugin_lib)
@@ -2290,7 +2352,7 @@ go in `bin` next to the executables that load them):
 from pcons import install_dir
 
 exe = project.Program("hello", env, sources=["src/hello.c"])
-project.Install(install_dir(env, "program"), [exe])   # -> <prefix>/bin/
+project.Install(install_dir(env, "program"), [exe])  # -> <prefix>/bin/
 ```
 
 **Note:** `Install()` accepts a list of sources and copies each to the destination directory. `InstallAs()` takes exactly one source and copies it to the specified path (with optional rename). If you need to install multiple files with renaming, use multiple `InstallAs()` calls.
@@ -2373,23 +2435,23 @@ Use `env.Command()` to run arbitrary shell commands as build steps. This is usef
 ```python
 # Generate a header from a template
 env.Command(
-    "config.h",                              # Target file(s)
-    ["config.h.in", "version.txt"],          # Source file(s)
-    "python generate_config.py $SOURCES > $TARGET"
+    "config.h",  # Target file(s)
+    ["config.h.in", "version.txt"],  # Source file(s)
+    "python generate_config.py $SOURCES > $TARGET",
 )
 
 # Run a code generator with multiple outputs
 env.Command(
-    ["parser.c", "parser.h"],                # Multiple targets
-    "grammar.y",                             # Single source
-    "bison -d -o ${TARGETS[0]} $SOURCE"
+    ["parser.c", "parser.h"],  # Multiple targets
+    "grammar.y",  # Single source
+    "bison -d -o ${TARGETS[0]} $SOURCE",
 )
 
 # Command with no source dependencies
 env.Command(
     "timestamp.txt",
-    None,                                    # No sources
-    "date > $TARGET"
+    None,  # No sources
+    "date > $TARGET",
 )
 ```
 
@@ -2413,7 +2475,7 @@ Use `$SRCDIR` to reference files in the source tree that aren't listed as source
 env.Command(
     target="generated.h",
     source="schema.json",
-    command="python $SRCDIR/tools/codegen.py $SOURCE -o $TARGET"
+    command="python $SRCDIR/tools/codegen.py $SOURCE -o $TARGET",
 )
 ```
 
@@ -2455,7 +2517,7 @@ The command runs during the build phase, and Ninja tracks dependencies so the co
 env.Command(
     target="output.txt",
     source="input.txt",
-    command="step1 $SOURCE -o temp.txt && step2 temp.txt -o $TARGET"
+    command="step1 $SOURCE -o temp.txt && step2 temp.txt -o $TARGET",
 )
 ```
 
@@ -2624,7 +2686,8 @@ Create standard macOS installer packages using `pkgbuild` and `productbuild` (re
 from pcons.contrib.installers import macos
 
 pkg = macos.create_component_pkg(
-    project, env,
+    project,
+    env,
     identifier="com.example.myapp",
     version="1.0.0",
     sources=[app],
@@ -2636,7 +2699,8 @@ pkg = macos.create_component_pkg(
 
 ```python
 pkg = macos.create_pkg(
-    project, env,
+    project,
+    env,
     name="MyApp",
     version="1.0.0",
     identifier="com.example.myapp",
@@ -2670,7 +2734,8 @@ Create compressed disk images with `hdiutil`:
 
 ```python
 dmg = macos.create_dmg(
-    project, env,
+    project,
+    env,
     name="MyApp",
     sources=[app],
     applications_symlink=True,  # Add /Applications symlink for drag-install
@@ -2713,7 +2778,8 @@ Create modern Windows MSIX packages using `MakeAppx.exe` (requires Windows SDK):
 from pcons.contrib.installers import windows
 
 msix = windows.create_msix(
-    project, env,
+    project,
+    env,
     name="MyApp",
     version="1.0.0.0",
     publisher="CN=Example Corp",
@@ -2748,8 +2814,10 @@ if platform.is_macos():
     from pcons.contrib.installers import macos
 
     pkg = macos.create_pkg(
-        project, env,
-        name="MyApp", version="1.0.0",
+        project,
+        env,
+        name="MyApp",
+        version="1.0.0",
         identifier="com.example.myapp",
         sources=[app],
         install_location="/usr/local/bin",
@@ -2761,8 +2829,10 @@ elif platform.is_windows():
     from pcons.contrib.installers import windows
 
     msix = windows.create_msix(
-        project, env,
-        name="MyApp", version="1.0.0.0",
+        project,
+        env,
+        name="MyApp",
+        version="1.0.0.0",
         publisher="CN=Example Corp",
         sources=[app],
     )
@@ -3007,7 +3077,7 @@ For example, on a Windows x64 machine this builds an ARM64 binary — no
 vcvars cross shell needed, just the ARM64 build-tools component:
 
 ```python
-env = project.Environment(toolchain="c")   # MSVC or clang-cl
+env = project.Environment(toolchain="c")  # MSVC or clang-cl
 env.set_target_arch("arm64")
 app = project.Program("myapp", env, sources=["main.c"])
 ```
@@ -3042,7 +3112,7 @@ lib_universal = create_universal_binary(
     project,
     "mylib_universal",
     inputs=[lib_arm64, lib_x86_64],
-    output="build/universal/libmylib.a"
+    output="build/universal/libmylib.a",
 )
 
 project.Default(lib_universal)
@@ -3080,10 +3150,12 @@ env = project.Environment(toolchain="emscripten")
 env.apply_cross_preset(pyodide("2026_0"))
 
 # Generic Linux cross-compilation
-env.apply_cross_preset(linux_cross(
-    triple="aarch64-linux-gnu",
-    sysroot="/opt/aarch64-sysroot",
-))
+env.apply_cross_preset(
+    linux_cross(
+        triple="aarch64-linux-gnu",
+        sysroot="/opt/aarch64-sysroot",
+    )
+)
 ```
 
 For a fully self-contained WASI build, prefer the dedicated WASI toolchain:
@@ -3190,10 +3262,12 @@ env.add_toolchain("cuda")
 
 # Now this target can have both .cpp and .cu sources
 app = project.Program("gpu_app", env)
-app.add_sources([
-    "main.cpp",       # Compiled with C++ compiler
-    "kernel.cu",      # Compiled with CUDA nvcc
-])
+app.add_sources(
+    [
+        "main.cpp",  # Compiled with C++ compiler
+        "kernel.cu",  # Compiled with CUDA nvcc
+    ]
+)
 ```
 
 #### How Source Routing Works
@@ -3269,11 +3343,13 @@ if checks.check_type("size_t", headers=["stddef.h"]).success:
     pass
 
 # Get the size of a type (uses compile-time assertion, no need to run)
-int_size = checks.check_type_size("int")    # Returns 4 on most systems
+int_size = checks.check_type_size("int")  # Returns 4 on most systems
 ptr_size = checks.check_type_size("void*")  # 8 on 64-bit, 4 on 32-bit
 
 # Check if a function is available (compiles + links)
-if checks.check_function("pthread_create", headers=["pthread.h"], libs=["pthread"]).success:
+if checks.check_function(
+    "pthread_create", headers=["pthread.h"], libs=["pthread"]
+).success:
     env.link.libs.append("pthread")
 
 # Read a predefined compiler macro
@@ -3289,10 +3365,10 @@ All results are automatically cached through `Configure`. On the first run, each
 
 ```python
 result1 = checks.check_flag("-Wall")
-assert result1.cached is False    # First run: compiled a test
+assert result1.cached is False  # First run: compiled a test
 
 result2 = checks.check_flag("-Wall")
-assert result2.cached is True     # Second run: from cache
+assert result2.cached is True  # Second run: from cache
 ```
 
 The cache key includes a signature of the compiler command *and its current flags*, so switching compilers — or retargeting the same compiler with a cross preset (`--target=`, `-isysroot`) — invalidates the relevant entries automatically. Checks probe the same compilation the build will do.
@@ -3335,15 +3411,15 @@ if checks.check_header("sys/mman.h").success:
 
 config.define("VERSION_MAJOR", 1)
 config.define("VERSION_STRING", "1.2.0")
-config.check_sizeof("int", env=env)     # Defines SIZEOF_INT
-config.check_sizeof("void*", env=env)   # Defines SIZEOF_VOIDP
+config.check_sizeof("int", env=env)  # Defines SIZEOF_INT
+config.check_sizeof("void*", env=env)  # Defines SIZEOF_VOIDP
 config.undefine("MISSING_FEATURE")
 
 # Generate the header
 config.write_config_header(
     Path("build/config.h"),
     guard="MY_CONFIG_H",
-    include_platform=True,      # Add PCONS_OS_* and PCONS_ARCH_* defines
+    include_platform=True,  # Add PCONS_OS_* and PCONS_ARCH_* defines
 )
 ```
 
@@ -3382,7 +3458,8 @@ For projects that use template-based configuration (like CMake's `configure_file
 from pcons import configure_file
 
 configure_file(
-    "src/config.h.in", "build/config.h",
+    "src/config.h.in",
+    "build/config.h",
     {"VERSION": "1.2.3", "HAVE_ZLIB": "1"},
 )
 ```
@@ -3409,8 +3486,7 @@ With `{"VERSION": "1.2.3", "HAVE_THREADS": "1"}` this produces:
 **At style** (`style="at"`) — simple `@VAR@` replacement only:
 
 ```python
-configure_file("version.txt.in", "build/version.txt",
-               {"VERSION": "1.2.3"}, style="at")
+configure_file("version.txt.in", "build/version.txt", {"VERSION": "1.2.3"}, style="at")
 ```
 
 Options:
@@ -3598,6 +3674,7 @@ from pcons.modules import mymodule
 
 # Or access all loaded modules
 import pcons.modules
+
 print(dir(pcons.modules))  # ['mymodule', ...]
 ```
 
@@ -3615,14 +3692,18 @@ __pcons_module__ = {
     "description": "OFX plugin bundle creation",
 }
 
+
 def setup_env(env, platform=None):
     """Configure environment for OFX plugin building."""
-    env.cxx.includes.extend([
-        "openfx/include",
-        "openfx/Examples/include",
-    ])
+    env.cxx.includes.extend(
+        [
+            "openfx/include",
+            "openfx/Examples/include",
+        ]
+    )
     if platform and not platform.is_windows:
         env.cxx.flags.append("-fvisibility=hidden")
+
 
 def create_bundle(project, env, plugin_name, sources, *, build_dir, version="1.0.0"):
     """Create OFX plugin bundle with proper structure."""
@@ -3640,6 +3721,7 @@ def create_bundle(project, env, plugin_name, sources, *, build_dir, version="1.0
     project.Install(arch_dir, [plugin])
 
     return plugin
+
 
 def register():
     """Optional: Register custom builders at load time."""
@@ -3659,7 +3741,9 @@ env = project.Environment(toolchain="c")
 
 ofx.setup_env(env)
 plugin = ofx.create_bundle(
-    project, env, "myplugin",
+    project,
+    env,
+    "myplugin",
     sources=["src/plugin.cpp"],
     build_dir=project.build_dir,
 )

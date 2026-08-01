@@ -85,10 +85,9 @@ def _get_toolchain_table() -> str:
     if str(pcons_root) not in sys.path:
         sys.path.insert(0, str(pcons_root))
 
-    from pcons.tools.toolchain import toolchain_registry
-
     # Import contrib toolchains so their registrations appear in the table
     import pcons.contrib.latex.toolchain  # noqa: F401
+    from pcons.tools.toolchain import toolchain_registry
 
     # Collect unique toolchains (each may be registered under multiple aliases)
     seen_classes: set[type] = set()
@@ -99,25 +98,29 @@ def _get_toolchain_table() -> str:
             continue
         seen_classes.add(entry.toolchain_class)
         finder = f"`{entry.finder}`" if entry.finder else ""
-        rows.append({
-            "name": entry.toolchain_class.__name__.removesuffix("Toolchain"),
-            "aliases": ", ".join(f"`{a}`" for a in entry.aliases),
-            "category": entry.category,
-            "check_command": f"`{entry.check_command}`",
-            "platforms": _format_platforms(entry.platforms),
-            "description": entry.description,
-            "finder": finder,
-        })
+        rows.append(
+            {
+                "name": entry.toolchain_class.__name__.removesuffix("Toolchain"),
+                "aliases": ", ".join(f"`{a}`" for a in entry.aliases),
+                "category": entry.category,
+                "check_command": f"`{entry.check_command}`",
+                "platforms": _format_platforms(entry.platforms),
+                "description": entry.description,
+                "finder": finder,
+            }
+        )
 
     # Sort: C toolchains first (GCC/LLVM before MSVC/Clang-CL), then others
     category_order = {"c": 0, "cuda": 1, "wasm": 2, "python": 3}
     # Within C category, prefer well-known names first
     c_name_order = {"Gcc": 0, "Llvm": 1, "Msvc": 2, "ClangCl": 3}
-    rows.sort(key=lambda r: (
-        category_order.get(r["category"], 99),
-        c_name_order.get(r["name"], 99),
-        r["name"],
-    ))
+    rows.sort(
+        key=lambda r: (
+            category_order.get(r["category"], 99),
+            c_name_order.get(r["name"], 99),
+            r["name"],
+        )
+    )
 
     # Build markdown table
     lines = [
@@ -149,12 +152,14 @@ def _get_builder_table() -> str:
         # Clean up the description: first sentence only
         desc = reg.description.strip().split("\n")[0].rstrip(".")
         platforms = _format_platforms(reg.platforms) if reg.platforms else "All"
-        rows.append({
-            "name": name,
-            "target_type": reg.target_type.replace("_", " ").title(),
-            "platforms": platforms,
-            "description": desc,
-        })
+        rows.append(
+            {
+                "name": name,
+                "target_type": reg.target_type.replace("_", " ").title(),
+                "platforms": platforms,
+                "description": desc,
+            }
+        )
 
     lines = [
         "| Builder | Type | Platforms | Description |",

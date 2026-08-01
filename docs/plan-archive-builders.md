@@ -28,8 +28,8 @@ docs_tar = project.Tarfile(
     env,
     output="dist/docs.tar.gz",
     sources=["docs/", "README.md", "LICENSE"],
-    compression="gzip",                   # None, "gzip", "bz2", "xz"
-    base_dir=".",                         # Strip this prefix from archive paths
+    compression="gzip",  # None, "gzip", "bz2", "xz"
+    base_dir=".",  # Strip this prefix from archive paths
 )
 
 # Create a zip archive - returns Target
@@ -45,7 +45,7 @@ custom = project.Tarfile(
     env,
     output="out.tar.gz",
     sources=["data/"],
-    name="my_custom_name",               # Optional explicit name
+    name="my_custom_name",  # Optional explicit name
 )
 
 # Archives are Targets, so they work with Install
@@ -111,7 +111,9 @@ import zipfile
 from pathlib import Path
 
 
-def create_tarfile(output: Path, files: list[Path], compression: str | None, base_dir: Path) -> None:
+def create_tarfile(
+    output: Path, files: list[Path], compression: str | None, base_dir: Path
+) -> None:
     """Create a tar archive."""
     mode = "w"
     if compression == "gzip":
@@ -178,9 +180,10 @@ def _name_from_output(output: str | Path, strip_suffixes: list[str]) -> str:
     name = str(output)
     for suffix in strip_suffixes:
         if name.endswith(suffix):
-            name = name[:-len(suffix)]
+            name = name[: -len(suffix)]
             break
     return name  # e.g., "dist/docs.tar.gz" -> "dist/docs"
+
 
 def Tarfile(
     self,
@@ -224,6 +227,7 @@ def Tarfile(
     }
     self._targets.append(target)
     return target
+
 
 def Zipfile(
     self,
@@ -272,9 +276,7 @@ Currently `env.Command()` returns `list[FileNode]`. For consistency, it should r
 ```python
 # Returns list[FileNode]
 generated = env.Command(
-    "generated.h",
-    "schema.json",
-    "python generate.py $SOURCE > $TARGET"
+    "generated.h", "schema.json", "python generate.py $SOURCE > $TARGET"
 )
 ```
 
@@ -282,9 +284,9 @@ generated = env.Command(
 ```python
 # Returns Target - name derived from first target file
 generated = env.Command(
-    target="generated.h",            # Output file(s)
-    source="schema.json",            # Input file(s)
-    command="python generate.py $SOURCE > $TARGET"
+    target="generated.h",  # Output file(s)
+    source="schema.json",  # Input file(s)
+    command="python generate.py $SOURCE > $TARGET",
 )
 # Can now be passed to Install
 project.Install("include/", [generated])
@@ -294,7 +296,7 @@ generated = env.Command(
     target="out/generated.h",
     source="schema.json",
     command="...",
-    name="gen_header",               # Optional explicit name
+    name="gen_header",  # Optional explicit name
 )
 ```
 
@@ -325,7 +327,9 @@ def Command(
         name = Path(targets_list[0]).stem
 
     t = Target(name, self._project, self, target_type="command")
-    t._pending_sources = source if isinstance(source, list) else [source] if source else []
+    t._pending_sources = (
+        source if isinstance(source, list) else [source] if source else []
+    )
     t._build_info = {
         "tool": "command",
         "command": command,
