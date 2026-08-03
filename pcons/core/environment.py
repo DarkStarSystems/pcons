@@ -8,6 +8,7 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 from __future__ import annotations
 
 import logging
+from collections import UserList
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
@@ -35,6 +36,12 @@ else:
     _EnvironmentStubs = object
 
 logger = logging.getLogger(__name__)
+
+
+def _first_repr(value: Any) -> str:
+    """repr of a sequence's first element, for use in an example line."""
+    items = list(value)
+    return repr(items[0]) if items else '"..."'
 
 
 class Environment(_EnvironmentStubs):
@@ -465,42 +472,63 @@ class Environment(_EnvironmentStubs):
 
     @contextmanager
     def override(self, **kwargs: Any) -> Iterator[Environment]:
-        """Create a temporary environment with overrides.
+        """Build with a temporarily modified copy of this environment.
 
-        Returns a context manager that yields a cloned environment with
-        the specified overrides applied. Useful for building targets with
-        temporarily modified settings.
+        Yields a full clone; the original is untouched. Modify the clone in
+        the block — it is an ordinary Environment, so a flag list is an
+        ordinary Python list:
+
+            with env.override() as tuned:
+                tuned.cxx.flags.append("-O1")                    # add
+                tuned.cxx.flags.remove("-Werror")                # remove
+                tuned.cxx.flags = ["-O1"]                        # replace
+                project.Program("app", tuned, sources=["main.cpp"])
+
+        Keyword arguments are a shorthand that *assigns*, so they are for
+        scalars — ``variant="debug"``, ``cc__cmd="clang"``. Tool attributes
+        use ``tool__attr`` notation because Python keywords can't contain a
+        dot. Passing a list raises: at a call site ``cxx__flags=["-O1"]``
+        reads as "add -O1" but would discard every flag the environment
+        already carried, so the operation has to be spelled out in the block
+        instead.
 
         Args:
-            **kwargs: Variables or tool settings to override.
-                     For tool settings, use tool__attr notation (e.g., cc__flags)
-                     since Python kwargs can't contain dots.
+            **kwargs: Scalar variables or tool settings to assign.
 
         Yields:
-            A cloned Environment with overrides applied. The cloned environment
-            is fully independent, so you can also modify it directly within
-            the context block.
+            A clone of this environment with *kwargs* applied.
+
+        Raises:
+            TypeError: If a keyword's value is a list, tuple, or other
+                sequence — see above.
 
         Example:
-            # Override cross-tool variables
-            with env.override(variant="profile") as profile_env:
-                project.Program("app_profile", profile_env, sources=["main.cpp"])
+            # Scalars: keyword form
+            with env.override(variant="profile", cc__cmd="clang") as profile:
+                project.Program("app_profile", profile, sources=["main.cpp"])
 
-            # Override tool settings using double-underscore notation
-            with env.override(cxx__flags=["-fno-exceptions"]) as no_except_env:
-                project.Library("mylib", no_except_env, sources=["lib.cpp"])
-
-            # The yielded env is a full clone - you can modify it directly too
+            # Lists: modify the clone, so the operation is explicit
             with env.override(variant="debug") as debug_env:
                 debug_env.cxx.defines.append("EXTRA_DEBUG")
                 debug_env.cxx.flags.extend(["-g3", "-fno-omit-frame-pointer"])
                 project.Library("mylib_debug", debug_env, sources=["lib.cpp"])
+
+            # Per-file flags: hand the environment to the sources it applies to
+            with env.override() as careful:
+                careful.cxx.flags.append("-O1")
+                lib.add_sources(["cuda-support.cxx"], env=careful)
         """
+        # Validate before cloning or mutating anything, so a rejected call
+        # leaves no half-applied environment behind.
+        for key, value in kwargs.items():
+            if isinstance(value, (list, tuple, UserList)):
+                raise TypeError(self._list_override_message(key, value))
+
         temp_env = self.clone()
 
         for key, value in kwargs.items():
             if "__" in key:
-                # Tool attribute override: cc__flags -> env.cc.flags
+                # Tool attribute override: cc__cmd -> env.cc.cmd
                 tool_name, attr_name = key.split("__", 1)
                 tool = temp_env.add_tool(tool_name)  # Returns existing or creates new
                 setattr(tool, attr_name, value)
@@ -509,6 +537,61 @@ class Environment(_EnvironmentStubs):
                 setattr(temp_env, key, value)
 
         yield temp_env
+
+    def _list_override_message(self, key: str, value: Any) -> str:
+        """Explain why a list keyword was rejected, and what to write instead.
+
+        Names what the call would have discarded: that's the part a reader of
+        ``override(cxx__flags=["-O1"])`` doesn't see, and the reason the
+        keyword form doesn't take lists.
+        """
+        if "__" in key:
+            tool_name, attr_name = key.split("__", 1)
+            target = f"{tool_name}.{attr_name}"
+            current = None
+            if self.has_tool(tool_name):
+                current = getattr(getattr(self, tool_name), attr_name, None)
+            block = f"e.{target}"
+        else:
+            target = key
+            current = self._get_vars().get(key)
+            block = f"e.{target}"
+
+        if isinstance(current, (list, tuple, UserList)) and len(current) > 0:
+            shown = ", ".join(repr(v) for v in list(current)[:4])
+            if len(current) > 4:
+                shown += f", ... ({len(current)} in all)"
+            discards = (
+                f"would replace {target} entirely, discarding [{shown}].\n"
+                f"  Keyword overrides assign; they don't add to a list."
+            )
+        else:
+            discards = (
+                f"would assign {target} wholesale.\n"
+                f"  Keyword overrides assign; they don't add to a list — and once "
+                f"{target} is\n  non-empty this call would silently discard it."
+            )
+
+        examples = [
+            (f"{block}.append({_first_repr(value)})", "add"),
+            (f"{block}.remove(...)", "remove"),
+            (f"{block} = {list(value)!r}", "replace outright"),
+        ]
+        width = max(len(code) for code, _ in examples)
+        shown_examples = "\n".join(
+            f"          {code:<{width}}  # {what}" for code, what in examples
+        )
+
+        return (
+            f"env.override({key}=[...]) {discards}\n"
+            f"\n"
+            f"  Modify the list in the block, where the operation is explicit:\n"
+            f"      with env.override() as e:\n"
+            f"{shown_examples}\n"
+            f"\n"
+            f"  The keyword form is for scalars: "
+            f'env.override(variant="debug", cc__cmd="clang").'
+        )
 
     # Convenience methods for common patterns
 

@@ -2422,41 +2422,41 @@ app_profile = project.Program("app_profile", profile_env)
 
 ### Temporary Environment Overrides
 
-Use `env.override()` as a context manager to temporarily modify settings for specific files or targets. This creates a cloned environment with the specified changes, leaving the original unchanged.
+`env.override()` yields a temporary clone of the environment; the original is untouched. **Modify the clone in the block** — it's an ordinary `Environment`, so a flag list is an ordinary Python list and every operation is just Python:
 
 ```python
-# Override cross-tool variables
-with env.override(variant="profile") as profile_env:
-    project.Program("app_profile", profile_env, sources=["main.cpp"])
+with env.override() as tuned:
+    tuned.cxx.flags.append("-O1")  # add
+    tuned.cxx.flags.remove("-Werror")  # remove one
+    tuned.cxx.flags = [
+        f
+        for f in tuned.cxx.flags  # remove by pattern
+        if not f.startswith("-W")
+    ]
+    tuned.cxx.flags.insert(0, "-fno-strict-aliasing")  # order matters
+    tuned.cxx.flags = ["-O1"]  # replace outright
 
-# Override tool settings using double-underscore notation
-# (because Python kwargs can't contain dots)
-with env.override(cxx__flags=["-fno-exceptions"]) as no_except_env:
-    project.Library("mylib", no_except_env, sources=["lib.cpp"])
-
-# The yielded env is a full clone - you can modify it further
-with env.override(variant="debug") as debug_env:
-    debug_env.cxx.defines.append("EXTRA_DEBUG")
-    debug_env.cxx.flags.extend(["-g3", "-fno-omit-frame-pointer"])
-    project.Library("mylib_debug", debug_env, sources=["lib.cpp"])
-
-# Combine multiple overrides
-with env.override(variant="debug", cc__cmd="clang") as temp_env:
-    # temp_env has both changes applied
-    pass
+    project.Library("mylib", tuned, sources=["lib.cpp"])
 ```
 
-This is particularly useful when you need to compile a few files with different settings without creating a permanent cloned environment.
+Keyword arguments are a shorthand that **assigns**, so they are for scalars:
 
-!!! warning "The kwargs form *replaces* a list, it doesn't extend it"
-    `env.override(cxx__flags=["-O1"])` gives that target `-O1` and **nothing else** — the flags the environment already carried (`-std=c++17`, warning flags, `-isystem` paths) are gone. That is often not what the call site means. To add to a list, mutate the clone instead:
+```python
+with env.override(variant="debug", cc__cmd="clang") as temp_env:
+    project.Program("app_debug", temp_env, sources=["main.cpp"])
+```
+
+Tool settings use `tool__attr` notation because Python keywords can't contain a dot.
+
+!!! warning "Keyword arguments don't take lists"
+    `env.override(cxx__flags=["-O1"])` raises. It can only mean "assign", but at a call site it *reads* as "add `-O1`" — and assigning would silently discard every flag the environment already carried (`-std=c++17`, the warning set, `-isystem` paths). Since which of add / remove / reorder / replace you meant can't be inferred, say it in the block:
 
     ```python
-    with env.override() as tweaked:
-        tweaked.cxx.flags.append("-O1")  # keeps everything else
+    with env.override() as tuned:
+        tuned.cxx.flags.append("-O1")  # or .remove(...), or = [...]
     ```
 
-    Assignment on the clone (`tweaked.cxx.flags = [...]`) is the deliberate way to replace a list wholesale, e.g. to drop a flag.
+    The error message names the flags the call would have dropped and shows each form.
 
 #### Per-File Flags
 

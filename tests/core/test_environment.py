@@ -219,14 +219,14 @@ class TestEnvironmentOverride:
         assert env.variant == "release"
 
     def test_override_tool_setting(self, test_project):  # noqa: F811
-        """Override tool settings using double-underscore notation."""
+        """Override a scalar tool setting using double-underscore notation."""
         env = Environment()
         env.add_tool("cc")
-        env.cc.flags = ["-Wall"]
+        env.cc.cmd = "gcc"
 
-        with env.override(cc__flags=["-Wall", "-Werror"]) as temp_env:
-            assert temp_env.cc.flags == ["-Wall", "-Werror"]
-            assert env.cc.flags == ["-Wall"]  # Original unchanged
+        with env.override(cc__cmd="clang") as temp_env:
+            assert temp_env.cc.cmd == "clang"
+            assert env.cc.cmd == "gcc"  # Original unchanged
 
     def test_override_add_define(self, test_project):  # noqa: F811
         """Common use case: add a specific define for some files."""
@@ -234,9 +234,45 @@ class TestEnvironmentOverride:
         env.add_tool("cxx")
         env.cxx.defines = ["RELEASE"]
 
-        with env.override(cxx__defines=["RELEASE", "SPECIAL_BUILD"]) as temp_env:
-            assert "SPECIAL_BUILD" in temp_env.cxx.defines
+        with env.override() as temp_env:
+            temp_env.cxx.defines.append("SPECIAL_BUILD")
+            assert temp_env.cxx.defines == ["RELEASE", "SPECIAL_BUILD"]
             assert "SPECIAL_BUILD" not in env.cxx.defines
+
+    def test_override_rejects_a_list_value(self, test_project):  # noqa: F811
+        """A list keyword can only mean "assign", but at the call site it
+        reads as "add" -- so it is rejected rather than silently discarding
+        the flags the environment already carried."""
+        env = Environment()
+        env.add_tool("cxx")
+        env.cxx.flags = ["-std=c++17", "-Wall"]
+
+        with pytest.raises(TypeError) as excinfo:
+            with env.override(cxx__flags=["-O1"]):
+                pass
+
+        message = str(excinfo.value)
+        assert "-std=c++17" in message  # names what would have been lost
+        assert "cxx.flags.append('-O1')" in message  # and how to say "add"
+        assert env.cxx.flags == ["-std=c++17", "-Wall"]  # nothing mutated
+
+    def test_override_rejects_a_list_for_an_unset_variable(self, test_project):  # noqa: F811
+        """Rejected even when nothing would be lost yet: the same call would
+        start discarding silently as soon as the variable is populated."""
+        env = Environment()
+        env.add_tool("cc")
+
+        with pytest.raises(TypeError, match="cc.defines"):
+            with env.override(cc__defines=["FOO"]):
+                pass
+
+    def test_override_rejects_a_tuple(self, test_project):  # noqa: F811
+        env = Environment()
+        env.add_tool("cc")
+
+        with pytest.raises(TypeError):
+            with env.override(cc__flags=("-O1",)):
+                pass
 
     def test_override_multiple_settings(self, test_project):  # noqa: F811
         """Override multiple settings at once."""

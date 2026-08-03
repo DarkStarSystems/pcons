@@ -50,6 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`env.override()` keyword arguments no longer accept lists** — `override(cxx__flags=
+  ["-O1"])` raises with a message naming the flags it would have discarded and showing
+  each alternative. The keyword form assigns, but at a call site it reads as "add", and
+  assigning silently dropped everything the environment already carried. Which of add /
+  remove / reorder / replace was meant can't be inferred, so it's spelled out in the
+  block, where a flag list is an ordinary Python list:
+  `with env.override() as e: e.cxx.flags.append("-O1")`. Keyword arguments remain the
+  shorthand for scalars (`variant="debug"`, `cc__cmd="clang"`).
 - **Install target names derive from the whole destination path**, so they are unique by
   construction: `install_MyPlugin.bundle_Contents_MacOS` rather than `install_MacOS`
   renamed 278 times. Shallow destinations are unchanged (`install_bin`, `install_dist`).
