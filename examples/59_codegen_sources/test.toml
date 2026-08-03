@@ -1,0 +1,36 @@
+# Test configuration for the codegen-sources example
+
+[test]
+description = "A built generator plus a variable-length input list: declared source order, ${SOURCES[n:]} slices, and a globbed directory as a configure dependency"
+
+expected_outputs = [
+    "build/collate",
+    "build/gen/entries.c",
+    "build/demo",
+]
+
+[verify]
+# Running the program is the assertion: it can only print this if
+# ${SOURCES[0]} was the tool (rather than whichever input happened to be a
+# plain path) and ${SOURCES[1:]} covered both .def files. The structural
+# claim -- edge inputs in declared order -- is pinned by
+# tests/core/test_command.py, which doesn't depend on a shell.
+commands = [
+    { run = "build/demo", expect_stdout = "4 entries" },
+    { run = "build/demo", expect_stdout = "circle" },   # from shapes.def
+    { run = "build/demo", expect_stdout = "red" },      # and from colors.def
+]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "Touching a .def file regenerates the sources but not the tool"
+touch = "defs/shapes.def"
+expect_no_rebuild = ["obj.collate/*", "collate"]
+
+[skip]
+# The Makefile generator expresses all of this, but this example leans on the
+# regen edge (see 57_staged_generation for why make 3.81 can't drive it).
+generators = ["make", "xcode"]

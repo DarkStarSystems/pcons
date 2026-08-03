@@ -171,8 +171,11 @@ class NinjaGenerator(BaseGenerator):
             for flag in extra_command_flags:
                 if flag not in command_tokens:
                     command_tokens.append(flag)
+            all_targets = build_info.get("all_targets") or []
             relativized_tokens = self._relativize_command_tokens(
-                cast(list[str], command_tokens)
+                cast(list[str], command_tokens),
+                source_count=len(build_info.get("sources") or []),
+                target_count=len(all_targets) or 1,
             )
             command = to_shell_command(relativized_tokens, shell="ninja")
         else:
@@ -955,23 +958,34 @@ class NinjaGenerator(BaseGenerator):
         )
 
     def _relativize_command_tokens(
-        self, tokens: list[str] | list[CommandToken]
+        self,
+        tokens: list[str] | list[CommandToken],
+        *,
+        source_count: int = 0,
+        target_count: int = 0,
     ) -> list[str]:
         """Relativize command tokens for ninja execution.
 
         SourcePath/TargetPath markers become $in/$out (or $source_N/$target_N
         in indexed mode), PathTokens are relativized, and plain strings fall
         back to pattern-based path-flag detection.
+
+        A slice marker (``${SOURCES[2:]}``) expands to the indexed references
+        it covers, which is why the counts are needed: ninja has no way to
+        say "the rest of the inputs".
         """
         from pcons.core.subst import PathToken, SourcePath, TargetPath
 
         # An explicit index on any marker (even 0) switches all markers of
         # that type to indexed mode; index=None means "auto" ($in/$out).
+        # A slice does the same: it renders as indexed references.
         has_indexed_source = any(
-            isinstance(t, SourcePath) and t.index is not None for t in tokens
+            isinstance(t, SourcePath) and (t.index is not None or t.is_slice)
+            for t in tokens
         )
         has_indexed_target = any(
-            isinstance(t, TargetPath) and t.index is not None for t in tokens
+            isinstance(t, TargetPath) and (t.index is not None or t.is_slice)
+            for t in tokens
         )
 
         result: list[str] = []
@@ -987,12 +1001,18 @@ class NinjaGenerator(BaseGenerator):
                     result.append(self._relativize_flag_with_path(token, prefix=""))
                     continue
             if isinstance(token, SourcePath):
+                if token.is_slice:
+                    result.extend(self._slice_refs(token, "source", source_count))
+                    continue
                 if token.index is not None or has_indexed_source:
                     ninja_var = f"$source_{token.index or 0}"
                 else:
                     ninja_var = "$in"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
             elif isinstance(token, TargetPath):
+                if token.is_slice:
+                    result.extend(self._slice_refs(token, "target", target_count))
+                    continue
                 if token.index is not None or has_indexed_target:
                     ninja_var = f"$target_{token.index or 0}"
                 else:
@@ -1011,6 +1031,18 @@ class NinjaGenerator(BaseGenerator):
                     self._warn_absolute_in_tree(relativized)
                 result.append(relativized)
         return result
+
+    @staticmethod
+    def _slice_refs(token: Any, kind: str, count: int) -> list[str]:
+        """The indexed references a slice marker covers, one token each.
+
+        Ninja has no "rest of the inputs" variable, so the slice is written
+        out as ``$source_2 $source_3 ...`` for this edge's actual count. Edges
+        with different counts therefore get different rules; that is fine for
+        the code-generation commands slices exist for.
+        """
+        start, stop, _ = slice(token.start, token.stop).indices(count)
+        return [f"{token.prefix}${kind}_{i}{token.suffix}" for i in range(start, stop)]
 
     def _relativize_path_for_ninja(self, path: str) -> str:
         """Transform a path for ninja execution: $topdir/... for project

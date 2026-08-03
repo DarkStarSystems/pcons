@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`${SOURCES[n:m]}` slices** in `env.Command`, with either end optional, for the common
+  shape where the number of inputs is a property of the project rather than of the rule:
+  `command="${SOURCES[0]} $TARGET ${SOURCES[1:]}"`. Anything else inside `${...}` now
+  raises — an unrecognized form previously reached `build.ninja` as a shell-escaped
+  literal and ran as nonsense, which is the opposite of pcons's fail-fast rule.
+- **`check_define(..., as_string=True)`** (and the batch form) returns the string a macro
+  denotes rather than its expansion text: adjacent literals concatenated, quotes removed,
+  simple C escapes decoded. `#define DIR "/opt/" "app"` reads back as `/opt/app` instead
+  of the seven characters `"/opt/" "app"`. Raises if the macro isn't a string literal.
 - **Per-file flags without a second target.** `target.add_sources([...], env=other_env)`
   (and `add_source`) compiles those sources with a different environment while they stay
   part of the target — so they keep its include dirs, defines, and everything inherited
@@ -65,6 +74,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Configure checks compile the way the build does.** `env.<tool>.defines` and
+  `.includes` were never applied to any probe — only `flags` were — so `check_header()`
+  couldn't find a header on the project's own include path, and a macro read out of a
+  header that takes a different `#ifdef` branch came back with a plausible **wrong value**
+  rather than an error. Per-call `defines=` adds to the environment's rather than
+  replacing them. Cached answers computed without them invalidate themselves, so expect
+  one slower configure after upgrading.
+- **`env.Command` preserves the order sources were declared in.** Target sources were
+  appended after path sources regardless of where they appeared, so
+  `source=[built_tool, *data_files]` made `${SOURCES[0]}` a data file and the build tried
+  to execute it. `$in` order was wrong too, which matters to anything order-sensitive.
 - **Object files are keyed by environment, so multi-architecture builds are correct.**
   Two targets compiling one source with different environments shared a single object
   file: a universal build compiled `-arch arm64` once and linked those objects into the

@@ -120,9 +120,45 @@ class CommandNodeFactory(PendingSourceFactory):
             primary = target.output_nodes[0]
             if hasattr(primary, "_build_info") and primary._build_info:
                 existing_sources = primary._build_info.get("sources", [])
-                primary._build_info["sources"] = (
-                    list(existing_sources) + additional_sources
+                primary._build_info["sources"] = self._ordered_sources(
+                    target, list(existing_sources), additional_sources
                 )
+
+    @staticmethod
+    def _ordered_sources(
+        target: Target,
+        existing: list[FileNode],
+        additional: list[FileNode],
+    ) -> list[FileNode]:
+        """Merge resolved Target outputs back into the declared source order.
+
+        ``env.Command`` records the sequence the script wrote, with Targets
+        left in place because their outputs don't exist yet. Substituting each
+        Target with its outputs here keeps ``$SOURCE``, ``${SOURCES[n]}`` and
+        the edge's input order agreeing with the call. Appending instead —
+        which is what happens without a declared sequence — silently shifts
+        every positional reference.
+        """
+        declared = (getattr(target, "_builder_data", None) or {}).get(
+            "declared_sources"
+        )
+        if not declared:
+            return existing + additional
+
+        from pcons.core.target import Target as TargetClass
+
+        ordered: list[FileNode] = []
+        for entry in declared:
+            if isinstance(entry, TargetClass):
+                ordered.extend(entry.output_nodes)
+            elif isinstance(entry, FileNode):
+                ordered.append(entry)
+
+        # Anything the declared sequence didn't account for (sources added
+        # after the fact) keeps its old position at the end.
+        seen = {id(node) for node in ordered}
+        ordered.extend(n for n in existing + additional if id(n) not in seen)
+        return ordered
 
 
 class Resolver:

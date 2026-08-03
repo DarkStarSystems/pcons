@@ -2522,8 +2522,25 @@ env.Command(
 | `$TARGETS` | All target files (space-separated) |
 | `${SOURCES[n]}` | Indexed source access (0-based) |
 | `${TARGETS[n]}` | Indexed target access (0-based) |
+| `${SOURCES[n:m]}` | A range of sources — either end may be omitted |
+| `${TARGETS[n:m]}` | A range of targets |
 | `$SRCDIR` | Project source tree root directory |
 | `$$` | Literal `$` (escaped) |
+
+Anything else inside `${...}` is an error. An unrecognized form would otherwise reach `build.ninja` as a shell-escaped literal and run as nonsense.
+
+**Sources keep the order you wrote them in.** `$SOURCE` is the first source declared, whether or not it's another target's output:
+
+```python
+# ${SOURCES[0]} is the tool; ${SOURCES[1:]} is however many .def files there are
+env.Command(
+    target=gen_dir / "entries.c",
+    source=[collate_tool, *def_files],
+    command="${SOURCES[0]} $TARGET ${SOURCES[1:]}",
+)
+```
+
+A slice is the right tool when the input count is a property of the project rather than of the rule — adding a `.def` file above changes nothing in the build script. See `examples/59_codegen_sources`, which also shows why a glob needs `project.add_configure_dependency()` on the directory it read.
 
 Use `$SRCDIR` to reference files in the source tree that aren't listed as sources. Since the build runs from the build directory, relative paths to source-tree files won't resolve correctly without this:
 
@@ -3455,6 +3472,8 @@ assert result2.cached is True  # Second run: from cache
 
 The cache key includes a signature of the compiler command *and its current flags*, so switching compilers — or retargeting the same compiler with a cross preset (`--target=`, `-isysroot`) — invalidates the relevant entries automatically. Checks probe the same compilation the build will do.
 
+Checks compile the way the build does: the tool's flags, defines, and include directories all apply. That matters most for the case that doesn't fail — a header that compiles either way and takes a different `#ifdef` branch will hand back a plausible wrong value if the probe doesn't carry the same defines the build will. Per-call `defines=` adds to the environment's rather than replacing them.
+
 #### Reading Macros From Headers
 
 `check_define()` and `check_defines()` accept `headers=`, `include_dirs=`, and `defines=`, so they read constants out of the project's own headers — version strings, feature flags, install paths — not just compiler builtins. Four outcomes are distinguishable:
@@ -3467,6 +3486,16 @@ The cache key includes a signature of the compiler command *and its current flag
 | `#define FOO "Sapphire 2024"` | `'"Sapphire 2024"'` |
 
 Quotes are kept, so a string literal is distinguishable from a number and from a defined-but-empty macro, and the value can go straight into a generated config header. Use the batch form when reading several from one header: configure time is dominated by process startup, and `check_defines()` answers them all in a single preprocessor run.
+
+For a macro you know is a string, `as_string=True` gives you the string it denotes rather than its expansion text — adjacent literals concatenated, quotes removed, simple C escapes decoded:
+
+```python
+# support/config.h:  #define DEFAULT_DIR "/Applications/" "MyApp 2024" "/config"
+checks.check_define("DEFAULT_DIR", headers=["support/config.h"], as_string=True)
+# -> "/Applications/MyApp 2024/config"
+```
+
+It raises if the macro isn't a string literal, since asking for a string back from `#define N 42` is a mistake in the call rather than a value to guess at.
 
 A probe that fails to preprocess at all — a missing header, a bad include path — is not cached. It's an error condition rather than an answer about the macro, and with staged generation the header may simply not exist yet on the first pass.
 

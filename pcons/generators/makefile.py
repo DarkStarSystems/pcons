@@ -819,15 +819,25 @@ class MakefileGenerator(BaseGenerator):
         # An explicit index on any marker (even 0) switches all markers of
         # that type to indexed mode; index=None means "auto".
         has_indexed_source = any(
-            isinstance(t, SourcePath) and t.index is not None for t in tokens
+            isinstance(t, SourcePath) and (t.index is not None or t.is_slice)
+            for t in tokens
         )
         has_indexed_target = any(
-            isinstance(t, TargetPath) and t.index is not None for t in tokens
+            isinstance(t, TargetPath) and (t.index is not None or t.is_slice)
+            for t in tokens
         )
 
         result: list[str] = []
         for token in tokens:
-            if isinstance(token, SourcePath):
+            if isinstance(token, (SourcePath, TargetPath)) and token.is_slice:
+                # A slice names a range of the edge's paths; make sees the
+                # concrete paths anyway, so this is a plain list slice.
+                paths = in_paths if isinstance(token, SourcePath) else out_paths
+                result.extend(
+                    f"{token.prefix}{p}{token.suffix}"
+                    for p in paths[token.start : token.stop]
+                )
+            elif isinstance(token, SourcePath):
                 if token.index is not None or has_indexed_source:
                     idx = token.index or 0
                     if idx < len(in_paths):

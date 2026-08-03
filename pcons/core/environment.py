@@ -1218,9 +1218,13 @@ class Environment(_EnvironmentStubs):
         if name is None:
             name = targets[0].stem
 
-        # Normalize source to list, separating Targets from immediate sources
+        # Normalize source to list, separating Targets from immediate sources.
+        # A Target's outputs don't exist until the resolve phase, so it can't
+        # become a node here — but its *position* has to survive, or $SOURCE
+        # and ${SOURCES[n]} refer to different files than the script wrote.
         immediate_sources: list[str | Path | Node] = []
         target_sources: list[TargetClass] = []
+        source_list: list[Any] = []
 
         if source is not None:
             source_list = (
@@ -1238,10 +1242,11 @@ class Environment(_EnvironmentStubs):
         builder = GenericCommandBuilder(command, restat=restat or write_if_different)
 
         # Build the targets with immediate sources
+        normalized = builder._normalize_sources(immediate_sources)
         nodes = builder._build(
             self,
             targets,
-            builder._normalize_sources(immediate_sources),
+            normalized,
             defined_at=get_caller_location(),
         )
 
@@ -1271,6 +1276,15 @@ class Environment(_EnvironmentStubs):
         # Handle Target sources - store for deferred resolution
         if target_sources:
             cmd_target._pending_sources = list(target_sources)
+            # The declared sequence, with each Target still a Target: the
+            # factory substitutes its outputs in place once they exist, so
+            # $SOURCES keeps the order the script wrote instead of listing
+            # every Target last.
+            normalized_iter = iter(normalized)
+            cmd_target._builder_data["declared_sources"] = [
+                src if isinstance(src, TargetClass) else next(normalized_iter)
+                for src in source_list
+            ]
             # Add as dependencies to ensure correct build order
             for src_target in target_sources:
                 if src_target not in cmd_target.dependencies:

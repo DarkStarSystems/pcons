@@ -9,6 +9,7 @@ import pytest
 from pcons.configure.checks import (
     CheckResult,
     ToolChecks,
+    _decode_c_string,
     _parse_probe_output,
     _probe_source,
 )
@@ -719,3 +720,165 @@ class TestCheckDefineWithCompiler:
         (tmp_path / "probe_header.h").write_text("#define PROBE_NUMBER 99\n")
 
         assert checks.check_define("PROBE_NUMBER", **kwargs) == first
+
+
+@pytest.mark.skipif(not has_cc, reason="No C compiler available")
+class TestChecksUseTheEnvironment:
+    """A check has to compile the way the build will.
+
+    Flags were already applied; defines and include dirs were not, so a probe
+    answered a different question than the caller asked. The dangerous shape
+    isn't a probe that fails to compile -- it's a header that compiles fine
+    either way and takes a different #ifdef branch, handing back a plausible
+    wrong value.
+    """
+
+    @pytest.fixture
+    def setup(self, tmp_path, test_project):  # noqa: F811
+        (tmp_path / "cfg.h").write_text(
+            "#ifdef SAPPHIRE\n"
+            '#define DIR "/right/path"\n'
+            "#else\n"
+            '#define DIR "/wrong/path"\n'
+            "#endif\n"
+        )
+        config = Configure(build_dir=tmp_path)
+        env = Environment()
+        env.add_tool("cc")
+        if _cc_path:
+            env.cc.cmd = _cc_path
+        return config, env, tmp_path
+
+    def test_env_defines_reach_the_probe(self, setup):
+        config, env, tmp_path = setup
+        env.cc.defines = ["SAPPHIRE"]
+        env.cc.includes = [tmp_path]
+        checks = ToolChecks(config, env, "cc")
+
+        value = checks.check_define("DIR", headers=["cfg.h"])
+
+        assert value == '"/right/path"'  # used to be "/wrong/path"
+
+    def test_env_includes_let_check_header_find_a_project_header(self, setup):
+        config, env, tmp_path = setup
+        env.cc.includes = [tmp_path]
+        checks = ToolChecks(config, env, "cc")
+
+        assert checks.check_header("cfg.h").success
+
+    def test_without_env_defines_the_other_branch_is_reported(self, setup):
+        """The mechanism, from the other side: no define, other branch."""
+        config, env, tmp_path = setup
+        env.cc.includes = [tmp_path]
+        checks = ToolChecks(config, env, "cc")
+
+        assert checks.check_define("DIR", headers=["cfg.h"]) == '"/wrong/path"'
+
+    def test_per_call_defines_add_to_the_environments(self, setup):
+        config, env, tmp_path = setup
+        env.cc.defines = ["SAPPHIRE"]
+        env.cc.includes = [tmp_path]
+        checks = ToolChecks(config, env, "cc")
+
+        # GATE comes from the call, SAPPHIRE from the environment; both apply.
+        (tmp_path / "gated.h").write_text(
+            "#if defined(SAPPHIRE) && defined(GATE)\n#define BOTH 1\n#endif\n"
+        )
+        value = checks.check_define("BOTH", headers=["gated.h"], defines=["GATE"])
+
+        assert value == "1"
+
+    def test_env_defines_discriminate_the_cache(self, setup):
+        config, env, tmp_path = setup
+        env.cc.includes = [tmp_path]
+        plain = ToolChecks(config, env, "cc").check_define("DIR", headers=["cfg.h"])
+
+        env.cc.defines = ["SAPPHIRE"]
+        defined = ToolChecks(config, env, "cc").check_define("DIR", headers=["cfg.h"])
+
+        assert plain != defined  # not served from the first answer's cache entry
+
+    def test_relative_include_dirs_resolve_against_the_project_root(
+        self, tmp_path, test_project
+    ):  # noqa: F811
+        """Probes compile in a temp dir, so a project-relative -I would
+        otherwise point nowhere."""
+        from pcons.core.project import Project
+
+        project = Project("relinc", root_dir=tmp_path)
+        (tmp_path / "inc").mkdir()
+        (tmp_path / "inc" / "rel.h").write_text("#define REL_OK 1\n")
+
+        env = project.Environment()
+        env.add_tool("cc")
+        if _cc_path:
+            env.cc.cmd = _cc_path
+        env.cc.includes = ["inc"]  # relative to the project root
+        checks = ToolChecks(Configure(build_dir=tmp_path), env, "cc")
+
+        assert checks.check_define("REL_OK", headers=["rel.h"]) == "1"
+
+
+class TestCheckDefineAsString:
+    """as_string=True: the string the macro denotes, not its expansion text."""
+
+    def test_concatenates_adjacent_literals(self):
+        assert (
+            _decode_c_string('"/Applications/" "Sapphire 2022" "/config"', "DIR")
+            == "/Applications/Sapphire 2022/config"
+        )
+
+    def test_decodes_simple_escapes(self):
+        assert (
+            _decode_c_string(r'"C:\\Program Files\\App"', "P")
+            == r"C:\Program Files\App"
+        )
+        assert _decode_c_string(r'"a\nb"', "S") == "a\nb"
+        assert _decode_c_string(r'"say \"hi\""', "S") == 'say "hi"'
+
+    def test_leaves_exotic_escapes_alone(self):
+        """Numeric and universal escapes are rare here, and guessing at them
+        silently would be worse than leaving them visible."""
+        assert _decode_c_string(r'"\x41"', "S") == r"\x41"
+
+    def test_a_non_string_macro_is_a_caller_error(self):
+        with pytest.raises(ValueError, match="not a string literal"):
+            _decode_c_string("42", "NUM")
+
+    def test_empty_expansion_is_a_caller_error(self):
+        with pytest.raises(ValueError, match="not a string literal"):
+            _decode_c_string("", "EMPTY")
+
+
+@pytest.mark.skipif(not has_cc, reason="No C compiler available")
+class TestCheckDefineAsStringWithCompiler:
+    @pytest.fixture
+    def checks(self, tmp_path, test_project):  # noqa: F811
+        (tmp_path / "s.h").write_text(
+            '#define DIR "/Applications/BorisFX/" "Sapphire 2022 Adobe" "/config"\n'
+            "#define NUM 42\n"
+        )
+        config = Configure(build_dir=tmp_path)
+        env = Environment()
+        env.add_tool("cc")
+        if _cc_path:
+            env.cc.cmd = _cc_path
+        env.cc.includes = [tmp_path]
+        return ToolChecks(config, env, "cc")
+
+    def test_reads_a_concatenated_path_macro(self, checks):
+        value = checks.check_define("DIR", headers=["s.h"], as_string=True)
+
+        assert value == "/Applications/BorisFX/Sapphire 2022 Adobe/config"
+
+    def test_undefined_stays_none(self, checks):
+        assert checks.check_define("NOPE", headers=["s.h"], as_string=True) is None
+
+    def test_non_string_macro_raises(self, checks):
+        with pytest.raises(ValueError, match="not a string literal"):
+            checks.check_define("NUM", headers=["s.h"], as_string=True)
+
+    def test_batch_form_decodes_each(self, checks):
+        values = checks.check_defines(["DIR"], headers=["s.h"], as_string=True)
+
+        assert values["DIR"].startswith("/Applications/BorisFX/")

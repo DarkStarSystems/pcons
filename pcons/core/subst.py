@@ -164,6 +164,15 @@ class TargetPath:
     index: int | None = None
     suffix: str = ""
     prefix: str = ""
+    #: Half-open range of targets, for ${TARGETS[n:m]}. Mutually exclusive
+    #: with *index*; both None means "all of them".
+    start: int | None = None
+    stop: int | None = None
+
+    @property
+    def is_slice(self) -> bool:
+        """True if this marker selects a range rather than one target."""
+        return self.start is not None or self.stop is not None
 
 
 @dataclass(frozen=True)
@@ -189,6 +198,15 @@ class SourcePath:
     index: int | None = None
     suffix: str = ""
     prefix: str = ""
+    #: Half-open range of sources, for ${SOURCES[n:m]}. Mutually exclusive
+    #: with *index*; both None means "all of them" ($in).
+    start: int | None = None
+    stop: int | None = None
+
+    @property
+    def is_slice(self) -> bool:
+        """True if this marker selects a range rather than one source."""
+        return self.start is not None or self.stop is not None
 
 
 # Type alias for command tokens (can be string, PathToken, or marker objects)

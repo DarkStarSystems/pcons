@@ -8,6 +8,7 @@ an Object builder that turns .c files into .o files).
 
 from __future__ import annotations
 
+import re
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from pcons.core.node import BuildInfo, FileNode, Node, OutputInfo
-from pcons.core.subst import PathToken, TargetPath
+from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
@@ -536,6 +537,56 @@ class MultiOutputBuilder(CommandBuilder):
         return OutputGroup(nodes, primary_name)
 
 
+#: A ${...} substitution whose contents are a plain variable name. Anything
+#: else inside ${...} is either a marker form we recognize or a mistake.
+_PLAIN_VARIABLE = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_.]*\}$")
+
+#: The substitutions env.Command() understands, for error messages.
+_SUPPORTED_SUBSTITUTIONS = (
+    "$SOURCE, $SOURCES, $TARGET, $TARGETS, ${SOURCES[n]}, ${TARGETS[n]}, "
+    "${SOURCES[n:m]} (slices, with either end optional), $SRCDIR, "
+    "${VARIABLE}, and $$ for a literal dollar"
+)
+
+
+def _subscript_marker(token: str, match: re.Match[str]) -> SourcePath | TargetPath:
+    """Build the marker for a ${SOURCES[...]} / ${TARGETS[...]} token."""
+    kind, first, second = match.group(1), match.group(2), match.group(3)
+    marker = SourcePath if kind == "SOURCES" else TargetPath
+
+    if second is None:  # ${X[n]} -- a single item
+        if not first:
+            raise ValueError(
+                f"{token} has an empty subscript. Use ${{{kind}[n]}} for one "
+                f"item or ${{{kind}[n:m]}} for a range."
+            )
+        return marker(index=int(first))
+
+    start = int(first) if first else None
+    stop = int(second) if second else None
+    if start is None and stop is None:
+        # ${X[:]} is just all of them; the bare form says so more clearly.
+        return marker()
+    return marker(start=start, stop=stop)
+
+
+def _reject_unknown_substitution(token: str) -> None:
+    """Raise on a ${...} that is neither a known marker nor a variable.
+
+    Left alone, an unrecognized form reaches build.ninja as a shell-escaped
+    literal and the command runs with nonsense in it -- the exact silent
+    failure pcons's fail-fast rule exists to prevent. Variable references
+    pass through here and are validated against the environment later.
+    """
+    for candidate in re.findall(r"\$\{[^}]*\}", token):
+        if _PLAIN_VARIABLE.match(candidate):
+            continue
+        raise ValueError(
+            f"Unrecognized substitution {candidate} in command {token!r}.\n"
+            f"Supported: {_SUPPORTED_SUBSTITUTIONS}."
+        )
+
+
 class GenericCommandBuilder(BaseBuilder):
     """A builder for arbitrary shell commands, with $SOURCE/$TARGET-style
     variable substitution.
@@ -605,9 +656,10 @@ class GenericCommandBuilder(BaseBuilder):
         else:
             tokens = list(command)
 
-        # Patterns for indexed access
-        indexed_source_pattern = re.compile(r"^\$\{SOURCES\[(\d+)\]\}$")
-        indexed_target_pattern = re.compile(r"^\$\{TARGETS\[(\d+)\]\}$")
+        # ${SOURCES[2]}, ${SOURCES[2:]}, ${SOURCES[:3]}, ${SOURCES[1:3]}
+        subscript = re.compile(
+            r"^\$\{(SOURCES|TARGETS)\[(\d*)(?::(\d*))?\]\}$",
+        )
 
         # Replace string patterns with typed markers
         result: list = []
@@ -616,11 +668,10 @@ class GenericCommandBuilder(BaseBuilder):
                 result.append(SourcePath())
             elif token in ("$TARGET", "$TARGETS"):
                 result.append(TargetPath())
-            elif match := indexed_source_pattern.match(token):
-                result.append(SourcePath(index=int(match.group(1))))
-            elif match := indexed_target_pattern.match(token):
-                result.append(TargetPath(index=int(match.group(1))))
+            elif match := subscript.match(token):
+                result.append(_subscript_marker(token, match))
             else:
+                _reject_unknown_substitution(token)
                 # Keep as string (covers embedded variables like /Fo$TARGET
                 # and plain tokens)
                 result.append(token)

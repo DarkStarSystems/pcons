@@ -8,6 +8,7 @@ libraries, and other system capabilities.
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -112,6 +113,55 @@ def _parse_probe_output(output: str, names: list[str]) -> dict[str, str | None]:
     return results
 
 
+#: C escapes worth decoding in a string-literal macro. Numeric (\\x41, \\101)
+#: and universal (\\u) escapes are left alone: they're vanishingly rare in the
+#: build-configuration strings this is for, and guessing at them silently
+#: would be worse than leaving them visible.
+_C_ESCAPES = {
+    "\\\\": "\\",
+    '\\"': '"',
+    "\\'": "'",
+    "\\n": "\n",
+    "\\t": "\t",
+    "\\r": "\r",
+    "\\a": "\a",
+    "\\b": "\b",
+    "\\f": "\f",
+    "\\v": "\v",
+    "\\0": "\0",
+}
+
+#: One C string literal, escapes included.
+_STRING_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def _decode_c_string(value: str, name: str) -> str:
+    """Turn a macro's string-literal expansion into the string it denotes.
+
+    ``#define DIR "/a/" "b"`` expands to the seven characters ``"/a/" "b"``:
+    adjacent literals, still quoted, escapes intact. Every caller that reads a
+    path or version string out of a header otherwise writes this same
+    unquote-and-join by hand.
+
+    Raises:
+        ValueError: If *value* isn't made only of string literals — asking for
+            a string back from ``#define N 42`` is a mistake in the call, not
+            a value to guess at.
+    """
+    remainder = _STRING_LITERAL.sub("", value).strip()
+    if remainder or not value.strip():
+        raise ValueError(
+            f"Macro {name} is {value!r}, which is not a string literal. "
+            f"Drop as_string=True to get the expansion text as-is."
+        )
+    decoded: list[str] = []
+    for piece in _STRING_LITERAL.findall(value):
+        for escape, replacement in _C_ESCAPES.items():
+            piece = piece.replace(escape, replacement)
+        decoded.append(piece)
+    return "".join(decoded)
+
+
 def cache_signature(*parts: str) -> str:
     """Short, stable signature over *parts* for configure cache keys.
 
@@ -203,10 +253,9 @@ class ToolChecks:
         return getattr(self._tool_config, "cmd", None)
 
     def _tool_flags(self) -> list[str]:
-        """The tool's current string flags, included in every check compile.
+        """The tool's current string flags.
 
-        Cross presets put ``--target=``/``-isysroot``/``--sysroot`` here,
-        so a check probes the same compilation the build will do.
+        Cross presets put ``--target=``/``-isysroot``/``--sysroot`` here.
         """
         if self._tool_config is None:
             return []
@@ -214,6 +263,37 @@ class ToolChecks:
         if not isinstance(flags, list):
             return []
         return [f for f in flags if isinstance(f, str)]
+
+    def _tool_list(self, name: str) -> list[str]:
+        """A tool variable's string entries (``defines``, ``includes``, ...)."""
+        if self._tool_config is None:
+            return []
+        values = self._tool_config.get(name)
+        if not isinstance(values, list):
+            return []
+        return [str(v) for v in values if isinstance(v, (str, Path))]
+
+    def _probe_flags(self) -> list[str]:
+        """Everything a probe needs to compile the way the build will.
+
+        Flags, defines, and include directories all shape what the compiler
+        sees, so a check that omits any of them answers a different question
+        than the one the caller asked. The dangerous case isn't a probe that
+        fails to compile — it's a header that compiles fine either way and
+        takes a different ``#ifdef`` branch, handing back a plausible wrong
+        value.
+        """
+        return [
+            *self._tool_flags(),
+            *(self._define_flag(d) for d in self._tool_list("defines")),
+            *(self._include_flag(i) for i in self._tool_list("includes")),
+            *(self._include_flag(i) for i in self._tool_list("system_includes")),
+        ]
+
+    def _project_root(self) -> Path | None:
+        """The project root, for resolving relative include dirs."""
+        project = getattr(self._env, "_project", None)
+        return getattr(project, "root_dir", None)
 
     def _cache_key(self, check_type: str, *args: str) -> str:
         """Generate a cache key for a check.
@@ -223,7 +303,7 @@ class ToolChecks:
         ``--target=wasm32-wasi``) never shares cached answers.
         """
         compiler = self._get_compiler() or "unknown"
-        sig = cache_signature(compiler, *self._tool_flags())
+        sig = cache_signature(compiler, *self._probe_flags())
         return f"check:{self._tool_name}:{sig}:{check_type}:{':'.join(args)}"
 
     def _cached_or_compiler(self, cache_key: str) -> CheckResult | str:
@@ -338,9 +418,29 @@ class ToolChecks:
         return f"-l{lib}"
 
     def _include_flag(self, directory: str | Path) -> str:
-        """Return the command-line argument adding an include directory."""
+        """Return the command-line argument adding an include directory.
+
+        A relative directory is resolved against the project root: probes
+        compile in a temporary directory, so ``-Iinclude`` would otherwise
+        search a directory that doesn't exist.
+
+        Rootedness is tested with ``anchor`` rather than ``is_absolute()``,
+        which is platform-dependent: ``Path("/opt/sdk").is_absolute()`` is
+        False on Windows (no drive), and prefixing the project root onto it
+        would point the probe somewhere that doesn't exist.
+        """
+        path = Path(directory)
+        if not path.anchor:
+            root = self._project_root()
+            if root is not None:
+                path = root / path
         prefix = "/I" if self._is_msvc_style() else "-I"
-        return f"{prefix}{Path(directory).as_posix()}"
+        return f"{prefix}{path.as_posix()}"
+
+    def _define_flag(self, define: str) -> str:
+        """Return the command-line argument predefining a macro."""
+        prefix = "/D" if self._is_msvc_style() else "-D"
+        return f"{prefix}{define}"
 
     def check_flag(self, flag: str) -> CheckResult:
         """Check if the compiler accepts a flag.
@@ -550,6 +650,7 @@ int main(void) {{ return 0; }}
         headers: list[str | Path] | None = None,
         defines: list[str] | None = None,
         include_dirs: list[str | Path] | None = None,
+        as_string: bool = False,
     ) -> str | None:
         """Read a macro's value, from the compiler or from a header.
 
@@ -565,6 +666,7 @@ int main(void) {{ return 0; }}
                 (note this is *input* to the probe; the macro being read is
                 the ``define`` argument).
             include_dirs: Directories to search for *headers*.
+            as_string: Decode the value as a C string literal (see below).
 
         Returns:
             The macro's expansion text, or None when it isn't defined. Four
@@ -581,8 +683,14 @@ int main(void) {{ return 0; }}
 
             Quotes are kept, so a string literal is distinguishable from a
             number and from a defined-but-empty macro, and the value can go
-            straight into a generated config header. Strip them yourself if
-            you want the bare text. Function-like macros are not expanded.
+            straight into a generated config header. Function-like macros are
+            not expanded.
+
+            With ``as_string=True`` you get the string the macro *denotes*
+            instead: adjacent literals concatenated, quotes removed, simple C
+            escapes decoded — ``#define DIR "/opt/" "app"`` becomes
+            ``/opt/app``. Raises ValueError if the macro isn't a string
+            literal at all.
 
         Example:
             # core/version.h:  #define VERSION_NAME "Sapphire 2024"
@@ -598,7 +706,11 @@ int main(void) {{ return 0; }}
             self._caller_location(),
         )
         return self._check_defines(
-            [define], headers=headers, defines=defines, include_dirs=include_dirs
+            [define],
+            headers=headers,
+            defines=defines,
+            include_dirs=include_dirs,
+            as_string=as_string,
         )[define]
 
     def check_defines(
@@ -608,6 +720,7 @@ int main(void) {{ return 0; }}
         headers: list[str | Path] | None = None,
         defines: list[str] | None = None,
         include_dirs: list[str | Path] | None = None,
+        as_string: bool = False,
     ) -> dict[str, str | None]:
         """Read several macros in a single preprocessor run.
 
@@ -621,6 +734,8 @@ int main(void) {{ return 0; }}
             headers: Headers to include before reading them.
             defines: Macros to predefine first (``NAME`` or ``NAME=value``).
             include_dirs: Directories to search for *headers*.
+            as_string: Decode each value as a C string literal — see
+                :meth:`check_define`.
 
         Returns:
             ``{name: value-or-None}`` in the order given.
@@ -640,7 +755,11 @@ int main(void) {{ return 0; }}
             self._caller_location(),
         )
         return self._check_defines(
-            names, headers=headers, defines=defines, include_dirs=include_dirs
+            names,
+            headers=headers,
+            defines=defines,
+            include_dirs=include_dirs,
+            as_string=as_string,
         )
 
     def _define_cache_key(
@@ -677,8 +796,13 @@ int main(void) {{ return 0; }}
         headers: list[str | Path] | None,
         defines: list[str] | None,
         include_dirs: list[str | Path] | None,
+        as_string: bool = False,
     ) -> dict[str, str | None]:
-        """Read *names*, answering from the cache and probing only the rest."""
+        """Read *names*, answering from the cache and probing only the rest.
+
+        Caching stores the raw expansion, so *as_string* decoding happens on
+        the way out and a cached answer can be read either way.
+        """
         results: dict[str, str | None] = {}
         missing: list[str] = []
         for name in names:
@@ -690,13 +814,22 @@ int main(void) {{ return 0; }}
             else:
                 results[name] = None if cached == _CACHE_UNDEFINED else cached
 
+        def answer(values: dict[str, str | None]) -> dict[str, str | None]:
+            ordered = {name: values.get(name) for name in names}
+            if not as_string:
+                return ordered
+            return {
+                name: None if value is None else _decode_c_string(value, name)
+                for name, value in ordered.items()
+            }
+
         if not missing:
             trace("configure", "  cached: %s", results)
-            return {name: results[name] for name in names}
+            return answer(results)
 
         compiler = self._get_compiler()
         if compiler is None:
-            return {name: results.get(name) for name in names}
+            return answer(results)
 
         source = _probe_source(missing, headers, defines)
         extra_flags = [self._include_flag(d) for d in include_dirs or []]
@@ -715,7 +848,7 @@ int main(void) {{ return 0; }}
             # exist yet on the first configure pass, and a cached "no such
             # header" would stick after the build produced it.
             trace("configure", "  probe failed; not caching")
-            return {name: results.get(name) for name in names}
+            return answer(results)
 
         probed = _parse_probe_output(result.output, missing)
         for name, value in probed.items():
@@ -726,7 +859,7 @@ int main(void) {{ return 0; }}
             results[name] = value
 
         trace("configure", "  result: %s", results)
-        return {name: results[name] for name in names}
+        return answer(results)
 
     def check_function(
         self,
@@ -857,9 +990,9 @@ int main(void) {{
             src_path = dir_path / f"check{suffix}"
             src_path.write_text(source)
 
-            # Tool flags first, so the check probes the target the build
-            # will use (see _tool_flags).
-            tool_flags = self._tool_flags()
+            # Probe flags first, so the check compiles the way the build
+            # will (see _probe_flags).
+            tool_flags = self._probe_flags()
             if self._is_msvc_style():
                 out_path = dir_path / ("check.exe" if link else "check.obj")
                 cmd = [compiler, "/nologo"]
@@ -940,13 +1073,13 @@ int main(void) {{
                 cmd = [
                     compiler,
                     "/nologo",
-                    *self._tool_flags(),
+                    *self._probe_flags(),
                     *extra,
                     "/E",
                     str(src_path),
                 ]
             else:
-                cmd = [compiler, *self._tool_flags(), *extra, "-E", str(src_path)]
+                cmd = [compiler, *self._probe_flags(), *extra, "-E", str(src_path)]
             trace("configure", "  cmd: %s", " ".join(cmd))
 
             try:

@@ -703,3 +703,201 @@ class TestCommandDepends:
         build_info = result.output_nodes[0]._build_info
         source_paths = [str(s.path) for s in build_info["sources"]]
         assert "tools/gen.py" not in source_paths
+
+
+class TestDeclaredSourceOrder:
+    """`$SOURCE` and `${SOURCES[n]}` mean nothing if declaration order isn't
+    kept. Target sources used to be appended after plain paths regardless of
+    where they were written, so a command that ran its own built tool as
+    `${SOURCES[0]}` executed a data file instead.
+    """
+
+    def _project(self, tmp_path, gcc_toolchain):
+        project = Project("order", root_dir=tmp_path, build_dir="build")
+        (tmp_path / "tool.c").write_text("int main(void){return 0;}\n")
+        for name in ("a.txt", "b.txt"):
+            (tmp_path / name).write_text("data\n")
+        env = project.Environment(toolchain=gcc_toolchain)
+        tool = project.Program("mytool", env, sources=["tool.c"])
+        return project, env, tool
+
+    @staticmethod
+    def _source_names(command_target):
+        """Source names, stems only: the program picks up .exe on Windows."""
+        build_info = command_target.output_nodes[0]._build_info
+        return [
+            Path(s.path).stem
+            if Path(s.path).suffix in ("", ".exe")
+            else Path(s.path).name
+            for s in build_info["sources"]
+        ]
+
+    def test_target_first(self, tmp_path, gcc_toolchain):
+        project, env, tool = self._project(tmp_path, gcc_toolchain)
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            source=[tool, "a.txt", "b.txt"],
+            command="$SOURCE ${SOURCES[1]} ${SOURCES[2]} > $TARGET",
+        )
+        project.resolve()
+
+        assert self._source_names(cmd) == ["mytool", "a.txt", "b.txt"]
+
+    def test_target_in_the_middle(self, tmp_path, gcc_toolchain):
+        project, env, tool = self._project(tmp_path, gcc_toolchain)
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            source=["a.txt", tool, "b.txt"],
+            command="$SOURCES > $TARGET",
+        )
+        project.resolve()
+
+        assert self._source_names(cmd) == ["a.txt", "mytool", "b.txt"]
+
+    def test_multi_output_target_splices_all_its_outputs(self, tmp_path, gcc_toolchain):
+        project, env, _tool = self._project(tmp_path, gcc_toolchain)
+        generator = env.Command(
+            target=[project.build_dir / "one.c", project.build_dir / "two.c"],
+            source=None,
+            command="generate $TARGETS",
+            name="gen",
+        )
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            source=[generator, "a.txt"],
+            command="$SOURCES > $TARGET",
+            name="consume",
+        )
+        project.resolve()
+
+        assert self._source_names(cmd) == ["one.c", "two.c", "a.txt"]
+
+    def test_edge_inputs_follow_declared_order(self, tmp_path, gcc_toolchain):
+        """Not just substitution: $in order matters to anything order-sensitive."""
+        from pcons.generators.ninja import NinjaGenerator
+
+        project, env, tool = self._project(tmp_path, gcc_toolchain)
+        env.Command(
+            target=project.build_dir / "out.txt",
+            source=[tool, "a.txt"],
+            command="$SOURCES > $TARGET",
+        )
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        edge = next(
+            line for line in content.splitlines() if line.startswith("build out.txt:")
+        )
+        assert edge.index("mytool") < edge.index("a.txt")
+
+    def test_commands_without_target_sources_are_unchanged(
+        self, tmp_path, gcc_toolchain
+    ):
+        project, env, _tool = self._project(tmp_path, gcc_toolchain)
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            source=["a.txt", "b.txt"],
+            command="$SOURCES > $TARGET",
+        )
+        project.resolve()
+
+        assert self._source_names(cmd) == ["a.txt", "b.txt"]
+
+
+class TestSourceSlices:
+    """`${SOURCES[n:]}` -- "the tool, then however many data files there are"
+    is the normal shape for a code-generation rule."""
+
+    def _command(self, tmp_path, gcc_toolchain, template):
+        project = Project("slices", root_dir=tmp_path, build_dir="build")
+        for name in ("a.txt", "b.txt", "c.txt"):
+            (tmp_path / name).write_text("data\n")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.Command(
+            target=project.build_dir / "out.txt",
+            source=["a.txt", "b.txt", "c.txt"],
+            command=template,
+        )
+        from pcons.generators.ninja import NinjaGenerator
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        return next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("command =") and "out.txt" not in line
+        )
+
+    def test_open_ended_slice(self, tmp_path, gcc_toolchain):
+        command = self._command(tmp_path, gcc_toolchain, "gen ${SOURCES[1:]} > $TARGET")
+
+        assert "$source_1 $source_2" in command
+        assert "$source_0" not in command
+
+    def test_bounded_slice(self, tmp_path, gcc_toolchain):
+        command = self._command(
+            tmp_path, gcc_toolchain, "gen ${SOURCES[0:2]} > $TARGET"
+        )
+
+        assert "$source_0 $source_1" in command
+        assert "$source_2" not in command
+
+    def test_open_start_slice(self, tmp_path, gcc_toolchain):
+        command = self._command(tmp_path, gcc_toolchain, "gen ${SOURCES[:2]} > $TARGET")
+
+        assert "$source_0 $source_1" in command
+
+    def test_slice_mixes_with_an_index(self, tmp_path, gcc_toolchain):
+        command = self._command(
+            tmp_path, gcc_toolchain, "${SOURCES[0]} --json ${SOURCES[1:]} > $TARGET"
+        )
+
+        assert "$source_0 --json $source_1 $source_2" in command
+
+
+class TestUnknownSubstitutionsRaise:
+    """An unrecognized ${...} used to reach build.ninja as an escaped literal
+    and run as nonsense -- the opposite of pcons's fail-fast rule."""
+
+    def _command(self, tmp_path, template):
+        project = Project("bad", root_dir=tmp_path, build_dir="build")
+        (tmp_path / "a.txt").write_text("data\n")
+        env = project.Environment()
+        return env.Command(
+            target=project.build_dir / "out.txt", source=["a.txt"], command=template
+        )
+
+    def test_unknown_marker_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="Unrecognized substitution"):
+            self._command(tmp_path, "gen ${SOURCE[0]} > $TARGET")
+
+    def test_message_lists_the_supported_forms(self, tmp_path):
+        with pytest.raises(ValueError) as excinfo:
+            self._command(tmp_path, "gen ${SOURCES[a:b]} > $TARGET")
+
+        assert "${SOURCES[n:m]}" in str(excinfo.value)
+
+    def test_empty_subscript_raises(self, tmp_path):
+        with pytest.raises(ValueError, match="empty subscript"):
+            self._command(tmp_path, "gen ${SOURCES[]} > $TARGET")
+
+    def test_plain_variables_still_pass_through(self, tmp_path):
+        project = Project("vars", root_dir=tmp_path, build_dir="build")
+        (tmp_path / "a.txt").write_text("data\n")
+        env = project.Environment()
+        env.MYVAR = "value"
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            source=["a.txt"],
+            command="gen ${MYVAR} $SOURCE > $TARGET",
+        )
+
+        assert cmd is not None
