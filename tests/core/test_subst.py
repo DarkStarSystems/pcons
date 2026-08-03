@@ -485,6 +485,29 @@ class TestToShellCommand:
         result = to_shell_command(tokens, shell="cmd")
         assert result == 'echo "hello world"'
 
+    def test_shell_operators_are_not_quoted(self):
+        """Quoting an operator turns redirection into a literal argument, so
+        the command silently does something else: `tool in > out` would write
+        nothing and pass ">" and "out" to the tool."""
+        tokens = ["tool", "input", ">", "output.txt"]
+
+        for shell in ("bash", "ninja", "cmd", "powershell"):
+            result = to_shell_command(tokens, shell=shell)
+            assert " > output.txt" in result, shell
+            assert "'>'" not in result and '">"' not in result, shell
+
+    def test_operators_beyond_redirection(self):
+        for operator in (">>", "|", "&&", "||", ";", "2>&1", "<"):
+            result = to_shell_command(["a", operator, "b"], shell="bash")
+            assert result == f"a {operator} b"
+
+    def test_an_operator_inside_a_larger_token_is_still_quoted(self):
+        """Only a bare operator is syntax; one embedded in an argument is
+        data and has to survive as data."""
+        result = to_shell_command(["grep", "a>b", "file"], shell="bash")
+
+        assert "'a>b'" in result
+
     def test_ninja_escapes_literal_dollar(self):
         """Literal $ in tokens must be escaped for both ninja and shell."""
         tokens = ["gcc", "-Wl,-rpath,$ORIGIN", "-o", "$out", "$in"]

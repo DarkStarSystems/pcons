@@ -436,3 +436,43 @@ class TestMakefileTestRecipe:
         # variable reference before the shell ever sees the line).
         assert "'/opt/my tools/py$$thon/bin/python3'" in content
         assert "test-build" in content
+
+
+class TestMakefileShellOperators:
+    """A recipe has to keep shell syntax as syntax.
+
+    `to_shell_command(shell="bash")` quoted every metacharacter, so a command
+    written `tool $SOURCE > $TARGET` became `tool src '>' out` -- the tool got
+    ">" and the output path as arguments and nothing was redirected. Ninja
+    already exempted operators; make did not.
+    """
+
+    def _recipe(self, tmp_path, command: str) -> str:
+        project = Project("redirect", root_dir=tmp_path, build_dir="build")
+        (tmp_path / "in.txt").write_text("data\n")
+        env = project.Environment()
+        env.Command(
+            target=project.build_dir / "out.txt", source=["in.txt"], command=command
+        )
+
+        MakefileGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "Makefile").read_text()
+        return next(
+            line
+            for line in content.splitlines()
+            if line.startswith("\t") and "tool" in line
+        )
+
+    def test_redirection_survives(self, tmp_path):
+        recipe = self._recipe(tmp_path, "tool $SOURCE > $TARGET")
+
+        assert "> out.txt" in recipe
+        assert "'>'" not in recipe
+
+    def test_pipeline_survives(self, tmp_path):
+        recipe = self._recipe(tmp_path, "tool $SOURCE | filter > $TARGET")
+
+        assert "| filter" in recipe
+        assert "'|'" not in recipe

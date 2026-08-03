@@ -74,6 +74,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Shell operators survive into Makefile recipes.** Every metacharacter was quoted for
+  the bash-style recipe, so a command written `tool $SOURCE > $TARGET` emitted
+  `tool src '>' out` — the tool received ">" and the output path as arguments and nothing
+  was redirected. Pipelines and `&&` chains had the same problem. The ninja generator
+  already exempted operators; that knowledge now lives in one place and applies to every
+  shell.
 - **Configure checks compile the way the build does.** `env.<tool>.defines` and
   `.includes` were never applied to any probe — only `flags` were — so `check_header()`
   couldn't find a header on the project's own include path, and a macro read out of a

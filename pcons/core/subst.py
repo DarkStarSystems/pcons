@@ -755,6 +755,30 @@ def _flatten(items: list) -> list[str]:
     return result
 
 
+#: Tokens that are shell syntax rather than arguments. Quoting one turns
+#: redirection or a pipeline into a literal argument, so the command silently
+#: does something else -- `tool in > out` writes nothing and passes ">" and
+#: "out" to the tool. A command template that wants a literal ">" has to quote
+#: it itself; a bare one, after tokenization, can only mean the operator.
+_SHELL_OPERATORS = frozenset(
+    {
+        ">",
+        ">>",
+        "<",
+        "<<",
+        "|",
+        "||",
+        "&&",
+        "&",
+        ";",
+        "2>",
+        "2>&1",
+        ">&2",
+        "2>>",
+    }
+)
+
+
 def _quote_for_shell(s: str, shell: str) -> str:
     """Quote string for target shell if needed.
 
@@ -768,6 +792,9 @@ def _quote_for_shell(s: str, shell: str) -> str:
     if not s:
         return "''" if shell not in ("cmd", "ninja") else '""' if shell == "cmd" else ""
 
+    if s in _SHELL_OPERATORS:
+        return s
+
     if shell == "ninja":
         # Ninja commands are passed to the shell (sh on Unix, cmd on Windows).
         # Use double quotes for cross-platform compatibility.
@@ -778,7 +805,7 @@ def _quote_for_shell(s: str, shell: str) -> str:
         #
         # Strategy:
         # - Ninja variables ($in, $out, $topdir, etc.) → don't quote (ninja expands them)
-        # - Shell operators (>, |, &&) → don't quote
+        # - Shell operators (>, |, &&) → don't quote (handled above, for every shell)
         # - Tokens containing shell metacharacters (spaces, but also things like
         #   backticks, ;, |, &, (, ), <, >, *, ? - which may come from
         #   attacker-influenced input such as globbed filenames or flags pulled
@@ -786,25 +813,6 @@ def _quote_for_shell(s: str, shell: str) -> str:
         #   quotes so the shell can't interpret them
         # - Simple flags (--type, -c) → don't quote
         import re
-
-        # Shell operators should not be quoted
-        shell_operators = {
-            ">",
-            ">>",
-            "<",
-            "<<",
-            "|",
-            "||",
-            "&&",
-            "&",
-            ";",
-            "2>",
-            "2>&1",
-            ">&2",
-            "2>>",
-        }
-        if s in shell_operators:
-            return s
 
         # Ninja variables - don't quote, ninja will expand them
         # This includes $in, $out, $topdir, $out.d, etc.
