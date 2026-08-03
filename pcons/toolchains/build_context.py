@@ -9,7 +9,7 @@ via get_env_overrides().
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -29,6 +29,7 @@ class CompileLinkContext:
     """
 
     includes: list[str] = field(default_factory=list)
+    system_includes: list[str] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
     flags: list[str | PathToken] = field(default_factory=list)
     link_flags: list[str | PathToken] = field(default_factory=list)
@@ -39,6 +40,7 @@ class CompileLinkContext:
 
     # Prefixes - allow toolchains to customize (e.g., MSVC uses /I, /D, /LIBPATH:)
     include_prefix: str = "-I"
+    system_include_prefix: str = "-isystem"
     define_prefix: str = "-D"
     libdir_prefix: str = "-L"
     lib_prefix: str = "-l"
@@ -109,6 +111,8 @@ class CompileLinkContext:
 
         if self.includes:
             result["includes"] = [ProjectPath(p) for p in self.includes]
+        if self.system_includes:
+            result["system_includes"] = [ProjectPath(p) for p in self.system_includes]
         if self.defines:
             result["defines"] = list(self.defines)
         if self.flags:
@@ -209,6 +213,7 @@ class CompileLinkContext:
 
         return cls(
             includes=[str(p) for p in effective.includes],
+            system_includes=[str(p) for p in effective.system_includes],
             defines=list(effective.defines),
             flags=list(effective.compile_flags),
             link_flags=link_flags,
@@ -225,6 +230,7 @@ class CompileLinkContext:
         """Return a hashable representation for caching."""
         return (
             tuple(self.includes),
+            tuple(self.system_includes),
             tuple(self.defines),
             tuple(self.flags),
             tuple(self.link_flags),
@@ -239,9 +245,32 @@ class MsvcCompileLinkContext(CompileLinkContext):
     """CompileLinkContext with MSVC-specific prefixes (/I, /D, /LIBPATH:)."""
 
     include_prefix: str = "/I"
+    system_include_prefix: str = "/external:I"
     define_prefix: str = "/D"
     libdir_prefix: str = "/LIBPATH:"
     lib_prefix: str = ""  # MSVC uses full library names (foo.lib)
+
+    def _compile_overrides(self) -> dict[str, object]:
+        """Add /external:W0 when there are system includes.
+
+        On MSVC, ``/external:I`` marks headers as external but changes nothing
+        by itself — the warning level for external headers is a separate
+        switch. Only emitted when there is something external, so builds that
+        never ask for system includes stay compatible with older cl.exe.
+        """
+        result = super()._compile_overrides()
+        if not self.system_includes:
+            return result
+        flags = result.get("flags")
+        merged: list[str | PathToken]
+        if isinstance(flags, list):
+            merged = cast("list[str | PathToken]", flags)
+        else:
+            merged = self._merge_with_base_flags(self._tool_name, self.flags)
+        if "/external:W0" not in merged:
+            merged.append("/external:W0")
+        result["flags"] = merged
+        return result
 
     def _format_libs(self, libs: list[str]) -> list[str]:
         # MSVC uses full library names (kernel32.lib, not -lkernel32).

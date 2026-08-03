@@ -152,7 +152,19 @@ def run_script(
         Tuple of (exit_code, list of registered Projects).
     """
     import pcons
+    import pcons.core.invocation
     import pcons.core.vars
+
+    pcons.core.invocation.record(
+        pcons.core.invocation.Invocation(
+            script=script_path.absolute(),
+            variables=dict(variables or {}),
+            variant=variant,
+            generators=(
+                [generator] if isinstance(generator, str) else list(generator or [])
+            ),
+        )
+    )
 
     sentinel = object()
     previous_env: dict[str, str | object] = {}

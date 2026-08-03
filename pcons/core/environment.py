@@ -1035,6 +1035,7 @@ class Environment(_EnvironmentStubs):
         name: str | None = None,
         depends: str | Path | Sequence[str | Path] | None = None,
         restat: bool = False,
+        write_if_different: bool = False,
     ) -> Target:
         """Run an arbitrary shell command to build targets from sources.
 
@@ -1071,6 +1072,13 @@ class Environment(_EnvironmentStubs):
                    running the command. If the output didn't actually change,
                    downstream targets won't be rebuilt. Useful for code
                    generators that may produce identical output.
+            write_if_different: If True, restore any output the command
+                   rewrote with identical content, timestamp included, and
+                   set ``restat``. This is what makes ``restat`` pay off for
+                   a generator that unconditionally rewrites its outputs —
+                   without it, one changed input rebuilds everything
+                   downstream of every output. See
+                   ``pcons.tools.stable_output``.
 
         Returns:
             Target object representing the command outputs.
@@ -1139,7 +1147,7 @@ class Environment(_EnvironmentStubs):
                     immediate_sources.append(src)
 
         # Create the builder
-        builder = GenericCommandBuilder(command, restat=restat)
+        builder = GenericCommandBuilder(command, restat=restat or write_if_different)
 
         # Build the targets with immediate sources
         nodes = builder._build(
@@ -1163,6 +1171,14 @@ class Environment(_EnvironmentStubs):
             if isinstance(node, FileNode):
                 self.register_node(node)
                 cmd_target.output_nodes.append(node)
+
+        if write_if_different:
+            import sys
+
+            python = sys.executable.replace("\\", "/")
+            stable = f"{python} -m pcons.tools.stable_output"
+            cmd_target.pre_build(f"{stable} --pre $out")
+            cmd_target.post_build(f"{stable} --post $out")
 
         # Handle Target sources - store for deferred resolution
         if target_sources:

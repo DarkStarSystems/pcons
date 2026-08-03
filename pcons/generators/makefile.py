@@ -67,6 +67,7 @@ class MakefileGenerator(BaseGenerator):
             self._collect_directories(project)
             self._write_directory_rules(f)
             self._write_build_rules(f, project)
+            self._write_regen(f, project, makefile_path)
             self._write_aliases(f, project)
             self._write_tests(f, project)
             self._write_default_target(f, project)
@@ -192,12 +193,19 @@ class MakefileGenerator(BaseGenerator):
         sources: list[Node] = build_info.get("sources", [])
 
         outputs_info = build_info.get("outputs")
+        all_targets = build_info.get("all_targets")
         if outputs_info:
             all_outputs = [
                 self._make_build_relative_path(info["path"])
                 for info in outputs_info.values()
             ]
             output = " ".join(all_outputs)
+        elif all_targets and len(all_targets) > 1:
+            # A command with several declared outputs (e.g. a code generator):
+            # name them all, or the extra ones have no rule at all.
+            output = " ".join(
+                self._node_path(n) for n in all_targets if isinstance(n, FileNode)
+            )
         else:
             output = self._node_path(node)
 
@@ -220,16 +228,14 @@ class MakefileGenerator(BaseGenerator):
             if isinstance(s, FileNode):
                 prereqs.append(get_source_path(s))
 
-        # Explicit deps (e.g., libraries for linking, generated headers)
+        # Explicit deps (e.g. libraries for linking, generated headers) and
+        # implicit deps (headers found by scanners, files named by depends=).
+        # Rendered like sources: a dep may just as well be a source-tree file,
+        # which make can't find by a build-dir-relative path.
         source_paths_set = {s.path for s in sources if isinstance(s, FileNode)}
-        for dep in node.explicit_deps:
+        for dep in [*node.explicit_deps, *node.implicit_deps]:
             if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                prereqs.append(self._make_build_relative_path(dep.path))
-
-        # Implicit deps (e.g., headers discovered by scanners)
-        for dep in node.implicit_deps:
-            if isinstance(dep, FileNode) and dep.path not in source_paths_set:
-                prereqs.append(self._make_build_relative_path(dep.path))
+                prereqs.append(get_source_path(dep))
 
         # Order-only prerequisites (directories)
         order_only: list[str] = []
@@ -300,7 +306,7 @@ class MakefileGenerator(BaseGenerator):
                 command = str(custom_command)
                 command = self._convert_command_variables(command)
                 command = self._substitute_make_vars(command, node, sources, build_info)
-            return self._append_post_build(command, node, target, sources)
+            return self._wrap_build_commands(command, node, target, sources)
 
         context = build_info.get("context")
         context_overrides: dict[str, object] = {}
@@ -327,7 +333,7 @@ class MakefileGenerator(BaseGenerator):
             )
 
             command = to_shell_command(expanded_tokens, shell="bash")
-            return self._append_post_build(command, node, target, sources)
+            return self._wrap_build_commands(command, node, target, sources)
 
         tool_config = getattr(env, tool_name, None)
         if tool_config is None:
@@ -362,16 +368,62 @@ class MakefileGenerator(BaseGenerator):
             command = self._convert_command_variables(command)
             command = self._substitute_make_vars(command, node, sources, build_info)
 
-        return self._append_post_build(command, node, target, sources)
+        return self._wrap_build_commands(command, node, target, sources)
 
-    def _append_post_build(
+    def _write_regen(self, f: TextIO, project: Project, makefile_path: Path) -> None:
+        """Write the rule that re-runs pcons when the build description changes.
+
+        Make remakes any makefile it can build a rule for, then restarts
+        itself — the same contract as Ninja's ``generator = 1`` edge, so
+        staged generation works here too.
+        """
+        from pcons.core import invocation
+        from pcons.core.subst import to_shell_command
+
+        deps = project.configure_dependencies
+        if not deps:
+            return
+
+        inv = invocation.current()
+        if inv is None:
+            return
+        argv = inv.command(root_dir=project.root_dir, run_dir=makefile_path.parent)
+        if argv is None:
+            return
+
+        dep_refs = " ".join(sorted(self._escape_path(self._regen_dep(d)) for d in deps))
+        command = self._escape_dollar_for_recipe(to_shell_command(argv, shell="bash"))
+
+        f.write("# Re-run pcons when the build description changes\n")
+        f.write(f"Makefile: {dep_refs}\n")
+        f.write('\t@echo "Regenerating $@"\n')
+        f.write(f"\t{command}\n")
+        f.write("\n")
+
+    def _regen_dep(self, path: Path) -> str:
+        """Render a configure dependency for the makefile-remake rule.
+
+        Build-tree inputs must match how their producing rule names them
+        (relative to the build dir, where make runs); source-tree inputs are
+        absolute, like every other source path in the makefile.
+        """
+        build_parts = self._relative_build_dir.parts if self._relative_build_dir else ()
+        if build_parts and path.parts[: len(build_parts)] == build_parts:
+            return self._strip_build_dir_prefix(path)
+        return self._relativize_path_for_make(str(path))
+
+    def _wrap_build_commands(
         self,
         command: str,
         node: FileNode,
         target: Target | None,
         sources: list[Node],
     ) -> str:
-        """Append the target's post-build commands (if this is an output node)."""
+        """Wrap with the target's pre/post-build commands (output nodes only).
+
+        ``$out``/``$in`` expand to execution-relative paths, matching what the
+        main command sees — make runs from the build directory.
+        """
         if target is None:
             return command
 
@@ -384,20 +436,26 @@ class MakefileGenerator(BaseGenerator):
             return command
 
         builder_data = getattr(target, "_builder_data", {}) or {}
+        pre_build_cmds = builder_data.get("pre_build_commands", [])
         post_build_cmds = builder_data.get("post_build_commands", [])
-        if not post_build_cmds:
+        if not pre_build_cmds and not post_build_cmds:
             return command
 
-        out_path = str(node.path)
-        in_paths = " ".join(str(s.path) for s in sources if isinstance(s, FileNode))
+        out_path = self._node_out_raw(node)
+        in_paths = " ".join(
+            self._relativize_path_for_make(str(s.path))
+            for s in sources
+            if isinstance(s, FileNode)
+        )
 
-        substituted_cmds = []
-        for cmd in post_build_cmds:
-            cmd = cmd.replace("$out", out_path)
-            cmd = cmd.replace("$in", in_paths)
-            substituted_cmds.append(cmd)
+        def substitute(commands: list[str]) -> list[str]:
+            return [
+                cmd.replace("$out", out_path).replace("$in", in_paths)
+                for cmd in commands
+            ]
 
-        return command + " && " + " && ".join(substituted_cmds)
+        parts = [*substitute(pre_build_cmds), command, *substitute(post_build_cmds)]
+        return " && ".join(parts)
 
     def _escape_dollar_for_recipe(self, text: str) -> str:
         """Escape literal ``$`` as ``$$`` in a Makefile recipe line.

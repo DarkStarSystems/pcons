@@ -30,6 +30,9 @@ class EffectiveRequirements:
 
     Attributes:
         includes: Include directories for compilation.
+        system_includes: Include directories to treat as system headers
+            (``-isystem``, ``/external:I``): searched like any other include
+            path, but warnings from headers found there are suppressed.
         defines: Preprocessor definitions.
         compile_flags: Additional compiler flags.
         link_flags: Linker flags.
@@ -40,6 +43,7 @@ class EffectiveRequirements:
     """
 
     includes: list[Path] = field(default_factory=list)
+    system_includes: list[Path] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
     compile_flags: list[str | PathToken] = field(default_factory=list)
     link_flags: list[str | PathToken] = field(default_factory=list)
@@ -55,6 +59,10 @@ class EffectiveRequirements:
             inc_path = Path(inc_dir) if isinstance(inc_dir, str) else inc_dir
             if inc_path not in self.includes:
                 self.includes.append(inc_path)
+        for sys_dir in reqs.system_include_dirs:
+            sys_path = Path(sys_dir) if isinstance(sys_dir, str) else sys_dir
+            if sys_path not in self.system_includes:
+                self.system_includes.append(sys_path)
         for define in reqs.defines:
             if define not in self.defines:
                 self.defines.append(define)
@@ -72,6 +80,7 @@ class EffectiveRequirements:
         """Return a hashable representation for caching."""
         return (
             tuple(str(p) for p in self.includes),
+            tuple(str(p) for p in self.system_includes),
             tuple(self.defines),
             tuple(self.compile_flags),
             tuple(self.link_flags),
@@ -83,6 +92,7 @@ class EffectiveRequirements:
         """Create a deep copy with copied lists."""
         return EffectiveRequirements(
             includes=list(self.includes),
+            system_includes=list(self.system_includes),
             defines=list(self.defines),
             compile_flags=list(self.compile_flags),
             link_flags=list(self.link_flags),
@@ -135,6 +145,9 @@ def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None
             continue
         tool = getattr(env, tool_name)
         extend_unique(tool, "includes", (str(inc) for inc in eff.includes))
+        extend_unique(
+            tool, "system_includes", (str(inc) for inc in eff.system_includes)
+        )
         extend_unique(tool, "defines", eff.defines)
         if eff.compile_flags:
             merge_flags(var(tool, "flags"), eff.compile_flags, sep)
@@ -176,6 +189,9 @@ def _resolve_and_add_includes_for(
         return top.path_resolver.canonicalize(p)
 
     result.include_dirs = [_update_include(inc) for inc in reqs.include_dirs]
+    result.system_include_dirs = [
+        _update_include(inc) for inc in reqs.system_include_dirs
+    ]
     return result
 
 
@@ -213,6 +229,13 @@ def compute_effective_requirements(
                 path = Path(inc) if isinstance(inc, str) else inc
                 if path not in result.includes:
                     result.includes.append(path)
+
+        system_includes = getattr(tool_config, "system_includes", None)
+        if system_includes:
+            for inc in system_includes:
+                path = Path(inc) if isinstance(inc, str) else inc
+                if path not in result.system_includes:
+                    result.system_includes.append(path)
 
         defines = getattr(tool_config, "defines", None)
         if defines:

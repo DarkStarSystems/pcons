@@ -14,12 +14,14 @@ Direct use: ``NinjaGenerator().generate(project)``
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TextIO, cast
 
+from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
 from pcons.core.node import FileNode, Node
 from pcons.core.paths import PathResolver
@@ -30,6 +32,8 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.core.subst import CommandToken
     from pcons.core.target import Target
+
+logger = logging.getLogger(__name__)
 
 
 class NinjaGenerator(BaseGenerator):
@@ -54,6 +58,9 @@ class NinjaGenerator(BaseGenerator):
         self._topdir: str = ".."  # Relative path from output_dir to project root
         self._path_resolver: PathResolver | None = None  # Set during generate()
         self._build_dir_parts: tuple[str, ...] = ()  # Parts of relative build_dir
+        # Path-carrying flags of the project's toolchains (-I, -isystem, /I...)
+        self._path_flags: frozenset[str] = frozenset()
+        self._warned_absolute_paths: set[str] = set()
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate build.ninja in output_dir."""
@@ -70,6 +77,8 @@ class NinjaGenerator(BaseGenerator):
         self._project_root = project.root_dir.resolve()
         self._path_resolver = getattr(project, "_path_resolver", None)
         self._build_dir_parts = Path(project.build_dir).parts
+        self._path_flags = self._collect_path_flags(project)
+        self._warned_absolute_paths = set()
         try:
             self._topdir = str(
                 Path(os.path.relpath(self._project_root, self._output_dir))
@@ -83,6 +92,7 @@ class NinjaGenerator(BaseGenerator):
             self._write_variables(f, project)
             self._write_rules(f, project)
             self._write_builds(f, project)
+            self._write_regen(f, project, ninja_file)
             self._write_aliases(f, project)
             self._write_tests(f, project)
             self._write_defaults(f, project)
@@ -171,10 +181,15 @@ class NinjaGenerator(BaseGenerator):
                 if f" {flag}" not in command:
                     command = f"{command} {flag}"
 
-        # Append post-build commands
+        # Wrap with the target's pre/post-build commands
+        pre_build_prefix = self._get_pre_build_prefix(node, target)
+        if pre_build_prefix:
+            command = pre_build_prefix + command.lstrip()
         post_build_suffix = self._get_post_build_suffix(node, target)
         if post_build_suffix:
             command = command.rstrip() + post_build_suffix
+
+        command = self._route_through_shell(command)
 
         # Compute rule key
         if custom_rule_name:
@@ -219,6 +234,11 @@ class NinjaGenerator(BaseGenerator):
         """
         build_info = getattr(node, "_build_info", None)
         if build_info is None:
+            return "phony"
+
+        if "primary_node" in build_info:
+            # A secondary output of a multi-output edge: the primary node's
+            # build statement lists it, so it needs no rule of its own.
             return "phony"
 
         tool_name = build_info.get("tool", "unknown")
@@ -273,37 +293,72 @@ class NinjaGenerator(BaseGenerator):
 
         return self._rules[rule_key]
 
+    # Shell operators that only mean anything to a shell. A command using one
+    # has to be routed through one on Windows (see _route_through_shell).
+    _SHELL_OPERATORS = (" && ", " || ", " | ", " > ", " >> ", " < ")
+
+    def _route_through_shell(self, command: str) -> str:
+        """Run *command* through cmd.exe when it needs a shell, on Windows.
+
+        Ninja hands a command to CreateProcess directly on Windows — there is
+        no shell — so ``a && b`` reaches ``a`` as the literal arguments "&&"
+        and "b", and silently does half the work. (On Unix ninja always uses
+        /bin/sh, so nothing is needed there.) ``/s`` makes cmd strip exactly
+        the outer quotes and leave the rest alone, so quoted arguments inside
+        the command survive.
+        """
+        if not get_platform().is_windows:
+            return command
+        if not any(op in command for op in self._SHELL_OPERATORS):
+            return command
+        if command.startswith(("cmd ", "cmd.exe ")):
+            return command  # already explicit about wanting a shell
+        return f'cmd.exe /s /c "{command}"'
+
+    def _extra_build_commands(
+        self,
+        node: FileNode,
+        target: Target | None,
+        key: str,
+    ) -> list[str]:
+        """The target's pre/post-build commands, if *node* is an output node.
+
+        These are baked into the rule command, so targets with different
+        pre/post-build commands get different rules (via the command hash).
+        $out and $in are left as literals for ninja to expand at build time:
+        ninja runs from the build directory, so they are already
+        build-dir-relative, matching the paths in the main command.
+        """
+        if target is None:
+            return []
+
+        # Output node, not an intermediate like a .o file
+        is_output_node = (
+            hasattr(target, "output_nodes") and node in target.output_nodes
+        ) or node in target.nodes
+        if not is_output_node:
+            return []
+
+        builder_data = getattr(target, "_builder_data", {}) or {}
+        return list(builder_data.get(key, []))
+
     def _get_post_build_suffix(
         self,
         node: FileNode,
         target: Target | None,
     ) -> str:
-        """Return ' && cmd1 && cmd2' if this is an output node with
-        post-build commands, else "".
+        """Return ' && cmd1 && cmd2' for the target's post-build commands."""
+        commands = self._extra_build_commands(node, target, "post_build_commands")
+        return " && " + " && ".join(commands) if commands else ""
 
-        Post-build commands are baked into the rule command, so targets with
-        different post-build commands get different rules (via command hash).
-        """
-        if target is None:
-            return ""
-
-        # Check if this is an output node (not an intermediate like .o files)
-        is_output_node = (
-            hasattr(target, "output_nodes") and node in target.output_nodes
-        ) or node in target.nodes
-
-        if not is_output_node:
-            return ""
-
-        builder_data = getattr(target, "_builder_data", {}) or {}
-        post_build_cmds = builder_data.get("post_build_commands", [])
-        if not post_build_cmds:
-            return ""
-
-        # Leave $out and $in as literals for ninja to expand at build time.
-        # Ninja runs from the build directory, so its $out/$in are already
-        # build-dir-relative — matching the paths in the main command.
-        return " && " + " && ".join(post_build_cmds)
+    def _get_pre_build_prefix(
+        self,
+        node: FileNode,
+        target: Target | None,
+    ) -> str:
+        """Return 'cmd1 && cmd2 && ' for the target's pre-build commands."""
+        commands = self._extra_build_commands(node, target, "pre_build_commands")
+        return " && ".join(commands) + " && " if commands else ""
 
     def _expand_command_fallback(
         self,
@@ -558,6 +613,57 @@ class NinjaGenerator(BaseGenerator):
                     escaped_value = self._escape_for_ninja_variable(str(var_value))
                     f.write(f"  {var_name} = {escaped_value}\n")
 
+    def _write_regen(self, f: TextIO, project: Project, ninja_file: Path) -> None:
+        """Write the self-regeneration edge (``generator = 1``).
+
+        Ninja brings its own manifest up to date before running anything else,
+        and re-reads it if it changed — so editing the build script, or any
+        file the build description read, re-runs pcons automatically. Those
+        inputs may themselves be build outputs, which is what makes staged
+        generation work (see ``Project.generated_input``).
+        """
+        from pcons.core import invocation
+        from pcons.core.subst import to_shell_command
+
+        deps = project.configure_dependencies
+        if not deps:
+            return
+
+        inv = invocation.current()
+        if inv is None:
+            trace("generate", "No recorded invocation; skipping regen rule")
+            return
+        argv = inv.command(root_dir=project.root_dir, run_dir=ninja_file.parent)
+        if argv is None:
+            trace("generate", "Invocation not reconstructable; skipping regen rule")
+            return
+
+        manifest = self._escape_output_path(ninja_file)
+        dep_refs = " ".join(sorted(self._manifest_dep_ref(d) for d in deps))
+
+        f.write("# Re-run pcons when the build description changes\n")
+        f.write("rule pcons_regen\n")
+        f.write(f"  command = {to_shell_command(argv, shell='ninja')}\n")
+        f.write("  description = Regenerating $out\n")
+        f.write("  generator = 1\n")
+        f.write("  pool = console\n")
+        f.write(f"build {manifest}: pcons_regen | {dep_refs}\n")
+        f.write("\n")
+
+    def _manifest_dep_ref(self, path: Path) -> str:
+        """Render a configure dependency for the regen edge.
+
+        Build-tree inputs must match how their producing edge names them
+        (relative to the build dir); source-tree inputs are referenced through
+        ``$topdir`` like any other source.
+        """
+        if self._is_under_build_dir(path):
+            return self._escape_output_path(path)
+        rel = self._make_source_relative(path)
+        if rel is not None:
+            return "$topdir/" + self._escape_path(rel)
+        return self._escape_path(path)
+
     def _write_aliases(self, f: TextIO, project: Project) -> None:
         """Write phony rules for aliases."""
         if not project.aliases:
@@ -779,48 +885,74 @@ class NinjaGenerator(BaseGenerator):
             return path_obj.parts[:n] == self._build_dir_parts
         return False
 
-    def _relativize_flag_with_path(self, token: str) -> str:
-        """Relativize a path-carrying compiler flag (-I, -L, -isystem, /I,
-        /LIBPATH:) to $topdir form, or "." when the path is the build dir.
+    def _relativize_flag_with_path(self, token: str, prefix: str | None = None) -> str:
+        """Relativize a path-carrying flag (``-I<path>``, ``/LIBPATH:<path>``)
+        to $topdir form, or "." when the path is the build dir.
 
-        Returns the token unchanged if it's not a path flag or can't be
-        relativized.
+        With *prefix* given, *token* is the bare path argument of a flag that
+        was spelled as two tokens (``-isystem`` ``<path>``); the prefix is used
+        only to detect the MSVC ``/I.`` style and is not re-attached.
+
+        Returns the token unchanged if it isn't a path flag, or if the path
+        can't be made project-relative (it lives outside the tree).
         """
-        # Unix-style flags
-        for prefix in ("-I", "-L", "-isystem"):
-            if token.startswith(prefix):
-                path = token[len(prefix) :]
-                if path:
-                    if self._is_build_dir_path(path):
-                        return f"{prefix}."
-                    rel = self._make_source_relative(path)
-                    if rel is not None:
-                        return f"{prefix}$topdir/{rel}"
+        if prefix is None:
+            prefix = self._path_flag_prefix(token)
+            if prefix is None:
                 return token
+            path = token[len(prefix) :]
+            if not path:
+                return token
+        else:
+            path = token
+            prefix = ""
 
-        # MSVC-style flags
-        if token.startswith("/I"):
-            path = token[2:]
-            if path:
-                if self._is_build_dir_path(path):
-                    return "/I."
-                rel = self._make_source_relative(path)
-                if rel is not None:
-                    return f"/I$topdir/{rel}"
-            return token
+        if self._is_build_dir_path(path):
+            return f"{prefix}."
+        rel = self._make_source_relative(path)
+        if rel is not None:
+            return f"{prefix}$topdir/{rel}"
+        # Outside the project tree (an SDK, a system prefix): absolute is
+        # the only thing it can be.
+        return f"{prefix}{path}"
 
-        if token.upper().startswith("/LIBPATH:"):
-            prefix = token[:9]  # Preserve original case
-            path = token[9:]
-            if path:
-                if self._is_build_dir_path(path):
-                    return f"{prefix}."
-                rel = self._make_source_relative(path)
-                if rel is not None:
-                    return f"{prefix}$topdir/{rel}"
-            return token
+    def _path_flag_prefix(self, token: str) -> str | None:
+        """The path-flag prefix *token* starts with, if any.
 
-        return token
+        Longest match wins, so ``/external:I`` isn't mistaken for a token that
+        merely starts with ``/e``.
+        """
+        matches = [p for p in self._path_flags if token.startswith(p)]
+        if not matches:
+            return None
+        return max(matches, key=len)
+
+    def _warn_absolute_in_tree(self, flag: str) -> None:
+        """Warn once per flag that carries an absolute path from inside the
+        project tree.
+
+        pcons rewrites the paths in flags it recognizes to ``$topdir/...`` so
+        build.ninja stays relocatable and shareable between checkouts. A path
+        it couldn't see through — a flag spelling we don't know, or one
+        assembled by hand — silently defeats that, and silence is the real
+        problem. Paths outside the tree (SDKs, system prefixes) are fine and
+        stay quiet.
+        """
+        if self._project_root is None:
+            return
+        if str(self._project_root) not in flag:
+            return
+        if flag in self._warned_absolute_paths:
+            return
+        self._warned_absolute_paths.add(flag)
+        logger.warning(
+            "Flag carries an absolute path inside the project tree, so "
+            "build.ninja is not relocatable:\n  %s\n"
+            "  pcons rewrites paths in the flags it knows (%s). For anything "
+            "else, use the tool's includes/libdirs lists or a PathToken.",
+            flag,
+            ", ".join(sorted(self._path_flags)) or "none configured",
+        )
 
     def _relativize_command_tokens(
         self, tokens: list[str] | list[CommandToken]
@@ -843,7 +975,17 @@ class NinjaGenerator(BaseGenerator):
         )
 
         result: list[str] = []
+        expect_path = False
         for token in tokens:
+            if expect_path:
+                # Argument of a path flag spelled as two tokens ("-isystem",
+                # "/abs/path"): relativize it as the bare path it is. Only
+                # when absolute — a relative argument may not be a path at
+                # all, and rewriting it would change its meaning.
+                expect_path = False
+                if isinstance(token, str) and Path(token).is_absolute():
+                    result.append(self._relativize_flag_with_path(token, prefix=""))
+                    continue
             if isinstance(token, SourcePath):
                 if token.index is not None or has_indexed_source:
                     ninja_var = f"$source_{token.index or 0}"
@@ -862,7 +1004,12 @@ class NinjaGenerator(BaseGenerator):
                 s = str(token)
                 # $SRCDIR and $topdir both mean the project source root
                 s = s.replace("$SRCDIR", "$topdir")
-                result.append(self._relativize_flag_with_path(s))
+                # A bare path flag takes its path as the next token
+                expect_path = s in self._path_flags
+                relativized = self._relativize_flag_with_path(s)
+                if relativized.startswith("-"):
+                    self._warn_absolute_in_tree(relativized)
+                result.append(relativized)
         return result
 
     def _relativize_path_for_ninja(self, path: str) -> str:

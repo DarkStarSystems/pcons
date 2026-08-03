@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, overload
@@ -84,6 +84,8 @@ class Project(_ProjectBuilders):
         "_path_resolver",
         "_found_packages",
         "_package_finder_chain",
+        "_configure_deps",
+        "_pending_stages",
         "defined_at",
         "_parent",
         "_children",
@@ -158,6 +160,12 @@ class Project(_ProjectBuilders):
             tuple[str, str | None, tuple[str, ...]], Target | None
         ] = {}
         self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
+        # Files the build description read while running: the generated build
+        # files depend on these, so editing one re-runs pcons (see
+        # add_configure_dependency / generated_input).
+        self._configure_deps: list[Path] = []
+        # Staged inputs that did not exist yet, so their blocks were skipped.
+        self._pending_stages: list[Path] = []
         self.defined_at = defined_at or get_caller_location()
         self._subdir = None
         # Offset from the top-level project's root to this project's root.
@@ -705,6 +713,174 @@ class Project(_ProjectBuilders):
                     continue
         return False
 
+    # -------------------------------------------------------------------------
+    # Configure-time inputs and staged generation
+    # -------------------------------------------------------------------------
+
+    def add_configure_dependency(self, path: Path | str | FileNode) -> None:
+        """Declare a file the build description read while describing the build.
+
+        Generated build files depend on these, so changing one re-runs pcons
+        before anything is built (Ninja's ``generator = 1`` edge). The build
+        script itself, any Python module imported from the project tree, and
+        ``configure_file()`` templates are registered automatically; use this
+        for data files a build script reads directly.
+
+        The path may name a file the build itself produces — that is how
+        staged generation works; see :meth:`generated_input`.
+        """
+        top = self.top_level()
+        if isinstance(path, FileNode):
+            resolved = path.path
+        else:
+            resolved = self._canonicalize_path(Path(path))
+        if resolved not in top._configure_deps:
+            top._configure_deps.append(resolved)
+
+    @property
+    def configure_dependencies(self) -> list[Path]:
+        """Files the generated build files depend on (see
+        :meth:`add_configure_dependency`)."""
+        return list(self.top_level()._configure_deps)
+
+    def generated_input(self, path: Path | str) -> Path | None:
+        """A build-time-generated file the build description wants to read.
+
+        Returns the path when it exists, otherwise None — and either way
+        registers it as a configure dependency. That makes staged generation
+        work: on the first pass the file does not exist yet, so the script
+        describes only the part of the graph that produces it; the build
+        system then produces it, re-runs pcons, and the second pass sees the
+        complete picture.
+
+        This is the one sanctioned existence check in a build script. Deciding
+        whether something is a *target* by looking at the filesystem is still
+        wrong; this asks whether a declared build input has been produced yet,
+        and records the answer as a dependency.
+
+        Example:
+            manifest = project.generated_input(project.build_dir / "plugins.txt")
+            if manifest is not None:
+                for name in manifest.read_text().split():
+                    project.SharedLibrary(name, env, sources=[f"{name}.c"])
+        """
+        top = self.top_level()
+        self.add_configure_dependency(path)
+
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = top.root_dir / self._canonicalize_path(candidate)
+        if candidate.is_file():
+            return candidate
+
+        pending = self._canonicalize_path(Path(path))
+        if pending not in top._pending_stages:
+            top._pending_stages.append(pending)
+        return None
+
+    def when_generated(
+        self, *paths: Path | str
+    ) -> Callable[[Callable[..., Any]], None]:
+        """Decorator: run a block only once every named file has been generated.
+
+        Sugar over :meth:`generated_input` for the common staged-generation
+        shape. The decorated function is called immediately with the resolved
+        paths when all of them exist, and skipped otherwise; either way the
+        paths become configure dependencies, so the build system re-runs pcons
+        once they appear.
+
+        Example:
+            @project.when_generated(build_dir / "plugins.txt")
+            def _plugins(manifest: Path) -> None:
+                for name in manifest.read_text().split():
+                    make_plugin(name)
+        """
+
+        def decorate(func: Callable[..., Any]) -> None:
+            resolved = [self.generated_input(p) for p in paths]
+            if all(p is not None for p in resolved):
+                func(*resolved)
+
+        return decorate
+
+    def _register_implicit_configure_deps(self) -> None:
+        """Register the build script and every project-local module it imported.
+
+        Splitting a build description across ``build-scripts/*.py`` is normal;
+        those files are configure inputs just as much as the entry script, and
+        ``sys.modules`` is the honest record of which ones were used.
+        """
+        import sys
+
+        from pcons.core import invocation
+
+        top = self.top_level()
+        root = top.root_dir.resolve()
+        pcons_dir = Path(__file__).resolve().parent.parent
+
+        inv = invocation.current()
+        if inv is not None:
+            top.add_configure_dependency(inv.script)
+
+        for module in list(sys.modules.values()):
+            filename = getattr(module, "__file__", None)
+            if not filename or not filename.endswith(".py"):
+                continue
+            try:
+                path = Path(filename).resolve()
+            except OSError:
+                continue
+            if not path.is_relative_to(root) or path.is_relative_to(pcons_dir):
+                continue
+            top.add_configure_dependency(path)
+
+    def _check_pending_stages(self) -> None:
+        """Verify every skipped staged input is something the build produces.
+
+        A staged input that no edge produces can never appear, so the build
+        would silently stay incomplete forever. Raise instead.
+        """
+        top = self.top_level()
+        if not top._pending_stages:
+            return
+
+        orphans = [p for p in top._pending_stages if not top._is_produced(p)]
+        if orphans:
+            from pcons.core.errors import PconsError
+
+            listed = "\n  ".join(str(p) for p in orphans)
+            raise PconsError(
+                f"Staged input is not produced by any build rule:\n  {listed}\n"
+                f"generated_input()/when_generated() wait for a file the build "
+                f"itself generates. Declare the rule that produces it (e.g. "
+                f"env.Command(target=..., ...)) in the same pass."
+            )
+
+        logger.info(
+            "Staged generation: %d block(s) pending on %s — run the build to "
+            "generate them; pcons re-runs automatically.",
+            len(top._pending_stages),
+            ", ".join(str(p) for p in top._pending_stages),
+        )
+
+    def _is_produced(self, path: Path) -> bool:
+        """True if some node in the project tree builds *path*."""
+        for project in self._tree():
+            node = project._nodes.get(path)
+            if node is not None and (
+                getattr(node, "_build_info", None) is not None
+                or getattr(node, "builder", None) is not None
+            ):
+                return True
+        return False
+
+    def _tree(self) -> list[Project]:
+        """This project and all its descendants."""
+        result: list[Project] = [self]
+        for child in self._children:
+            result.extend(child._tree())
+        return result
+
     def validate(self) -> list[Exception]:
         """Validate the project configuration.
 
@@ -790,6 +966,9 @@ class Project(_ProjectBuilders):
         resolver = Resolver(self)
         resolver.resolve()
         resolver.resolve_pending_sources()
+
+        self._register_implicit_configure_deps()
+        self._check_pending_stages()
 
         errors = self.validate()
         if errors:

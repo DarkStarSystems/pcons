@@ -25,6 +25,7 @@ if TYPE_CHECKING:
         """Typed mixin for UsageRequirements (TYPE_CHECKING-only)."""
 
         include_dirs: MutableSequence[Path | str]  # directories added to dependents' include path
+        system_include_dirs: MutableSequence[Path | str]  # like include_dirs, but marked as system headers (-isystem, /external:I) so their warnings are suppressed
         compile_flags: MutableSequence[str | PathToken]  # flags propagated to dependents (strings, or PathToken for embedded paths)
         link_flags: MutableSequence[str | PathToken]  # flags propagated to dependents (strings, or PathToken for embedded paths)
         defines: MutableSequence[str]  # preprocessor defines propagated to dependents

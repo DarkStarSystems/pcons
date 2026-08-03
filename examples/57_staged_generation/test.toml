@@ -1,0 +1,34 @@
+# Test configuration for the staged-generation example
+
+[test]
+description = "Targets discovered from a manifest the build itself produces, via the build.ninja regen edge"
+
+expected_outputs = [
+    "build/list-plugins",
+    "build/gen/plugins-list.txt",
+    "build/gen/S_blur.c",
+    "build/gen/plugins.h",
+    "build/demo",
+]
+
+[verify]
+commands = [
+    { run = "build/demo", expect_stdout = "3 plugins" },
+]
+
+[[rebuild]]
+description = "Nothing changed: no work, and no re-run of pcons"
+expect_no_work = true
+
+[[rebuild]]
+description = "Touching the plugin definitions regenerates the manifest but rebuilds nothing"
+touch = "plugins.def"
+expect_no_rebuild = ["obj.demo/*", "demo"]
+
+[skip]
+# The Makefile generator expresses this correctly and it works with GNU make
+# 4.x, but make 3.81 (still Apple's /usr/bin/make) compares makefile
+# prerequisite timestamps at whole-second granularity, so it misses a manifest
+# generated in the same second as the makefile and never restarts. The Xcode
+# generator has no self-regeneration concept at all.
+generators = ["make", "xcode"]

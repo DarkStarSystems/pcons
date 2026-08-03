@@ -44,6 +44,10 @@ class ClangClCompiler(BaseTool):
             "flags": ["/nologo"],
             "iprefix": "/I",
             "includes": [],
+            # clang-cl's own spelling for system includes; it also accepts
+            # MSVC's /external:I, but -imsvc works on every version.
+            "isysprefix": "-imsvc",
+            "system_includes": [],
             "dprefix": "/D",
             "defines": [],
             # clang-cl uses /showIncludes for MSVC-style deps
@@ -56,6 +60,9 @@ class ClangClCompiler(BaseTool):
                 "${prefix(cc.iprefix, cc.includes)}"
                 if self._language == "c"
                 else "${prefix(cxx.iprefix, cxx.includes)}",
+                "${prefix(cc.isysprefix, cc.system_includes)}"
+                if self._language == "c"
+                else "${prefix(cxx.isysprefix, cxx.system_includes)}",
                 "${prefix(cc.dprefix, cc.defines)}"
                 if self._language == "c"
                 else "${prefix(cxx.dprefix, cxx.defines)}",
@@ -108,6 +115,8 @@ class ClangClCxxCompiler(ClangClCompiler):
             "flags": ["/nologo"],
             "iprefix": "/I",
             "includes": [],
+            "isysprefix": "-imsvc",
+            "system_includes": [],
             "dprefix": "/D",
             "defines": [],
             "objcmd": [
@@ -117,6 +126,7 @@ class ClangClCxxCompiler(ClangClCompiler):
                 "/c",
                 TargetPath(prefix="/Fo"),
                 "${prefix(cxx.iprefix, cxx.includes)}",
+                "${prefix(cxx.isysprefix, cxx.system_includes)}",
                 "${prefix(cxx.dprefix, cxx.defines)}",
                 "$cxx.flags",
                 SourcePath(),

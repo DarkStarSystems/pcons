@@ -47,6 +47,23 @@ def _is_link_input(path: Path) -> bool:
     return ".so" in path.suffixes or ".dylib" in path.suffixes
 
 
+def _propagate_declared_deps(source: FileNode, obj_node: FileNode) -> None:
+    """Carry a source file's declared dependencies onto its object node.
+
+    Only for real sources. On a *generated* source, ``explicit_deps`` are the
+    inputs of the edge that produces it, and those are the producer's business:
+    copying them here would recompile every consumer whenever the generator's
+    input changed, even when the generated file came back byte-identical —
+    defeating ``restat`` and ``write_if_different``. Ninja already orders the
+    generator before the compile through the file itself.
+    """
+    if not source.explicit_deps:
+        return
+    if source.builder is not None or getattr(source, "_build_info", None) is not None:
+        return
+    obj_node.implicit_deps.extend(source.explicit_deps)
+
+
 def _context_class_for(env: Environment) -> type[CompileLinkContext]:
     """The CompileLinkContext subclass the env's toolchain uses.
 
@@ -320,8 +337,7 @@ class CompileLinkFactory:
 
         depfile = self._resolve_depfile(handler.depfile, obj_path)
 
-        if source.explicit_deps:
-            obj_node.implicit_deps.extend(source.explicit_deps)
+        _propagate_declared_deps(source, obj_node)
 
         # Compile commands use the base context so compile_commands.json
         # stays clang-compatible (-I/-D) regardless of the actual compiler.
@@ -392,8 +408,7 @@ class CompileLinkFactory:
         depfile = self._resolve_depfile(handler.depfile, obj_path)
 
         for source in sources:
-            if source.explicit_deps:
-                obj_node.implicit_deps.extend(source.explicit_deps)
+            _propagate_declared_deps(source, obj_node)
 
         context = CompileLinkContext.from_effective_requirements(
             effective,

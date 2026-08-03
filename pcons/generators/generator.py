@@ -211,6 +211,23 @@ class BaseGenerator:
                 os._exit(1)
             raise
 
+    @staticmethod
+    def _collect_path_flags(project: Project) -> frozenset[str]:
+        """Path-carrying flags (-I, -isystem, /LIBPATH:, ...) of every
+        toolchain in the project.
+
+        Generators rewrite the paths in these flags relative to where the
+        build tool runs. Which flags carry paths is toolchain knowledge, so
+        it comes from the toolchains rather than a list in the generator.
+        """
+        flags: set[str] = set()
+        for env in project.environments:
+            for toolchain in getattr(env, "toolchains", []):
+                getter = getattr(toolchain, "get_path_flags", None)
+                if getter is not None:
+                    flags.update(getter())
+        return frozenset(flags)
+
     def _resolve_output_dir(self, project: Project) -> Path:
         """Compute the output directory: build_dir, resolved against
         root_dir if relative."""

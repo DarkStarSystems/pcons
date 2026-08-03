@@ -617,6 +617,7 @@ def merge_scan_compile_flags(
     extra_flags: tuple[str, ...] = (),
     *,
     iprefix: str = "-I",
+    isysprefix: str = "-isystem",
     dprefix: str = "-D",
 ) -> list[str]:
     """Build a per-TU compile-flag list for module scanning.
@@ -638,6 +639,10 @@ def merge_scan_compile_flags(
                 seen.add(flag)
         for inc in context.includes:
             compile_flags.append(f"{iprefix}{inc}")
+        # Vendored SDK headers live here; without them the scanner can't
+        # preprocess the TU it is scanning.
+        for inc in getattr(context, "system_includes", ()):
+            compile_flags.append(f"{isysprefix}{inc}")
         for define in context.defines:
             compile_flags.append(f"{dprefix}{define}")
     return compile_flags

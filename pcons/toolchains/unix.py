@@ -332,9 +332,32 @@ class UnixToolchain(BaseToolchain):
 
         return []
 
+    # Flags whose argument is a directory path, in either spelling ("-Ifoo"
+    # or "-I foo"). Generators rewrite these so generated build files stay
+    # relocatable. Deliberately excludes -include/-imacros: their argument is
+    # a header *name* resolved through the include path (Qt's mkspecs pass
+    # "-include arm_acle.h"), and rewriting it as a path breaks the build.
+    PATH_FLAGS: frozenset[str] = frozenset(
+        [
+            "-I",
+            "-L",
+            "-F",
+            "-isystem",
+            "-iquote",
+            "-idirafter",
+            "-iframework",
+            "-isysroot",
+            "--sysroot",
+        ]
+    )
+
     def get_separated_arg_flags(self) -> frozenset[str]:
         """Return flags that take their argument as a separate token."""
         return self.SEPARATED_ARG_FLAGS
+
+    def get_path_flags(self) -> frozenset[str]:
+        """Return flags whose argument is a path."""
+        return self.PATH_FLAGS
 
     # =========================================================================
     # Target Architecture and Variant Methods

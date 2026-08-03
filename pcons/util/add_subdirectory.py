@@ -46,11 +46,16 @@ def add_subdirectory(
     """
     project = Project.current()
     subdir_path = project.current_dir / subdir
-    if not (subdir_path / "pcons-build.py").exists():
+    script = subdir_path / "pcons-build.py"
+    if not script.exists():
         raise FileNotFoundError(f"No pcons-build.py found in {subdir_path}")
 
+    # runpy doesn't touch sys.modules, so the automatic scan can't see this
+    # script; register it directly or editing it wouldn't re-run pcons.
+    project.add_configure_dependency(script)
+
     with project._enter_subdir(subdir):
-        module = runpy.run_path(str(subdir_path / "pcons-build.py"))
+        module = runpy.run_path(str(script))
         if pick is not None:
             return tuple(module[name] for name in pick)
         else:

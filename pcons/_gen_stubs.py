@@ -458,6 +458,11 @@ _USAGE_REQUIREMENT_TYPES: tuple[tuple[str, str, str | None], ...] = (
         "directories added to dependents' include path",
     ),
     (
+        "system_include_dirs",
+        "MutableSequence[Path | str]",
+        "like include_dirs, but marked as system headers (-isystem, /external:I) so their warnings are suppressed",
+    ),
+    (
         "compile_flags",
         "MutableSequence[str | PathToken]",
         "flags propagated to dependents (strings, or PathToken for embedded paths)",

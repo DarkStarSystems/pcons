@@ -371,6 +371,10 @@ class MsvcCompiler(BaseTool):
             "flags": ["/nologo"],
             "iprefix": "/I",
             "includes": [],
+            # /external:I needs /external:W0 to actually silence anything;
+            # see MsvcToolchain.get_compile_flags_for_system_includes.
+            "isysprefix": "/external:I",
+            "system_includes": [],
             "dprefix": "/D",
             "defines": [],
             "depflags": ["/showIncludes"],
@@ -378,6 +382,7 @@ class MsvcCompiler(BaseTool):
                 "$cc.cmd",
                 "$cc.flags",
                 "${prefix(cc.iprefix, cc.includes)}",
+                "${prefix(cc.isysprefix, cc.system_includes)}",
                 "${prefix(cc.dprefix, cc.defines)}",
                 "$cc.depflags",
                 "/c",
@@ -441,6 +446,8 @@ class MsvcCxxCompiler(MsvcCompiler):
             "flags": ["/nologo"],
             "iprefix": "/I",
             "includes": [],
+            "isysprefix": "/external:I",
+            "system_includes": [],
             "dprefix": "/D",
             "defines": [],
             "modules": False,  # set True to enable C++20 module scanning
@@ -449,6 +456,7 @@ class MsvcCxxCompiler(MsvcCompiler):
                 "$cxx.cmd",
                 "$cxx.flags",
                 "${prefix(cxx.iprefix, cxx.includes)}",
+                "${prefix(cxx.isysprefix, cxx.system_includes)}",
                 "${prefix(cxx.dprefix, cxx.defines)}",
                 "$cxx.depflags",
                 "/c",
@@ -902,7 +910,11 @@ class MsvcToolchain(MsvcCompatibleToolchain):
             bi = getattr(obj_node, "_build_info", None)
             context = bi.get("context") if bi else None
             compile_flags = merge_scan_compile_flags(
-                setup.base_flags, context, iprefix="/I", dprefix="/D"
+                setup.base_flags,
+                context,
+                iprefix="/I",
+                isysprefix="/external:I",
+                dprefix="/D",
             )
             specs.append(add_tu_spec(setup, src, obj_node, compile_flags, flag_spec))
 

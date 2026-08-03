@@ -1,0 +1,24 @@
+# Test configuration for the system-includes example
+
+[test]
+description = "Third-party headers via system_includes: found like -I, exempt from -Werror"
+
+expected_outputs = [
+    "build/obj.sdk_demo/src/main.c.o",
+    "build/sdk_demo",
+]
+
+[verify]
+commands = [
+    { run = "build/sdk_demo", expect_stdout = "sdk says 42" },
+    # The path must be relativized, not baked in absolute: build.ninja has to
+    # stay relocatable and shareable between checkouts.
+    { run = "grep -c -- \"-isystem[$]topdir/vendor\" build/build.ninja", expect_stdout = "1" },
+]
+
+[skip]
+# -Wall/-Wextra/-Werror and -isystem are GCC/Clang spellings; the MSVC
+# equivalents (/external:I + /external:W0) are covered by unit tests. The
+# grep-based check on build.ninja is ninja-specific.
+generators = ["make", "xcode"]
+platforms = ["windows"]

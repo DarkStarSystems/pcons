@@ -781,6 +781,26 @@ Key points:
 !!! note "`link()` / `link_private()` vs. the `link_libs` lists"
     `target.link(...)` and `target.link_private(...)` are the recommended high-level forms. They are exactly equivalent to appending to `target.public.link_libs` and `target.private.link_libs` respectively — those lists remain fully supported as the low-level form, and accept the same `Target` objects and library-name strings.
 
+#### System Include Directories
+
+Vendored third-party headers are a special case: you want them found, but you don't want their warnings, and you certainly don't want `-Werror` failing your build on code you can't change. Every compiler has a second kind of include path for this — `-isystem` on GCC/Clang, `/external:I` on MSVC (pcons adds `/external:W0` alongside it), `-imsvc` on clang-cl. In pcons it's `system_includes`, on the tool or as a usage requirement:
+
+```python
+# On the environment
+env.cxx.system_includes.append(root / "vendor/ae-sdk")
+
+# Or as a usage requirement, so consumers inherit the headers
+# without inheriting the warnings
+sdk = project.HeaderOnlyLibrary("ae_sdk")
+sdk.public.system_include_dirs.append(root / "vendor/ae-sdk")
+app.link(sdk)
+```
+
+Everything that works for `includes` works here: transitive propagation, deduplication, and path relativization in the generated build files. See `examples/58_system_includes`.
+
+!!! note "Packages"
+    Imported packages (`find_package()`, pkg-config, Conan) still contribute ordinary `-I` include dirs. Marking them system by default is a deliberate behavior change and is not in place yet.
+
 ### Shared/Dynamic Library
 
 Create a shared library (`.so` on Linux, `.dylib` on macOS, `.dll` on Windows).
@@ -2521,6 +2541,21 @@ env.Command(
 )
 ```
 
+**Generators that rewrite everything: `write_if_different=True`**
+
+Ninja's `restat` skips downstream work when a command's output didn't actually change — but only if the generator leaves unchanged files alone, and most generators rewrite every output on every run. `write_if_different=True` fixes that without the generator's cooperation: pcons stashes the outputs, runs the command, and restores any output that came back byte-identical, timestamp included. It implies `restat=True`.
+
+```python
+env.Command(
+    target=[gen_dir / f"S_{name}.c" for name in names],
+    source=[manifest],
+    command=f"{python} $SRCDIR/tools/gen.py $SOURCE",
+    write_if_different=True,  # one changed input != recompile everything
+)
+```
+
+Without it, adding one entry to a 280-plugin manifest recompiles all 280. With it, only the new one. See `examples/57_staged_generation`.
+
 ### Post-Build Commands
 
 Add commands that run after a target is built using `target.post_build()`:
@@ -2547,6 +2582,8 @@ Commands run in the order they are added. The fluent API allows chaining:
 ```python
 plugin.post_build("cmd1 $out").post_build("cmd2 $out")
 ```
+
+`target.pre_build()` is the mirror image, for commands that must run before the target's own command, with the same `$out`/`$in` substitutions.
 
 ### Archive Builders (Tarfile and Zipfile)
 
@@ -3497,6 +3534,67 @@ Options:
 
 This is especially useful when porting CMake projects to pcons, since the template files can often be used as-is.
 
+### Re-running pcons Automatically
+
+Generated build files carry a self-regeneration rule: Ninja's `generator = 1` edge, and the equivalent makefile-remake rule for Make. Editing the build script — or anything it read while describing the build — re-runs pcons before anything is built, in the same `ninja` invocation. No wrapper script, no stale graph.
+
+Registered automatically:
+
+- the build script itself;
+- every Python module imported from inside the project tree, so a description split across `build-scripts/*.py` is fully covered;
+- `configure_file()` templates.
+
+Anything else — a data file your script reads directly — you declare:
+
+```python
+project.add_configure_dependency(project.root_dir / "plugins.def")
+```
+
+The regen rule is omitted when the invocation can't be reconstructed (for example a build script executed in an unusual way). `project.generate()` still writes the build files; they just won't re-run pcons on their own.
+
+### Staged Generation: Targets Discovered Mid-Build
+
+Some projects can't know their target list until something has run: a definition language, an IDL, a schema, a plugin manifest — and often the program that reads it is built by the same build.
+
+pcons describes the graph and hands it to Ninja; it never creates targets while the build runs. Instead it stages, and the build system drives the staging:
+
+```python
+manifest_path = project.build_dir / "gen/plugins-list.txt"
+
+# Pass 1: only the part of the graph that produces the manifest.
+lister = project.Program("list-plugins", env, sources=["src/list-plugins.c"])
+manifest = env.Command(
+    target=manifest_path,
+    source=[lister],
+    depends=["plugins.def"],
+    command="$SOURCE $SRCDIR/plugins.def $TARGET",
+    write_if_different=True,
+)
+
+
+# Pass 2: runs only once the manifest exists.
+@project.when_generated(manifest_path)
+def _plugins(path):
+    for name in path.read_text().split():
+        make_plugin(name)
+```
+
+From a clean tree, one `ninja` compiles and runs `list-plugins`, notices that `build.ninja` depends on the manifest it just produced, re-runs pcons, reloads, and builds the discovered targets.
+
+`when_generated` is sugar over the primitive:
+
+```python
+path = project.generated_input(manifest_path)  # -> Path | None
+```
+
+Either form registers the path as a configure dependency, so the build system re-runs pcons as soon as it appears or changes. A staged input that no rule produces is an error — it could never appear, and the build would silently stay incomplete.
+
+This is the one sanctioned filesystem check in a build script. It asks whether a declared build *input* has been produced yet and records the answer as a dependency; deciding whether something is a *target* by looking at the filesystem is still wrong.
+
+Pair it with `write_if_different=True` (see [Custom Commands](#custom-commands-with-envcommand)) or a re-run of the generator will invalidate everything downstream of every output it touched. A complete worked example is `examples/57_staged_generation`.
+
+Ninja handles this natively; GNU make 4.x does too. GNU make 3.81 — still `/usr/bin/make` on macOS — compares makefile prerequisite timestamps at whole-second granularity and can miss a manifest written in the same second, so use ninja or a modern GNU make for staged builds.
+
 ---
 
 ## Troubleshooting
@@ -3567,6 +3665,7 @@ This is especially useful when porting CMake projects to pcons, since the templa
 | `target.link_private(t, "m")` | Link a dependency (or raw lib name), keeping it local |
 | `target.add_dependency(t)` | Add a non-link build dependency |
 | `target.public.include_dirs` | Include dirs for consumers |
+| `target.public.system_include_dirs` | Like `include_dirs`, but as system headers (warnings suppressed) |
 | `target.public.link_libs.append(t)` | Low-level form of `link()` (append a `Target` or `-l` name) |
 | `target.private.link_libs.append(t)` | Low-level form of `link_private()` |
 | `target.public.link_libs` | Libraries to link (`-l`; placed after objects) |

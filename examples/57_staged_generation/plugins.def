@@ -1,0 +1,6 @@
+# Plugins to build, one per line. Blank lines and #-comments are ignored.
+# Add a line here, run `ninja`, and the new plugin appears in the build with
+# no other step: build.ninja regenerates itself.
+blur
+glow
+sharpen

@@ -143,9 +143,24 @@ class MsvcCompatibleToolchain(BaseToolchain):
         """
         return []
 
+    # Flags whose argument is a path. MSVC spells them joined ("/Ifoo"), but
+    # the separate form is accepted too, so generators handle both.
+    PATH_FLAGS: frozenset[str] = frozenset(
+        [
+            "/I",
+            "/LIBPATH:",
+            "/external:I",
+            "-imsvc",  # clang-cl's spelling of /external:I
+        ]
+    )
+
     def get_separated_arg_flags(self) -> frozenset[str]:
         """Return flags that take their argument as a separate token."""
         return self.SEPARATED_ARG_FLAGS
+
+    def get_path_flags(self) -> frozenset[str]:
+        """Return flags whose argument is a path."""
+        return self.PATH_FLAGS
 
     # Variant flags per build type (compile_flags, defines).
     MSVC_VARIANTS: dict[str, tuple[list[str], list[str]]] = {

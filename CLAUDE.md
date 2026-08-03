@@ -15,7 +15,10 @@ Designed for simplicity, maintainability and extensibility.
 
 **NEVER add tool-specific code to `pcons/core/`**. Compiler flags, tool names, and language-specific logic belong in `pcons/toolchains/` or `pcons/tools/`.
 
-**NEVER check filesystem existence to determine if something is a target**
+**NEVER check filesystem existence to determine if something is a target.** The one
+sanctioned existence check is `project.generated_input()` / `project.when_generated()`,
+which asks whether a declared build *input* has been produced yet and registers the
+answer as a configure dependency (staged generation; see `examples/57_staged_generation`).
 
 **ALL builders must return `Target` objects**, not raw FileNodes. This ensures consistency across Install(), dependencies, etc.
 

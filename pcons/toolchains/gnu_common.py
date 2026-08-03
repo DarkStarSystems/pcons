@@ -44,6 +44,7 @@ def gnu_compile_vars(
         [
             f"${ns}.flags",
             f"${{prefix({ns}.iprefix, {ns}.includes)}}",
+            f"${{prefix({ns}.isysprefix, {ns}.system_includes)}}",
             f"${{prefix({ns}.dprefix, {ns}.defines)}}",
             f"${ns}.depflags",
             "-c",
@@ -57,6 +58,10 @@ def gnu_compile_vars(
         "flags": [],
         "iprefix": "-I",
         "includes": [],
+        # Third-party headers: found like any other include, but warnings
+        # from them are suppressed.
+        "isysprefix": "-isystem",
+        "system_includes": [],
         "dprefix": "-D",
         "defines": [],
         "depflags": ["-MD", "-MF", TargetPath(suffix=".d")],

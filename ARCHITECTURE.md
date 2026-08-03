@@ -177,7 +177,34 @@ The resolve phase is significant; before that, the node graph is sparse, with bu
 
 ### Phase 4: Build
 
-User runs `ninja` (or `make`). Pcons is not involved.
+User runs `ninja` (or `make`). Pcons is not involved — with one deliberate exception.
+
+#### Self-regeneration and staged generation
+
+Generated build files declare their own inputs and how to rebuild themselves: Ninja's
+`generator = 1` edge, Make's makefile-remake rule. The command is reconstructed from
+`pcons.core.invocation`, which the CLI records at the start of the run. The inputs are
+`project.configure_dependencies`: the build script, every Python module imported from
+inside the project tree, `configure_file()` templates, and anything registered with
+`project.add_configure_dependency()`.
+
+Because a build tool brings its manifest up to date *before* running anything else, and
+re-reads it if it changed, one of those inputs may itself be a build output — including
+one that requires compiling and running a program first. That is what makes staged
+generation possible without pcons ever creating targets during the build:
+
+```
+pass 1   describe what produces the manifest
+         build tool produces it, sees build.ninja is out of date against it,
+         re-runs pcons, reloads
+pass 2   project.generated_input() now returns the path, so the targets it
+         decides join the graph
+```
+
+The contract this preserves: pcons still describes a complete, static graph, and the
+build tool still just executes it. What changes is only *how many times* pcons is asked
+to describe. A staged input that no edge produces is a hard error — it could never
+appear, so the build would silently stay incomplete.
 
 ---
 

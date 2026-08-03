@@ -6,6 +6,7 @@ from typing import Any
 
 import pytest
 
+from pcons.core import invocation
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.preset import _PRESET_REGISTRY
 from pcons.core.project import Project
@@ -106,11 +107,13 @@ def clear_project_tree():
     """
     Project._clear_tree()
     BaseGenerator._clear_pending()
+    invocation.clear()
     registries = _snapshot_registries()
     yield
     _restore_registries(registries)
     Project._clear_tree()
     BaseGenerator._clear_pending()
+    invocation.clear()
 
 
 @pytest.fixture(autouse=True)

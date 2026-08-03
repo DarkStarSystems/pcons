@@ -604,6 +604,15 @@ class Toolchain(Protocol):
         token, for flag deduplication."""
         ...
 
+    def get_path_flags(self) -> frozenset[str]:
+        """Return flags (like -I, -isystem) whose argument is a path.
+
+        Generators use this to rewrite the paths in flags relative to where
+        the build tool runs, in both the joined (``-Ifoo``) and separate
+        (``-I foo``) spellings.
+        """
+        ...
+
     def get_archiver_tool_name(self) -> str:
         """Return the archiver tool name ("ar" for GCC, "lib" for MSVC)."""
         ...
@@ -1132,6 +1141,10 @@ class BaseToolchain(ABC):
 
     def get_separated_arg_flags(self) -> frozenset[str]:
         """Return flags whose argument is a separate token. Base: none."""
+        return frozenset()
+
+    def get_path_flags(self) -> frozenset[str]:
+        """Return flags whose argument is a path. Base: none."""
         return frozenset()
 
     def compile_link_context_class(self) -> type[CompileLinkContext]:

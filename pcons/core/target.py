@@ -778,6 +778,21 @@ class Target:
         """Get an option previously set with :meth:`set_option`."""
         return self._builder_data.get(key, default)
 
+    def pre_build(self, command: str) -> Target:
+        """Add a shell command to run before the target is built (fluent API).
+
+        The mirror of :meth:`post_build`, with the same ``$out``/``$in``
+        substitutions. Commands run in the order added, ahead of the target's
+        own command.
+
+        Example:
+            gen.pre_build("python -m pcons.tools.stable_output --pre $out")
+        """
+        if "pre_build_commands" not in self._builder_data:
+            self._builder_data["pre_build_commands"] = []
+        self._builder_data["pre_build_commands"].append(command)
+        return self
+
     def post_build(self, command: str) -> Target:
         """Add a shell command to run after the target is built (fluent API).
 

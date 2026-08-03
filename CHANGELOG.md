@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Generated build files re-run pcons on their own.** `build.ninja` now carries a
+  `generator = 1` edge (and the Makefile a remake rule) listing the build script, every
+  Python module imported from inside the project tree, `configure_file()` templates, and
+  anything added with the new `project.add_configure_dependency(path)`. Editing any of
+  them re-runs pcons before the build proceeds, in the same `ninja` invocation — no
+  wrapper script, no silently stale graph.
+- **Staged generation** for projects whose target list is decided by data the build
+  itself produces (a definition language, an IDL, a plugin manifest). A configure
+  dependency may be a build output, so the build tool produces it, re-runs pcons, and
+  reloads. `project.generated_input(path)` returns the path or `None`, and
+  `@project.when_generated(path)` runs a block only once it exists; both register the
+  path so the re-run happens automatically. Waiting on a file no rule produces is an
+  error. See `examples/57_staged_generation`.
+- **`env.Command(..., write_if_different=True)`** restores any output a generator
+  rewrote with identical content, timestamp included, and implies `restat`. Without it,
+  `restat` buys nothing from the many generators that rewrite everything every run — one
+  changed input rebuilds the world.
+- **System include directories.** `env.cc.system_includes` / `env.cxx.system_includes`
+  and `target.public.system_include_dirs` emit `-isystem` (GCC/Clang), `/external:I`
+  plus `/external:W0` (MSVC), or `-imsvc` (clang-cl), so vendored third-party headers
+  can be found without their warnings breaking a `-Werror` build. They propagate,
+  deduplicate, and relativize like ordinary include dirs. See
+  `examples/58_system_includes`.
+- **`target.pre_build(command)`**, the mirror of `post_build()`.
+
+### Fixed
+
+- **Path flags whose argument is a separate token are relativized.** `["-isystem",
+  "/abs/path"]` — the spelling clang documents — previously passed through untouched,
+  quietly baking absolute paths into `build.ninja` and breaking relocatability. Which
+  flags carry paths is now toolchain knowledge (`Toolchain.get_path_flags()`) rather
+  than a hardcoded list in the generator. An absolute path from inside the project tree
+  that survives into a flag pcons doesn't recognize now warns instead of passing
+  silently.
+- **A generated source no longer drags its producer's inputs onto its consumers.** The
+  object compiled from a generated file was picking up that file's producing-edge
+  inputs as implicit dependencies, so any change to the generator's input recompiled
+  every consumer even when the generated file came back byte-identical — defeating
+  `restat`.
+- **Shell operators in ninja commands work on Windows.** Ninja hands a command to
+  `CreateProcess` directly there — there is no shell — so `a && b` reached `a` as the
+  literal arguments `&&` and `b` and silently did half the work. This affected
+  `post_build()` commands and any `env.Command` using `&&`, `|`, or redirection. Such
+  commands are now routed through `cmd.exe /s /c`; commands that need no shell are
+  untouched, and Unix (where ninja always uses `/bin/sh`) is unaffected.
+- **Makefile generator**: `depends=` on a source-tree file emitted an unresolvable
+  build-dir-relative path; a `Command` with several outputs declared a rule for only the
+  first; and `post_build` commands substituted `$out`/`$in` with paths that weren't
+  relative to where make runs.
+- Multi-output commands no longer emit unused ninja rules for their secondary outputs.
+
 ## [0.24.0] - 2026-07-31
 
 ### Changed

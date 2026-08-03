@@ -739,3 +739,39 @@ class TestNinjaTestRule:
         # The old "$ "-escaped form (unquoted, ninja un-escapes to a bare
         # space) must not appear.
         assert "/opt/my$ tools/bin/python3" not in content
+
+
+class TestShellRouting:
+    """On Windows ninja calls CreateProcess directly — there is no shell, so a
+    command using shell operators has to name one explicitly. On Unix ninja
+    always uses /bin/sh, so nothing should change."""
+
+    @staticmethod
+    def _route(monkeypatch, command: str, *, windows: bool) -> str:
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(
+            "pcons.generators.ninja.get_platform",
+            lambda: SimpleNamespace(is_windows=windows),
+        )
+        return NinjaGenerator()._route_through_shell(command)
+
+    def test_chained_command_goes_through_cmd_on_windows(self, monkeypatch):
+        routed = self._route(monkeypatch, "prep $out && build $in", windows=True)
+
+        assert routed == 'cmd.exe /s /c "prep $out && build $in"'
+
+    def test_plain_command_is_untouched(self, monkeypatch):
+        routed = self._route(monkeypatch, "clang -c $in -o $out", windows=True)
+
+        assert routed == "clang -c $in -o $out"
+
+    def test_command_already_naming_cmd_is_untouched(self, monkeypatch):
+        command = "cmd.exe /c echo a && echo b"
+
+        assert self._route(monkeypatch, command, windows=True) == command
+
+    def test_unix_is_untouched(self, monkeypatch):
+        command = "prep $out && build $in"
+
+        assert self._route(monkeypatch, command, windows=False) == command

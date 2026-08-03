@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pcons.tools.compile_link import _is_link_input
+from pcons.core.node import FileNode
+from pcons.tools.compile_link import _is_link_input, _propagate_declared_deps
 
 
 class TestIsLinkInput:
@@ -47,3 +48,35 @@ class TestIsLinkInput:
         assert not _is_link_input(Path("foo.txt"))
         assert not _is_link_input(Path("manifest.json"))
         assert not _is_link_input(Path("script.py"))
+
+
+class TestDeclaredSourceDeps:
+    """A source file's declared deps belong on its object; a *generated*
+    source's do not.
+
+    On a generated source, `explicit_deps` are the inputs of the edge that
+    produces it. Copying those onto the consuming object rebuilds every
+    consumer whenever the generator's input changes — even when the generated
+    file came back byte-identical, which defeats restat/write_if_different.
+    """
+
+    def test_source_header_dep_propagates(self):
+        source = FileNode(Path("src/main.c"))
+        header = FileNode(Path("build/gen/config.h"))
+        source.depends(header)
+        obj = FileNode(Path("build/obj/main.c.o"))
+
+        _propagate_declared_deps(source, obj)
+
+        assert header in obj.implicit_deps
+
+    def test_generated_source_producer_inputs_do_not_propagate(self):
+        generated = FileNode(Path("build/gen/S_blur.c"))
+        manifest = FileNode(Path("build/gen/plugins-list.txt"))
+        generated.depends(manifest)
+        generated._build_info = {"tool": "command"}
+        obj = FileNode(Path("build/obj/S_blur.c.o"))
+
+        _propagate_declared_deps(generated, obj)
+
+        assert obj.implicit_deps == []
