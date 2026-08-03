@@ -68,13 +68,73 @@ class ValidatedUniqueList(UniqueList[_T]):
         super().append(item)
 
 
+#: Usage-requirement names that mean something to pcons. Anything else is a
+#: typo until a toolchain declares otherwise: the lists are consumed by name,
+#: so `target.private.lib_dirs.append(...)` would be accepted, stored, and
+#: never looked at again — the link then fails naming the library rather than
+#: the mistake. Extension authors add their own with
+#: :func:`register_usage_requirement`.
+#:
+#: The type annotations for these live in pcons/_gen_stubs.py; a test keeps
+#: the two lists in step.
+_KNOWN_USAGE_REQUIREMENTS: set[str] = {
+    "include_dirs",
+    "system_include_dirs",
+    "defines",
+    "compile_flags",
+    "link_flags",
+    "link_libs",
+    "link_dirs",
+    "frameworks",
+    "framework_dirs",
+}
+
+
+def _unknown_requirement_message(name: str) -> str:
+    """Explain an unrecognized usage-requirement name, and guess the intent."""
+    import difflib
+
+    known = sorted(_KNOWN_USAGE_REQUIREMENTS)
+    message = (
+        f"Unknown usage requirement '{name}'. Nothing reads it, so setting it "
+        f"would have no effect on the build."
+    )
+    close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+    if close:
+        message += f" Did you mean '{close[0]}'?"
+    message += (
+        f"\n  Known names: {', '.join(known)}."
+        f"\n  A toolchain or extension that consumes its own name declares it "
+        f"with pcons.core.target.register_usage_requirement()."
+    )
+    return message
+
+
+def register_usage_requirement(name: str) -> None:
+    """Declare a usage-requirement name a toolchain or extension consumes.
+
+    Only needed for names pcons doesn't already know
+    (:data:`_KNOWN_USAGE_REQUIREMENTS`); registering one makes
+    ``target.public.<name>`` and ``target.private.<name>`` usable instead of
+    raising. Registration is process-wide and idempotent.
+    """
+    _KNOWN_USAGE_REQUIREMENTS.add(name)
+
+
+def known_usage_requirements() -> frozenset[str]:
+    """Every usage-requirement name currently recognized."""
+    return frozenset(_KNOWN_USAGE_REQUIREMENTS)
+
+
 class UsageRequirements(_UsageRequirementsStubs):
     """Requirements that propagate from a target to its consumers (CMake-style):
     when A depends on B, B's public usage requirements are added to A's build.
 
     Stores named lists of values via attribute access. C/C++ toolchains use
-    include_dirs, defines, compile_flags, link_flags, link_libs; any toolchain
-    can define its own names.
+    include_dirs, defines, compile_flags, link_flags, link_libs, link_dirs;
+    a toolchain can add its own with :func:`register_usage_requirement`.
+    An unrecognized name raises rather than quietly becoming a list nothing
+    reads.
 
     The ``link_libs`` list is special: appending a ``Target`` creates a full
     dependency (the owner inherits that target's public usage requirements —
@@ -99,7 +159,14 @@ class UsageRequirements(_UsageRequirementsStubs):
             self._data[k] = v
 
     def __getattr__(self, name: str) -> list[Any] | UserList[Any]:
-        """Return the named list, creating it on first access."""
+        """Return the named list, creating it on first access.
+
+        Raises AttributeError for an unrecognized name — which also keeps
+        dunder probes (``copy``, ``pickle``) from being answered with an
+        empty list.
+        """
+        if name not in _KNOWN_USAGE_REQUIREMENTS:
+            raise AttributeError(_unknown_requirement_message(name))
         data: dict[str, list[Any] | UserList[Any]] = object.__getattribute__(
             self, "_data"
         )
@@ -109,6 +176,8 @@ class UsageRequirements(_UsageRequirementsStubs):
         if name.startswith("_"):
             object.__setattr__(self, name, value)
         else:
+            if name not in _KNOWN_USAGE_REQUIREMENTS:
+                raise AttributeError(_unknown_requirement_message(name))
             if not isinstance(value, (list, UserList)):
                 raise TypeError(
                     f"Usage requirement '{name}' must be a list, "

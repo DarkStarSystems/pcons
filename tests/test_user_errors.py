@@ -186,22 +186,24 @@ class TestTyposAndMisspellings:
         with pytest.raises(AttributeError, match="Tool"):
             _ = env.ccx
 
-    def test_typo_usage_requirement_name_is_silent(self, project_env):
-        """Typo in usage requirement name is silently accepted.
+    def test_typo_usage_requirement_name_raises(self, project_env):
+        """A typo in a usage-requirement name is an error.
 
-        UsageRequirements is intentionally open-ended: any toolchain can
-        define its own requirement names (e.g., device_flags, module_dirs).
-        A typo like 'includedirs' creates an unused list, but this is by
-        design -- restricting to known names would break extensibility.
-        Users will notice via missing flags in build output.
+        This used to be accepted deliberately, on the reasoning that
+        UsageRequirements is open-ended for toolchains and that "users will
+        notice via missing flags in build output". A real port disproved the
+        second half: `private.lib_dirs.append(...)` looked like it worked, and
+        the build failed with `ld: library 'OpenImageIO' not found` -- naming
+        the library rather than the typo, several steps from the cause.
+
+        Extensibility is preserved explicitly instead: a toolchain that
+        consumes its own name calls register_usage_requirement().
         """
         project, env = project_env
         app = project.Program("app", env, sources=["src/main.c"])
-        # Typo silently creates a new attribute -- this is expected behavior
-        app.public.includedirs.append("/usr/include")
-        assert app.public.includedirs == ["/usr/include"]
-        # The correctly-spelled one remains empty
-        assert app.public.include_dirs == []
+
+        with pytest.raises(AttributeError, match="Did you mean 'include_dirs'"):
+            app.public.includedirs.append("/usr/include")
 
     def test_typo_public_called_as_method(self, project_env):
         """User calls target.public() instead of accessing target.public."""

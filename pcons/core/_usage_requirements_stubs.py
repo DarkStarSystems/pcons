@@ -30,3 +30,6 @@ if TYPE_CHECKING:
         link_flags: MutableSequence[str | PathToken]  # flags propagated to dependents (strings, or PathToken for embedded paths)
         defines: MutableSequence[str]  # preprocessor defines propagated to dependents
         link_libs: MutableSequence[str | Target]  # link deps: a Target brings its public usage requirements (headers etc.); a str is a raw link token; public re-exports, private does not
+        link_dirs: MutableSequence[Path | str]  # library search directories (-L) propagated to dependents
+        frameworks: MutableSequence[str]  # macOS frameworks propagated to dependents (-framework)
+        framework_dirs: MutableSequence[Path | str]  # macOS framework search directories propagated to dependents (-F)

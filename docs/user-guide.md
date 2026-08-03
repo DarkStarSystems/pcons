@@ -3760,7 +3760,11 @@ Ninja handles this natively; GNU make 4.x does too. GNU make 3.81 — still `/us
 | `target.public.link_libs` | Libraries to link (`-l`; placed after objects) |
 | `target.public.link_flags` | Linker flags (placed before objects; use `link_libs` for `-l` libraries). Use `PathToken` for flags containing paths. |
 | `target.public.defines` | Defines for consumers |
+| `target.public.link_dirs` | Library search directories (`-L`) |
+| `target.public.frameworks` / `framework_dirs` | macOS frameworks (`-framework` / `-F`) |
 | `target.private.compile_flags` | Flags for this target only |
+
+These are the names pcons reads. Any other name raises — the lists are consumed by name, so a typo like `lib_dirs` would otherwise be stored and never looked at, and the build would fail somewhere else entirely (`ld: library 'Foo' not found`, naming the library rather than the mistake). A toolchain or extension that consumes a name of its own declares it with `pcons.core.target.register_usage_requirement()`.
 
 ### Environment Methods
 

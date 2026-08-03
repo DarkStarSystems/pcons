@@ -76,6 +76,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **An unknown usage-requirement name raises.** `target.private.lib_dirs.append(...)` was
+  accepted, stored, and never read — the lists are consumed by name, so the real field
+  (`link_dirs`) stayed empty and the build failed later with `ld: library 'Foo' not
+  found`, naming the library rather than the typo. Unknown names now raise with a
+  suggestion (`Did you mean 'link_dirs'?`) and the list of known names. Toolchains that
+  consume their own names declare them with `register_usage_requirement()`; the type
+  stubs and the runtime set are now the same list, checked by a test.
 - **`Node.depends()` now adds an *implicit* dependency**, not a positional input — the
   same meaning `Target.depends()` and `env.Command(depends=...)` already had. It used to
   land in `$in`, so ordering a generated header before an object gave the compiler two

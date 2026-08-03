@@ -1,11 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.core.target."""
 
+import copy
 import warnings
 from pathlib import Path
 
 import pytest
 
+import pcons.core.target
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import (
@@ -15,6 +17,8 @@ from pcons.core.target import (
     UsageRequirements,
     ValidatedUniqueList,
     is_qualified_name,
+    known_usage_requirements,
+    register_usage_requirement,
     split_qualified_name,
 )
 
@@ -1045,3 +1049,79 @@ class TestTargetSubdir:
         with pytest.raises(KeyError):
             # Unqualified lookup should fail due to collision
             test_project.get_target("mylib")
+
+
+class TestUnknownUsageRequirements:
+    """An unrecognized name used to be accepted, stored, and never read.
+
+    The lists are consumed by name, so `private.lib_dirs.append(...)` looked
+    like it worked and the link then failed reporting the *library* as
+    missing rather than the typo.
+    """
+
+    def test_unknown_name_raises_on_read(self):
+        reqs = UsageRequirements()
+
+        with pytest.raises(
+            AttributeError, match="Unknown usage requirement 'lib_dirs'"
+        ):
+            reqs.lib_dirs  # noqa: B018
+
+    def test_unknown_name_raises_on_assignment(self):
+        reqs = UsageRequirements()
+
+        with pytest.raises(AttributeError, match="lib_dirs"):
+            reqs.lib_dirs = ["/opt/lib"]
+
+    def test_the_message_suggests_the_real_name(self):
+        reqs = UsageRequirements()
+
+        with pytest.raises(AttributeError) as excinfo:
+            reqs.lib_dirs.append("/opt/lib")
+
+        assert "Did you mean 'link_dirs'?" in str(excinfo.value)
+        assert "register_usage_requirement" in str(excinfo.value)
+
+    def test_known_names_still_work(self):
+        reqs = UsageRequirements()
+
+        for name in known_usage_requirements():
+            getattr(reqs, name).append("value")
+
+        assert reqs.link_dirs == ["value"]
+
+    def test_a_registered_name_works(self):
+        register_usage_requirement("custom_thing")
+        try:
+            reqs = UsageRequirements()
+            reqs.custom_thing.append("value")
+
+            assert reqs.custom_thing == ["value"]
+        finally:
+            known = pcons.core.target._KNOWN_USAGE_REQUIREMENTS
+            known.discard("custom_thing")
+
+    def test_dunder_probes_are_not_answered_with_a_list(self):
+        """copy/pickle probe for __deepcopy__ etc.; returning an empty list
+        for those made them look implemented."""
+        reqs = UsageRequirements()
+
+        assert not hasattr(reqs, "__deepcopy__")
+        assert copy.deepcopy(reqs) is not reqs
+
+    def test_the_stub_list_matches_the_runtime_set(self):
+        """Type stubs and runtime validation have to agree, or a name is
+        either uncompletable or unusable."""
+        from pcons._gen_stubs import _USAGE_REQUIREMENT_TYPES
+
+        stubbed = {name for name, _type, _doc in _USAGE_REQUIREMENT_TYPES}
+
+        assert stubbed == known_usage_requirements()
+
+    def test_a_target_rejects_the_typo(self, tmp_path):
+        project = Project("t", root_dir=tmp_path)
+        target = Target("app", target_type="program")
+
+        with pytest.raises(AttributeError, match="link_dirs"):
+            target.private.lib_dirs.append("/opt/lib")
+        assert project is not None

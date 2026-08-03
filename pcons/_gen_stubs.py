@@ -482,6 +482,21 @@ _USAGE_REQUIREMENT_TYPES: tuple[tuple[str, str, str | None], ...] = (
         "MutableSequence[str | Target]",
         "link deps: a Target brings its public usage requirements (headers etc.); a str is a raw link token; public re-exports, private does not",
     ),
+    (
+        "link_dirs",
+        "MutableSequence[Path | str]",
+        "library search directories (-L) propagated to dependents",
+    ),
+    (
+        "frameworks",
+        "MutableSequence[str]",
+        "macOS frameworks propagated to dependents (-framework)",
+    ),
+    (
+        "framework_dirs",
+        "MutableSequence[Path | str]",
+        "macOS framework search directories propagated to dependents (-F)",
+    ),
 )
 
 
