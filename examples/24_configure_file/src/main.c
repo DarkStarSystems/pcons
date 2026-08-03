@@ -4,11 +4,12 @@
 
 int main(void) {
     printf("Version: %s\n", VERSION);
-    printf("HAVE_THREADS: %d\n", HAVE_THREADS);
-#ifdef HAVE_ZLIB
-    printf("zlib: yes\n");
+    printf("HAVE_STDINT_H: %d\n", HAVE_STDINT_H);
+#ifdef HAVE_FROBNICATE_H
+    printf("frobnicate: yes\n");
 #else
-    printf("zlib: no\n");
+    printf("frobnicate: no\n");
 #endif
+    printf("sizeof(void*): %d\n", SIZEOF_VOIDP);
     return 0;
 }

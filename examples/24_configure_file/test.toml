@@ -1,7 +1,7 @@
-# Test configuration for the configure_file example
+# Test configuration for the configure checks + configure_file example
 
 [test]
-description = "Demonstrates configure_file() for generating config headers"
+description = "Demonstrates compiler feature checks feeding configure_file()"
 
 expected_outputs = [
     "build/config.h",
@@ -12,8 +12,9 @@ expected_outputs = [
 [verify]
 commands = [
     { run = "./build/configure_demo", expect_stdout = "Version: 1.2.3" },
-    { run = "./build/configure_demo", expect_stdout = "HAVE_THREADS: 1" },
-    { run = "./build/configure_demo", expect_stdout = "zlib: no" },
+    { run = "./build/configure_demo", expect_stdout = "HAVE_STDINT_H: 1" },
+    { run = "./build/configure_demo", expect_stdout = "frobnicate: no" },
+    { run = "./build/configure_demo", expect_stdout = "sizeof(void*): 8" },
 ]
 
 [skip]

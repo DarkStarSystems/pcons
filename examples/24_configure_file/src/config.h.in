@@ -3,7 +3,8 @@
 #define CONFIG_H
 
 #define VERSION "@VERSION@"
-#cmakedefine01 HAVE_THREADS
-#cmakedefine HAVE_ZLIB
+#define SIZEOF_VOIDP @SIZEOF_VOIDP@
+#cmakedefine01 HAVE_STDINT_H
+#cmakedefine HAVE_FROBNICATE_H
 
 #endif /* CONFIG_H */
