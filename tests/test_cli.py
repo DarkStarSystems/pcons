@@ -383,6 +383,131 @@ class TestRunScriptEnvironment:
         assert "PCONS_VARIANT" not in os.environ
         assert "CUSTOM_ENV" not in os.environ
 
+    def test_run_script_persists_vars_across_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A var configured in one run is readable by a later bare run."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        # Second run has no CLI vars; get_var must read the persisted value.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "val = pcons.get_var('MY_VAR')\n"
+            "assert val == '42', f'Got {val!r}'\n"
+            "Project('demo')\n"
+        )
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("MY_VAR", raising=False)
+        _clear_cli_vars()
+
+        # First run: configure MY_VAR=42.
+        exit_code, _ = run_script(script, build_dir, variables={"MY_VAR": "42"})
+        assert exit_code == 0
+
+        # Second run: no CLI vars -> reads persisted 42.
+        exit_code, _ = run_script(script, build_dir)
+        assert exit_code == 0
+
+    def test_run_script_persists_variant_and_generator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--variant and -G configured in one run are reused by a later bare run."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "variant = pcons.get_variant()\n"
+            "assert variant == 'debug', f'Got {variant!r}'\n"
+            "assert isinstance(pcons.Generator(), pcons.MakefileGenerator)\n"
+            "Project('demo')\n"
+        )
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARIANT", raising=False)
+        monkeypatch.delenv("VARIANT", raising=False)
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.delenv("GENERATOR", raising=False)
+        _clear_cli_vars()
+
+        # First run: configure variant=debug, generator=make.
+        exit_code, _ = run_script(script, build_dir, variant="debug", generator="make")
+        assert exit_code == 0
+
+        # Second run: no CLI settings -> both read from the cache.
+        exit_code, _ = run_script(script, build_dir)
+        assert exit_code == 0
+
+    def test_failed_configure_does_not_persist(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A build script that fails must not poison the cache."""
+        from pcons.core.cache import CACHE_FILE
+
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("raise RuntimeError('boom')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        exit_code, _ = run_script(script, build_dir, variables={"MY_VAR": "42"})
+        assert exit_code == 1
+        assert not (build_dir / CACHE_FILE).exists()
+
+    def _persisted_generator(self, build_dir: Path) -> str | None:
+        import json
+
+        from pcons.core.cache import CACHE_FILE
+
+        cache_file = build_dir / CACHE_FILE
+        if not cache_file.exists():
+            return None
+        return json.loads(cache_file.read_text()).get("generator")
+
+    def test_aux_generator_keeps_cached_build_generator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An aux-only -G metadata run keeps the cached build generator (sticky)."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.delenv("GENERATOR", raising=False)
+        _clear_cli_vars()
+
+        # Build generator persisted.
+        assert run_script(script, build_dir, generator="make")[0] == 0
+        assert self._persisted_generator(build_dir) == "make"
+
+        # Aux-only run: build slot stays make, metadata added (not erased).
+        assert run_script(script, build_dir, generator="metadata")[0] == 0
+        assert self._persisted_generator(build_dir) == "make:metadata"
+
+    def test_build_generator_replaces_cached_build_generator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A new build generator replaces the cached one; aux from the new spec."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.delenv("GENERATOR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir, generator=["ninja", "metadata"])[0] == 0
+        assert self._persisted_generator(build_dir) == "ninja:metadata"
+
+        # make replaces ninja in the build slot; new spec has no aux.
+        assert run_script(script, build_dir, generator="make")[0] == 0
+        assert self._persisted_generator(build_dir) == "make"
+
 
 class TestDirectoryArg:
     """Tests for -C/--directory argument."""

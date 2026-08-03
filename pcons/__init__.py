@@ -19,6 +19,7 @@ from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
 from pcons.configure.config_file import configure_file, write_file  # noqa: E402
 from pcons.configure.platform import Platform, get_platform  # noqa: E402
+from pcons.core.cache import BuildCache, get_cache  # noqa: E402
 from pcons.core.context import context  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.preset import (  # noqa: E402
@@ -99,8 +100,11 @@ def Generator(
     """Get a generator instance based on CLI option or environment.
 
     Precedence: PCONS_GENERATOR (set by ``pcons -G``), then the GENERATOR
-    environment variable, then *default*. Colon-separated names (e.g.
-    ``ninja:metadata``) run each generator in order on the same project.
+    environment variable, then the generator cached by a prior configure, then
+    *default*. A generator chosen on the command line persists across runs in
+    the per-build-dir cache, so a later bare ``pcons configure`` reuses it (like
+    cmake -G). Colon-separated names (e.g. ``ninja:metadata``) run each
+    generator in order on the same project.
 
     Args:
         default: Generator name if not otherwise set ("ninja", "make",
@@ -119,7 +123,13 @@ def Generator(
         # ... configure project ...
         Generator().generate(project)
     """
-    spec = os.environ.get("PCONS_GENERATOR") or os.environ.get("GENERATOR") or default
+    cached_gen = get_cache().get("generator")
+    spec = (
+        os.environ.get("PCONS_GENERATOR")
+        or os.environ.get("GENERATOR")
+        or (cached_gen if isinstance(cached_gen, str) else None)
+        or default
+    )
     names = [n.strip().lower() for n in spec.split(":") if n.strip()]
 
     valid = ", ".join(sorted(set(GENERATORS.keys())))
@@ -140,6 +150,9 @@ __all__ = [
     # CLI variable access
     "get_var",
     "get_variant",
+    # Per-build-dir cache
+    "get_cache",
+    "BuildCache",
     # Install helpers
     "install_dir",
     # Project registry (for CLI use)

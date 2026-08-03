@@ -127,6 +127,59 @@ def _cancel_pending_generation() -> None:
     BaseGenerator._clear_pending()
 
 
+def _split_generators(spec: str | None) -> tuple[list[str], list[str]]:
+    """Split a colon-separated generator spec into (build, auxiliary) name lists."""
+    import pcons
+
+    build: list[str] = []
+    aux: list[str] = []
+    for name in [n.strip().lower() for n in (spec or "").split(":") if n.strip()]:
+        gen = pcons.GENERATORS.get(name)
+        if getattr(gen, "_is_build_generator", False):
+            build.append(name)
+        else:
+            aux.append(name)
+    return build, aux
+
+
+def _merge_generator_spec(cached: str | None, new_spec: str) -> str:
+    """Merge a new ``-G`` spec into the cached one.
+
+    A new build generator replaces the cached one (the build slot is sticky);
+    auxiliary generators come from the new spec. So an aux-only ``-G metadata``
+    keeps the cached build generator, leaving a later bare run something to build.
+    """
+    cached_build, _ = _split_generators(cached)
+    new_build, new_aux = _split_generators(new_spec)
+    build = new_build if new_build else cached_build
+    return ":".join(build + new_aux)
+
+
+def _persist_run_settings(
+    variables: dict[str, str] | None,
+    variant: str | None,
+    gen_spec: str | None,
+) -> None:
+    """Persist the settings chosen on this run into the build-dir cache."""
+    import pcons.core.cache
+
+    cache = pcons.core.cache.get_cache()
+    updates: dict[str, object] = {}
+    if variables:
+        existing = cache.get("vars")
+        base = existing if isinstance(existing, dict) else {}
+        updates["vars"] = {**base, **variables}
+    if variant:
+        updates["variant"] = variant
+    if gen_spec:
+        cached_gen = cache.get("generator")
+        cached_str = cached_gen if isinstance(cached_gen, str) else None
+        merged = _merge_generator_spec(cached_str, gen_spec)
+        if merged:
+            updates["generator"] = merged
+    cache.update(updates)
+
+
 def run_script(
     script_path: Path,
     build_dir: Path,
@@ -152,6 +205,7 @@ def run_script(
         Tuple of (exit_code, list of registered Projects).
     """
     import pcons
+    import pcons.core.cache
     import pcons.core.invocation
     import pcons.core.vars
 
@@ -197,6 +251,7 @@ def run_script(
     if variant:
         set_env_var("PCONS_VARIANT", variant)
 
+    gen_spec: str | None = None
     if generator:
         gen_spec = ":".join(generator) if isinstance(generator, list) else generator
         set_env_var("PCONS_GENERATOR", gen_spec)
@@ -241,6 +296,7 @@ def run_script(
 
             top_level = Project.top_level()
             BaseGenerator._generate_pending(top_level)
+            _persist_run_settings(variables, variant, gen_spec)
             return 0, pcons.get_registered_projects()
         except ValueError:
             logger.error("No Project created in build script")
@@ -271,6 +327,8 @@ def run_script(
                 os.environ[key] = previous
             else:
                 os.environ.pop(key, None)
+        # PCONS_BUILD_DIR is restored above; drop the singleton bound to it.
+        pcons.core.cache.reset_cache()
 
 
 def _find_ninja(override: str | None = None) -> list[str] | None:
@@ -588,6 +646,13 @@ def cmd_build(args: argparse.Namespace) -> int:
     elif makefile.exists():
         return run_make(build_dir, targets=targets, jobs=jobs, verbose=verbose)
     elif xcodeproj_files:
+        # Xcode picks the configuration at build time; fall back to the cached
+        # variant so a bare build matches what was generated, not Release.
+        if variant is None:
+            import pcons.core.cache
+
+            cached = pcons.core.cache.BuildCache(build_dir).get("variant")
+            variant = cached if isinstance(cached, str) else None
         return run_xcodebuild(
             build_dir,
             targets=targets,
