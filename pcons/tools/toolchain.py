@@ -100,6 +100,37 @@ for clang) regardless of which extension the user picks.
 """
 
 
+PROBED_SOURCE_SUFFIXES: tuple[str, ...] = (
+    ".c",
+    ".C",
+    ".cc",
+    ".cpp",
+    ".cxx",
+    ".c++",
+    ".m",
+    ".mm",
+    ".s",
+    ".S",
+    ".asm",
+    ".rc",
+    *sorted(CXX_MODULE_INTERFACE_SUFFIXES),
+    ".f",
+    ".f90",
+    ".for",
+    ".swift",
+    ".pyx",
+    ".cu",
+    ".metal",
+)
+"""Suffixes tried by `BaseToolchain.source_suffixes()`, for error messages only.
+
+Every candidate is checked against the toolchain's own `get_source_handler()`,
+so the answer is never *wrong* — at worst it omits an exotic extension whose
+builder doesn't declare it in `src_suffixes` either. A toolchain that wants an
+exact answer can override `source_suffixes()`.
+"""
+
+
 @dataclass
 class SourceHandler:
     """Describes how a toolchain handles a source file type.
@@ -535,6 +566,10 @@ class Toolchain(Protocol):
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled."""
+        ...
+
+    def source_suffixes(self) -> list[str]:
+        """Suffixes this toolchain compiles (for diagnostics)."""
         ...
 
     def setup_group_node(self, node: Any, target: Target, env: Environment) -> None:
@@ -1031,6 +1066,20 @@ class BaseToolchain(ABC):
         resolver queries this instead of hardcoding file types.
         """
         return None
+
+    def source_suffixes(self) -> list[str]:
+        """Suffixes this toolchain compiles, for error messages.
+
+        There is no registry to read: get_source_handler() is a function, so
+        this probes it with the suffixes the toolchain's own builders declare
+        plus PROBED_SOURCE_SUFFIXES. Every reported suffix is genuinely
+        handled; override for an exhaustive answer.
+        """
+        candidates: set[str] = set(PROBED_SOURCE_SUFFIXES)
+        for tool in self.tools.values():
+            for tool_builder in tool.builders().values():
+                candidates.update(tool_builder.src_suffixes)
+        return sorted(s for s in candidates if self.get_source_handler(s) is not None)
 
     def setup_group_node(  # noqa: B027 — optional hook, intentionally a no-op
         self, node: Any, target: Target, env: Environment

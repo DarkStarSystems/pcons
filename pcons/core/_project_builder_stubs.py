@@ -202,6 +202,7 @@ if TYPE_CHECKING:
             name: str,
             env: Env,
             sources: Sequence[str | Path | Node] | None = None,
+            depends: Sequence[Target | Node | Path | str] | None = None,
         ) -> Target:
             """Create an object library target (compiles but doesn't link)."""
             ...
@@ -234,6 +235,7 @@ if TYPE_CHECKING:
             name: str,
             env: Env,
             sources: Sequence[str | Path | Node] | None = None,
+            depends: Sequence[Target | Node | Path | str] | None = None,
         ) -> Target:
             """Create a program (executable) target."""
             ...
@@ -340,6 +342,7 @@ if TYPE_CHECKING:
             name: str,
             env: Env,
             sources: Sequence[str | Path | Node] | None = None,
+            depends: Sequence[Target | Node | Path | str] | None = None,
         ) -> Target:
             """Create a shared library target."""
             ...
@@ -349,6 +352,7 @@ if TYPE_CHECKING:
             name: str,
             env: Env,
             sources: Sequence[str | Path | Node] | None = None,
+            depends: Sequence[Target | Node | Path | str] | None = None,
         ) -> Target:
             """Create a static library target."""
             ...

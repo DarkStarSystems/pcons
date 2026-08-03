@@ -44,6 +44,7 @@ class ProgramBuilder:
         name: str,
         env: Environment,
         sources: Sequence[str | Path | Node] | None = None,
+        depends: Sequence[Target | Node | Path | str] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a Program target.
@@ -53,6 +54,10 @@ class ProgramBuilder:
             name: Target name (e.g., "myapp").
             env: Environment to use for building.
             sources: Source files for the program.
+            depends: Extra implicit dependencies — files or targets that must
+                be up to date before any of this target's build steps run,
+                without being passed to the compiler or linker. Use it for a
+                generated header no scanner can see yet.
             defined_at: Source location where this was defined (auto-captured).
 
         Returns:
@@ -72,6 +77,8 @@ class ProgramBuilder:
 
         if sources:
             target.add_sources(sources)
+        if depends:
+            target.depends(*depends)
 
         return target
 
@@ -91,6 +98,7 @@ class StaticLibraryBuilder:
         name: str,
         env: Environment,
         sources: Sequence[str | Path | Node] | None = None,
+        depends: Sequence[Target | Node | Path | str] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a StaticLibrary target.
@@ -100,6 +108,7 @@ class StaticLibraryBuilder:
             name: Target name (e.g., "mylib").
             env: Environment to use for building.
             sources: Source files for the library.
+            depends: Extra implicit dependencies (see Program).
             defined_at: Source location where this was defined (auto-captured).
 
         Returns:
@@ -119,6 +128,8 @@ class StaticLibraryBuilder:
 
         if sources:
             target.add_sources(sources)
+        if depends:
+            target.depends(*depends)
 
         return target
 
@@ -138,6 +149,7 @@ class SharedLibraryBuilder:
         name: str,
         env: Environment,
         sources: Sequence[str | Path | Node] | None = None,
+        depends: Sequence[Target | Node | Path | str] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create a SharedLibrary target.
@@ -147,6 +159,7 @@ class SharedLibraryBuilder:
             name: Target name (e.g., "mylib").
             env: Environment to use for building.
             sources: Source files for the library.
+            depends: Extra implicit dependencies (see Program).
             defined_at: Source location where this was defined (auto-captured).
 
         Returns:
@@ -166,6 +179,8 @@ class SharedLibraryBuilder:
 
         if sources:
             target.add_sources(sources)
+        if depends:
+            target.depends(*depends)
 
         return target
 
@@ -185,6 +200,7 @@ class ObjectLibraryBuilder:
         name: str,
         env: Environment,
         sources: Sequence[str | Path | Node] | None = None,
+        depends: Sequence[Target | Node | Path | str] | None = None,
         defined_at: SourceLocation | None = None,
     ) -> Target:
         """Create an ObjectLibrary target.
@@ -194,6 +210,7 @@ class ObjectLibraryBuilder:
             name: Target name.
             env: Environment to use for building.
             sources: Source files to compile.
+            depends: Extra implicit dependencies (see Program).
             defined_at: Source location where this was defined (auto-captured).
 
         Returns:
@@ -213,6 +230,8 @@ class ObjectLibraryBuilder:
 
         if sources:
             target.add_sources(sources)
+        if depends:
+            target.depends(*depends)
 
         return target
 

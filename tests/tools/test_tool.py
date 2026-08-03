@@ -159,3 +159,14 @@ class TestBuilderMethod:
 
         # No sources means no targets (for single_source=True)
         assert len(result) == 0
+
+    def test_call_with_only_a_source(self, test_project):  # noqa: F811
+        """One argument is the source; the target path is derived (G22)."""
+        tool = MockTool()
+        env = Environment()
+        tool.setup(env)
+
+        result = env.mock.Compile("a.mock")
+
+        assert len(result) == 1
+        assert result[0].path.name == "a.out"

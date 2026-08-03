@@ -152,7 +152,7 @@ class GraphGenerator(BaseGenerator):
                     output_node_paths[node.path] = node_id
 
                     # Source dependencies directly on output_nodes (for Command targets)
-                    for dep in node.explicit_deps:
+                    for dep in node.deps:
                         if isinstance(dep, FileNode):
                             dep_id = write_source_node(dep)
                             edges.append((dep_id, node_id))
@@ -166,8 +166,9 @@ class GraphGenerator(BaseGenerator):
                         f.write(self._object_node_line(node_id, label))
                         written_nodes.add(node_id)
 
-                    # Source dependencies
-                    for dep in node.explicit_deps:
+                    # Source dependencies. Both kinds: an implicit dep is
+                    # still an edge in the graph the user asked to see.
+                    for dep in node.deps:
                         if isinstance(dep, FileNode):
                             dep_id = write_source_node(dep)
                             edges.append((dep_id, node_id))

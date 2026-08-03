@@ -266,7 +266,7 @@ class GfortranToolchain(UnixToolchain):
         source_nodes = [project.node(src) for src, _ in fortran_source_obj_pairs]
 
         dyndep_node = project.node(dyndep_path)
-        dyndep_node.depends(source_nodes)
+        dyndep_node.add_inputs(source_nodes)
 
         dyndep_node._build_info = {
             "tool": "fc_scanner",

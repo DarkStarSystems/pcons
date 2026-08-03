@@ -207,9 +207,48 @@ class TestNodeDependencies:
 
         target.depends(source)
 
-        assert source in target.explicit_deps
+        assert source in target.implicit_deps
         assert source in target.deps
         assert len(target.deps) == 1
+
+    def test_depends_is_implicit_not_an_input(self):
+        """depends() must not put anything in $in (G24)."""
+        obj = FileNode("main.o")
+        generated_header = FileNode("gen.h")
+
+        obj.depends(generated_header)
+
+        assert obj.explicit_deps == []
+        assert obj.implicit_deps == [generated_header]
+
+    def test_add_inputs_is_positional(self):
+        obj = FileNode("main.o")
+        source = FileNode("main.c")
+
+        obj.add_inputs([source])
+
+        assert obj.explicit_deps == [source]
+        assert obj.implicit_deps == []
+
+    def test_depends_skips_an_existing_input(self):
+        """A positional input is already a dependency; don't list it twice."""
+        obj = FileNode("main.o")
+        source = FileNode("main.c")
+
+        obj.add_inputs([source])
+        obj.depends(source)
+
+        assert obj.implicit_deps == []
+        assert len(obj.deps) == 1
+
+    def test_depends_deduplicates(self):
+        obj = FileNode("main.o")
+        generated_header = FileNode("gen.h")
+
+        obj.depends(generated_header)
+        obj.depends([generated_header])
+
+        assert obj.implicit_deps == [generated_header]
 
     def test_depends_multiple_nodes(self):
         target = FileNode("target.o")

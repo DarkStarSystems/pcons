@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
+from pcons.core.errors import PconsError
 from pcons.core.node import FileNode
 from pcons.core.subst import PathToken, TargetPath
 from pcons.toolchains.build_context import CompileLinkContext
@@ -47,21 +48,105 @@ def _is_link_input(path: Path) -> bool:
     return ".so" in path.suffixes or ".dylib" in path.suffixes
 
 
+# Sources that aren't compiled but are still meaningful on a link command
+# line: linker scripts and MSVC compiled resources, on top of the prebuilt
+# objects and libraries _is_link_input() already covers. A source with no
+# compile handler and no entry here is a mistake, not a link input.
+_UNCOMPILED_LINK_SUFFIXES = frozenset({".ld", ".lds", ".res"})
+
+
+def _is_linker_passthrough(path: Path) -> bool:
+    """True if a source with no compile handler still belongs to the linker."""
+    return _is_link_input(path) or path.suffix.lower() in _UNCOMPILED_LINK_SUFFIXES
+
+
+def _compilers_by_language_priority(env: Environment) -> list[str]:
+    """Tool names in *env* with an Object builder, strongest language first.
+
+    Same ordering pcons uses to pick a linker, so the compiler suggested for
+    an unrecognized extension is the environment's most capable one (C++
+    ahead of C) rather than whichever was configured first.
+    """
+    priority = getattr(env._toolchain, "language_priority", {}) or {}
+
+    def rank(name: str) -> int:
+        for toolchain in env.toolchains:
+            tool = toolchain.tools.get(name)
+            if tool is not None:
+                builder = tool.builders().get("Object")
+                if builder is not None:
+                    return -priority.get(builder.language or "", 0)
+        return 0
+
+    names = [
+        name
+        for name in env.tool_names()
+        if name != "link" and hasattr(getattr(env, name, None), "Object")
+    ]
+    return sorted(names, key=rank)
+
+
+def _unhandled_source_error(
+    target: Target, source: Path, env: Environment
+) -> PconsError:
+    """Explain why *source* can't be compiled, and how to compile it anyway.
+
+    Left to itself, an unhandled source used to become one of the target's
+    own output nodes: no compile rule, and ninja complaining that a file
+    sitting in the source tree is "missing and no known rule to make it".
+    """
+    suffix = source.suffix or "(none)"
+    lines = [
+        f"Target '{target.name}': nothing in this environment compiles "
+        f"'{source}' — no toolchain handles the '{suffix}' extension."
+    ]
+
+    for toolchain in env.toolchains:
+        handler = toolchain.get_source_handler(suffix)
+        if handler is not None and not env.has_tool(handler.tool_name):
+            # A near miss: the toolchain knows the extension but the tool
+            # that compiles it never made it into the environment.
+            lines.append(
+                f"  Toolchain '{toolchain.name}' compiles '{suffix}' with the "
+                f"'{handler.tool_name}' tool, which this environment does not "
+                f"have. Configure a toolchain that provides it, or add it with "
+                f'env.add_tool("{handler.tool_name}").'
+            )
+            return PconsError("\n".join(lines), location=target.defined_at)
+
+    for toolchain in env.toolchains:
+        handled = toolchain.source_suffixes()
+        known = " ".join(handled) if handled else "(nothing)"
+        lines.append(f"  Toolchain '{toolchain.name}' compiles: {known}")
+
+    compilers = _compilers_by_language_priority(env)
+    example = compilers[0] if compilers else "cc"
+    others = ", ".join(f"env.{n}" for n in compilers[1:3])
+    lines.append(
+        f"Pick a compiler for it explicitly and pass the object along:\n"
+        f'    obj = env.{example}.Object("{source}")'
+        + (f"  # or {others}" if others else "")
+        + f"\n    project.{target._builder_name or 'Program'}"
+        f"('{target.name}', env, sources=[..., obj[0]])"
+    )
+    return PconsError("\n".join(lines), location=target.defined_at)
+
+
 def _propagate_declared_deps(source: FileNode, obj_node: FileNode) -> None:
     """Carry a source file's declared dependencies onto its object node.
 
-    Only for real sources. On a *generated* source, ``explicit_deps`` are the
-    inputs of the edge that produces it, and those are the producer's business:
-    copying them here would recompile every consumer whenever the generator's
-    input changed, even when the generated file came back byte-identical —
-    defeating ``restat`` and ``write_if_different``. Ninja already orders the
-    generator before the compile through the file itself.
+    Only for real sources. A *generated* source's dependencies are the
+    producer's business: copying them here would recompile every consumer
+    whenever the generator's input changed, even when the generated file came
+    back byte-identical — defeating ``restat`` and ``write_if_different``.
+    Ninja already orders the generator before the compile through the file
+    itself.
     """
-    if not source.explicit_deps:
+    if not source.implicit_deps:
         return
     if source.builder is not None or getattr(source, "_build_info", None) is not None:
         return
-    obj_node.implicit_deps.extend(source.explicit_deps)
+    obj_node.implicit_deps.extend(source.implicit_deps)
 
 
 def _context_class_for(env: Environment) -> type[CompileLinkContext]:
@@ -122,8 +207,6 @@ class CompileLinkFactory:
             return
 
         if not env.toolchains and target.target_type != "interface":
-            from pcons.core.errors import PconsError
-
             raise PconsError(
                 f"Target '{target.name}' requires a toolchain but the "
                 f"environment has none configured. "
@@ -277,19 +360,17 @@ class CompileLinkFactory:
     def _get_source_handler_with_toolchain(
         self, source: Path, env: Environment
     ) -> tuple[SourceHandler, Toolchain] | None:
-        """Get (handler, owning toolchain) for a source, or None."""
+        """Get (handler, owning toolchain) for a source, or None.
+
+        A toolchain that claims the suffix but whose tool is missing from the
+        environment doesn't count; _unhandled_source_error() reports that
+        case, rather than a warning that scrolls past on the way to a build
+        with no rule for the file.
+        """
         for toolchain in env.toolchains:
             handler = toolchain.get_source_handler(source.suffix)
-            if handler is not None:
-                if env.has_tool(handler.tool_name):
-                    return handler, toolchain
-                else:
-                    logger.warning(
-                        "Tool '%s' required for '%s' files is not available in the "
-                        "environment. Configure the toolchain or add the tool manually.",
-                        handler.tool_name,
-                        source.suffix,
-                    )
+            if handler is not None and env.has_tool(handler.tool_name):
+                return handler, toolchain
         return None
 
     def _get_auxiliary_input_handler(
@@ -352,7 +433,11 @@ class CompileLinkFactory:
         """
         handler = self._get_source_handler(source.path, env)
         if handler is None:
-            return source
+            if _is_linker_passthrough(source.path):
+                # A prebuilt object, library or linker script: not compiled,
+                # but a legitimate input to the link step.
+                return source
+            raise _unhandled_source_error(target, source.path, env)
 
         tool_name = handler.tool_name
         language = handler.language
@@ -375,7 +460,7 @@ class CompileLinkFactory:
 
         obj_path = self._get_object_path(target, source.path, env)
         obj_node = self.project.node(obj_path)
-        obj_node.depends([source])
+        obj_node.add_inputs([source])
 
         depfile = self._resolve_depfile(handler.depfile, obj_path)
 
@@ -445,7 +530,7 @@ class CompileLinkFactory:
         obj_dir = target.build_dir / f"obj.{target.name}"
         obj_path = obj_dir / f"{target.name}{handler.object_suffix}"
         obj_node = self.project.node(obj_path)
-        obj_node.depends(list(sources))
+        obj_node.add_inputs(list(sources))
 
         depfile = self._resolve_depfile(handler.depfile, obj_path)
 
@@ -555,7 +640,7 @@ class CompileLinkFactory:
         lib_path = build_dir / path_resolver.normalize_target_path(lib_name)
 
         lib_node = self.project.node(lib_path)
-        lib_node.depends(target.intermediate_nodes)
+        lib_node.add_inputs(target.intermediate_nodes)
 
         archiver_tool = "ar"
         if toolchain := env._toolchain:
@@ -590,7 +675,7 @@ class CompileLinkFactory:
         lib_path = build_dir / path_resolver.normalize_target_path(lib_name)
 
         lib_node = self.project.node(lib_path)
-        lib_node.depends(target.intermediate_nodes)
+        lib_node.add_inputs(target.intermediate_nodes)
 
         link_language, context = self._setup_link_node(target, env, lib_node)
 
@@ -631,7 +716,7 @@ class CompileLinkFactory:
         prog_path = build_dir / path_resolver.normalize_target_path(prog_name)
 
         prog_node = self.project.node(prog_path)
-        prog_node.depends(target.intermediate_nodes)
+        prog_node.add_inputs(target.intermediate_nodes)
 
         link_language, context = self._setup_link_node(target, env, prog_node)
 
@@ -701,7 +786,7 @@ class CompileLinkFactory:
         if dep_libs:
             dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
             if dep_libs:
-                output_node.depends(dep_libs)
+                output_node.add_inputs(dep_libs)
 
         # Non-link outputs from transitive deps (e.g., a generated
         # header produced by a code generator that also produces a

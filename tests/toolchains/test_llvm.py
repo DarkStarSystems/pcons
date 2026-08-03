@@ -260,6 +260,37 @@ class TestLlvmSourceHandlers:
         assert handler.language == "cxx_module"
 
 
+def _metal_project(tmp_path, name, shaders=("a",)):
+    """A project with `shaders/<name>.metal` sources, rooted at tmp_path."""
+    from pcons.core.project import Project
+
+    shader_dir = tmp_path / "shaders"
+    shader_dir.mkdir(exist_ok=True)
+    for shader in shaders:
+        (shader_dir / f"{shader}.metal").write_text("// shader\n")
+    return Project(name, root_dir=tmp_path, build_dir=tmp_path / "build")
+
+
+def _metal_env(project):
+    """An environment whose only tool is the Metal one, no detection needed."""
+    from pcons.toolchains.llvm import MetalCompiler
+
+    tc = LlvmToolchain()
+    tc._tools = {"metal": MetalCompiler()}
+    tc._configured = True
+    return project.Environment(toolchain=tc)
+
+
+def _generate_ninja(project) -> str:
+    """Generate build.ninja and return its content (slashes normalized)."""
+    from pcons.generators.generator import BaseGenerator
+    from pcons.generators.ninja import NinjaGenerator
+
+    NinjaGenerator().generate(project)
+    BaseGenerator._generate_pending(project)
+    return (project.build_dir / "build.ninja").read_text().replace("\\", "/")
+
+
 class TestMetalCompiler:
     """Tests for the Metal compiler tool."""
 
@@ -281,16 +312,95 @@ class TestMetalCompiler:
         assert "metal" in metalcmd
         assert "-c" in metalcmd
 
+    def test_metallib_command_template(self):
+        """The metallib step is `xcrun metallib -o <out> <airs>`."""
+        from pcons.core.subst import SourcePath, TargetPath
+        from pcons.toolchains.llvm import MetalCompiler
+
+        vars = MetalCompiler().default_vars()
+        assert vars["libflags"] == []
+        assert vars["metallibcmd"] == [
+            "$metal.cmd",
+            "metallib",
+            "$metal.libflags",
+            "-o",
+            TargetPath(),
+            SourcePath(),
+        ]
+
     def test_builders(self):
         from pcons.toolchains.llvm import MetalCompiler
 
         metal = MetalCompiler()
         builders = metal.builders()
-        assert "MetalObject" in builders
-        builder = builders["MetalObject"]
-        assert builder.name == "MetalObject"
-        assert ".metal" in builder.src_suffixes
-        assert ".air" in builder.target_suffixes
+        assert set(builders) == {"Object", "Library"}
+
+        obj = builders["Object"]
+        assert obj.name == "Object"
+        assert ".metal" in obj.src_suffixes
+        assert ".air" in obj.target_suffixes
+
+        lib = builders["Library"]
+        assert lib.name == "Library"
+        assert lib.src_suffixes == [".air"]
+        assert lib.target_suffixes == [".metallib"]
+
+    def test_tool_namespace_exposes_builders(self, tmp_path):
+        """env.metal.Object / env.metal.Library are the callable spellings."""
+        project = _metal_project(tmp_path, "metalns")
+        env = _metal_env(project)
+
+        assert callable(env.metal.Object)
+        assert callable(env.metal.Library)
+        # The old redundant spelling is gone (the namespace already says "metal").
+        with pytest.raises(AttributeError):
+            getattr(env.metal, "MetalObject")  # noqa: B009
+
+    def test_metal_chain_ninja_edges(self, tmp_path, monkeypatch):
+        """.metal -> .air -> .metallib produces the expected build.ninja edges."""
+        monkeypatch.chdir(tmp_path)
+        project = _metal_project(tmp_path, "metalchain", shaders=("a", "b"))
+        env = _metal_env(project)
+        airs = []
+        for name in ("a", "b"):
+            airs += env.metal.Object(f"build/{name}.air", f"shaders/{name}.metal")
+        env.metal.Library("build/shaders.metallib", airs)
+
+        content = _generate_ninja(project)
+
+        compile_rule = re.search(r"rule (metal_metalcmd_\w+)", content)
+        lib_rule = re.search(r"rule (metal_metallibcmd_\w+)", content)
+        assert compile_rule and lib_rule
+        assert re.search(r"command = .*xcrun metal .*-c -o \$out \$in", content)
+        assert re.search(r"command = .*xcrun metallib -o \$out \$in", content)
+
+        assert (
+            f"build a.air: {compile_rule.group(1)} $topdir/shaders/a.metal" in content
+        )
+        assert (
+            f"build b.air: {compile_rule.group(1)} $topdir/shaders/b.metal" in content
+        )
+        # All the .air files link into one metallib.
+        assert f"build shaders.metallib: {lib_rule.group(1)} a.air b.air" in content
+
+    def test_metallib_libflags(self, tmp_path, monkeypatch):
+        """env.metal.libflags reaches the metallib command, not the compile one."""
+        monkeypatch.chdir(tmp_path)
+        project = _metal_project(tmp_path, "metalflags")
+        env = _metal_env(project)
+        env.metal.libflags = ["-split-module"]
+        airs = env.metal.Object("build/a.air", "shaders/a.metal")
+        env.metal.Library("build/shaders.metallib", airs)
+
+        content = _generate_ninja(project)
+        lib_command = next(
+            line for line in content.splitlines() if "xcrun metallib" in line
+        )
+        assert "-split-module" in lib_command
+        compile_command = next(
+            line for line in content.splitlines() if "xcrun metal " in line
+        )
+        assert "-split-module" not in compile_command
 
 
 class TestLlvmCompileFlagsForTargetType:

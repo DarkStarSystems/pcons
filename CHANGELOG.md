@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`depends=` on the compile builders** (`Program`, `StaticLibrary`, `SharedLibrary`,
+  `ObjectLibrary`, and `env.<tool>.Object()`), matching `env.Command(depends=...)`. A
+  generated header can now be ordered before the object that includes it without a
+  coarser target-level dependency.
+- **`Node.add_inputs()`** for positional inputs — the files an edge's command consumes.
+  Builders use it to keep the input list in step with `build_info["sources"]`.
+- **`env.<tool>.Object("foo.c")`** — the one-argument form, deriving the object path,
+  instead of `TypeError: argument should be a str or an os.PathLike object`. Whether a
+  lone argument is the target or the source is decided by the builder's *target*
+  suffixes, so compiling a file the builder doesn't advertise (a `.cu` as C++) works,
+  which is the point of the explicit form.
+- **`Toolchain.source_suffixes()`** enumerates the extensions a toolchain compiles, for
+  diagnostics. It probes `get_source_handler()`, so it can under-report but never lie.
+- **`env.metal.Library`** links `.air` files into a `.metallib` (`xcrun metallib`), so the
+  Metal pipeline no longer stops one step short of the only form an application can
+  load. Its own `libflags` var, since the compile flags (`-I`, `-std=metal3.0`) aren't
+  accepted by `metallib`.
 - **`${SOURCES[n:m]}` slices** in `env.Command`, with either end optional, for the common
   shape where the number of inputs is a property of the project rather than of the rule:
   `command="${SOURCES[0]} $TARGET ${SOURCES[1:]}"`. Anything else inside `${...}` now
@@ -59,6 +76,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **`Node.depends()` now adds an *implicit* dependency**, not a positional input — the
+  same meaning `Target.depends()` and `env.Command(depends=...)` already had. It used to
+  land in `$in`, so ordering a generated header before an object gave the compiler two
+  inputs and `cannot specify -o when generating multiple output files`. Builders that
+  need the old behavior use the new `Node.add_inputs()`.
+- **Builders reject unknown keyword arguments** instead of silently ignoring them.
+- **`env.metal.MetalObject` is now `env.metal.Object`.** The tool namespace already says
+  "metal", so the prefix was redundant — and `env.metal.Object`, the natural spelling,
+  used to fail with "Tool 'metal' has no variable 'Object'". No alias is kept.
 - **`env.override()` keyword arguments no longer accept lists** — `override(cxx__flags=
   ["-O1"])` raises with a message naming the flags it would have discarded and showing
   each alternative. The keyword form assigns, but at a call site it reads as "add", and
@@ -74,6 +100,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An unrecognized source extension is an error, not a target.** `sources=["k.cu"]` with
+  a toolchain that has no `.cu` handler emitted no compile rule and made the *source file*
+  a default target, so ninja reported `'k.cu' missing and no known rule to make it` about a
+  file sitting in the source tree. It now raises at configure time, naming the extension,
+  the extensions each toolchain does handle, and the escape hatch (`env.cxx.Object(...)`).
+  A known extension whose tool is absent from the environment raises too, with its own
+  message — it previously logged a warning and then produced the same broken build.
+- **Dot and Mermaid graphs show implicit dependencies.** `generators/graph.py` walked only
+  positional inputs, so scanner- and depfile-discovered edges were invisible.
 - **Shell operators survive into Makefile recipes.** Every metacharacter was quoted for
   the bash-style recipe, so a command written `tool $SOURCE > $TARGET` emitted
   `tool src '>' out` — the tool received ">" and the output path as arguments and nothing

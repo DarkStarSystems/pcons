@@ -10,11 +10,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from pcons.core.builder import Builder, OutputGroup
     from pcons.core.environment import Environment
+    from pcons.core.node import Node
     from pcons.core.toolconfig import ToolConfig
 
 
@@ -299,16 +300,18 @@ class BuilderMethod:
 
     def __call__(
         self,
-        target: str | Path | None = None,
-        sources: Sequence[str | Path] | str | Path | None = None,
+        target: str | Path | Node | None = None,
+        sources: Sequence[str | Path | Node] | str | Path | Node | None = None,
         **kwargs: object,
     ) -> list | OutputGroup:
         """Invoke the builder.
 
         Args:
-            target: Target file path (str or Path).
-            sources: Source file(s) (str, Path, or list of either).
-            **kwargs: Additional builder options.
+            target: Target file path (str or Path). May be omitted: with a
+                single argument, that argument is the *source* and the target
+                path is derived from it, as ``env.cc.Object("foo.c")``.
+            sources: Source file(s) (str, Path, Node, or a sequence).
+            **kwargs: Additional builder options, e.g. ``depends=``.
 
         Returns:
             List of created nodes.
@@ -317,11 +320,17 @@ class BuilderMethod:
 
         from pcons.core.node import Node
 
+        if sources is None and target is not None and not self._names_an_output(target):
+            # One-argument form: env.cc.Object("foo.c"). The lone argument
+            # doesn't look like this builder's output, so it is the source and
+            # the builder derives the output path (_default_targets).
+            target, sources = None, target  # type: ignore[assignment]
+
         # Normalize sources to a list
         source_list: list[str | PathlibPath | Node]
         if sources is None:
             source_list = []
-        elif isinstance(sources, (str, PathlibPath)):
+        elif isinstance(sources, (str, PathlibPath, Node)):
             source_list = [sources]
         else:
             source_list = list(sources)
@@ -333,6 +342,24 @@ class BuilderMethod:
             self._env.register_node(node)
 
         return nodes
+
+    def _names_an_output(self, item: str | Path | Node | Sequence[Any]) -> bool:
+        """True if a lone argument is this builder's *target*, not its source.
+
+        Decided by suffix, not by guessing: ``.o`` is what ``env.cc.Object``
+        produces, so ``env.cc.Object("foo.c")`` compiles foo.c, while
+        ``env.qt.Predefs("moc_predefs.h")`` — a builder whose output is a
+        ``.h`` and which takes no sources at all — still names its target.
+        Deliberately *not* keyed on src_suffixes: compiling a file the
+        builder doesn't advertise (a ``.cu`` as C++) is exactly why the
+        explicit form exists.
+        """
+        from pcons.core.node import FileNode
+
+        if isinstance(item, (list, tuple)):
+            return False  # a list is always a list of sources
+        path = item.path if isinstance(item, FileNode) else Path(str(item))
+        return path.suffix in self._builder.target_suffixes
 
     def __repr__(self) -> str:
         return f"BuilderMethod({self._builder.name})"

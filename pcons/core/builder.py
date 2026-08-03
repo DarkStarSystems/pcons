@@ -127,12 +127,72 @@ class Builder(Protocol):
     def __call__(
         self,
         env: Environment,
-        target: str | Path | None,
+        target: str | Path | Node | None,
         sources: list[str | Path | Node],
         **kwargs: Any,
     ) -> list[Node] | OutputGroup:
         """Build targets from sources (target=None auto-generates paths)."""
         ...
+
+
+def apply_depends(
+    nodes: list[Node] | OutputGroup,
+    depends: Any,
+    env: Environment | None,
+) -> None:
+    """Attach ``depends=`` items to the build statements of *nodes*.
+
+    Accepts a single item or a sequence of nodes, Targets, strings and Paths,
+    and adds each as an implicit dependency (see ``Node.depends``). Secondary
+    outputs of a multi-output build are skipped: their build statement is the
+    primary node's, and naming a dependency twice there would duplicate it.
+    """
+    from pcons.core.target import Target
+
+    items = depends if isinstance(depends, (list, tuple)) else [depends]
+    project = getattr(env, "_project", None) if env is not None else None
+
+    dep_nodes: list[Node] = []
+    for item in items:
+        if isinstance(item, Node):
+            dep_nodes.append(item)
+        elif isinstance(item, Target):
+            if not item.output_nodes:
+                from pcons.core.errors import PconsError
+
+                raise PconsError(
+                    f"depends=[{item.name!r}]: that target's outputs don't "
+                    f"exist yet (targets resolve later than builder calls). "
+                    f"Depend on a Target from another Target — "
+                    f"my_target.depends({item.name}) — or name the file "
+                    f"directly here.",
+                    location=get_caller_location(),
+                )
+            dep_nodes.extend(item.output_nodes)
+        elif project is not None:
+            dep_nodes.append(project.node(item))
+        else:
+            dep_nodes.append(FileNode(item, defined_at=get_caller_location()))
+
+    for node in nodes:
+        build_info = getattr(node, "_build_info", None) or {}
+        if "primary_node" in build_info:
+            continue
+        node.depends(dep_nodes)
+
+
+def reject_unknown_kwargs(builder_name: str, kwargs: dict[str, Any]) -> None:
+    """Raise on builder keyword arguments nothing consumes.
+
+    Quietly dropping a kwarg (``depends=`` used to be dropped this way) turns
+    a typo or an unsupported option into a build that is wrong but silent.
+    """
+    unknown = sorted(k for k in kwargs if k != "defined_at")
+    if unknown:
+        raise TypeError(
+            f"{builder_name}() got unexpected keyword argument(s): "
+            f"{', '.join(unknown)}."
+        )
 
 
 class BaseBuilder(ABC):
@@ -180,19 +240,31 @@ class BaseBuilder(ABC):
     def __call__(
         self,
         env: Environment,
-        target: str | Path | None,
+        target: str | Path | Node | None,
         sources: list[str | Path | Node],
         **kwargs: Any,
     ) -> list[Node] | OutputGroup:
-        """Build targets from sources: normalize inputs, delegate to _build()."""
+        """Build targets from sources: normalize inputs, delegate to _build().
+
+        ``depends=`` is handled here so every builder honours it identically,
+        with the same meaning it has on ``Target`` and ``env.Command``: an
+        implicit dependency, ordered before the build but kept off the
+        command line.
+        """
+        depends = kwargs.pop("depends", None)
         source_nodes = self._normalize_sources(sources, env)
 
         if target is None:
             target_paths = self._default_targets(source_nodes, env)
+        elif isinstance(target, Node):
+            target_paths = [Path(target.name)]
         else:
-            target_paths = [Path(target) if isinstance(target, str) else target]
+            target_paths = [Path(target)]
 
-        return self._build(env, target_paths, source_nodes, **kwargs)
+        result = self._build(env, target_paths, source_nodes, **kwargs)
+        if depends:
+            apply_depends(result, depends, env)
+        return result
 
     def _normalize_sources(
         self,
@@ -306,6 +378,7 @@ class CommandBuilder(BaseBuilder):
         **kwargs: Any,
     ) -> list[Node] | OutputGroup:
         """Create target nodes for command execution."""
+        reject_unknown_kwargs(self.name, kwargs)
         tool_config = self._get_tool_config(env)
         defined_at = kwargs.get("defined_at") or get_caller_location()
 
@@ -345,7 +418,7 @@ class CommandBuilder(BaseBuilder):
             if project is not None
             else FileNode(target, defined_at=defined_at)
         )
-        node.depends(sources)
+        node.add_inputs(sources)
         node.builder = self
 
         # Resolve depfile: convert TargetPath to PathToken with actual target path
@@ -438,6 +511,7 @@ class MultiOutputBuilder(CommandBuilder):
         **kwargs: Any,
     ) -> list[Node] | OutputGroup:
         """Create target nodes; returns an OutputGroup for a single build."""
+        reject_unknown_kwargs(self.name, kwargs)
         tool_config = self._get_tool_config(env)
         defined_at = kwargs.get("defined_at") or get_caller_location()
 
@@ -492,7 +566,7 @@ class MultiOutputBuilder(CommandBuilder):
 
         # Primary node has dependencies on sources
         primary_node = nodes[primary_name]
-        primary_node.depends(sources)
+        primary_node.add_inputs(sources)
 
         # Build info lives on the primary node, covering all outputs
         output_info: dict[str, OutputInfo] = {
@@ -707,6 +781,7 @@ class GenericCommandBuilder(BaseBuilder):
         **kwargs: Any,
     ) -> list[Node]:
         """Create target nodes for the command."""
+        reject_unknown_kwargs(self.name, kwargs)
         defined_at = kwargs.get("defined_at") or get_caller_location()
         project = getattr(env, "_project", None)
 
@@ -717,7 +792,7 @@ class GenericCommandBuilder(BaseBuilder):
                 if project is not None
                 else FileNode(target, defined_at=defined_at)
             )
-            node.depends(sources)
+            node.add_inputs(sources)
             node.builder = self
             result.append(node)
 

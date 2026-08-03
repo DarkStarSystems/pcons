@@ -125,7 +125,7 @@ class ArchiveNodeFactory(PendingSourceFactory):
 
         # Via project.node() for deduplication
         archive_node = self.project.node(output_path)
-        archive_node.depends(sources)
+        archive_node.add_inputs(sources)
 
         env = getattr(target, "_env", None)
         context = ArchiveContext.from_target(target, env)

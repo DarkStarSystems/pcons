@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from pcons.core.node import FileNode
 from pcons.tools.compile_link import _is_link_input, _propagate_declared_deps
 
@@ -122,3 +124,107 @@ class TestObjectIdentity:
         project.resolve()
 
         assert one.intermediate_nodes[0] is two.intermediate_nodes[0]
+
+
+class TestUnhandledSource:
+    """A source no toolchain compiles must be an error, not a target (G22).
+
+    Left alone, the source itself became one of the target's output nodes:
+    ninja then reported a file sitting in the source tree as "missing and no
+    known rule to make it", which points away from the real problem.
+    """
+
+    def test_unhandled_extension_raises(self, tmp_path):
+        from pcons.core.errors import PconsError
+        from pcons.core.project import Project
+
+        (tmp_path / "k.cu").write_text("int k(void){return 0;}\n")
+        project = Project("cuda", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain="c++")
+        project.ObjectLibrary("k", env, sources=["k.cu"])
+
+        with pytest.raises(PconsError) as excinfo:
+            project.resolve()
+
+        message = str(excinfo.value)
+        assert "'.cu'" in message
+        assert "k.cu" in message
+        # Names the toolchain, what it does compile, and the escape hatch.
+        assert ".cpp" in message
+        assert ".Object(" in message
+
+    def test_unhandled_extension_names_the_target_location(self, tmp_path):
+        from pcons.core.errors import PconsError
+        from pcons.core.project import Project
+
+        (tmp_path / "k.cu").write_text("int k(void){return 0;}\n")
+        project = Project("cuda", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain="c++")
+        project.ObjectLibrary("k", env, sources=["k.cu"])
+
+        with pytest.raises(PconsError) as excinfo:
+            project.resolve()
+
+        assert excinfo.value.location is not None
+        assert "test_compile_link.py" in str(excinfo.value.location)
+
+    def test_missing_tool_for_known_extension_raises(self, tmp_path):
+        """A known extension whose tool isn't in the env used to only warn."""
+        from pcons.core.errors import PconsError
+        from pcons.core.project import Project
+
+        (tmp_path / "a.cpp").write_text("int f(void){return 0;}\n")
+        project = Project("notool", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain="c++")
+        del env._tools["cxx"]
+        project.ObjectLibrary("a", env, sources=["a.cpp"])
+
+        with pytest.raises(PconsError) as excinfo:
+            project.resolve()
+
+        message = str(excinfo.value)
+        assert "'cxx' tool" in message
+        assert "add_tool" in message
+
+    def test_handled_extension_still_compiles(self, tmp_path):
+        from pcons.core.project import Project
+
+        (tmp_path / "a.c").write_text("int f(void){return 0;}\n")
+        project = Project("ok", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain="c")
+        lib = project.ObjectLibrary("a", env, sources=["a.c"])
+        project.resolve()
+
+        assert len(lib.output_nodes) == 1
+        assert lib.output_nodes[0].path.suffix in (".o", ".obj")
+
+    def test_prebuilt_objects_and_linker_scripts_pass_through(self, tmp_path):
+        """The passthrough the error must not break: link inputs."""
+        from pcons.core.node import FileNode as FN
+        from pcons.core.project import Project
+
+        (tmp_path / "a.c").write_text("int main(void){return 0;}\n")
+        project = Project("passthru", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain="c")
+        prog = project.Program("app", env, sources=["a.c"])
+        prog.add_sources([FN(tmp_path / "prebuilt.o"), FN(tmp_path / "custom.ld")])
+        project.resolve()
+
+        paths = [n.path for n in prog.intermediate_nodes]
+        assert tmp_path / "prebuilt.o" in paths
+        assert tmp_path / "custom.ld" in paths
+
+    def test_escape_hatch_compiles_the_unhandled_source(self, tmp_path):
+        """What the error tells you to do has to actually work."""
+        from pcons.core.project import Project
+
+        (tmp_path / "k.cu").write_text("int k(void){return 0;}\n")
+        project = Project("hatch", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain="c++")
+
+        obj = env.cxx.Object("k.cu")
+        lib = project.ObjectLibrary("k", env, sources=[obj[0]])
+        project.resolve()
+
+        assert lib.output_nodes == [obj[0]]
+        assert obj[0]._build_info["tool"] == "cxx"

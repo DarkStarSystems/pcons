@@ -100,9 +100,20 @@ class Node(ABC):
     Nodes track their dependencies (both explicit and implicit) and
     where they were defined for debugging.
 
+    The two dependency lists use Ninja's terminology, and generators render
+    them that way:
+
+    - ``explicit_deps`` are the edge's *positional inputs*. They land in
+      ``$in``, so the command sees them. Builders put the thing being
+      compiled/linked/copied here (mirroring ``_build_info["sources"]``);
+      add them with :meth:`add_inputs`.
+    - ``implicit_deps`` must be up to date before the edge runs but are NOT
+      on the command line (Ninja's ``| dep`` syntax). Scanner and depfile
+      results live here, and so does everything :meth:`depends` adds.
+
     Attributes:
-        explicit_deps: Dependencies explicitly declared by the user.
-        implicit_deps: Dependencies discovered by scanners or depfiles.
+        explicit_deps: Positional inputs; visible to the command as ``$in``.
+        implicit_deps: Order-and-freshness-only dependencies.
         builder: The builder that produces this node (None for sources).
         defined_at: Source location where this node was created.
     """
@@ -122,7 +133,28 @@ class Node(ABC):
         return self.explicit_deps + self.implicit_deps
 
     def depends(self, *nodes: Node | Sequence[Node]) -> None:
-        """Add explicit dependencies (nodes or sequences of nodes)."""
+        """Add implicit dependencies (nodes or sequences of nodes).
+
+        The dependency must be up to date before this node builds, but it is
+        not passed to the command — use :meth:`add_inputs` for that. This is
+        the same meaning ``Target.depends()`` and ``env.Command(depends=...)``
+        have, so a generated header can be ordered before the object that
+        includes it without corrupting the compile command line.
+        """
+        for item in nodes:
+            for node in (item,) if isinstance(item, Node) else item:
+                # An input is already a dependency; repeating it as an
+                # implicit dep would just duplicate it in the build statement.
+                if node not in self.explicit_deps and node not in self.implicit_deps:
+                    self.implicit_deps.append(node)
+
+    def add_inputs(self, *nodes: Node | Sequence[Node]) -> None:
+        """Add positional inputs: dependencies the command sees as ``$in``.
+
+        For the files an edge consumes — the source being compiled, the
+        objects being linked. Builders keep this list in step with
+        ``_build_info["sources"]``.
+        """
         for item in nodes:
             if isinstance(item, Node):
                 self.explicit_deps.append(item)

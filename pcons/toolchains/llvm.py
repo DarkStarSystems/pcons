@@ -255,10 +255,11 @@ class LlvmLinker(BaseTool):
 
 
 class MetalCompiler(BaseTool):
-    """Apple Metal shader compiler (macOS only).
+    """Apple Metal shader toolchain (macOS only).
 
-    Compiles .metal files to .air (Apple Intermediate Representation),
-    which metallib can link into .metallib archives.
+    Provides both halves of the Metal pipeline: `Object` compiles .metal
+    sources to .air (Apple Intermediate Representation), and `Library` links
+    .air files into the .metallib archive an application actually loads.
     """
 
     def __init__(self) -> None:
@@ -270,6 +271,9 @@ class MetalCompiler(BaseTool):
             "flags": [],
             "iprefix": "-I",
             "includes": [],
+            # Flags for the metallib step; the compile flags above (-I, -std=...)
+            # are not accepted there.
+            "libflags": [],
             "metalcmd": [
                 "$metal.cmd",
                 "metal",
@@ -280,18 +284,35 @@ class MetalCompiler(BaseTool):
                 TargetPath(),
                 SourcePath(),
             ],
+            "metallibcmd": [
+                "$metal.cmd",
+                "metallib",
+                "$metal.libflags",
+                "-o",
+                TargetPath(),
+                SourcePath(),
+            ],
         }
 
     def builders(self) -> dict[str, Builder]:
         return {
-            "MetalObject": CommandBuilder(
-                "MetalObject",
+            "Object": CommandBuilder(
+                "Object",
                 "metal",
                 "metalcmd",
                 src_suffixes=[".metal"],
                 target_suffixes=[".air"],
                 language="metal",
                 single_source=True,
+            ),
+            "Library": CommandBuilder(
+                "Library",
+                "metal",
+                "metallibcmd",
+                src_suffixes=[".air"],
+                target_suffixes=[".metallib"],
+                language="metal",
+                single_source=False,
             ),
         }
 

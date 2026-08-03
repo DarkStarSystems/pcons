@@ -707,6 +707,95 @@ class TestNinjaSrcDir:
         assert "generated.h" in after_pipe
 
 
+class TestExtraObjectDeps:
+    """`depends=` and `node.depends()` must be implicit deps, not $in (G24).
+
+    A generated header ordered before an object used to arrive as a second
+    positional input, and clang refused: "cannot specify -o when generating
+    multiple output files".
+    """
+
+    @staticmethod
+    def _generate(project, tmp_path):
+        project.resolve()
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
+        return content.splitlines()
+
+    @staticmethod
+    def _obj_line(lines):
+        line = next((ln for ln in lines if ln.startswith("build obj.")), None)
+        assert line is not None, "compile line not found"
+        return line
+
+    def _project_with_generated_header(self, tmp_path, gcc_toolchain):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+        gen = env.Command(
+            target="build/generated.h",
+            source="spec.yml",
+            command="python gen.py $SOURCE $TARGET",
+        )
+        return project, env, gen
+
+    def test_node_depends_is_not_an_input(self, tmp_path, gcc_toolchain):
+        project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
+        objs = env.cc.Object("build/manual.o", "main.c")
+        objs[0].depends([gen.output_nodes[0]])
+
+        lines = self._generate(project, tmp_path)
+        line = next(ln for ln in lines if ln.startswith("build manual.o:"))
+        inputs, implicit = line.split(" | ", 1)
+        assert "generated.h" not in inputs
+        assert "generated.h" in implicit
+        assert "main.c" in inputs
+
+    def test_object_builder_depends_kwarg(self, tmp_path, gcc_toolchain):
+        project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
+        env.cc.Object("build/manual.o", "main.c", depends=[gen.output_nodes[0]])
+
+        lines = self._generate(project, tmp_path)
+        line = next(ln for ln in lines if ln.startswith("build manual.o:"))
+        inputs, implicit = line.split(" | ", 1)
+        assert "generated.h" not in inputs
+        assert "generated.h" in implicit
+
+    @pytest.mark.parametrize(
+        "builder", ["Program", "StaticLibrary", "SharedLibrary", "ObjectLibrary"]
+    )
+    def test_compile_builder_depends_kwarg(self, tmp_path, gcc_toolchain, builder):
+        project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
+        getattr(project, builder)("app", env, sources=["main.c"], depends=[gen])
+
+        lines = self._generate(project, tmp_path)
+        obj_line = self._obj_line(lines)
+        inputs, implicit = obj_line.split(" | ", 1)
+        assert "generated.h" not in inputs
+        assert "generated.h" in implicit
+
+    def test_the_source_is_still_a_positional_input(self, tmp_path, gcc_toolchain):
+        project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
+        project.Program("app", env, sources=["main.c"], depends=[gen])
+
+        lines = self._generate(project, tmp_path)
+        obj_line = self._obj_line(lines)
+        inputs, implicit = obj_line.split(" | ", 1)
+        assert "$topdir/main.c" in inputs
+        # ...and only there, not also as an implicit dep.
+        assert "main.c" not in implicit
+
+    def test_unknown_kwarg_is_rejected(self, tmp_path, gcc_toolchain):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+
+        with pytest.raises(TypeError, match="depnds"):
+            env.cc.Object("build/manual.o", "main.c", depnds=["x.h"])
+
+
 class TestNinjaTestRule:
     def test_test_rule_quotes_spaced_python_exe(
         self, tmp_path, gcc_toolchain, monkeypatch

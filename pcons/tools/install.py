@@ -378,7 +378,7 @@ class InstallNodeFactory(PendingSourceFactory):
             # Via project.node() for deduplication; install_output role
             # only for outside-build destinations (see _install_role).
             dest_node = self.project.node(dest_path, role=_install_role(dest_path))
-            dest_node.depends([file_node])
+            dest_node.add_inputs([file_node])
 
             dest_node._build_info = {
                 "tool": "install",
@@ -422,7 +422,7 @@ class InstallNodeFactory(PendingSourceFactory):
         # Source directory is the explicit dep (becomes $in for copytree).
         # Child nodes are implicit deps — they trigger rebuilds but don't
         # appear in $in (ninja's | syntax).
-        stamp_node.depends([source_node])
+        stamp_node.add_inputs([source_node])
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
 
@@ -472,7 +472,7 @@ class InstallNodeFactory(PendingSourceFactory):
         # Via project.node() for deduplication; install_output role only
         # for outside-build destinations (see _install_role).
         dest_node = self.project.node(dest, role=_install_role(dest))
-        dest_node.depends([source_node])
+        dest_node.add_inputs([source_node])
 
         env = self._get_install_env(target)
         dest_node._build_info = {
@@ -527,7 +527,7 @@ class InstallNodeFactory(PendingSourceFactory):
         # Source directory is the explicit dep (becomes $in for copytree).
         # Child nodes are implicit deps — they trigger rebuilds but don't
         # appear in $in (ninja's | syntax).
-        stamp_node.depends([source_node])
+        stamp_node.add_inputs([source_node])
         child_nodes = self.project.get_child_nodes(source_path)
         stamp_node.implicit_deps.extend(child_nodes)
 

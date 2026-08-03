@@ -113,7 +113,7 @@ class CommandNodeFactory(PendingSourceFactory):
 
         # Add as dependencies to command's output nodes
         for node in target.output_nodes:
-            node.depends(additional_sources)
+            node.add_inputs(additional_sources)
 
         # Update _build_info to include additional sources
         if target.output_nodes:

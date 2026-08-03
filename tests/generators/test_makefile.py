@@ -278,6 +278,33 @@ class TestMakefileImplicitDeps:
         # Implicit dep should be in prerequisites
         assert "header.h" in content
 
+    def test_depends_is_a_prereq_but_not_on_the_command_line(
+        self, tmp_path, gcc_toolchain
+    ):
+        """G24, make side: make has no `|`, so an implicit dep is an ordinary
+        prerequisite — but it must stay out of the recipe's $in expansion."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+        gen = env.Command(
+            target="build/generated.h",
+            source="spec.yml",
+            command="python gen.py $SOURCE $TARGET",
+        )
+        project.Program("app", env, sources=["main.c"], depends=[gen])
+
+        MakefileGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = normalize_path((tmp_path / "build" / "Makefile").read_text())
+        lines = content.splitlines()
+        rule = next(i for i, ln in enumerate(lines) if ln.startswith("obj.app/"))
+        assert "generated.h" in lines[rule]
+        recipe = lines[rule + 1]
+        assert recipe.startswith("\t")
+        assert "generated.h" not in recipe
+        assert "main.c" in recipe
+
 
 class TestMakefilePostBuild:
     def test_post_build_commands_appended(self, tmp_path):
