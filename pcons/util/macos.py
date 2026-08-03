@@ -168,56 +168,51 @@ def create_universal_binary(
     Returns:
         Target object representing the universal binary.
 
+    One environment per architecture, and a *distinct name* per architecture —
+    the per-arch builds are separate targets producing separate files, and only
+    the lipo output carries the name you ship. Two targets with the same name
+    are the same target, and two targets writing the same output path collide
+    on one node. Objects are keyed by environment, so the per-arch builds never
+    share a compile.
+
     Example:
-        from pcons import Project, find_c_toolchain
+        from pcons import Project
         from pcons.util.macos import create_universal_binary
 
         project = Project("mylib")
-        toolchain = find_c_toolchain()
 
-        # Build for each architecture
-        env_arm64 = project.Environment(toolchain=toolchain)
-        env_arm64.set_target_arch("arm64")
-        env_arm64.build_dir = Path("build/arm64")
+        libs = []
+        for arch in ("arm64", "x86_64"):
+            env = project.Environment(toolchain="c")
+            env.set_target_arch(arch)
+            libs.append(project.StaticLibrary(f"mylib-{arch}", env, ["lib.c"]))
 
-        env_x86_64 = project.Environment(toolchain=toolchain)
-        env_x86_64.set_target_arch("x86_64")
-        env_x86_64.build_dir = Path("build/x86_64")
-
-        lib_arm64 = project.StaticLibrary("mylib", env_arm64, sources=["lib.c"])
-        lib_x86_64 = project.StaticLibrary("mylib", env_x86_64, sources=["lib.c"])
-
-        # Combine into universal binary
+        # libmylib-arm64.a + libmylib-x86_64.a -> libmylib.a
         lib_universal = create_universal_binary(
             project, "mylib_universal",
-            inputs=[lib_arm64, lib_x86_64],
-            output="build/universal/libmylib.a"
+            inputs=libs,
+            output="build/universal/libmylib.a",
         )
+        project.Default(lib_universal)
     """
     from pcons.core.node import FileNode
     from pcons.core.target import Target
 
     output_path = Path(output)
 
-    # Resolve inputs to file paths
-    input_nodes: list[FileNode] = []
+    # Targets are passed through untouched: Command resolves a Target source
+    # to its outputs during the resolve phase, which is the only time those
+    # outputs exist. Reading target.output_nodes here would see an empty list
+    # for any target declared in the usual way (resolution is lazy) and quietly
+    # drop it from the lipo command line.
+    sources: list[Target | Path | str] = []
     for inp in inputs:
-        if isinstance(inp, Target):
-            if inp.output_nodes:
-                for node in inp.output_nodes:
-                    if isinstance(node, FileNode):
-                        input_nodes.append(node)
-            elif inp.nodes:
-                # Fallback for unresolved targets
-                for node in inp.nodes:
-                    if isinstance(node, FileNode):
-                        input_nodes.append(node)
+        if isinstance(inp, (Target, Path, str)):
+            sources.append(inp)
         elif isinstance(inp, FileNode):
-            input_nodes.append(inp)
-        elif isinstance(inp, (Path, str)):
-            input_nodes.append(project.node(Path(inp)))
+            sources.append(inp.path)
 
-    if not input_nodes:
+    if not sources:
         raise ValueError("create_universal_binary requires at least one input")
 
     # Command() needs an environment; lipo needs no toolchain settings,
@@ -229,11 +224,9 @@ def create_universal_binary(
 
         env = Environment()
 
-    source_paths: list[Path | str] = [node.path for node in input_nodes]
-
     lipo_target = env.Command(
         target=output_path,
-        source=source_paths,
+        source=sources,
         command="lipo -create -output $TARGET $SOURCES",
         name=name,
     )

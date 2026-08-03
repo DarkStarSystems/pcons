@@ -21,6 +21,97 @@ if TYPE_CHECKING:
     from pcons.core.environment import Environment
 
 
+#: Cache placeholder for "this macro is not defined" (None can't be cached:
+#: an absent key and a cached None are indistinguishable).
+_CACHE_UNDEFINED = "__UNDEFINED__"
+
+#: Label emitted by the macro probe, and the token standing for "not defined".
+_PROBE_MARKER = "PCONS_PROBE"
+_PROBE_UNDEFINED = "PCONS_UNDEFINED"
+
+
+def _define_lines(defines: list[str] | None) -> str:
+    """Render *defines* as ``#define`` directives, one per line.
+
+    An entry is either a bare macro name (``_XOPEN_SOURCE``) or
+    ``NAME=value`` (``HAVE_FOO=1``); the latter has to become
+    ``#define NAME value``, since ``#define NAME=value`` defines nothing.
+
+    Returns "" for no defines, otherwise text ending in a newline.
+    """
+    if not defines:
+        return ""
+    lines: list[str] = []
+    for entry in defines:
+        name, sep, value = entry.partition("=")
+        lines.append(f"#define {name} {value}".rstrip() if sep else f"#define {entry}")
+    return "\n".join(lines) + "\n"
+
+
+def _probe_source(
+    names: list[str],
+    headers: list[str | Path] | None,
+    defines: list[str] | None,
+) -> str:
+    """Build the preprocessor probe that reports the value of each name.
+
+    Each macro is labelled by its **index**, never by its name: the
+    preprocessor would expand the name on the left-hand side too, so
+    ``PCONS_PROBE FOO = FOO`` comes back as ``PCONS_PROBE 42 = 42`` with
+    nothing left to key the answer on.  Do not "simplify" this back.
+
+    Undefined macros report a sentinel token rather than an empty
+    right-hand side, because an empty right-hand side is the answer for a
+    macro that *is* defined and expands to nothing.  The marker and the
+    sentinel are ``#undef``'d after the includes so that a header defining
+    either one cannot make them expand.
+
+    Headers are included in quoted form: the probe lives alone in a fresh
+    temporary directory, so the "next to the including file" search finds
+    nothing, and quoted form is the one that reliably accepts absolute
+    paths (including Windows drive-letter paths, normalized to forward
+    slashes here).
+    """
+    lines: list[str] = []
+    define_text = _define_lines(defines)
+    if define_text:
+        lines.append(define_text.rstrip("\n"))
+    for header in headers or []:
+        lines.append(f'#include "{Path(header).as_posix()}"')
+    lines.append(f"#undef {_PROBE_MARKER}")
+    lines.append(f"#undef {_PROBE_UNDEFINED}")
+    for index, name in enumerate(names):
+        lines.append(f"#ifdef {name}")
+        lines.append(f"{_PROBE_MARKER} {index} = {name}")
+        lines.append("#else")
+        lines.append(f"{_PROBE_MARKER} {index} = {_PROBE_UNDEFINED}")
+        lines.append("#endif")
+    return "\n".join(lines) + "\n"
+
+
+def _parse_probe_output(output: str, names: list[str]) -> dict[str, str | None]:
+    """Extract macro values from the output of _probe_source().
+
+    Lines that aren't probe results (line markers, blank lines, whatever
+    the headers themselves emitted) are ignored.
+    """
+    results: dict[str, str | None] = dict.fromkeys(names)
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line.startswith(_PROBE_MARKER):
+            continue
+        label, separator, value = line[len(_PROBE_MARKER) :].partition("=")
+        if not separator:
+            continue
+        try:
+            name = names[int(label.strip())]
+        except (ValueError, IndexError):
+            continue
+        value = value.strip()
+        results[name] = None if value == _PROBE_UNDEFINED else value
+    return results
+
+
 def cache_signature(*parts: str) -> str:
     """Short, stable signature over *parts* for configure cache keys.
 
@@ -246,6 +337,11 @@ class ToolChecks:
             return lib if lib.lower().endswith(".lib") else f"{lib}.lib"
         return f"-l{lib}"
 
+    def _include_flag(self, directory: str | Path) -> str:
+        """Return the command-line argument adding an include directory."""
+        prefix = "/I" if self._is_msvc_style() else "-I"
+        return f"{prefix}{Path(directory).as_posix()}"
+
     def check_flag(self, flag: str) -> CheckResult:
         """Check if the compiler accepts a flag.
 
@@ -328,9 +424,9 @@ class ToolChecks:
             return outcome
         compiler = outcome
 
-        define_lines = ""
-        if defines:
-            define_lines = "\n".join(f"#define {d}" for d in defines) + "\n"
+        # Via the shared helper: the old inline form emitted "#define FOO=1"
+        # for the documented "NAME=value" spelling, which defines nothing.
+        define_lines = _define_lines(defines)
 
         source = f"{define_lines}#include <{header}>\nint main(void) {{ return 0; }}\n"
 
@@ -447,14 +543,52 @@ int main(void) {{ return 0; }}
         trace("configure", "  result: unknown size")
         return None
 
-    def check_define(self, define: str) -> str | None:
-        """Get the value of a predefined macro.
+    def check_define(
+        self,
+        define: str,
+        *,
+        headers: list[str | Path] | None = None,
+        defines: list[str] | None = None,
+        include_dirs: list[str | Path] | None = None,
+    ) -> str | None:
+        """Read a macro's value, from the compiler or from a header.
+
+        With no *headers* this reports compiler builtins (``__GNUC__``,
+        ``_MSC_VER``). Passing headers makes it read constants out of the
+        project's own headers — version strings, feature flags, install
+        paths — which is what most of a configure step actually does.
 
         Args:
-            define: Macro name (e.g., '__GNUC__', '_MSC_VER').
+            define: Macro name.
+            headers: Headers to include before reading the macro.
+            defines: Macros to predefine first, as ``NAME`` or ``NAME=value``
+                (note this is *input* to the probe; the macro being read is
+                the ``define`` argument).
+            include_dirs: Directories to search for *headers*.
 
         Returns:
-            Macro value as string, or None if not defined.
+            The macro's expansion text, or None when it isn't defined. Four
+            cases are distinguishable:
+
+            =============================  ==================
+            source                         returned
+            =============================  ==================
+            (not defined)                  ``None``
+            ``#define FOO``                ``""``
+            ``#define FOO 42``             ``"42"``
+            ``#define FOO "Sapphire"``     ``'"Sapphire"'``
+            =============================  ==================
+
+            Quotes are kept, so a string literal is distinguishable from a
+            number and from a defined-but-empty macro, and the value can go
+            straight into a generated config header. Strip them yourself if
+            you want the bare text. Function-like macros are not expanded.
+
+        Example:
+            # core/version.h:  #define VERSION_NAME "Sapphire 2024"
+            name = checks.check_define(
+                "VERSION_NAME", headers=["core/version.h"], include_dirs=[src_dir]
+            )  # -> '"Sapphire 2024"'
         """
         trace(
             "configure",
@@ -463,49 +597,136 @@ int main(void) {{ return 0; }}
             self._tool_name,
             self._caller_location(),
         )
-        cache_key = self._cache_key("define", define)
-        cached = self._config.get(cache_key)
-        if cached is not None:
-            value = cached if cached != "__UNDEFINED__" else None
-            trace("configure", "  cached: %s", value)
-            return value
+        return self._check_defines(
+            [define], headers=headers, defines=defines, include_dirs=include_dirs
+        )[define]
+
+    def check_defines(
+        self,
+        names: list[str],
+        *,
+        headers: list[str | Path] | None = None,
+        defines: list[str] | None = None,
+        include_dirs: list[str | Path] | None = None,
+    ) -> dict[str, str | None]:
+        """Read several macros in a single preprocessor run.
+
+        Same answers as :meth:`check_define` (see it for the return contract),
+        but one process instead of one per macro — configure latency is
+        dominated by process startup, and reading a dozen constants out of one
+        header is the common case.
+
+        Args:
+            names: Macro names to read.
+            headers: Headers to include before reading them.
+            defines: Macros to predefine first (``NAME`` or ``NAME=value``).
+            include_dirs: Directories to search for *headers*.
+
+        Returns:
+            ``{name: value-or-None}`` in the order given.
+
+        Example:
+            values = checks.check_defines(
+                ["USE_RLM", "USE_DONGLES", "LICENSE_TYPE"],
+                headers=["support/config.h"],
+                include_dirs=[src_dir],
+            )
+        """
+        trace(
+            "configure",
+            "check_defines: %s (%s) at %s",
+            ", ".join(names),
+            self._tool_name,
+            self._caller_location(),
+        )
+        return self._check_defines(
+            names, headers=headers, defines=defines, include_dirs=include_dirs
+        )
+
+    def _define_cache_key(
+        self,
+        name: str,
+        headers: list[str | Path] | None,
+        defines: list[str] | None,
+        include_dirs: list[str | Path] | None,
+    ) -> str:
+        """Cache key for one macro read in one probe context.
+
+        The context belongs in the key: the same macro name means different
+        things after different headers, predefines, or include paths. Lists
+        are not sorted (include order is semantic) and each is labelled, so
+        two different lists can't collapse to the same signature. With no
+        context the key keeps its historical shape, so cached builtin lookups
+        survive this change.
+        """
+        context: list[str] = []
+        if headers:
+            context.extend(["headers", *(str(h) for h in headers)])
+        if defines:
+            context.extend(["defines", *defines])
+        if include_dirs:
+            context.extend(["include_dirs", *(str(d) for d in include_dirs)])
+        if not context:
+            return self._cache_key("define", name)
+        return self._cache_key("define", name, cache_signature(*context))
+
+    def _check_defines(
+        self,
+        names: list[str],
+        *,
+        headers: list[str | Path] | None,
+        defines: list[str] | None,
+        include_dirs: list[str | Path] | None,
+    ) -> dict[str, str | None]:
+        """Read *names*, answering from the cache and probing only the rest."""
+        results: dict[str, str | None] = {}
+        missing: list[str] = []
+        for name in names:
+            cached = self._config.get(
+                self._define_cache_key(name, headers, defines, include_dirs)
+            )
+            if cached is None:
+                missing.append(name)
+            else:
+                results[name] = None if cached == _CACHE_UNDEFINED else cached
+
+        if not missing:
+            trace("configure", "  cached: %s", results)
+            return {name: results[name] for name in names}
 
         compiler = self._get_compiler()
         if compiler is None:
-            return None
+            return {name: results.get(name) for name in names}
 
-        # Use preprocessor to output the macro value
-        source = f"""
-#ifdef {define}
-PCONS_VALUE={define}
-#else
-PCONS_UNDEFINED
-#endif
-"""
+        source = _probe_source(missing, headers, defines)
+        extra_flags = [self._include_flag(d) for d in include_dirs or []]
         cdir = self._make_check_dir()
         try:
-            result = self._try_preprocess(compiler, source, check_dir=cdir)
+            result = self._try_preprocess(
+                compiler, source, check_dir=cdir, extra_flags=extra_flags
+            )
         finally:
             self._cleanup_check_dir(*cdir)
+
         if not result.success:
-            self._config.set(cache_key, "__UNDEFINED__")
-            return None
+            # Never cache a probe that wouldn't preprocess: a missing header is
+            # an error condition, not an answer about the macro. With staged
+            # generation (project.generated_input()) a header may simply not
+            # exist yet on the first configure pass, and a cached "no such
+            # header" would stick after the build produced it.
+            trace("configure", "  probe failed; not caching")
+            return {name: results.get(name) for name in names}
 
-        # Parse the output to find the value
-        for line in result.output.split("\n"):
-            if line.startswith("PCONS_VALUE="):
-                value = line[len("PCONS_VALUE=") :].strip()
-                trace("configure", "  result: %s", value)
-                self._config.set(cache_key, value)
-                return value
-            if "PCONS_UNDEFINED" in line:
-                trace("configure", "  result: not defined")
-                self._config.set(cache_key, "__UNDEFINED__")
-                return None
+        probed = _parse_probe_output(result.output, missing)
+        for name, value in probed.items():
+            self._config.set(
+                self._define_cache_key(name, headers, defines, include_dirs),
+                _CACHE_UNDEFINED if value is None else value,
+            )
+            results[name] = value
 
-        trace("configure", "  result: not defined")
-        self._config.set(cache_key, "__UNDEFINED__")
-        return None
+        trace("configure", "  result: %s", results)
+        return {name: results[name] for name in names}
 
     def check_function(
         self,
@@ -691,6 +912,7 @@ int main(void) {{
         source: str,
         *,
         check_dir: tuple[Path, bool] | None = None,
+        extra_flags: list[str] | None = None,
     ) -> CheckResult:
         """Run the preprocessor on source code.
 
@@ -698,6 +920,7 @@ int main(void) {{
             compiler: Compiler command.
             source: Source code to preprocess.
             check_dir: Optional (dir, persistent) from _make_check_dir().
+            extra_flags: Additional flags (e.g. include directories).
 
         Returns:
             CheckResult with preprocessor output.
@@ -705,6 +928,7 @@ int main(void) {{
         suffix = ".c" if self._tool_name == "cc" else ".cpp"
         owns_dir = check_dir is None
         dir_path, persistent = check_dir if check_dir else self._make_check_dir()
+        extra = list(extra_flags or [])
 
         try:
             src_path = dir_path / f"check{suffix}"
@@ -713,9 +937,16 @@ int main(void) {{
             # Include tool flags: predefined macros are target-dependent
             # (e.g. __wasm__ under --target=wasm32-wasi).
             if self._is_msvc_style():
-                cmd = [compiler, "/nologo", *self._tool_flags(), "/E", str(src_path)]
+                cmd = [
+                    compiler,
+                    "/nologo",
+                    *self._tool_flags(),
+                    *extra,
+                    "/E",
+                    str(src_path),
+                ]
             else:
-                cmd = [compiler, *self._tool_flags(), "-E", str(src_path)]
+                cmd = [compiler, *self._tool_flags(), *extra, "-E", str(src_path)]
             trace("configure", "  cmd: %s", " ".join(cmd))
 
             try:

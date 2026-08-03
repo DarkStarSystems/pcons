@@ -1,22 +1,23 @@
 # Test configuration for the object_sources example
-# This tests passing pre-compiled objects as sources to Program()
 
 [test]
-description = "Demonstrates using separately compiled objects as Program sources"
+description = "Per-file flags: add_sources(env=...) inside a target, and standalone env.cc.Object()"
 
-# Files that should exist after the build
-# The helper.o is compiled separately via env.cc.Object()
-# main.o is compiled by Program's normal resolution
+# Files that should exist after the build.
+# helper.o is compiled separately via env.cc.Object(); main.c and tuned.c are
+# compiled by the target, tuned.c with its own environment.
 expected_outputs = [
     "build/helper.o",
     "build/obj.demo/src/main.c.o",
+    "build/obj.demo/src/tuned.c.o",
     "build/demo",
 ]
 
 [verify]
-# Run the built program and check output
 commands = [
     { run = "./build/demo", expect_stdout = "Value from helper: 42" },
+    # tuned.c saw -DTUNED; its neighbours did not.
+    { run = "./build/demo", expect_stdout = "tuned.c was compiled with its own flags" },
 ]
 
 [skip]

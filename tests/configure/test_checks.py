@@ -6,7 +6,12 @@ import sys
 
 import pytest
 
-from pcons.configure.checks import CheckResult, ToolChecks
+from pcons.configure.checks import (
+    CheckResult,
+    ToolChecks,
+    _parse_probe_output,
+    _probe_source,
+)
 from pcons.configure.config import Configure
 from pcons.core.environment import Environment
 
@@ -476,3 +481,241 @@ class TestCrossTargetChecks:
         # i686 pointers are 4 bytes; virtually every host is 8. The old
         # behavior (bare compiler, host ctypes) would answer 8.
         assert checks.check_type_size("void*") == 4
+
+
+class TestCheckDefineProbe:
+    """The macro probe's source and parsing, with no real compiler."""
+
+    def _checks(self, tmp_path, test_project, compiler_cmd="gcc"):  # noqa: F811
+        config = Configure(build_dir=tmp_path)
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.cmd = compiler_cmd
+        return ToolChecks(config, env, "cc")
+
+    @staticmethod
+    def _fake_run(captured, stdout):
+        class _Result:
+            returncode = 0
+            stderr = ""
+
+        def run(cmd, **kwargs):
+            captured.setdefault("cmds", []).append(cmd)
+            result = _Result()
+            result.stdout = stdout
+            return result
+
+        return run
+
+    def test_probe_source_labels_by_index_not_macro_name(self):
+        """`PCONS_PROBE FOO = FOO` expands FOO on *both* sides, leaving
+        nothing to key the answer on. The label must be the index."""
+        source = _probe_source(["FOO", "BAR"], None, None)
+
+        assert "PCONS_PROBE 0 = FOO" in source
+        assert "PCONS_PROBE 1 = BAR" in source
+        assert "PCONS_PROBE FOO" not in source
+
+    def test_probe_source_undefs_marker_and_sentinel(self):
+        """A header defining either would make it expand in the output."""
+        source = _probe_source(["FOO"], ["version.h"], None)
+
+        assert source.index("#undef PCONS_PROBE") > source.index('#include "version.h"')
+        assert "#undef PCONS_UNDEFINED" in source
+
+    def test_probe_source_includes_headers_and_defines(self):
+        source = _probe_source(["FOO"], ["a/b.h"], ["GATE", "N=3"])
+
+        assert "#define GATE" in source
+        assert "#define N 3" in source  # not "#define N=3", which defines nothing
+        assert '#include "a/b.h"' in source
+        assert source.index("#define GATE") < source.index('#include "a/b.h"')
+
+    def test_parses_the_four_value_cases(self):
+        output = "\n".join(
+            [
+                '# 1 "check.c"',  # linemarker noise
+                "PCONS_PROBE 0 = 42",
+                "PCONS_PROBE 1 = ",
+                'PCONS_PROBE 2 = "Sapphire 2024"',
+                "PCONS_PROBE 3 = PCONS_UNDEFINED",
+            ]
+        )
+
+        values = _parse_probe_output(output, ["NUM", "EMPTY", "STR", "MISSING"])
+
+        assert values == {
+            "NUM": "42",
+            "EMPTY": "",
+            "STR": '"Sapphire 2024"',
+            "MISSING": None,
+        }
+
+    def test_batch_runs_preprocessor_once(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        """The whole point of the batch form: one process, many answers."""
+        checks = self._checks(tmp_path, test_project)
+        captured: dict[str, list] = {}
+        stdout = "PCONS_PROBE 0 = 1\nPCONS_PROBE 1 = 2\nPCONS_PROBE 2 = 3\n"
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run", self._fake_run(captured, stdout)
+        )
+
+        values = checks.check_defines(["A", "B", "C"], headers=["h.h"])
+
+        assert values == {"A": "1", "B": "2", "C": "3"}
+        assert len(captured["cmds"]) == 1
+
+    def test_include_dirs_rendered_for_unix_and_msvc(
+        self,
+        tmp_path,
+        test_project,  # noqa: F811
+        monkeypatch,
+    ):
+        for compiler, expected in (("gcc", "-I/opt/sdk"), ("cl.exe", "/I/opt/sdk")):
+            checks = self._checks(tmp_path, test_project, compiler)
+            captured: dict[str, list] = {}
+            monkeypatch.setattr(
+                "pcons.configure.checks.subprocess.run",
+                self._fake_run(captured, "PCONS_PROBE 0 = 1\n"),
+            )
+
+            checks.check_define("FOO", headers=["h.h"], include_dirs=["/opt/sdk"])
+
+            assert expected in captured["cmds"][0]
+
+    def test_failed_probe_is_not_cached(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        """A missing header is an error condition, not an answer — and with
+        staged generation the header may simply not exist yet."""
+        checks = self._checks(tmp_path, test_project)
+
+        class _Failed:
+            returncode = 1
+            stdout = ""
+            stderr = "fatal error: no such file"
+
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run", lambda cmd, **kw: _Failed()
+        )
+
+        assert checks.check_define("FOO", headers=["missing.h"]) is None
+
+        captured: dict[str, list] = {}
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run",
+            self._fake_run(captured, "PCONS_PROBE 0 = 7\n"),
+        )
+        assert checks.check_define("FOO", headers=["missing.h"]) == "7"
+
+    def test_cache_key_varies_with_headers(self, tmp_path, test_project, monkeypatch):  # noqa: F811
+        """Same macro name, different header: two different questions."""
+        checks = self._checks(tmp_path, test_project)
+        captured: dict[str, list] = {}
+        monkeypatch.setattr(
+            "pcons.configure.checks.subprocess.run",
+            self._fake_run(captured, "PCONS_PROBE 0 = 1\n"),
+        )
+
+        checks.check_define("FOO", headers=["a.h"])
+        checks.check_define("FOO", headers=["b.h"])
+        checks.check_define("FOO", headers=["a.h"])  # cached
+
+        assert len(captured["cmds"]) == 2
+
+
+@pytest.mark.skipif(not has_cc, reason="No C compiler available")
+class TestCheckDefineWithCompiler:
+    """Reading macros out of a real header with a real preprocessor."""
+
+    @pytest.fixture
+    def setup(self, tmp_path, test_project):  # noqa: F811
+        header = tmp_path / "probe_header.h"
+        header.write_text(
+            '#define PROBE_STRING "Sapphire 2024"\n'
+            "#define PROBE_NUMBER 42\n"
+            "#define PROBE_EMPTY\n"
+            "#define PROBE_SPACES 1 + 2\n"
+            "#ifdef PROBE_GATE\n"
+            "#define PROBE_GATED 1\n"
+            "#endif\n"
+        )
+        config = Configure(build_dir=tmp_path)
+        env = Environment()
+        env.add_tool("cc")
+        if _cc_path:
+            env.cc.cmd = _cc_path
+        return ToolChecks(config, env, "cc"), tmp_path
+
+    def test_builtin_macro_still_works(self, setup):
+        checks, _ = setup
+        # __LINE__ is the one macro every C preprocessor must define, in every
+        # mode: __STDC__ is absent under MSVC (and under clang in its default
+        # MSVC-compatible mode on Windows), and __GNUC__ is compiler-specific.
+        value = checks.check_define("__LINE__")
+
+        assert value is not None
+        assert value.isdigit()
+
+    def test_undefined_macro(self, setup):
+        checks, _ = setup
+
+        assert checks.check_define("PCONS_NOT_A_REAL_MACRO_XYZ") is None
+
+    def test_value_from_a_project_header(self, setup):
+        checks, tmp_path = setup
+
+        value = checks.check_define(
+            "PROBE_NUMBER", headers=["probe_header.h"], include_dirs=[tmp_path]
+        )
+
+        assert value == "42"
+
+    def test_quoted_and_empty_values_are_distinguishable(self, setup):
+        checks, tmp_path = setup
+
+        values = checks.check_defines(
+            ["PROBE_STRING", "PROBE_EMPTY", "PROBE_NOPE"],
+            headers=["probe_header.h"],
+            include_dirs=[tmp_path],
+        )
+
+        assert values["PROBE_STRING"] == '"Sapphire 2024"'
+        assert values["PROBE_EMPTY"] == ""
+        assert values["PROBE_NOPE"] is None
+
+    def test_batch_answers_in_order(self, setup):
+        checks, tmp_path = setup
+        names = ["PROBE_NUMBER", "PROBE_STRING", "PROBE_EMPTY"]
+
+        values = checks.check_defines(
+            names, headers=["probe_header.h"], include_dirs=[tmp_path]
+        )
+
+        assert list(values) == names
+
+    def test_expansion_with_spaces(self, setup):
+        checks, tmp_path = setup
+
+        value = checks.check_define(
+            "PROBE_SPACES", headers=["probe_header.h"], include_dirs=[tmp_path]
+        )
+
+        assert value is not None
+        assert value.replace(" ", "") == "1+2"
+
+    def test_defines_argument_gates_the_header(self, setup):
+        checks, tmp_path = setup
+        kwargs = {"headers": ["probe_header.h"], "include_dirs": [tmp_path]}
+
+        assert checks.check_define("PROBE_GATED", **kwargs) is None
+        assert (
+            checks.check_define("PROBE_GATED", defines=["PROBE_GATE"], **kwargs) == "1"
+        )
+
+    def test_answer_is_cached(self, setup):
+        checks, tmp_path = setup
+        kwargs = {"headers": ["probe_header.h"], "include_dirs": [tmp_path]}
+
+        first = checks.check_define("PROBE_NUMBER", **kwargs)
+        (tmp_path / "probe_header.h").write_text("#define PROBE_NUMBER 99\n")
+
+        assert checks.check_define("PROBE_NUMBER", **kwargs) == first

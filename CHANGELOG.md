@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-file flags without a second target.** `target.add_sources([...], env=other_env)`
+  (and `add_source`) compiles those sources with a different environment while they stay
+  part of the target — so they keep its include dirs, defines, and everything inherited
+  from its dependencies. Previously the only route was a second one-file target, which
+  starts from nothing and has to re-state all of it. `examples/17_object_sources` shows
+  this alongside `env.cc.Object()`, which remains the tool for sharing one compiled
+  object between targets.
+- **`ToolChecks.check_define()` reads macros out of project headers**, via `headers=`,
+  `include_dirs=`, and `defines=` — matching `check_type()`/`check_function()`, which
+  always took `headers=`. Previously it preprocessed an empty source and so could only
+  report compiler builtins. New `check_defines(names, ...)` answers many macros in a
+  single preprocessor run, which matters because configure time is dominated by process
+  startup. Undefined, defined-but-empty, numeric, and string-valued macros are all
+  distinguishable in the result; quotes are retained.
 - **Generated build files re-run pcons on their own.** `build.ninja` now carries a
   `generator = 1` edge (and the Makefile a remake rule) listing the build script, every
   Python module imported from inside the project tree, `configure_file()` templates, and
@@ -34,8 +48,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `examples/58_system_includes`.
 - **`target.pre_build(command)`**, the mirror of `post_build()`.
 
+### Changed
+
+- **Install target names derive from the whole destination path**, so they are unique by
+  construction: `install_MyPlugin.bundle_Contents_MacOS` rather than `install_MacOS`
+  renamed 278 times. Shallow destinations are unchanged (`install_bin`, `install_dist`).
+  The dedup warning remains for genuine collisions.
+
 ### Fixed
 
+- **Object files are keyed by environment, so multi-architecture builds are correct.**
+  Two targets compiling one source with different environments shared a single object
+  file: a universal build compiled `-arch arm64` once and linked those objects into the
+  x86_64 binary too. Effective requirements deliberately exclude `env.<tool>.flags`, so
+  the architecture — or any other per-target flag — was invisible to object identity.
+  Sharing between targets that genuinely use the same environment is unaffected.
+- **`create_universal_binary()` no longer needs a manual `project.resolve()`.** It read
+  `output_nodes` eagerly, which are empty until the resolve phase, so the documented
+  example raised "requires at least one input". Targets are now passed through to the
+  command and resolved with everything else. Its docstring example works as written.
+- **Install-heavy projects generate in linear time.** `Project.get_child_nodes()` and
+  `has_child_nodes()` scanned every registered node and re-canonicalized every path on
+  each call; with one Install per bundle that is quadratic. A directory index maintained
+  at node registration replaces the scan: 300 plugin bundles went from 19.2s to 0.6s of
+  `pcons generate`, with a byte-identical `build.ninja`.
+- `check_header(defines=["FOO=1"])` emitted `#define FOO=1`, which defines nothing. Both
+  it and the new macro probe now share one helper that renders `NAME=value` correctly.
 - **Path flags whose argument is a separate token are relativized.** `["-isystem",
   "/abs/path"]` — the spelling clang documents — previously passed through untouched,
   quietly baking absolute paths into `build.ninja` and breaking relocatability. Which

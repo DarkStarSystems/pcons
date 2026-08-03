@@ -366,7 +366,7 @@ mylib.private.compile_flags.append("-fvisibility=hidden")
 
 ### Per-file flags
 
-CMake's `set_source_files_properties` maps to pcons's `env.override()` + `Object()` pattern:
+CMake's `set_source_files_properties` maps to `env.override()` plus a per-source environment:
 
 ```cmake
 # CMake
@@ -377,9 +377,12 @@ set_source_files_properties(simd.c PROPERTIES COMPILE_FLAGS "-mavx2")
 # pcons
 with env.override() as simd_env:
     simd_env.cc.flags.append("-mavx2")  # could remove, replace or modify here too!
-    obj = simd_env.cc.Object(build_dir / "simd.o", "simd.c")[0]
-mylib.add_sources([obj])
+    mylib.add_sources(["simd.c"], env=simd_env)
 ```
+
+The file stays part of `mylib`, so it keeps the target's include dirs, defines, and inherited requirements; only the environment layer differs.
+
+(`simd_env.cc.Object(...)` compiles a *standalone* object node instead — use that when several targets should link one object without recompiling it, accepting that no target's usage requirements apply.)
 
 ### Platform-specific flags
 

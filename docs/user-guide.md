@@ -2448,6 +2448,32 @@ with env.override(variant="debug", cc__cmd="clang") as temp_env:
 
 This is particularly useful when you need to compile a few files with different settings without creating a permanent cloned environment.
 
+!!! warning "The kwargs form *replaces* a list, it doesn't extend it"
+    `env.override(cxx__flags=["-O1"])` gives that target `-O1` and **nothing else** — the flags the environment already carried (`-std=c++17`, warning flags, `-isystem` paths) are gone. That is often not what the call site means. To add to a list, mutate the clone instead:
+
+    ```python
+    with env.override() as tweaked:
+        tweaked.cxx.flags.append("-O1")  # keeps everything else
+    ```
+
+    Assignment on the clone (`tweaked.cxx.flags = [...]`) is the deliberate way to replace a list wholesale, e.g. to drop a flag.
+
+#### Per-File Flags
+
+To compile *one file* in a target differently, pass the environment along with the source:
+
+```python
+lib = project.StaticLibrary("core", env, sources=common_sources)
+
+with env.override() as careful:
+    careful.cxx.flags.append("-O1")  # this file miscompiles at -O2
+    lib.add_sources(["cuda-support.cxx"], env=careful)
+```
+
+The file stays part of the target, so it keeps the target's include dirs, defines, and everything inherited from its dependencies — only the environment layer changes. That's the difference from declaring a second one-file target, which starts from nothing and has to re-state all of it.
+
+`env.cc.Object()` (see `examples/17_object_sources`) remains the tool for a different job: compiling a standalone object that several targets can link without recompiling. It sits outside any target, so no target's usage requirements apply to it.
+
 ### Custom Commands with env.Command()
 
 Use `env.Command()` to run arbitrary shell commands as build steps. This is useful for code generators, asset processing, or any tool that doesn't fit the standard compile/link model.
@@ -3392,6 +3418,14 @@ if checks.check_function(
 # Read a predefined compiler macro
 gcc_ver = checks.check_define("__GNUC__")  # e.g. "14"
 
+# Read constants out of the project's own headers -- one preprocessor run
+# for as many macros as you like
+version = checks.check_defines(
+    ["VERSION_NAME", "VERSION_MAJOR", "USE_DONGLES"],
+    headers=["core/version.h"],
+    include_dirs=[src_dir],
+)
+
 # Custom compile check with arbitrary source code
 has_neon = checks.try_compile(
     "#include <arm_neon.h>\nint main() { float a[] = {1,1}; vld1q_f32_x2(a); return 0; }"
@@ -3409,6 +3443,21 @@ assert result2.cached is True  # Second run: from cache
 ```
 
 The cache key includes a signature of the compiler command *and its current flags*, so switching compilers — or retargeting the same compiler with a cross preset (`--target=`, `-isysroot`) — invalidates the relevant entries automatically. Checks probe the same compilation the build will do.
+
+#### Reading Macros From Headers
+
+`check_define()` and `check_defines()` accept `headers=`, `include_dirs=`, and `defines=`, so they read constants out of the project's own headers — version strings, feature flags, install paths — not just compiler builtins. Four outcomes are distinguishable:
+
+| in the header | returned |
+|---|---|
+| (not defined) | `None` |
+| `#define FOO` | `""` |
+| `#define FOO 42` | `"42"` |
+| `#define FOO "Sapphire 2024"` | `'"Sapphire 2024"'` |
+
+Quotes are kept, so a string literal is distinguishable from a number and from a defined-but-empty macro, and the value can go straight into a generated config header. Use the batch form when reading several from one header: configure time is dominated by process startup, and `check_defines()` answers them all in a single preprocessor run.
+
+A probe that fails to preprocess at all — a missing header, a bad include path — is not cached. It's an error condition rather than an answer about the macro, and with staged generation the header may simply not exist yet on the first pass.
 
 ### Configure: Caching, Defines, and Config Headers
 
@@ -3731,7 +3780,8 @@ Ninja handles this natively; GNU make 4.x does too. GNU make 3.81 — still `/us
 | `checks.check_type(name, headers=[])` | Check if a type exists |
 | `checks.check_type_size(name)` | Get the size of a type |
 | `checks.check_function(name)` | Check if a function is available |
-| `checks.check_define(name)` | Get value of a predefined macro |
+| `checks.check_define(name, headers=[])` | Read a macro's value, from the compiler or a header |
+| `checks.check_defines(names, headers=[])` | Read several macros in one preprocessor run |
 | `checks.try_compile(source)` | Try to compile arbitrary source code |
 
 ### macOS Utilities

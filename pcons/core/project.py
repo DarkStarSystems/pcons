@@ -39,6 +39,61 @@ else:
     _ProjectBuilders = object
 
 
+class _ChildNodeIndex:
+    """Directory -> registry keys of the nodes beneath it.
+
+    Answers ``get_child_nodes()``/``has_child_nodes()`` without scanning the
+    whole node registry, which is otherwise O(nodes) per call — install-heavy
+    projects (one bundle per plugin, say) make that call once per install
+    target and spend all their generate time there.
+
+    Two paths keep it honest:
+
+    * ``Project.node()``/``dir_node()`` *maintain* it as nodes are registered
+      — O(path depth) each, and the only path a normal build takes.
+    * :meth:`sync` *repairs* it. A build script may write ``Project._nodes``
+      directly (``examples/15_custom_builder`` does), so a count mismatch
+      means the index missed something and it is rebuilt wholesale. Rare, so
+      the rebuild cost doesn't matter; the check itself is an int compare.
+
+    Stores paths rather than Node objects, so replacing the node under an
+    existing key can't leave a stale object behind — the caller resolves
+    paths through ``_nodes`` at query time.
+    """
+
+    __slots__ = ("_by_dir", "_accounted", "_build_dir")
+
+    def __init__(self) -> None:
+        self._by_dir: dict[Path, list[Path]] = {}
+        self._accounted = 0
+        self._build_dir: Path | None = None
+
+    def add(self, key: Path, normalized: Path) -> None:
+        """Record *key* under every directory that contains it."""
+        for parent in normalized.parents:
+            self._by_dir.setdefault(parent, []).append(key)
+        self._accounted += 1
+
+    def sync(
+        self,
+        nodes: dict[Path, Node],
+        normalize: Callable[[Path], Path],
+        build_dir: Path,
+    ) -> None:
+        """Rebuild if the registry changed behind our back, or build_dir moved."""
+        if self._accounted == len(nodes) and self._build_dir == build_dir:
+            return
+        self._by_dir = {}
+        self._accounted = 0
+        self._build_dir = build_dir
+        for key in nodes:
+            self.add(key, normalize(key))
+
+    def children(self, directory: Path) -> list[Path]:
+        """Registry keys strictly beneath *directory*, in registration order."""
+        return self._by_dir.get(directory, [])
+
+
 class Project(_ProjectBuilders):
     """Top-level container for a pcons build.
 
@@ -86,6 +141,7 @@ class Project(_ProjectBuilders):
         "_package_finder_chain",
         "_configure_deps",
         "_pending_stages",
+        "_child_index",
         "defined_at",
         "_parent",
         "_children",
@@ -166,6 +222,8 @@ class Project(_ProjectBuilders):
         self._configure_deps: list[Path] = []
         # Staged inputs that did not exist yet, so their blocks were skipped.
         self._pending_stages: list[Path] = []
+        # Directory -> node keys beneath it, for get_child_nodes().
+        self._child_index = _ChildNodeIndex()
         self.defined_at = defined_at or get_caller_location()
         self._subdir = None
         # Offset from the top-level project's root to this project's root.
@@ -381,6 +439,7 @@ class Project(_ProjectBuilders):
             self._nodes[path] = FileNode(
                 path, role=role, defined_at=get_caller_location()
             )
+            self._child_index.add(path, self._normalize_for_index(path))
         node = self._nodes[path]
         if not isinstance(node, FileNode):
             raise TypeError(
@@ -397,6 +456,7 @@ class Project(_ProjectBuilders):
             self._nodes[path] = DirNode(
                 path, role=role, defined_at=get_caller_location()
             )
+            self._child_index.add(path, self._normalize_for_index(path))
         node = self._nodes[path]
         if not isinstance(node, DirNode):
             raise TypeError(
@@ -665,6 +725,18 @@ class Project(_ProjectBuilders):
             return Path(*parts[n:]) if len(parts) > n else Path(".")
         return p
 
+    def _normalize_for_index(self, p: Path) -> Path:
+        """The form paths are compared in by the child-node queries.
+
+        One place, so the index and the queries can't drift apart.
+        """
+        return self._to_build_relative(self._path_resolver.canonicalize(p))
+
+    def _child_keys(self, path: Path | str) -> list[Path]:
+        """Registry keys strictly beneath *path* (see _ChildNodeIndex)."""
+        self._child_index.sync(self._nodes, self._normalize_for_index, self.build_dir)
+        return self._child_index.children(self._normalize_for_index(Path(path)))
+
     def get_child_nodes(self, path: Path | str) -> list[FileNode]:
         """Get all project nodes whose path is a descendant of the given path.
 
@@ -679,39 +751,19 @@ class Project(_ProjectBuilders):
         Returns:
             List of FileNodes whose canonical path is strictly under *path*.
         """
-        canonicalize = self._path_resolver.canonicalize
-        check_path = self._to_build_relative(canonicalize(Path(path)))
-        children: list[FileNode] = []
-        for node_path, node in self._nodes.items():
-            if not isinstance(node, FileNode):
-                continue
-            canonical = self._to_build_relative(canonicalize(node_path))
-            if canonical == check_path:
-                continue
-            try:
-                canonical.relative_to(check_path)
-                children.append(node)
-            except ValueError:
-                continue
-        return children
+        return [
+            node
+            for key in self._child_keys(path)
+            if isinstance(node := self._nodes[key], FileNode)
+        ]
 
     def has_child_nodes(self, path: Path | str) -> bool:
         """Check whether any registered node is a descendant of *path*.
 
-        Equivalent to ``bool(self.get_child_nodes(path))`` but short-circuits
-        on the first match for efficiency.
+        Like ``bool(self.get_child_nodes(path))``, except that it counts
+        directory nodes too — it answers "is anything registered under here".
         """
-        canonicalize = self._path_resolver.canonicalize
-        check_path = self._to_build_relative(canonicalize(Path(path)))
-        for node_path in self._nodes:
-            canonical = self._to_build_relative(canonicalize(node_path))
-            if canonical != check_path:
-                try:
-                    canonical.relative_to(check_path)
-                    return True
-                except ValueError:
-                    continue
-        return False
+        return bool(self._child_keys(path))
 
     # -------------------------------------------------------------------------
     # Configure-time inputs and staged generation

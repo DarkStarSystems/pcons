@@ -1,55 +1,44 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Build script demonstrating separate object compilation.
+"""Compiling one file differently from its neighbours.
 
-This example shows:
-- Using env.cc.Object() to compile a source file separately
-- Passing the resulting object node as a source to Program()
+Two ways, for two different situations:
 
-Use case: Compile some sources with different flags (e.g., different
-optimization level, or legacy code with warnings disabled).
+1. ``target.add_sources([...], env=other_env)`` — the file stays part of the
+   target, so it keeps the target's include dirs, defines, and everything
+   inherited from its dependencies. Only the environment layer changes. This
+   is what you want for a per-file flag tweak: the one source that miscompiles
+   at -O2, the one that needs -fno-strict-aliasing, the one that wants a
+   define its neighbours must not see.
+
+2. ``env.cc.Object()`` — compile a source to a standalone object node and use
+   it as a source. Use this when the *object itself* is the thing you want to
+   share: several targets can link the same object without recompiling it.
+   It's outside any target, so the target's usage requirements don't apply.
 """
 
 from pcons import Project
 
-# =============================================================================
-# Build Script
-# =============================================================================
-
-
-# Create project
 project = Project("object_sources")
 
-# Directories
 src_dir = project.root_dir / "src"
 build_dir = project.build_dir
 env = project.Environment(toolchain="c")
 
-# Compile helper.c separately with special flags
-# For example, compile with -O0 for debugging while rest uses -O2
-# Use the toolchain's object suffix for cross-platform compatibility
+# (2) A standalone object, compiled once, usable by any target.
 obj_suffix = env.toolchain.get_object_suffix()  # .o on Unix, .obj on Windows
 helper_obj = env.cc.Object(
     build_dir / f"helper{obj_suffix}",
     src_dir / "helper.c",
 )
-print(f"helper_obj from env.cc.Object(): {helper_obj}")
 
-# Create program using the pre-compiled object and main.c
-# This is the pattern we want to support:
-# - main.c gets compiled normally by Program
-# - helper.o is already compiled, just link it
 prog = project.Program("demo", env)
-prog.add_sources(
-    [
-        src_dir / "main.c",
-        helper_obj[0],  # The object node from env.cc.Object()
-    ]
-)
+prog.add_sources([src_dir / "main.c", helper_obj[0]])
 
-# Resolve to inspect resolved state (debug purposes only)
-project.resolve()
+# The target's own requirements reach every source it owns...
+prog.private.defines.append("IN_DEMO=1")
 
-# Check what happened
-print(f"Program intermediate_nodes: {prog.intermediate_nodes}")
-print(f"Program sources: {prog.sources}")
+# ...including this one, which additionally gets -DTUNED.
+with env.override() as tuned_env:
+    tuned_env.cc.defines.append("TUNED")
+    prog.add_sources([src_dir / "tuned.c"], env=tuned_env)

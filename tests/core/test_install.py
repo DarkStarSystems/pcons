@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for Project.Install() method."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -283,8 +284,10 @@ class TestInstallAs:
         dest_node = install.output_nodes[0]
         assert src_node in dest_node.explicit_deps
 
-    def test_install_as_unique_names(self, tmp_path):
-        """Multiple InstallAs with same dest name get unique target names."""
+    def test_install_as_unique_names(self, tmp_path, caplog):
+        """Same file name in two directories: distinct target names, derived
+        from the whole destination path rather than deduplicated after a
+        collision."""
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
 
         src1 = tmp_path / "file1.txt"
@@ -292,14 +295,13 @@ class TestInstallAs:
         src1.touch()
         src2.touch()
 
-        # Both install to files named "icon.png" in different dirs
-        install1 = project.InstallAs(tmp_path / "dir1" / "icon.png", src1)
-        install2 = project.InstallAs(tmp_path / "dir2" / "icon.png", src2)
+        with caplog.at_level(logging.WARNING):
+            install1 = project.InstallAs(tmp_path / "dir1" / "icon.png", src1)
+            install2 = project.InstallAs(tmp_path / "dir2" / "icon.png", src2)
 
-        # Should have unique names
-        assert install1.name != install2.name
-        assert install1.name.startswith("install_icon.png")
-        assert install2.name.startswith("install_icon.png")
+        assert install1.name == "install_dir1_icon.png"
+        assert install2.name == "install_dir2_icon.png"
+        assert "renamed from" not in caplog.text
 
 
 class TestInstallWithNinja:

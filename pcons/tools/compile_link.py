@@ -90,11 +90,13 @@ class CompileLinkFactory:
 
     def __init__(self, project: Project) -> None:
         self.project = project
-        self._object_cache: dict[tuple[Path, str, tuple], FileNode] = {}
+        # Object nodes shared between targets, keyed by source + compiler cmd
+        # + effective requirements + environment (see _create_object_node).
+        self._object_cache: dict[tuple[Path, str, tuple, Environment], FileNode] = {}
         # Grouped (whole-module) compile nodes, keyed by the sorted source
-        # set + compiler cmd + effective requirements.
+        # set + compiler cmd + effective requirements + environment.
         self._grouped_object_cache: dict[
-            tuple[str, tuple[str, ...], str, tuple], FileNode
+            tuple[str, tuple[str, ...], str, tuple, Environment], FileNode
         ]
         self._grouped_object_cache = {}
         # Maps language -> list of (source_path, obj_node) pairs.
@@ -140,23 +142,25 @@ class CompileLinkFactory:
                 "resolve", "dependencies", [d.name for d in target.dependencies]
             )
 
-        effective = compute_effective_requirements(target, env, for_compilation=True)
+        # Sources added with add_sources(..., env=...) compile with their own
+        # environment; everything else uses the target's. Requirements are
+        # computed once per distinct environment.
+        requirements: dict[int, EffectiveRequirements] = {}
+
+        def effective_for(source_env: Environment) -> EffectiveRequirements:
+            cached = requirements.get(id(source_env))
+            if cached is None:
+                cached = self._compute_requirements(target, source_env)
+                requirements[id(source_env)] = cached
+            return cached
+
+        effective = effective_for(env)
 
         if is_enabled("resolve"):
             trace("resolve", "  Effective requirements:")
             trace_value("resolve", "includes", [str(p) for p in effective.includes])
             trace_value("resolve", "defines", effective.defines)
             trace_value("resolve", "compile_flags", effective.compile_flags)
-
-        # Target-type compile flags (e.g. -fPIC for shared libs on Linux)
-        toolchain = env._toolchain
-        if toolchain is not None and target.target_type is not None:
-            target_type_flags = toolchain.get_compile_flags_for_target_type(
-                str(target.target_type)
-            )
-            for flag in target_type_flags:
-                if flag not in effective.compile_flags:
-                    effective.compile_flags.append(flag)
 
         language = self._determine_language(target, env)
         if language:
@@ -168,32 +172,43 @@ class CompileLinkFactory:
         # Sources whose handler sets group_sources compile together in ONE
         # node per (toolchain, tool) group — whole-module compilation.
         trace("resolve", "  Creating object nodes for %d sources", len(target.sources))
-        grouped: dict[tuple[int, str], tuple[SourceHandler, Toolchain, list[FileNode]]]
+        grouped: dict[
+            tuple[int, str, int],
+            tuple[SourceHandler, Toolchain, Environment, list[FileNode]],
+        ]
         grouped = {}
         for source in target.sources:
             if isinstance(source, FileNode):
-                aux_handler = self._get_auxiliary_input_handler(source.path, env)
+                source_env = target._source_envs.get(source.path, env)
+
+                aux_handler = self._get_auxiliary_input_handler(source.path, source_env)
                 if aux_handler is not None:
                     flag = aux_handler.flag_template.replace("$file", str(source.path))
                     auxiliary_inputs.append((source, flag, aux_handler))
                     trace("resolve", "    %s -> auxiliary input", source.path)
                     continue
 
-                found = self._get_source_handler_with_toolchain(source.path, env)
+                found = self._get_source_handler_with_toolchain(source.path, source_env)
                 if found is not None and found[0].group_sources:
                     handler, toolchain = found
-                    key = (id(toolchain), handler.tool_name)
-                    grouped.setdefault(key, (handler, toolchain, []))[2].append(source)
+                    # Whole-module groups are per environment too: sources
+                    # compiled with different flags can't share one command.
+                    key = (id(toolchain), handler.tool_name, id(source_env))
+                    grouped.setdefault(key, (handler, toolchain, source_env, []))[
+                        3
+                    ].append(source)
                     continue
 
-                obj_node = self._create_object_node(target, source, effective, env)
+                obj_node = self._create_object_node(
+                    target, source, effective_for(source_env), source_env
+                )
                 if obj_node:
                     target.intermediate_nodes.append(obj_node)
                     trace("resolve", "    %s -> %s", source.path, obj_node.path)
 
-        for handler, toolchain, sources in grouped.values():
+        for handler, toolchain, group_env, sources in grouped.values():
             obj_node = self._create_grouped_object_node(
-                target, sources, handler, toolchain, effective, env
+                target, sources, handler, toolchain, effective_for(group_env), group_env
             )
             target.intermediate_nodes.append(obj_node)
             trace(
@@ -221,6 +236,29 @@ class CompileLinkFactory:
 
         if target.output_nodes:
             trace("resolve", "  Output: %s", [str(n.path) for n in target.output_nodes])
+
+    def _compute_requirements(
+        self, target: Target, env: Environment
+    ) -> EffectiveRequirements:
+        """Effective compile requirements for *target* under *env*.
+
+        The target's own requirements and its dependencies' are the same
+        whichever environment a given source compiles with; only the
+        environment layer differs (see ``add_sources(..., env=...)``).
+        """
+        effective = compute_effective_requirements(target, env, for_compilation=True)
+
+        # Target-type compile flags (e.g. -fPIC for shared libs on Linux)
+        toolchain = env._toolchain
+        if toolchain is not None and target.target_type is not None:
+            target_type_flags = toolchain.get_compile_flags_for_target_type(
+                str(target.target_type)
+            )
+            for flag in target_type_flags:
+                if flag not in effective.compile_flags:
+                    effective.compile_flags.append(flag)
+
+        return effective
 
     def resolve_pending(self, target: Target) -> None:
         """No-op: compile-link targets don't have pending sources."""
@@ -321,12 +359,16 @@ class CompileLinkFactory:
         deps_style = handler.deps_style
         command_var = handler.command_var
 
-        # Key the cache by the compiler command as well as the flags: the same
-        # source built by a different compiler (another toolchain, or a per-env
-        # cmd override) must not share an object file.
+        # Two targets share one object only when the compile is genuinely the
+        # same. The environment is part of that: effective requirements
+        # deliberately exclude env.<tool>.flags (they'd leak across languages
+        # in a mixed target), so an env carrying -arch, a -D, or any other
+        # per-target flag is invisible here. Keying on the environment itself
+        # — Environment hashes by identity — keeps a universal build from
+        # silently linking one architecture's objects into the other's binary.
         tool_cmd = str(getattr(getattr(env, tool_name, None), "cmd", tool_name))
         effective_hash = effective.as_hashable_tuple()
-        cache_key = (source.path.resolve(), tool_cmd, effective_hash)
+        cache_key = (source.path.resolve(), tool_cmd, effective_hash, env)
 
         if cache_key in self._object_cache:
             return self._object_cache[cache_key]
@@ -395,7 +437,7 @@ class CompileLinkFactory:
         # Unlike per-source objects, grouped nodes are NOT shared between
         # targets: the node carries target identity (module name, output
         # path). The key only guards against double-resolving one target.
-        cache_key = (target.qualified_name, source_key, tool_cmd, effective_hash)
+        cache_key = (target.qualified_name, source_key, tool_cmd, effective_hash, env)
         cached = self._grouped_object_cache.get(cache_key)
         if cached is not None:
             return cached

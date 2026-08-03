@@ -598,3 +598,80 @@ class TestAlias:
 
         with pytest.raises(TypeError):
             project.Alias("install", invalid_target)
+
+
+class TestChildNodeIndex:
+    """get_child_nodes/has_child_nodes answer from an index, not a scan.
+
+    The contract they had before the index must survive it: no filesystem
+    access, build-dir-prefixed and unprefixed query paths agree, and a node
+    equal to the query path is not its own child.
+    """
+
+    def test_nodes_registered_after_a_query_are_found(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+
+        assert project.get_child_nodes("build/gen") == []
+        node = project.node("build/gen/later.c")
+
+        assert project.get_child_nodes("build/gen") == [node]
+
+    def test_query_matches_with_and_without_build_dir_prefix(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        node = project.node("build/gen/thing.c")
+
+        assert project.get_child_nodes("build/gen") == [node]
+        assert project.get_child_nodes("gen") == [node]
+
+    def test_node_equal_to_the_query_path_is_not_a_child(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        project.node("build/gen")
+
+        assert project.get_child_nodes("build/gen") == []
+        assert not project.has_child_nodes("build/gen")
+
+    def test_grandchildren_count(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        deep = project.node("build/a/b/c/deep.c")
+
+        assert project.get_child_nodes("build/a") == [deep]
+        assert project.has_child_nodes("build/a")
+
+    def test_external_absolute_paths(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        outside = project.node("/opt/vendor/lib/thing.a")
+
+        assert project.get_child_nodes("/opt/vendor") == [outside]
+        assert project.get_child_nodes("/opt/other") == []
+
+    def test_has_child_nodes_counts_directory_nodes(self, tmp_path):
+        """has_child_nodes asks "is anything registered under here", so a
+        DirNode counts even though get_child_nodes returns FileNodes only."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        project.dir_node("build/assets/images")
+
+        assert project.has_child_nodes("build/assets")
+        assert project.get_child_nodes("build/assets") == []
+
+    def test_directly_inserted_registry_entries_are_indexed(self, tmp_path):
+        """The repair path: a build script may write project._nodes itself
+        (examples/15_custom_builder does), bypassing node()."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        project.node("build/gen/first.c")
+
+        smuggled = FileNode(Path("build/gen/smuggled.c"))
+        project._nodes[Path("build/gen/smuggled.c")] = smuggled
+
+        assert smuggled in project.get_child_nodes("build/gen")
+
+    def test_index_survives_build_dir_reassignment(self, tmp_path):
+        """build_dir is a public attribute and normalization depends on it."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        node = project.node("build/gen/thing.c")
+        assert project.get_child_nodes("gen") == [node]
+
+        project.build_dir = Path("other")
+
+        # "build/gen" is no longer stripped, so it is a plain path now.
+        assert project.get_child_nodes("build/gen") == [node]
+        assert project.get_child_nodes("gen") == []

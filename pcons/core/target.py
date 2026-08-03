@@ -231,6 +231,7 @@ def _make_default_requirements(
     reqs = UsageRequirements()
     reqs.defines = UniqueList([])
     reqs.include_dirs = UniqueList([])
+    reqs.system_include_dirs = UniqueList([])
     reqs.link_dirs = UniqueList([])
     # compile_flags/link_flags are plain lists, NOT UniqueList: token-level
     # dedup corrupts paired flags (-framework Foo -framework Bar, -Xlinker, -arch,
@@ -327,6 +328,9 @@ class Target:
         # Implicit target deps with propagate=False (output nodes only,
         # no usage requirement propagation).
         "_implicit_target_deps_output_only",
+        # Per-source environment overrides (add_sources(..., env=...)),
+        # keyed by source node path.
+        "_source_envs",
         "_subdir",
         # Utility targets (lupdate, doc generation, ...) set this False:
         # excluded from 'all' and implicit defaults, built only when
@@ -378,6 +382,9 @@ class Target:
         # Implicit target deps (from target.depends(other_target))
         self._implicit_target_deps: list[Target] = []
         self._implicit_target_deps_output_only: list[Target] = []
+        # Sources that compile with an environment other than the target's
+        # (add_sources(..., env=...)), keyed by source node path.
+        self._source_envs: dict[Path, Environment] = {}
 
         from pcons.core.project import Project
 
@@ -673,11 +680,18 @@ class Target:
                 if dep not in node.implicit_deps:
                     node.implicit_deps.append(dep)
 
-    def add_source(self, source: Target | Node | Path | str) -> Target:
+    def add_source(
+        self, source: Target | Node | Path | str, *, env: Environment | None = None
+    ) -> Target:
         """Add a source to this target (fluent API).
 
         A Target source's output files become sources after that Target is
         resolved.
+
+        Args:
+            source: The source to add.
+            env: Compile this one source with a different environment (see
+                :meth:`add_sources`).
 
         Example:
             generated = env.Command(target="gen.cpp", source="gen.y", command="...")
@@ -694,6 +708,8 @@ class Target:
         else:
             node = self._to_node(source)
             self._sources.append(node)
+            if env is not None:
+                self._set_source_env(node, env)
         return self
 
     def add_sources(
@@ -701,6 +717,7 @@ class Target:
         sources: Sequence[Target | Node | Path | str],
         *,
         base: Path | str | None = None,
+        env: Environment | None = None,
     ) -> Target:
         """Add multiple sources to this target (fluent API).
 
@@ -708,13 +725,22 @@ class Target:
             sources: Source files (Targets, Nodes, Paths, or string paths).
                 A Target's output files become sources after it is resolved.
             base: Optional base directory for relative Path/string sources.
+            env: Compile these sources with a different environment than the
+                rest of the target's. The target's own usage requirements
+                (private/public include dirs, defines, and those inherited
+                from dependencies) still apply — only the environment layer
+                changes, which is what per-file flag tweaks want.
 
         Returns:
             self for method chaining.
 
         Example:
-            generated = env.Command(target="gen.cpp", source="gen.y", command="...")
-            target.add_sources([generated, "main.cpp", "util.cpp"], base=src_dir)
+            lib = project.StaticLibrary("core", env, sources=common_sources)
+
+            # One file that miscompiles at -O2
+            with env.override() as careful:
+                careful.cxx.flags.append("-O1")
+                lib.add_sources(["cuda-support.cxx"], env=careful)
         """
         if self._resolved:
             raise RuntimeError(
@@ -752,7 +778,29 @@ class Target:
                     source = Path(self._subdir) / source
                 node = self._to_node(source)
                 self._sources.append(node)
+                if env is not None:
+                    self._set_source_env(node, env)
         return self
+
+    def _set_source_env(self, node: Node, env: Environment) -> None:
+        """Record the environment one source compiles with.
+
+        Two different environments for the same source in one target would
+        make the object file ambiguous — both would write the same path — so
+        that's an error rather than a last-one-wins surprise.
+        """
+        from pcons.core.node import FileNode as _FileNode
+
+        if not isinstance(node, _FileNode):
+            return
+        existing = self._source_envs.get(node.path)
+        if existing is not None and existing is not env:
+            raise ValueError(
+                f"Source '{node.path}' was added to target '{self.name}' twice "
+                f"with different environments. One source compiles once per "
+                f"target; use a separate target if you need two variants."
+            )
+        self._source_envs[node.path] = env
 
     def _to_node(self, source: Node | Path | str) -> Node:
         """Convert a source specification to a Node."""

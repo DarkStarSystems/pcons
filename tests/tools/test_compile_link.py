@@ -80,3 +80,45 @@ class TestDeclaredSourceDeps:
         _propagate_declared_deps(generated, obj)
 
         assert obj.implicit_deps == []
+
+
+class TestObjectIdentity:
+    """One object per (source, environment).
+
+    Effective requirements deliberately exclude ``env.<tool>.flags``, so an
+    environment carrying a define, an arch, or any other per-target flag is
+    invisible to them. Keying objects on requirements alone made two targets
+    share one object file, and the second link silently consumed the first's.
+    """
+
+    def test_different_environments_get_different_objects(self, tmp_path):
+        from pcons.core.project import Project
+
+        (tmp_path / "shared.c").write_text("int f(void){return 0;}\n")
+        project = Project("ids", root_dir=tmp_path, build_dir="build")
+
+        first = project.Environment(toolchain="c")
+        first.cc.defines.append("VARIANT=1")
+        second = project.Environment(toolchain="c")
+        second.cc.defines.append("VARIANT=2")
+
+        one = project.StaticLibrary("one", first, sources=["shared.c"])
+        two = project.StaticLibrary("two", second, sources=["shared.c"])
+        project.resolve()
+
+        assert one.intermediate_nodes[0] is not two.intermediate_nodes[0]
+        assert one.intermediate_nodes[0].path != two.intermediate_nodes[0].path
+
+    def test_one_environment_still_shares_objects(self, tmp_path):
+        """The sharing this cache exists for must survive the fix."""
+        from pcons.core.project import Project
+
+        (tmp_path / "shared.c").write_text("int f(void){return 0;}\n")
+        project = Project("share", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain="c")
+
+        one = project.StaticLibrary("one", env, sources=["shared.c"])
+        two = project.StaticLibrary("two", env, sources=["shared.c"])
+        project.resolve()
+
+        assert one.intermediate_nodes[0] is two.intermediate_nodes[0]

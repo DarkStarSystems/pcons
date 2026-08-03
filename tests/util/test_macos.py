@@ -216,3 +216,65 @@ class TestCreateUniversalBinary:
         assert isinstance(result, Target)
         assert len(result.output_nodes) > 0
         assert result.output_nodes[0].path == Path("build/universal/libtest.a")
+
+    def test_unresolved_targets_still_reach_the_lipo_command(self, tmp_path):
+        """Targets are resolved lazily, so a freshly-declared one has no
+        output_nodes yet. Reading them here used to drop the input silently —
+        or raise "requires at least one input" for the documented example."""
+        from pcons.core.project import Project
+        from pcons.generators.generator import BaseGenerator
+        from pcons.generators.ninja import NinjaGenerator
+
+        (tmp_path / "lib.c").write_text("int f(void){return 0;}\n")
+        project = Project("uni", root_dir=tmp_path, build_dir="build")
+
+        libs = []
+        for arch in ("arm64", "x86_64"):
+            env = project.Environment(toolchain="c")
+            env.set_target_arch(arch)
+            libs.append(project.StaticLibrary(f"lib-{arch}", env, sources=["lib.c"]))
+
+        # No project.resolve() here: that is the point.
+        universal = create_universal_binary(
+            project, "lib_universal", inputs=libs, output="build/libtest.a"
+        )
+        project.Default(universal)
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        lipo_edge = next(
+            line for line in content.splitlines() if line.startswith("build libtest.a:")
+        )
+        assert "liblib-arm64.a" in lipo_edge
+        assert "liblib-x86_64.a" in lipo_edge
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS only")
+class TestMultiArchObjectIdentity:
+    """One object per (source, environment) — not per source.
+
+    Effective requirements deliberately exclude env.<tool>.flags, so an
+    environment carrying -arch (or any other per-target flag) is invisible to
+    them. Objects keyed on requirements alone made two architectures share one
+    object file, and the second link consumed the first's objects.
+    """
+
+    def test_per_arch_targets_get_their_own_objects(self, tmp_path):
+        from pcons.core.project import Project
+
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+        project = Project("uni", root_dir=tmp_path, build_dir="build")
+
+        progs = []
+        for arch in ("arm64", "x86_64"):
+            env = project.Environment(toolchain="c")
+            env.set_target_arch(arch)
+            progs.append(project.Program(f"hello-{arch}", env, sources=["main.c"]))
+
+        project.resolve()
+
+        objects = [prog.intermediate_nodes[0] for prog in progs]
+        assert objects[0] is not objects[1]
+        assert objects[0].path != objects[1].path

@@ -9,6 +9,7 @@ Users can customize the copy commands via the tool namespace
 from __future__ import annotations
 
 import logging
+import re
 import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -123,8 +124,47 @@ def _install_role(dest: Path) -> PathRole | None:
     return "install_output" if _is_rooted(dest) else None
 
 
+#: Characters that would be confusing or illegal in a target name. Dots are
+#: kept: today's names already carry them (install_icon.png).
+_UNSAFE_IN_NAME = re.compile(r"[^A-Za-z0-9._+-]")
+
+
+def _dest_suffix(project: Project, dest: Path) -> str:
+    """Flatten a destination path into a target-name suffix.
+
+    Naming an install target after the destination's *basename* alone makes
+    every bundle collide with every other — 279 plugins each installing into
+    ``<name>.bundle/Contents/MacOS`` produce one ``install_MacOS`` and 278
+    renames. The whole path makes the name unique by construction.
+
+    Canonicalized (root-relative when under the project root) so the name
+    doesn't embed an absolute path, and computed *before* the install prefix
+    is applied, so PCONS_INSTALL_PREFIX can't leak into target names and make
+    build.ninja vary between runs.
+    """
+    canonical = project._path_resolver.canonicalize(dest)
+    parts = canonical.parts[1:] if canonical.anchor else canonical.parts
+    return "_".join(_UNSAFE_IN_NAME.sub("_", part) for part in parts)
+
+
+def _install_target_name(project: Project, dest: Path, prefix: str) -> str:
+    """``<prefix><flattened dest>``, or just *prefix* for the "." destination.
+
+    The degenerate case keeps its historical name rather than becoming a bare
+    "install", which would collide with the conventional
+    ``project.Alias("install", ...)``.
+    """
+    suffix = _dest_suffix(project, dest)
+    return f"{prefix}_{suffix}" if suffix else prefix
+
+
 def _deduplicate_target_name(project: Project, base_name: str) -> str:
-    """Generate a unique target name, appending a numeric suffix if needed."""
+    """Generate a unique target name, appending a numeric suffix if needed.
+
+    A safety net now that names derive from the whole destination path: it
+    fires only for an explicitly repeated ``name=`` or two distinct paths that
+    flatten alike (``a_b/c`` vs ``a/b_c``), both of which are worth a warning.
+    """
     target_name = base_name
     counter = 1
     while project.get_target(target_name, False) is not None:
@@ -548,7 +588,7 @@ class InstallBuilder:
         """
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
-            project, name or f"install_{dest_dir.name}"
+            project, name or _install_target_name(project, dest_dir, "install")
         )
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
@@ -603,7 +643,12 @@ class InstallAsBuilder:
             )
 
         dest = Path(dest)
-        target_name = _deduplicate_target_name(project, name or f"install_{dest.name}")
+        target_name = _deduplicate_target_name(
+            # InstallAs names a *file*, so the whole path goes into the name:
+            # two files installed into one directory must not collide.
+            project,
+            name or _install_target_name(project, dest, "install"),
+        )
         dest = _apply_install_prefix(project, dest, no_prefix)
 
         return _make_install_target(
@@ -646,7 +691,7 @@ class InstallDirBuilder:
         """
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
-            project, name or f"install_dir_{dest_dir.name}"
+            project, name or _install_target_name(project, dest_dir, "install_dir")
         )
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
