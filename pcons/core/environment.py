@@ -474,9 +474,14 @@ class Environment(_EnvironmentStubs):
     def override(self, **kwargs: Any) -> Iterator[Environment]:
         """Build with a temporarily modified copy of this environment.
 
-        Yields a full clone; the original is untouched. Modify the clone in
-        the block — it is an ordinary Environment, so a flag list is an
-        ordinary Python list:
+        This is :meth:`clone` plus a scope: it yields a full clone, leaving
+        the original untouched, and the block shows where the modified
+        environment applies. Nothing requires the block — a clone you keep
+        and mutate behaves identically, and is the better shape when the
+        modified environment outlives one stretch of the build script.
+
+        Modify the clone directly; it is an ordinary Environment, so a flag
+        list is an ordinary Python list:
 
             with env.override() as tuned:
                 tuned.cxx.flags.append("-O1")                    # add
@@ -585,8 +590,8 @@ class Environment(_EnvironmentStubs):
         return (
             f"env.override({key}=[...]) {discards}\n"
             f"\n"
-            f"  Modify the list in the block, where the operation is explicit:\n"
-            f"      with env.override() as e:\n"
+            f"  Modify a copy of the environment, where the operation is explicit:\n"
+            f"      with env.override() as e:      # or: e = env.clone()\n"
             f"{shown_examples}\n"
             f"\n"
             f"  The keyword form is for scalars: "

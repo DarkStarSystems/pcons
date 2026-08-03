@@ -2422,7 +2422,7 @@ app_profile = project.Program("app_profile", profile_env)
 
 ### Temporary Environment Overrides
 
-`env.override()` yields a temporary clone of the environment; the original is untouched. **Modify the clone in the block** — it's an ordinary `Environment`, so a flag list is an ordinary Python list and every operation is just Python:
+`env.override()` yields a temporary clone of the environment; the original is untouched. **Modify the clone** — it's an ordinary `Environment`, so a flag list is an ordinary Python list and every operation is just Python:
 
 ```python
 with env.override() as tuned:
@@ -2447,6 +2447,17 @@ with env.override(variant="debug", cc__cmd="clang") as temp_env:
 ```
 
 Tool settings use `tool__attr` notation because Python keywords can't contain a dot.
+
+`override()` is `clone()` plus a scope, and the block isn't required — it just saves the assignment and shows where the modified environment applies. When the modified environment outlives one stretch of the script, keep a clone instead:
+
+```python
+careful = env.clone()
+careful.cc.flags.remove("-O2")
+careful.cc.flags.append("-O1")
+
+lib.add_sources(["cuda-support.cxx"], env=careful)
+lib.add_sources(["other-touchy.cxx"], env=careful)
+```
 
 !!! warning "Keyword arguments don't take lists"
     `env.override(cxx__flags=["-O1"])` raises. It can only mean "assign", but at a call site it *reads* as "add `-O1`" — and assigning would silently discard every flag the environment already carried (`-std=c++17`, the warning set, `-isystem` paths). Since which of add / remove / reorder / replace you meant can't be inferred, say it in the block:
