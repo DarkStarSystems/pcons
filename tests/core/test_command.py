@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for env.Command() functionality."""
 
+import shlex
+import sys
 from pathlib import Path
 
 import pytest
@@ -11,6 +13,10 @@ from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.subst import SourcePath, TargetPath
 from pcons.generators.generator import BaseGenerator
+
+# cmd.exe reads a leading "/" as a switch and needs /d to change drive, so a
+# `cd` in a generated command is spelled differently per platform.
+CD = "cd /d" if sys.platform == "win32" else "cd"
 
 
 class TestGenericCommandBuilder:
@@ -1129,11 +1135,15 @@ class TestWorkingDirectory:
         return (tmp_path / "build" / "Makefile").read_text()
 
     def _command_line(self, content, marker="command ="):
-        return next(
+        line = next(
             line.strip()
             for line in content.splitlines()
             if marker in line and "out.txt" not in line.split(marker)[0]
         )
+        # A moved command contains "&&", so on Windows it is routed through
+        # cmd.exe. Unwrap it: these tests are about the cd, not the routing.
+        prefix, _, rest = line.partition('cmd.exe /s /c "')
+        return prefix + rest[:-1] if rest else line
 
     def test_absolute_cwd_is_stored_on_the_edge(self, tmp_path, gcc_toolchain):
         project = self._project(
@@ -1168,8 +1178,8 @@ class TestWorkingDirectory:
         command = self._command_line(content)
         # Back to the build dir, so anything wrapped around the command (a
         # post-build step, write_if_different) still finds its files.
-        assert command.endswith("&& cd build")
-        assert "cd .. && " in command
+        assert command.endswith(f"&& {CD} build")
+        assert f"{CD} .. && " in command
 
     def test_ninja_paths_are_relative_to_the_working_directory(
         self, tmp_path, gcc_toolchain
@@ -1257,8 +1267,8 @@ class TestWorkingDirectory:
             for line in content.splitlines()
             if line.startswith("\t") and " gen " in line
         )
-        assert recipe.startswith(f"cd {tmp_path} && ")
-        assert recipe.endswith(f"&& cd {tmp_path / 'build'}")
+        assert recipe.startswith(f"cd {shlex.quote(str(tmp_path))} && ")
+        assert recipe.endswith(f"&& cd {shlex.quote(str(tmp_path / 'build'))}")
 
     def test_makefile_paths_are_absolute_in_a_moved_command(
         self, tmp_path, gcc_toolchain
@@ -1269,10 +1279,9 @@ class TestWorkingDirectory:
 
         # A Makefile already spells sources absolutely; the output has to
         # follow, or it lands wherever the command was told to run.
-        assert (
-            f"gen {tmp_path / 'in.txt'} {tmp_path / 'build' / 'gen' / 'out.txt'}"
-            in (content)
-        )
+        source = shlex.quote(str(tmp_path / "in.txt"))
+        output = shlex.quote(str(tmp_path / "build" / "gen" / "out.txt"))
+        assert f"gen {source} {output}" in content
 
     def test_write_if_different_wrapper_is_not_moved(self, tmp_path, gcc_toolchain):
         content = self._ninja(
@@ -1284,10 +1293,10 @@ class TestWorkingDirectory:
         )
 
         command = self._command_line(content)
-        before, after = command.split(" && cd .. && ", 1)
+        before, after = command.split(f" && {CD} .. && ", 1)
         # Both halves of the stash wrapper run where ninja put us: the build
         # directory, which is where $out is relative to.
         assert "stable_output --pre $out" in before
-        assert after.split(" && cd build && ", 1)[1].endswith(
+        assert after.split(f" && {CD} build && ", 1)[1].endswith(
             "stable_output --post $out"
         )

@@ -3,6 +3,7 @@
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,9 @@ from pcons.tools.stable_output import (
     restore_unchanged,
     save,
 )
+
+# cmd.exe reads a leading "/" as a switch and needs /d to change drive.
+CD = "cd /d" if sys.platform == "win32" else "cd"
 
 
 class TestStableOutput:
@@ -168,8 +172,8 @@ class TestChangedDirectoryIsCaught:
         command = next(
             line for line in content.splitlines() if "stable_output --pre" in line
         )
-        pre, rest = command.split(" && cd .. && ", 1)
-        moved, post = rest.split(" && cd build && ", 1)
+        pre, rest = command.split(f" && {CD} .. && ", 1)
+        moved, post = rest.split(f" && {CD} build && ", 1)
         assert "stable_output --pre $out" in pre
         assert "stable_output --post $out" in post
         assert "stable_output" not in moved
