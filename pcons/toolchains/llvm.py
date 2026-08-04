@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.configure.platform import get_platform
 from pcons.core.builder import CommandBuilder
+from pcons.core.builder_registry import builder
 from pcons.core.subst import SourcePath, TargetPath
+from pcons.core.target import Target
 from pcons.toolchains.gnu_common import (
     gnu_archiver_builders,
     gnu_archiver_vars,
@@ -21,12 +23,17 @@ from pcons.toolchains.gnu_common import (
     gnu_link_vars,
 )
 from pcons.toolchains.unix import UnixToolchain
+from pcons.tools.compile_link import CompileLinkFactory
 from pcons.tools.tool import BaseTool
 from pcons.tools.toolchain import CXX_MODULE_INTERFACE_SUFFIXES
+from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from pcons.core.builder import Builder
-    from pcons.core.node import FileNode
+    from pcons.core.environment import Environment
+    from pcons.core.node import FileNode, Node
     from pcons.core.project import Project
     from pcons.core.toolconfig import ToolConfig
     from pcons.tools.toolchain import SourceHandler
@@ -254,6 +261,12 @@ class LlvmLinker(BaseTool):
         return self._find_tool_config(config, "clang")
 
 
+#: Target type for a linked .metallib. Not one of the four the shared
+#: compile/link step knows how to finish, so it compiles the sources and
+#: leaves the link to MetalLibraryFactory, below.
+METAL_LIBRARY_TARGET_TYPE = "metal_library"
+
+
 class MetalCompiler(BaseTool):
     """Apple Metal shader toolchain (macOS only).
 
@@ -351,6 +364,17 @@ class LlvmToolchain(UnixToolchain):
 
     def __init__(self) -> None:
         super().__init__("llvm")
+
+    def get_output_prefix(self, target_type: str) -> str:
+        """A .metallib takes its name verbatim; everything else is Unix."""
+        if target_type == METAL_LIBRARY_TARGET_TYPE:
+            return ""
+        return super().get_output_prefix(target_type)
+
+    def get_output_suffix(self, target_type: str) -> str:
+        if target_type == METAL_LIBRARY_TARGET_TYPE:
+            return ".metallib"
+        return super().get_output_suffix(target_type)
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled.
@@ -687,6 +711,105 @@ class LlvmToolchain(UnixToolchain):
 
 # =============================================================================
 # Registration
+class MetalLibraryFactory(CompileLinkFactory):
+    """Compiles .metal sources to .air, then links them into a .metallib.
+
+    The compile half is the ordinary one — the metal source handler turns
+    each .metal into an .air in ``intermediate_nodes``. The shared step then
+    finds a target type it doesn't finish and leaves ``output_nodes`` empty,
+    so the link lands here, in the toolchain that owns the format.
+    """
+
+    def resolve(self, target: Target, env: Environment | None) -> None:
+        super().resolve(target, env)
+        if env is None or target.output_nodes:
+            return
+        if not target.intermediate_nodes:
+            logger.warning(
+                "Target '%s' has no sources - no output will be generated",
+                target.name,
+            )
+            return
+
+        name = self._apply_output_naming(target, env, METAL_LIBRARY_TARGET_TYPE)
+        path = target.build_dir / target.path_resolver.normalize_target_path(name)
+
+        node = self.project.node(path)
+        node.add_inputs(target.intermediate_nodes)
+        # No link context: metallib takes .air files and nothing else — the
+        # compile flags (-I, -std=metal3.0) are not accepted here, which is
+        # why the tool keeps a separate libflags.
+        node._build_info = {
+            "tool": "metal",
+            "command_var": "metallibcmd",
+            "sources": target.intermediate_nodes,
+            "env": env,
+        }
+
+        target.output_nodes.append(node)
+        env.register_node(node)
+
+
+@builder(
+    "MetalLibrary",
+    target_type=METAL_LIBRARY_TARGET_TYPE,
+    requires_env=True,
+    factory_class=MetalLibraryFactory,
+    platforms=["darwin"],
+    description="Compile .metal shaders and link them into a .metallib",
+)
+class MetalLibraryBuilder:
+    """A .metallib built from .metal sources — the form an application loads.
+
+    `env.metal.Object` / `env.metal.Library` remain available for driving the
+    two steps by hand; they return nodes, like every tool-namespace builder.
+    This is the Target-returning spelling, so a metallib can be a default
+    target, an alias member, or something to Install.
+    """
+
+    @staticmethod
+    def create_target(
+        project: Project,
+        name: str,
+        env: Environment,
+        sources: Sequence[str | Path | Node] | None = None,
+        depends: Sequence[Target | Node | Path | str] | None = None,
+        defined_at: SourceLocation | None = None,
+    ) -> Target:
+        """Create a MetalLibrary target.
+
+        Args:
+            project: The project to add the target to.
+            name: Target name; the output is ``<name>.metallib``.
+            env: Environment whose toolchain provides the metal tool.
+            sources: ``.metal`` shader sources.
+            depends: Extra implicit dependencies (see Program).
+            defined_at: Source location where this was defined.
+
+        Example:
+            shaders = project.MetalLibrary("sapphire", env,
+                                           sources=["blur.metal", "warp.metal"])
+            project.Default(shaders)
+        """
+        from pcons.builders.compile import _validate_builder_name
+
+        _validate_builder_name(name, "MetalLibrary")
+        target = Target(
+            name,
+            target_type=METAL_LIBRARY_TARGET_TYPE,
+            defined_at=defined_at or get_caller_location(),
+        )
+        target._env = env
+        target._builder_name = "MetalLibrary"
+
+        if sources:
+            target.add_sources(sources)
+        if depends:
+            target.depends(*depends)
+
+        return target
+
+
 # =============================================================================
 
 from pcons.tools.toolchain import toolchain_registry  # noqa: E402

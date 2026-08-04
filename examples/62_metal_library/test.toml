@@ -1,0 +1,24 @@
+# Test configuration for the metal-library example
+
+[test]
+description = "project.MetalLibrary compiles .metal shaders and links them into a loadable .metallib"
+
+expected_outputs = [
+    "build/obj.effects/src/blur.metal.air",
+    "build/obj.effects/src/warp.metal.air",
+    "build/effects.metallib",
+]
+
+[verify]
+# metal-readobj only recognizes a real, well-formed metallib.
+commands = [
+    { run = "xcrun metal-readobj build/effects.metallib", expect_stdout = "Format: MetalLib" },
+]
+
+[skip]
+# Metal is an Apple toolchain, and xcrun ships with Xcode.
+platforms = ["linux", "windows"]
+requires = ["xcrun"]
+# The xcode generator has no notion of a metallib target, so it emits an
+# empty project. ninja and make both build this correctly.
+generators = ["xcode"]

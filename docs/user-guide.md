@@ -2038,6 +2038,21 @@ Pcons toolchains support various source file types beyond standard C/C++:
 | `.rc` | Windows resource | MSVC, Clang-CL |
 | `.metal` | Metal shaders (macOS) | LLVM |
 
+#### Metal shaders (macOS)
+
+`project.MetalLibrary` is the whole pipeline — each `.metal` source compiles to an `.air`, and the `.air` files link into the single `.metallib` an application loads at runtime:
+
+```python
+shaders = project.MetalLibrary(
+    "effects", env, sources=["src/blur.metal", "src/warp.metal"]
+)
+project.Default(shaders)
+```
+
+It returns a `Target`, so the library can be a default target, an alias member, or something to `Install`, exactly like a program or a shared library. The output is named verbatim (`effects.metallib`) — no `lib` prefix, since shaders are looked up by name at runtime.
+
+`env.metal.Object` and `env.metal.Library` drive the two steps separately and return nodes, like every tool-namespace builder. Use those only when an intermediate `.air` is wanted for its own sake. See `examples/62_metal_library`.
+
 #### C++20 modules
 
 When a target has at least one source whose extension is in

@@ -178,6 +178,16 @@ if TYPE_CHECKING:
             """Create a macOS .bundle or .plugin structure [darwin only]"""
             ...
 
+        def MetalLibrary(
+            self,
+            name: str,
+            env: Env,
+            sources: Sequence[str | Path | Node] | None = None,
+            depends: Sequence[Target | Node | Path | str] | None = None,
+        ) -> Target:
+            """A .metallib built from .metal sources — the form an application loads. [darwin only]"""
+            ...
+
         def Msix(
             self,
             env: Env,

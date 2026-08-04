@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which is the point of the explicit form.
 - **`Toolchain.source_suffixes()`** enumerates the extensions a toolchain compiles, for
   diagnostics. It probes `get_source_handler()`, so it can under-report but never lie.
+- **`project.MetalLibrary(name, env, sources=["a.metal", ...])`** is the whole Metal
+  pipeline in one target: each shader compiles to an `.air`, and the `.air` files link
+  into the `.metallib` an application loads. It returns a `Target`, so a metallib can be
+  a default target, an alias member, or something to `Install` — `env.metal.Library`
+  returns nodes, like every tool-namespace builder, which left a metallib unable to be a
+  build target at all. The output is named verbatim (no `lib` prefix), since shaders are
+  looked up by name at runtime. See `examples/62_metal_library`.
 - **`env.metal.Library`** links `.air` files into a `.metallib` (`xcrun metallib`), so the
   Metal pipeline no longer stops one step short of the only form an application can
   load. Its own `libflags` var, since the compile flags (`-I`, `-std=metal3.0`) aren't

@@ -403,6 +403,78 @@ class TestMetalCompiler:
         assert "-split-module" not in compile_command
 
 
+class TestMetalLibraryTarget:
+    """`project.MetalLibrary` — the Target-returning spelling.
+
+    `env.metal.Library` returns nodes, like every tool-namespace builder, so
+    a metallib built that way could not be a default target, an alias member,
+    or something to Install. A .metallib is a final artifact, so it needs a
+    project-level builder the way a program or a shared library does.
+    """
+
+    def test_returns_a_target(self, tmp_path):
+        from pcons.core.target import Target
+
+        project = _metal_project(tmp_path, "mlib", shaders=("a", "b"))
+        env = _metal_env(project)
+
+        lib = project.MetalLibrary(
+            "shaders", env, sources=["shaders/a.metal", "shaders/b.metal"]
+        )
+
+        assert isinstance(lib, Target)
+
+    def test_compiles_each_shader_and_links_one_metallib(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        project = _metal_project(tmp_path, "mlib", shaders=("a", "b"))
+        env = _metal_env(project)
+        project.MetalLibrary(
+            "shaders", env, sources=["shaders/a.metal", "shaders/b.metal"]
+        )
+
+        content = _generate_ninja(project)
+
+        lib_rule = re.search(r"rule (metal_metallibcmd_\w+)", content)
+        assert lib_rule
+        assert "build obj.shaders/shaders/a.metal.air:" in content
+        assert "build obj.shaders/shaders/b.metal.air:" in content
+        assert (
+            f"build shaders.metallib: {lib_rule.group(1)} "
+            "obj.shaders/shaders/a.metal.air obj.shaders/shaders/b.metal.air" in content
+        )
+
+    def test_output_is_named_verbatim(self, tmp_path):
+        """No "lib" prefix: a .metallib is loaded by name at runtime."""
+        project = _metal_project(tmp_path, "mlib")
+        env = _metal_env(project)
+
+        lib = project.MetalLibrary("shaders", env, sources=["shaders/a.metal"])
+        project.resolve()
+
+        assert [n.path.name for n in lib.output_nodes] == ["shaders.metallib"]
+
+    def test_can_be_a_default_target(self, tmp_path, monkeypatch):
+        """The whole point of returning a Target (gap G31)."""
+        monkeypatch.chdir(tmp_path)
+        project = _metal_project(tmp_path, "mlib")
+        env = _metal_env(project)
+
+        lib = project.MetalLibrary("shaders", env, sources=["shaders/a.metal"])
+        project.Default(lib)
+
+        assert "default shaders.metallib" in _generate_ninja(project)
+
+    def test_no_sources_warns_rather_than_producing_a_lib(self, tmp_path, caplog):
+        project = _metal_project(tmp_path, "mlib")
+        env = _metal_env(project)
+
+        lib = project.MetalLibrary("shaders", env, sources=[])
+        project.resolve()
+
+        assert lib.output_nodes == []
+        assert "no sources" in caplog.text
+
+
 class TestLlvmCompileFlagsForTargetType:
     """Tests for get_compile_flags_for_target_type method."""
 
