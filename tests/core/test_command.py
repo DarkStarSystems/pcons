@@ -1194,6 +1194,19 @@ class TestWorkingDirectory:
         assert "  source_0 = in.txt\n" in content
         assert "  target_0 = build/gen/out.txt\n" in content
 
+    def test_moved_paths_use_native_separators(self, tmp_path, gcc_toolchain):
+        """A moved edge is routed through cmd.exe on Windows, and cmd.exe
+        reads `build/tool.exe` as the command `build` with a switch."""
+        content = self._ninja(
+            tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd=tmp_path
+        )
+        target_line = next(
+            line for line in content.splitlines() if line.strip().startswith("target_0")
+        )
+
+        expected = str(Path("build/gen/out.txt"))
+        assert target_line.strip() == f"target_0 = {expected}"
+
     def test_a_bare_target_name_still_resolves_to_the_build_dir(
         self, tmp_path, gcc_toolchain
     ):

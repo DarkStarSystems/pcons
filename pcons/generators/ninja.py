@@ -399,12 +399,23 @@ class NinjaGenerator(BaseGenerator):
         return self._output_dir / self._make_output_relative(path_obj)
 
     def _path_at(self, path: Path | str, cwd: Path, *, output: bool = False) -> str:
-        """Render *path* as a command running in *cwd* sees it."""
+        """Render *path* as a command running in *cwd* sees it.
+
+        Separators stay native on Windows. Everywhere else pcons writes
+        forward slashes and ninja passes them through happily, but a moved
+        edge always contains ``&&``, so it is routed through ``cmd.exe`` —
+        which reads ``build/tool.exe`` as the command ``build`` with a
+        ``/tool.exe`` switch. Only a re-anchored path can acquire a directory
+        component it didn't have, so this is the one place it bites.
+        """
         absolute = self._output_absolute(path) if output else self._absolute(path)
         try:
-            return os.path.relpath(absolute, cwd).replace("\\", "/")
+            rendered = os.path.relpath(absolute, cwd)
         except ValueError:
-            return str(absolute).replace("\\", "/")  # different Windows drive
+            rendered = str(absolute)  # different Windows drive
+        if get_platform().is_windows:
+            return rendered.replace("/", "\\")
+        return rendered.replace("\\", "/")
 
     def _extra_build_commands(
         self,
