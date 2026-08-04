@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from pcons.core.target import Target
 from pcons.toolchains.gcc import GccToolchain
 from pcons.toolchains.llvm import LlvmToolchain
@@ -28,7 +30,13 @@ class TestTargetSetGet:
 
     def test_get_with_default(self, test_project):  # noqa: F811
         t = Target("lib", target_type="shared_library")
-        assert t.get_option("missing_key", "fallback") == "fallback"
+        assert t.get_option("install_name", "fallback") == "fallback"
+
+    def test_undeclared_option_raises(self, test_project):  # noqa: F811
+        """A typo used to be stored and read by nothing."""
+        t = Target("lib", target_type="shared_library")
+        with pytest.raises(ValueError, match="Unknown target option 'install_names'"):
+            t.set_option("install_names", "@rpath/libcustom.dylib")
 
 
 # ── Toolchain.get_link_flags_for_target ───────────────────────────────────────

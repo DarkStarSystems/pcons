@@ -3750,6 +3750,8 @@ Ninja handles this natively; GNU make 4.x does too. GNU make 3.81 — still `/us
 |--------|-------------|
 | `target.add_source(path)` | Add a source file |
 | `target.add_sources(paths)` | Add multiple source files |
+| `target.add_sources(paths, env=e)` | Compile those sources with a different environment; on a source the target already has, sets its environment in place |
+| `target.set_option(key, value)` | Set a builder/toolchain option (e.g. `install_name`) |
 | `target.link(t, "m")` | Link a dependency (or raw lib name) and re-export it to consumers |
 | `target.link_private(t, "m")` | Link a dependency (or raw lib name), keeping it local |
 | `target.add_dependency(t)` | Add a non-link build dependency |
@@ -3765,6 +3767,8 @@ Ninja handles this natively; GNU make 4.x does too. GNU make 3.81 — still `/us
 | `target.private.compile_flags` | Flags for this target only |
 
 These are the names pcons reads. Any other name raises — the lists are consumed by name, so a typo like `lib_dirs` would otherwise be stored and never looked at, and the build would fail somewhere else entirely (`ld: library 'Foo' not found`, naming the library rather than the mistake). A toolchain or extension that consumes a name of its own declares it with `pcons.core.target.register_usage_requirement()`.
+
+The same rule applies to the other named surfaces: `set_option()` takes only options a builder or toolchain declared with `register_target_option()`, `env.<tool>.<var> = ...` only assigns variables the tool declared (use `env.<tool>.set(name, value)` to introduce one), and adding a source a target already has raises unless `env=` is given. In each case the alternative is a value nothing reads.
 
 ### Environment Methods
 

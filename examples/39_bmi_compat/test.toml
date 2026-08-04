@@ -24,7 +24,7 @@ windows = ["gcc", "llvm", "msvc"]
 
 [verify]
 commands = [
-    { run = "./build/app", expect_exit_code = 0, expect_output_contains = "answer = 42" },
+    { run = "./build/app", expect_returncode = 0, expect_stdout = "answer = 42" },
 ]
 
 [[rebuild]]

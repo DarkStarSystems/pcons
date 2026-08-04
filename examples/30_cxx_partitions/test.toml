@@ -14,7 +14,7 @@ expected_outputs = [
 
 [verify]
 commands = [
-    { run = "./build/hello", expect_exit_code = 0 },
+    { run = "./build/hello", expect_returncode = 0 },
 ]
 
 [skip]

@@ -16,7 +16,7 @@ windows = ["msvc"]
 
 [verify]
 commands = [
-    { run = "./build/hello", expect_exit_code = 0, expect_output_contains = "Hello, modules!" },
+    { run = "./build/hello", expect_returncode = 0, expect_stdout = "Hello, modules!" },
 ]
 
 [skip]

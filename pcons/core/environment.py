@@ -1055,10 +1055,10 @@ class Environment(_EnvironmentStubs):
             return
 
         link = self.link
-        if not hasattr(link, "frameworks"):
-            link.frameworks = []
-        if not hasattr(link, "frameworkdirs"):
-            link.frameworkdirs = []
+        if "frameworks" not in link:
+            link.set("frameworks", [])
+        if "frameworkdirs" not in link:
+            link.set("frameworkdirs", [])
 
         for name in names:
             if name not in link.frameworks:

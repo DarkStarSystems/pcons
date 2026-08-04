@@ -15,8 +15,8 @@ expected_outputs = [
 [verify]
 # Verify the generated project.pbxproj contains expected content
 commands = [
-    { run = "grep -q 'PBXNativeTarget' build/hello_xcode.xcodeproj/project.pbxproj", expect_exit_code = 0 },
-    { run = "grep -q 'hello' build/hello_xcode.xcodeproj/project.pbxproj", expect_exit_code = 0 },
+    { run = "grep -q 'PBXNativeTarget' build/hello_xcode.xcodeproj/project.pbxproj", expect_returncode = 0 },
+    { run = "grep -q 'hello' build/hello_xcode.xcodeproj/project.pbxproj", expect_returncode = 0 },
 ]
 
 [skip]

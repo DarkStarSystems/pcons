@@ -126,6 +126,51 @@ def known_usage_requirements() -> frozenset[str]:
     return frozenset(_KNOWN_USAGE_REQUIREMENTS)
 
 
+# Target options (target.set_option()), name → what consumes it. Core defines
+# none: an option means something only to the builder or toolchain that reads
+# it, and that's what declares it here.
+_KNOWN_TARGET_OPTIONS: dict[str, str] = {}
+
+
+def register_target_option(name: str, description: str) -> None:
+    """Declare a target option a builder or toolchain consumes.
+
+    Makes ``target.set_option(name, ...)`` legal; an undeclared name raises,
+    since nothing would read it. The description is shown when a set_option()
+    call misses. Registration is process-wide and idempotent.
+    """
+    _KNOWN_TARGET_OPTIONS[name] = description
+
+
+def known_target_options() -> dict[str, str]:
+    """Every target option currently declared, name → description."""
+    return dict(_KNOWN_TARGET_OPTIONS)
+
+
+def _unknown_option_message(key: str) -> str:
+    """Explain an unrecognized target option, and guess the intent."""
+    import difflib
+
+    known = sorted(_KNOWN_TARGET_OPTIONS)
+    message = (
+        f"Unknown target option '{key}'. No builder or toolchain reads it, so "
+        f"setting it would have no effect on the build."
+    )
+    close = difflib.get_close_matches(key, known, n=1, cutoff=0.6)
+    if close:
+        message += f" Did you mean '{close[0]}'?"
+    if known:
+        message += "\n  Known options:\n" + "\n".join(
+            f"    {name}: {_KNOWN_TARGET_OPTIONS[name]}" for name in known
+        )
+    else:
+        message += "\n  No options are declared."
+    return message + (
+        "\n  A builder or toolchain that reads its own option declares it with "
+        "pcons.core.target.register_target_option()."
+    )
+
+
 class UsageRequirements(_UsageRequirementsStubs):
     """Requirements that propagate from a target to its consumers (CMake-style):
     when A depends on B, B's public usage requirements are added to A's build.
@@ -919,15 +964,22 @@ class Target:
         """Set a builder/toolchain option on this target (fluent API).
 
         The core does not interpret these values — their meaning is defined
-        by the builder or toolchain. E.g. ``"install_name"``: shared-library
-        install name (macOS) or SONAME (Linux); ``""`` disables the
-        automatic default. Returns self for chaining.
+        by the builder or toolchain that declared the option with
+        :func:`register_target_option`. Returns self for chaining.
+
+        Raises:
+            ValueError: If no builder or toolchain declared ``key``, so
+                nothing would read it.
         """
+        if key not in _KNOWN_TARGET_OPTIONS:
+            raise ValueError(_unknown_option_message(key))
         self._builder_data[key] = value
         return self
 
     def get_option(self, key: str, default: Any = None) -> Any:
         """Get an option previously set with :meth:`set_option`."""
+        if key not in _KNOWN_TARGET_OPTIONS:
+            raise ValueError(_unknown_option_message(key))
         return self._builder_data.get(key, default)
 
     def pre_build(self, command: str) -> Target:

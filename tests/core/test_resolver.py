@@ -293,7 +293,6 @@ class TestResolverTargetTypes:
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
-        env.cc.linkcmd = "gcc $SOURCES -o $TARGET"
 
         target = project.Program("myapp", env, sources=[str(src_file)])
         project.resolve()
@@ -314,7 +313,6 @@ class TestResolverTargetTypes:
         env = project.Environment(toolchain=gcc_toolchain)
         env.add_tool("cc")
         env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
-        env.cc.sharedcmd = "gcc -shared $SOURCES -o $TARGET"
 
         target = project.SharedLibrary("mylib", env, sources=[str(src_file)])
         project.resolve()

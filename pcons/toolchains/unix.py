@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from pcons.configure.platform import get_platform
 from pcons.core.preset import Preset, ToolContribution
 from pcons.core.subst import TargetPath
+from pcons.core.target import register_target_option
 from pcons.tools.toolchain import BaseToolchain
 from pcons.util.macos import apple_sdk_for_triple
 
@@ -23,6 +24,12 @@ if TYPE_CHECKING:
     from pcons.tools.toolchain import SourceHandler
 
 logger = logging.getLogger(__name__)
+
+register_target_option(
+    "install_name",
+    'shared-library install name (macOS) or SONAME (Linux); "" disables the '
+    "automatic default",
+)
 
 
 class UnixToolchain(BaseToolchain):

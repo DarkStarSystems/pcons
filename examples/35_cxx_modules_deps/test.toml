@@ -16,7 +16,7 @@ darwin = ["llvm"]
 windows = ["msvc", "gcc"]
 
 [verify]
-commands = [{ run = "./build/hello", expect_exit_code = 0 }]
+commands = [{ run = "./build/hello", expect_returncode = 0 }]
 
 
 [[rebuild]]

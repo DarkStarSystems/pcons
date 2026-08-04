@@ -416,12 +416,30 @@ _TOOLCONFIG_VAR_TYPES: tuple[tuple[str, str, str | None], ...] = (
     ("cmd", "str | list[Any]", "command template (string or token list)"),
     ("flags", "list[Any]", "compile/link flags; can hold strings or subst tokens"),
     ("includes", "list[Path | str]", "include directories"),
+    (
+        "system_includes",
+        "list[Path | str]",
+        "include dirs whose warnings are suppressed",
+    ),
     ("defines", "list[str]", "preprocessor defines, e.g. ['FOO=1']"),
     ("libs", "list[Any]", "library names or Target/subst-token entries"),
     ("libdirs", "list[Path | str]", "library search directories"),
     ("frameworks", "list[str]", "macOS frameworks"),
     ("frameworkdirs", "list[Path | str]", "macOS framework search dirs"),
     ("exe", "str", "path to the tool executable"),
+    ("version", "str", "the tool's detected version"),
+    ("depflags", "list[Any]", "flags that make the compiler emit a depfile"),
+    ("objcmd", "str | list[Any]", "compile-to-object command template"),
+    ("progcmd", "str | list[Any]", "link-a-program command template"),
+    ("sharedcmd", "str | list[Any]", "link-a-shared-library command template"),
+    ("libcmd", "str | list[Any]", "create-a-static-library command template"),
+    # Flag prefixes, so a toolchain spells -I / /I (etc.) in one place.
+    ("iprefix", "str", "include-dir flag prefix, e.g. '-I'"),
+    ("isysprefix", "str", "system-include-dir flag prefix, e.g. '-isystem'"),
+    ("dprefix", "str", "define flag prefix, e.g. '-D'"),
+    ("lprefix", "str", "library-dir flag prefix, e.g. '-L'"),
+    ("fprefix", "str", "framework flag prefix, e.g. '-framework'"),
+    ("sprefix", "str", "framework-search-dir flag prefix, e.g. '-F'"),
 )
 
 

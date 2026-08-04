@@ -296,6 +296,21 @@ _SKIP_SECTION_KEYS = {
 }
 _VERIFY_SECTION_PLATFORM_KEYS = {"commands"}
 _TOOLCHAINS_SECTION_KEYS = {"linux", "darwin", "windows"}
+# Keys recognized in each entry of [[verify.commands]] and [[rebuild]].
+_VERIFY_COMMAND_KEYS = {
+    "run",
+    "expect_returncode",
+    "expect_stdout",
+    "expect_file",
+    "expect_content",
+}
+_REBUILD_ENTRY_KEYS = {
+    "description",
+    "touch",
+    "expect_no_work",
+    "expect_rebuild",
+    "expect_no_rebuild",
+}
 
 _PLATFORM_SUFFIXES = ("windows", "darwin", "linux")
 
@@ -364,10 +379,22 @@ def load_test_config(example_dir: Path) -> dict[str, Any]:
             set(),
             _VERIFY_SECTION_PLATFORM_KEYS,
         )
+        for section, commands in config["verify"].items():
+            for i, cmd in enumerate(commands):
+                _validate_known_keys(
+                    config_file, f"verify.{section}][{i}", cmd, _VERIFY_COMMAND_KEYS
+                )
+                if not cmd.get("run"):
+                    raise ValueError(
+                        f"{config_file}: [[verify.{section}]] entry {i} has no "
+                        f"'run' command, so it checks nothing."
+                    )
     if "toolchains" in config:
         _validate_known_keys(
             config_file, "toolchains", config["toolchains"], _TOOLCHAINS_SECTION_KEYS
         )
+    for i, rebuild in enumerate(config.get("rebuild", [])):
+        _validate_known_keys(config_file, f"rebuild][{i}", rebuild, _REBUILD_ENTRY_KEYS)
 
     return config
 

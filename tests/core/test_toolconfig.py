@@ -65,6 +65,59 @@ class TestToolConfigBasic:
             del tc.missing
 
 
+class TestDeclaredVariables:
+    """Once a tool declares what it consumes, an unknown name is a typo.
+
+    ``env.cxx.cxxflags = [...]`` used to be stored, read by nothing, and leave
+    the build silently unflagged -- the same silent-acceptance shape as an
+    unknown usage requirement.
+    """
+
+    def test_undeclared_namespace_stays_open(self):
+        tc = ToolConfig("cc")
+        tc.anything = "ok"
+        assert tc.anything == "ok"
+
+    def test_unknown_name_raises_once_declared(self):
+        tc = ToolConfig("cxx", cmd="c++", flags=[])
+        tc.mark_declared()
+        with pytest.raises(AttributeError, match="has no variable 'cxxflags'"):
+            tc.cxxflags = ["-O2"]
+
+    def test_message_suggests_the_near_miss(self):
+        tc = ToolConfig("cxx", cmd="c++", flags=[])
+        tc.mark_declared()
+        with pytest.raises(AttributeError, match="Did you mean 'cxx.flags'"):
+            tc.cxxflags = ["-O2"]
+
+    def test_known_names_still_assignable(self):
+        tc = ToolConfig("cxx", cmd="c++", flags=[])
+        tc.mark_declared()
+        tc.flags = ["-O2"]
+        assert tc.flags == ["-O2"]
+
+    def test_set_declares_a_new_variable(self):
+        tc = ToolConfig("cxx", cmd="c++")
+        tc.mark_declared()
+        tc.set("myvar", "x")
+        tc.myvar = "y"  # now known, so assignment works
+        assert tc.myvar == "y"
+
+    def test_clone_keeps_the_declaration(self):
+        tc = ToolConfig("cxx", cmd="c++")
+        tc.mark_declared()
+        with pytest.raises(AttributeError):
+            tc.clone().nosuch = 1
+
+    def test_a_real_environment_declares_its_tools(self, tmp_path, gcc_toolchain):
+        from pcons.core.project import Project
+
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        with pytest.raises(AttributeError, match="Did you mean 'cc.includes'"):
+            env.cc.include = ["inc"]
+
+
 class TestToolConfigClone:
     def test_clone_basic(self):
         tc = ToolConfig("cc", cmd="gcc")

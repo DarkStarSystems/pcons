@@ -34,7 +34,7 @@ class ToolConfig(_ToolConfigStubs):
         name: The tool's name (e.g., 'cc', 'cxx', 'link').
     """
 
-    __slots__ = ("_name", "_vars", "_env")
+    __slots__ = ("_name", "_vars", "_env", "_declared")
 
     def __init__(self, name: str, **defaults: Any) -> None:
         """Create a tool configuration.
@@ -48,6 +48,9 @@ class ToolConfig(_ToolConfigStubs):
         # Back-reference to the owning Environment, set when the tool is added.
         # Used only by explain(); None for detached/standalone ToolConfigs.
         object.__setattr__(self, "_env", None)
+        # True once the owning Tool has declared the variables it consumes;
+        # see mark_declared().
+        object.__setattr__(self, "_declared", False)
 
     @property
     def name(self) -> str:
@@ -86,10 +89,26 @@ class ToolConfig(_ToolConfigStubs):
     # Command templates (objcmd, linkcmd, etc.) can be strings or lists.
     _LIST_ONLY_VARS = frozenset({"flags", "includes", "defines", "libs"})
 
+    def mark_declared(self) -> None:
+        """Note that the owning tool has declared the variables it consumes.
+
+        From here on an unknown name in an attribute assignment is a typo
+        (``env.cxx.cxxflags = [...]``) and raises. Namespaces nobody declared
+        stay open: with no known-names list there is nothing to check against.
+        """
+        object.__setattr__(self, "_declared", True)
+
     def __setattr__(self, name: str, value: Any) -> None:
-        """Set a tool variable.
+        """Set an existing tool variable.
+
+        Once the tool has declared its variables (:meth:`mark_declared`), a
+        name it doesn't have is a typo: it would be stored, read by nothing,
+        and leave the build silently unflagged. Introducing a genuinely new
+        variable is spelled :meth:`set`.
 
         Raises:
+            AttributeError: If this tool declared its variables and has none
+                      by that name.
             TypeError: If assigning a string to a known list-type variable
                       (likely a user error like ``env.cc.flags = "-Wall"``
                       instead of ``env.cc.flags = ["-Wall"]``).
@@ -98,11 +117,15 @@ class ToolConfig(_ToolConfigStubs):
             object.__setattr__(self, name, value)
         else:
             vars_dict = object.__getattribute__(self, "_vars")
+            if name not in vars_dict:
+                if object.__getattribute__(self, "_declared"):
+                    raise AttributeError(self._unknown_variable_message(name))
+                vars_dict[name] = value
+                return
             # Catch common mistake: assigning string to a list-only variable
             if (
                 isinstance(value, str)
                 and name in self._LIST_ONLY_VARS
-                and name in vars_dict
                 and isinstance(vars_dict[name], list)
             ):
                 raise TypeError(
@@ -112,6 +135,25 @@ class ToolConfig(_ToolConfigStubs):
                     f'{self.name}.{name}.append("{value}").'
                 )
             vars_dict[name] = value
+
+    def _unknown_variable_message(self, name: str) -> str:
+        """Explain an unrecognized variable name, and guess the intent."""
+        import difflib
+
+        vars_dict = object.__getattribute__(self, "_vars")
+        known = sorted(k for k in vars_dict if not k[:1].isupper())
+        message = (
+            f"Tool '{self.name}' has no variable '{name}', so setting it would "
+            f"have no effect on the build."
+        )
+        close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+        if close:
+            message += f" Did you mean '{self.name}.{close[0]}'?"
+        return message + (
+            f"\n  Known variables: {', '.join(known) or '(none)'}."
+            f"\n  To introduce a new one (for a custom command line), declare "
+            f"it: {self.name}.set({name!r}, ...)."
+        )
 
     def __delattr__(self, name: str) -> None:
         """Delete a tool variable."""
@@ -137,7 +179,12 @@ class ToolConfig(_ToolConfigStubs):
         return vars_dict.get(name, default)
 
     def set(self, name: str, value: Any) -> None:
-        """Set a variable (alternative to attribute access)."""
+        """Set a variable, declaring it if the tool doesn't have it yet.
+
+        Attribute assignment (``tool.flags = [...]``) only updates variables
+        the tool already has, so this is how a tool or an extension
+        introduces one.
+        """
         vars_dict = object.__getattribute__(self, "_vars")
         vars_dict[name] = value
 
@@ -191,7 +238,10 @@ class ToolConfig(_ToolConfigStubs):
                 new_vars[key] = dict(value)
             else:
                 new_vars[key] = value
-        return ToolConfig(self.name, **new_vars)
+        clone = ToolConfig(self.name, **new_vars)
+        if object.__getattribute__(self, "_declared"):
+            clone.mark_declared()
+        return clone
 
     def __repr__(self) -> str:
         vars_dict = object.__getattribute__(self, "_vars")

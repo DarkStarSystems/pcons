@@ -208,7 +208,7 @@ class BaseTool(ABC):
 
         tool_config = ToolConfig(self._name, cmd=str(found.path))
         if with_version and found.version:
-            tool_config.version = found.version
+            tool_config.set("version", found.version)
         return tool_config
 
     def setup(self, env: Environment) -> None:
@@ -226,8 +226,14 @@ class BaseTool(ABC):
 
         # Attach builders to the tool config
         for builder_name, builder in self.builders().items():
-            # Make builder callable from tool config (e.g., env.cc.Object())
-            setattr(tool_config, builder_name, self._make_builder_method(env, builder))
+            # Make builder callable from tool config (e.g., env.cc.Object()).
+            # set() rather than setattr(): builder names are declared here, and
+            # attribute assignment only updates variables the tool already has.
+            tool_config.set(builder_name, self._make_builder_method(env, builder))
+
+        # Everything this tool consumes now has a name, so an unknown one in a
+        # later `env.<tool>.<var> = ...` is a typo rather than a new variable.
+        tool_config.mark_declared()
 
     def _make_builder_method(self, env: Environment, builder: Builder) -> BuilderMethod:
         """Create a bound method for calling a builder from the tool config."""

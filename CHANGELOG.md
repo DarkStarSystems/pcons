@@ -83,6 +83,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   suggestion (`Did you mean 'link_dirs'?`) and the list of known names. Toolchains that
   consume their own names declare them with `register_usage_requirement()`; the type
   stubs and the runtime set are now the same list, checked by a test.
+- **An unknown tool variable raises when assigned.** `env.cxx.cxxflags = ["-O2"]` was
+  stored under the wrong name, read by nothing, and left the build unflagged — reading it
+  back already raised, but writing it didn't. Assignment now only updates variables the
+  tool declared, with a suggestion (`Did you mean 'cxx.flags'?`) and the list of real
+  ones; `env.<tool>.set(name, value)` introduces a genuinely new variable. Namespaces
+  nobody declared (a bare `env.add_tool("x")`) stay open — with no known-names list there
+  is nothing to check against.
+- **`target.set_option()` takes only declared options.** A misspelled key was stored and
+  never read; `set_option("install_names", ...)` silently left the library's install name
+  at its default. Options are declared by whatever consumes them —
+  `register_target_option()`, called from the toolchain, not core — and the error lists
+  each one with what it does.
 - **A source added to a target twice raises.** Object nodes are shared, so the file
   compiled once but was consumed twice, and the linker reported duplicate symbols naming
   a single object file — which reads like a linker bug rather than a build-description
