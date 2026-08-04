@@ -679,6 +679,42 @@ def _reject_unknown_substitution(token: str) -> None:
         )
 
 
+def _reject_hand_quoting(token: str) -> None:
+    """Raise on a token the author quoted themselves.
+
+    pcons keeps a command as tokens and the generator quotes each one for the
+    shell it writes for, so quoting a path that might contain spaces — the
+    reflex in every other build system — quotes it twice: the program is
+    handed ``"/path/with spaces/tool"``, quotes included, and reports that no
+    such file exists.
+
+    A leading *or* trailing quote counts, not just a matched pair: a string
+    command is split on whitespace first, so the case quoting exists for
+    (``"/opt/my tools/rez"``) arrives here already torn into ``"/opt/my`` and
+    ``tools/rez"``.
+
+    A token carrying shell syntax of its own (``a && b``) is left alone: the
+    generator doesn't quote those either, so their quoting is the author's to
+    get right — see ``_SHELL_OPERATORS`` in ``pcons.core.subst``.
+    """
+    from pcons.core.subst import _SHELL_OPERATORS
+
+    if not token or (token[0] not in "\"'" and token[-1] not in "\"'"):
+        return
+    if any(operator in token.split() for operator in _SHELL_OPERATORS):
+        return
+    bare = token.strip("\"'")
+    raise ValueError(
+        f"Command token {token!r} is quoted. pcons quotes each token for the "
+        f"shell itself, so this would reach the program with the quotes still "
+        f"on it.\n"
+        f"  Write it bare: {bare!r}.\n"
+        f"  A string command is split on whitespace, so a token that must "
+        f"contain a space needs the list form instead: "
+        f"command=[..., {bare!r}, ...]."
+    )
+
+
 def _tokenize_one(token: Any) -> Any:
     """Turn one command token into a marker, or leave it as it is.
 
@@ -687,7 +723,10 @@ def _tokenize_one(token: Any) -> Any:
     marker's prefix and suffix — that is what makes ``./${SOURCES[0]}`` run
     a program this build produced, and ``/Fo$TARGET`` an output flag.
     """
-    if not isinstance(token, str) or "$" not in token:
+    if not isinstance(token, str):
+        return token
+    _reject_hand_quoting(token)
+    if "$" not in token:
         return token
 
     match = _MARKER.search(token)

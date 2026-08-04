@@ -167,3 +167,95 @@ class TestGeneratedInput:
         project.generated_input(Path("build/gen/list.txt"))
 
         project.resolve()  # does not raise
+
+
+class TestRegenReproducesTheManifest:
+    """The regen edge must not silently emit a *different* build.
+
+    `root = Path(__file__).parent` is the first line of most build scripts.
+    pcons used to hand the script whatever spelling of the path it was
+    invoked with, and its own regen edge passes `-b pcons-build.py`
+    relative -- so every path derived from `root` changed between the user's
+    run and the regenerated one. The first build worked; the one after the
+    first regeneration was broken, with nothing to see. CPython makes a
+    script's `__file__` absolute (3.9+); pcons now does the same.
+    """
+
+    SCRIPT = """\
+from pathlib import Path
+
+from pcons import Project
+
+root = Path(__file__).parent
+project = Project("regen")
+env = project.Environment(toolchain="c")
+env.Command(
+    target="out.txt",
+    source="in.txt",
+    command=["python3", str(root / "gen.py"), "$SOURCE", "$TARGET"],
+    name="generate",
+)
+"""
+
+    def _project_dir(self, tmp_path):
+        (tmp_path / "pcons-build.py").write_text(self.SCRIPT)
+        (tmp_path / "gen.py").write_text("# generator\n")
+        (tmp_path / "in.txt").write_text("in\n")
+        return tmp_path
+
+    def _run(self, cwd, *args):
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "-m", "pcons", "generate", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr
+        return result
+
+    @staticmethod
+    def _stable(manifest: str) -> str:
+        """Manifest text with env.Command's rule names normalized.
+
+        Those are `command_<uuid4>`, freshly random on every run, so no two
+        manifests are ever byte-identical -- which is worth knowing in its own
+        right, but is not the asymmetry under test here.
+        """
+        import re
+
+        names: dict[str, str] = {}
+        return re.sub(
+            r"command_[0-9a-f]{8}",
+            lambda m: names.setdefault(m.group(0), f"command_{len(names)}"),
+            manifest,
+        )
+
+    def test_regen_reproduces_the_users_manifest(self, tmp_path):
+        root = self._project_dir(tmp_path)
+
+        # As a user runs it, from the source directory.
+        self._run(root)
+        as_user = (root / "build" / "build.ninja").read_text()
+
+        # As the regen edge runs it: from the build directory, naming the
+        # script relatively. These are the arguments pcons writes itself.
+        self._run(root / "build", "-C", "..", "-B", "build", "-b", "pcons-build.py")
+        as_regen = (root / "build" / "build.ninja").read_text()
+
+        assert self._stable(as_regen) == self._stable(as_user)
+
+    def test_the_script_sees_an_absolute_file(self, tmp_path):
+        """The mechanism, pinned directly: a relative -b used to reach the
+        script as a relative __file__, so root became '.'."""
+        root = self._project_dir(tmp_path)
+        (root / "pcons-build.py").write_text(
+            "from pathlib import Path\n"
+            "from pcons import Project\n"
+            "assert Path(__file__).is_absolute(), __file__\n"
+            "Project('regen')\n"
+        )
+
+        self._run(root, "-b", "pcons-build.py")

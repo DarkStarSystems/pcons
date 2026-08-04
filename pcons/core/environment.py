@@ -1174,6 +1174,21 @@ class Environment(_EnvironmentStubs):
                     or "--out=$TARGET". Attached to a form that expands to
                     several paths, the text repeats on each of them.
                     Any other $variable is expanded from this environment.
+
+                    **The command runs in the build directory**, which is the
+                    one place in pcons where paths are not relative to the
+                    project root (``sources=`` and ``target=`` are). So a path
+                    written relative — "tools/gen.pl" — is looked for under
+                    the build directory and won't be found. Spell it
+                    "$SRCDIR/tools/gen.pl", pass an absolute path (pcons
+                    rewrites those to stay relocatable), or move the whole
+                    command with ``cwd=``.
+
+                    Do not quote a token yourself: pcons keeps the command as
+                    tokens and quotes each for the shell it writes for, so
+                    hand-quoting arrives at the program with the quotes still
+                    attached. A token that must contain a space goes in the
+                    list form, which isn't split on whitespace.
             name: Optional target name for `ninja <name>`. Derived from first
                   target filename if not specified.
             depends: Extra files that trigger a rebuild when changed, but

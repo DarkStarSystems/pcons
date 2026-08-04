@@ -2576,6 +2576,10 @@ env.Command(
 )
 ```
 
+This is the one place in pcons where paths are not relative to the project root — `sources=` and `target=` are, a command's are not — so it is worth stating plainly: a *relative* path inside a command is looked for under the build directory. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below.
+
+**Don't quote tokens yourself.** pcons keeps a command as a list of tokens and quotes each one for the shell it is writing for, so `command=f'"{tool}" $SOURCE'` reaches the program with the quotes still attached and it reports that no such file exists. Write it bare; a token that must contain a space goes in the list form, which isn't split on whitespace. pcons raises if it sees a token you quoted.
+
 **Running somewhere else: `cwd=`**
 
 Build tools run from the build directory, and pcons writes every path in a command relative to it. Some tools can't live with that — they open an input by a path relative to the source root, or write beside their inputs. `cwd=` moves the command, and moves its paths with it: `$SOURCE`, `$TARGET` and `$SRCDIR` all come out relative to the directory you named, so nothing else in the rule changes. A relative `cwd` is taken from the project root.

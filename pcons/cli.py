@@ -155,9 +155,17 @@ def run_script(
     import pcons.core.invocation
     import pcons.core.vars
 
+    # Absolute from here on, so the script sees the same __file__ however
+    # pcons was started. CPython does this for a script's __file__ too (3.9+),
+    # and `root = Path(__file__).parent` is the first line of most build
+    # scripts: left relative, every path derived from it would change spelling
+    # between a user's run and the regen edge's, quietly producing a different
+    # manifest on the second pass.
+    script_path = script_path.absolute()
+
     pcons.core.invocation.record(
         pcons.core.invocation.Invocation(
-            script=script_path.absolute(),
+            script=script_path,
             variables=dict(variables or {}),
             variant=variant,
             generators=(

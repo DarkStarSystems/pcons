@@ -869,6 +869,49 @@ class TestSourceSlices:
         assert "$source_0 --json $source_1 $source_2" in command
 
 
+class TestHandQuoting:
+    """pcons quotes each token itself, so quoting one by hand quotes it twice.
+
+    Wrapping a path that might contain spaces is the reflex in every other
+    build system, and the resulting failure names the quoted string as if it
+    were a filename: `/bin/sh: "/Applications/.../Rez": No such file`.
+    """
+
+    def test_a_quoted_token_raises(self):
+        with pytest.raises(ValueError, match="quotes each token"):
+            GenericCommandBuilder('"/opt/my tools/rez" $SOURCE $TARGET')
+
+    def test_the_message_shows_the_bare_spelling(self):
+        with pytest.raises(ValueError, match=r"Write it bare: '/opt/rez'"):
+            GenericCommandBuilder('"/opt/rez" $SOURCE')
+
+    def test_single_quotes_too(self):
+        with pytest.raises(ValueError, match="quotes each token"):
+            GenericCommandBuilder("'/opt/rez' $SOURCE")
+
+    def test_list_form_is_checked_as_well(self):
+        with pytest.raises(ValueError, match="quotes each token"):
+            GenericCommandBuilder(["rez", '"/opt/sdk"', "$SOURCE"])
+
+    def test_an_unquoted_token_is_untouched(self):
+        builder = GenericCommandBuilder("rez /opt/rez $SOURCE")
+
+        assert builder.command[1] == "/opt/rez"
+
+    def test_a_quote_inside_a_token_is_left_alone(self):
+        """Only a leading or trailing quote is the mistake; one in the middle
+        may well be a literal the program wants."""
+        builder = GenericCommandBuilder(["say", 'it"s', "-x"])
+
+        assert builder.command[1] == 'it"s'
+
+    def test_a_quoted_path_with_spaces_is_caught_after_the_split(self):
+        """The case quoting exists for: a string command is split on
+        whitespace first, so neither half is a matched pair."""
+        with pytest.raises(ValueError, match="quotes each token"):
+            GenericCommandBuilder('"/opt/my tools/rez" $SOURCE $TARGET')
+
+
 class TestEmbeddedMarkers:
     """A marker may be part of an argument rather than all of one.
 
