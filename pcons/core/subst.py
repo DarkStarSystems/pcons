@@ -67,6 +67,24 @@ class MultiCmd:
     join: str = "&&"
 
 
+class Verbatim(str):
+    """A command token to take exactly as written, quotes and all.
+
+    pcons quotes each command token for the shell it is writing for, so
+    quoting one by hand normally means it arrives at the program with the
+    quotes still attached — almost always a mistake, and ``env.Command``
+    raises on a token that starts with a quote. Wrap it in ``Verbatim`` to
+    say the quotes are meant:
+
+        env.Command(..., command=["awk", Verbatim("'{print $1}'"), "$SOURCE"])
+
+    It is an ordinary ``str`` everywhere else, so substitution, quoting and
+    the generators treat it exactly as they would the same text unwrapped.
+    """
+
+    __slots__ = ()
+
+
 # =============================================================================
 # PathToken for marking path-containing command tokens
 # =============================================================================

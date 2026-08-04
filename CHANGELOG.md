@@ -157,11 +157,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first time staged generation forced a regen mid-build, with nothing to see.
   `__file__` is now absolute, as CPython makes it for a script (3.9+). A round-trip test
   generates a manifest both ways and asserts they match.
-- **A hand-quoted command token raises** instead of reaching the program with its quotes
-  attached. `command=f'"{tool}" $SOURCE'` is the reflex from every other build system, and
-  pcons already quotes each token for the shell it writes for, so the failure was
-  `/bin/sh: "/Applications/.../Rez": No such file or directory` — the quoted string named
-  as if it were a filename. Tokens carrying shell syntax of their own are left alone.
+- **A command token that starts with a quote raises** instead of reaching the program with
+  the quotes attached. `command=f'"{tool}" $SOURCE'` is the reflex from every other build
+  system, and pcons already quotes each token for the shell it writes for, so the failure
+  was `/bin/sh: "/Applications/.../Rez": No such file or directory` — the quoted string
+  named as if it were a filename. Only a *leading* quote counts: `-DNAME="value"` wants
+  its quotes delivered. Tokens carrying shell syntax of their own are left alone, and
+  `Verbatim("...")` says the quotes are meant.
 - **`$$` in a command no longer produces an unparseable ninja file.** The escape was
   applied twice — `cd $$OLDPWD` came out as `cd "$\$$OLDPWD"` — and ninja rejected the
   whole manifest with "bad $-escape", so nothing built at all. `$$` now collapses to one

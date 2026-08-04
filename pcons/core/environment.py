@@ -1187,8 +1187,10 @@ class Environment(_EnvironmentStubs):
                     Do not quote a token yourself: pcons keeps the command as
                     tokens and quotes each for the shell it writes for, so
                     hand-quoting arrives at the program with the quotes still
-                    attached. A token that must contain a space goes in the
-                    list form, which isn't split on whitespace.
+                    attached, and a token starting with a quote raises. A
+                    token that must contain a space goes in the list form,
+                    which isn't split on whitespace; one whose quotes really
+                    are meant goes in ``Verbatim(...)``.
             name: Optional target name for `ninja <name>`. Derived from first
                   target filename if not specified.
             depends: Extra files that trigger a rebuild when changed, but

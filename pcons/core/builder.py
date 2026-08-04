@@ -688,30 +688,36 @@ def _reject_hand_quoting(token: str) -> None:
     handed ``"/path/with spaces/tool"``, quotes included, and reports that no
     such file exists.
 
-    A leading *or* trailing quote counts, not just a matched pair: a string
-    command is split on whitespace first, so the case quoting exists for
-    (``"/opt/my tools/rez"``) arrives here already torn into ``"/opt/my`` and
-    ``tools/rez"``.
+    Only a *leading* quote counts. A trailing one alone is ordinary: a token
+    like ``-DNAME="value"`` wants its quotes delivered, because that is how a
+    string macro is spelled. A string command is split on whitespace before
+    this sees it, so the case quoting exists for (``"/opt/my tools/rez"``)
+    arrives torn into ``"/opt/my`` and ``tools/rez"`` — the first half is
+    enough to catch it.
 
-    A token carrying shell syntax of its own (``a && b``) is left alone: the
-    generator doesn't quote those either, so their quoting is the author's to
-    get right — see ``_SHELL_OPERATORS`` in ``pcons.core.subst``.
+    Two things are left alone: a token carrying shell syntax of its own
+    (``a && b``), since the generator doesn't quote those either and their
+    quoting is the author's to get right; and a :class:`Verbatim`, which is
+    how the author says the quotes are meant.
     """
-    from pcons.core.subst import _SHELL_OPERATORS
+    from pcons.core.subst import _SHELL_OPERATORS, Verbatim
 
-    if not token or (token[0] not in "\"'" and token[-1] not in "\"'"):
+    if isinstance(token, Verbatim) or not token or token[0] not in "\"'":
         return
     if any(operator in token.split() for operator in _SHELL_OPERATORS):
         return
     bare = token.strip("\"'")
     raise ValueError(
-        f"Command token {token!r} is quoted. pcons quotes each token for the "
-        f"shell itself, so this would reach the program with the quotes still "
-        f"on it.\n"
+        f"Command token {token!r} starts with a quote. pcons quotes each token "
+        f"for the shell itself, so this would reach the program with the "
+        f"quotes still on it.\n"
         f"  Write it bare: {bare!r}.\n"
         f"  A string command is split on whitespace, so a token that must "
         f"contain a space needs the list form instead: "
-        f"command=[..., {bare!r}, ...]."
+        f"command=[..., {bare!r}, ...].\n"
+        f"  If the quotes really are meant, say so: "
+        f"command=[..., Verbatim({token!r}), ...] "
+        f"(from pcons.core.subst)."
     )
 
 

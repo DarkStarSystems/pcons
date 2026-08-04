@@ -899,11 +899,31 @@ class TestHandQuoting:
         assert builder.command[1] == "/opt/rez"
 
     def test_a_quote_inside_a_token_is_left_alone(self):
-        """Only a leading or trailing quote is the mistake; one in the middle
-        may well be a literal the program wants."""
+        """Only a leading quote is the mistake; one in the middle may well be
+        a literal the program wants."""
         builder = GenericCommandBuilder(["say", 'it"s', "-x"])
 
         assert builder.command[1] == 'it"s'
+
+    def test_a_trailing_quote_alone_is_fine(self):
+        """`-DNAME="value"` wants its quotes delivered -- that is how a C
+        string macro is spelled, and pcons quoting the whole token preserves
+        them."""
+        builder = GenericCommandBuilder('cc -DFOO="bar" --msg="hi" $SOURCE')
+
+        assert builder.command[1] == '-DFOO="bar"'
+        assert builder.command[2] == '--msg="hi"'
+
+    def test_verbatim_says_the_quotes_are_meant(self):
+        from pcons.core.subst import Verbatim
+
+        builder = GenericCommandBuilder(["awk", Verbatim("'{print $1}'"), "$SOURCE"])
+
+        assert builder.command[1] == "'{print $1}'"
+
+    def test_the_message_names_the_escape_hatch(self):
+        with pytest.raises(ValueError, match="Verbatim"):
+            GenericCommandBuilder('"/opt/rez" $SOURCE')
 
     def test_a_quoted_path_with_spaces_is_caught_after_the_split(self):
         """The case quoting exists for: a string command is split on

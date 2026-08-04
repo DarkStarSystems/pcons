@@ -2578,7 +2578,17 @@ env.Command(
 
 This is the one place in pcons where paths are not relative to the project root — `sources=` and `target=` are, a command's are not — so it is worth stating plainly: a *relative* path inside a command is looked for under the build directory. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below.
 
-**Don't quote tokens yourself.** pcons keeps a command as a list of tokens and quotes each one for the shell it is writing for, so `command=f'"{tool}" $SOURCE'` reaches the program with the quotes still attached and it reports that no such file exists. Write it bare; a token that must contain a space goes in the list form, which isn't split on whitespace. pcons raises if it sees a token you quoted.
+**Don't quote tokens yourself.** pcons keeps a command as a list of tokens and quotes each one for the shell it is writing for, so `command=f'"{tool}" $SOURCE'` reaches the program with the quotes still attached and it reports that no such file exists. Write it bare; a token that must contain a space goes in the list form, which isn't split on whitespace. pcons raises on a token that *starts* with a quote — a trailing one is ordinary, since `-DNAME="value"` wants its quotes delivered. When the quotes really are meant, say so with `Verbatim`:
+
+```python
+from pcons import Verbatim
+
+env.Command(
+    target="counts.txt",
+    source="log.txt",
+    command=["awk", Verbatim("'{print $1}'"), "$SOURCE", ">", "$TARGET"],
+)
+```
 
 **Running somewhere else: `cwd=`**
 
