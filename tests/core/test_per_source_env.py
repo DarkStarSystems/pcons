@@ -131,6 +131,26 @@ class TestPerSourceEnvironment:
         with env.override() as second, pytest.raises(ValueError, match="twice"):
             lib.add_sources(["src/a.c"], env=second)
 
+    def test_env_on_a_source_already_present_sets_it_in_place(
+        self, tmp_path, gcc_toolchain
+    ):
+        """The natural spelling: leave the file in the main source list and
+        name it again with env= to change how that one file compiles."""
+        _make_sources(tmp_path, "a.c", "slow.c")
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.cc.flags.append("-O2")
+
+        lib = project.StaticLibrary("core", env, sources=["src/a.c", "src/slow.c"])
+        with env.override() as careful:
+            careful.cc.flags.append("-O1")
+            lib.add_sources(["src/slow.c"], env=careful)
+
+        assert [n.name for n in lib.sources] == ["src/a.c", "src/slow.c"]
+        content = _rules_for(tmp_path, project)
+        assert content.count("build obj.core/src/slow.c.o:") == 1
+        assert "-O2 -O1" in content
+
     def test_add_source_takes_an_env_too(self, tmp_path, gcc_toolchain):
         _make_sources(tmp_path, "slow.c")
         project = Project("p", root_dir=tmp_path, build_dir="build")

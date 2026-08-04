@@ -400,6 +400,9 @@ class Target:
         # Per-source environment overrides (add_sources(..., env=...)),
         # keyed by source node path.
         "_source_envs",
+        # Membership index for _sources, so duplicate detection stays O(1)
+        # on targets with thousands of sources.
+        "_source_set",
         "_subdir",
         # Utility targets (lupdate, doc generation, ...) set this False:
         # excluded from 'all' and implicit defaults, built only when
@@ -420,6 +423,7 @@ class Target:
         self.name = name
         self.builder = builder
         self._sources: list[Node] = []
+        self._source_set: set[Node] = set()
         self._dependencies: list[Target] = []
         self.public = _make_default_requirements(self.__link_libs_validator)
         self.private = _make_default_requirements(self.__link_libs_validator)
@@ -767,18 +771,9 @@ class Target:
             program.add_source(generated)
         """
         if isinstance(source, Target):
-            # Defer resolution of Target sources
-            if self._pending_sources is None:
-                self._pending_sources = []
-            self._pending_sources.append(source)
-            # Add as dependency to ensure correct build order
-            if source not in self._dependencies:
-                self._dependencies.append(source)
+            self._add_source_target(source)
         else:
-            node = self._to_node(source)
-            self._sources.append(node)
-            if env is not None:
-                self._set_source_env(node, env)
+            self._add_source_node(self._to_node(source), env)
         return self
 
     def add_sources(
@@ -800,13 +795,21 @@ class Target:
                 from dependencies) still apply — only the environment layer
                 changes, which is what per-file flag tweaks want.
 
+                On a source the target already has, ``env`` sets that source's
+                environment rather than adding a second copy, so the file need
+                not be held out of the main source list.
+
         Returns:
             self for method chaining.
+
+        Raises:
+            ValueError: A source is already in this target and no ``env`` is
+                given, so re-adding it could only duplicate it in the link.
 
         Example:
             lib = project.StaticLibrary("core", env, sources=common_sources)
 
-            # One file that miscompiles at -O2
+            # One file that miscompiles at -O2 (already in common_sources)
             with env.override() as careful:
                 careful.cxx.flags.append("-O1")
                 lib.add_sources(["cuda-support.cxx"], env=careful)
@@ -829,13 +832,7 @@ class Target:
         base_path = Path(base) if base else None
         for source in sources:
             if isinstance(source, Target):
-                # Defer resolution of Target sources
-                if self._pending_sources is None:
-                    self._pending_sources = []
-                self._pending_sources.append(source)
-                # Add as dependency to ensure correct build order
-                if source not in self._dependencies:
-                    self._dependencies.append(source)
+                self._add_source_target(source)
             else:
                 if base_path and isinstance(source, (str, Path)):
                     path = Path(source)
@@ -845,11 +842,49 @@ class Target:
                 # already a Node, leave it alone.
                 if self._subdir and isinstance(source, (str, Path)):
                     source = Path(self._subdir) / source
-                node = self._to_node(source)
-                self._sources.append(node)
-                if env is not None:
-                    self._set_source_env(node, env)
+                self._add_source_node(self._to_node(source), env)
         return self
+
+    def _add_source_target(self, source: Target) -> None:
+        """Add a Target source, whose outputs become sources once resolved."""
+        if self._pending_sources is None:
+            self._pending_sources = []
+        if source in self._pending_sources:
+            raise ValueError(
+                f"Target '{self.name}' already has source target "
+                f"'{source.name}'. Its outputs would be built once and "
+                f"consumed twice."
+            )
+        self._pending_sources.append(source)
+        # Add as dependency to ensure correct build order
+        if source not in self._dependencies:
+            self._dependencies.append(source)
+
+    def _add_source_node(self, node: Node, env: Environment | None) -> None:
+        """Add one source node, rejecting a source the target already has.
+
+        A duplicate compiles once (object nodes are shared) but is consumed
+        twice, so the linker reports duplicate symbols against a single object
+        file — a build-description mistake that reads like a linker bug. With
+        an ``env``, though, re-naming a source is the natural way to say "this
+        one file compiles differently", so that sets its environment in place.
+        """
+        if node in self._source_set:
+            if env is None:
+                raise ValueError(
+                    f"Target '{self.name}' already has source '{node.name}'. "
+                    f"Adding it again links it twice, which the linker reports "
+                    f"as duplicate symbols in one object file.\n"
+                    f"  To compile this one file differently, pass env= — on a "
+                    f"source the target already has, that sets the source's "
+                    f"environment instead of adding a copy."
+                )
+            self._set_source_env(node, env)
+            return
+        self._source_set.add(node)
+        self._sources.append(node)
+        if env is not None:
+            self._set_source_env(node, env)
 
     def _set_source_env(self, node: Node, env: Environment) -> None:
         """Record the environment one source compiles with.

@@ -387,6 +387,33 @@ class TestDependencyMistakes:
         # Should not crash and lib should appear only once
         assert app.dependencies.count(lib) == 1
 
+    def test_duplicate_source_raises(self, project_env):
+        """A source listed twice used to be emitted twice into the link.
+
+        Object nodes are shared, so it compiled once but was consumed twice,
+        and the linker reported duplicate symbols naming a single object file
+        -- which reads like a linker bug, not a build-description mistake.
+        """
+        project, env = project_env
+        app = project.Program("app", env, sources=["src/main.c"])
+        with pytest.raises(ValueError, match="already has source"):
+            app.add_sources(["src/main.c"])
+
+    def test_duplicate_source_within_one_call_raises(self, project_env):
+        project, env = project_env
+        with pytest.raises(ValueError, match="already has source"):
+            project.Program("app", env, sources=["src/main.c", "src/main.c"])
+
+    def test_duplicate_source_target_raises(self, project_env):
+        project, env = project_env
+        gen = env.Command(
+            target="gen.c", source="gen.in", command=["cp", "$SOURCE", "$TARGET"]
+        )
+        app = project.Program("app", env, sources=["src/main.c"])
+        app.add_source(gen)
+        with pytest.raises(ValueError, match="already has source target"):
+            app.add_source(gen)
+
     def test_link_not_deprecated(self, project_env):
         """link() is a first-class API and must not emit any warning."""
         project, env = project_env

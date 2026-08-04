@@ -380,7 +380,7 @@ with env.override() as simd_env:
     mylib.add_sources(["simd.c"], env=simd_env)
 ```
 
-The file stays part of `mylib`, so it keeps the target's include dirs, defines, and inherited requirements; only the environment layer differs.
+The file stays part of `mylib`, so it keeps the target's include dirs, defines, and inherited requirements; only the environment layer differs. It works whether or not `simd.c` was already in `mylib`'s source list — on a source the target already has, `env=` sets that source's environment rather than adding a second copy, so a globbed source list needs no hole cut in it. (Naming a source twice *without* `env=` is an error: it would link the same object twice.)
 
 (`simd_env.cc.Object(...)` compiles a *standalone* object node instead — use that when several targets should link one object without recompiling it, accepting that no target's usage requirements apply.)
 

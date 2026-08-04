@@ -83,6 +83,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   suggestion (`Did you mean 'link_dirs'?`) and the list of known names. Toolchains that
   consume their own names declare them with `register_usage_requirement()`; the type
   stubs and the runtime set are now the same list, checked by a test.
+- **A source added to a target twice raises.** Object nodes are shared, so the file
+  compiled once but was consumed twice, and the linker reported duplicate symbols naming
+  a single object file — which reads like a linker bug rather than a build-description
+  mistake. Passing `env=` is the exception: on a source the target already has it sets
+  that source's environment in place, so per-file flags need no hole cut in a globbed
+  source list.
 - **`Node.depends()` now adds an *implicit* dependency**, not a positional input — the
   same meaning `Target.depends()` and `env.Command(depends=...)` already had. It used to
   land in `$in`, so ordering a generated header before an object gave the compiler two
