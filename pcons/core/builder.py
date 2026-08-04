@@ -12,7 +12,7 @@ import re
 import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
@@ -623,10 +623,28 @@ _SUPPORTED_SUBSTITUTIONS = (
 )
 
 
-def _subscript_marker(token: str, match: re.Match[str]) -> SourcePath | TargetPath:
-    """Build the marker for a ${SOURCES[...]} / ${TARGETS[...]} token."""
-    kind, first, second = match.group(1), match.group(2), match.group(3)
-    marker = SourcePath if kind == "SOURCES" else TargetPath
+#: A $SOURCE(S)/$TARGET(S) marker, optionally braced and — for the plural
+#: forms — optionally subscripted with an index or a half-open range. Matched
+#: anywhere in a token, not just as the whole of one, so that surrounding text
+#: like the "./" of ./${SOURCES[0]} can come along as a prefix.
+_MARKER = re.compile(
+    r"\$(?:"
+    r"\{(?:(?P<sliced>SOURCES|TARGETS)\[(\d*)(?::(\d*))?\]"
+    r"|(?P<braced>SOURCES|TARGETS|SOURCE|TARGET))\}"
+    r"|(?P<bare>SOURCES|TARGETS|SOURCE|TARGET)\b"
+    r")"
+)
+
+
+def _marker_from_match(token: str, match: re.Match[str]) -> SourcePath | TargetPath:
+    """Build the marker a matched $SOURCE/$TARGET substitution stands for."""
+    kind = match.group("sliced") or match.group("braced") or match.group("bare")
+    marker = SourcePath if kind.startswith("SOURCE") else TargetPath
+
+    if match.group("sliced") is None:  # bare $SOURCES / ${TARGET} — all of them
+        return marker()
+
+    first, second = match.group(2), match.group(3)
 
     if second is None:  # ${X[n]} -- a single item
         if not first:
@@ -661,6 +679,51 @@ def _reject_unknown_substitution(token: str) -> None:
         )
 
 
+def _tokenize_one(token: Any) -> Any:
+    """Turn one command token into a marker, or leave it as it is.
+
+    A token holding exactly one $SOURCE/$TARGET marker becomes a
+    SourcePath/TargetPath, carrying whatever text surrounded it as the
+    marker's prefix and suffix — that is what makes ``./${SOURCES[0]}`` run
+    a program this build produced, and ``/Fo$TARGET`` an output flag.
+    """
+    if not isinstance(token, str) or "$" not in token:
+        return token
+
+    match = _MARKER.search(token)
+    if match is None:
+        _reject_unknown_substitution(token)
+        # Keep as string (plain tokens and variable references)
+        return token
+
+    if _MARKER.search(token, match.end()):
+        raise ValueError(
+            f"Command token {token!r} has more than one $SOURCE/$TARGET "
+            f"substitution. Give each one its own argument."
+        )
+
+    marker = _marker_from_match(token, match)
+    prefix, suffix = token[: match.start()], token[match.end() :]
+    if suffix.startswith("["):
+        kind = match.group("braced") or match.group("bare")
+        raise ValueError(
+            f"Command token {token!r} needs braces around the subscript: "
+            f"write ${{{kind}{suffix}}}, not ${kind}{suffix}."
+        )
+    _reject_unknown_substitution(prefix + suffix)
+
+    if not prefix and not suffix:
+        return marker
+
+    # Text attached to a marker that can expand to several paths belongs to
+    # each of them -- "-i${SOURCES[0:]}" means -ione.c -itwo.c, not one -i
+    # welded to the first path. Saying so as a full slice makes the
+    # generators, which already repeat a slice per path, do exactly that.
+    if marker.index is None and not marker.is_slice:
+        marker = replace(marker, start=0)
+    return replace(marker, prefix=prefix, suffix=suffix)
+
+
 class GenericCommandBuilder(BaseBuilder):
     """A builder for arbitrary shell commands, with $SOURCE/$TARGET-style
     variable substitution.
@@ -679,6 +742,13 @@ class GenericCommandBuilder(BaseBuilder):
             "grammar.y",
             "bison -d -o ${TARGETS[0]} $SOURCE"
         )
+
+        # Run a tool this build produced, over the remaining sources
+        env.Command(
+            "all.txt",
+            [tool, "a.txt", "b.txt"],
+            "./${SOURCES[0]} $TARGET ${SOURCES[1:]}"
+        )
     """
 
     def __init__(
@@ -693,7 +763,10 @@ class GenericCommandBuilder(BaseBuilder):
 
         Args:
             command: The shell command. Supports $SOURCE(S), $TARGET(S),
-                and indexed ${SOURCES[n]}/${TARGETS[n]}.
+                indexed ${SOURCES[n]}/${TARGETS[n]}, sliced
+                ${SOURCES[n:m]}, and $$ for a literal dollar sign. Any of
+                them may be part of a larger argument, as in
+                ./${SOURCES[0]} or /Fo$TARGET.
             rule_name: Optional custom Ninja rule name; auto-generated
                 if not provided.
             restat: If True, Ninja re-stats the output after the command,
@@ -723,39 +796,17 @@ class GenericCommandBuilder(BaseBuilder):
     def _tokenize_command(self, command: str | list[str]) -> list:
         """Convert command string to tokenized list with typed markers.
 
-        Converts $SOURCE/$TARGET patterns to SourcePath()/TargetPath() markers.
-        Also handles indexed patterns like ${SOURCES[0]} and ${TARGETS[0]}.
+        Converts $SOURCE/$TARGET patterns to SourcePath()/TargetPath()
+        markers, including the indexed (``${SOURCES[0]}``) and sliced
+        (``${SOURCES[1:]}``) forms.
+
+        A marker may sit inside a larger token: the text around it becomes
+        the marker's prefix and suffix, so ``./${SOURCES[0]}`` runs a
+        just-built tool and ``/Fo$TARGET`` names an output.
         """
-        import re
+        tokens = command.split() if isinstance(command, str) else list(command)
 
-        from pcons.core.subst import SourcePath, TargetPath
-
-        if isinstance(command, str):
-            tokens = command.split()
-        else:
-            tokens = list(command)
-
-        # ${SOURCES[2]}, ${SOURCES[2:]}, ${SOURCES[:3]}, ${SOURCES[1:3]}
-        subscript = re.compile(
-            r"^\$\{(SOURCES|TARGETS)\[(\d*)(?::(\d*))?\]\}$",
-        )
-
-        # Replace string patterns with typed markers
-        result: list = []
-        for token in tokens:
-            if token in ("$SOURCE", "$SOURCES"):
-                result.append(SourcePath())
-            elif token in ("$TARGET", "$TARGETS"):
-                result.append(TargetPath())
-            elif match := subscript.match(token):
-                result.append(_subscript_marker(token, match))
-            else:
-                _reject_unknown_substitution(token)
-                # Keep as string (covers embedded variables like /Fo$TARGET
-                # and plain tokens)
-                result.append(token)
-
-        return result
+        return [_tokenize_one(token) for token in tokens]
 
     @property
     def command(self) -> list:
@@ -777,6 +828,46 @@ class GenericCommandBuilder(BaseBuilder):
             "GenericCommandBuilder requires explicit target(s). "
             "Use env.Command(target, sources, command) with a target specified."
         )
+
+    def _expand_command(self, env: Environment) -> list:
+        """Expand the $variables in the command against the environment.
+
+        The one place a Command's variables are substituted: a list-valued
+        variable becomes several tokens, and ``$$`` collapses to a single
+        literal ``$`` here rather than at the generator, which by then has no
+        way to tell an escaped dollar from a real one and escapes it twice.
+
+        $SOURCE/$TARGET are typed markers by now, but text a marker carries
+        alongside its path is substituted like anything else. $SRCDIR is left
+        for the generators, which alone know how to spell the source root.
+        """
+
+        def expand(text: str) -> str:
+            if "$" not in text or "$SRCDIR" in text:
+                return text
+            tokens = env.subst_list([text])
+            if len(tokens) != 1:
+                raise ValueError(
+                    f"{text!r} expands to {len(tokens)} arguments, but it is "
+                    f"attached to a $SOURCE/$TARGET path."
+                )
+            return tokens[0]
+
+        expanded: list = []
+        for token in self._command:
+            if isinstance(token, (SourcePath, TargetPath)):
+                expanded.append(
+                    replace(
+                        token, prefix=expand(token.prefix), suffix=expand(token.suffix)
+                    )
+                )
+            elif isinstance(token, str) and "$" in token and "$SRCDIR" not in token:
+                # Substitute in list form so the token is never re-split on
+                # whitespace: a quoted argument stays one argument.
+                expanded.extend(env.subst_list([token]))
+            else:
+                expanded.append(token)
+        return expanded
 
     def _build(
         self,
@@ -801,16 +892,7 @@ class GenericCommandBuilder(BaseBuilder):
             node.builder = self
             result.append(node)
 
-        # Validate that any $var references in command tokens are defined.
-        # At this point, $SOURCE/$TARGET are already typed markers (SourcePath/
-        # TargetPath), so only user variables like $MYVAR remain as strings.
-        # $SRCDIR is handled by generators, and $$ is a literal dollar escape.
-        for token in self._command:
-            if isinstance(token, str) and "$" in token and not token.startswith("$$"):
-                # Skip $SRCDIR -- handled by generators, not subst
-                if "$SRCDIR" in token:
-                    continue
-                env.subst_list(token)
+        command = self._expand_command(env)
 
         # Build info lives on the first (primary) target
         if result:
@@ -818,7 +900,7 @@ class GenericCommandBuilder(BaseBuilder):
             primary._build_info = {
                 "tool": "command",
                 "command_var": "cmdline",
-                "command": self._command,
+                "command": command,
                 "rule_name": self._rule_name,
                 "language": None,
                 "sources": sources,

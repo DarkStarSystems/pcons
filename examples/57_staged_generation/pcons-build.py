@@ -25,6 +25,7 @@ Two pieces make it work:
     every run doesn't invalidate everything downstream of them.
 """
 
+import platform
 import sys
 from pathlib import Path
 
@@ -34,6 +35,9 @@ project = Project("staged_generation")
 env = project.Environment(toolchain="c")
 
 python = sys.executable.replace("\\", "/")
+# A POSIX shell looks a bare name up on $PATH, where a program in the build
+# directory is not; cmd.exe searches the current directory and has no "./".
+run = "" if platform.system() == "Windows" else "./"
 gen_dir = project.build_dir / "gen"
 plugins_list = gen_dir / "plugins-list.txt"
 
@@ -45,7 +49,7 @@ manifest = env.Command(
     target=plugins_list,
     source=[lister],  # $SOURCE is the program we just built
     depends=["plugins.def"],
-    command="$SOURCE $SRCDIR/plugins.def $TARGET",
+    command=f"{run}$SOURCE $SRCDIR/plugins.def $TARGET",
     write_if_different=True,
 )
 

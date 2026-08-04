@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, TextIO, cast
 
 from pcons.core.node import FileNode, Node
 from pcons.core.paths import PathResolver
-from pcons.generators.generator import BaseGenerator
+from pcons.generators.generator import BaseGenerator, apply_context_overrides
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -327,7 +327,7 @@ class MakefileGenerator(BaseGenerator):
             processed_tokens = self._process_path_tokens(cmd_template)
 
             if context_overrides:
-                processed_tokens = self._apply_context_overrides(
+                processed_tokens = apply_context_overrides(
                     processed_tokens, tool_name, context_overrides
                 )
 
@@ -989,27 +989,3 @@ class MakefileGenerator(BaseGenerator):
             return list(cmd_template)
 
         return [cmd_template]
-
-    def _apply_context_overrides(
-        self, tokens: list[str], tool_name: str, context_overrides: dict[str, object]
-    ) -> list[str]:
-        """Replace $tool.var patterns in tokens with context override values."""
-        from pcons.core.subst import SourcePath, TargetPath
-
-        result: list[str] = []
-        for token in tokens:
-            if isinstance(token, (SourcePath, TargetPath)):
-                result.append(token)
-                continue
-
-            modified = str(token)
-            for key, val in context_overrides.items():
-                pattern = f"${tool_name}.{key}"
-                if pattern in modified:
-                    if isinstance(val, list):
-                        val_str = " ".join(str(v) for v in val)
-                    else:
-                        val_str = str(val)
-                    modified = modified.replace(pattern, val_str)
-            result.append(modified)
-        return result

@@ -20,6 +20,36 @@ if TYPE_CHECKING:
     from pcons.core.target import Target
 
 
+def apply_context_overrides(
+    tokens: list, tool_name: str, context_overrides: dict[str, object]
+) -> list:
+    """Replace ``$tool.var`` references in tokens with context override values.
+
+    For nodes with no environment (the standalone install/archive tools),
+    where the tool's context supplies the values subst() would otherwise have.
+    Has to run on the tokens: once they are quoted for a shell, the dollar
+    these patterns match on has been escaped.
+    """
+    from pcons.core.subst import SourcePath, TargetPath
+
+    result: list = []
+    for token in tokens:
+        if isinstance(token, (SourcePath, TargetPath)) or not isinstance(token, str):
+            result.append(token)
+            continue
+
+        modified = token
+        for key, val in context_overrides.items():
+            pattern = f"${tool_name}.{key}"
+            if pattern in modified:
+                val_str = (
+                    " ".join(str(v) for v in val) if isinstance(val, list) else str(val)
+                )
+                modified = modified.replace(pattern, val_str)
+        result.append(modified)
+    return result
+
+
 @runtime_checkable
 class Generator(Protocol):
     """Protocol for build file generators.

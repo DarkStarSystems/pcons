@@ -1155,16 +1155,25 @@ class Environment(_EnvironmentStubs):
             source: Input file(s) that the command depends on. Can be Targets
                    (whose output files become sources), paths, or None.
             command: The shell command to run. Supports variable substitution:
-                    - $SOURCE: First source file
-                    - $SOURCES: All source files (space-separated)
-                    - $TARGET: First target file
-                    - $TARGETS: All target files (space-separated)
+                    - $SOURCE / $SOURCES: All source files (space-separated);
+                      the two spellings mean the same thing
+                    - $TARGET / $TARGETS: All target files (space-separated)
                     - ${SOURCES[n]}: Indexed source access (0-based)
                     - ${TARGETS[n]}: Indexed target access (0-based)
+                    - ${SOURCES[n:m]}: A range of sources, either end optional
                     - $SRCDIR: Project source tree root directory. Use this
                       to reference source-tree files that aren't listed as
                       sources (e.g., config files, scripts). Example:
                       "$SRCDIR/scripts/generate.py $SOURCE $TARGET"
+                    - $$: A literal dollar sign, delivered to the command
+                      verbatim (the shell does not expand it). Environment
+                      variables belong in the build script, via os.environ.
+                    Any of these may be part of a larger argument, e.g.
+                    "./${SOURCES[0]}" to run a program this build produced (a
+                    POSIX shell would otherwise look a bare name up on $PATH)
+                    or "--out=$TARGET". Attached to a form that expands to
+                    several paths, the text repeats on each of them.
+                    Any other $variable is expanded from this environment.
             name: Optional target name for `ninja <name>`. Derived from first
                   target filename if not specified.
             depends: Extra files that trigger a rebuild when changed, but
@@ -1225,6 +1234,14 @@ class Environment(_EnvironmentStubs):
                 target="app.pkg",
                 source=[app],
                 command="pkgbuild --root $SOURCE $TARGET"
+            )
+
+            # Run a tool this build produced over a variable-length input
+            # list. Sources keep the order given, so the tool is source 0.
+            atlas = env.Command(
+                target="atlas.bin",
+                source=[packer, *sprites],
+                command="./${SOURCES[0]} --out=$TARGET ${SOURCES[1:]}"
             )
 
             # Can be passed to Install() since it's a Target

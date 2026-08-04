@@ -1,0 +1,27 @@
+# Test configuration for the command_substitution example
+
+[test]
+description = "Markers embedded in an argument: ./${SOURCES[0]}, --out=$TARGET, a prefix repeated over a slice, and $$ for a literal dollar"
+
+expected_outputs = [
+    "build/bundler",
+    "build/bundle.txt",
+]
+
+[verify]
+# The bundled file is the assertion. bundler.c exits non-zero on an argument
+# it doesn't recognize, so the build itself already proves the -i prefix
+# reached every path; these check the parts a wrong-but-accepted expansion
+# could still get through.
+commands = [
+    # $$ arrived as one literal dollar, not eaten by ninja, make or the shell
+    { run = "cat build/bundle.txt", expect_stdout = "stamp: $Revision$" },
+    # -i${SOURCES[1:]} covered every data file, and not the tool itself
+    { run = "cat build/bundle.txt", expect_stdout = "inputs: 3" },
+    { run = "cat build/bundle.txt", expect_stdout = "alpha" },
+    { run = "cat build/bundle.txt", expect_stdout = "gamma" },
+]
+
+[skip]
+# xcode builds into build/Release, so the tool isn't where the command looks
+generators = ["xcode"]

@@ -2516,10 +2516,8 @@ env.Command(
 
 | Variable | Description |
 |----------|-------------|
-| `$SOURCE` | First source file |
-| `$SOURCES` | All source files (space-separated) |
-| `$TARGET` | First target file |
-| `$TARGETS` | All target files (space-separated) |
+| `$SOURCE`, `$SOURCES` | All source files (space-separated) — the two spellings mean the same thing; use `${SOURCES[0]}` for the first one |
+| `$TARGET`, `$TARGETS` | All target files (space-separated) |
 | `${SOURCES[n]}` | Indexed source access (0-based) |
 | `${TARGETS[n]}` | Indexed target access (0-based) |
 | `${SOURCES[n:m]}` | A range of sources — either end may be omitted |
@@ -2529,16 +2527,26 @@ env.Command(
 
 Anything else inside `${...}` is an error. An unrecognized form would otherwise reach `build.ninja` as a shell-escaped literal and run as nonsense.
 
-**Sources keep the order you wrote them in.** `$SOURCE` is the first source declared, whether or not it's another target's output:
+**Sources keep the order you wrote them in.** `${SOURCES[0]}` is the first source declared, whether or not it's another target's output:
 
 ```python
 # ${SOURCES[0]} is the tool; ${SOURCES[1:]} is however many .def files there are
 env.Command(
     target=gen_dir / "entries.c",
     source=[collate_tool, *def_files],
-    command="${SOURCES[0]} $TARGET ${SOURCES[1:]}",
+    command="./${SOURCES[0]} $TARGET ${SOURCES[1:]}",
 )
 ```
+
+**A substitution can be part of an argument** rather than all of it — the text around it comes along:
+
+```python
+command = "./${SOURCES[0]} --out=$TARGET -i${SOURCES[1:]}"
+```
+
+The `./` above is not decoration: `${SOURCES[0]}` expands to a plain build-directory name like `collate`, and a POSIX shell reads a bare name as something to look up on `$PATH`, where it will not find it. (`cmd.exe` searches the current directory instead, and does not take `./`, so a build script that runs a built tool should pick the prefix per platform — see `examples/61_command_substitution`.)
+
+Text attached to a form that expands to *several* paths repeats on each of them, which is what such a flag always means: `-i${SOURCES[1:]}` becomes `-ione.def -itwo.def`, not one `-i` welded to the first path.
 
 A slice is the right tool when the input count is a property of the project rather than of the rule — adding a `.def` file above changes nothing in the build script. See `examples/59_codegen_sources`, which also shows why a glob needs `project.add_configure_dependency()` on the directory it read.
 
@@ -2591,14 +2599,30 @@ app = project.Program("app", ["main.c"])
 app.depends("version.txt")  # Rebuild when version.txt changes
 ```
 
-Use `$$` to include a literal dollar sign in commands. This is useful for shell variables that should be expanded at build time rather than generation time:
+Use `$$` for a literal dollar sign. pcons delivers it to the command *verbatim*: it is quoted and escaped so that neither ninja, nor make, nor the shell gets to interpret it. That is what tools that have their own use for a dollar need — the ELF dynamic linker, `awk`, `sed`:
 
 ```python
 # Set rpath to $ORIGIN for portable shared libraries
-env.link.flags.append("-Wl,-rpath,'$$ORIGIN'")
+env.link.flags.append("-Wl,-rpath,$$ORIGIN")
 
-# Use shell environment variables
-env.Command("output.txt", "input.txt", "echo $$HOME > $TARGET")
+# The program, not the shell, sees the dollar
+env.Command(
+    target="rev.txt",
+    source="in.txt",
+    command="stamper --keyword=$$Revision$$ --out=$TARGET $SOURCE",
+)
+```
+
+So `$$HOME` is *not* a shell variable reference — it is the five characters `$HOME`. Build scripts are Python, so read environment variables there, at configure time, where the value is visible to pcons and recorded in the build files:
+
+```python
+import os
+
+env.Command(
+    target="output.txt",
+    source="input.txt",
+    command=f"pack --home={os.environ['HOME']} $SOURCE $TARGET",
+)
 ```
 
 The command runs during the build phase, and Ninja tracks dependencies so the command only re-runs when sources change.
@@ -3677,7 +3701,7 @@ manifest = env.Command(
     target=manifest_path,
     source=[lister],
     depends=["plugins.def"],
-    command="$SOURCE $SRCDIR/plugins.def $TARGET",
+    command="./$SOURCE $SRCDIR/plugins.def $TARGET",  # ./ so /bin/sh finds it
     write_if_different=True,
 )
 

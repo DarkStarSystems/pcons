@@ -530,3 +530,45 @@ class TestMakefileShellOperators:
 
         assert "| filter" in recipe
         assert "'|'" not in recipe
+
+
+class TestMakefileEmbeddedMarkers:
+    """A marker that is part of a larger argument, and $$ for a dollar the
+    command wants kept."""
+
+    def _recipe(self, tmp_path, template, contains, sources=("a.txt", "b.txt")):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target="out.txt", source=list(sources), command=template, name="gen"
+        )
+        project.resolve()
+
+        gen = MakefileGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "Makefile").read_text()
+        return next(
+            line.strip()
+            for line in content.splitlines()
+            if line.startswith("\t") and contains in line
+        )
+
+    def test_prefix_stays_next_to_the_path(self, tmp_path):
+        recipe = self._recipe(tmp_path, "./${SOURCES[0]} $TARGET ${SOURCES[1:]}", "./")
+
+        assert "./" in recipe
+        assert "a.txt" in recipe and "b.txt" in recipe
+
+    def test_prefix_repeats_over_a_slice(self, tmp_path):
+        recipe = self._recipe(tmp_path, "gen -i${SOURCES[0:]} $TARGET", "gen ")
+
+        assert recipe.count("-i") == 2
+
+    def test_literal_dollar_survives_make_and_the_shell(self, tmp_path):
+        """Make's own $-pass needs it doubled; the shell needs it quoted."""
+        recipe = self._recipe(tmp_path, "gen --stamp=$$Rev $TARGET", "gen ")
+
+        assert "--stamp=$$Rev" in recipe
+        assert "--stamp=$Rev" not in recipe.replace("--stamp=$$Rev", "")

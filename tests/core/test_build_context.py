@@ -576,8 +576,12 @@ class TestNinjaQuoting:
         """Verify $ORIGIN in link flags is properly escaped in ninja output.
 
         The linker flag -Wl,-rpath,$ORIGIN must survive ninja + shell expansion:
-        \\$$ in ninja → \\$ to shell → literal $ to linker.
+        \\$$ in ninja → \\$ to shell → literal $ to linker. Windows has no
+        shell layer to hide the dollar from (ninja calls CreateProcess, and
+        cmd.exe leaves $ alone), so there ninja's doubling is the whole job.
         """
+        import platform
+
         from pcons.core.subst import to_shell_command
 
         # Simulate what happens when a token containing $ORIGIN reaches
@@ -585,8 +589,8 @@ class TestNinjaQuoting:
         tokens = ["gcc", "-Wl,-rpath,$ORIGIN", "-o", "$out", "$in"]
         result = to_shell_command(tokens, shell="ninja")
 
-        # $ORIGIN should be escaped for both ninja and shell: \$$
-        assert "\\$$ORIGIN" in result
+        dollar = "$$" if platform.system() == "Windows" else "\\$$"
+        assert f"{dollar}ORIGIN" in result
         # Ninja variables should NOT be escaped
         assert " $out " in result or result.endswith("$out")
         assert " $in" in result or result.endswith("$in")

@@ -305,6 +305,11 @@ _TOKEN_PATTERN = re.compile(
 
 _ARG_SPLIT = re.compile(r",\s*")
 
+#: The variables a generator defines in a ninja file: $in/$out, the source
+#: root, and the per-edge indexed paths. A "$name" outside this set is a
+#: literal dollar in the command, not a variable ninja will expand.
+_NINJA_VARS = r"(?:in|out|topdir|source_\d+|target_\d+)"
+
 
 def _split_template_string(template: str) -> list[str]:
     """Split a string command template on whitespace into tokens.
@@ -814,9 +819,12 @@ def _quote_for_shell(s: str, shell: str) -> str:
         # - Simple flags (--type, -c) → don't quote
         import re
 
-        # Ninja variables - don't quote, ninja will expand them
-        # This includes $in, $out, $topdir, $out.d, etc.
-        if re.match(r"^\$[a-zA-Z_][a-zA-Z0-9_.]*$", s):
+        # Ninja variables - don't quote, ninja will expand them (and $in/$out
+        # may expand to several space-separated paths). Only the variables the
+        # generator actually defines qualify -- $in, $out, $topdir, $out.d,
+        # $source_N: any other $name is a literal dollar in the command and
+        # must be escaped like one below.
+        if re.fullmatch(rf"\${_NINJA_VARS}(?:\.\w+)*", s):
             return s
 
         # Any shell metacharacter (not just whitespace) means the shell could
@@ -843,15 +851,21 @@ def _quote_for_shell(s: str, shell: str) -> str:
                 # substitution.
                 s = s.replace("\\", "\\\\").replace('"', '\\"').replace("`", "\\`")
 
-        # Escape literal $ signs that are NOT ninja variable references.
-        # Ninja commands are passed to the shell, so $ must survive both layers:
+        # Escape literal $ signs that are NOT ninja variable references, so a
+        # dollar the user wrote reaches the command verbatim.
+        # On Unix it has to survive both layers:
         #   \$$ in ninja file → ninja expands $$ to $ → shell sees \$ → literal $
+        # Windows has no shell layer to hide from (ninja calls CreateProcess,
+        # and even cmd.exe leaves $ alone), so there ninja's own doubling is
+        # the whole job; a backslash would reach the program as one.
         # This handles e.g. -Wl,-rpath,$ORIGIN (linker token, not a variable).
-        # Known ninja vars ($in, $out, $topdir, $source_N, $target_N) are preserved.
-        _NINJA_VARS = r"(?:in|out|topdir|source_\d+|target_\d+)"
+        # Every other dollar is literal, including one that follows another:
+        # exempting "$$" here would emit "$\$$", which ninja rejects outright
+        # as a bad $-escape.
+        escaped_dollar = "$$" if platform.system() == "Windows" else "\\$$"
         s = re.sub(
-            rf"\$(?!({_NINJA_VARS})(?!\w)|\$)",
-            lambda m: "\\$$",
+            rf"\$(?!({_NINJA_VARS})(?!\w))",
+            lambda m: escaped_dollar,
             s,
         )
 

@@ -25,7 +25,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
 from pcons.core.node import FileNode, Node
 from pcons.core.paths import PathResolver
-from pcons.generators.generator import BaseGenerator
+from pcons.generators.generator import BaseGenerator, apply_context_overrides
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -483,21 +483,20 @@ class NinjaGenerator(BaseGenerator):
                     # Expand using subst
                     command = env.subst(cmd_template, shell="ninja")
         else:
-            # Try standalone tools
-            cmd_template = self._get_standalone_tool_command(tool_name, command_var)
-            if cmd_template:
-                command = cmd_template.replace("$$", "$")
-                # Apply context overrides for standalone tools
-                # Replace $tool.var patterns with actual values
+            # Try standalone tools. Their context supplies what subst() would
+            # have ($install.destdir and friends); it has to be applied to the
+            # tokens, before quoting escapes the dollar it matches on.
+            from pcons.core.subst import to_shell_command
+
+            tokens = self._get_standalone_tool_tokens(tool_name, command_var)
+            if tokens is not None:
                 if context_overrides:
-                    for key, val in context_overrides.items():
-                        pattern = f"${tool_name}.{key}"
-                        if isinstance(val, list):
-                            # List values become space-separated tokens
-                            val_str = " ".join(str(v) for v in val)
-                        else:
-                            val_str = str(val)
-                        command = command.replace(pattern, val_str)
+                    tokens = apply_context_overrides(
+                        tokens, tool_name, context_overrides
+                    )
+                command = to_shell_command(
+                    self._relativize_command_tokens(tokens), shell="ninja"
+                )
 
         return command
 
@@ -1208,14 +1207,13 @@ class NinjaGenerator(BaseGenerator):
         token = token.replace("\x00TOPDIR\x00", "$topdir")
         return token
 
-    def _get_standalone_tool_command(
+    def _get_standalone_tool_tokens(
         self, tool_name: str, command_var: str
-    ) -> str | None:
+    ) -> list | None:
         """Get a command template from a standalone tool (install/archive),
-        for nodes with no associated environment. Returns None if unavailable.
+        for nodes with no associated environment, as a token list (which may
+        contain SourcePath/TargetPath markers). None if unavailable.
         """
-        from pcons.core.subst import to_shell_command
-
         if tool_name == "install":
             from pcons.tools.install import InstallTool
 
@@ -1227,19 +1225,11 @@ class NinjaGenerator(BaseGenerator):
         else:
             return None
 
-        defaults = tool.default_vars()
-        cmd_template = defaults.get(command_var)
+        cmd_template = tool.default_vars().get(command_var)
         if cmd_template is None:
             return None
 
-        # List templates may contain SourcePath/TargetPath markers that
-        # become Ninja's $in/$out variables
         if isinstance(cmd_template, list):
-            from pcons.core.subst import CommandToken
+            return list(cmd_template)
 
-            relativized = self._relativize_command_tokens(
-                cast(list[CommandToken], cmd_template)
-            )
-            return to_shell_command(relativized, shell="ninja")
-
-        return str(cmd_template) or None
+        return str(cmd_template).split() or None

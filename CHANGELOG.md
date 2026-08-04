@@ -28,9 +28,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   accepted by `metallib`.
 - **`${SOURCES[n:m]}` slices** in `env.Command`, with either end optional, for the common
   shape where the number of inputs is a property of the project rather than of the rule:
-  `command="${SOURCES[0]} $TARGET ${SOURCES[1:]}"`. Anything else inside `${...}` now
+  `command="./${SOURCES[0]} $TARGET ${SOURCES[1:]}"`. Anything else inside `${...}` now
   raises — an unrecognized form previously reached `build.ninja` as a shell-escaped
   literal and ran as nonsense, which is the opposite of pcons's fail-fast rule.
+- **A substitution can be part of an argument** rather than having to be all of one:
+  `./${SOURCES[0]}`, `--out=$TARGET`, `$TARGET.tmp`. It previously had to be a whole
+  whitespace-separated word, which ruled out the one spelling that actually runs a tool
+  the build just produced — a bare `${SOURCES[0]}` expands to a build-directory name
+  like `collate`, and a POSIX shell looks a bare name up on `$PATH`, where it is not
+  (`examples/57_staged_generation` and `59_codegen_sources` were relying on the current
+  directory being on `$PATH`, and now say `./`). Text attached to a form that expands to
+  several paths repeats on each of them, so `-i${SOURCES[1:]}` is `-ione.def -itwo.def`.
+  See `examples/61_command_substitution`.
 - **`check_define(..., as_string=True)`** (and the batch form) returns the string a macro
   denotes rather than its expansion text: adjacent literals concatenated, quotes removed,
   simple C escapes decoded. `#define DIR "/opt/" "app"` reads back as `/opt/app` instead
@@ -133,6 +142,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`$$` in a command no longer produces an unparseable ninja file.** The escape was
+  applied twice — `cd $$OLDPWD` came out as `cd "$\$$OLDPWD"` — and ninja rejected the
+  whole manifest with "bad $-escape", so nothing built at all. `$$` now collapses to one
+  literal dollar during substitution, the single place every other template goes through,
+  and the generator escapes it once. As documented, that dollar reaches the command
+  verbatim rather than being expanded by the shell (which is what `-Wl,-rpath,$$ORIGIN`
+  and `awk '{print $$1}'` need); read environment variables in the build script with
+  `os.environ` instead.
+- **`env.Command()` expands the environment's variables in its command.** `$MYVAR` was
+  validated and then thrown away, so the reference reached `build.ninja` intact and ninja
+  expanded it to nothing. A list-valued variable becomes one argument per element.
+- **A `$name` that is not a variable the generator defines is no longer written bare into
+  `build.ninja`**, where ninja expanded it to the empty string — `cd $OLDPWD` became
+  `cd`. Only `$in`, `$out`, `$topdir` and the per-edge `$source_N`/`$target_N` are
+  variables; everything else is a literal dollar and is escaped as one.
 - **`pre_build()` / `post_build()` no longer run on the target's object files.** The guard
   accepted `node in target.nodes`, which is intermediates *plus* outputs, so a step meant
   for a linked library was appended to every compile rule the target owned —

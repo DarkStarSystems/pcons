@@ -9,6 +9,7 @@ from pcons.core.builder import GenericCommandBuilder
 from pcons.core.environment import Environment
 from pcons.core.node import FileNode
 from pcons.core.project import Project
+from pcons.core.subst import SourcePath, TargetPath
 from pcons.generators.generator import BaseGenerator
 
 
@@ -862,6 +863,118 @@ class TestSourceSlices:
         assert "$source_0 --json $source_1 $source_2" in command
 
 
+class TestEmbeddedMarkers:
+    """A marker may be part of an argument rather than all of one.
+
+    The spelling that matters is `./${SOURCES[0]}`: a bare `${SOURCES[0]}`
+    expands to a build-directory name with no directory in it, and /bin/sh
+    reads that as something to look up on $PATH, where a program this build
+    just produced is not."""
+
+    def test_relative_prefix_on_an_index(self):
+        builder = GenericCommandBuilder("./${SOURCES[0]} $TARGET")
+
+        assert builder.command[0] == SourcePath(index=0, prefix="./")
+
+    def test_flag_welded_to_a_target(self):
+        builder = GenericCommandBuilder("cl /Fo$TARGET $SOURCE")
+
+        assert builder.command[1] == TargetPath(prefix="/Fo", start=0)
+
+    def test_suffix_after_a_marker(self):
+        builder = GenericCommandBuilder("gen $TARGET.tmp")
+
+        assert builder.command[1] == TargetPath(suffix=".tmp", start=0)
+
+    def test_a_bare_marker_is_left_alone(self):
+        """Nothing attached means nothing to distribute: $in/$out as before."""
+        builder = GenericCommandBuilder("cp $SOURCES $TARGET")
+
+        assert builder.command == ["cp", SourcePath(), TargetPath()]
+
+    def test_braced_bare_marker(self):
+        assert GenericCommandBuilder("cp ${SOURCE} x").command[1] == SourcePath()
+
+    def test_affix_on_a_multi_path_form_becomes_a_slice(self):
+        """A prefix on something that expands to several paths belongs to each
+        of them, which is what a full slice says."""
+        builder = GenericCommandBuilder("tar ./$SOURCES")
+
+        assert builder.command[1] == SourcePath(start=0, prefix="./")
+
+    def test_affix_on_a_slice_is_kept(self):
+        builder = GenericCommandBuilder("gen -i${SOURCES[1:]}")
+
+        assert builder.command[1] == SourcePath(start=1, prefix="-i")
+
+    def test_two_markers_in_one_token_raise(self):
+        with pytest.raises(ValueError, match="more than one"):
+            GenericCommandBuilder("cp $SOURCE:$TARGET")
+
+    def test_unbraced_subscript_raises(self):
+        with pytest.raises(ValueError, match="needs braces"):
+            GenericCommandBuilder("tool $SOURCES[0]")
+
+    def test_a_longer_name_is_not_a_marker(self):
+        """$SOURCEDIR is an ordinary variable, not $SOURCE plus text."""
+        builder = GenericCommandBuilder("tool $SOURCEDIR/x $TARGET")
+
+        assert builder.command[1] == "$SOURCEDIR/x"
+
+    def test_unknown_substitution_beside_a_marker_still_raises(self):
+        with pytest.raises(ValueError, match="Unrecognized substitution"):
+            GenericCommandBuilder("tool ${nope[1]}$SOURCE")
+
+
+class TestEmbeddedMarkersInNinja:
+    """What the embedded forms come out as, for ninja to expand."""
+
+    def _command(self, tmp_path, template, sources=("a.txt", "b.txt")):
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("embedded", root_dir=tmp_path, build_dir="build")
+        for name in sources:
+            (tmp_path / name).write_text("data\n")
+        env = project.Environment()
+        env.Command(
+            target=project.build_dir / "out.txt",
+            source=list(sources),
+            command=template,
+        )
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        return next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("command =")
+        )
+
+    def test_prefix_stays_next_to_the_path(self, tmp_path):
+        command = self._command(tmp_path, "./${SOURCES[0]} $TARGET ${SOURCES[1:]}")
+
+        assert "./$source_0" in command
+        assert "$source_1" in command
+
+    def test_prefix_repeats_over_a_slice(self, tmp_path):
+        command = self._command(tmp_path, "gen -i${SOURCES[0:]} $TARGET")
+
+        assert "-i$source_0" in command
+        assert "-i$source_1" in command
+
+    def test_prefix_repeats_over_a_bare_marker(self, tmp_path):
+        command = self._command(tmp_path, "gen -i$SOURCES $TARGET")
+
+        assert "-i$source_0" in command
+        assert "-i$source_1" in command
+        assert "-i$in" not in command
+
+    def test_suffix_reaches_the_command(self, tmp_path):
+        command = self._command(tmp_path, "gen $SOURCE $TARGET.tmp")
+
+        assert "$target_0.tmp" in command
+
+
 class TestUnknownSubstitutionsRaise:
     """An unrecognized ${...} used to reach build.ninja as an escaped literal
     and run as nonsense -- the opposite of pcons's fail-fast rule."""
@@ -901,6 +1014,83 @@ class TestUnknownSubstitutionsRaise:
         )
 
         assert cmd is not None
+
+
+class TestCommandVariablesAndDollars:
+    """A Command's own $variables, and $$ for a dollar that isn't one."""
+
+    def _command(self, tmp_path, template, **vars_):
+        project = Project("vars", root_dir=tmp_path, build_dir="build")
+        (tmp_path / "a.txt").write_text("data\n")
+        env = project.Environment()
+        for name, value in vars_.items():
+            setattr(env, name, value)
+        result = env.Command(
+            target=project.build_dir / "out.txt",
+            source=["a.txt"],
+            command=template,
+        )
+        return result.output_nodes[0]._build_info["command"]
+
+    def test_a_variable_is_expanded(self, tmp_path):
+        command = self._command(tmp_path, "$MYTOOL $SOURCE $TARGET", MYTOOL="mytool")
+
+        assert command[0] == "mytool"
+
+    def test_a_list_variable_becomes_several_arguments(self, tmp_path):
+        command = self._command(tmp_path, "tool $MYFLAGS $TARGET", MYFLAGS=["-a", "-b"])
+
+        assert command[:3] == ["tool", "-a", "-b"]
+
+    def test_a_variable_beside_a_marker_is_expanded(self, tmp_path):
+        command = self._command(
+            tmp_path, "tool $OUTFLAG$TARGET $SOURCE", OUTFLAG="--out="
+        )
+
+        assert command[1].prefix == "--out="
+
+    def test_an_undefined_variable_still_fails_fast(self, tmp_path):
+        from pcons.core.errors import MissingVariableError
+
+        with pytest.raises(MissingVariableError):
+            self._command(tmp_path, "$NOPE $TARGET")
+
+    def test_double_dollar_collapses_to_one(self, tmp_path):
+        """Resolved here, once. Left doubled, the generator cannot tell an
+        escaped dollar from a real one and escapes half of it."""
+        command = self._command(tmp_path, "awk $$1 $SOURCE > $TARGET")
+
+        assert command[1] == "$1"
+
+    def test_srcdir_is_left_for_the_generators(self, tmp_path):
+        command = self._command(tmp_path, "python $SRCDIR/gen.py $TARGET")
+
+        assert "$SRCDIR/gen.py" in command
+
+    def test_ninja_manifest_parses_with_a_literal_dollar(self, tmp_path):
+        r"""The doubled form "$\$$" is not a valid ninja escape; ninja rejects
+        the whole file, so nothing builds at all."""
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("dollar", root_dir=tmp_path, build_dir="build")
+        (tmp_path / "a.txt").write_text("data\n")
+        env = project.Environment()
+        env.Command(
+            target=project.build_dir / "out.txt",
+            source=["a.txt"],
+            command="tool --stamp=$$Rev$$ $TARGET",
+        )
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        command = next(
+            line
+            for line in content.splitlines()
+            if line.strip().startswith("command =")
+        )
+        assert "$\\$$" not in command
+        assert "Rev" in command
 
 
 class TestWorkingDirectory:
@@ -1020,6 +1210,22 @@ class TestWorkingDirectory:
         content = (tmp_path / "build" / "build.ninja").read_text()
 
         assert "  target_0 = build/out.txt\n" in content
+
+    def test_ninja_keeps_an_embedded_prefix_on_a_moved_path(
+        self, tmp_path, gcc_toolchain
+    ):
+        """A moved command names its inputs one by one in place of $in; text
+        attached to the marker has to come along with each of them."""
+        content = self._ninja(
+            tmp_path,
+            gcc_toolchain,
+            command="./${SOURCES[0]} --out=$TARGET",
+            cwd=tmp_path,
+        )
+
+        assert "./$source_0" in content
+        assert "--out=$target_0" in content
+        assert "  source_0 = in.txt\n" in content
 
     def test_ninja_srcdir_follows_the_working_directory(self, tmp_path, gcc_toolchain):
         content = self._ninja(

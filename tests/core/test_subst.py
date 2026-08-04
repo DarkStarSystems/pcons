@@ -23,6 +23,11 @@ from pcons.core.subst import (
     to_shell_command,
 )
 
+# How a literal dollar comes out of to_shell_command(shell="ninja"): "$$" is
+# ninja's own escape, and on POSIX a backslash additionally hides it from the
+# shell ninja runs the command through.
+_DOLLAR_ESC = "$$" if platform.system() == "Windows" else "\\$$"
+
 
 class TestNamespace:
     def test_basic_get_set(self):
@@ -512,11 +517,34 @@ class TestToShellCommand:
         """Literal $ in tokens must be escaped for both ninja and shell."""
         tokens = ["gcc", "-Wl,-rpath,$ORIGIN", "-o", "$out", "$in"]
         result = to_shell_command(tokens, shell="ninja")
-        # $ORIGIN should be escaped: \$$ (ninja $$ → $, shell \$ → $)
-        assert "\\$$ORIGIN" in result
+        # $ORIGIN should be escaped: \$$ (ninja $$ → $, shell \$ → $), except
+        # on Windows, which has no shell layer to hide the dollar from.
+        assert f"{_DOLLAR_ESC}ORIGIN" in result
         # Ninja variables $out, $in should NOT be escaped
         assert "$out" in result
         assert "$in" in result
+
+    def test_ninja_escapes_a_doubled_literal_dollar(self):
+        """Both dollars, separately. Exempting the second would emit "$\\$$",
+        which ninja rejects as a bad $-escape -- the whole manifest fails to
+        parse, so nothing builds at all."""
+        result = to_shell_command(["echo", "$$1"], shell="ninja")
+
+        assert result == f'echo "{_DOLLAR_ESC}{_DOLLAR_ESC}1"'
+
+    def test_ninja_does_not_take_an_unknown_name_for_a_variable(self):
+        """$OLDPWD is a literal dollar the command wants, not something ninja
+        should expand (to nothing, leaving a bare "cd")."""
+        result = to_shell_command(["cd", "$OLDPWD"], shell="ninja")
+
+        assert f"{_DOLLAR_ESC}OLDPWD" in result
+
+    def test_ninja_leaves_the_per_edge_variables_bare(self):
+        """$source_N must stay unquoted: ninja expands it to a path, and a
+        quoted one would arrive as a single argument."""
+        result = to_shell_command(["tool", "$source_1", "$out.d"], shell="ninja")
+
+        assert result == "tool $source_1 $out.d"
 
     def test_ninja_preserves_topdir(self):
         """$topdir in tokens should not be escaped."""
@@ -529,7 +557,7 @@ class TestToShellCommand:
         """Literal $ in -D defines must be escaped for ninja."""
         tokens = ["gcc", "-DPREFIX=$HOME/local", "-c", "$in"]
         result = to_shell_command(tokens, shell="ninja")
-        assert "\\$$HOME" in result
+        assert f"{_DOLLAR_ESC}HOME" in result
         assert "$in" in result
 
     # --- Security: space-free tokens with shell metacharacters must be
@@ -557,7 +585,7 @@ class TestToShellCommand:
         # that after ninja's own $$ -> $ pass the shell sees `\$(id).c`
         # (a literal, escaped $) rather than an executable `$(id)` command
         # substitution.
-        assert '"\\$$(id).c"' in result
+        assert f'"{_DOLLAR_ESC}(id).c"' in result
 
     def test_ninja_quotes_semicolon(self):
         tokens = ["gcc", "-c", "x;touch_pwned.c", "-o", "$out"]

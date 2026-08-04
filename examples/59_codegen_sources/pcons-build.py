@@ -15,9 +15,17 @@ Two things have to hold for it to work, and both are easy to get wrong:
    this rule, so the command says "the rest of them" rather than listing
    indices: `${SOURCES[1:]}`. Adding a file to `defs` changes nothing here.
 
+3. **The tool is named with a directory.** `${SOURCES[0]}` expands to
+   `collate`, and a POSIX shell reads a bare name as something to look up on
+   `$PATH` — where a program in the build directory is not. Hence the `./`
+   (see `61_command_substitution`; `cmd.exe` searches the current directory
+   instead and has no `./`, so on Windows the prefix is empty).
+
 Any `${...}` pcons doesn't recognize is an error rather than a literal passed
 through to the build tool.
 """
+
+import platform
 
 from pcons import Project
 
@@ -38,10 +46,12 @@ project.add_configure_dependency(def_dir)
 def_files = sorted(p.relative_to(project.root_dir) for p in def_dir.glob("*.def"))
 
 # ${SOURCES[0]} is the tool; ${SOURCES[1:]} is every .def file.
+run = "" if platform.system() == "Windows" else "./"
+
 generated = env.Command(
     target=gen_dir / "entries.c",
     source=[collate, *def_files],
-    command="${SOURCES[0]} $TARGET ${SOURCES[1:]}",
+    command=f"{run}${{SOURCES[0]}} $TARGET ${{SOURCES[1:]}}",
     name="collate_defs",
     write_if_different=True,
 )
