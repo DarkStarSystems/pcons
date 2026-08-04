@@ -74,6 +74,16 @@ def configure_file(
     template = Path(template)
     output = Path(output)
 
+    # The template is an input to the build description, so editing it has to
+    # re-run pcons: the substitution happens here, at configure time, and
+    # nothing in the generated build knows the template exists.
+    from pcons.core.project import Project
+
+    try:
+        Project.current().add_configure_dependency(template)
+    except ValueError:
+        pass  # called outside a project (a unit test, or a bare script)
+
     if style not in ("cmake", "at"):
         raise ValueError(
             f"Unknown configure_file style {style!r}; expected 'cmake' or 'at'"

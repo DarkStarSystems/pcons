@@ -157,6 +157,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first time staged generation forced a regen mid-build, with nothing to see.
   `__file__` is now absolute, as CPython makes it for a script (3.9+). A round-trip test
   generates a manifest both ways and asserts they match.
+- **A `configure_file()` template re-runs pcons when it changes.** The substitution happens
+  at configure time and nothing in the generated build knows the template exists, so
+  editing `config.h.in` left the generated header stale and every compile kept using it,
+  with nothing to see. The template is now a configure dependency, like the build script.
 - **Identical `env.Command` commands share one ninja rule.** Each edge was pinned to a
   rule named for a fresh uuid, which bypassed rule deduplication entirely and made every
   run write a different `build.ninja`. 200 identical commands now produce one rule

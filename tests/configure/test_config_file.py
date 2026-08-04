@@ -191,3 +191,31 @@ class TestEdgeCases:
         tpl = _write(tmp_path / "t.in", "@X@")
         out = configure_file(str(tpl), str(tmp_path / "out"), {"X": "ok"}, style="at")
         assert out.read_text() == "ok"
+
+
+class TestTemplateIsAConfigureDependency:
+    """Editing a template re-runs pcons.
+
+    The substitution happens at configure time and nothing in the generated
+    build knows the template exists, so without this the generated file goes
+    stale and the build keeps using it.
+    """
+
+    def test_template_is_registered(self, tmp_path):
+        from pcons.core.project import Project
+
+        template = tmp_path / "config.h.in"
+        template.write_text('#define NAME "@NAME@"\n')
+        project = Project("cf", root_dir=tmp_path, build_dir="build")
+
+        configure_file(template, tmp_path / "build" / "config.h", {"NAME": "x"})
+
+        # Stored relative to the project root, like every other node path.
+        assert Path("config.h.in") in project.configure_dependencies
+
+    def test_outside_a_project_is_not_an_error(self, tmp_path):
+        """configure_file is usable from a plain script or a unit test."""
+        template = tmp_path / "t.in"
+        template.write_text("@A@\n")
+
+        assert configure_file(template, tmp_path / "out", {"A": "1"}).exists()
