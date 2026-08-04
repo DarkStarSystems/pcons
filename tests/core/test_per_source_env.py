@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Per-source environments: add_sources(..., env=...)."""
 
+from pathlib import Path
+
 import pytest
 
 from pcons.core.project import Project
@@ -146,9 +148,15 @@ class TestPerSourceEnvironment:
             careful.cc.flags.append("-O1")
             lib.add_sources(["src/slow.c"], env=careful)
 
-        assert [n.name for n in lib.sources] == ["src/a.c", "src/slow.c"]
+        assert [Path(n.name).as_posix() for n in lib.sources] == [
+            "src/a.c",
+            "src/slow.c",
+        ]
         content = _rules_for(tmp_path, project)
-        assert content.count("build obj.core/src/slow.c.o:") == 1
+        objects = [
+            line for line in content.splitlines() if line.startswith("build obj.core")
+        ]
+        assert sum("slow.c" in line for line in objects) == 1
         assert "-O2 -O1" in content
 
     def test_add_source_takes_an_env_too(self, tmp_path, gcc_toolchain):
