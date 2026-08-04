@@ -157,6 +157,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first time staged generation forced a regen mid-build, with nothing to see.
   `__file__` is now absolute, as CPython makes it for a script (3.9+). A round-trip test
   generates a manifest both ways and asserts they match.
+- **Identical `env.Command` commands share one ninja rule.** Each edge was pinned to a
+  rule named for a fresh uuid, which bypassed rule deduplication entirely and made every
+  run write a different `build.ninja`. 200 identical commands now produce one rule
+  instead of 200, a third less manifest text, and the same bytes on every run —
+  reproducible manifests are also easier to diff and to read. Pass `rule_name=` to
+  `GenericCommandBuilder` to pin an edge to a rule of its own.
 - **A command token that starts with a quote raises** instead of reaching the program with
   the quotes attached. `command=f'"{tool}" $SOURCE'` is the reflex from every other build
   system, and pcons already quotes each token for the shell it writes for, so the failure

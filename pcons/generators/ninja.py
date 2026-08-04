@@ -222,7 +222,12 @@ class NinjaGenerator(BaseGenerator):
                 else:
                     dep_sig = "gcc"
 
-            hash_body = f"{command}\n{dep_sig}\nrestat:{int(restat)}"
+            # The description is part of the rule, so two edges may only
+            # share one if theirs agree.
+            description = build_info.get("description") or ""
+            hash_body = (
+                f"{command}\n{dep_sig}\nrestat:{int(restat)}\ndesc:{description}"
+            )
             cmd_hash = hashlib.md5(hash_body.encode()).hexdigest()[:8]
             rule_key = f"{tool_name}_{command_var}_{cmd_hash}"
 

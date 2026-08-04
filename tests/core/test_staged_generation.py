@@ -216,23 +216,6 @@ env.Command(
         assert result.returncode == 0, result.stderr
         return result
 
-    @staticmethod
-    def _stable(manifest: str) -> str:
-        """Manifest text with env.Command's rule names normalized.
-
-        Those are `command_<uuid4>`, freshly random on every run, so no two
-        manifests are ever byte-identical -- which is worth knowing in its own
-        right, but is not the asymmetry under test here.
-        """
-        import re
-
-        names: dict[str, str] = {}
-        return re.sub(
-            r"command_[0-9a-f]{8}",
-            lambda m: names.setdefault(m.group(0), f"command_{len(names)}"),
-            manifest,
-        )
-
     def test_regen_reproduces_the_users_manifest(self, tmp_path):
         root = self._project_dir(tmp_path)
 
@@ -245,11 +228,12 @@ env.Command(
         self._run(root / "build", "-C", "..", "-B", "build", "-b", "pcons-build.py")
         as_regen = (root / "build" / "build.ninja").read_text()
 
-        assert self._stable(as_regen) == self._stable(as_user)
+        assert as_regen == as_user
 
     def test_the_script_sees_an_absolute_file(self, tmp_path):
-        """The mechanism, pinned directly: a relative -b used to reach the
-        script as a relative __file__, so root became '.'."""
+        """The mechanism, pinned directly: a relative -b still reaches the
+        script as an absolute __file__, so `Path(__file__).parent` is the
+        project root whoever ran pcons."""
         root = self._project_dir(tmp_path)
         (root / "pcons-build.py").write_text(
             "from pathlib import Path\n"

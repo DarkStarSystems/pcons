@@ -91,9 +91,9 @@ def _unhandled_source_error(
 ) -> PconsError:
     """Explain why *source* can't be compiled, and how to compile it anyway.
 
-    Left to itself, an unhandled source used to become one of the target's
-    own output nodes: no compile rule, and ninja complaining that a file
-    sitting in the source tree is "missing and no known rule to make it".
+    Raising here is what keeps an unhandled source from becoming one of the
+    target's own output nodes, which would leave ninja demanding a rule for a
+    file that sits in the source tree.
     """
     suffix = source.suffix or "(none)"
     lines = [

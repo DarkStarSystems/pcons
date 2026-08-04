@@ -40,11 +40,10 @@ class TestGenericCommandBuilder:
         # $SOURCE and $TARGET are converted to typed markers
         assert builder.command == ["python", "script.py", SourcePath(), TargetPath()]
 
-    def test_unique_rule_names(self, test_project):  # noqa: F811
-        """Each builder gets a unique rule name."""
-        builder1 = GenericCommandBuilder("cmd1")
-        builder2 = GenericCommandBuilder("cmd2")
-        assert builder1.rule_name != builder2.rule_name
+    def test_no_rule_name_by_default(self, test_project):  # noqa: F811
+        """No name pinned here means the generator names the rule after its
+        contents, so identical commands share one."""
+        assert GenericCommandBuilder("cmd1").rule_name is None
 
     def test_custom_rule_name(self, test_project):  # noqa: F811
         """Builder can have a custom rule name."""
@@ -1376,3 +1375,50 @@ class TestWorkingDirectory:
         assert after.split(f" && {CD} build && ", 1)[1].endswith(
             "stable_output --post $out"
         )
+
+
+class TestRuleSharing:
+    """Identical commands share one ninja rule, and a manifest is reproducible.
+
+    A rule name pinned per edge would bypass the generator's deduplication, so
+    N identical commands would write N identical rules; a random one would also
+    make every run produce a different build.ninja.
+    """
+
+    def _ninja(self, tmp_path, commands):
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("share", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        for i, command in enumerate(commands):
+            (tmp_path / f"in{i}.txt").write_text("x\n")
+            env.Command(target=f"out{i}.txt", source=[f"in{i}.txt"], command=command)
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    @staticmethod
+    def _rules(manifest: str) -> list[str]:
+        return [ln for ln in manifest.splitlines() if ln.startswith("rule ")]
+
+    def test_identical_commands_share_a_rule(self, tmp_path):
+        content = self._ninja(tmp_path, ["cp $SOURCE $TARGET"] * 20)
+
+        command_rules = [r for r in self._rules(content) if "command" in r]
+        assert len(command_rules) == 1
+
+    def test_different_commands_keep_their_own(self, tmp_path):
+        content = self._ninja(tmp_path, ["cp $SOURCE $TARGET", "mv $SOURCE $TARGET"])
+
+        assert len({r for r in self._rules(content) if "command" in r}) == 2
+
+    def test_a_pinned_rule_name_reaches_the_generator(self, test_project):  # noqa: F811
+        """A caller that wants an edge on a rule of its own says so, and the
+        name travels on the edge for the generator to use verbatim."""
+        builder = GenericCommandBuilder("cp $SOURCE $TARGET", rule_name="my_rule")
+        env = Environment()
+
+        node = builder(env, "out.txt", ["in.txt"])[0]
+
+        assert builder.rule_name == "my_rule"
+        assert node._build_info["rule_name"] == "my_rule"

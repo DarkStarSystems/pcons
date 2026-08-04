@@ -70,7 +70,7 @@ class BuildInfo(TypedDict, total=False):
     output_name: str  # This output's name (set on secondary outputs)
 
     # Generic command builder
-    rule_name: str  # Custom Ninja rule name
+    rule_name: str | None  # Rule name pinned by the caller; None to derive one
     all_targets: list[Any]  # list[Node]
     restat: bool  # Ninja restat: re-check output timestamp after build
     # Directory to run the command in, absolute, or None for the build

@@ -9,7 +9,6 @@ an Object builder that turns .c files into .o files).
 from __future__ import annotations
 
 import re
-import uuid
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
@@ -184,8 +183,8 @@ def apply_depends(
 def reject_unknown_kwargs(builder_name: str, kwargs: dict[str, Any]) -> None:
     """Raise on builder keyword arguments nothing consumes.
 
-    Quietly dropping a kwarg (``depends=`` used to be dropped this way) turns
-    a typo or an unsupported option into a build that is wrong but silent.
+    A silently dropped kwarg turns a typo or an unsupported option into a
+    build that is wrong and says nothing.
     """
     unknown = sorted(k for k in kwargs if k != "defined_at")
     if unknown:
@@ -812,18 +811,17 @@ class GenericCommandBuilder(BaseBuilder):
                 ${SOURCES[n:m]}, and $$ for a literal dollar sign. Any of
                 them may be part of a larger argument, as in
                 ./${SOURCES[0]} or /Fo$TARGET.
-            rule_name: Optional custom Ninja rule name; auto-generated
-                if not provided.
+            rule_name: Pin this edge to a rule of its own, by name. Leave
+                it unset — the usual case — and the generator names the rule
+                after what it contains, so commands that expand to the same
+                text share one rule and the manifest is the same on every
+                run.
             restat: If True, Ninja re-stats the output after the command,
                 so unchanged output doesn't rebuild downstream targets.
             cwd: Absolute directory to run the command in, instead of the
                 build directory. Generators render this edge's paths as seen
                 from there; see the generators' ``_run_in_dir``.
         """
-        # uuid4 gives uniqueness without thread synchronization
-        if rule_name is None:
-            rule_name = f"command_{uuid.uuid4().hex[:8]}"
-
         super().__init__(
             name="Command",
             tool_name="command",
@@ -859,8 +857,9 @@ class GenericCommandBuilder(BaseBuilder):
         return self._command
 
     @property
-    def rule_name(self) -> str:
-        """The Ninja rule name for this command."""
+    def rule_name(self) -> str | None:
+        """A rule name pinned by the caller, or None to let the generator
+        name the rule after its contents (so identical commands share one)."""
         return self._rule_name
 
     def _default_targets(
