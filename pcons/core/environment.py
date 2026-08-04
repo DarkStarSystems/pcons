@@ -1114,6 +1114,20 @@ class Environment(_EnvironmentStubs):
 
         apply_requirements_to_env(self, reqs)
 
+    def _resolve_cwd(self, cwd: str | Path | None) -> Path | None:
+        """Anchor a ``cwd=`` argument, which is relative to the project root.
+
+        Absolute at this point, so generators need no notion of where a
+        working directory was spelled from.
+        """
+        if cwd is None:
+            return None
+        path = Path(cwd)
+        if path.is_absolute():
+            return path
+        root = getattr(self._project, "root_dir", None) if self._project else None
+        return (root or Path.cwd()) / path
+
     def Command(
         self,
         *,
@@ -1124,6 +1138,7 @@ class Environment(_EnvironmentStubs):
         depends: str | Path | Sequence[str | Path] | None = None,
         restat: bool = False,
         write_if_different: bool = False,
+        cwd: str | Path | None = None,
     ) -> Target:
         """Run an arbitrary shell command to build targets from sources.
 
@@ -1167,6 +1182,17 @@ class Environment(_EnvironmentStubs):
                    without it, one changed input rebuilds everything
                    downstream of every output. See
                    ``pcons.tools.stable_output``.
+            cwd: Directory to run the command in. Build tools run from the
+                   build directory; a tool that insists on the source tree
+                   (reads a data file by a path relative to it, writes
+                   beside its inputs) needs this. A relative path is taken
+                   from the project root. Every path this command's edge
+                   names is emitted as seen from *cwd*, so ``$SOURCE``,
+                   ``$TARGET`` and ``$SRCDIR`` keep working; the generated
+                   build file stays as relocatable as it was. Use this
+                   rather than writing ``cd ... &&`` into the command,
+                   which would also strand the ``write_if_different``
+                   wrapper (see ``pcons.tools.stable_output``).
 
         Returns:
             Target object representing the command outputs.
@@ -1239,7 +1265,11 @@ class Environment(_EnvironmentStubs):
                     immediate_sources.append(src)
 
         # Create the builder
-        builder = GenericCommandBuilder(command, restat=restat or write_if_different)
+        builder = GenericCommandBuilder(
+            command,
+            restat=restat or write_if_different,
+            cwd=self._resolve_cwd(cwd),
+        )
 
         # Build the targets with immediate sources
         normalized = builder._normalize_sources(immediate_sources)

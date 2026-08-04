@@ -72,6 +72,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can be found without their warnings breaking a `-Werror` build. They propagate,
   deduplicate, and relativize like ordinary include dirs. See
   `examples/58_system_includes`.
+- **`env.Command(..., cwd=...)`** runs a command somewhere other than the build
+  directory — the source root, typically, for a generator that opens an input by a path
+  relative to it. There was no way to say this, and the obvious workaround (`cd $SRCDIR
+  &&` inside the command) is a trap: it strands everything pcons wraps around the
+  command. `$SOURCE`, `$TARGET` and `$SRCDIR` come out relative to the directory named,
+  the paths stay relative so `build.ninja` is still relocatable, and the command is
+  returned to the build directory afterwards. A relative `cwd` is taken from the project
+  root. Ninja and Make both. See `examples/60_command_cwd`.
 - **`target.pre_build(command)`**, the mirror of `post_build()`.
 
 ### Changed
@@ -133,6 +141,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own, so `SharedLibrary(sources=[objlib, "x.c"])` with a post-build step broke. Now
   the test is `output_nodes` alone; an ObjectLibrary's objects are its outputs, so they
   still qualify. Both generators.
+- **`write_if_different` no longer switches itself off in silence.** It wraps the
+  command as `stash --pre $out && <your command> && stash --post $out`, and both halves
+  name their files relative to the directory the build system started them in. A `cd`
+  inside the command left `--post` in the wrong place: it found none of the outputs it
+  had stashed, restored nothing, and exited 0 — so `restat` quietly stopped suppressing
+  anything and a byte-identical generated file relinked a 15 MB library on every build,
+  with nothing in the output pointing at the cause. `--pre` now records the run, and
+  `--post` fails with an explanation when it can't find that record. Use the new
+  `env.Command(cwd=...)`, which changes back.
 - **An unrecognized source extension is an error, not a target.** `sources=["k.cu"]` with
   a toolchain that has no `.cu` handler emitted no compile rule and made the *source file*
   a default target, so ninja reported `'k.cu' missing and no known rule to make it` about a

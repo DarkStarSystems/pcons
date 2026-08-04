@@ -1,0 +1,34 @@
+# Test configuration for the command-cwd example
+
+[test]
+description = "A generator that must run from the source root: env.Command(cwd=...) moves the command and its paths, and write_if_different keeps identical output from rebuilding the world"
+
+expected_outputs = [
+    "build/make-items",
+    "build/gen/items.c",
+    "build/demo",
+]
+
+[verify]
+# The program can only print this if the generator found data/items.txt by its
+# source-root-relative path and wrote the target where the build expected it.
+commands = [
+    { run = "build/demo", expect_stdout = "3 items: alpha beta gamma" },
+]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "Touching the data file re-runs the generator, but identical output rebuilds nothing"
+touch = "data/items.txt"
+# The glob spans the directory separator, which differs by platform.
+expect_rebuild = ["gen*items.c"]
+expect_no_rebuild = ["obj.demo/*", "demo"]
+
+[skip]
+# Xcode has no equivalent of a generic command edge. Make does, and builds
+# this correctly (the rebuild scenarios above are ninja-only in any case,
+# since make has no restat).
+generators = ["xcode"]

@@ -163,6 +163,7 @@ class NinjaGenerator(BaseGenerator):
         # Resolve the command string
         command_raw = build_info.get("command")
         extra_command_flags = build_info.get("extra_command_flags") or []
+        cwd = cast("Path | None", build_info.get("cwd"))
 
         if command_raw is None:
             command = self._expand_command_fallback(node, build_info, env)
@@ -176,6 +177,7 @@ class NinjaGenerator(BaseGenerator):
                 cast(list[str], command_tokens),
                 source_count=len(build_info.get("sources") or []),
                 target_count=len(all_targets) or 1,
+                cwd=cwd,
             )
             command = to_shell_command(relativized_tokens, shell="ninja")
         else:
@@ -183,6 +185,9 @@ class NinjaGenerator(BaseGenerator):
             for flag in extra_command_flags:
                 if f" {flag}" not in command:
                     command = f"{command} {flag}"
+
+        if cwd is not None:
+            command = self._run_in_dir(command, cwd)
 
         # Wrap with the target's pre/post-build commands
         pre_build_prefix = self._get_pre_build_prefix(node, target)
@@ -317,6 +322,89 @@ class NinjaGenerator(BaseGenerator):
         if command.startswith(("cmd ", "cmd.exe ")):
             return command  # already explicit about wanting a shell
         return f'cmd.exe /s /c "{command}"'
+
+    def _run_in_dir(self, command: str, cwd: Path) -> str:
+        """Wrap *command* so it runs in *cwd*, and come back afterwards.
+
+        Ninja runs every edge from the build directory, and everything else on
+        the command line counts on that: the pre/post-build commands wrapped
+        around this one (``write_if_different``'s stash, say) name their files
+        relative to it. So the ``cd`` is paired with a ``cd`` back rather than
+        left to leak into the rest of the ``&&`` chain — a one-way ``cd`` is
+        exactly the trap this argument exists to remove.
+
+        Both directions are written relative to the build dir where possible,
+        so build.ninja stays relocatable; only a directory no relative path
+        can reach (another Windows drive) falls back to absolute.
+        """
+        cd = "cd /d" if get_platform().is_windows else "cd"
+        there = self._dir_argument(cwd, base=self._output_dir)
+        back = self._dir_argument(self._output_dir, base=cwd)
+        return f"{cd} {there} && {command} && {cd} {back}"
+
+    #: A directory a shell needs no help reading.
+    _PLAIN_DIR = re.compile(r"^[\w./\\:-]+$")
+
+    def _dir_argument(self, directory: Path | None, *, base: Path | None) -> str:
+        """*directory* as a ``cd`` argument, seen from *base*.
+
+        Quoted for the shell ninja will use — cmd.exe doesn't honour single
+        quotes, /bin/sh keeps expanding inside double ones — and $-escaped for
+        ninja itself.
+        """
+        rel = str(directory)
+        if directory is not None and base is not None:
+            try:
+                rel = os.path.relpath(directory, base)
+            except ValueError:
+                rel = str(directory)  # different Windows drive
+        windows = get_platform().is_windows
+        # cmd.exe reads a leading "/" as a switch, so give it backslashes.
+        rel = rel.replace("\\", "/").replace("/", "\\" if windows else "/")
+        quote = '"' if windows else "'"
+        escaped = rel.replace("$", "$$")
+        if self._PLAIN_DIR.match(rel):
+            return escaped
+        return f"{quote}{escaped}{quote}"
+
+    def _absolute(self, path: Path | str) -> Path:
+        """The absolute location of a node path (build output or source).
+
+        Node paths are project-root-relative and carry the build_dir prefix
+        for outputs; both spellings resolve here so a path can be re-anchored
+        to an edge's working directory.
+        """
+        path_obj = Path(str(path).replace("\\", "/"))
+        if path_obj.is_absolute():
+            return path_obj
+        if self._is_under_build_dir(path_obj) and self._output_dir is not None:
+            return self._output_dir / self._make_output_relative(path_obj)
+        if self._project_root is not None:
+            return self._project_root / path_obj
+        return path_obj
+
+    def _output_absolute(self, path: Path | str) -> Path:
+        """The absolute location of a *build output*'s node path.
+
+        An output's node path is execution-relative, which it can be either
+        with the build_dir prefix (``build/gen/x.c``) or without it, when the
+        builder was handed a bare name (``env.Command(target="out.txt")``).
+        :meth:`_absolute` can't tell the second spelling from a source path
+        and would anchor it at the project root, so an output resolves here
+        instead: ``_make_output_relative`` normalizes both spellings.
+        """
+        path_obj = Path(str(path).replace("\\", "/"))
+        if path_obj.is_absolute() or self._output_dir is None:
+            return path_obj
+        return self._output_dir / self._make_output_relative(path_obj)
+
+    def _path_at(self, path: Path | str, cwd: Path, *, output: bool = False) -> str:
+        """Render *path* as a command running in *cwd* sees it."""
+        absolute = self._output_absolute(path) if output else self._absolute(path)
+        try:
+            return os.path.relpath(absolute, cwd).replace("\\", "/")
+        except ValueError:
+            return str(absolute).replace("\\", "/")  # different Windows drive
 
     def _extra_build_commands(
         self,
@@ -573,11 +661,21 @@ class NinjaGenerator(BaseGenerator):
         $in/$out are never written — ninja sets them from the build
         statement. Multi-output builds get out_<name> variables; generic
         commands get source_N/target_N for indexed access.
+
+        An edge with a ``cwd`` writes those paths as seen from there: they
+        exist only to be read by that edge's command, which runs there.
         """
         sources = cast(list[Node], build_info.get("sources", []))
+        cwd = cast("Path | None", build_info.get("cwd"))
+
+        def is_build_output(s: FileNode) -> bool:
+            return getattr(s, "_build_info", None) is not None or s.is_target
 
         def get_source_path(s: FileNode) -> str:
-            if getattr(s, "_build_info", None) is not None or s.is_target:
+            if cwd is not None:
+                return self._path_at(s.path, cwd, output=is_build_output(s))
+
+            if is_build_output(s):
                 return self._make_output_relative(s.path)
 
             rel = self._make_source_relative(s.path)
@@ -585,6 +683,11 @@ class NinjaGenerator(BaseGenerator):
                 return f"$topdir/{rel}"
 
             return str(s.path)
+
+        def get_target_path(path: Path) -> str:
+            if cwd is None:
+                return self._make_output_relative(path)
+            return self._path_at(path, cwd, output=True)
 
         source_file_nodes = [s for s in sources if isinstance(s, FileNode)]
 
@@ -594,7 +697,7 @@ class NinjaGenerator(BaseGenerator):
                 f.write(f"  source_{i} = {get_source_path(src)}\n")
             target_nodes = cast(list[FileNode], all_targets)
             for i, tgt in enumerate(target_nodes):
-                f.write(f"  target_{i} = {self._make_output_relative(tgt.path)}\n")
+                f.write(f"  target_{i} = {get_target_path(tgt.path)}\n")
 
         outputs_info = build_info.get("outputs")
         if outputs_info and isinstance(outputs_info, dict):
@@ -886,9 +989,12 @@ class NinjaGenerator(BaseGenerator):
             return path_obj.parts[:n] == self._build_dir_parts
         return False
 
-    def _relativize_flag_with_path(self, token: str, prefix: str | None = None) -> str:
+    def _relativize_flag_with_path(
+        self, token: str, prefix: str | None = None, *, cwd: Path | None = None
+    ) -> str:
         """Relativize a path-carrying flag (``-I<path>``, ``/LIBPATH:<path>``)
-        to $topdir form, or "." when the path is the build dir.
+        the same way as any other path in the command — $topdir form, "." for
+        the build dir, or relative to the edge's *cwd*.
 
         With *prefix* given, *token* is the bare path argument of a flag that
         was spelled as two tokens (``-isystem`` ``<path>``); the prefix is used
@@ -908,14 +1014,9 @@ class NinjaGenerator(BaseGenerator):
             path = token
             prefix = ""
 
-        if self._is_build_dir_path(path):
-            return f"{prefix}."
-        rel = self._make_source_relative(path)
-        if rel is not None:
-            return f"{prefix}$topdir/{rel}"
-        # Outside the project tree (an SDK, a system prefix): absolute is
-        # the only thing it can be.
-        return f"{prefix}{path}"
+        # Outside the project tree (an SDK, a system prefix), the path comes
+        # back absolute — the only thing it can be.
+        return f"{prefix}{self._relativize_path_for_ninja(path, cwd)}"
 
     def _path_flag_prefix(self, token: str) -> str | None:
         """The path-flag prefix *token* starts with, if any.
@@ -961,6 +1062,7 @@ class NinjaGenerator(BaseGenerator):
         *,
         source_count: int = 0,
         target_count: int = 0,
+        cwd: Path | None = None,
     ) -> list[str]:
         """Relativize command tokens for ninja execution.
 
@@ -971,6 +1073,12 @@ class NinjaGenerator(BaseGenerator):
         A slice marker (``${SOURCES[2:]}``) expands to the indexed references
         it covers, which is why the counts are needed: ninja has no way to
         say "the rest of the inputs".
+
+        With *cwd*, every path is rendered as seen from there instead of from
+        the build directory. $in/$out can't be: they are ninja's own view of
+        the edge, which has to stay build-relative for dependency tracking.
+        So a cwd edge uses the per-edge $source_N/$target_N variables, which
+        the build statement writes relative to the same directory.
         """
         from pcons.core.subst import PathToken, SourcePath, TargetPath
 
@@ -996,10 +1104,17 @@ class NinjaGenerator(BaseGenerator):
                 # all, and rewriting it would change its meaning.
                 expect_path = False
                 if isinstance(token, str) and Path(token).is_absolute():
-                    result.append(self._relativize_flag_with_path(token, prefix=""))
+                    result.append(
+                        self._relativize_flag_with_path(token, prefix="", cwd=cwd)
+                    )
                     continue
             if isinstance(token, SourcePath):
                 if token.is_slice:
+                    result.extend(self._slice_refs(token, "source", source_count))
+                    continue
+                if token.index is None and cwd is not None:
+                    # $in has no cwd-relative spelling; name the inputs one by
+                    # one instead, which is what an unbounded slice does.
                     result.extend(self._slice_refs(token, "source", source_count))
                     continue
                 if token.index is not None or has_indexed_source:
@@ -1011,20 +1126,30 @@ class NinjaGenerator(BaseGenerator):
                 if token.is_slice:
                     result.extend(self._slice_refs(token, "target", target_count))
                     continue
+                if token.index is None and cwd is not None:
+                    result.extend(self._slice_refs(token, "target", target_count))
+                    continue
                 if token.index is not None or has_indexed_target:
                     ninja_var = f"$target_{token.index or 0}"
                 else:
                     ninja_var = "$out"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
             elif isinstance(token, PathToken):
-                result.append(token.relativize(self._relativize_path_for_ninja))
+                result.append(
+                    token.relativize(lambda p: self._relativize_path_for_ninja(p, cwd))
+                )
             else:
                 s = str(token)
                 # $SRCDIR and $topdir both mean the project source root
-                s = s.replace("$SRCDIR", "$topdir")
+                srcdir = (
+                    "$topdir"
+                    if cwd is None or self._project_root is None
+                    else self._path_at(self._project_root, cwd)
+                )
+                s = s.replace("$SRCDIR", srcdir)
                 # A bare path flag takes its path as the next token
                 expect_path = s in self._path_flags
-                relativized = self._relativize_flag_with_path(s)
+                relativized = self._relativize_flag_with_path(s, cwd=cwd)
                 if relativized.startswith("-"):
                     self._warn_absolute_in_tree(relativized)
                 result.append(relativized)
@@ -1032,19 +1157,28 @@ class NinjaGenerator(BaseGenerator):
 
     @staticmethod
     def _slice_refs(token: Any, kind: str, count: int) -> list[str]:
-        """The indexed references a slice marker covers, one token each.
+        """The indexed references a marker covers, one token each.
 
-        Ninja has no "rest of the inputs" variable, so the slice is written
-        out as ``$source_2 $source_3 ...`` for this edge's actual count. Edges
+        Ninja has no "rest of the inputs" variable, so a slice is written out
+        as ``$source_2 $source_3 ...`` for this edge's actual count. Edges
         with different counts therefore get different rules; that is fine for
-        the code-generation commands slices exist for.
+        the code-generation commands slices exist for. An unindexed marker has
+        no range at all, so this spells out every reference — which is what a
+        cwd edge needs in place of ``$in``/``$out``.
         """
         start, stop, _ = slice(token.start, token.stop).indices(count)
         return [f"{token.prefix}${kind}_{i}{token.suffix}" for i in range(start, stop)]
 
-    def _relativize_path_for_ninja(self, path: str) -> str:
+    def _relativize_path_for_ninja(self, path: str, cwd: Path | None = None) -> str:
         """Transform a path for ninja execution: $topdir/... for project
-        paths, "." for the build dir, unchanged for external paths."""
+        paths, "." for the build dir, unchanged for external paths.
+
+        An edge with a *cwd* runs somewhere else, so its paths are written
+        relative to that directory instead.
+        """
+        if cwd is not None:
+            return self._path_at(path, cwd)
+
         if self._is_build_dir_path(path):
             return "."
 

@@ -289,14 +289,15 @@ class MakefileGenerator(BaseGenerator):
 
         # Builder-provided command (generic commands, install, archive)
         custom_command = build_info.get("command")
+        cwd = cast("Path | None", build_info.get("cwd"))
         if custom_command:
             if isinstance(custom_command, list):
-                processed_tokens = self._process_path_tokens(custom_command)
+                processed_tokens = self._process_path_tokens(custom_command, cwd=cwd)
 
                 # Expand $SOURCES/$TARGET before to_shell_command() so each
                 # path is a separate, individually quoted token.
                 expanded_tokens = self._expand_source_target_tokens(
-                    processed_tokens, node, sources, build_info
+                    processed_tokens, node, sources, build_info, cwd=cwd
                 )
 
                 from pcons.core.subst import to_shell_command
@@ -306,6 +307,8 @@ class MakefileGenerator(BaseGenerator):
                 command = str(custom_command)
                 command = self._convert_command_variables(command)
                 command = self._substitute_make_vars(command, node, sources, build_info)
+            if cwd is not None:
+                command = self._run_in_dir(command, cwd)
             return self._wrap_build_commands(command, node, target, sources)
 
         context = build_info.get("context")
@@ -712,7 +715,29 @@ class MakefileGenerator(BaseGenerator):
         """Render a Makefile rule-target path for *node* ($-escaped)."""
         return self.ESCAPE_DOLLAR.sub("$$", self._node_out_raw(node))
 
-    def _process_path_tokens(self, tokens: list) -> list:
+    def _run_in_dir(self, command: str, cwd: Path) -> str:
+        """Wrap *command* so it runs in *cwd*, and come back afterwards.
+
+        Make runs from the build directory, and the pre/post-build commands
+        wrapped around this one name their files relative to it, so the ``cd``
+        is paired with a ``cd`` back instead of leaking into the rest of the
+        recipe line. Both are absolute: a Makefile already spells its source
+        paths absolutely, so there is no relocatability left to protect.
+        """
+        return f"cd {shlex.quote(str(cwd))} && {command} && cd {shlex.quote(str(self._build_dir))}"
+
+    def _at_build_dir(self, path: str) -> str:
+        """A recipe path made absolute, for a command that runs elsewhere.
+
+        Recipe paths are either build-dir-relative (build artifacts) or
+        already absolute (source-tree files).
+        """
+        path_obj = Path(path)
+        if path_obj.is_absolute() or self._build_dir is None:
+            return str(path_obj)
+        return str(self._build_dir / path_obj)
+
+    def _process_path_tokens(self, tokens: list, *, cwd: Path | None = None) -> list:
         """Relativize PathTokens in a command token list for make.
 
         SourcePath/TargetPath markers pass through unchanged for
@@ -720,12 +745,16 @@ class MakefileGenerator(BaseGenerator):
         """
         from pcons.core.subst import PathToken, SourcePath, TargetPath
 
+        def relativize(path: str) -> str:
+            rendered = self._relativize_path_for_make(path)
+            return self._at_build_dir(rendered) if cwd is not None else rendered
+
         result: list = []
         for token in tokens:
             if isinstance(token, (SourcePath, TargetPath)):
                 result.append(token)
             elif isinstance(token, PathToken):
-                result.append(token.relativize(self._relativize_path_for_make))
+                result.append(token.relativize(relativize))
             else:
                 s = str(token)
                 # $SRCDIR becomes the absolute project root (make runs from
@@ -761,6 +790,8 @@ class MakefileGenerator(BaseGenerator):
         node: FileNode,
         sources: list[Node],
         build_info: dict[str, object],
+        *,
+        cwd: Path | None = None,
     ) -> list[str]:
         """Expand source/target markers and $SOURCES/$TARGET-style variables
         to actual file paths at the token level.
@@ -768,6 +799,10 @@ class MakefileGenerator(BaseGenerator):
         Expansion happens before shell quoting so each path becomes a
         separate, individually quoted token — critical for commands like
         linkers where $SOURCES expands to multiple files.
+
+        With *cwd*, the command runs somewhere other than the build directory,
+        so build-relative paths are made absolute — the one spelling that
+        means the same thing from every directory.
         """
         from pcons.core.subst import SourcePath, TargetPath
 
@@ -812,6 +847,12 @@ class MakefileGenerator(BaseGenerator):
                     out_paths.append(self._strip_build_dir_prefix(info_dict["path"]))
         if not out_paths:
             out_paths = [out_path]
+
+        if cwd is not None:
+            in_paths = [self._at_build_dir(p) for p in in_paths]
+            out_paths = [self._at_build_dir(p) for p in out_paths]
+            out_path = self._at_build_dir(out_path)
+            depfile_path = self._at_build_dir(depfile_path) if depfile_path else ""
 
         # An explicit index on any marker (even 0) switches all markers of
         # that type to indexed mode; index=None means "auto".

@@ -2553,6 +2553,25 @@ env.Command(
 )
 ```
 
+**Running somewhere else: `cwd=`**
+
+Build tools run from the build directory, and pcons writes every path in a command relative to it. Some tools can't live with that — they open an input by a path relative to the source root, or write beside their inputs. `cwd=` moves the command, and moves its paths with it: `$SOURCE`, `$TARGET` and `$SRCDIR` all come out relative to the directory you named, so nothing else in the rule changes. A relative `cwd` is taken from the project root.
+
+```python
+# The tool finds its input at "data/items.txt" -- relative to the source root
+env.Command(
+    target=gen_dir / "items.c",
+    source=[make_items],
+    depends=["data/items.txt"],
+    command="$SOURCE $TARGET",
+    cwd=project.root_dir,
+)
+```
+
+Paths stay relative wherever they can, so `build.ninja` remains as relocatable as it was; only a directory no relative path can reach (another Windows drive) forces an absolute one. Makefiles already spell their source paths absolutely, so a moved command there is absolute throughout.
+
+Don't write the `cd` into the command yourself. It looks equivalent and isn't: pcons wraps your command with steps of its own — `post_build()` commands, and the `write_if_different` stash below — that run in the build directory and name their files relative to it. A one-way `cd` strands them. `cwd=` changes back; a hand-written `cd` now fails the build rather than quietly costing you a rebuild. See `examples/60_command_cwd`.
+
 **Extra dependencies with `depends=`:** Files listed in `depends=` trigger a rebuild when they change, but don't appear in `$SOURCE`/`$SOURCES`. Use this for scripts, config files, or other build-time inputs:
 
 ```python
@@ -2609,6 +2628,8 @@ env.Command(
 ```
 
 Without it, adding one entry to a 280-plugin manifest recompiles all 280. With it, only the new one. See `examples/57_staged_generation`.
+
+The two halves of that stash have to run in the same directory, so a command that changes directory and doesn't change back fails the build with an explanation, rather than restoring nothing and exiting 0. Use `cwd=` (above) instead of a bare `cd`.
 
 ### Post-Build Commands
 

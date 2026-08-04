@@ -901,3 +901,187 @@ class TestUnknownSubstitutionsRaise:
         )
 
         assert cmd is not None
+
+
+class TestWorkingDirectory:
+    """`cwd=` for a tool that only works from somewhere else -- the source
+    root, typically, because it opens an input by a path relative to it.
+
+    Ninja and make run from the build directory and pcons writes every path in
+    a command relative to there, so moving the command has to move its paths
+    with it, or the tool is handed paths that mean nothing where it runs."""
+
+    def _project(self, tmp_path, gcc_toolchain, **command_args):
+        project = Project("cwd", root_dir=tmp_path, build_dir="build")
+        (tmp_path / "in.txt").write_text("data\n")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.Command(
+            target=project.build_dir / "gen/out.txt",
+            source=["in.txt"],
+            **command_args,
+        )
+        return project
+
+    def _ninja(self, tmp_path, gcc_toolchain, **command_args):
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = self._project(tmp_path, gcc_toolchain, **command_args)
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    def _makefile(self, tmp_path, gcc_toolchain, **command_args):
+        from pcons.generators.makefile import MakefileGenerator
+
+        project = self._project(tmp_path, gcc_toolchain, **command_args)
+        MakefileGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "Makefile").read_text()
+
+    def _command_line(self, content, marker="command ="):
+        return next(
+            line.strip()
+            for line in content.splitlines()
+            if marker in line and "out.txt" not in line.split(marker)[0]
+        )
+
+    def test_absolute_cwd_is_stored_on_the_edge(self, tmp_path, gcc_toolchain):
+        project = self._project(
+            tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd=tmp_path
+        )
+        node = project.targets[0].output_nodes[0]
+
+        assert node._build_info["cwd"] == tmp_path
+
+    def test_relative_cwd_is_anchored_at_the_project_root(
+        self, tmp_path, gcc_toolchain
+    ):
+        project = self._project(
+            tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd="tools"
+        )
+        node = project.targets[0].output_nodes[0]
+
+        assert node._build_info["cwd"] == tmp_path / "tools"
+
+    def test_no_cwd_leaves_the_command_alone(self, tmp_path, gcc_toolchain):
+        content = self._ninja(tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET")
+
+        command = self._command_line(content)
+        assert "cd " not in command
+        assert "gen $in $out" in command
+
+    def test_ninja_changes_directory_and_back(self, tmp_path, gcc_toolchain):
+        content = self._ninja(
+            tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd=tmp_path
+        )
+
+        command = self._command_line(content)
+        # Back to the build dir, so anything wrapped around the command (a
+        # post-build step, write_if_different) still finds its files.
+        assert command.endswith("&& cd build")
+        assert "cd .. && " in command
+
+    def test_ninja_paths_are_relative_to_the_working_directory(
+        self, tmp_path, gcc_toolchain
+    ):
+        content = self._ninja(
+            tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd=tmp_path
+        )
+
+        # $in/$out are ninja's own, build-relative view of the edge, so a
+        # moved command uses the per-edge variables instead.
+        assert "gen $source_0 $target_0" in content
+        assert "  source_0 = in.txt\n" in content
+        assert "  target_0 = build/gen/out.txt\n" in content
+
+    def test_a_bare_target_name_still_resolves_to_the_build_dir(
+        self, tmp_path, gcc_toolchain
+    ):
+        """`target="out.txt"` gives a node path with no build_dir prefix.
+
+        It is still execution-relative -- ninja writes `build out.txt:` and
+        the file lands in the build directory -- but it looks exactly like a
+        source path, so anchoring it at the project root sent the command's
+        output one directory up, where nothing would ever look for it.
+        """
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("cwd", root_dir=tmp_path, build_dir="build")
+        (tmp_path / "in.txt").write_text("data\n")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.Command(
+            target="out.txt",
+            source=["in.txt"],
+            command="gen $SOURCE $TARGET",
+            cwd=tmp_path,
+        )
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        assert "  target_0 = build/out.txt\n" in content
+
+    def test_ninja_srcdir_follows_the_working_directory(self, tmp_path, gcc_toolchain):
+        content = self._ninja(
+            tmp_path,
+            gcc_toolchain,
+            command="$SRCDIR/tools/gen $TARGET",
+            cwd=tmp_path / "sub",
+        )
+
+        assert "../tools/gen $target_0" in content
+        assert "$topdir/tools/gen" not in content
+
+    def test_ninja_stays_relocatable(self, tmp_path, gcc_toolchain):
+        content = self._ninja(
+            tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd=tmp_path
+        )
+
+        # No absolute path from this checkout anywhere in the moved edge.
+        assert str(tmp_path) not in self._command_line(content)
+        assert str(tmp_path) not in content.split("# Build statements")[1]
+
+    def test_makefile_changes_directory_and_back(self, tmp_path, gcc_toolchain):
+        content = self._makefile(
+            tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd=tmp_path
+        )
+
+        recipe = next(
+            line.strip()
+            for line in content.splitlines()
+            if line.startswith("\t") and " gen " in line
+        )
+        assert recipe.startswith(f"cd {tmp_path} && ")
+        assert recipe.endswith(f"&& cd {tmp_path / 'build'}")
+
+    def test_makefile_paths_are_absolute_in_a_moved_command(
+        self, tmp_path, gcc_toolchain
+    ):
+        content = self._makefile(
+            tmp_path, gcc_toolchain, command="gen $SOURCE $TARGET", cwd=tmp_path
+        )
+
+        # A Makefile already spells sources absolutely; the output has to
+        # follow, or it lands wherever the command was told to run.
+        assert (
+            f"gen {tmp_path / 'in.txt'} {tmp_path / 'build' / 'gen' / 'out.txt'}"
+            in (content)
+        )
+
+    def test_write_if_different_wrapper_is_not_moved(self, tmp_path, gcc_toolchain):
+        content = self._ninja(
+            tmp_path,
+            gcc_toolchain,
+            command="gen $SOURCE $TARGET",
+            cwd=tmp_path,
+            write_if_different=True,
+        )
+
+        command = self._command_line(content)
+        before, after = command.split(" && cd .. && ", 1)
+        # Both halves of the stash wrapper run where ninja put us: the build
+        # directory, which is where $out is relative to.
+        assert "stable_output --pre $out" in before
+        assert after.split(" && cd build && ", 1)[1].endswith(
+            "stable_output --post $out"
+        )

@@ -908,3 +908,45 @@ class TestShellRouting:
         command = "prep $out && build $in"
 
         assert self._route(monkeypatch, command, windows=False) == command
+
+
+class TestWorkingDirectoryOnWindows:
+    """cmd.exe needs `cd /d` to follow a drive letter, and reads a leading
+    forward slash as a switch."""
+
+    @staticmethod
+    def _generator(monkeypatch, tmp_path, *, windows: bool) -> NinjaGenerator:
+        from types import SimpleNamespace
+
+        monkeypatch.setattr(
+            "pcons.generators.ninja.get_platform",
+            lambda: SimpleNamespace(is_windows=windows),
+        )
+        gen = NinjaGenerator()
+        gen._output_dir = tmp_path / "build"
+        return gen
+
+    def test_windows_uses_cd_slash_d_and_backslashes(self, monkeypatch, tmp_path):
+        gen = self._generator(monkeypatch, tmp_path, windows=True)
+
+        wrapped = gen._run_in_dir("gen $source_0", tmp_path / "sub dir")
+
+        assert wrapped == 'cd /d "..\\sub dir" && gen $source_0 && cd /d ..\\build'
+
+    def test_unix_uses_plain_cd(self, monkeypatch, tmp_path):
+        gen = self._generator(monkeypatch, tmp_path, windows=False)
+
+        wrapped = gen._run_in_dir("gen $source_0", tmp_path)
+
+        assert wrapped == "cd .. && gen $source_0 && cd build"
+
+    def test_another_drive_falls_back_to_absolute(self, monkeypatch, tmp_path):
+        gen = self._generator(monkeypatch, tmp_path, windows=True)
+        monkeypatch.setattr(
+            "pcons.generators.ninja.os.path.relpath",
+            lambda *args: (_ for _ in ()).throw(ValueError("different drive")),
+        )
+
+        wrapped = gen._run_in_dir("gen", Path("D:/elsewhere"))
+
+        assert wrapped.startswith("cd /d D:\\elsewhere && ")

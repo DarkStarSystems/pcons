@@ -73,6 +73,9 @@ class BuildInfo(TypedDict, total=False):
     rule_name: str  # Custom Ninja rule name
     all_targets: list[Any]  # list[Node]
     restat: bool  # Ninja restat: re-check output timestamp after build
+    # Directory to run the command in, absolute, or None for the build
+    # directory. Generators render this edge's paths as seen from there.
+    cwd: Path | None
 
     # Per-build variables for standalone tools (Install, Archive)
     # These are written as Ninja build-level variables

@@ -687,6 +687,7 @@ class GenericCommandBuilder(BaseBuilder):
         *,
         rule_name: str | None = None,
         restat: bool = False,
+        cwd: Path | None = None,
     ) -> None:
         """Initialize a generic command builder.
 
@@ -697,6 +698,9 @@ class GenericCommandBuilder(BaseBuilder):
                 if not provided.
             restat: If True, Ninja re-stats the output after the command,
                 so unchanged output doesn't rebuild downstream targets.
+            cwd: Absolute directory to run the command in, instead of the
+                build directory. Generators render this edge's paths as seen
+                from there; see the generators' ``_run_in_dir``.
         """
         # uuid4 gives uniqueness without thread synchronization
         if rule_name is None:
@@ -714,6 +718,7 @@ class GenericCommandBuilder(BaseBuilder):
         self._command = self._tokenize_command(command)
         self._rule_name = rule_name
         self._restat = restat
+        self._cwd = cwd
 
     def _tokenize_command(self, command: str | list[str]) -> list:
         """Convert command string to tokenized list with typed markers.
@@ -821,6 +826,7 @@ class GenericCommandBuilder(BaseBuilder):
                 "depfile": None,
                 "deps_style": None,
                 "restat": self._restat,
+                "cwd": self._cwd,
             }
 
             # For multiple outputs, mark secondary targets as referencing primary

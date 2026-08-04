@@ -1406,6 +1406,8 @@ class Project(_ProjectBuilders):
         source: str | Path | list[str | Path] | None = None,
         command: str | list[str] = "",
         restat: bool = False,
+        write_if_different: bool = False,
+        cwd: str | Path | None = None,
     ) -> Target:
         """Create a custom command target.
 
@@ -1425,6 +1427,10 @@ class Project(_ProjectBuilders):
             restat: If True, Ninja will re-check the output timestamp after
                    running the command. If the output didn't actually change,
                    downstream targets won't be rebuilt.
+            write_if_different: Restore outputs the command rewrote with
+                   identical content, and set ``restat``.
+            cwd: Directory to run the command in, instead of the build
+                   directory; relative to the project root.
 
         Returns:
             A new Target configured as a command.
@@ -1439,7 +1445,13 @@ class Project(_ProjectBuilders):
             )
         """
         return env.Command(
-            target=target, source=source, command=command, name=name, restat=restat
+            target=target,
+            source=source,
+            command=command,
+            name=name,
+            restat=restat,
+            write_if_different=write_if_different,
+            cwd=cwd,
         )
 
     def __str__(self) -> str:
