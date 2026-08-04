@@ -139,9 +139,64 @@ def configure_file(
 
     text = re.sub(r"@(\w+)@", _at_replace, text)
 
-    # ── Write-if-changed ────────────────────────────────────────────────
+    return write_file(output, text)
+
+
+def _anchor(path: Path | str) -> Path:
+    """A relative path taken from the project root, like every other in pcons.
+
+    Configure-time writes would otherwise land relative to the working
+    directory, which is the source root when the CLI runs a build script but
+    anything at all when a script or a test calls in directly.
+    """
+    path = Path(path)
+    if path.is_absolute():
+        return path
+
+    from pcons.core.project import Project
+
+    try:
+        return Path(Project.current().root_dir) / path
+    except ValueError:
+        return path  # no project: the working directory is all there is
+
+
+def write_file(output: Path | str, content: str | bytes) -> Path:
+    """Write *content* to *output* at configure time, if it differs.
+
+    For a file whose content the build script computes — an Info.plist, a
+    PkgInfo, a version header, a generated .pc. The write happens during
+    generate, so the file is an ordinary source by the time the build runs:
+    no rule, no process per file, and no quoting to get wrong. Content that
+    has not changed keeps its timestamp, so nothing downstream rebuilds.
+
+    Pass ``bytes`` when the exact bytes matter — a classic macOS ``PkgInfo``
+    is 8 bytes with no trailing newline.
+
+    The build script is already a configure dependency, so editing the script
+    that computes the content re-runs pcons and rewrites the file.
+
+    Args:
+        output: Path to write.
+        content: Text, or bytes when the encoding is yours to control.
+
+    Returns:
+        The *output* path, for use as a source or an ``Install()`` input.
+
+    Example:
+        plist = write_file(build_dir / "Info.plist", generate_info_plist(...))
+        project.Install(contents_dir, [plist])
+    """
+    output = _anchor(output)
     output.parent.mkdir(parents=True, exist_ok=True)
-    if output.exists() and output.read_text() == text:
+
+    if isinstance(content, bytes):
+        if output.exists() and output.read_bytes() == content:
+            return output
+        output.write_bytes(content)
         return output
-    output.write_text(text)
+
+    if output.exists() and output.read_text() == content:
+        return output
+    output.write_text(content)
     return output

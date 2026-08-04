@@ -15,10 +15,11 @@ These are building blocks that domain-specific modules can use:
 
 from __future__ import annotations
 
-import sys
 from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from pcons.configure.config_file import write_file
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
@@ -115,10 +116,16 @@ def create_macos_bundle(
     *,
     bundle_dir: Path | str,
     info_plist: str | Path | None = None,
+    pkginfo: str | bytes | None = None,
     resources: Sequence[Path | str] | None = None,
     arch_subdir: str | None = None,
 ) -> Target:
     """Create a macOS .bundle or .plugin structure.
+
+    For one bundle, or a handful. A project with hundreds of near-identical
+    bundles wants one generator edge producing all their files and an
+    ``Install()`` per bundle, which costs a few edges rather than a few per
+    bundle; this helper makes no attempt at that shape.
 
     This creates the standard macOS bundle structure:
         MyBundle.bundle/
@@ -134,8 +141,12 @@ def create_macos_bundle(
         env: Configured environment.
         plugin: The compiled plugin/library target.
         bundle_dir: Bundle output directory (e.g., "build/MyPlugin.bundle").
-        info_plist: Info.plist content (string) or path to existing file.
-            If None, generates a minimal plist.
+        info_plist: Info.plist content (string) or path to an existing file.
+            For a template with placeholders, substitute it first and pass
+            the result: ``info_plist=configure_file(tmpl, out, subs)``.
+        pkginfo: Contents of the bundle's ``PkgInfo``, if it needs one. Pass
+            ``bytes`` when the exact bytes matter — the classic form is 8
+            bytes with no trailing newline, e.g. ``b"BNDL????"``.
         resources: Optional list of resource files to include.
         arch_subdir: Architecture subdirectory name (e.g., "MacOS-x86-64").
             If None, uses standard "MacOS" directory.
@@ -159,28 +170,21 @@ def create_macos_bundle(
     # Install the plugin binary
     installed = project.Install(binary_dir, [plugin])
 
-    # Install Info.plist
+    # Install Info.plist. Content given as a string is written here, at
+    # configure time, so the bundle costs no extra rule or process and the
+    # plist text stays out of the build file.
+    staging = Path(project.build_dir) / ".bundle_staging" / bundle_path.name
+    contents_files: list[Path | str] = []
     if info_plist is not None:
         if isinstance(info_plist, str):
-            # Generate the plist content into a build-dir file, then install
-            # it into the bundle's Contents directory, mirroring the Path
-            # branch below.
-            plist_path = Path(".bundle_staging") / bundle_path.name / "Info.plist"
-            python_cmd = sys.executable.replace("\\", "/")
-            plist_target = env.Command(
-                target=plist_path,
-                source=None,
-                command=[
-                    python_cmd,
-                    "-c",
-                    f"import pathlib; pathlib.Path({str(plist_path)!r})"
-                    f".write_text({info_plist!r}, encoding='utf-8')",
-                ],
-                name=f"info_plist_{bundle_path.stem}",
-            )
-            project.Install(contents_dir, [plist_target])
-        elif isinstance(info_plist, Path):
-            project.Install(contents_dir, [info_plist])
+            info_plist = write_file(staging / "Info.plist", info_plist)
+        contents_files.append(info_plist)
+    if pkginfo is not None:
+        contents_files.append(write_file(staging / "PkgInfo", pkginfo))
+    # One Install for the whole directory: two into the same destination
+    # collide on the target name.
+    if contents_files:
+        project.Install(contents_dir, contents_files)
 
     # Install resources
     if resources:

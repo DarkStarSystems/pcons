@@ -172,6 +172,7 @@ if TYPE_CHECKING:
             *,
             bundle_dir: Path | str,
             info_plist: str | Path | None = None,
+            pkginfo: str | bytes | None = None,
             resources: Sequence[Path | str] | None = None,
             arch_subdir: str | None = None,
         ) -> Target:

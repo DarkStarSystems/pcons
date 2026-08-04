@@ -123,3 +123,90 @@ class TestCreateMacosBundleStringPlist:
             if node.path.name == "Info.plist"
         ]
         assert plist_nodes
+
+
+class TestPkgInfoAndConfigureTimeWriting:
+    """Bundle files whose content the script computes are written during
+    generate, so a bundle costs no rule and no process of its own."""
+
+    def _make_plugin(self, project, env):
+        return env.Command(
+            target="myplugin.so", source=None, command="true", name="plugin"
+        )
+
+    def test_pkginfo_is_written_byte_exact(self, tmp_path: Path) -> None:
+        """A classic PkgInfo is 8 bytes with no trailing newline."""
+        project = Project("pkginfo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        bundle.create_macos_bundle(
+            project,
+            env,
+            self._make_plugin(project, env),
+            bundle_dir="MyPlugin.bundle",
+            pkginfo=b"eFKTFXTC",
+        )
+
+        written = tmp_path / "build" / ".bundle_staging" / "MyPlugin.bundle" / "PkgInfo"
+        assert written.read_bytes() == b"eFKTFXTC"
+
+    def test_pkginfo_is_installed_into_contents(self, tmp_path: Path) -> None:
+        project = Project("pkginfo_install", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        bundle.create_macos_bundle(
+            project,
+            env,
+            self._make_plugin(project, env),
+            bundle_dir="MyPlugin.bundle",
+            info_plist=bundle.generate_info_plist("MyPlugin", "1.0"),
+            pkginfo="BNDL????",
+        )
+        project.resolve()
+
+        installed = {
+            node.path.name
+            for target in project.targets
+            for node in target.output_nodes
+            if node.path.parent.name == "Contents"
+        }
+        assert {"Info.plist", "PkgInfo"} <= installed
+
+    def test_the_plist_text_stays_out_of_the_build_graph(self, tmp_path: Path) -> None:
+        """The content is known at configure time, so no edge carries it."""
+        project = Project("no_edge", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        bundle.create_macos_bundle(
+            project,
+            env,
+            self._make_plugin(project, env),
+            bundle_dir="MyPlugin.bundle",
+            info_plist=bundle.generate_info_plist("MyPlugin", "1.0"),
+        )
+        project.resolve()
+
+        commands = [
+            str(node._build_info.get("command"))
+            for target in project.targets
+            for node in target.output_nodes
+            if getattr(node, "_build_info", None)
+        ]
+        assert not any("CFBundleName" in c for c in commands)
+
+    def test_staging_stays_under_the_build_dir(self, tmp_path: Path) -> None:
+        """Not in the source tree: write_file resolves a relative path
+        against the working directory, which at configure time is the root."""
+        project = Project("staging", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        bundle.create_macos_bundle(
+            project,
+            env,
+            self._make_plugin(project, env),
+            bundle_dir="MyPlugin.bundle",
+            pkginfo=b"BNDL????",
+        )
+
+        assert not (tmp_path / ".bundle_staging").exists()
+        assert (tmp_path / "build" / ".bundle_staging").is_dir()

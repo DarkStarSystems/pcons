@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 # Re-export commonly used classes for convenient imports
 from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
-from pcons.configure.config_file import configure_file  # noqa: E402
+from pcons.configure.config_file import configure_file, write_file  # noqa: E402
 from pcons.configure.platform import Platform, get_platform  # noqa: E402
 from pcons.core.context import context  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
@@ -149,6 +149,7 @@ __all__ = [
     # Core classes
     "Configure",
     "configure_file",
+    "write_file",
     "FlagPair",
     "PathToken",
     "Verbatim",

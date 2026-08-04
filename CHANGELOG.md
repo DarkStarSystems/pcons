@@ -157,6 +157,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the first time staged generation forced a regen mid-build, with nothing to see.
   `__file__` is now absolute, as CPython makes it for a script (3.9+). A round-trip test
   generates a manifest both ways and asserts they match.
+- **`write_file(path, content)`** writes a file the build script computes — an Info.plist,
+  a PkgInfo, a generated header — at configure time, if the content differs. It costs no
+  rule and no process, keeps the content out of the build file, and has no quoting to get
+  wrong; unchanged content keeps its timestamp so nothing downstream rebuilds. Pass
+  `bytes` when the exact bytes matter. Relative paths are taken from the project root,
+  like every other path in pcons.
+- **`create_macos_bundle(pkginfo=...)`**, and a string `info_plist=` is now written at
+  configure time rather than through a `python -c` command per bundle. Ten bundles go from
+  23 rules to 13 and from 18.9 KB of manifest to 6.3 KB, with no plist text left in the
+  build file. For a template with placeholders, substitute it first and pass the result:
+  `info_plist=configure_file(tmpl, out, subs)`.
 - **A `configure_file()` template re-runs pcons when it changes.** The substitution happens
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
