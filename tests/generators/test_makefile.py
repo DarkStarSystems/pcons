@@ -307,6 +307,33 @@ class TestMakefileImplicitDeps:
 
 
 class TestMakefilePostBuild:
+    def test_post_build_skips_the_targets_own_object_files(
+        self, tmp_path, gcc_toolchain
+    ):
+        """A post-build step belongs to the linked output, not to every .o.
+
+        The guard used to accept `node in target.nodes`, which is
+        intermediates *plus* outputs, so the step landed on the compile recipe
+        as well (see the ninja test of the same name).
+        """
+        (tmp_path / "a.c").write_text("int a(void){return 1;}\n")
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        lib = project.SharedLibrary("mylib", env, sources=["a.c"])
+        lib.post_build("echo linked $out")
+
+        MakefileGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        recipes = [
+            line
+            for line in (tmp_path / "build" / "Makefile").read_text().splitlines()
+            if line.startswith("\t")
+        ]
+        compile_recipes = [r for r in recipes if " -c " in r]
+        assert compile_recipes
+        assert not any("echo linked" in r for r in compile_recipes)
+        assert any("echo linked" in r for r in recipes)
+
     def test_post_build_commands_appended(self, tmp_path):
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
 

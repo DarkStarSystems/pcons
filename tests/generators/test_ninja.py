@@ -308,6 +308,50 @@ class TestNinjaPostBuild:
         # Should not have post_build variable
         assert "post_build =" not in content
 
+    def test_post_build_skips_the_targets_own_object_files(
+        self, tmp_path, gcc_toolchain
+    ):
+        """A post-build step belongs to the linked output, not to every .o.
+
+        The guard used to accept `node in target.nodes`, which is
+        intermediates *plus* outputs, so the step was appended to the compile
+        rule as well. install_name_tool on an object file fails outright
+        ("changing install names or rpaths can't be redone"), breaking any
+        target that had a post-build step and compiled sources of its own.
+        """
+        (tmp_path / "a.c").write_text("int a(void){return 1;}\n")
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        lib = project.SharedLibrary("mylib", env, sources=["a.c"])
+        lib.post_build('install_name_tool -id "@rpath/libmylib.dylib" $out')
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        commands = [
+            line
+            for line in (tmp_path / "build" / "build.ninja").read_text().splitlines()
+            if line.strip().startswith("command =")
+        ]
+        compile_cmds = [c for c in commands if " -c " in c]
+        assert compile_cmds
+        assert not any("install_name_tool" in c for c in compile_cmds)
+        assert any("install_name_tool" in c for c in commands)
+
+    def test_post_build_still_applies_to_an_object_librarys_objects(
+        self, tmp_path, gcc_toolchain
+    ):
+        """An ObjectLibrary's objects are its outputs, so they still qualify."""
+        (tmp_path / "a.c").write_text("int a(void){return 1;}\n")
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        objs = project.ObjectLibrary("objs", env, sources=["a.c"])
+        objs.post_build("echo compiled $out")
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert "&& echo compiled $out" in content
+
 
 class TestNinjaDepsDirectives:
     def test_same_command_but_different_dep_modes_use_distinct_rules(self, tmp_path):

@@ -423,16 +423,13 @@ class MakefileGenerator(BaseGenerator):
 
         ``$out``/``$in`` expand to execution-relative paths, matching what the
         main command sees — make runs from the build directory.
+
+        The test is ``output_nodes`` alone: ``Target.nodes`` also holds the
+        intermediates, so testing it would put a post-build step meant for a
+        linked library onto every object file the target compiles. An
+        ObjectLibrary's objects *are* its outputs, so they still qualify.
         """
-        if target is None:
-            return command
-
-        is_output_node = hasattr(target, "output_nodes") and node in target.output_nodes
-        if not is_output_node:
-            # Interface targets like Install keep outputs in target.nodes
-            is_output_node = node in target.nodes
-
-        if not is_output_node:
+        if target is None or node not in target.output_nodes:
             return command
 
         builder_data = getattr(target, "_builder_data", {}) or {}

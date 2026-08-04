@@ -331,15 +331,13 @@ class NinjaGenerator(BaseGenerator):
         $out and $in are left as literals for ninja to expand at build time:
         ninja runs from the build directory, so they are already
         build-dir-relative, matching the paths in the main command.
-        """
-        if target is None:
-            return []
 
-        # Output node, not an intermediate like a .o file
-        is_output_node = (
-            hasattr(target, "output_nodes") and node in target.output_nodes
-        ) or node in target.nodes
-        if not is_output_node:
+        The test is ``output_nodes`` alone: ``Target.nodes`` also holds the
+        intermediates, so testing it would put a post-build step meant for a
+        linked library onto every object file the target compiles. An
+        ObjectLibrary's objects *are* its outputs, so they still qualify.
+        """
+        if target is None or node not in target.output_nodes:
             return []
 
         builder_data = getattr(target, "_builder_data", {}) or {}

@@ -125,6 +125,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`pre_build()` / `post_build()` no longer run on the target's object files.** The guard
+  accepted `node in target.nodes`, which is intermediates *plus* outputs, so a step meant
+  for a linked library was appended to every compile rule the target owned —
+  `install_name_tool -id ... $out` on a `.o` fails outright ("changing install names or
+  rpaths can't be redone"). It only stayed harmless while the target compiled nothing of
+  its own, so `SharedLibrary(sources=[objlib, "x.c"])` with a post-build step broke. Now
+  the test is `output_nodes` alone; an ObjectLibrary's objects are its outputs, so they
+  still qualify. Both generators.
 - **An unrecognized source extension is an error, not a target.** `sources=["k.cu"]` with
   a toolchain that has no `.cu` handler emitted no compile rule and made the *source file*
   a default target, so ninja reported `'k.cu' missing and no known rule to make it` about a
