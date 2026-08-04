@@ -2,6 +2,7 @@
 """Tests for pcons.toolchains.llvm."""
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -403,8 +404,12 @@ class TestMetalCompiler:
         assert "-split-module" not in compile_command
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="Metal is macOS only")
 class TestMetalLibraryTarget:
     """`project.MetalLibrary` — the Target-returning spelling.
+
+    The builder registers with ``platforms=["darwin"]``, so it does not exist
+    off macOS; that is the point, not something to work around here.
 
     `env.metal.Library` returns nodes, like every tool-namespace builder, so
     a metallib built that way could not be a default target, an alias member,

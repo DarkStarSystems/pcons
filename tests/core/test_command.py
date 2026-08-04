@@ -1192,7 +1192,7 @@ class TestWorkingDirectory:
         # moved command uses the per-edge variables instead.
         assert "gen $source_0 $target_0" in content
         assert "  source_0 = in.txt\n" in content
-        assert "  target_0 = build/gen/out.txt\n" in content
+        assert f"  target_0 = {Path('build/gen/out.txt')}\n" in content
 
     def test_moved_paths_use_native_separators(self, tmp_path, gcc_toolchain):
         """A moved edge is routed through cmd.exe on Windows, and cmd.exe
@@ -1232,7 +1232,7 @@ class TestWorkingDirectory:
         BaseGenerator._generate_pending(project)
         content = (tmp_path / "build" / "build.ninja").read_text()
 
-        assert "  target_0 = build/out.txt\n" in content
+        assert f"  target_0 = {Path('build/out.txt')}\n" in content
 
     def test_ninja_keeps_an_embedded_prefix_on_a_moved_path(
         self, tmp_path, gcc_toolchain
