@@ -10,6 +10,7 @@ changes nothing.
 
 import pytest
 from hypothesis import given
+from hypothesis import strategies as st
 
 from pcons.core.flags import (
     Flag,
@@ -21,7 +22,12 @@ from pcons.core.flags import (
     parse_flags,
 )
 
-from .strategies import PASSTHROUGH_FLAGS, SEPARATED_ARG_FLAGS, flag_lists
+from .strategies import (
+    PASSTHROUGH_FLAGS,
+    SEPARATED_ARG_FLAGS,
+    flag_list_mutations,
+    flag_lists,
+)
 
 pytestmark = pytest.mark.fuzz
 
@@ -139,6 +145,27 @@ def test_merge_is_idempotent(existing, new):
     once = list(merged)
     merge_flags(merged, new, SEP, PASS)
     assert merged == once
+
+
+@given(flag_lists(), st.lists(flag_list_mutations(), max_size=8))
+def test_a_flag_list_always_agrees_with_its_groups(initial, mutations):
+    """However a FlagList is edited, its tokens are its groups' tokens.
+
+    A FlagList maintains two views of the same thing, and every list
+    mutator has to keep them in step -- one overridden method forgotten
+    and the tokens quietly stop matching the grouping that merging works
+    from. So: apply arbitrary edits, and check after every one.
+    """
+    flags = FlagList(initial, separated=SEP, passthrough=PASS)
+    assert list(flags) == flatten_flags(flags.groups)
+
+    for mutate in mutations:
+        mutate(flags)
+        assert list(flags) == flatten_flags(flags.groups), f"desynced after {mutate}"
+
+    copy = flags.copy()
+    assert list(copy) == list(flags)
+    assert copy.groups == flags.groups
 
 
 @given(flag_lists(), flag_lists())
