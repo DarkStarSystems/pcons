@@ -758,17 +758,21 @@ class NinjaGenerator(BaseGenerator):
         all_targets = build_info.get("all_targets")
         if all_targets:
             for i, src in enumerate(source_file_nodes):
-                f.write(f"  source_{i} = {get_source_path(src)}\n")
+                path = self._escape_for_ninja_variable(get_source_path(src))
+                f.write(f"  source_{i} = {path}\n")
             target_nodes = cast(list[FileNode], all_targets)
             for i, tgt in enumerate(target_nodes):
-                f.write(f"  target_{i} = {get_target_path(tgt)}\n")
+                path = self._escape_for_ninja_variable(get_target_path(tgt))
+                f.write(f"  target_{i} = {path}\n")
 
         outputs_info = build_info.get("outputs")
         if outputs_info and isinstance(outputs_info, dict):
             for i, (name, info) in enumerate(outputs_info.items()):
                 if isinstance(info, dict):
                     info_dict = cast(dict[str, Any], info)
-                    out_path = self._make_output_relative(info_dict["path"])
+                    out_path = self._escape_for_ninja_variable(
+                        self._make_output_relative(info_dict["path"])
+                    )
                     f.write(f"  out_{name} = {out_path}\n")
                     # target_N supports TargetPath(index=N) in commands
                     f.write(f"  target_{i} = {out_path}\n")
