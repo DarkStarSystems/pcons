@@ -1422,3 +1422,61 @@ class TestRuleSharing:
 
         assert builder.rule_name == "my_rule"
         assert node._build_info["rule_name"] == "my_rule"
+
+
+class TestTargetOutsideTheBuildDirectory:
+    """A destination the script names outside the build tree stays there.
+
+    Node paths are stored relative to the project root, so a generator cannot
+    tell `outdir/copy.txt` from an ordinary build output by looking at it —
+    and reading it as build-relative writes the file into `build/` instead.
+    Nothing about the build reveals that: ninja tracks the path it wrote, so
+    the mistake is self-consistent and rebuilds cleanly.
+    """
+
+    def _ninja(self, tmp_path, target):
+        from pcons.generators.ninja import NinjaGenerator
+
+        (tmp_path / "src.txt").write_text("x\n")
+        project = Project("outside", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(target=target, source=["src.txt"], command="cp $SOURCE $TARGET")
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    def test_absolute_target_outside_the_build_dir_says_where_it_is(self, tmp_path):
+        content = self._ninja(tmp_path, tmp_path / "outdir" / "copy.txt")
+
+        assert "build $topdir/outdir/copy.txt:" in content
+
+    def test_it_matches_what_install_does(self, tmp_path):
+        """Install already emits its destinations this way."""
+        from pcons.generators.ninja import NinjaGenerator
+
+        (tmp_path / "src.txt").write_text("x\n")
+        project = Project("both", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target=tmp_path / "outdir" / "copy.txt",
+            source=["src.txt"],
+            command="cp $SOURCE $TARGET",
+        )
+        project.Install(tmp_path / "outdir2", ["src.txt"])
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        assert "build $topdir/outdir/copy.txt:" in content
+        assert "build $topdir/outdir2/src.txt:" in content
+
+    def test_a_target_inside_the_build_dir_is_unchanged(self, tmp_path):
+        content = self._ninja(tmp_path, tmp_path / "build" / "gen" / "out.txt")
+
+        assert "build gen/out.txt:" in content
+
+    def test_a_relative_target_is_unchanged(self, tmp_path):
+        """A bare name is build-dir relative, which is the ordinary case."""
+        content = self._ninja(tmp_path, "out.txt")
+
+        assert "build out.txt:" in content

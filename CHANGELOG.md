@@ -172,6 +172,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
   with nothing to see. The template is now a configure dependency, like the build script.
+- **An `env.Command` target outside the build directory lands there.** A node path is
+  stored relative to the project root, so a destination named by absolute path — a staging
+  tree, an install root — arrived at the generator indistinguishable from an ordinary
+  build output and was written into `build/` instead. Exit 0, no warning, and the rebuild
+  was clean because ninja tracked the path it had written: the build was self-consistently
+  wrong. `env.Command` now records where the output really lives, the way `Install()`
+  already did, and the two agree.
 - **Per-node command variables no longer fork a rule each.** A toolchain's
   `_build_info["vars"]` — a Swift module's name, a Qt resource's name, a QML module's
   URI — was substituted into the command text before the generators saw it, so every

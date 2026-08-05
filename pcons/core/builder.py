@@ -768,6 +768,29 @@ def _tokenize_one(token: Any) -> Any:
     return replace(marker, prefix=prefix, suffix=suffix)
 
 
+def _output_role(project: Any, target: Path | str) -> str | None:
+    """Where an ``env.Command`` output lives, recorded while it is still known.
+
+    A node path is stored relative to the project root, so by the time a
+    generator sees ``outdir/copy.txt`` it cannot tell a destination the script
+    named outside the build tree from an ordinary build output — and reading it
+    as build-relative writes the file into ``build/`` instead, quietly and
+    self-consistently. The role keeps the distinction.
+    """
+    path = Path(target)
+    if not path.is_absolute():
+        return None  # build-dir relative, the ordinary case
+
+    build_dir = Path(project.root_dir) / project.build_dir
+    try:
+        path.relative_to(build_dir)
+    except ValueError:
+        # "install_output" is the existing role for "produced outside the
+        # build directory"; see PathRole in pcons.core.node.
+        return "install_output"
+    return None
+
+
 class GenericCommandBuilder(BaseBuilder):
     """A builder for arbitrary shell commands, with $SOURCE/$TARGET-style
     variable substitution.
@@ -928,7 +951,7 @@ class GenericCommandBuilder(BaseBuilder):
         result: list[FileNode] = []
         for target in targets:
             node = (
-                project.node(target)
+                project.node(target, role=_output_role(project, target))
                 if project is not None
                 else FileNode(target, defined_at=defined_at)
             )
