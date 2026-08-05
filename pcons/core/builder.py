@@ -791,6 +791,12 @@ def _output_role(project: Any, target: Path | str) -> str | None:
     return None
 
 
+#: Stands in for $SRCDIR while a command's other variables are substituted:
+#: no "$", so substitution passes over it, and not NUL, which subst uses for
+#: its own escaped-dollar sentinel (see _DOLLAR_SENTINEL).
+_SRCDIR_SENTINEL = "\x01pcons-srcdir\x01"
+
+
 class GenericCommandBuilder(BaseBuilder):
     """A builder for arbitrary shell commands, with $SOURCE/$TARGET-style
     variable substitution.
@@ -905,20 +911,23 @@ class GenericCommandBuilder(BaseBuilder):
         way to tell an escaped dollar from a real one and escapes it twice.
 
         $SOURCE/$TARGET are typed markers by now, but text a marker carries
-        alongside its path is substituted like anything else. $SRCDIR is left
-        for the generators, which alone know how to spell the source root.
+        alongside its path is substituted like anything else. $SRCDIR is held
+        back for the generators, which alone know how to spell the source
+        root — held back rather than skipped over, so a token carrying both
+        it and a ``$$`` still gets the escape collapsed.
         """
 
         def expand(text: str) -> str:
-            if "$" not in text or "$SRCDIR" in text:
+            if "$" not in text:
                 return text
-            tokens = env.subst_list([text])
+            shielded = text.replace("$SRCDIR", _SRCDIR_SENTINEL)
+            tokens = env.subst_list([shielded])
             if len(tokens) != 1:
                 raise ValueError(
                     f"{text!r} expands to {len(tokens)} arguments, but it is "
                     f"attached to a $SOURCE/$TARGET path."
                 )
-            return tokens[0]
+            return tokens[0].replace(_SRCDIR_SENTINEL, "$SRCDIR")
 
         expanded: list = []
         for token in self._command:
@@ -928,10 +937,14 @@ class GenericCommandBuilder(BaseBuilder):
                         token, prefix=expand(token.prefix), suffix=expand(token.suffix)
                     )
                 )
-            elif isinstance(token, str) and "$" in token and "$SRCDIR" not in token:
+            elif isinstance(token, str) and "$" in token:
                 # Substitute in list form so the token is never re-split on
                 # whitespace: a quoted argument stays one argument.
-                expanded.extend(env.subst_list([token]))
+                shielded = token.replace("$SRCDIR", _SRCDIR_SENTINEL)
+                expanded.extend(
+                    t.replace(_SRCDIR_SENTINEL, "$SRCDIR")
+                    for t in env.subst_list([shielded])
+                )
             else:
                 expanded.append(token)
         return expanded

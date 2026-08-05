@@ -308,6 +308,28 @@ class UnixToolchain(BaseToolchain):
     #: Flag that carries a shared library's own name, per platform.
     _INSTALL_NAME_FLAGS = {"macos": "-Wl,-install_name,", "linux": "-Wl,-soname,"}
 
+    @staticmethod
+    def _names_itself_already(
+        flag: str, existing_flags: Sequence[FlagToken], env: Environment | None
+    ) -> bool:
+        """Whether the caller has already set this library's own name.
+
+        Every spelling the linker accepts: ``-Wl,-soname,x``, ``-Wl,-soname=x``
+        and the ``-Xlinker -soname -Xlinker x`` long form. ``env.link.flags``
+        is searched as well as the usage requirements, since a project may set
+        it in either and the environment's are merged in after this runs.
+        """
+        stem = flag.rstrip(",")  # "-Wl,-soname"
+        bare = stem.split(",")[-1]  # "-soname"
+        candidates = list(existing_flags)
+        if env is not None and env.has_tool("link"):
+            candidates += list(getattr(env.link, "flags", None) or [])
+        strings = [f for f in candidates if isinstance(f, str)]
+        return any(
+            f.startswith(f"{stem},") or f.startswith(f"{stem}=") or f == bare
+            for f in strings
+        )
+
     def get_link_flags_for_target(
         self,
         target: Target,
@@ -344,13 +366,11 @@ class UnixToolchain(BaseToolchain):
             return []
 
         # A hand-written one wins. The marker can't be compared against the
-        # caller's string flags, so this is what `existing_flags` is for.
-        # Both spellings of the argument, since ld takes either.
-        stem = flag.rstrip(",")
-        if any(
-            isinstance(f, str)
-            and (f.startswith(f"{stem},") or f.startswith(f"{stem}="))
-            for f in existing_flags
+        # caller's string flags, so this is what `existing_flags` is for, and
+        # the automatic flag is appended after theirs — ld takes the last one,
+        # so missing theirs would override it rather than duplicate it.
+        if self._names_itself_already(
+            flag, existing_flags, getattr(target, "_env", None)
         ):
             return []
 

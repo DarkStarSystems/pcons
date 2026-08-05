@@ -15,16 +15,18 @@ Supported syntax:
              ${pairwise(var, list)} (produces interleaved pairs)
 
 Command template forms:
-- String: "$cc.cmd $cc.flags -c -o $$TARGET $$SOURCE" (auto-tokenized on whitespace)
-- List: ["$cc.cmd", "$cc.flags", "-c", "-o", "$$TARGET", "$$SOURCE"] (explicit tokens)
+- String: "$cc.cmd $cc.flags -c -o $TARGET $SOURCE" (auto-tokenized on whitespace)
+- List: ["$cc.cmd", "$cc.flags", "-c", "-o", TargetPath(), SourcePath()]
 - MultiCmd: MultiCmd(["cmd1 args", "cmd2 args"]) (multiple commands)
 
-Generator-agnostic variables:
-- $$SOURCE / $$SOURCES: Input file(s), converted by generators to native syntax
-- $$TARGET / $$TARGETS: Output file(s), converted by generators to native syntax
-- $$TARGET.d: In command templates (e.g., depflags), expanded to actual depfile path
-
-Depfile paths in build_info use PathToken with suffix=".d" for type-safe handling.
+Generator-agnostic path markers, which generators render in native syntax:
+- SourcePath() / TargetPath(): the edge's inputs and outputs. A command
+  template writes them as $SOURCE/$SOURCES and $TARGET/$TARGETS; a toolchain
+  constructs the marker directly.
+- TargetPath(suffix=".d"): the depfile, in a depflags template.
+- TargetPath(basename=True): the output's filename alone, for a flag that
+  names the library it is building (an install name, a SONAME).
+- NodeVar("NAME"): a per-edge value the toolchain attached to the node.
 """
 
 from __future__ import annotations
@@ -891,8 +893,6 @@ def _quote_for_shell(
         #   from a dependency's Conan/pkg-config metadata) → quote with double
         #   quotes so the shell can't interpret them
         # - Simple flags (--type, -c) → don't quote
-        import re
-
         # Ninja variables - don't quote, ninja will expand them (and $in/$out
         # may expand to several space-separated paths). Only the variables the
         # generator actually defines qualify -- $in, $out, $topdir, $out.d,
@@ -975,8 +975,3 @@ def _quote_for_shell(
         return f"'{s.replace(chr(39), chr(39) + chr(39))}'"
 
     return f'"{s}"' if " " in s else s
-
-
-def escape(s: str) -> str:
-    """Escape dollar signs: $ -> $$"""
-    return s.replace("$", "$$")

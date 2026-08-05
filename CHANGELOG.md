@@ -172,6 +172,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
   with nothing to see. The template is now a configure dependency, like the build script.
+- **`configure_file()` and `write_file()` read and write UTF-8**, not the locale's
+  encoding — a build file has to come out the same on every machine, and cp1252 would
+  refuse a plist containing `©` or make the write-if-changed comparison mismatch on every
+  run.
+- **An in-tree virtualenv is no longer a configure dependency.** `uv venv` puts one at
+  `.venv` by default, under the project root, so every installed module joined the regen
+  edge and upgrading any dependency re-ran pcons. Found by `pyvenv.cfg` rather than by
+  name.
+- **A hand-written `-Wl,-soname` / `-Wl,-install_name` suppresses the automatic one** in
+  every spelling the linker takes (`,`, `=`, and the `-Xlinker` long form), and whether it
+  sits in a target's `link_flags` or in `env.link.flags`. The automatic flag is appended
+  after, and `ld` takes the last one, so a missed spelling silently overrode the project's.
 - **`InstallDir()` merges instead of deleting its destination.** It ran `shutil.rmtree`
   before copying, so installing into a shared directory — a plugin's config directory, a
   system prefix — silently took everyone else's files with it, and the docstring said only

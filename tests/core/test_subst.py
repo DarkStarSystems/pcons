@@ -18,7 +18,6 @@ from pcons.core.subst import (
     MultiCmd,
     Namespace,
     PathToken,
-    escape,
     subst,
     to_shell_command,
 )
@@ -744,18 +743,6 @@ class TestRealWorldPatterns:
             "/Fo$TARGET",
             "$SOURCE",
         ]
-
-
-class TestEscape:
-    """Test the escape() helper function."""
-
-    def test_escape_dollars(self):
-        assert escape("$VAR") == "$$VAR"
-        assert escape("$a$b") == "$$a$$b"
-        assert escape("no dollars") == "no dollars"
-
-    def test_already_escaped(self):
-        assert escape("$$VAR") == "$$$$VAR"
 
 
 class TestPathToken:

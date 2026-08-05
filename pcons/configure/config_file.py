@@ -89,7 +89,7 @@ def configure_file(
             f"Unknown configure_file style {style!r}; expected 'cmake' or 'at'"
         )
 
-    text = template.read_text()
+    text = template.read_text(encoding="utf-8")
 
     # ── CMake directives (before @VAR@ substitution) ────────────────────
     if style == "cmake":
@@ -170,8 +170,10 @@ def write_file(output: Path | str, content: str | bytes) -> Path:
     no rule, no process per file, and no quoting to get wrong. Content that
     has not changed keeps its timestamp, so nothing downstream rebuilds.
 
-    Pass ``bytes`` when the exact bytes matter — a classic macOS ``PkgInfo``
-    is 8 bytes with no trailing newline.
+    Text is UTF-8, not the locale's encoding: a build file must come out the
+    same on every machine, and cp1252 would refuse a plist containing ``©``.
+    Pass ``bytes`` when the encoding is yours to decide, or when the exact
+    bytes matter — a classic macOS ``PkgInfo`` is 8 with no trailing newline.
 
     The build script is already a configure dependency, so editing the script
     that computes the content re-runs pcons and rewrites the file.
@@ -196,7 +198,7 @@ def write_file(output: Path | str, content: str | bytes) -> Path:
         output.write_bytes(content)
         return output
 
-    if output.exists() and output.read_text() == content:
+    if output.exists() and output.read_text(encoding="utf-8") == content:
         return output
-    output.write_text(content)
+    output.write_text(content, encoding="utf-8")
     return output

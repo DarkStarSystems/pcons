@@ -94,6 +94,20 @@ class _ChildNodeIndex:
         return self._by_dir.get(directory, [])
 
 
+def _in_virtualenv(path: Path, root: Path) -> bool:
+    """Whether *path* lives inside a virtualenv under *root*.
+
+    Identified by ``pyvenv.cfg``, which every venv has at its top, rather than
+    by name — ``.venv`` is only a convention.
+    """
+    for parent in path.parents:
+        if not parent.is_relative_to(root):
+            return False
+        if (parent / "pyvenv.cfg").exists():
+            return True
+    return False
+
+
 class Project(_ProjectBuilders):
     """Top-level container for a pcons build.
 
@@ -861,6 +875,11 @@ class Project(_ProjectBuilders):
         Splitting a build description across ``build-scripts/*.py`` is normal;
         those files are configure inputs just as much as the entry script, and
         ``sys.modules`` is the honest record of which ones were used.
+
+        An in-tree virtualenv is excluded. ``uv venv`` puts one at ``.venv`` by
+        default, and its site-packages are under the project root but are not
+        the build description: every installed module would join the regen edge,
+        so upgrading any dependency would re-run pcons.
         """
         import sys
 
@@ -883,6 +902,8 @@ class Project(_ProjectBuilders):
             except OSError:
                 continue
             if not path.is_relative_to(root) or path.is_relative_to(pcons_dir):
+                continue
+            if _in_virtualenv(path, root):
                 continue
             top.add_configure_dependency(path)
 

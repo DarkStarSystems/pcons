@@ -251,13 +251,20 @@ class TestHandWrittenFlagSpellings:
     automatic flag -- which is appended after the user's and would otherwise
     win, since the last one on the command line is the one that counts."""
 
-    @pytest.mark.parametrize("written", ["-Wl,-soname,mine.so", "-Wl,-soname=mine.so"])
+    @pytest.mark.parametrize(
+        "written",
+        [
+            ["-Wl,-soname,mine.so"],
+            ["-Wl,-soname=mine.so"],
+            ["-Xlinker", "-soname", "-Xlinker", "mine.so"],
+        ],
+    )
     def test_either_spelling_suppresses_the_automatic_one(self, written, test_project):  # noqa: F811
         with patch("pcons.toolchains.unix.get_platform") as platform:
             platform.return_value.is_macos = False
             platform.return_value.is_linux = True
             flags = GccToolchain().get_link_flags_for_target(
-                _make_shared_target(), "libfoo.so", [written]
+                _make_shared_target(), "libfoo.so", written
             )
 
         assert flags == []

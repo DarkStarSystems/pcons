@@ -219,3 +219,35 @@ class TestTemplateIsAConfigureDependency:
         template.write_text("@A@\n")
 
         assert configure_file(template, tmp_path / "out", {"A": "1"}).exists()
+
+
+class TestEncodingIsUtf8:
+    """Not the locale's encoding: a build file has to come out the same on
+    every machine, and cp1252 would refuse a plist containing a copyright
+    sign."""
+
+    def test_non_ascii_round_trips(self, tmp_path):
+        from pcons.configure.config_file import write_file
+
+        out = write_file(tmp_path / "Info.plist", "<string>© 2026</string>\n")
+
+        assert out.read_text(encoding="utf-8") == "<string>© 2026</string>\n"
+
+    def test_rewriting_identical_non_ascii_keeps_the_timestamp(self, tmp_path):
+        from pcons.configure.config_file import write_file
+
+        target = tmp_path / "Info.plist"
+        write_file(target, "© 2026\n")
+        before = target.stat().st_mtime_ns
+
+        write_file(target, "© 2026\n")
+
+        assert target.stat().st_mtime_ns == before
+
+    def test_a_template_with_non_ascii_substitutes(self, tmp_path):
+        template = tmp_path / "t.in"
+        template.write_text("name=@NAME@ ©\n", encoding="utf-8")
+
+        out = configure_file(template, tmp_path / "out.txt", {"NAME": "x"})
+
+        assert out.read_text(encoding="utf-8") == "name=x ©\n"

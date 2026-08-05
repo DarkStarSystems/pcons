@@ -243,3 +243,42 @@ env.Command(
         )
 
         self._run(root, "-b", "pcons-build.py")
+
+
+class TestVirtualenvIsNotAConfigureDependency:
+    """A build description split across build-scripts/*.py is a configure
+    input; an in-tree virtualenv is not. `uv venv` puts one at .venv by
+    default, and pulling its site-packages into the regen edge would re-run
+    pcons whenever any dependency was upgraded."""
+
+    def test_a_venv_module_is_excluded(self, tmp_path):
+        from pcons.core.project import _in_virtualenv
+
+        venv = tmp_path / ".venv"
+        (venv / "lib" / "python3.12" / "site-packages" / "pkg").mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text("")
+        module = venv / "lib" / "python3.12" / "site-packages" / "pkg" / "__init__.py"
+        module.write_text("")
+
+        assert _in_virtualenv(module, tmp_path)
+
+    def test_a_project_module_is_not(self, tmp_path):
+        from pcons.core.project import _in_virtualenv
+
+        helper = tmp_path / "build-scripts" / "helper.py"
+        helper.parent.mkdir(parents=True)
+        helper.write_text("")
+
+        assert not _in_virtualenv(helper, tmp_path)
+
+    def test_the_venv_is_found_by_marker_not_by_name(self, tmp_path):
+        """`.venv` is a convention; pyvenv.cfg is what every venv has."""
+        from pcons.core.project import _in_virtualenv
+
+        env = tmp_path / "some-env"
+        env.mkdir()
+        (env / "pyvenv.cfg").write_text("")
+        module = env / "mod.py"
+        module.write_text("")
+
+        assert _in_virtualenv(module, tmp_path)

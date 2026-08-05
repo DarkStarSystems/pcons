@@ -63,6 +63,8 @@ class NinjaGenerator(BaseGenerator):
         self._path_flags: frozenset[str] = frozenset()
         self._warned_absolute_paths: set[str] = set()
         self._warned_build_dir_paths: set[str] = set()
+        # id(node) -> (rule_key, command); reset per generate()
+        self._rule_key_cache: dict[int, tuple[str, str]] = {}
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate build.ninja in output_dir."""
@@ -82,6 +84,7 @@ class NinjaGenerator(BaseGenerator):
         self._path_flags = self._collect_path_flags(project)
         self._warned_absolute_paths = set()
         self._warned_build_dir_paths = set()
+        self._rule_key_cache = {}
         try:
             self._topdir = str(
                 Path(os.path.relpath(self._project_root, self._output_dir))
@@ -155,8 +158,26 @@ class NinjaGenerator(BaseGenerator):
         """Resolve the rule key and expanded command for a build node.
 
         Single source of truth for rule naming: both _ensure_rule() and
-        _write_build_statement() use it.
+        _write_build_statement() use it, so the answer is memoized per node —
+        the work (relativizing every token, quoting, wrapping, hashing) is the
+        generator's dominant cost, and computing it twice also leaves room for
+        the two answers to disagree.
         """
+        cached = self._rule_key_cache.get(id(node))
+        if cached is not None:
+            return cached
+        result = self._compute_rule_key(node, build_info, target, env)
+        self._rule_key_cache[id(node)] = result
+        return result
+
+    def _compute_rule_key(
+        self,
+        node: FileNode,
+        build_info: dict[str, Any],
+        target: Target | None,
+        env: Environment | None,
+    ) -> tuple[str, str]:
+        """The uncached body of :meth:`_resolve_rule_key`."""
         from pcons.core.subst import to_shell_command
 
         tool_name = build_info.get("tool", "unknown")

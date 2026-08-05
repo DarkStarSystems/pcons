@@ -931,6 +931,27 @@ Writing the value into the string is the thing to avoid. It is not a
 correctness bug, so nothing catches it; it just quietly multiplies the
 generated build file.
 
+**Paths inside flags: three mechanisms, and when each applies**
+
+A flag carrying a path has to be rewritten so the generated build file stays
+relocatable, and there are three ways that happens. They are not
+interchangeable:
+
+- **`PathToken`** — the flag says outright that it carries a path, and of what
+  kind (`"project"`, `"build"`, `"absolute"`). Use this when constructing a
+  flag in a toolchain: it is the only one that cannot be fooled.
+- **A recognized flag prefix** — `-I`, `-L`, `-isystem` and the rest of a
+  toolchain's `get_path_flags()`. The generator splits the prefix off and
+  rewrites the remainder. This is what catches flags a *user* wrote as plain
+  strings.
+- **The two-token spelling** — `-isystem` followed by its argument. Here the
+  generator rewrites the next token only when it is *absolute*, because a
+  relative one may not be a path at all and rewriting it would change its
+  meaning.
+
+If you are adding a flag from inside pcons, reach for `PathToken`. The other
+two exist for strings that arrive from outside, where the type is gone.
+
 **Why this design?**
 
 - **Core stays generic**: The core only sees `ToolchainContext.get_env_overrides() -> dict[str, object]`
