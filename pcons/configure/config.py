@@ -121,7 +121,7 @@ class Configure:
         cache_path = path or self._cache_path()
         cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(cache_path, "w") as f:
+        with open(cache_path, "w", encoding="utf-8") as f:
             json.dump(self._cache, f, indent=2, default=str)
             f.write("\n")
 
@@ -469,7 +469,7 @@ class Configure:
         # that includes it) when content is unchanged.
         content = "\n".join(lines)
         path.parent.mkdir(parents=True, exist_ok=True)
-        if path.exists() and path.read_text() == content:
+        if path.exists() and path.read_text(encoding="utf-8") == content:
             return
         path.write_text(content)
 

@@ -379,9 +379,12 @@ class TestIntegrationWithEffectiveRequirements:
 
         rpaths = ["-Xlinker", "-rpath", "-Xlinker", "/a"]
         rpaths += ["-Xlinker", "-rpath", "-Xlinker", "/b"]
+        # Some toolchains seed their link flags (clang-cl starts with
+        # /nologo), so this is about what the merge appends.
+        before = list(env.link.flags)
         env.use(UsageRequirements(link_flags=list(rpaths)))
 
-        assert list(env.link.flags) == rpaths
+        assert list(env.link.flags) == before + rpaths
 
     def test_real_world_macos_frameworks(self):
         """Test a realistic macOS scenario with multiple frameworks."""

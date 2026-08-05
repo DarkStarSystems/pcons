@@ -54,7 +54,7 @@ class CompileCommandsGenerator(BaseGenerator):
         for target in project.targets:
             commands.extend(self._collect_compile_commands(target, project))
 
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             json.dump(commands, f, indent=2)
             f.write("\n")
 
