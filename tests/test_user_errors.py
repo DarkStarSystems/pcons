@@ -189,15 +189,15 @@ class TestTyposAndMisspellings:
     def test_typo_usage_requirement_name_raises(self, project_env):
         """A typo in a usage-requirement name is an error.
 
-        This used to be accepted deliberately, on the reasoning that
-        UsageRequirements is open-ended for toolchains and that "users will
-        notice via missing flags in build output". A real port disproved the
-        second half: `private.lib_dirs.append(...)` looked like it worked, and
-        the build failed with `ld: library 'OpenImageIO' not found` -- naming
-        the library rather than the typo, several steps from the cause.
+        Accepting unknown names is tempting -- UsageRequirements has to stay
+        open-ended for toolchains, and the flags a typo drops are supposedly
+        visible in the build output. They aren't: `private.lib_dirs.append(...)`
+        looks like it worked, and the build fails with `ld: library
+        'OpenImageIO' not found` -- naming the library rather than the typo,
+        several steps from the cause.
 
-        Extensibility is preserved explicitly instead: a toolchain that
-        consumes its own name calls register_usage_requirement().
+        Extensibility is explicit instead: a toolchain that consumes its own
+        name calls register_usage_requirement().
         """
         project, env = project_env
         app = project.Program("app", env, sources=["src/main.c"])
@@ -388,11 +388,11 @@ class TestDependencyMistakes:
         assert app.dependencies.count(lib) == 1
 
     def test_duplicate_source_raises(self, project_env):
-        """A source listed twice used to be emitted twice into the link.
+        """A source listed twice must be rejected, not emitted twice.
 
-        Object nodes are shared, so it compiled once but was consumed twice,
-        and the linker reported duplicate symbols naming a single object file
-        -- which reads like a linker bug, not a build-description mistake.
+        Object nodes are shared, so it compiles once and is consumed twice, and
+        the linker reports duplicate symbols naming a single object file --
+        which reads like a linker bug, not a build-description mistake.
         """
         project, env = project_env
         app = project.Program("app", env, sources=["src/main.c"])

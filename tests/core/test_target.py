@@ -1052,11 +1052,11 @@ class TestTargetSubdir:
 
 
 class TestUnknownUsageRequirements:
-    """An unrecognized name used to be accepted, stored, and never read.
+    """An unrecognized name must raise, not be stored and never read.
 
-    The lists are consumed by name, so `private.lib_dirs.append(...)` looked
-    like it worked and the link then failed reporting the *library* as
-    missing rather than the typo.
+    The lists are consumed by name, so a stored `private.lib_dirs.append(...)`
+    would look like it worked and the link would then fail reporting the
+    *library* as missing rather than the typo.
     """
 
     def test_unknown_name_raises_on_read(self):
@@ -1103,7 +1103,7 @@ class TestUnknownUsageRequirements:
 
     def test_dunder_probes_are_not_answered_with_a_list(self):
         """copy/pickle probe for __deepcopy__ etc.; returning an empty list
-        for those made them look implemented."""
+        for those would make them look implemented."""
         reqs = UsageRequirements()
 
         assert not hasattr(reqs, "__deepcopy__")

@@ -726,11 +726,10 @@ class TestCheckDefineWithCompiler:
 class TestChecksUseTheEnvironment:
     """A check has to compile the way the build will.
 
-    Flags were already applied; defines and include dirs were not, so a probe
-    answered a different question than the caller asked. The dangerous shape
-    isn't a probe that fails to compile -- it's a header that compiles fine
-    either way and takes a different #ifdef branch, handing back a plausible
-    wrong value.
+    The environment's flags, defines and include dirs all have to reach the
+    probe. The dangerous shape isn't a probe that fails to compile -- it's a
+    header that compiles fine either way and takes a different #ifdef branch,
+    handing back a plausible wrong value.
     """
 
     @pytest.fixture
@@ -757,7 +756,7 @@ class TestChecksUseTheEnvironment:
 
         value = checks.check_define("DIR", headers=["cfg.h"])
 
-        assert value == '"/right/path"'  # used to be "/wrong/path"
+        assert value == '"/right/path"'  # the #ifdef SAPPHIRE branch
 
     def test_env_includes_let_check_header_find_a_project_header(self, setup):
         config, env, tmp_path = setup

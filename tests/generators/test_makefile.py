@@ -312,9 +312,9 @@ class TestMakefilePostBuild:
     ):
         """A post-build step belongs to the linked output, not to every .o.
 
-        The guard used to accept `node in target.nodes`, which is
-        intermediates *plus* outputs, so the step landed on the compile recipe
-        as well (see the ninja test of the same name).
+        A guard written as `node in target.nodes` would match intermediates
+        *plus* outputs, landing the step on the compile recipe too (see the
+        ninja test of the same name).
         """
         (tmp_path / "a.c").write_text("int a(void){return 1;}\n")
         project = Project("p", root_dir=tmp_path, build_dir="build")
@@ -495,10 +495,9 @@ class TestMakefileTestRecipe:
 class TestMakefileShellOperators:
     """A recipe has to keep shell syntax as syntax.
 
-    `to_shell_command(shell="bash")` quoted every metacharacter, so a command
-    written `tool $SOURCE > $TARGET` became `tool src '>' out` -- the tool got
-    ">" and the output path as arguments and nothing was redirected. Ninja
-    already exempted operators; make did not.
+    `to_shell_command(shell="bash")` must exempt the operators from quoting: a
+    command written `tool $SOURCE > $TARGET` rendered as `tool src '>' out`
+    hands the tool ">" and the output path as arguments and redirects nothing.
     """
 
     def _recipe(self, tmp_path, command: str) -> str:

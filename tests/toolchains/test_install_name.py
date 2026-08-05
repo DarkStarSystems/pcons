@@ -35,7 +35,7 @@ class TestTargetSetGet:
         assert t.get_option("install_name", "fallback") == "fallback"
 
     def test_undeclared_option_raises(self, test_project):  # noqa: F811
-        """A typo used to be stored and read by nothing."""
+        """An option no builder declares is a typo: storing it reads to nobody."""
         t = Target("lib", target_type="shared_library")
         with pytest.raises(ValueError, match="Unknown target option 'install_names'"):
             t.set_option("install_names", "@rpath/libcustom.dylib")

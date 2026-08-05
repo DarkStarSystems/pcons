@@ -172,13 +172,13 @@ class TestGeneratedInput:
 class TestRegenReproducesTheManifest:
     """The regen edge must not silently emit a *different* build.
 
-    `root = Path(__file__).parent` is the first line of most build scripts.
-    pcons used to hand the script whatever spelling of the path it was
-    invoked with, and its own regen edge passes `-b pcons-build.py`
-    relative -- so every path derived from `root` changed between the user's
-    run and the regenerated one. The first build worked; the one after the
-    first regeneration was broken, with nothing to see. CPython makes a
-    script's `__file__` absolute (3.9+); pcons now does the same.
+    `root = Path(__file__).parent` is the first line of most build scripts, and
+    the regen edge spells the script's path differently than the user did (it
+    passes `-b pcons-build.py` relative). Handing the script that spelling
+    verbatim would move every path derived from `root` between the user's run
+    and the regenerated one: the first build works, the one after the first
+    regeneration is broken, with nothing to see. So pcons makes `__file__`
+    absolute, as CPython does for a script's own `__file__` (3.9+).
     """
 
     SCRIPT = """\

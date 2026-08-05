@@ -713,9 +713,8 @@ class TestCommandDepends:
 
 class TestDeclaredSourceOrder:
     """`$SOURCE` and `${SOURCES[n]}` mean nothing if declaration order isn't
-    kept. Target sources used to be appended after plain paths regardless of
-    where they were written, so a command that ran its own built tool as
-    `${SOURCES[0]}` executed a data file instead.
+    kept. A Target source reordered among the plain paths would leave a command
+    that runs its own built tool as `${SOURCES[0]}` executing a data file.
     """
 
     def _project(self, tmp_path, gcc_toolchain):
@@ -955,7 +954,7 @@ class TestEmbeddedMarkers:
         assert builder.command[1] == TargetPath(suffix=".tmp", start=0)
 
     def test_a_bare_marker_is_left_alone(self):
-        """Nothing attached means nothing to distribute: $in/$out as before."""
+        """Nothing attached means nothing to distribute: a plain $in/$out."""
         builder = GenericCommandBuilder("cp $SOURCES $TARGET")
 
         assert builder.command == ["cp", SourcePath(), TargetPath()]
@@ -1044,8 +1043,8 @@ class TestEmbeddedMarkersInNinja:
 
 
 class TestUnknownSubstitutionsRaise:
-    """An unrecognized ${...} used to reach build.ninja as an escaped literal
-    and run as nonsense -- the opposite of pcons's fail-fast rule."""
+    """An unrecognized ${...} that reached build.ninja as an escaped literal
+    would run as nonsense -- the opposite of pcons's fail-fast rule."""
 
     def _command(self, tmp_path, template):
         project = Project("bad", root_dir=tmp_path, build_dir="build")

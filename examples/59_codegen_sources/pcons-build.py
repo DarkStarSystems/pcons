@@ -8,8 +8,7 @@ Two things have to hold for it to work, and both are easy to get wrong:
 
 1. **Declared order is preserved.** `${SOURCES[0]}` is the tool because the
    tool was written first — not whichever input happened to be a plain path.
-   (pcons used to append Target sources after path sources, so `${SOURCES[0]}`
-   was a `.def` file and the build tried to execute it.)
+   A Target source holds its place in the list just as a path does.
 
 2. **Slices.** The number of `.def` files is a property of the project, not of
    this rule, so the command says "the rest of them" rather than listing

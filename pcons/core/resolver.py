@@ -155,7 +155,7 @@ class CommandNodeFactory(PendingSourceFactory):
                 ordered.append(entry)
 
         # Anything the declared sequence didn't account for (sources added
-        # after the fact) keeps its old position at the end.
+        # after the fact) follows, in the order it was added.
         seen = {id(node) for node in ordered}
         ordered.extend(n for n in existing + additional if id(n) not in seen)
         return ordered

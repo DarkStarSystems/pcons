@@ -68,9 +68,9 @@ class TestToolConfigBasic:
 class TestDeclaredVariables:
     """Once a tool declares what it consumes, an unknown name is a typo.
 
-    ``env.cxx.cxxflags = [...]`` used to be stored, read by nothing, and leave
-    the build silently unflagged -- the same silent-acceptance shape as an
-    unknown usage requirement.
+    A stored ``env.cxx.cxxflags = [...]`` is read by nothing and leaves the
+    build silently unflagged -- the same silent-acceptance shape as an unknown
+    usage requirement.
     """
 
     def test_undeclared_namespace_stays_open(self):

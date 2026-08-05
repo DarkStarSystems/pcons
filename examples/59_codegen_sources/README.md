@@ -19,9 +19,9 @@ env.Command(
 ```
 
 **Declared order is preserved.** `${SOURCES[0]}` is `collate` because `collate`
-was written first. It doesn't matter that it's a Target and the rest are paths;
-pcons used to append Targets last, which made `${SOURCES[0]}` a `.def` file and
-the build tried to execute it.
+was written first. It doesn't matter that it's a Target and the rest are paths:
+a Target source holds its declared place, so `${SOURCES[0]}` is the tool the
+command means to run and not a `.def` file.
 
 **Slices.** How many `.def` files there are is a property of the project, not
 of this rule, so the command says "the rest of them" — `${SOURCES[1:]}` — and

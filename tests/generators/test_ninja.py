@@ -313,11 +313,11 @@ class TestNinjaPostBuild:
     ):
         """A post-build step belongs to the linked output, not to every .o.
 
-        The guard used to accept `node in target.nodes`, which is
-        intermediates *plus* outputs, so the step was appended to the compile
-        rule as well. install_name_tool on an object file fails outright
-        ("changing install names or rpaths can't be redone"), breaking any
-        target that had a post-build step and compiled sources of its own.
+        A guard written as `node in target.nodes` would match intermediates
+        *plus* outputs, appending the step to the compile rule too.
+        install_name_tool on an object file fails outright ("changing install
+        names or rpaths can't be redone"), breaking any target that has a
+        post-build step and compiles sources of its own.
         """
         (tmp_path / "a.c").write_text("int a(void){return 1;}\n")
         project = Project("p", root_dir=tmp_path, build_dir="build")
@@ -754,9 +754,8 @@ class TestNinjaSrcDir:
 class TestExtraObjectDeps:
     """`depends=` and `node.depends()` must be implicit deps, not $in (G24).
 
-    A generated header ordered before an object used to arrive as a second
-    positional input, and clang refused: "cannot specify -o when generating
-    multiple output files".
+    A generated header that arrives in $in is a second positional input, and
+    clang refuses: "cannot specify -o when generating multiple output files".
     """
 
     @staticmethod

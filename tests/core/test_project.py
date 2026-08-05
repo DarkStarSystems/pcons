@@ -603,9 +603,9 @@ class TestAlias:
 class TestChildNodeIndex:
     """get_child_nodes/has_child_nodes answer from an index, not a scan.
 
-    The contract they had before the index must survive it: no filesystem
-    access, build-dir-prefixed and unprefixed query paths agree, and a node
-    equal to the query path is not its own child.
+    The contract the index has to honor: no filesystem access, build-dir-
+    prefixed and unprefixed query paths agree, and a node equal to the query
+    path is not its own child.
     """
 
     def test_nodes_registered_after_a_query_are_found(self, tmp_path):

@@ -219,8 +219,8 @@ class TestCreateUniversalBinary:
 
     def test_unresolved_targets_still_reach_the_lipo_command(self, tmp_path):
         """Targets are resolved lazily, so a freshly-declared one has no
-        output_nodes yet. Reading them here used to drop the input silently —
-        or raise "requires at least one input" for the documented example."""
+        output_nodes yet. Reading them here would drop the input silently — or
+        raise "requires at least one input" for the documented example."""
         from pcons.core.project import Project
         from pcons.generators.generator import BaseGenerator
         from pcons.generators.ninja import NinjaGenerator
@@ -257,8 +257,8 @@ class TestMultiArchObjectIdentity:
 
     Effective requirements deliberately exclude env.<tool>.flags, so an
     environment carrying -arch (or any other per-target flag) is invisible to
-    them. Objects keyed on requirements alone made two architectures share one
-    object file, and the second link consumed the first's objects.
+    them. Objects keyed on requirements alone would make two architectures
+    share one object file, and the second link would consume the first's.
     """
 
     def test_per_arch_targets_get_their_own_objects(self, tmp_path):

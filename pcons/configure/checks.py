@@ -524,8 +524,6 @@ class ToolChecks:
             return outcome
         compiler = outcome
 
-        # Via the shared helper: the old inline form emitted "#define FOO=1"
-        # for the documented "NAME=value" spelling, which defines nothing.
         define_lines = _define_lines(defines)
 
         source = f"{define_lines}#include <{header}>\nint main(void) {{ return 0; }}\n"
@@ -774,9 +772,8 @@ int main(void) {{ return 0; }}
         The context belongs in the key: the same macro name means different
         things after different headers, predefines, or include paths. Lists
         are not sorted (include order is semantic) and each is labelled, so
-        two different lists can't collapse to the same signature. With no
-        context the key keeps its historical shape, so cached builtin lookups
-        survive this change.
+        two different lists can't collapse to the same signature. A context-free
+        read (a compiler builtin) keys on the name alone.
         """
         context: list[str] = []
         if headers:

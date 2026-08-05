@@ -353,7 +353,7 @@ class TestMetalCompiler:
 
         assert callable(env.metal.Object)
         assert callable(env.metal.Library)
-        # The old redundant spelling is gone (the namespace already says "metal").
+        # No redundant "Metal" prefix: the namespace already says "metal".
         with pytest.raises(AttributeError):
             getattr(env.metal, "MetalObject")  # noqa: B009
 

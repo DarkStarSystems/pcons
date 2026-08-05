@@ -89,8 +89,9 @@ class TestObjectIdentity:
 
     Effective requirements deliberately exclude ``env.<tool>.flags``, so an
     environment carrying a define, an arch, or any other per-target flag is
-    invisible to them. Keying objects on requirements alone made two targets
-    share one object file, and the second link silently consumed the first's.
+    invisible to them. Keying objects on requirements alone would make two
+    targets share one object file, and the second link would silently consume
+    the first's.
     """
 
     def test_different_environments_get_different_objects(self, tmp_path):
@@ -112,7 +113,7 @@ class TestObjectIdentity:
         assert one.intermediate_nodes[0].path != two.intermediate_nodes[0].path
 
     def test_one_environment_still_shares_objects(self, tmp_path):
-        """The sharing this cache exists for must survive the fix."""
+        """One environment, one object: the sharing this cache exists for."""
         from pcons.core.project import Project
 
         (tmp_path / "shared.c").write_text("int f(void){return 0;}\n")
@@ -129,9 +130,9 @@ class TestObjectIdentity:
 class TestUnhandledSource:
     """A source no toolchain compiles must be an error, not a target (G22).
 
-    Left alone, the source itself became one of the target's output nodes:
-    ninja then reported a file sitting in the source tree as "missing and no
-    known rule to make it", which points away from the real problem.
+    Left alone, the source itself becomes one of the target's output nodes, and
+    ninja reports a file sitting in the source tree as "missing and no known
+    rule to make it" -- which points away from the real problem.
     """
 
     def test_unhandled_extension_raises(self, tmp_path):
@@ -169,7 +170,7 @@ class TestUnhandledSource:
         assert "test_compile_link.py" in str(excinfo.value.location)
 
     def test_missing_tool_for_known_extension_raises(self, tmp_path):
-        """A known extension whose tool isn't in the env used to only warn."""
+        """A known extension whose tool isn't in the env is an error, not a warning."""
         from pcons.core.errors import PconsError
         from pcons.core.project import Project
 

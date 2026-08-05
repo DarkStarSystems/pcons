@@ -108,10 +108,10 @@ class TestChangedDirectoryIsCaught:
 
     The wrapper is `--pre $out && <command> && --post $out`, and both halves
     name their files relative to where the build system started them. A `cd`
-    inside <command> leaves `--post` somewhere else: it found none of the
-    stashed outputs, restored nothing and exited 0, so restat silently stopped
-    suppressing anything -- a 15 MB relink per build with nothing to see. It
-    now fails instead."""
+    inside <command> leaves `--post` somewhere else, where it finds none of the
+    stashed outputs. Restoring nothing and exiting 0 would leave restat
+    suppressing nothing -- a 15 MB relink per build with nothing to see -- so
+    it fails instead."""
 
     def test_post_in_another_directory_fails(self, tmp_path, monkeypatch):
         build = tmp_path / "build"

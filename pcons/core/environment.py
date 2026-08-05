@@ -544,9 +544,9 @@ class Environment(_EnvironmentStubs):
         yield temp_env
 
     def _list_override_message(self, key: str, value: Any) -> str:
-        """Explain why a list keyword was rejected, and what to write instead.
+        """Explain why a list keyword is rejected, and what to write instead.
 
-        Names what the call would have discarded: that's the part a reader of
+        Names what the call would discard: that's the part a reader of
         ``override(cxx__flags=["-O1"])`` doesn't see, and the reason the
         keyword form doesn't take lists.
         """
