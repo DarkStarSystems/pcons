@@ -908,7 +908,7 @@ def _quote_for_shell(
         # Decide on quoting - and escape backslash/quote/backtick for the
         # quoted form - using the token's original content, before the $
         # escaping below inserts backslashes of its own.
-        needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>")
+        needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>#")
         if needs_quote:
             if platform.system() == "Windows":
                 # Ninja runs cmd.exe on Windows. Backslash is not an escape
@@ -947,7 +947,7 @@ def _quote_for_shell(
         return f'"{s}"' if needs_quote else s
 
     if shell == "bash":
-        needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>")
+        needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>#")
         if not needs_quote:
             return s
         if "'" not in s:
@@ -967,7 +967,7 @@ def _quote_for_shell(
         return f'"{s.replace(chr(34), chr(34) + chr(34))}"'
 
     elif shell == "powershell":
-        needs_quote = any(c in s for c in " \t\"'$`(){}[]|&;<>")
+        needs_quote = any(c in s for c in " \t\"'$`(){}[]|&;<>#")
         if not needs_quote:
             return s
         if "'" not in s:

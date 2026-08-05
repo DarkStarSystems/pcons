@@ -479,6 +479,16 @@ class TestToShellCommand:
         result = to_shell_command(tokens, shell="bash")
         assert "''" in result
 
+    def test_hash_token_quoted(self):
+        """A token starting with '#' must be quoted: sh reads it as a comment.
+
+        Unquoted, the shell discards it and the rest of the command line,
+        so the command silently does something else. Minimized by the
+        property tests in tests/fuzz/.
+        """
+        assert to_shell_command(["echo", "#tag", "x"], shell="bash") == "echo '#tag' x"
+        assert to_shell_command(["echo", "#tag", "x"], shell="ninja") == 'echo "#tag" x'
+
     def test_shell_powershell(self):
         tokens = ["echo", "hello world"]
         result = to_shell_command(tokens, shell="powershell")
