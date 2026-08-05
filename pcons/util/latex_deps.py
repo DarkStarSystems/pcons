@@ -136,7 +136,7 @@ def fls_to_depfile(fls_path: Path, depfile_path: Path, target: str) -> None:
             seen.add(dep)
             deps.append(dep)
 
-    with open(depfile_path, "w") as f:
+    with open(depfile_path, "w", encoding="utf-8") as f:
         f.write(f"{target}:")
         for dep in deps:
             escaped = dep.replace(" ", "\\ ")
