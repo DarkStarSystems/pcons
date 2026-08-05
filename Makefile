@@ -40,6 +40,10 @@ lint-rez:         ## Type-check the rez integration (needs rez installed).
 test:             ## Run tests.
 	uv run pytest -n auto
 
+.PHONY: fuzz
+fuzz:             ## Run the property tests in a long campaign (as CI does nightly).
+	uv run pytest tests/fuzz -m fuzz --hypothesis-profile=nightly
+
 .PHONY: test-cov
 test-cov:         ## Run tests with coverage report.
 	uv run pytest --cov=pcons --cov-branch --cov-report=html --cov-report=xml
