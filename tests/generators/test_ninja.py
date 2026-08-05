@@ -556,6 +556,24 @@ class TestNinjaAwkwardPaths:
         assert "  target_0 = out$$put.txt\n" in content
         assert "  source_0 = $topdir/in$$put.txt\n" in content
 
+    def test_edge_variables_keep_their_path_separators(self):
+        """Escaping a per-edge path must not rewrite its separators.
+
+        These values are read by the edge's own command. On Windows they
+        arrive with backslashes, and cmd.exe will not run a program whose
+        path uses forward slashes -- it takes the first one as the start
+        of a switch. Checked directly because a POSIX run never has a
+        backslash to lose.
+        """
+        generator = NinjaGenerator()
+
+        assert generator._escape_ninja_value(r"build\tool.exe") == r"build\tool.exe"
+        assert generator._escape_ninja_value(r"C:\a b\x$y") == r"C$:\a$ b\x$$y"
+        # The ninja-facing spelling still normalizes, for values ninja reads.
+        assert (
+            generator._escape_for_ninja_variable(r"build\tool.exe") == "build/tool.exe"
+        )
+
 
 class TestNinjaSrcDir:
     def test_srcdir_replaced_with_topdir(self, tmp_path):
