@@ -528,6 +528,35 @@ class TestNinjaDepsDirectives:
         assert "depfile" not in content
 
 
+class TestNinjaAwkwardPaths:
+    """Paths whose characters mean something to ninja."""
+
+    def test_dollar_in_command_paths_is_escaped(self, tmp_path):
+        """A '$' in a filename must be escaped everywhere, edge variables too.
+
+        Unescaped in a `source_N`/`target_N` value, ninja rejects the
+        whole file ("bad $-escape") and nothing builds. Minimized by the
+        property tests in tests/fuzz/.
+        """
+        (tmp_path / "in$put.txt").write_text("x")
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target="out$put.txt",
+            source="in$put.txt",
+            command="cp $SOURCE $TARGET",
+            name="copy",
+        )
+        project.resolve()
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        assert "  target_0 = out$$put.txt\n" in content
+        assert "  source_0 = $topdir/in$$put.txt\n" in content
+
+
 class TestNinjaSrcDir:
     def test_srcdir_replaced_with_topdir(self, tmp_path):
         """$SRCDIR in Command() commands is replaced with $topdir for ninja."""
