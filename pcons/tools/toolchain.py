@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
-    from pcons.core.subst import PathToken
+    from pcons.core.subst import FlagToken
     from pcons.core.target import Target
     from pcons.toolchains.build_context import CompileLinkContext
     from pcons.tools.tool import BaseTool, Tool
@@ -626,8 +626,8 @@ class Toolchain(Protocol):
         self,
         target: Target,
         output_name: str,
-        existing_flags: Sequence[str | PathToken],
-    ) -> list[str]:
+        existing_flags: Sequence[FlagToken],
+    ) -> list[FlagToken]:
         """Return additional target-specific link flags (e.g. install_name,
         SONAME). *existing_flags* lets the toolchain skip defaults the user
         already overrode.
@@ -1180,11 +1180,16 @@ class BaseToolchain(ABC):
         self,
         target: Target,
         output_name: str,
-        existing_flags: Sequence[str | PathToken],
-    ) -> list[str]:
+        existing_flags: Sequence[FlagToken],
+    ) -> list[FlagToken]:
         """Return additional target-specific link flags (e.g. install_name,
         SONAME). *existing_flags* lets subclasses skip defaults the user
         already overrode. Base: none.
+
+        A flag carrying something target-specific should say so with a marker
+        (``TargetPath(basename=True)``) rather than formatting the value into
+        the string: rules are keyed on their command text, so a formatted
+        value gives every target a rule of its own.
         """
         return []
 

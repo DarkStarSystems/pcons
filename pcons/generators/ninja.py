@@ -724,6 +724,14 @@ class NinjaGenerator(BaseGenerator):
                     # target_N supports TargetPath(index=N) in commands
                     f.write(f"  target_{i} = {out_path}\n")
 
+        # $out_basename, for a TargetPath(basename=True) in the command. Only
+        # when one is present: emitting it for every edge would add a line per
+        # compile for the benefit of the few links that name it.
+        if self._wants_out_basename(build_info):
+            f.write(
+                f"  out_basename = {self._escape_for_ninja_variable(node.path.name)}\n"
+            )
+
         # Custom per-build variables from build_info (legacy support)
         custom_vars = build_info.get("variables")
         if custom_vars and isinstance(custom_vars, dict):
@@ -731,6 +739,18 @@ class NinjaGenerator(BaseGenerator):
                 if var_value:  # Only write non-empty values
                     escaped_value = self._escape_for_ninja_variable(str(var_value))
                     f.write(f"  {var_name} = {escaped_value}\n")
+
+    @staticmethod
+    def _wants_out_basename(build_info: dict[str, object]) -> bool:
+        """Whether this edge's command names ``$out_basename``."""
+        from pcons.core.subst import TargetPath
+
+        command = build_info.get("command")
+        if not isinstance(command, list):
+            return False
+        return any(
+            isinstance(token, TargetPath) and token.basename for token in command
+        )
 
     def _write_regen(self, f: TextIO, project: Project, ninja_file: Path) -> None:
         """Write the self-regeneration edge (``generator = 1``).
@@ -1138,6 +1158,13 @@ class NinjaGenerator(BaseGenerator):
                     ninja_var = "$in"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
             elif isinstance(token, TargetPath):
+                if token.basename:
+                    # A per-edge variable, so the rule text is the same for
+                    # every target and they share one rule. Deliberately not
+                    # $target_N: an index here would flip has_indexed_target
+                    # and rewrite this command's other markers with it.
+                    result.append(f"{token.prefix}$out_basename{token.suffix}")
+                    continue
                 if token.is_slice:
                     result.extend(self._slice_refs(token, "target", target_count))
                     continue

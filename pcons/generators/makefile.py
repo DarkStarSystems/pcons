@@ -886,7 +886,11 @@ class MakefileGenerator(BaseGenerator):
                     for p in in_paths:
                         result.append(f"{token.prefix}{p}{token.suffix}")
             elif isinstance(token, TargetPath):
-                if token.index is not None or has_indexed_target:
+                if token.basename:
+                    # Make substitutes concrete paths and shares no rules, so
+                    # there is nothing to collapse here — just the filename.
+                    result.append(f"{token.prefix}{Path(out_path).name}{token.suffix}")
+                elif token.index is not None or has_indexed_target:
                     idx = token.index or 0
                     if idx < len(out_paths):
                         result.append(f"{token.prefix}{out_paths[idx]}{token.suffix}")

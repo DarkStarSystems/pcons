@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from pcons.core.environment import Environment
-    from pcons.core.subst import PathToken
+    from pcons.core.subst import FlagToken
     from pcons.core.target import Target, UsageRequirements
 
 logger = logging.getLogger(__name__)
@@ -45,8 +45,8 @@ class EffectiveRequirements:
     includes: list[Path] = field(default_factory=list)
     system_includes: list[Path] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
-    compile_flags: list[str | PathToken] = field(default_factory=list)
-    link_flags: list[str | PathToken] = field(default_factory=list)
+    compile_flags: list[FlagToken] = field(default_factory=list)
+    link_flags: list[FlagToken] = field(default_factory=list)
     link_libs: list[str | Target] = field(default_factory=list)
     link_dirs: list[Path] = field(default_factory=list)
     separated_arg_flags: frozenset[str] = field(default_factory=frozenset)

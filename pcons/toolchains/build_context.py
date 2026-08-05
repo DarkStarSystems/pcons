@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment
-    from pcons.core.subst import PathToken
+    from pcons.core.subst import FlagToken
     from pcons.core.target import Target
     from pcons.tools.requirements import EffectiveRequirements
 
@@ -31,8 +31,8 @@ class CompileLinkContext:
     includes: list[str] = field(default_factory=list)
     system_includes: list[str] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
-    flags: list[str | PathToken] = field(default_factory=list)
-    link_flags: list[str | PathToken] = field(default_factory=list)
+    flags: list[FlagToken] = field(default_factory=list)
+    link_flags: list[FlagToken] = field(default_factory=list)
     libs: list[str] = field(default_factory=list)
     libdirs: list[str] = field(default_factory=list)
     linker_cmd: str | None = None  # Override for link.cmd (e.g., "clang++" for C++)
@@ -62,8 +62,8 @@ class CompileLinkContext:
         return {}
 
     def _merge_with_base_flags(
-        self, tool_name: str | None, flags: list[str | PathToken]
-    ) -> list[str | PathToken]:
+        self, tool_name: str | None, flags: list[FlagToken]
+    ) -> list[FlagToken]:
         """Prepend env.<tool>.flags to `flags`, dropping duplicates.
 
         Uses the flag-pair-aware merge so separated-argument flags
@@ -75,7 +75,7 @@ class CompileLinkContext:
             merge_flags,
         )
 
-        base_flags: list[str | PathToken] = []
+        base_flags: list[FlagToken] = []
         if tool_name and self._env and self._env.has_tool(tool_name):
             tool_cfg = getattr(self._env, tool_name, None)
             base_flags = list(getattr(tool_cfg, "flags", None) or [])
@@ -85,7 +85,7 @@ class CompileLinkContext:
             if self._env is not None
             else None
         )
-        result: list[str | PathToken] = list(base_flags)
+        result: list[FlagToken] = list(base_flags)
         merge_flags(result, flags, separated_arg_flags)
         return result
 
@@ -262,9 +262,9 @@ class MsvcCompileLinkContext(CompileLinkContext):
         if not self.system_includes:
             return result
         flags = result.get("flags")
-        merged: list[str | PathToken]
+        merged: list[FlagToken]
         if isinstance(flags, list):
-            merged = cast("list[str | PathToken]", flags)
+            merged = cast("list[FlagToken]", flags)
         else:
             merged = self._merge_with_base_flags(self._tool_name, self.flags)
         if "/external:W0" not in merged:

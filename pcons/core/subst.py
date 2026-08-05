@@ -170,6 +170,10 @@ class TargetPath:
             expand to *all* outputs.
         suffix: Suffix to append (e.g., ".d" for depfiles).
         prefix: Optional prefix (e.g., "-MF" for MSVC-style depfile flags).
+        basename: Render only the output's filename, dropping its directory —
+            what a macOS install name or an ELF SONAME wants. Ninja gets a
+            per-edge variable, so the rule text stays the same for every
+            target and they share one rule.
 
     Example:
         # In toolchain's get_source_handler():
@@ -186,6 +190,9 @@ class TargetPath:
     #: with *index*; both None means "all of them".
     start: int | None = None
     stop: int | None = None
+    #: Just the filename. Mutually exclusive with *index* and a slice: those
+    #: pick *which* output, and a basename marker names the edge's own.
+    basename: bool = False
 
     @property
     def is_slice(self) -> bool:
@@ -230,6 +237,10 @@ class SourcePath:
 # Type alias for command tokens (can be string, PathToken, or marker objects)
 # SourcePath/TargetPath markers are preserved through subst() for generators to handle
 CommandToken = str | PathToken | SourcePath | TargetPath
+
+# A flag, which may carry a path (PathToken) or something the generator
+# resolves per edge (TargetPath, e.g. an install name naming its own output).
+FlagToken = str | PathToken | TargetPath
 
 
 # =============================================================================
@@ -326,7 +337,9 @@ _ARG_SPLIT = re.compile(r",\s*")
 #: The variables a generator defines in a ninja file: $in/$out, the source
 #: root, and the per-edge indexed paths. A "$name" outside this set is a
 #: literal dollar in the command, not a variable ninja will expand.
-_NINJA_VARS = r"(?:in|out|topdir|source_\d+|target_\d+)"
+# Longest first: the alternation must not settle for "out" and leave
+# "_basename" behind, which would make the $ read as a literal.
+_NINJA_VARS = r"(?:out_basename|in|out|topdir|source_\d+|target_\d+)"
 
 
 def _split_template_string(template: str) -> list[str]:

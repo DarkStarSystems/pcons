@@ -905,6 +905,26 @@ This design ensures paths with spaces (e.g., `/Users/Alice/My Projects/include`)
 and defines with special characters (e.g., `MSG="Hello World"`) work correctly
 across all output formats.
 
+**Per-target values in a command: use a marker, never an f-string**
+
+A ninja rule is identified by its command text, so a value formatted into that
+text gives every target a rule of its own. A project with 300 shared libraries
+gets 300 copies of the link rule if the install name is written in as a string.
+
+There are two ways to say "this varies per edge", and between them they cover
+everything:
+
+- **A marker** — `TargetPath` / `SourcePath` — for a value derived from the
+  edge's own paths. The generators render it per edge (`$out`, `$source_N`,
+  `$out_basename` for `TargetPath(basename=True)`) without knowing what it
+  means, so the rule text stays identical across targets. This is what
+  `-Wl,-install_name,@rpath/` and MSVC's `/IMPLIB:` use.
+- **`_build_info["vars"]`** — a per-node dict — for any other per-edge value.
+
+Writing the value into the string is the thing to avoid. It is not a
+correctness bug, so nothing catches it; it just quietly multiplies the
+generated build file.
+
 **Why this design?**
 
 - **Core stays generic**: The core only sees `ToolchainContext.get_env_overrides() -> dict[str, object]`

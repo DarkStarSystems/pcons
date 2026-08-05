@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from pcons.core.environment import Environment
-    from pcons.core.subst import PathToken
+    from pcons.core.subst import FlagToken
     from pcons.core.target import Target
     from pcons.tools.toolchain import SourceHandler
 
@@ -305,23 +305,30 @@ class UnixToolchain(BaseToolchain):
 
         return []
 
+    #: Flag that carries a shared library's own name, per platform.
+    _INSTALL_NAME_FLAGS = {"macos": "-Wl,-install_name,", "linux": "-Wl,-soname,"}
+
     def get_link_flags_for_target(
         self,
         target: Target,
         output_name: str,
-        existing_flags: Sequence[str | PathToken],
-    ) -> list[str]:
+        existing_flags: Sequence[FlagToken],
+    ) -> list[FlagToken]:
         """Return install_name (macOS) or SONAME (Linux) for shared libraries.
 
-        Uses ``target.install_name`` if set:
-        - ``None``: auto-generate from *output_name*
+        Reads ``target.get_option("install_name")``:
+        - ``None``: name the library after its own output file
         - a string: use as-is
         - ``""``: disable entirely
+
+        The automatic name is a ``TargetPath(basename=True)`` marker rather
+        than a formatted string, so the flag reads the same in every target's
+        rule and they share one. Writing the filename in would give each
+        shared library a private copy of the whole link rule.
         """
         if target.target_type != "shared_library":
             return []
 
-        # Check for explicit user setting via target.set("install_name", ...)
         explicit = (
             target.get_option("install_name") if hasattr(target, "get_option") else None
         )
@@ -329,15 +336,24 @@ class UnixToolchain(BaseToolchain):
             return []  # explicitly disabled
 
         platform = get_platform()
-
         if platform.is_macos:
-            name = explicit if explicit is not None else f"@rpath/{output_name}"
-            return [f"-Wl,-install_name,{name}"]
+            flag, auto_prefix = self._INSTALL_NAME_FLAGS["macos"], "@rpath/"
         elif platform.is_linux:
-            name = explicit if explicit is not None else output_name
-            return [f"-Wl,-soname,{name}"]
+            flag, auto_prefix = self._INSTALL_NAME_FLAGS["linux"], ""
+        else:
+            return []
 
-        return []
+        # A hand-written one wins. The marker can't be compared against the
+        # caller's string flags, so this is what `existing_flags` is for.
+        if any(isinstance(f, str) and f.startswith(flag) for f in existing_flags):
+            return []
+
+        if explicit is not None:
+            # Not derived from the output, so it stays literal — and this
+            # target gets a rule of its own, which is what asking for a
+            # specific name means.
+            return [f"{flag}{explicit}"]
+        return [TargetPath(basename=True, prefix=f"{flag}{auto_prefix}")]
 
     # Flags whose argument is a directory path, in either spelling ("-Ifoo"
     # or "-I foo"). Generators rewrite these so generated build files stay

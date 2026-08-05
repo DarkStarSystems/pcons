@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Iterator, Sequence
     from typing import Any
 
-    from pcons.core.subst import PathToken
+    from pcons.core.subst import FlagToken
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ DEFAULT_SEPARATED_ARG_FLAGS: frozenset[str] = frozenset()
 
 
 def is_separated_arg_flag(
-    flag: str | PathToken, separated_arg_flags: frozenset[str] | None = None
+    flag: FlagToken, separated_arg_flags: frozenset[str] | None = None
 ) -> bool:
     """Check if a flag takes its argument as a separate token."""
     return flag in (separated_arg_flags or DEFAULT_SEPARATED_ARG_FLAGS)
@@ -139,8 +139,8 @@ def deduplicate_flags(
 
 
 def merge_flags(
-    existing: MutableSequence[str | PathToken],
-    new: Sequence[str | FlagPair | PathToken],
+    existing: MutableSequence[FlagToken],
+    new: Sequence[FlagToken | FlagPair],
     separated_arg_flags: frozenset[str] | None = None,
 ) -> None:
     """Merge new flags into *existing* in place, skipping duplicates.

@@ -172,6 +172,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
   with nothing to see. The template is now a configure dependency, like the build script.
+- **Shared libraries share one link rule.** The automatic `install_name` (macOS) and
+  `SONAME` (Linux) had the library's own filename formatted into the flag, and a ninja
+  rule is identified by its command text — so every shared library got a private copy of
+  the whole link rule. Twenty libraries now produce one rule instead of twenty. The flag
+  is a `TargetPath(basename=True)` marker, which the generators render through a per-edge
+  variable. An explicit `set_option("install_name", ...)` still takes a rule of its own,
+  which is what asking for a specific name means, and a hand-written
+  `-Wl,-install_name,`/`-Wl,-soname,` in `link_flags` now suppresses the automatic one
+  (that is what `get_link_flags_for_target`'s `existing_flags` argument was always for).
 - **Identical `env.Command` commands share one ninja rule.** Each edge was pinned to a
   rule named for a fresh uuid, which bypassed rule deduplication entirely and made every
   run write a different `build.ninja`. 200 identical commands now produce one rule
