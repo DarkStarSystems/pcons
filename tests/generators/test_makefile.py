@@ -571,3 +571,42 @@ class TestMakefileEmbeddedMarkers:
 
         assert "--stamp=$$Rev" in recipe
         assert "--stamp=$Rev" not in recipe.replace("--stamp=$$Rev", "")
+
+
+class TestMakefileMatchesNinja:
+    """Two generators, one build description: where they can both express
+    something they have to express the same thing."""
+
+    def _makefile(self, tmp_path, gcc_toolchain, build):
+        project = Project("mk", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        build(project, env)
+        MakefileGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "Makefile").read_text()
+
+    def test_unindexed_target_names_every_output(self, tmp_path, gcc_toolchain):
+        """Ninja's $out expands to all of them."""
+
+        def build(project, env):
+            (tmp_path / "in.txt").write_text("x\n")
+            env.Command(
+                target=["a.txt", "b.txt"],
+                source=["in.txt"],
+                command=["touch", "$TARGETS"],
+            )
+
+        content = self._makefile(tmp_path, gcc_toolchain, build)
+
+        assert "touch a.txt b.txt" in content
+
+    def test_extra_command_flags_reach_the_recipe(self, tmp_path, gcc_toolchain):
+        """They carry an install mode, and gcc's module-mapper path."""
+
+        def build(project, env):
+            (tmp_path / "s.sh").write_text("#!/bin/sh\n")
+            project.Install("bin", ["s.sh"], mode=0o755)
+
+        content = self._makefile(tmp_path, gcc_toolchain, build)
+
+        assert "--mode 755" in content

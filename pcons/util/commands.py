@@ -58,20 +58,42 @@ def _escape_depfile_path(path: str) -> str:
     return path.replace(" ", "\\ ")
 
 
-def _merge_tree(src: Path, dest: Path) -> None:
+def _merge_tree(
+    src: Path,
+    dest: Path,
+    _ancestors: frozenset[Path] = frozenset(),
+    _root: Path | None = None,
+) -> None:
     """Copy *src* over *dest*, skipping files that are already identical.
 
     Same size and no older than the source is taken as identical, the check
     make and rsync use. It matters at scale: without it one touched file
     re-copies the whole tree, which for a few hundred MB of assets is a
     multi-second stall on any filesystem without copy-on-write.
+
+    A symlinked directory is descended into and copied as a real one, which
+    is what ``shutil.copytree`` does: a macOS framework is built out of them
+    (``Versions/Current``), so stepping over them would install the shape of
+    the bundle and none of its contents. Two links to the same directory each
+    get a copy — also copytree's behaviour.
+
+    A link is only refused when following it would not terminate: it resolves
+    to a directory already on the way down, or to an ancestor of where the
+    walk started.
     """
-    for item in src.rglob("*"):
+    resolved = src.resolve()
+    root = _root or resolved
+    # Not on the first call, where root is this directory by definition.
+    if _ancestors and (resolved in _ancestors or root.is_relative_to(resolved)):
+        return
+    ancestors = _ancestors | {resolved}
+
+    dest.mkdir(parents=True, exist_ok=True)
+    for item in sorted(src.iterdir()):
+        target = dest / item.name
         if item.is_dir():
-            (dest / item.relative_to(src)).mkdir(parents=True, exist_ok=True)
+            _merge_tree(item, target, ancestors, root)
             continue
-        target = dest / item.relative_to(src)
-        target.parent.mkdir(parents=True, exist_ok=True)
         if target.exists():
             source_stat, target_stat = item.stat(), target.stat()
             if (

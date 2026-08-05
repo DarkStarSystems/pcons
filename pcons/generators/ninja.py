@@ -315,7 +315,21 @@ class NinjaGenerator(BaseGenerator):
 
     # Shell operators that only mean anything to a shell. A command using one
     # has to be routed through one on Windows (see _route_through_shell).
-    _SHELL_OPERATORS = (" && ", " || ", " | ", " > ", " >> ", " < ")
+    _SHELL_OPERATORS = (
+        " && ",
+        " || ",
+        " | ",
+        " > ",
+        " >> ",
+        " < ",
+        # Stderr redirects are shell syntax too, and " > " is not a substring
+        # of " 2> " -- without these a command whose only operator is one of
+        # them goes to CreateProcess with the redirect as a literal argument.
+        " 2> ",
+        " 2>> ",
+        " 2>&1 ",
+        " >&2 ",
+    )
 
     def _route_through_shell(self, command: str) -> str:
         """Run *command* through cmd.exe when it needs a shell, on Windows.
@@ -591,7 +605,7 @@ class NinjaGenerator(BaseGenerator):
         if all_targets and len(cast(list[Node], all_targets)) > 1:
             # Generic command with multiple outputs
             target_nodes = cast(list[FileNode], all_targets)
-            output = " ".join(self._escape_output_path(t.path) for t in target_nodes)
+            output = " ".join(self._output_ref(t) for t in target_nodes)
         elif outputs_info:
             # Multi-output build (from MultiOutputBuilder)
             explicit_outputs: list[str] = []
@@ -706,10 +720,10 @@ class NinjaGenerator(BaseGenerator):
 
             return str(s.path)
 
-        def get_target_path(path: Path) -> str:
+        def get_target_path(node: FileNode) -> str:
             if cwd is None:
-                return self._make_output_relative(path)
-            return self._path_at(path, cwd, output=True)
+                return self._output_command_path(node)
+            return self._path_at(node.path, cwd, output=True)
 
         source_file_nodes = [s for s in sources if isinstance(s, FileNode)]
 
@@ -719,7 +733,7 @@ class NinjaGenerator(BaseGenerator):
                 f.write(f"  source_{i} = {get_source_path(src)}\n")
             target_nodes = cast(list[FileNode], all_targets)
             for i, tgt in enumerate(target_nodes):
-                f.write(f"  target_{i} = {get_target_path(tgt.path)}\n")
+                f.write(f"  target_{i} = {get_target_path(tgt)}\n")
 
         outputs_info = build_info.get("outputs")
         if outputs_info and isinstance(outputs_info, dict):
@@ -997,6 +1011,19 @@ class NinjaGenerator(BaseGenerator):
         if rel is not None:
             return "$topdir/" + self._escape_path(rel)
         return self._escape_path(node.path)
+
+    def _output_command_path(self, node: FileNode) -> str:
+        """An output as the command must name it, honouring its role.
+
+        The build statement says ``$topdir/outdir/copy.txt`` for a destination
+        outside the build tree, so a ``$target_N`` naming the same file has to
+        agree — pointing them at different places leaves the edge dirty after
+        every run, or writes the wrong file.
+        """
+        if getattr(node, "role", None) == "install_output":
+            rel = self._make_source_relative(node.path)
+            return f"$topdir/{rel}" if rel is not None else str(node.path)
+        return self._make_output_relative(node.path)
 
     def _output_ref(self, node: FileNode) -> str:
         """Render an output-node reference.

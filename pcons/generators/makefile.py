@@ -292,6 +292,12 @@ class MakefileGenerator(BaseGenerator):
         cwd = cast("Path | None", build_info.get("cwd"))
         if custom_command:
             if isinstance(custom_command, list):
+                # Flags a builder appended to this edge (an install mode, a
+                # module-mapper path). Ninja adds them the same way.
+                extra = cast("list[str]", build_info.get("extra_command_flags") or [])
+                custom_command = list(custom_command) + [
+                    flag for flag in extra if flag not in custom_command
+                ]
                 processed_tokens = self._process_path_tokens(
                     custom_command,
                     cwd=cwd,
@@ -925,13 +931,15 @@ class MakefileGenerator(BaseGenerator):
                     else:
                         result.append(f"{token.prefix}{out_path}{token.suffix}")
                 else:
-                    result.append(f"{token.prefix}{out_path}{token.suffix}")
+                    # Unindexed means every output, matching ninja's $out.
+                    for p in out_paths or [out_path]:
+                        result.append(f"{token.prefix}{p}{token.suffix}")
             # String patterns (legacy support)
             elif isinstance(token, str):
                 if token in ("$SOURCES", "$SOURCE", "$in"):
                     result.extend(in_paths)
                 elif token in ("$TARGET", "$TARGETS", "$out"):
-                    result.append(out_path)
+                    result.extend(out_paths or [out_path])
                 elif token in ("$TARGET.d", "$out.d"):
                     result.append(depfile_path if depfile_path else token)
                 elif (

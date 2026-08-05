@@ -345,7 +345,13 @@ class UnixToolchain(BaseToolchain):
 
         # A hand-written one wins. The marker can't be compared against the
         # caller's string flags, so this is what `existing_flags` is for.
-        if any(isinstance(f, str) and f.startswith(flag) for f in existing_flags):
+        # Both spellings of the argument, since ld takes either.
+        stem = flag.rstrip(",")
+        if any(
+            isinstance(f, str)
+            and (f.startswith(f"{stem},") or f.startswith(f"{stem}="))
+            for f in existing_flags
+        ):
             return []
 
         if explicit is not None:

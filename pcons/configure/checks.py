@@ -131,6 +131,10 @@ _C_ESCAPES = {
     "\\0": "\0",
 }
 
+_C_ESCAPE_PATTERN = re.compile(
+    "|".join(re.escape(e) for e in sorted(_C_ESCAPES, key=len, reverse=True))
+)
+
 #: One C string literal, escapes included.
 _STRING_LITERAL = re.compile(r'"((?:[^"\\]|\\.)*)"')
 
@@ -156,9 +160,13 @@ def _decode_c_string(value: str, name: str) -> str:
         )
     decoded: list[str] = []
     for piece in _STRING_LITERAL.findall(value):
-        for escape, replacement in _C_ESCAPES.items():
-            piece = piece.replace(escape, replacement)
-        decoded.append(piece)
+        # One pass: replacing escape by escape would decode the "n" of an
+        # already-decoded "\\" (a literal backslash followed by n) as a newline.
+        decoded.append(
+            _C_ESCAPE_PATTERN.sub(
+                lambda m: _C_ESCAPES.get(m.group(0), m.group(0)), piece
+            )
+        )
     return "".join(decoded)
 
 

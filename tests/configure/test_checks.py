@@ -881,3 +881,19 @@ class TestCheckDefineAsStringWithCompiler:
         values = checks.check_defines(["DIR"], headers=["s.h"], as_string=True)
 
         assert values["DIR"].startswith("/Applications/BorisFX/")
+
+
+class TestDecodeCStringEscapes:
+    """One pass over the escapes: decoding them one rule at a time would
+    re-match the output of an earlier rule."""
+
+    def test_an_escaped_backslash_is_not_re_decoded(self):
+        from pcons.configure.checks import _decode_c_string
+
+        # A literal backslash followed by "n" -- not a newline.
+        assert _decode_c_string(r'"a\\nb"', "X") == "a\\nb"
+
+    def test_a_real_newline_still_decodes(self):
+        from pcons.configure.checks import _decode_c_string
+
+        assert _decode_c_string(r'"a\nb"', "X") == "a\nb"

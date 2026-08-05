@@ -73,10 +73,19 @@ class Verbatim(str):
     pcons quotes each command token for the shell it is writing for, so
     quoting one by hand normally means it arrives at the program with the
     quotes still attached — almost always a mistake, and ``env.Command``
-    raises on a token that starts with a quote. Wrap it in ``Verbatim`` to
-    say the quotes are meant:
+    raises on a token that starts with a quote.
 
-        env.Command(..., command=["awk", Verbatim("'{print $1}'"), "$SOURCE"])
+    Shell quoting is not what this is for: a token that merely contains
+    spaces or shell syntax needs no quotes of its own, because pcons adds
+    them. ``["awk", "{print $$1}", "$SOURCE"]`` is the awk program spelled
+    correctly; wrapping it in ``Verbatim("'{print $1}'")`` hands awk the
+    single quotes as program text and it refuses to run.
+
+    ``Verbatim`` is for the rarer case where the quotes are part of the value
+    the program must receive — a defined string macro, say, where the quotes
+    are C syntax rather than shell syntax:
+
+        env.Command(..., command=["cc", Verbatim('-DGREETING="hi"'), "$SOURCE"])
 
     It is an ordinary ``str`` everywhere else, so substitution, quoting and
     the generators treat it exactly as they would the same text unwrapped.

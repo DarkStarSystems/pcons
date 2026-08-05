@@ -1519,3 +1519,50 @@ class TestBuildDirPathWarning:
         self._generate(tmp_path, ["tool", "-Wl,build/libfoo.dylib", "$SOURCE"])
 
         assert "runs *in* the build directory" not in caplog.text
+
+
+class TestOutsideBuildDirIndexedTargets:
+    """A `${TARGETS[n]}` naming an outside-build destination must agree with
+    the build statement. Pointing them at different places leaves the edge
+    dirty after every run, or writes the file where nothing looks for it."""
+
+    def _ninja(self, tmp_path, targets, command):
+        from pcons.generators.ninja import NinjaGenerator
+
+        (tmp_path / "src.txt").write_text("x\n")
+        project = Project("idx", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(target=targets, source=["src.txt"], command=command)
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    def test_indexed_target_matches_the_build_statement(self, tmp_path):
+        content = self._ninja(
+            tmp_path,
+            tmp_path / "outdir" / "copy.txt",
+            ["cp", "$SOURCE", "${TARGETS[0]}"],
+        )
+
+        assert "build $topdir/outdir/copy.txt:" in content
+        assert "  target_0 = $topdir/outdir/copy.txt\n" in content
+
+    def test_multiple_outside_targets_agree_too(self, tmp_path):
+        content = self._ninja(
+            tmp_path,
+            [tmp_path / "outdir" / "a.txt", tmp_path / "outdir" / "b.txt"],
+            ["cp", "$SOURCE", "${TARGETS[0]}", "&&", "cp", "$SOURCE", "${TARGETS[1]}"],
+        )
+
+        assert "build $topdir/outdir/a.txt $topdir/outdir/b.txt:" in content
+        assert "  target_0 = $topdir/outdir/a.txt\n" in content
+        assert "  target_1 = $topdir/outdir/b.txt\n" in content
+
+    def test_a_build_dir_target_is_unchanged(self, tmp_path):
+        content = self._ninja(
+            tmp_path,
+            tmp_path / "build" / "gen" / "out.txt",
+            ["cp", "$SOURCE", "${TARGETS[0]}"],
+        )
+
+        assert "  target_0 = gen/out.txt\n" in content

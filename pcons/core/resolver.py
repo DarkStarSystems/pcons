@@ -156,8 +156,10 @@ class CommandNodeFactory(PendingSourceFactory):
 
         # Anything the declared sequence didn't account for (sources added
         # after the fact) follows, in the order it was added.
-        seen = {id(node) for node in ordered}
-        ordered.extend(n for n in existing + additional if id(n) not in seen)
+        # Keyed on the path, like every other node identity in pcons
+        # (project._nodes, Target._source_set, Node.depends).
+        seen = {node.path for node in ordered}
+        ordered.extend(n for n in existing + additional if n.path not in seen)
         return ordered
 
 

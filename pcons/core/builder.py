@@ -713,10 +713,10 @@ def _reject_hand_quoting(token: str) -> None:
         f"  Write it bare: {bare!r}.\n"
         f"  A string command is split on whitespace, so a token that must "
         f"contain a space needs the list form instead: "
-        f"command=[..., {bare!r}, ...].\n"
-        f"  If the quotes really are meant, say so: "
-        f"command=[..., Verbatim({token!r}), ...] "
-        f"(from pcons.core.subst)."
+        f"command=[..., {bare!r}, ...] — pcons quotes it for the shell.\n"
+        f"  Verbatim({token!r}) keeps the quotes, but only do that when they "
+        f"are part of the value the program must receive (a C string macro, "
+        f"say), not to protect it from the shell."
     )
 
 

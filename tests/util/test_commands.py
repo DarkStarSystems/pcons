@@ -212,3 +212,33 @@ class TestCopytreeMerges:
         copytree(str(src), str(dest))
 
         assert (dest / "a.txt").read_text() == "changed\n"
+
+
+class TestCopytreeSymlinks:
+    """A symlinked directory is descended into and copied as a real one, the
+    way shutil.copytree does. A macOS framework is built out of them
+    (Versions/Current), so stepping over one installs the shape of the bundle
+    with none of its contents."""
+
+    def test_a_symlinked_directory_brings_its_contents(self, tmp_path):
+        src = tmp_path / "src"
+        (src / "real" / "nested").mkdir(parents=True)
+        (src / "real" / "file.txt").write_text("content\n")
+        (src / "real" / "nested" / "deep.txt").write_text("deep\n")
+        (src / "linkdir").symlink_to("real")
+
+        copytree(str(src), str(tmp_path / "dest"))
+
+        dest = tmp_path / "dest"
+        assert (dest / "linkdir" / "file.txt").read_text() == "content\n"
+        assert (dest / "linkdir" / "nested" / "deep.txt").read_text() == "deep\n"
+
+    def test_a_symlink_loop_terminates(self, tmp_path):
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.txt").write_text("x\n")
+        (src / "loop").symlink_to("..")
+
+        copytree(str(src), str(tmp_path / "dest"))
+
+        assert (tmp_path / "dest" / "file.txt").read_text() == "x\n"
