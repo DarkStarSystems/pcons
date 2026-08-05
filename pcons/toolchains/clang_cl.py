@@ -242,6 +242,11 @@ class ClangClToolchain(MsvcCompatibleToolchain):
 
     TOOL_NAMES = ("cc", "cxx", "lib", "link", "rc", "ml")
 
+    #: Driver flags that hand the token after them to a sub-tool. Consecutive
+    #: ones form a single directive, so they group as a run and are never
+    #: split by de-duplication (see UnixToolchain.PASSTHROUGH_FLAGS).
+    PASSTHROUGH_FLAGS: frozenset[str] = frozenset(["-Xlinker", "-Xclang"])
+
     # Clang-CL supports additional GCC-style flags beyond the base MSVC set
     SEPARATED_ARG_FLAGS: frozenset[str] = frozenset(
         [
@@ -250,9 +255,13 @@ class ClangClToolchain(MsvcCompatibleToolchain):
             # GCC-style flags that clang-cl also supports
             "-target",
             "--target",
-            "-Xlinker",
+            *PASSTHROUGH_FLAGS,
         ]
     )
+
+    def get_passthrough_flags(self) -> frozenset[str]:
+        """Flags whose argument is passed through to a sub-tool verbatim."""
+        return self.PASSTHROUGH_FLAGS
 
     def __init__(self) -> None:
         super().__init__("clang-cl")
