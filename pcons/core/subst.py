@@ -201,6 +201,25 @@ class TargetPath:
 
 
 @dataclass(frozen=True)
+class NodeVar:
+    """Marker for a per-edge value the toolchain attached to one node.
+
+    A toolchain puts target-specific values in ``_build_info["vars"]`` — a
+    Swift module's name, a Qt resource's name — and names them ``$MODULE_NAME``
+    in its command template. Expanding those into the command text would give
+    every module a rule of its own, since a ninja rule is identified by that
+    text; this marker keeps the reference in the rule and lets the generator
+    decide. Ninja writes the value on the build statement, so one rule serves
+    every target. Generators without per-edge variables substitute the value.
+
+    Attributes:
+        name: The key in ``_build_info["vars"]``.
+    """
+
+    name: str
+
+
+@dataclass(frozen=True)
 class SourcePath:
     """Marker for a source input path, converted to a PathToken with the
     actual path during resolution.
@@ -236,7 +255,7 @@ class SourcePath:
 
 # Type alias for command tokens (can be string, PathToken, or marker objects)
 # SourcePath/TargetPath markers are preserved through subst() for generators to handle
-CommandToken = str | PathToken | SourcePath | TargetPath
+CommandToken = str | PathToken | SourcePath | TargetPath | NodeVar
 
 # A flag, which may carry a path (PathToken) or something the generator
 # resolves per edge (TargetPath, e.g. an install name naming its own output).
@@ -337,9 +356,19 @@ _ARG_SPLIT = re.compile(r",\s*")
 #: The variables a generator defines in a ninja file: $in/$out, the source
 #: root, and the per-edge indexed paths. A "$name" outside this set is a
 #: literal dollar in the command, not a variable ninja will expand.
-# Longest first: the alternation must not settle for "out" and leave
-# "_basename" behind, which would make the $ read as a literal.
-_NINJA_VARS = r"(?:out_basename|in|out|topdir|source_\d+|target_\d+)"
+# Variables the generator defines, so a $ in front of one is a reference and
+# every other $ is a literal dollar. Longest first: the alternation must not
+# settle for "out" and leave "_basename" behind.
+_NINJA_VAR_NAMES = ("out_basename", "in", "out", "topdir", r"source_\d+", r"target_\d+")
+_NINJA_VARS = "(?:" + "|".join(_NINJA_VAR_NAMES) + ")"
+
+
+def _ninja_var_pattern(extra: frozenset[str]) -> str:
+    """The variable alternation, plus any this edge defines itself."""
+    if not extra:
+        return _NINJA_VARS
+    names = sorted((re.escape(v) for v in extra), key=len, reverse=True)
+    return "(?:" + "|".join([*names, *_NINJA_VAR_NAMES]) + ")"
 
 
 def _split_template_string(template: str) -> list[str]:
@@ -433,7 +462,7 @@ def _subst_command(
     result: list[CommandToken] = []
     for token in tokens:
         # Preserve marker objects through substitution
-        if isinstance(token, (SourcePath, TargetPath, PathToken)):
+        if isinstance(token, (SourcePath, TargetPath, PathToken, NodeVar)):
             result.append(token)
         elif isinstance(token, str):
             expanded = _expand_token(token, namespace, set(), location)
@@ -478,7 +507,7 @@ def _expand_token(
             var_result: list[CommandToken] = []
             for v in value:
                 # Preserve marker objects through substitution
-                if isinstance(v, (PathToken, SourcePath, TargetPath)):
+                if isinstance(v, (PathToken, SourcePath, TargetPath, NodeVar)):
                     var_result.append(v)
                 elif isinstance(v, (ProjectPath, BuildPath)):
                     var_result.append(str(v))
@@ -497,7 +526,7 @@ def _expand_token(
             return var_result
 
         # Preserve marker objects (SourcePath, TargetPath, PathToken) directly
-        if isinstance(value, (PathToken, SourcePath, TargetPath)):
+        if isinstance(value, (PathToken, SourcePath, TargetPath, NodeVar)):
             return value
 
         str_value = str(value)
@@ -745,6 +774,7 @@ def to_shell_command(
     tokens: Sequence[CommandToken] | Sequence[Sequence[CommandToken]],
     shell: str = "auto",
     multi_join: str = " && ",
+    extra_ninja_vars: frozenset[str] = frozenset(),
 ) -> str:
     """Convert token list to shell command string with proper quoting.
 
@@ -770,13 +800,15 @@ def to_shell_command(
             # cmd_tokens is a Sequence[CommandToken]
             if isinstance(cmd_tokens, (list, tuple)):
                 flat_tokens = _flatten(list(cmd_tokens))
-                quoted = [_quote_for_shell(t, shell) for t in flat_tokens]
+                quoted = [
+                    _quote_for_shell(t, shell, extra_ninja_vars) for t in flat_tokens
+                ]
                 commands.append(" ".join(quoted))
         return multi_join.join(commands)
     else:
         # tokens is Sequence[CommandToken] - single command
         flat_tokens = _flatten(list(tokens))
-        quoted = [_quote_for_shell(t, shell) for t in flat_tokens]
+        quoted = [_quote_for_shell(t, shell, extra_ninja_vars) for t in flat_tokens]
         return " ".join(quoted)
 
 
@@ -815,7 +847,9 @@ _SHELL_OPERATORS = frozenset(
 )
 
 
-def _quote_for_shell(s: str, shell: str) -> str:
+def _quote_for_shell(
+    s: str, shell: str, extra_ninja_vars: frozenset[str] = frozenset()
+) -> str:
     """Quote string for target shell if needed.
 
     Args:
@@ -855,7 +889,8 @@ def _quote_for_shell(s: str, shell: str) -> str:
         # generator actually defines qualify -- $in, $out, $topdir, $out.d,
         # $source_N: any other $name is a literal dollar in the command and
         # must be escaped like one below.
-        if re.fullmatch(rf"\${_NINJA_VARS}(?:\.\w+)*", s):
+        ninja_vars = _ninja_var_pattern(extra_ninja_vars)
+        if re.fullmatch(rf"\${ninja_vars}(?:\.\w+)*", s):
             return s
 
         # Any shell metacharacter (not just whitespace) means the shell could
@@ -895,7 +930,7 @@ def _quote_for_shell(s: str, shell: str) -> str:
         # as a bad $-escape.
         escaped_dollar = "$$" if platform.system() == "Windows" else "\\$$"
         s = re.sub(
-            rf"\$(?!({_NINJA_VARS})(?!\w))",
+            rf"\$(?!({ninja_vars})(?!\w))",
             lambda m: escaped_dollar,
             s,
         )

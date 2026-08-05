@@ -292,7 +292,11 @@ class MakefileGenerator(BaseGenerator):
         cwd = cast("Path | None", build_info.get("cwd"))
         if custom_command:
             if isinstance(custom_command, list):
-                processed_tokens = self._process_path_tokens(custom_command, cwd=cwd)
+                processed_tokens = self._process_path_tokens(
+                    custom_command,
+                    cwd=cwd,
+                    node_vars=cast("dict[str, object] | None", build_info.get("vars")),
+                )
 
                 # Expand $SOURCES/$TARGET before to_shell_command() so each
                 # path is a separate, individually quoted token.
@@ -324,7 +328,10 @@ class MakefileGenerator(BaseGenerator):
 
             from pcons.core.subst import to_shell_command
 
-            processed_tokens = self._process_path_tokens(cmd_template)
+            processed_tokens = self._process_path_tokens(
+                cmd_template,
+                node_vars=cast("dict[str, object] | None", build_info.get("vars")),
+            )
 
             if context_overrides:
                 processed_tokens = apply_context_overrides(
@@ -356,7 +363,10 @@ class MakefileGenerator(BaseGenerator):
             namespace = env._build_namespace()
             tokens = subst_fn(command_template, namespace)
 
-            relativized_tokens = self._process_path_tokens(tokens)
+            relativized_tokens = self._process_path_tokens(
+                tokens,
+                node_vars=cast("dict[str, object] | None", build_info.get("vars")),
+            )
 
             # Expand $SOURCES/$TARGET before to_shell_command() so each
             # path is a separate, individually quoted token.
@@ -737,13 +747,31 @@ class MakefileGenerator(BaseGenerator):
             return str(path_obj)
         return str(self._build_dir / path_obj)
 
-    def _process_path_tokens(self, tokens: list, *, cwd: Path | None = None) -> list:
+    def _process_path_tokens(
+        self,
+        tokens: list,
+        *,
+        cwd: Path | None = None,
+        node_vars: dict[str, object] | None = None,
+    ) -> list:
         """Relativize PathTokens in a command token list for make.
 
         SourcePath/TargetPath markers pass through unchanged for
-        _expand_source_target_tokens() to handle.
+        _expand_source_target_tokens() to handle. A NodeVar expands to its
+        value here: make has no per-edge variables, so the value goes inline,
+        and expanding it before the loop means its own paths are relativized
+        with everything else.
         """
-        from pcons.core.subst import PathToken, SourcePath, TargetPath
+        from pcons.core.subst import NodeVar, PathToken, SourcePath, TargetPath
+
+        expanded: list = []
+        for token in tokens:
+            if isinstance(token, NodeVar):
+                value = (node_vars or {}).get(token.name, "")
+                expanded.extend(value if isinstance(value, list) else [value])
+            else:
+                expanded.append(token)
+        tokens = expanded
 
         def relativize(path: str) -> str:
             rendered = self._relativize_path_for_make(path)

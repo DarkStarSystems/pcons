@@ -46,10 +46,13 @@ class TestQtQmlModule:
         assert "moc_backend.cpp.json" in content
         # ...which feed qmltyperegistrar with URI and version.
         assert "build qt.ui/ui_qmltyperegistrations.cpp: qt_typeregcmd" in content
-        assert "--import-name com.example.demo" in content
-        assert "--major-version 2" in content
-        assert "--minor-version 1" in content
-        assert "--generate-qmltypes qt.ui/ui.qmltypes" in content
+        # The URI, version and qmltypes path are per-edge variables, so one
+        # typeregistrar rule serves every QML module.
+        assert "--import-name $QMLURI" in content
+        assert "  QMLURI = com.example.demo\n" in content
+        assert "  QMLMAJOR = 2\n" in content
+        assert "  QMLMINOR = 1\n" in content
+        assert "  QMLTYPES = qt.ui/ui.qmltypes\n" in content
         # The registration TU compiles into the module.
         assert "ui_qmltyperegistrations.cpp.o" in content
         # Resources (qml files + qmldir) compile in via rcc.

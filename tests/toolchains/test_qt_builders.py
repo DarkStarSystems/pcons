@@ -103,7 +103,9 @@ class TestNinjaOutput:
         env.qt.Rcc(sources="res.qrc")
         content = generate_ninja(project)
         assert "/fake/bin/rcc" in content
-        assert "--name res" in content
+        # The name is a per-edge variable, so one rule serves every .qrc.
+        assert "--name $RCCNAME" in content
+        assert "  RCCNAME = res\n" in content
         assert "--depfile $out.d" in content
         assert "build qt.gen/qrc_res.cpp:" in content
 
@@ -112,7 +114,7 @@ class TestNinjaOutput:
         env = qt_only_env(project)
         env.qt.Rcc(sources="res.qrc", name="assets")
         content = generate_ninja(project)
-        assert "--name assets" in content
+        assert "  RCCNAME = assets\n" in content
 
 
 def _widgets_tree(tmp_path):
@@ -288,7 +290,7 @@ class TestQtResources:
         assert 'alias="assets/a.txt"' in text
         assert 'alias="assets/b.txt"' in text
         content = generate_ninja(project)
-        assert "--name assets" in content
+        assert "  RCCNAME = assets\n" in content
 
     def test_missing_glob_is_an_error(self, tmp_path, monkeypatch):
         project = _make_project(tmp_path, monkeypatch)
@@ -317,3 +319,46 @@ class TestAlongsideCxxToolchain:
         )
         # ...and moc itself runs as a visible edge.
         assert "build qt.gen/src/moc_thing.cpp:" in content
+
+
+class TestResourceRulesAreShared:
+    """Many .qrc files, one rcc rule.
+
+    The resource name is a per-edge variable rather than command text, so the
+    rule is identical for every resource. Writing the name into the command
+    would give each one a rule of its own, since that text is the rule's
+    identity.
+    """
+
+    def test_many_resources_share_one_rule(self, tmp_path, monkeypatch):
+        project = _make_project(tmp_path, monkeypatch)
+        env = qt_only_env(project)
+        for i in range(6):
+            (tmp_path / f"r{i}.qrc").write_text("<RCC/>\n")
+            env.qt.Rcc(sources=f"r{i}.qrc")
+
+        content = generate_ninja(project)
+
+        rules = [ln for ln in content.splitlines() if ln.startswith("rule qt_rcccmd")]
+        names = sorted(
+            ln.split("=", 1)[1].strip()
+            for ln in content.splitlines()
+            if ln.strip().startswith("RCCNAME =")
+        )
+        assert len(rules) == 1
+        assert names == [f"r{i}" for i in range(6)]
+
+
+class TestNodeVarNameGuard:
+    def test_shadowing_a_generator_variable_raises(self, tmp_path, monkeypatch):
+        """A per-node "out" would be used where the edge's output belongs."""
+        import pytest
+
+        project = _make_project(tmp_path, monkeypatch)
+        env = qt_only_env(project)
+        (tmp_path / "r.qrc").write_text("<RCC/>\n")
+        nodes = env.qt.Rcc(sources="r.qrc")
+        nodes[0]._build_info["vars"]["out"] = "nope"
+
+        with pytest.raises(ValueError, match="shadows one the generator defines"):
+            generate_ninja(project)

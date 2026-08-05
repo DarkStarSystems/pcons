@@ -215,6 +215,10 @@ class CompileCommandsGenerator(BaseGenerator):
                 all_sources=cast("list[FileNode]", all_sources)
                 if isinstance(all_sources, list)
                 else None,
+                node_vars=cast(
+                    "dict[str, object] | None",
+                    build_info.get("vars") if build_info else None,
+                ),
             )
             return to_shell_command(expanded, shell="bash")
 
@@ -229,6 +233,7 @@ class CompileCommandsGenerator(BaseGenerator):
         output: FileNode,
         project: Project,
         all_sources: list[FileNode] | None = None,
+        node_vars: dict[str, object] | None = None,
     ) -> list[str]:
         """Expand SourcePath/TargetPath markers and PathToken paths to literals.
 
@@ -238,7 +243,7 @@ class CompileCommandsGenerator(BaseGenerator):
         SourcePath expands to all of ``all_sources`` — each per-file entry
         repeats the whole command, the sourcekit-lsp/CMake Swift convention.
         """
-        from pcons.core.subst import PathToken, SourcePath, TargetPath
+        from pcons.core.subst import NodeVar, PathToken, SourcePath, TargetPath
 
         result: list[str] = []
         for token in tokens:
@@ -248,6 +253,11 @@ class CompileCommandsGenerator(BaseGenerator):
                         result.append(f"{token.prefix}{s.path}{token.suffix}")
                     continue
                 result.append(f"{token.prefix}{source.path}{token.suffix}")
+            elif isinstance(token, NodeVar):
+                # No per-edge variables in a compile_commands entry: inline it.
+                value = (node_vars or {}).get(token.name, "")
+                items = value if isinstance(value, list) else [value]
+                result.extend(str(v) for v in items)
             elif isinstance(token, TargetPath):
                 path = output.path.name if token.basename else output.path
                 result.append(f"{token.prefix}{path}{token.suffix}")

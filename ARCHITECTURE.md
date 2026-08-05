@@ -920,6 +920,12 @@ everything:
   means, so the rule text stays identical across targets. This is what
   `-Wl,-install_name,@rpath/` and MSVC's `/IMPLIB:` use.
 - **`_build_info["vars"]`** — a per-node dict — for any other per-edge value.
+  A toolchain names them in its template (`"-module-name", "$MODULE_NAME"`) and
+  the generators decide how to deliver them: ninja writes them on the build
+  statement so one rule serves every node, and generators without per-edge
+  variables (make, `compile_commands.json`) substitute the value. A name that
+  would shadow `$in`/`$out`/`$topdir`/`$source_N`/`$target_N`/`$out_basename`
+  raises.
 
 Writing the value into the string is the thing to avoid. It is not a
 correctness bug, so nothing catches it; it just quietly multiplies the

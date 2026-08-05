@@ -446,7 +446,7 @@ class Resolver:
 
         # SourcePath/TargetPath markers are preserved through subst() and
         # converted to generator-specific syntax (e.g. $in/$out for Ninja)
-        from pcons.core.subst import SourcePath
+        from pcons.core.subst import NodeVar, SourcePath
 
         extra_vars: dict[str, object] = {}
         extra_vars["SOURCE"] = SourcePath()
@@ -458,10 +458,14 @@ class Resolver:
         extra_vars.update(tool_overrides)
 
         # Per-node template variables (e.g. a grouped compile node's
-        # MODULE_NAME, set by a toolchain's setup_group_node hook).
+        # MODULE_NAME, set by a toolchain's setup_group_node hook). The
+        # reference stays in the command as a marker rather than expanding to
+        # the value: a ninja rule is identified by its command text, so
+        # substituting here would give every module or resource a rule of its
+        # own. The generators read the value from build_info["vars"].
         node_vars = build_info.get("vars")
         if node_vars:
-            extra_vars.update(node_vars)
+            extra_vars.update({name: NodeVar(name) for name in node_vars})
 
         # Tokens stay separate; the generator joins them with shell quoting
         command_tokens = env.subst_list(cmd_template, **extra_vars)

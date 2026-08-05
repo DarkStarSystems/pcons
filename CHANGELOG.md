@@ -172,6 +172,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
   with nothing to see. The template is now a configure dependency, like the build script.
+- **Per-node command variables no longer fork a rule each.** A toolchain's
+  `_build_info["vars"]` — a Swift module's name, a Qt resource's name, a QML module's
+  URI — was substituted into the command text before the generators saw it, so every
+  module and every resource got a private copy of its rule. The reference now survives to
+  the generator: ninja writes the value on the build statement and shares one rule, while
+  make and `compile_commands.json`, which have no per-edge variables, substitute it as
+  before. Six `.qrc` resources produce one `rcc` rule instead of six. A variable that
+  would shadow `$in`/`$out`/`$topdir`/`$source_N`/`$target_N`/`$out_basename` raises
+  rather than silently displacing the edge's own paths.
 - **Shared libraries share one link rule.** The automatic `install_name` (macOS) and
   `SONAME` (Linux) had the library's own filename formatted into the flag, and a ninja
   rule is identified by its command text — so every shared library got a private copy of

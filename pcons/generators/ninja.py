@@ -25,6 +25,7 @@ from pcons.configure.platform import get_platform
 from pcons.core.debug import trace, trace_value
 from pcons.core.node import FileNode, Node
 from pcons.core.paths import PathResolver
+from pcons.core.subst import NodeVar
 from pcons.generators.generator import BaseGenerator, apply_context_overrides
 
 if TYPE_CHECKING:
@@ -179,7 +180,11 @@ class NinjaGenerator(BaseGenerator):
                 target_count=len(all_targets) or 1,
                 cwd=cwd,
             )
-            command = to_shell_command(relativized_tokens, shell="ninja")
+            command = to_shell_command(
+                relativized_tokens,
+                shell="ninja",
+                extra_ninja_vars=frozenset(cast(dict, build_info.get("vars") or {})),
+            )
         else:
             command = command_raw
             for flag in extra_command_flags:
@@ -732,6 +737,15 @@ class NinjaGenerator(BaseGenerator):
                 f"  out_basename = {self._escape_for_ninja_variable(node.path.name)}\n"
             )
 
+        # Per-node values the toolchain attached (MODULE_NAME, QMLURI, ...).
+        # They live here rather than in the rule so one rule serves every node
+        # built from the same template.
+        node_vars = build_info.get("vars")
+        if node_vars and isinstance(node_vars, dict):
+            for name, value in cast("dict[str, object]", node_vars).items():
+                self._check_node_var_name(name, node)
+                f.write(f"  {name} = {self._render_node_var(value, cwd)}\n")
+
         # Custom per-build variables from build_info (legacy support)
         custom_vars = build_info.get("variables")
         if custom_vars and isinstance(custom_vars, dict):
@@ -739,6 +753,34 @@ class NinjaGenerator(BaseGenerator):
                 if var_value:  # Only write non-empty values
                     escaped_value = self._escape_for_ninja_variable(str(var_value))
                     f.write(f"  {var_name} = {escaped_value}\n")
+
+    #: Names the generator defines itself; a per-node variable may not shadow
+    #: one, or the edge's own paths would be rewritten by its value.
+    _RESERVED_VARS = frozenset({"in", "out", "topdir", "out_basename"})
+
+    @classmethod
+    def _check_node_var_name(cls, name: str, node: FileNode) -> None:
+        if name in cls._RESERVED_VARS or re.fullmatch(r"(source|target)_\d+", name):
+            raise ValueError(
+                f"Per-node variable {name!r} on {node.path} shadows one the "
+                f"generator defines. Pick another name: ninja would use this "
+                f"value where the edge's own paths belong."
+            )
+
+    def _render_node_var(self, value: object, cwd: Path | None) -> str:
+        """One per-node value as ninja variable text.
+
+        The same shapes a command carries — a plain string, a PathToken, or a
+        list of either — so it goes through the same relativization and
+        quoting the command tokens do.
+        """
+        from pcons.core.subst import to_shell_command
+
+        tokens = value if isinstance(value, list) else [value]
+        return to_shell_command(
+            self._relativize_command_tokens(cast("list[str]", tokens), cwd=cwd),
+            shell="ninja",
+        )
 
     @staticmethod
     def _wants_out_basename(build_info: dict[str, object]) -> bool:
@@ -1176,6 +1218,10 @@ class NinjaGenerator(BaseGenerator):
                 else:
                     ninja_var = "$out"
                 result.append(f"{token.prefix}{ninja_var}{token.suffix}")
+            elif isinstance(token, NodeVar):
+                # The value goes on the build statement, so the rule text is
+                # the same for every node that uses this template.
+                result.append(f"${token.name}")
             elif isinstance(token, PathToken):
                 result.append(
                     token.relativize(lambda p: self._relativize_path_for_ninja(p, cwd))
