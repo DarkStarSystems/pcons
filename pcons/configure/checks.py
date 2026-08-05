@@ -699,10 +699,10 @@ int main(void) {{ return 0; }}
             literal at all.
 
         Example:
-            # core/version.h:  #define VERSION_NAME "Sapphire 2024"
+            # core/version.h:  #define VERSION_NAME "MyApp 2024"
             name = checks.check_define(
                 "VERSION_NAME", headers=["core/version.h"], include_dirs=[src_dir]
-            )  # -> '"Sapphire 2024"'
+            )  # -> '"MyApp 2024"'
         """
         trace(
             "configure",

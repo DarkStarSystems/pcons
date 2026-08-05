@@ -3559,7 +3559,7 @@ Checks compile the way the build does: the tool's flags, defines, and include di
 | (not defined) | `None` |
 | `#define FOO` | `""` |
 | `#define FOO 42` | `"42"` |
-| `#define FOO "Sapphire 2024"` | `'"Sapphire 2024"'` |
+| `#define FOO "MyLib 2024"` | `'"MyLib 2024"'` |
 
 Quotes are kept, so a string literal is distinguishable from a number and from a defined-but-empty macro, and the value can go straight into a generated config header. Use the batch form when reading several from one header: configure time is dominated by process startup, and `check_defines()` answers them all in a single preprocessor run.
 

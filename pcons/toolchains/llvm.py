@@ -787,7 +787,7 @@ class MetalLibraryBuilder:
             defined_at: Source location where this was defined.
 
         Example:
-            shaders = project.MetalLibrary("sapphire", env,
+            shaders = project.MetalLibrary("myapp", env,
                                            sources=["blur.metal", "warp.metal"])
             project.Default(shaders)
         """

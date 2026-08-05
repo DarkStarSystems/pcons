@@ -16,68 +16,6 @@ see **Changed** below for each one and what to write instead.
 
 ### Added
 
-- **`depends=` on the compile builders** (`Program`, `StaticLibrary`, `SharedLibrary`,
-  `ObjectLibrary`, and `env.<tool>.Object()`), matching `env.Command(depends=...)`. A
-  generated header can now be ordered before the object that includes it without a
-  coarser target-level dependency.
-- **`Node.add_inputs()`** for positional inputs — the files an edge's command consumes.
-  Builders use it to keep the input list in step with `build_info["sources"]`.
-- **`env.<tool>.Object("foo.c")`** — the one-argument form, deriving the object path,
-  instead of `TypeError: argument should be a str or an os.PathLike object`. Whether a
-  lone argument is the target or the source is decided by the builder's *target*
-  suffixes, so compiling a file the builder doesn't advertise (a `.cu` as C++) works,
-  which is the point of the explicit form.
-- **`Toolchain.source_suffixes()`** enumerates the extensions a toolchain compiles, for
-  diagnostics. It probes `get_source_handler()`, so it can under-report but never lie.
-- **`project.MetalLibrary(name, env, sources=["a.metal", ...])`** is the whole Metal
-  pipeline in one target: each shader compiles to an `.air`, and the `.air` files link
-  into the `.metallib` an application loads. It returns a `Target`, so a metallib can be
-  a default target, an alias member, or something to `Install` — `env.metal.Library`
-  returns nodes, like every tool-namespace builder, which left a metallib unable to be a
-  build target at all. The output is named verbatim (no `lib` prefix), since shaders are
-  looked up by name at runtime. See `examples/62_metal_library`.
-- **`env.metal.Library`** links `.air` files into a `.metallib` (`xcrun metallib`), so the
-  Metal pipeline no longer stops one step short of the only form an application can
-  load. Its own `libflags` var, since the compile flags (`-I`, `-std=metal3.0`) aren't
-  accepted by `metallib`.
-- **`${SOURCES[n:m]}` slices** in `env.Command`, with either end optional, for the common
-  shape where the number of inputs is a property of the project rather than of the rule:
-  `command="./${SOURCES[0]} $TARGET ${SOURCES[1:]}"`. Anything else inside `${...}` now
-  raises — an unrecognized form previously reached `build.ninja` as a shell-escaped
-  literal and ran as nonsense, which is the opposite of pcons's fail-fast rule.
-- **A substitution can be part of an argument** rather than having to be all of one:
-  `./${SOURCES[0]}`, `--out=$TARGET`, `$TARGET.tmp`. It previously had to be a whole
-  whitespace-separated word, which ruled out the one spelling that actually runs a tool
-  the build just produced — a bare `${SOURCES[0]}` expands to a build-directory name
-  like `collate`, and a POSIX shell looks a bare name up on `$PATH`, where it is not
-  (`examples/57_staged_generation` and `59_codegen_sources` were relying on the current
-  directory being on `$PATH`, and now say `./`). Text attached to a form that expands to
-  several paths repeats on each of them, so `-i${SOURCES[1:]}` is `-ione.def -itwo.def`.
-  See `examples/61_command_substitution`.
-- **`check_define(..., as_string=True)`** (and the batch form) returns the string a macro
-  denotes rather than its expansion text: adjacent literals concatenated, quotes removed,
-  simple C escapes decoded. `#define DIR "/opt/" "app"` reads back as `/opt/app` instead
-  of the seven characters `"/opt/" "app"`. Raises if the macro isn't a string literal.
-- **Per-file flags without a second target.** `target.add_sources([...], env=other_env)`
-  (and `add_source`) compiles those sources with a different environment while they stay
-  part of the target — so they keep its include dirs, defines, and everything inherited
-  from its dependencies. Previously the only route was a second one-file target, which
-  starts from nothing and has to re-state all of it. `examples/17_object_sources` shows
-  this alongside `env.cc.Object()`, which remains the tool for sharing one compiled
-  object between targets.
-- **`ToolChecks.check_define()` reads macros out of project headers**, via `headers=`,
-  `include_dirs=`, and `defines=` — matching `check_type()`/`check_function()`, which
-  always took `headers=`. Previously it preprocessed an empty source and so could only
-  report compiler builtins. New `check_defines(names, ...)` answers many macros in a
-  single preprocessor run, which matters because configure time is dominated by process
-  startup. Undefined, defined-but-empty, numeric, and string-valued macros are all
-  distinguishable in the result; quotes are retained.
-- **Generated build files re-run pcons on their own.** `build.ninja` now carries a
-  `generator = 1` edge (and the Makefile a remake rule) listing the build script, every
-  Python module imported from inside the project tree, `configure_file()` templates, and
-  anything added with the new `project.add_configure_dependency(path)`. Editing any of
-  them re-runs pcons before the build proceeds, in the same `ninja` invocation — no
-  wrapper script, no silently stale graph.
 - **Staged generation** for projects whose target list is decided by data the build
   itself produces (a definition language, an IDL, a plugin manifest). A configure
   dependency may be a build output, so the build tool produces it, re-runs pcons, and
@@ -89,6 +27,12 @@ see **Changed** below for each one and what to write instead.
   rewrote with identical content, timestamp included, and implies `restat`. Without it,
   `restat` buys nothing from the many generators that rewrite everything every run — one
   changed input rebuilds the world.
+- **Generated build files re-run pcons on their own.** `build.ninja` now carries a
+  `generator = 1` edge (and the Makefile a remake rule) listing the build script, every
+  Python module imported from inside the project tree, `configure_file()` templates, and
+  anything added with the new `project.add_configure_dependency(path)`. Editing any of
+  them re-runs pcons before the build proceeds, in the same `ninja` invocation — no
+  wrapper script, no silently stale graph.
 - **System include directories.** `env.cc.system_includes` / `env.cxx.system_includes`
   and `target.public.system_include_dirs` emit `-isystem` (GCC/Clang), `/external:I`
   plus `/external:W0` (MSVC), or `-imsvc` (clang-cl), so vendored third-party headers
@@ -104,6 +48,62 @@ see **Changed** below for each one and what to write instead.
   returned to the build directory afterwards. A relative `cwd` is taken from the project
   root. Ninja and Make both. See `examples/60_command_cwd`.
 - **`target.pre_build(command)`**, the mirror of `post_build()`.
+- **`depends=` on the compile builders** (`Program`, `StaticLibrary`, `SharedLibrary`,
+  `ObjectLibrary`, and `env.<tool>.Object()`), matching `env.Command(depends=...)`. A
+  generated header can now be ordered before the object that includes it without a
+  coarser target-level dependency.
+- **`Node.add_inputs()`** for positional inputs — the files an edge's command consumes.
+  Builders use it to keep the input list in step with `build_info["sources"]`.
+- **`env.<tool>.Object("foo.c")`** — the one-argument form, deriving the object path,
+  instead of `TypeError: argument should be a str or an os.PathLike object`. Whether a
+  lone argument is the target or the source is decided by the builder's *target*
+  suffixes, so compiling a file the builder doesn't advertise (a `.cu` as C++) works,
+  which is the point of the explicit form.
+- **`project.MetalLibrary(name, env, sources=["a.metal", ...])`** is the whole Metal
+  pipeline in one target: each shader compiles to an `.air`, and the `.air` files link
+  into the `.metallib` an application loads. It returns a `Target`, so a metallib can be
+  a default target, an alias member, or something to `Install` — `env.metal.Library`
+  returns nodes, like every tool-namespace builder, which left a metallib unable to be a
+  build target at all. The output is named verbatim (no `lib` prefix), since shaders are
+  looked up by name at runtime. See `examples/62_metal_library`.
+  **`env.metal.Library`** links `.air` files into a `.metallib`
+  (`xcrun metallib`), so the Metal pipeline now produces the full
+  application-loadable form. It has its own `libflags` var, since the
+  compile flags (`-I`, `-std=metal3.0`) aren't accepted by `metallib`.
+- **`${SOURCES[n:m]}` slices** in `env.Command`, with either end optional, for the common
+  shape where the number of inputs is a property of the project rather than of the rule:
+  `command="./${SOURCES[0]} $TARGET ${SOURCES[1:]}"`. Anything else inside `${...}` now
+  raises — an unrecognized form previously reached `build.ninja` as a shell-escaped
+  literal and ran as nonsense, which is the opposite of pcons's fail-fast rule.
+- **A substitution can be part of an argument** rather than having to be all of one:
+  `./${SOURCES[0]}`, `--out=$TARGET`, `$TARGET.tmp`. It previously had to be a whole
+  whitespace-separated word, which ruled out the one spelling that actually runs a tool
+  the build just produced — a bare `${SOURCES[0]}` expands to a build-directory name
+  like `collate`, and a POSIX shell looks a bare name up on `$PATH`, where it is not
+  (`examples/57_staged_generation` and `59_codegen_sources` were relying on the current
+  directory being on `$PATH`, and now say `./`). Text attached to a form that expands to
+  several paths repeats on each of them, so `-i${SOURCES[1:]}` is `-ione.def -itwo.def`.
+  See `examples/61_command_substitution`.
+- **`ToolChecks.check_define()` reads macros out of project headers**, via `headers=`,
+  `include_dirs=`, and `defines=` — matching `check_type()`/`check_function()`, which
+  always took `headers=`. Previously it preprocessed an empty source and so could only
+  report compiler builtins. New `check_defines(names, ...)` answers many macros in a
+  single preprocessor run, which matters because configure time is dominated by process
+  startup. Undefined, defined-but-empty, numeric, and string-valued macros are all
+  distinguishable in the result; quotes are retained.
+- **`check_define(..., as_string=True)`** (and the batch form) returns the string a macro
+  denotes rather than its expansion text: adjacent literals concatenated, quotes removed,
+  simple C escapes decoded. `#define DIR "/opt/" "app"` reads back as `/opt/app` instead
+  of the seven characters `"/opt/" "app"`. Raises if the macro isn't a string literal.
+- **Per-file flags without a second target.** `target.add_sources([...], env=other_env)`
+  (and `add_source`) compiles those sources with a different environment while they stay
+  part of the target — so they keep its include dirs, defines, and everything inherited
+  from its dependencies. Previously the only route was a second one-file target, which
+  starts from nothing and has to re-state all of it. `examples/17_object_sources` shows
+  this alongside `env.cc.Object()`, which remains the tool for sharing one compiled
+  object between targets.
+- **`Toolchain.source_suffixes()`** enumerates the extensions a toolchain compiles, for
+  diagnostics. It probes `get_source_handler()`, so it can under-report but never lie.
 
 ### Changed
 
