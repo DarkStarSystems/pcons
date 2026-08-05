@@ -88,7 +88,9 @@ def test_generated_paths_survive_ninja_lexing(tmp_path, spec):
     """Every path reads back as itself under ninja's own escaping rules."""
     build_dir, expected = build_project(tmp_path, spec)
 
-    builds = ninja_lex.parse((build_dir / "build.ninja").read_text())
+    # Read as ninja does: build files are UTF-8, whatever the locale is.
+    text = (build_dir / "build.ninja").read_text(encoding="utf-8")
+    builds = ninja_lex.parse(text)
 
     for output, source in expected.items():
         edges = [(outs, ins) for outs, ins in builds if output in outs]
