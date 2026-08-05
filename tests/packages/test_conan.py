@@ -786,6 +786,53 @@ class TestConanFinderWithToolchain:
         assert settings["compiler.version"] == "13"
         assert settings["compiler.libcxx"] == "libstdc++11"
 
+    def test_macos_gcc_shim_is_reported_as_apple_clang(self, tmp_path: Path) -> None:
+        """On macOS "gcc" is a shim for Apple Clang, so a toolchain named gcc
+        is not GCC. Conan validates compiler.version against the compiler you
+        claim, and Apple Clang's numbering left gcc's range behind at 17 --
+        claiming gcc gets "Invalid setting '21'" and no package at all.
+        """
+        finder = ConanFinder(output_folder=tmp_path)
+        finder._platform = MagicMock(is_macos=True, is_linux=False, is_windows=False)
+        finder._platform.arch = "arm64"
+        toolchain = _FakeToolchain("gcc", cc_cmd="/usr/bin/gcc")
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "Apple clang version 21.0.0 (clang-2100.1.1.101)\n"
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(toolchain)
+
+        assert settings["compiler"] == "apple-clang"
+        assert settings["compiler.version"] == "21"
+        assert settings["compiler.libcxx"] == "libc++"
+
+    def test_macos_real_gcc_stays_gcc(self, tmp_path: Path) -> None:
+        """A Homebrew gcc-14 on macOS is the genuine article, so asking the
+        compiler is what separates it from the shim -- not the platform."""
+        finder = ConanFinder(output_folder=tmp_path)
+        finder._platform = MagicMock(is_macos=True, is_linux=False, is_windows=False)
+        finder._platform.arch = "arm64"
+        toolchain = _FakeToolchain("gcc", cc_cmd="/opt/homebrew/bin/gcc-14")
+
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "gcc-14 (Homebrew GCC 14.2.0) 14.2.0\n"
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            settings = finder._detect_compiler_settings(toolchain)
+
+        assert settings["compiler"] == "gcc"
+        assert settings["compiler.version"] == "14"
+        assert settings["compiler.libcxx"] == "libstdc++11"
+
     def test_detect_compiler_version_uses_toolchain_cmd_not_path(
         self, tmp_path: Path
     ) -> None:
@@ -913,11 +960,24 @@ class TestConanFinderWithToolchain:
         assert ConanFinder._msvc_conan_version(cl_version) == expected
 
     def test_sync_profile_with_toolchain(self, tmp_path: Path) -> None:
-        """Test profile generation with toolchain."""
+        """Test profile generation with toolchain.
+
+        The compiler is answered by a stub rather than by whatever "gcc" is
+        on this host: on macOS that is an Apple Clang shim, and the profile
+        would legitimately say apple-clang.
+        """
         finder = ConanFinder(output_folder=tmp_path)
         toolchain = _FakeToolchain("gcc", cc_cmd="gcc")
 
-        finder.sync_profile(toolchain=toolchain)
+        def mock_run(cmd, **kwargs):
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = "gcc (Ubuntu 13.2.0-4ubuntu3) 13.2.0\n"
+            result.stderr = ""
+            return result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            finder.sync_profile(toolchain=toolchain)
 
         content = finder.profile_path.read_text()
         assert "compiler=gcc" in content

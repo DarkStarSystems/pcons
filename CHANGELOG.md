@@ -191,6 +191,12 @@ see **Changed** below for each one and what to write instead.
   `processorArchitecture` literally, so the dependency never bound. An unmappable
   architecture now raises instead of reaching the manifest, and `create_app_manifest()`
   takes an explicit `arch=` like its counterpart.
+- **Conan: macOS's `gcc` is reported as `apple-clang`.** `/usr/bin/gcc` on macOS is a
+  shim for Apple Clang, so a toolchain named `gcc` was described to Conan as GCC and
+  given Apple Clang's version number. That worked only while the two numbering schemes
+  overlapped; Apple Clang 17 left GCC's range behind, and the build stopped with
+  `Invalid setting '21' is not a valid 'settings.compiler.version' value`. The compiler
+  is now asked what it is, so a real Homebrew `gcc-14` is still reported as GCC.
 - **A path flag spelled with `=` is no longer mangled.** `--sysroot=/opt/wasi-sdk` was
   split on the flag name alone, leaving `=/opt/wasi-sdk` — which does not look absolute,
   so it was rewritten relative to the build directory and reached the compiler as

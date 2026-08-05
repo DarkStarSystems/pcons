@@ -226,8 +226,17 @@ class ConanFinder(BaseFinder):
                 toolchain, "cc"
             ) or self._get_toolchain_compiler_cmd(toolchain, "cxx")
             if "gcc" in compiler_name:
-                settings["compiler"] = "gcc"
-                settings["compiler.libcxx"] = "libstdc++11"
+                if self._platform.is_macos and self._is_apple_clang(compiler_cmd):
+                    # /usr/bin/gcc on macOS is a shim for Apple Clang, so a
+                    # toolchain named "gcc" is usually not GCC at all. Conan
+                    # validates compiler.version against the compiler you
+                    # claim, and Apple Clang's numbering left gcc's range
+                    # behind at 17 -- claiming gcc fails outright.
+                    settings["compiler"] = "apple-clang"
+                    settings["compiler.libcxx"] = "libc++"
+                else:
+                    settings["compiler"] = "gcc"
+                    settings["compiler.libcxx"] = "libstdc++11"
             elif "clang" in compiler_name or "llvm" in compiler_name:
                 if self._platform.is_macos:
                     settings["compiler"] = "apple-clang"
@@ -302,6 +311,23 @@ class ConanFinder(BaseFinder):
                 }
                 return aliases.get(std, std)
         return None
+
+    @staticmethod
+    def _is_apple_clang(compiler_cmd: str | None) -> bool:
+        """Whether *compiler_cmd* is really Apple Clang, whatever it is called.
+
+        Asks the compiler rather than trusting its name: on macOS "gcc" is a
+        shim for Apple Clang, while a Homebrew "gcc-14" is the genuine article.
+        """
+        try:
+            result = subprocess.run(
+                [compiler_cmd or "gcc", "--version"],
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return result.returncode == 0 and "apple clang" in result.stdout.lower()
 
     def _detect_compiler_version(
         self, compiler: str, compiler_cmd: str | None = None
