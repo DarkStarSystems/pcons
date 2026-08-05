@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import patch
 
 import pytest
@@ -134,6 +135,14 @@ class TestLlvmInstallName:
         assert flags == [TargetPath(basename=True, prefix="-Wl,-install_name,@rpath/")]
 
 
+#: Only Unix-like platforms emit an install name or SONAME at all; on Windows
+#: the hook returns nothing, so there is no per-edge variable to look for.
+_EMITS_INSTALL_NAME = sys.platform in ("darwin", "linux")
+_needs_install_name = pytest.mark.skipif(
+    not _EMITS_INSTALL_NAME, reason="no install_name/SONAME on this platform"
+)
+
+
 class TestSharedLibrariesShareOneRule:
     """The reason the flag is a marker: N shared libraries, one link rule.
 
@@ -168,6 +177,7 @@ class TestSharedLibrariesShareOneRule:
 
         assert len(self._link_rules(content)) == 1
 
+    @_needs_install_name
     def test_each_library_names_itself(self, tmp_path, gcc_toolchain):
         content = self._ninja(tmp_path, gcc_toolchain, count=3)
 
@@ -197,6 +207,7 @@ class TestSharedLibrariesShareOneRule:
         assert "-o $out " in command
         assert "$target_" not in command
 
+    @_needs_install_name
     def test_out_basename_is_on_the_build_statement(self, tmp_path, gcc_toolchain):
         """Not inside the rule block, where it would be one shared value."""
         content = self._ninja(tmp_path, gcc_toolchain, count=1)
@@ -210,6 +221,7 @@ class TestSharedLibrariesShareOneRule:
 
         assert owner.startswith("build ")
 
+    @_needs_install_name
     def test_a_disabled_library_gets_its_own_rule(self, tmp_path, gcc_toolchain):
         """Its command genuinely differs -- it carries no install name."""
 
