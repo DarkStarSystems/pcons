@@ -230,6 +230,6 @@ def write_test_manifest(project: Project, output_dir: Path) -> Path | None:
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    manifest_path.write_text(json.dumps(data, indent=2) + "\n")
+    manifest_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     logger.info("Wrote test manifest: %s (%d tests)", manifest_path, len(specs))
     return manifest_path

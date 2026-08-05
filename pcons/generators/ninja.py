@@ -93,7 +93,7 @@ class NinjaGenerator(BaseGenerator):
             # On Windows, relpath fails for paths on different drives
             self._topdir = str(self._project_root)
 
-        with open(ninja_file, "w") as f:
+        with open(ninja_file, "w", encoding="utf-8") as f:
             self._write_header(f, project)
             self._write_variables(f, project)
             self._write_rules(f, project)
@@ -751,17 +751,21 @@ class NinjaGenerator(BaseGenerator):
         all_targets = build_info.get("all_targets")
         if all_targets:
             for i, src in enumerate(source_file_nodes):
-                f.write(f"  source_{i} = {get_source_path(src)}\n")
+                path = self._escape_ninja_value(get_source_path(src))
+                f.write(f"  source_{i} = {path}\n")
             target_nodes = cast(list[FileNode], all_targets)
             for i, tgt in enumerate(target_nodes):
-                f.write(f"  target_{i} = {get_target_path(tgt)}\n")
+                path = self._escape_ninja_value(get_target_path(tgt))
+                f.write(f"  target_{i} = {path}\n")
 
         outputs_info = build_info.get("outputs")
         if outputs_info and isinstance(outputs_info, dict):
             for i, (name, info) in enumerate(outputs_info.items()):
                 if isinstance(info, dict):
                     info_dict = cast(dict[str, Any], info)
-                    out_path = self._make_output_relative(info_dict["path"])
+                    out_path = self._escape_ninja_value(
+                        self._make_output_relative(info_dict["path"])
+                    )
                     f.write(f"  out_{name} = {out_path}\n")
                     # target_N supports TargetPath(index=N) in commands
                     f.write(f"  target_{i} = {out_path}\n")
@@ -1378,15 +1382,18 @@ class NinjaGenerator(BaseGenerator):
 
         return path
 
-    def _escape_for_ninja_variable(self, token: str) -> str:
-        """Escape a token for use in a Ninja variable value.
+    def _escape_ninja_value(self, token: str) -> str:
+        """Escape a token for a Ninja variable value, separators untouched.
 
         Ninja escaping (space -> $ , colon -> $:, dollar -> $$) works
-        consistently across platforms, unlike shell quoting. Preserves
-        $topdir references and normalizes backslashes to forward slashes.
-        """
-        token = token.replace("\\", "/")
+        consistently across platforms, unlike shell quoting; $topdir
+        references are preserved.
 
+        Path separators are left exactly as they came. A value like
+        ``target_0`` is read back by the edge's own command, and cmd.exe
+        will not run a program whose path uses forward slashes -- it
+        reads the first one as the start of a switch.
+        """
         # Shield $topdir from the $$ escaping below
         token = token.replace("$topdir", "\x00TOPDIR\x00")
 
@@ -1395,8 +1402,16 @@ class NinjaGenerator(BaseGenerator):
         token = token.replace(":", "$:")
 
         # Restore $topdir
-        token = token.replace("\x00TOPDIR\x00", "$topdir")
-        return token
+        return token.replace("\x00TOPDIR\x00", "$topdir")
+
+    def _escape_for_ninja_variable(self, token: str) -> str:
+        """Escape a token for a Ninja variable value, in ninja's own spelling.
+
+        As :meth:`_escape_ninja_value`, and additionally normalizes
+        backslashes to forward slashes -- for values ninja itself reads
+        rather than ones handed to a command.
+        """
+        return self._escape_ninja_value(token.replace("\\", "/"))
 
     def _get_standalone_tool_tokens(
         self, tool_name: str, command_var: str

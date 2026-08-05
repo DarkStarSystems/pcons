@@ -52,7 +52,7 @@ class GraphGenerator(BaseGenerator):
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / self._output_filename
 
-        with open(output_file, "w") as f:
+        with open(output_file, "w", encoding="utf-8") as f:
             self._write_header(f, project)
             self._write_graph(f, project)
             self._write_footer(f)
@@ -246,7 +246,7 @@ class GraphGenerator(BaseGenerator):
 
         headers: list[Path] = []
         try:
-            content = depfile.read_text()
+            content = depfile.read_text(encoding="utf-8")
             # GCC/Clang .d format: "target: dep1 dep2 dep3 ..."
             content = content.replace("\\\n", " ")
             if ":" in content:

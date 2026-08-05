@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Repeated `-Xlinker` directives keep their arguments.** Two `-Xlinker -rpath
+  -Xlinker <path>` directives collapsed into one: the repeated `-Xlinker -rpath` was
+  dropped as a duplicate, leaving the second path with no directive in front of it and
+  the linker reading it as a stray argument. Consecutive pass-through flags are now
+  one unit, so a whole directive is compared as a whole. Same fix for clang-cl's
+  `-Xclang`.
+- **Non-ASCII filenames work on Windows.** Generated build files were written in the
+  locale's encoding, so on Windows a project with, say, a Japanese filename failed to
+  generate at all, and an accented one produced a build file ninja misread -- it reads
+  them as UTF-8. Build files, `compile_commands.json`, dependency files, generated
+  `.pc` files and the configure cache are now written as UTF-8 everywhere.
+- **A `$` in a filename no longer breaks the whole build.** `Command()` sources and
+  targets are written to per-edge ninja variables, and those values were not escaped:
+  one dollar in a filename and ninja rejected `build.ninja` outright with "bad
+  $-escape", so nothing built at all.
+- **A command argument starting with `#` is now quoted.** Unquoted, `/bin/sh` read it
+  as a comment and silently discarded it *and every argument after it* -- the command
+  ran, and did something other than what the build script said.
+- **Repeated flag merges no longer grow the flag list.** A usage requirement that
+  reached a target by more than one dependency path could be appended again on each
+  merge: once for a `FlagPair` whose flag the toolchain doesn't list as taking a
+  separate argument (`FlagPair("-custom", "value")`), and once for a separated-argument
+  flag that had been written out ungrouped. Found by the new property tests.
+
 ## [0.25.0] - 2026-08-05
 
 This release turns a class of silent mistakes into errors. Several things that

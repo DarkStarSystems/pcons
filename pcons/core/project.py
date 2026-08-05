@@ -1288,7 +1288,7 @@ class Project(_ProjectBuilders):
         pc_path.parent.mkdir(parents=True, exist_ok=True)
         if pc_path.exists() and pc_path.read_text() == content:
             return pc_path
-        pc_path.write_text(content)
+        pc_path.write_text(content, encoding="utf-8")
         logger.info("Generated %s", pc_path)
         return pc_path
 

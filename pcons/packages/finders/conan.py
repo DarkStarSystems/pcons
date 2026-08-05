@@ -16,7 +16,7 @@ import shutil
 import subprocess
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from pcons.configure.platform import get_platform
 from pcons.core.flags import deduplicate_flags
@@ -733,8 +733,11 @@ class ConanFinder(BaseFinder):
             # frameworks: -framework A -framework B), with -Xlinker-style
             # pass-through directives kept verbatim. No toolchain is available
             # at .pc-parse time, so the relevant flag sets are named here.
-            return deduplicate_flags(
-                seq, _PC_SEPARATED_ARG_FLAGS, _PC_PASSTHROUGH_FLAGS
+            # cast: the general flag type admits path tokens, but a .pc file
+            # yields plain strings and de-duplication only ever drops them.
+            return cast(
+                "list[str]",
+                deduplicate_flags(seq, _PC_SEPARATED_ARG_FLAGS, _PC_PASSTHROUGH_FLAGS),
             )
 
         for name, pkg in packages.items():

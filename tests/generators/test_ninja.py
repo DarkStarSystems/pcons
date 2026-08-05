@@ -528,6 +528,80 @@ class TestNinjaDepsDirectives:
         assert "depfile" not in content
 
 
+class TestNinjaAwkwardPaths:
+    """Paths whose characters mean something to ninja."""
+
+    def test_dollar_in_command_paths_is_escaped(self, tmp_path):
+        """A '$' in a filename must be escaped everywhere, edge variables too.
+
+        Unescaped in a `source_N`/`target_N` value, ninja rejects the
+        whole file ("bad $-escape") and nothing builds. Minimized by the
+        property tests in tests/fuzz/.
+        """
+        (tmp_path / "in$put.txt").write_text("x")
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target="out$put.txt",
+            source="in$put.txt",
+            command="cp $SOURCE $TARGET",
+            name="copy",
+        )
+        project.resolve()
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        assert "  target_0 = out$$put.txt\n" in content
+        assert "  source_0 = $topdir/in$$put.txt\n" in content
+
+    def test_build_file_is_written_as_utf8(self, tmp_path):
+        """A non-ASCII filename must survive being written out.
+
+        The default encoding is the locale's, which on Windows is cp1252:
+        a Japanese filename raised UnicodeEncodeError and no build file
+        was written at all, and an accented one encoded to a byte ninja
+        then misread as UTF-8. Ninja reads build files as UTF-8.
+        """
+        (tmp_path / "入力.txt").write_text("x", encoding="utf-8")
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target="出力é.txt",
+            source="入力.txt",
+            command="cp $SOURCE $TARGET",
+            name="c",
+        )
+        project.resolve()
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        raw = (tmp_path / "build" / "build.ninja").read_bytes()
+        content = raw.decode("utf-8")  # raises if it went out in another codec
+        assert "入力.txt" in content
+        assert "出力é.txt" in content
+
+    def test_edge_variables_keep_their_path_separators(self):
+        """Escaping a per-edge path must not rewrite its separators.
+
+        These values are read by the edge's own command. On Windows they
+        arrive with backslashes, and cmd.exe will not run a program whose
+        path uses forward slashes -- it takes the first one as the start
+        of a switch. Checked directly because a POSIX run never has a
+        backslash to lose.
+        """
+        generator = NinjaGenerator()
+
+        assert generator._escape_ninja_value(r"build\tool.exe") == r"build\tool.exe"
+        assert generator._escape_ninja_value(r"C:\a b\x$y") == r"C$:\a$ b\x$$y"
+        # The ninja-facing spelling still normalizes, for values ninja reads.
+        assert (
+            generator._escape_for_ninja_variable(r"build\tool.exe") == "build/tool.exe"
+        )
+
+
 class TestNinjaSrcDir:
     def test_srcdir_replaced_with_topdir(self, tmp_path):
         """$SRCDIR in Command() commands is replaced with $topdir for ninja."""

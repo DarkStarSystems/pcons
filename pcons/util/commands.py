@@ -152,7 +152,7 @@ def copytree(
         target_str = (stamp or str(dest_path)).replace("\\", "/")
         escaped_files = [_escape_depfile_path(f) for f in source_files]
         deps_str = " \\\n  ".join(escaped_files)
-        with open(depfile_path, "w") as f:
+        with open(depfile_path, "w", encoding="utf-8") as f:
             f.write(f"{target_str}: \\\n  {deps_str}\n")
 
     # Touch stamp file if specified
