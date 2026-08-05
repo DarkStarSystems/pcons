@@ -303,6 +303,7 @@ _VERIFY_COMMAND_KEYS = {
     "expect_stdout",
     "expect_file",
     "expect_content",
+    "timeout",
 }
 _REBUILD_ENTRY_KEYS = {
     "description",
@@ -1330,13 +1331,15 @@ def run_example(
         if cmd_path.exists():
             run_cmd = str(cmd_path) + run_cmd[len(run_cmd.split()[0]) :]
 
+        # 30s suits a command that just runs what was built. One that reaches
+        # the network needs to say so -- see 50_pyproject.
         result = subprocess.run(
             run_cmd,
             shell=True,
             cwd=work_dir,
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=cmd_config.get("timeout", 30),
             env=verify_env,
         )
 

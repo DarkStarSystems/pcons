@@ -21,9 +21,13 @@ expected_outputs_windows = [
 #    project build/ dir, so the imported extension lives under build/.
 # 2. Real install (build_wheel): uv build produces a wheel via the staging dir,
 #    which is installed into the venv, the extension then lives in site-packages.
+# uv sync and uv build resolve and download packages into an isolated
+# environment. The 30s default fits a command that runs what was just built;
+# a cold CI runner fetching over the network does not fit in it, and the
+# macOS runners have timed out there.
 commands = [
     # --- editable install ---
-    { run = "uv sync" },
+    { run = "uv sync", timeout = 300 },
     { run = "uv run python test_editable.py", expect_stdout = "Hello, world!" },
 
     # --- real (non-editable) install from a built wheel ---
@@ -32,16 +36,16 @@ commands = [
     # `--python .venv` pins uv pip to the project venv: under `uv run pytest`
     # the inherited VIRTUAL_ENV points at the pcons repo venv,
     # which uv pip would otherwise target instead.
-    { run = "uv build --wheel" },
+    { run = "uv build --wheel", timeout = 300 },
     { run = "uv pip uninstall --python .venv pcons_hello_ext" },
     # Install the freshly built wheel by name from dist/, rather than globbing
     # dist/*.whl: the glob isn't expanded by cmd.exe on Windows. --no-index keeps
     # it offline (the package has no runtime deps).
-    { run = "uv pip install --python .venv --no-index --find-links dist pcons_hello_ext" },
+    { run = "uv pip install --python .venv --no-index --find-links dist pcons_hello_ext", timeout = 300 },
     { run = "uv run --no-sync python test_wheel.py", expect_stdout = "Hello, world!" },
 
     # --- source distribution ---
-    { run = "uv build --sdist" },
+    { run = "uv build --sdist", timeout = 300 },
     { run = "uv run --no-sync python test_sdist.py" },
 ]
 
