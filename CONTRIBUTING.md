@@ -36,6 +36,26 @@ git checkout -b my_contribution
 uv run pytest
 ```
 
+### Property Tests
+
+`tests/fuzz/` holds property-based tests (Hypothesis): instead of one worked
+example, they state a rule — de-duplicating flags never separates a flag from
+its argument, a topological sort always puts dependencies first — and let
+Hypothesis look for a counterexample.
+
+They run as part of the normal suite, short and with a fixed seed, so `make
+test` stays fast and reproducible. The nightly CI job runs a much longer,
+randomized campaign:
+
+```bash
+make fuzz    # what CI runs nightly
+```
+
+When one finds a failure it prints a minimized counterexample. Fix the bug,
+then add that example to the matching unit test file (`tests/core/`,
+`tests/generators/`, ...) — the property keeps searching, the unit test keeps
+this particular case from coming back.
+
 ### Run Linter and Type Checker
 
 ```bash

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from hypothesis import settings
 
 from pcons.core import invocation
 from pcons.core.builder_registry import BuilderRegistry
@@ -19,6 +20,16 @@ from pcons.toolchains.gcc import (
     GccLinker,
     GccToolchain,
 )
+
+# Hypothesis profiles for the property tests in tests/fuzz/. "dev" is the
+# default: small and derandomized, so a normal `make test` costs little and
+# never fails on an example an unrelated run happened to draw. The nightly
+# CI job passes --hypothesis-profile=nightly to actually go looking. That
+# flag is applied by the Hypothesis pytest plugin after this file is
+# imported, so it wins over the load_profile() below.
+settings.register_profile("dev", max_examples=50, deadline=None, derandomize=True)
+settings.register_profile("nightly", max_examples=2000, deadline=None, print_blob=True)
+settings.load_profile("dev")
 
 
 @pytest.fixture
