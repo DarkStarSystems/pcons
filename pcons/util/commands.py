@@ -58,16 +58,51 @@ def _escape_depfile_path(path: str) -> str:
     return path.replace(" ", "\\ ")
 
 
+def _merge_tree(src: Path, dest: Path) -> None:
+    """Copy *src* over *dest*, skipping files that are already identical.
+
+    Same size and no older than the source is taken as identical, the check
+    make and rsync use. It matters at scale: without it one touched file
+    re-copies the whole tree, which for a few hundred MB of assets is a
+    multi-second stall on any filesystem without copy-on-write.
+    """
+    for item in src.rglob("*"):
+        if item.is_dir():
+            (dest / item.relative_to(src)).mkdir(parents=True, exist_ok=True)
+            continue
+        target = dest / item.relative_to(src)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.exists():
+            source_stat, target_stat = item.stat(), target.stat()
+            if (
+                source_stat.st_size == target_stat.st_size
+                and source_stat.st_mtime <= target_stat.st_mtime
+            ):
+                continue
+        shutil.copy2(item, target)
+
+
 def copytree(
-    src: str, dest: str, depfile: str | None = None, stamp: str | None = None
+    src: str,
+    dest: str,
+    depfile: str | None = None,
+    stamp: str | None = None,
+    replace: bool = False,
 ) -> None:
     """Copy a directory tree, optionally writing a depfile and stamp file.
+
+    Merges into the destination, leaving files that are already there and
+    identical, and anything at the destination the source doesn't have. An
+    install directory is often shared — a plugin's config directory, a system
+    prefix — and deleting it wholesale would take other people's files with
+    it. Pass *replace* to get the destination cleared first.
 
     Args:
         src: Source directory path.
         dest: Destination directory path.
         depfile: Optional path to write a ninja depfile listing source files.
         stamp: Optional stamp file to touch after copy (for ninja build tracking).
+        replace: Delete the destination tree first, rather than merging.
     """
     src_path = Path(src)
     dest_path = Path(dest)
@@ -75,12 +110,9 @@ def copytree(
     if not src_path.is_dir():
         raise ValueError(f"Source is not a directory: {src}")
 
-    # Remove destination if it exists to ensure clean copy
-    if dest_path.exists():
+    if replace and dest_path.exists():
         shutil.rmtree(dest_path)
-
-    # Copy the directory tree
-    shutil.copytree(src_path, dest_path)
+    _merge_tree(src_path, dest_path)
 
     # Write depfile if requested
     if depfile:
@@ -152,6 +184,7 @@ def main() -> int:
         args = sys.argv[2:]
         depfile = None
         stamp = None
+        replace = False
         positional: list[str] = []
         i = 0
         while i < len(args):
@@ -167,17 +200,21 @@ def main() -> int:
             elif args[i].startswith("--stamp="):
                 stamp = args[i].split("=", 1)[1]
                 i += 1
+            elif args[i] == "--replace":
+                replace = True
+                i += 1
             else:
                 positional.append(args[i])
                 i += 1
 
         if len(positional) != 2:
             print(
-                "Usage: python -m pcons.util.commands copytree [--depfile FILE] [--stamp FILE] <src> <dest>",
+                "Usage: python -m pcons.util.commands copytree "
+                "[--depfile FILE] [--stamp FILE] [--replace] <src> <dest>",
                 file=sys.stderr,
             )
             return 1
-        copytree(positional[0], positional[1], depfile, stamp)
+        copytree(positional[0], positional[1], depfile, stamp, replace)
         return 0
 
     else:

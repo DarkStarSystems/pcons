@@ -162,3 +162,53 @@ class TestCopytree:
         assert deps.count(expected) == 1
         assert not any(d.endswith("/my") for d in deps)
         assert "file.txt" not in deps
+
+
+class TestCopytreeMerges:
+    """An install directory is often shared -- a plugin's config directory, a
+    system prefix -- so the copy merges rather than clearing the destination
+    first, and skips files already identical."""
+
+    def _tree(self, tmp_path):
+        src = tmp_path / "src"
+        (src / "sub").mkdir(parents=True)
+        (src / "a.txt").write_text("a\n")
+        (src / "sub" / "b.txt").write_text("b\n")
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        return src, dest
+
+    def test_a_file_the_source_lacks_survives(self, tmp_path):
+        src, dest = self._tree(tmp_path)
+        (dest / "theirs.txt").write_text("not ours\n")
+
+        copytree(str(src), str(dest))
+
+        assert (dest / "theirs.txt").read_text() == "not ours\n"
+        assert (dest / "sub" / "b.txt").read_text() == "b\n"
+
+    def test_replace_clears_the_destination(self, tmp_path):
+        src, dest = self._tree(tmp_path)
+        (dest / "theirs.txt").write_text("not ours\n")
+
+        copytree(str(src), str(dest), replace=True)
+
+        assert not (dest / "theirs.txt").exists()
+
+    def test_an_unchanged_file_is_not_recopied(self, tmp_path):
+        src, dest = self._tree(tmp_path)
+        copytree(str(src), str(dest))
+        before = (dest / "a.txt").stat().st_mtime_ns
+
+        copytree(str(src), str(dest))
+
+        assert (dest / "a.txt").stat().st_mtime_ns == before
+
+    def test_a_changed_file_is_copied(self, tmp_path):
+        src, dest = self._tree(tmp_path)
+        copytree(str(src), str(dest))
+        (src / "a.txt").write_text("changed\n")
+
+        copytree(str(src), str(dest))
+
+        assert (dest / "a.txt").read_text() == "changed\n"

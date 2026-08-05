@@ -172,6 +172,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
   with nothing to see. The template is now a configure dependency, like the build script.
+- **`InstallDir()` merges instead of deleting its destination.** It ran `shutil.rmtree`
+  before copying, so installing into a shared directory — a plugin's config directory, a
+  system prefix — silently took everyone else's files with it, and the docstring said only
+  "recursively copies an entire directory tree". It now leaves files it didn't put there,
+  and skips files already identical, so one touched asset no longer rewrites the whole
+  tree. `replace=True` on `pcons.util.commands.copytree` restores the clearing behaviour.
 - **`Install(..., mode=0o755)`** sets the installed copy's permissions. `copy2` carries the
   source's across, which is usually right; this is for a file that has to arrive more
   permissive than it sits in the tree — a script checked in 0644 that must be executable.

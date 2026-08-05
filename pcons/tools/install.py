@@ -700,8 +700,11 @@ class InstallAsBuilder:
 class InstallDirBuilder:
     """Install a directory tree to a destination.
 
-    Recursively copies an entire directory tree. Uses ninja's depfile
-    mechanism for incremental rebuilds.
+    Merges into the destination: files already there and identical are left
+    alone, and anything the source doesn't have is left in place. An install
+    directory is often shared, so clearing it would take other people's files
+    with it. Ninja's depfile mechanism re-runs the copy when a source file
+    changes, and only the changed files are written.
     """
 
     @staticmethod
