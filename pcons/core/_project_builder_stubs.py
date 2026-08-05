@@ -139,6 +139,7 @@ if TYPE_CHECKING:
             *,
             name: str | None = None,
             no_prefix: bool = False,
+            mode: int | None = None,
         ) -> Target:
             """Install files to a destination directory."""
             ...
@@ -150,6 +151,7 @@ if TYPE_CHECKING:
             *,
             name: str | None = None,
             no_prefix: bool = False,
+            mode: int | None = None,
         ) -> Target:
             """Install a file to a specific destination path."""
             ...

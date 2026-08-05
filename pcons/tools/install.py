@@ -158,19 +158,23 @@ def _install_target_name(project: Project, dest: Path, prefix: str) -> str:
     return f"{prefix}_{suffix}" if suffix else prefix
 
 
-def _deduplicate_target_name(project: Project, base_name: str) -> str:
+def _deduplicate_target_name(
+    project: Project, base_name: str, *, named_by_caller: bool = False
+) -> str:
     """Generate a unique target name, appending a numeric suffix if needed.
 
-    A safety net now that names derive from the whole destination path: it
-    fires only for an explicitly repeated ``name=`` or two distinct paths that
-    flatten alike (``a_b/c`` vs ``a/b_c``), both of which are worth a warning.
+    Installing several things into one directory is ordinary — a config
+    directory exists to be filled from many places — and the auto-generated
+    name derives from the destination alone, so those collide by design.
+    That is benign and silent. A repeated explicit ``name=`` is a real
+    mistake, and only that one is worth saying out loud.
     """
     target_name = base_name
     counter = 1
     while project.get_target(target_name, False) is not None:
         target_name = f"{base_name}_{counter}"
         counter += 1
-    if target_name != base_name:
+    if target_name != base_name and named_by_caller:
         logger.warning(
             "Install target renamed from '%s' to '%s' to avoid conflict",
             base_name,
@@ -187,6 +191,23 @@ def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path
 
     prefix = get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist"))
     return Path(prefix) / dest
+
+
+def _mode_flags(target: Target) -> dict[str, list[str]]:
+    """``--mode`` tokens for the copy command, when a mode was asked for.
+
+    They join the command text, so installs sharing a mode share a rule and
+    the two or three distinct modes in a project get one rule each.
+    """
+    mode = target._builder_data.get("mode")
+    return {"extra_command_flags": ["--mode", str(mode)]} if mode else {}
+
+
+def _with_mode(data: dict[str, str], mode: int | None) -> dict[str, str]:
+    """Record an explicit install mode, octal, for the copy command."""
+    if mode is not None:
+        data["mode"] = format(mode, "o")
+    return data
 
 
 def _make_install_target(
@@ -386,6 +407,7 @@ class InstallNodeFactory(PendingSourceFactory):
                 "sources": [file_node],
                 "description": "INSTALL $out",
                 "env": env,
+                **_mode_flags(target),
             }
 
             installed_nodes.append(dest_node)
@@ -481,6 +503,7 @@ class InstallNodeFactory(PendingSourceFactory):
             "sources": [source_node],
             "description": "INSTALL $out",
             "env": env,
+            **_mode_flags(target),
         }
 
         target._install_nodes = [dest_node]
@@ -573,6 +596,7 @@ class InstallBuilder:
         *,
         name: str | None = None,
         no_prefix: bool = False,
+        mode: int | None = None,
     ) -> Target:
         """Create an Install target.
 
@@ -582,20 +606,26 @@ class InstallBuilder:
             sources: Files to install.
             name: Optional name for the install target.
             no_prefix: If True, do not prepend the install prefix to the destination.
+            mode: Permissions for the installed copy, e.g. ``0o755``. The copy
+                otherwise carries the source's, which is usually right — this
+                is for a file that has to arrive more (or less) permissive
+                than it sits in the tree.
 
         Returns:
             A Target representing the install operation.
         """
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
-            project, name or _install_target_name(project, dest_dir, "install")
+            project,
+            name or _install_target_name(project, dest_dir, "install"),
+            named_by_caller=name is not None,
         )
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
         return _make_install_target(
             target_name,
             "Install",
-            {"dest_dir": str(dest_dir)},
+            _with_mode({"dest_dir": str(dest_dir)}, mode),
             list(sources),
             defined_at=get_caller_location(),
         )
@@ -617,6 +647,7 @@ class InstallAsBuilder:
         *,
         name: str | None = None,
         no_prefix: bool = False,
+        mode: int | None = None,
     ) -> Target:
         """Create an InstallAs target.
 
@@ -626,6 +657,10 @@ class InstallAsBuilder:
             source: Source file.
             name: Optional name for the install target.
             no_prefix: If True, do not prepend the install prefix to the destination.
+            mode: Permissions for the installed copy, e.g. ``0o755``. The copy
+                otherwise carries the source's, which is usually right — this
+                is for a file that has to arrive more (or less) permissive
+                than it sits in the tree.
 
         Returns:
             A Target representing the install operation.
@@ -648,13 +683,14 @@ class InstallAsBuilder:
             # two files installed into one directory must not collide.
             project,
             name or _install_target_name(project, dest, "install"),
+            named_by_caller=name is not None,
         )
         dest = _apply_install_prefix(project, dest, no_prefix)
 
         return _make_install_target(
             target_name,
             "InstallAs",
-            {"dest": str(dest)},
+            _with_mode({"dest": str(dest)}, mode),
             [source],
             defined_at=get_caller_location(),
         )
@@ -691,7 +727,9 @@ class InstallDirBuilder:
         """
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(
-            project, name or _install_target_name(project, dest_dir, "install_dir")
+            project,
+            name or _install_target_name(project, dest_dir, "install_dir"),
+            named_by_caller=name is not None,
         )
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 

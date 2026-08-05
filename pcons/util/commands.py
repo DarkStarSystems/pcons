@@ -12,13 +12,19 @@ Usage in build rules:
 
 from __future__ import annotations
 
+import os
 import shutil
 import sys
 from pathlib import Path
 
 
-def copy(src: str, dest: str) -> None:
-    """Copy a file or directory, creating parent directories as needed."""
+def copy(src: str, dest: str, mode: int | None = None) -> None:
+    """Copy a file or directory, creating parent directories as needed.
+
+    ``copy2`` carries the source's permissions across, which is usually what
+    an install wants. *mode* is for when it isn't — a script that is 0644 in
+    the source tree and has to arrive executable.
+    """
     src_path = Path(src)
     dest_path = Path(dest)
     dest_path.parent.mkdir(parents=True, exist_ok=True)
@@ -28,6 +34,8 @@ def copy(src: str, dest: str) -> None:
         shutil.copytree(src_path, dest_path)
     else:
         shutil.copy2(src, dest)
+    if mode is not None:
+        os.chmod(dest_path, mode)
 
 
 def concat(sources: list[str], dest: str) -> None:
@@ -112,13 +120,21 @@ def main() -> int:
     cmd = sys.argv[1]
 
     if cmd == "copy":
-        if len(sys.argv) != 4:
+        args = sys.argv[2:]
+        mode = None
+        # Anywhere in the list: the generator appends extra flags after the
+        # command's own arguments.
+        if "--mode" in args:
+            i = args.index("--mode")
+            mode = int(args[i + 1], 8)
+            args = args[:i] + args[i + 2 :]
+        if len(args) != 2:
             print(
-                "Usage: python -m pcons.util.commands copy <src> <dest>",
+                "Usage: python -m pcons.util.commands copy [--mode OCTAL] <src> <dest>",
                 file=sys.stderr,
             )
             return 1
-        copy(sys.argv[2], sys.argv[3])
+        copy(args[0], args[1], mode)
         return 0
 
     elif cmd == "concat":

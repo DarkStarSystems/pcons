@@ -733,3 +733,78 @@ class TestInstallDirectoryAutoDetection:
         # which is the same one the Command builder created.
         assert node_ref._build_info is not None
         assert node_ref._build_info.get("tool") == "command"
+
+
+class TestInstallMode:
+    """`copy2` carries the source's permissions, which is usually right.
+    `mode=` is for a file that has to arrive more permissive than it sits in
+    the tree -- a script checked in as 0644 that must be executable."""
+
+    def test_mode_reaches_the_copy_command(self, tmp_path, gcc_toolchain):
+        from pcons.generators.ninja import NinjaGenerator
+
+        (tmp_path / "s.sh").write_text("#!/bin/sh\n")
+        project = Project("m", root_dir=tmp_path, build_dir="build")
+        project.Environment(toolchain=gcc_toolchain)
+        project.Install("bin", ["s.sh"], mode=0o755)
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = (tmp_path / "build" / "build.ninja").read_text()
+
+        assert "--mode 755" in content
+
+    def test_no_mode_leaves_the_command_alone(self, tmp_path, gcc_toolchain):
+        from pcons.generators.ninja import NinjaGenerator
+
+        (tmp_path / "s.sh").write_text("#!/bin/sh\n")
+        project = Project("m", root_dir=tmp_path, build_dir="build")
+        project.Environment(toolchain=gcc_toolchain)
+        project.Install("bin", ["s.sh"])
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        assert "--mode" not in (tmp_path / "build" / "build.ninja").read_text()
+
+    def test_the_copy_command_applies_it(self, tmp_path):
+        import os
+        import stat
+
+        from pcons.util.commands import copy
+
+        src = tmp_path / "s.sh"
+        src.write_text("#!/bin/sh\n")
+        os.chmod(src, 0o644)
+
+        copy(str(src), str(tmp_path / "out.sh"), 0o755)
+
+        assert stat.S_IMODE((tmp_path / "out.sh").stat().st_mode) == 0o755
+
+
+class TestInstallTargetNaming:
+    """Installing several things into one directory is ordinary; the
+    auto-generated name derives from the destination alone, so those collide
+    by design. Only a repeated explicit name= is a mistake worth saying."""
+
+    def test_many_installs_into_one_directory_are_quiet(
+        self, tmp_path, gcc_toolchain, caplog
+    ):
+        project = Project("q", root_dir=tmp_path, build_dir="build")
+        project.Environment(toolchain=gcc_toolchain)
+        for name in "abcde":
+            (tmp_path / f"{name}.txt").write_text(name)
+            project.Install("config", [f"{name}.txt"])
+
+        assert "renamed" not in caplog.text
+
+    def test_a_repeated_explicit_name_still_warns(
+        self, tmp_path, gcc_toolchain, caplog
+    ):
+        project = Project("q", root_dir=tmp_path, build_dir="build")
+        project.Environment(toolchain=gcc_toolchain)
+        for name in "ab":
+            (tmp_path / f"{name}.txt").write_text(name)
+            project.Install("config", [f"{name}.txt"], name="my_install")
+
+        assert "renamed" in caplog.text

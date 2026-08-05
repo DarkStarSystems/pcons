@@ -172,6 +172,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
   with nothing to see. The template is now a configure dependency, like the build script.
+- **`Install(..., mode=0o755)`** sets the installed copy's permissions. `copy2` carries the
+  source's across, which is usually right; this is for a file that has to arrive more
+  permissive than it sits in the tree — a script checked in 0644 that must be executable.
+  Installs sharing a mode share a rule.
+- **Installing several files into one directory no longer warns.** The auto-generated
+  target name derives from the destination alone, so those names collide by design and all
+  but the first were renamed with a warning — 18 of them per configure in one real project.
+  A warning that fires on correct, ordinary usage teaches people to ignore warnings. Only a
+  repeated explicit `name=` warns now.
 - **A command naming a path under the build directory warns.** `project.build_dir` is
   relative to the project root while a command runs *in* the build directory, so
   `f"-Wl,{project.build_dir}/libfoo.dylib"` resolves to `build/build/...` — and a tool that
