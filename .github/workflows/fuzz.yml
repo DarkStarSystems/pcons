@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: MIT
+name: Fuzz
+
+permissions:
+  contents: read
+
+on:
+  schedule:
+    - cron: "17 7 * * *"  # nightly, 07:17 UTC
+  workflow_dispatch:
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "latest"
+      # Hypothesis records failing examples here and replays them first on
+      # the next run, so a nightly failure stays reproducible after the
+      # random seed has moved on.
+      - name: Restore Hypothesis example database
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .hypothesis
+          key: hypothesis-${{ github.run_id }}
+          restore-keys: hypothesis-
+      - name: Install dependencies
+        run: uv sync
+      # The path-escaping properties check their build files by running
+      # ninja on them; without it that half of the campaign just skips.
+      - name: Install ninja
+        run: uv tool install ninja
+      - name: Run property tests
+        run: uv run pytest tests/fuzz -m fuzz --hypothesis-profile=nightly
