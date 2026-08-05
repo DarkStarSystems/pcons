@@ -12,7 +12,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from pcons.core.flags import get_separated_arg_flags_from_toolchains, merge_flags
+from pcons.core.flags import (
+    get_passthrough_flags_from_toolchains,
+    get_separated_arg_flags_from_toolchains,
+    merge_flags,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -40,6 +44,8 @@ class EffectiveRequirements:
         link_dirs: Library search directories.
         separated_arg_flags: Set of flags that take separate arguments,
                             used for proper flag deduplication.
+        passthrough_flags: Set of driver flags whose argument goes to a
+                            sub-tool (-Xlinker); never de-duplicated.
     """
 
     includes: list[Path] = field(default_factory=list)
@@ -50,6 +56,7 @@ class EffectiveRequirements:
     link_libs: list[str | Target] = field(default_factory=list)
     link_dirs: list[Path] = field(default_factory=list)
     separated_arg_flags: frozenset[str] = field(default_factory=frozenset)
+    passthrough_flags: frozenset[str] = field(default_factory=frozenset)
 
     def merge(self, reqs: UsageRequirements) -> None:
         """Merge in UsageRequirements: order-preserving dedup, with
@@ -66,8 +73,18 @@ class EffectiveRequirements:
         for define in reqs.defines:
             if define not in self.defines:
                 self.defines.append(define)
-        merge_flags(self.compile_flags, reqs.compile_flags, self.separated_arg_flags)
-        merge_flags(self.link_flags, reqs.link_flags, self.separated_arg_flags)
+        merge_flags(
+            self.compile_flags,
+            reqs.compile_flags,
+            self.separated_arg_flags,
+            self.passthrough_flags,
+        )
+        merge_flags(
+            self.link_flags,
+            reqs.link_flags,
+            self.separated_arg_flags,
+            self.passthrough_flags,
+        )
         for lib in reqs.link_libs:
             if lib not in self.link_libs:
                 self.link_libs.append(lib)
@@ -99,6 +116,7 @@ class EffectiveRequirements:
             link_libs=list(self.link_libs),
             link_dirs=list(self.link_dirs),
             separated_arg_flags=self.separated_arg_flags,
+            passthrough_flags=self.passthrough_flags,
         )
 
 
@@ -113,7 +131,8 @@ def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None
     from pcons.core.target import Target as _Target
 
     sep = get_separated_arg_flags_from_toolchains(env.toolchains)
-    eff = EffectiveRequirements(separated_arg_flags=sep)
+    through = get_passthrough_flags_from_toolchains(env.toolchains)
+    eff = EffectiveRequirements(separated_arg_flags=sep, passthrough_flags=through)
     eff.merge(reqs)
 
     for lib in eff.link_libs:
@@ -150,14 +169,14 @@ def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None
         )
         extend_unique(tool, "defines", eff.defines)
         if eff.compile_flags:
-            merge_flags(var(tool, "flags"), eff.compile_flags, sep)
+            merge_flags(var(tool, "flags"), eff.compile_flags, sep, through)
 
     if env.has_tool("link"):
         link = env.link
         extend_unique(link, "libdirs", (str(d) for d in eff.link_dirs))
         extend_unique(link, "libs", eff.link_libs)
         if eff.link_flags:
-            merge_flags(var(link, "flags"), eff.link_flags, sep)
+            merge_flags(var(link, "flags"), eff.link_flags, sep, through)
         # Structured frameworks (macOS) — same variables env.Framework() uses.
         extend_unique(link, "frameworks", reqs.frameworks)
         extend_unique(link, "frameworkdirs", (str(d) for d in reqs.framework_dirs))
@@ -216,7 +235,10 @@ def compute_effective_requirements(
         EffectiveRequirements containing the merged requirements.
     """
     separated_arg_flags = get_separated_arg_flags_from_toolchains(env.toolchains)
-    result = EffectiveRequirements(separated_arg_flags=separated_arg_flags)
+    result = EffectiveRequirements(
+        separated_arg_flags=separated_arg_flags,
+        passthrough_flags=get_passthrough_flags_from_toolchains(env.toolchains),
+    )
 
     # Layer 1: Base environment (primary tool's includes and defines).
     tool_name = _get_primary_tool(target, env)

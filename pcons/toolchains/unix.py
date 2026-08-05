@@ -32,6 +32,13 @@ register_target_option(
 )
 
 
+#: Driver flags that hand the token after them to a sub-tool. Named here so
+#: the two flag sets below can share one list rather than repeat it.
+_PASSTHROUGH_FLAGS: frozenset[str] = frozenset(
+    ["-Xlinker", "-Xpreprocessor", "-Xassembler", "-Xclang"]
+)
+
+
 class UnixToolchain(BaseToolchain):
     """Base class for Unix-like toolchains (GCC, LLVM/Clang).
 
@@ -155,12 +162,21 @@ class UnixToolchain(BaseToolchain):
             "-imacros",
             # Language specification
             "-x",
-            # Xlinker passthrough
-            "-Xlinker",
-            "-Xpreprocessor",
-            "-Xassembler",
+            # Driver pass-through (also PASSTHROUGH_FLAGS below)
+            *_PASSTHROUGH_FLAGS,
         ]
     )
+
+    #: Flags that hand their argument to a sub-tool. Consecutive ones form
+    #: a single directive -- ``-Xlinker -rpath -Xlinker /p`` is ``-rpath
+    #: /p`` to the linker -- so they are never dropped as duplicates:
+    #: dropping a repeated ``-Xlinker -rpath`` would leave the next path
+    #: with no directive in front of it.
+    PASSTHROUGH_FLAGS: frozenset[str] = _PASSTHROUGH_FLAGS
+
+    def get_passthrough_flags(self) -> frozenset[str]:
+        """Flags whose argument is passed through to a sub-tool verbatim."""
+        return self.PASSTHROUGH_FLAGS
 
     # =========================================================================
     # Feature presets needing detection (see docs/presets.md)

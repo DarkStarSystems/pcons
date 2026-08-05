@@ -71,6 +71,7 @@ class CompileLinkContext:
         deduplication.
         """
         from pcons.core.flags import (
+            get_passthrough_flags_from_toolchains,
             get_separated_arg_flags_from_toolchains,
             merge_flags,
         )
@@ -78,15 +79,15 @@ class CompileLinkContext:
         base_flags: list[FlagToken] = []
         if tool_name and self._env and self._env.has_tool(tool_name):
             tool_cfg = getattr(self._env, tool_name, None)
-            base_flags = list(getattr(tool_cfg, "flags", None) or [])
+            base_flags = getattr(tool_cfg, "flags", None) or []
 
-        separated_arg_flags = (
-            get_separated_arg_flags_from_toolchains(self._env.toolchains)
-            if self._env is not None
-            else None
-        )
-        result: list[FlagToken] = list(base_flags)
-        merge_flags(result, flags, separated_arg_flags)
+        toolchains = self._env.toolchains if self._env is not None else ()
+        separated_arg_flags = get_separated_arg_flags_from_toolchains(toolchains)
+        passthrough_flags = get_passthrough_flags_from_toolchains(toolchains)
+        # copy() rather than list(): a FlagList's copy keeps the flag
+        # grouping, which a plain list of its tokens would drop.
+        result: list[FlagToken] = base_flags.copy()
+        merge_flags(result, flags, separated_arg_flags, passthrough_flags)
         return result
 
     def _merge_with_base_libs(self, libs: list[str]) -> list[str]:

@@ -12,6 +12,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from pcons.core.flags import FlagList
+
 if TYPE_CHECKING:
     from pcons.core.builder import Builder, OutputGroup
     from pcons.core.environment import Environment
@@ -69,6 +71,25 @@ def _pin_cmd_path(cmd: str) -> str:
     import shutil
 
     return shutil.which(cmd) or cmd
+
+
+def _flag_list(flags: list, env: Environment) -> FlagList:
+    """A tool's flag list, grouped by the environment's toolchain rules.
+
+    The rules are read once, here, where the toolchains are known: from
+    then on the list carries its own grouping and nothing downstream has
+    to re-derive which token belongs to which flag.
+    """
+    from pcons.core.flags import (
+        get_passthrough_flags_from_toolchains,
+        get_separated_arg_flags_from_toolchains,
+    )
+
+    return FlagList(
+        flags,
+        separated=get_separated_arg_flags_from_toolchains(env.toolchains),
+        passthrough=get_passthrough_flags_from_toolchains(env.toolchains),
+    )
 
 
 @runtime_checkable
@@ -222,6 +243,8 @@ class BaseTool(ABC):
             if key not in tool_config:
                 if key == "cmd" and isinstance(value, str):
                     value = _pin_cmd_path(value)
+                elif key == "flags" and isinstance(value, list):
+                    value = _flag_list(value, env)
                 tool_config.set(key, value)
 
         # Attach builders to the tool config
