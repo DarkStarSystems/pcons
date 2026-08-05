@@ -1,25 +1,27 @@
 # Test configuration for the Windows manifest example
 
 [test]
-description = "Demonstrates Windows SxS manifest support with DPI awareness"
+description = "Windows SxS: an embedded app manifest and a private assembly that actually loads"
 
-# Files that should exist after the build
-# Note: manifest files are generated and embedded
 expected_outputs = [
     "build/obj.myapp/src/main.c.obj",
     "build/myapp.exe",
-    "build/MyLib.dll",
-    "build/ManifestExample.MyLib.manifest",
     "build/app.manifest",
+    # The DLL and its manifest live in the assembly directory, not beside the
+    # executable -- that is what forces SxS to do the resolving.
+    "build/ManifestExample.MyLib/MyLib.dll",
+    "build/ManifestExample.MyLib/ManifestExample.MyLib.manifest",
 ]
 
-# [verify]
-# Skipping runtime verification - the manifest embeds visual styles and
-# DPI settings, but full SxS assembly setup requires additional configuration.
-# The key test is that the build completes with embedded manifest.
-# commands = [
-#     { run = "./build/myapp.exe", expect_stdout = "Hello from Windows manifest example!" },
-# ]
+[verify]
+# Running the program is the whole point. MyLib.dll is not on any search path
+# the loader would try, so if either manifest is wrong -- a mismatched
+# processorArchitecture, a missing dependency, a manifest the linker did not
+# embed -- the process fails to start and this fails loudly.
+commands = [
+    { run = "./build/myapp.exe", expect_stdout = "Hello from MyLib!" },
+    { run = "./build/myapp.exe", expect_stdout = "2 + 3 = 5" },
+]
 
 [skip]
 # Only run on Windows - requires MSVC or clang-cl toolchain

@@ -1,16 +1,14 @@
-/* Simple library for demonstrating assembly manifests. */
-#include <stdio.h>
+/* The DLL that ships as a private SxS assembly.
 
-#ifdef _WIN32
-#define EXPORT __declspec(dllexport)
-#else
-#define EXPORT
-#endif
+   It returns text rather than printing it, so the example's output order does
+   not depend on how two modules happen to flush the same stream. */
+#define MYLIB_BUILD
+#include "mylib.h"
 
-EXPORT void mylib_hello(void) {
-    printf("Hello from MyLib!\n");
+MYLIB_API const char *mylib_greeting(void) {
+    return "Hello from MyLib!";
 }
 
-EXPORT int mylib_add(int a, int b) {
+MYLIB_API int mylib_add(int a, int b) {
     return a + b;
 }

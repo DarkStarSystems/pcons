@@ -172,6 +172,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
   with nothing to see. The template is now a configure dependency, like the build script.
+- **Windows manifests: `dpi_aware="PerMonitorV2"` produced an executable that would
+  not start.** `dpiAwareness` was emitted under the 2017 WindowsSettings namespace, where
+  `gdiScaling` lives; it belongs to 2016. Windows responds to an unrecognized setting by
+  refusing to build an activation context at all, so the process died at load with "the
+  side-by-side configuration is incorrect". The XML looked right, which is why no test
+  caught it — `examples/20_windows_manifest` now links and *runs* a private assembly.
+- **Windows manifests: an app and its assembly disagreed about the architecture.**
+  `create_assembly_manifest()` mapped `x64` to the `amd64` a manifest requires;
+  `create_app_manifest()` wrote `x64` through verbatim. Windows matches
+  `processorArchitecture` literally, so the dependency never bound. An unmappable
+  architecture now raises instead of reaching the manifest, and `create_app_manifest()`
+  takes an explicit `arch=` like its counterpart.
 - **`configure_file()` and `write_file()` read and write UTF-8**, not the locale's
   encoding — a build file has to come out the same on every machine, and cp1252 would
   refuse a plist containing `©` or make the write-if-changed comparison mismatch on every

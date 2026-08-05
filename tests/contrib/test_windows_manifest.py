@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.contrib.windows.manifest."""
 
+import pytest
+
 from pcons.contrib.windows.manifest import (
     _create_assembly_manifest_xml,
     _create_manifest_xml,
@@ -41,6 +43,27 @@ class TestCreateManifestXml:
         assert "dpiAware" in xml
         assert "dpiAwareness" in xml
         assert ">PerMonitorV2<" in xml
+
+    def test_windows_settings_namespaces(self):
+        """Each setting must sit under the one namespace Windows accepts.
+
+        Under the wrong one, Windows declines to build an activation context
+        and the process does not start -- so this is not a cosmetic detail.
+        dpiAwareness under the 2017 namespace (where gdiScaling lives) was
+        exactly that failure, and it was invisible in the generated XML.
+        """
+        xml = _create_manifest_xml(dpi_aware="PerMonitorV2")
+        assert (
+            'xmlns:ws2005="http://schemas.microsoft.com/SMI/2005/WindowsSettings"'
+            in xml
+        )
+        assert (
+            'xmlns:ws2016="http://schemas.microsoft.com/SMI/2016/WindowsSettings"'
+            in xml
+        )
+        assert "<ws2005:dpiAware>" in xml
+        assert "<ws2016:dpiAwareness>" in xml
+        assert "2017/WindowsSettings" not in xml
 
     def test_visual_styles(self):
         """Test enabling visual styles."""
@@ -93,11 +116,12 @@ class TestCreateManifestXml:
         assert 'version="1.0.0.0"' in xml
 
     def test_assembly_deps_with_arch(self):
-        """Test assembly dependency with architecture."""
+        """A dependency names the architecture the way a manifest spells it."""
         xml = _create_manifest_xml(
             assembly_deps=[("MyLib.Assembly", "1.0.0.0")], arch="x64"
         )
-        assert 'processorArchitecture="x64"' in xml
+        assert 'processorArchitecture="amd64"' in xml
+        assert 'processorArchitecture="x64"' not in xml
 
     def test_combined_options(self):
         """Test combining multiple manifest options."""
@@ -210,3 +234,47 @@ class TestManifestXmlFormatting:
         """Test that root element is assembly with correct namespace."""
         xml = _create_manifest_xml()
         assert '<assembly xmlns="urn:schemas-microsoft-com:asm.v1"' in xml
+
+
+class TestArchitectureAgreement:
+    """The two manifests have to name the architecture identically.
+
+    Windows matches processorArchitecture literally, so an app asking for
+    `x64` never binds to an assembly calling itself `amd64`. Nothing about
+    that failure looks like a manifest problem -- the DLL is simply not
+    found at load -- so it is worth pinning both sides against one input.
+    """
+
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            ("x64", "amd64"),
+            ("x86_64", "amd64"),
+            ("amd64", "amd64"),
+            ("x86", "x86"),
+            ("i386", "x86"),
+            ("arm64", "arm64"),
+            ("aarch64", "arm64"),
+            ("ARM64", "arm64"),
+        ],
+    )
+    def test_both_manifests_agree(self, given, expected):
+        app = _create_manifest_xml(
+            assembly_deps=[("MyLib.Assembly", "1.0.0.0")], arch=given
+        )
+        assembly = _create_assembly_manifest_xml(
+            name="MyLib.Assembly", version="1.0.0.0", dlls=["MyLib.dll"], arch=given
+        )
+        assert f'processorArchitecture="{expected}"' in app
+        assert f'processorArchitecture="{expected}"' in assembly
+
+    def test_unknown_arch_raises(self):
+        with pytest.raises(ValueError, match="No manifest processorArchitecture"):
+            _create_assembly_manifest_xml(
+                name="A", version="1.0.0.0", dlls=["a.dll"], arch="sparc"
+            )
+
+    def test_no_arch_omits_the_attribute(self):
+        """An app manifest may leave the dependency's architecture unstated."""
+        xml = _create_manifest_xml(assembly_deps=[("MyLib.Assembly", "1.0.0.0")])
+        assert "processorArchitecture" not in xml

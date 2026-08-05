@@ -1,6 +1,8 @@
 /* Simple Windows application demonstrating manifest usage. */
 #include <stdio.h>
 
+#include "mylib.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -24,12 +26,20 @@ int main(void) {
     printf("Hello from Windows manifest example!\n");
     printf("System DPI: %u\n", dpi);
 
+    /* MyLib.dll is not beside this executable; it is found only through the
+       activation context built from the manifests. Reaching this line at all
+       means SxS resolution worked. */
+    printf("%s\n", mylib_greeting());
+    printf("2 + 3 = %d\n", mylib_add(2, 3));
+
     if (dpi > 96) {
         printf("Running on a high-DPI display\n");
     }
 #else
     printf("Hello from Windows manifest example!\n");
     printf("(DPI awareness features only work on Windows)\n");
+    printf("%s\n", mylib_greeting());
+    printf("2 + 3 = %d\n", mylib_add(2, 3));
 #endif
 
     return 0;

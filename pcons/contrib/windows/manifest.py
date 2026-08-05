@@ -31,9 +31,47 @@ if TYPE_CHECKING:
 NS_ASM_V1 = "urn:schemas-microsoft-com:asm.v1"
 NS_ASM_V3 = "urn:schemas-microsoft-com:asm.v3"
 NS_COMPAT = "urn:schemas-microsoft-com:compatibility.v1"
-NS_WINSETTINGS = "http://schemas.microsoft.com/SMI/2005/WindowsSettings"
-NS_WINSETTINGS2 = "http://schemas.microsoft.com/SMI/2016/WindowsSettings"
-NS_WINSETTINGS3 = "http://schemas.microsoft.com/SMI/2017/WindowsSettings"
+# Each windowsSettings element is valid in exactly one of these, and Windows
+# refuses to build an activation context at all -- the process does not start --
+# if an element appears under the wrong one. dpiAware is 2005; dpiAwareness is
+# 2016. (2017 exists, but it is where gdiScaling lives, not dpiAwareness.)
+NS_WINSETTINGS_2005 = "http://schemas.microsoft.com/SMI/2005/WindowsSettings"
+NS_WINSETTINGS_2016 = "http://schemas.microsoft.com/SMI/2016/WindowsSettings"
+
+# Spellings pcons accepts for an architecture, mapped to the ones a manifest
+# accepts. Windows matches processorArchitecture literally, so "x64" -- the
+# spelling set_target_arch() takes -- does not bind to anything.
+_PROCESSOR_ARCHITECTURE = {
+    "x64": "amd64",
+    "x86_64": "amd64",
+    "amd64": "amd64",
+    "x86": "x86",
+    "i386": "x86",
+    "i686": "x86",
+    "arm": "arm",
+    "arm64": "arm64",
+    "aarch64": "arm64",
+    "ia64": "ia64",
+    "msil": "msil",
+    "*": "*",
+}
+
+
+def _manifest_arch(arch: str) -> str:
+    """Map an architecture spelling to the one a Windows manifest accepts.
+
+    Raises because the alternative is a manifest Windows silently declines to
+    bind: an app asking for `x64` and an assembly calling itself `amd64` are
+    different identities, and the failure surfaces as a missing DLL at load.
+    """
+    mapped = _PROCESSOR_ARCHITECTURE.get(arch.lower())
+    if mapped is None:
+        known = ", ".join(sorted(set(_PROCESSOR_ARCHITECTURE)))
+        raise ValueError(
+            f"No manifest processorArchitecture for {arch!r}. Known: {known}"
+        )
+    return mapped
+
 
 # Windows version GUIDs for compatibility section
 WINDOWS_VERSION_GUIDS = {
@@ -97,9 +135,8 @@ def _create_manifest_xml(
     ET.register_namespace("", NS_ASM_V1)
     ET.register_namespace("asmv3", NS_ASM_V3)
     ET.register_namespace("compat", NS_COMPAT)
-    ET.register_namespace("ws", NS_WINSETTINGS)
-    ET.register_namespace("ws2", NS_WINSETTINGS2)
-    ET.register_namespace("ws3", NS_WINSETTINGS3)
+    ET.register_namespace("ws2005", NS_WINSETTINGS_2005)
+    ET.register_namespace("ws2016", NS_WINSETTINGS_2016)
 
     root = ET.Element("assembly", xmlns=NS_ASM_V1, manifestVersion="1.0")
 
@@ -114,7 +151,7 @@ def _create_manifest_xml(
                 "version": dep_version,
             }
             if arch:
-                attribs["processorArchitecture"] = arch
+                attribs["processorArchitecture"] = _manifest_arch(arch)
             ET.SubElement(dep_asm, "assemblyIdentity", attribs)
 
     # Add visual styles dependency (Common Controls v6)
@@ -173,13 +210,13 @@ def _create_manifest_xml(
             dpi_v2_value = None
 
         # dpiAware element (Windows Vista+)
-        dpi_elem = ET.SubElement(win_settings, f"{{{NS_WINSETTINGS}}}dpiAware")
+        dpi_elem = ET.SubElement(win_settings, f"{{{NS_WINSETTINGS_2005}}}dpiAware")
         dpi_elem.text = dpi_value
 
         # dpiAwareness element (Windows 10 1607+) for PerMonitorV2
         if dpi_v2_value:
             dpi2_elem = ET.SubElement(
-                win_settings, f"{{{NS_WINSETTINGS3}}}dpiAwareness"
+                win_settings, f"{{{NS_WINSETTINGS_2016}}}dpiAwareness"
             )
             dpi2_elem.text = dpi_v2_value
 
@@ -210,18 +247,7 @@ def _create_assembly_manifest_xml(
     """
     ET.register_namespace("", NS_ASM_V1)
 
-    # Map common arch names to manifest values
-    arch_map = {
-        "x64": "amd64",
-        "x86_64": "amd64",
-        "amd64": "amd64",
-        "x86": "x86",
-        "i386": "x86",
-        "i686": "x86",
-        "arm64": "arm64",
-        "aarch64": "arm64",
-    }
-    proc_arch = arch_map.get(arch.lower(), arch)
+    proc_arch = _manifest_arch(arch)
 
     root = ET.Element("assembly", xmlns=NS_ASM_V1, manifestVersion="1.0")
 
@@ -255,6 +281,7 @@ def create_app_manifest(
     uac_level: str | None = None,
     supported_os: list[str] | None = None,
     assembly_deps: list[tuple[str, str]] | None = None,
+    arch: str | None = None,
 ) -> Target:
     """Generate a Windows application manifest file.
 
@@ -294,6 +321,10 @@ def create_app_manifest(
             Options: "win10", "win81", "win8", "win7", "vista"
         assembly_deps: List of (assembly_name, version) tuples for private
             assembly dependencies. Used with create_assembly_manifest().
+        arch: Processor architecture for those dependencies. Defaults to the
+            environment's. Must name the same architecture the assembly's own
+            manifest does, or Windows will not bind the two -- pass the same
+            value to create_assembly_manifest().
 
     Returns:
         Target representing the generated manifest file. Can be added directly
@@ -301,8 +332,8 @@ def create_app_manifest(
     """
     output_path = Path(output)
 
-    # Detect architecture from environment
-    arch = getattr(env, "target_arch", None)
+    if arch is None:
+        arch = getattr(env, "target_arch", None)
 
     # Generate manifest content
     xml_content = _create_manifest_xml(
@@ -397,12 +428,10 @@ def create_assembly_manifest(
     else:
         output_path = Path(output)
 
-    # Detect architecture from environment if not specified
+    # An assembly identity must name an architecture, so this one has a
+    # default where the app manifest simply omits the attribute.
     if arch is None:
-        arch = getattr(env, "target_arch", "x64")
-        # If still no arch, default to x64
-        if arch is None:
-            arch = "x64"
+        arch = getattr(env, "target_arch", None) or "x64"
 
     # Convert Target objects to DLL filenames
     dll_names: list[str] = []

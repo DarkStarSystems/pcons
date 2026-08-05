@@ -1,71 +1,83 @@
-"""Build script demonstrating Windows SxS manifest support.
+"""Windows SxS manifests: an app manifest and a private assembly.
 
-This example shows how to:
-1. Add a .manifest file as a source to embed it via /MANIFESTINPUT
-2. Generate app manifests with DPI awareness and visual styles
-3. Generate assembly manifests for private DLL assemblies
+Two separate things, both built here:
 
-Windows-only: requires MSVC or clang-cl toolchain.
+1. An **app manifest**, embedded into myapp.exe by the linker. This is where
+   DPI awareness, visual styles and UAC level live.
+2. A **private assembly** -- MyLib.dll in a subdirectory of its own, with an
+   assembly manifest beside it, which myapp.exe declares a dependency on.
+
+The second is the one worth looking at closely. MyLib.dll is deliberately
+*not* next to myapp.exe, so the ordinary DLL search cannot find it. The only
+thing that resolves it is the activation context Windows builds from the two
+manifests. If either manifest is wrong the process does not start at all --
+which is what makes running myapp.exe a real test rather than a smoke test.
+
+Windows-only: requires MSVC or clang-cl.
 """
+
+import platform
 
 from pcons import Project
 
-# Create project
 project = Project("manifest_example")
 
-# Directories
 src_dir = project.root_dir / "src"
 
-# Find C toolchain - prefer MSVC or clang-cl on Windows for manifest support
 env = project.Environment(toolchain=["msvc", "clang-cl", "gcc", "llvm"])
 
-# Example 1: Create a DLL that will be part of an assembly
+is_windows_toolchain = env.toolchain.name in ("msvc", "clang-cl")
+
+# The assembly's identity. The name is also the directory it lives in, which
+# is one of the two layouts Windows probes for a private assembly.
+ASSEMBLY_NAME = "ManifestExample.MyLib"
+ASSEMBLY_VERSION = "1.0.0.0"
+
 mylib = project.SharedLibrary("MyLib", env)
 mylib.add_sources([src_dir / "mylib.c"])
 
-# Check if we're on Windows with manifest support
-is_windows_toolchain = env.toolchain.name in ("msvc", "clang-cl")
+app = project.Program("myapp", env)
+app.add_sources([src_dir / "main.c"])
+app.link(mylib)
 
 if is_windows_toolchain:
     from pcons.contrib.windows import manifest
 
-    # Example 2: Generate assembly manifest for the DLL
-    # This manifest file declares the DLL as a named assembly
+    # Both manifests must name the architecture identically -- Windows matches
+    # the identity literally -- so it is derived once and passed to both.
+    arch = platform.machine()
+
+    # Placing the DLL here is what takes it out of reach of the ordinary
+    # search, leaving the activation context as the only way to find it.
+    mylib.output_prefix = f"{ASSEMBLY_NAME}/"
+
     assembly = manifest.create_assembly_manifest(
         project,
         env,
-        name="ManifestExample.MyLib",
-        version="1.0.0.0",
+        name=ASSEMBLY_NAME,
+        version=ASSEMBLY_VERSION,
         dlls=[mylib],
+        output=f"{ASSEMBLY_NAME}/{ASSEMBLY_NAME}.manifest",
+        arch=arch,
     )
 
-    # Example 3: Generate app manifest with common settings
-    # - DPI awareness for crisp rendering on high-DPI displays
-    # - Visual styles for modern Windows controls
-    # - Supported OS declaration for full Windows 10 functionality
     app_manifest = manifest.create_app_manifest(
         project,
         env,
         output="app.manifest",
         dpi_aware="PerMonitorV2",
         visual_styles=True,
+        uac_level="asInvoker",
         supported_os=["win10", "win81", "win7"],
+        assembly_deps=[(ASSEMBLY_NAME, ASSEMBLY_VERSION)],
+        arch=arch,
     )
 
-    # Example 4: Create program with embedded manifest
-    # The manifest file is automatically passed to the linker via /MANIFESTINPUT
-    app = project.Program("myapp", env)
-    app.add_sources([src_dir / "main.c", app_manifest])
+    # Added as a source, the manifest reaches the linker as /MANIFESTINPUT and
+    # is embedded as a resource. No separate mt.exe step is involved.
+    app.add_sources([app_manifest])
+    app.depends(assembly)
 
-    # Set as default targets
     project.Default(app, mylib, assembly)
 else:
-    # On non-Windows, just build a simple app without manifest
-    app = project.Program("myapp", env)
-    app.add_sources([src_dir / "main.c"])
     project.Default(app, mylib)
-
-
-if is_windows_toolchain:
-    print("  - MyLib.dll with assembly manifest")
-    print("  - myapp.exe with embedded app manifest (DPI aware, visual styles)")
