@@ -556,6 +556,33 @@ class TestNinjaAwkwardPaths:
         assert "  target_0 = out$$put.txt\n" in content
         assert "  source_0 = $topdir/in$$put.txt\n" in content
 
+    def test_build_file_is_written_as_utf8(self, tmp_path):
+        """A non-ASCII filename must survive being written out.
+
+        The default encoding is the locale's, which on Windows is cp1252:
+        a Japanese filename raised UnicodeEncodeError and no build file
+        was written at all, and an accented one encoded to a byte ninja
+        then misread as UTF-8. Ninja reads build files as UTF-8.
+        """
+        (tmp_path / "入力.txt").write_text("x", encoding="utf-8")
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target="出力é.txt",
+            source="入力.txt",
+            command="cp $SOURCE $TARGET",
+            name="c",
+        )
+        project.resolve()
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        raw = (tmp_path / "build" / "build.ninja").read_bytes()
+        content = raw.decode("utf-8")  # raises if it went out in another codec
+        assert "入力.txt" in content
+        assert "出力é.txt" in content
+
     def test_edge_variables_keep_their_path_separators(self):
         """Escaping a per-edge path must not rewrite its separators.
 

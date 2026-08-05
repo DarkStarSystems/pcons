@@ -93,7 +93,7 @@ class NinjaGenerator(BaseGenerator):
             # On Windows, relpath fails for paths on different drives
             self._topdir = str(self._project_root)
 
-        with open(ninja_file, "w") as f:
+        with open(ninja_file, "w", encoding="utf-8") as f:
             self._write_header(f, project)
             self._write_variables(f, project)
             self._write_rules(f, project)

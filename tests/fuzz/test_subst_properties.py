@@ -149,6 +149,9 @@ def test_shell_operators_are_never_quoted(before, operator, after):
 def test_ninja_variable_references_are_left_alone():
     """The generator's own variables reach the build file unquoted."""
     assert to_shell_command(["$in", "$out"], shell="ninja") == "$in $out"
-    # Any other dollar is a literal for the command, and has to survive
-    # ninja's expansion ($$ -> $) and then the shell's ( \$ -> $ ).
-    assert to_shell_command(["$nope"], shell="ninja") == '"\\$$nope"'
+    # Any other dollar is a literal for the command. On POSIX it has two
+    # layers to survive -- ninja's expansion ($$ -> $) and then the
+    # shell's (\$ -> $) -- where cmd.exe leaves dollars alone, so ninja's
+    # own doubling is the whole job.
+    literal = to_shell_command(["$nope"], shell="ninja")
+    assert literal == ('"$$nope"' if platform.system() == "Windows" else '"\\$$nope"')
