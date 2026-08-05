@@ -142,6 +142,68 @@ def shell_tokens(
     )
 
 
+def flag_list_mutations() -> st.SearchStrategy:
+    """Single edits to a FlagList, as a callable to apply to one.
+
+    Covers every list mutator the class overrides -- the ones that keep
+    the grouping (append, extend, merge) and the ones that can only read
+    the edit positionally and re-group from the rules.
+    """
+
+    def make(name: str, token: str, index: int):
+        def mutate(flags: list) -> None:
+            if name == "append":
+                flags.append(token)
+            elif name == "append_group":
+                flags.append(FlagPair("-paired", token))
+            elif name == "extend":
+                flags.extend(["-I", token])
+            elif name == "iadd":
+                flags += [token]
+            elif name == "merge":
+                flags.merge(["-isystem", token])
+            elif name == "insert":
+                flags.insert(index % (len(flags) + 1), token)
+            elif name == "clear":
+                flags.clear()
+            elif name == "sort":
+                flags.sort()
+            elif name == "reverse":
+                flags.reverse()
+            elif not flags:
+                return  # the rest need something to act on
+            elif name == "setitem":
+                flags[index % len(flags)] = token
+            elif name == "delitem":
+                del flags[index % len(flags)]
+            elif name == "remove":
+                flags.remove(flags[index % len(flags)])
+            elif name == "pop":
+                flags.pop(index % len(flags))
+
+        mutate.__name__ = f"{name}({token!r})"
+        return mutate
+
+    names = st.sampled_from(
+        [
+            "append",
+            "append_group",
+            "extend",
+            "iadd",
+            "merge",
+            "insert",
+            "setitem",
+            "delitem",
+            "remove",
+            "pop",
+            "clear",
+            "sort",
+            "reverse",
+        ]
+    )
+    return st.builds(make, names, st.sampled_from(ARGUMENTS), st.integers(0, 20))
+
+
 @st.composite
 def variable_chains(draw, *, max_vars: int = 5) -> tuple[dict, bool, str | None]:
     """A namespace of variables that reference each other in a chain.

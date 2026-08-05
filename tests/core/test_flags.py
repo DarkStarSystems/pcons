@@ -336,19 +336,46 @@ class TestIntegrationWithEffectiveRequirements:
         # path1 should not be duplicated, path2 should be added
         assert eff.link_flags == ["-F", "path1", "-F", "path2"]
 
-    def test_rpath_directives_survive_env_wide_requirements(self, tmp_path):
-        """Two -Xlinker -rpath directives both reach env.link.flags.
+    def test_rpath_directives_survive_a_merge(self):
+        """Two -Xlinker -rpath directives both survive, whole.
 
-        The whole path, as a build script drives it: the toolchain says
-        -Xlinker is pass-through, and that has to reach the merge, or the
-        second directive loses its -rpath and the linker reads /b as a
-        stray argument.
+        Without the pass-through rule the repeated ``-Xlinker -rpath``
+        reads as a duplicate, and dropping it leaves /b with no directive
+        in front of it. Uses the toolchain's own declarations rather than
+        whatever compiler the machine has, so it checks the same thing
+        everywhere.
         """
+        from pcons.toolchains.unix import UnixToolchain
+
+        rpaths = ["-Xlinker", "-rpath", "-Xlinker", "/a"]
+        rpaths += ["-Xlinker", "-rpath", "-Xlinker", "/b"]
+
+        flags = FlagList(
+            separated=UnixToolchain.SEPARATED_ARG_FLAGS,
+            passthrough=UnixToolchain.PASSTHROUGH_FLAGS,
+        )
+        flags.merge(rpaths)
+        assert list(flags) == rpaths
+
+        flags.merge(rpaths)  # and merging them again changes nothing
+        assert list(flags) == rpaths
+
+    def test_rpath_directives_survive_env_wide_requirements(self, tmp_path):
+        """The same, driven the way a build script drives it.
+
+        The toolchain says -Xlinker is pass-through, and that has to
+        reach the merge inside env.use(). Skipped where the detected
+        toolchain has no such flag -- MSVC's linker takes none.
+        """
+        import pytest
+
         from pcons.core.project import Project
         from pcons.core.target import UsageRequirements
 
         project = Project("rpath", root_dir=tmp_path)
         env = project.Environment(toolchain="c")
+        if "-Xlinker" not in env.link.flags.passthrough:
+            pytest.skip(f"{env.toolchain.name} has no -Xlinker")
 
         rpaths = ["-Xlinker", "-rpath", "-Xlinker", "/a"]
         rpaths += ["-Xlinker", "-rpath", "-Xlinker", "/b"]
