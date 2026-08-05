@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the linker reading it as a stray argument. Consecutive pass-through flags are now
   one unit, so a whole directive is compared as a whole. Same fix for clang-cl's
   `-Xclang`.
+- **Non-ASCII filenames work on Windows.** Generated build files were written in the
+  locale's encoding, so on Windows a project with, say, a Japanese filename failed to
+  generate at all, and an accented one produced a build file ninja misread -- it reads
+  them as UTF-8. Build files, `compile_commands.json`, dependency files, generated
+  `.pc` files and the configure cache are now written as UTF-8 everywhere.
 - **A `$` in a filename no longer breaks the whole build.** `Command()` sources and
   targets are written to per-edge ninja variables, and those values were not escaped:
   one dollar in a filename and ninja rejected `build.ninja` outright with "bad
