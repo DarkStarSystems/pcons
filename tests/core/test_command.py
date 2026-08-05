@@ -1480,3 +1480,43 @@ class TestTargetOutsideTheBuildDirectory:
         content = self._ninja(tmp_path, "out.txt")
 
         assert "build out.txt:" in content
+
+
+class TestBuildDirPathWarning:
+    """A command runs *in* the build directory, but `project.build_dir` is
+    relative to the project root, so interpolating it names one level too
+    deep -- `build/tool` looks for `build/build/tool`. Nothing checks it."""
+
+    def _generate(self, tmp_path, command, **kwargs):
+        from pcons.generators.ninja import NinjaGenerator
+
+        (tmp_path / "in.txt").write_text("x\n")
+        project = Project("bd", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(target="out.txt", source=["in.txt"], command=command, **kwargs)
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+    def test_warns(self, tmp_path, caplog):
+        self._generate(tmp_path, ["tool", "-Wl,build/libfoo.dylib", "$SOURCE"])
+
+        assert "runs *in* the build directory" in caplog.text
+
+    def test_a_cwd_edge_is_left_alone(self, tmp_path, caplog):
+        """With cwd= the frame is explicit and deliberate."""
+        self._generate(
+            tmp_path, ["tool", "build/libfoo.dylib", "$SOURCE"], cwd=tmp_path
+        )
+
+        assert "runs *in* the build directory" not in caplog.text
+
+    def test_a_similar_name_is_not_flagged(self, tmp_path, caplog):
+        self._generate(tmp_path, ["tool", "-Lrebuild/x", "$SOURCE"])
+
+        assert "runs *in* the build directory" not in caplog.text
+
+    def test_it_can_be_switched_off(self, tmp_path, caplog, monkeypatch):
+        monkeypatch.setenv("PCONS_WARN_BUILD_DIR_PATHS", "0")
+        self._generate(tmp_path, ["tool", "-Wl,build/libfoo.dylib", "$SOURCE"])
+
+        assert "runs *in* the build directory" not in caplog.text

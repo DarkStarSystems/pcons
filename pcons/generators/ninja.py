@@ -62,6 +62,7 @@ class NinjaGenerator(BaseGenerator):
         # Path-carrying flags of the project's toolchains (-I, -isystem, /I...)
         self._path_flags: frozenset[str] = frozenset()
         self._warned_absolute_paths: set[str] = set()
+        self._warned_build_dir_paths: set[str] = set()
 
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate build.ninja in output_dir."""
@@ -80,6 +81,7 @@ class NinjaGenerator(BaseGenerator):
         self._build_dir_parts = Path(project.build_dir).parts
         self._path_flags = self._collect_path_flags(project)
         self._warned_absolute_paths = set()
+        self._warned_build_dir_paths = set()
         try:
             self._topdir = str(
                 Path(os.path.relpath(self._project_root, self._output_dir))
@@ -1106,6 +1108,48 @@ class NinjaGenerator(BaseGenerator):
             return None
         return max(matches, key=len)
 
+    def _warn_build_dir_in_command(self, token: str) -> None:
+        """Warn once about a build-dir-relative path written into a command.
+
+        A command runs *in* the build directory, while ``project.build_dir``
+        is relative to the project *root* — so interpolating it names a
+        directory one level too deep: ``build/tool`` looks for
+        ``build/build/tool`` at run time. Nothing checks it; a tool that only
+        reads the path finds nothing and carries on.
+
+        The spellings that work are ``$SRCDIR/...`` for a source-tree file, a
+        marker or ``PathToken`` for something this build produces, or
+        ``cwd=`` to move the whole command — so an edge that names a ``cwd``
+        is left alone, since there the frame is explicit and deliberate.
+
+        A path really is build-dir-relative once in a while (a directory named
+        ``build`` *inside* the build directory). Set the build variable
+        ``PCONS_WARN_BUILD_DIR_PATHS=0`` to silence this.
+        """
+        if not self._build_dir_parts or token in self._warned_build_dir_paths:
+            return
+        from pcons.core.vars import get_var
+
+        if get_var("PCONS_WARN_BUILD_DIR_PATHS", "1") == "0":
+            return
+        build_dir = "/".join(self._build_dir_parts)
+        # Only where a path can start: the token itself, or after a separator
+        # like "-Wl," or "--out=". Not after a "/", which is already anchored.
+        if not re.search(rf"(?:^|[=,:\s]){re.escape(build_dir)}/", token):
+            return
+        self._warned_build_dir_paths.add(token)
+        logger.warning(
+            "Command token names a path under %r, but a command runs *in* the "
+            "build directory, so this resolves to %s/%s/...:\n  %s\n"
+            "  Use $SRCDIR/... for a source file, a PathToken for something "
+            "this build produces, or cwd= to move the command. Set "
+            "PCONS_WARN_BUILD_DIR_PATHS=0 if the path is right as written.",
+            build_dir,
+            build_dir,
+            build_dir,
+            token,
+        )
+
     def _warn_absolute_in_tree(self, flag: str) -> None:
         """Warn once per flag that carries an absolute path from inside the
         project tree.
@@ -1240,6 +1284,8 @@ class NinjaGenerator(BaseGenerator):
                 relativized = self._relativize_flag_with_path(s, cwd=cwd)
                 if relativized.startswith("-"):
                     self._warn_absolute_in_tree(relativized)
+                if cwd is None:
+                    self._warn_build_dir_in_command(relativized)
                 result.append(relativized)
         return result
 

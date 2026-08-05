@@ -172,6 +172,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at configure time and nothing in the generated build knows the template exists, so
   editing `config.h.in` left the generated header stale and every compile kept using it,
   with nothing to see. The template is now a configure dependency, like the build script.
+- **A command naming a path under the build directory warns.** `project.build_dir` is
+  relative to the project root while a command runs *in* the build directory, so
+  `f"-Wl,{project.build_dir}/libfoo.dylib"` resolves to `build/build/...` — and a tool that
+  only reads the path finds nothing and carries on. An edge with `cwd=` is left alone,
+  where the frame is explicit; `PCONS_WARN_BUILD_DIR_PATHS=0` silences it for the rare
+  path that is right as written.
 - **An `env.Command` target outside the build directory lands there.** A node path is
   stored relative to the project root, so a destination named by absolute path — a staging
   tree, an install root — arrived at the generator indistinguishable from an ordinary
