@@ -79,10 +79,14 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           CONAN_HOME=$(uvx conan config home)
+          # Conan rejects a compiler.version its settings.yml does not list, and
+          # the runner image moves faster than Conan releases -- it reached
+          # apple-clang 21 while this said 18. Listed with headroom so the next
+          # Xcode bump does not fail the build.
           cat > "$CONAN_HOME/settings_user.yml" << 'EOF'
           compiler:
               apple-clang:
-                  version: ["18"]
+                  version: ["17", "18", "19", "20", "21", "22", "23", "24"]
           EOF
       - name: Run unit tests (Windows)
         if: runner.os == 'Windows'
