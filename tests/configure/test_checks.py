@@ -538,7 +538,7 @@ class TestCheckDefineProbe:
                 '# 1 "check.c"',  # linemarker noise
                 "PCONS_PROBE 0 = 42",
                 "PCONS_PROBE 1 = ",
-                'PCONS_PROBE 2 = "Sapphire 2024"',
+                'PCONS_PROBE 2 = "MyApp 2024"',
                 "PCONS_PROBE 3 = PCONS_UNDEFINED",
             ]
         )
@@ -548,7 +548,7 @@ class TestCheckDefineProbe:
         assert values == {
             "NUM": "42",
             "EMPTY": "",
-            "STR": '"Sapphire 2024"',
+            "STR": '"MyApp 2024"',
             "MISSING": None,
         }
 
@@ -631,7 +631,7 @@ class TestCheckDefineWithCompiler:
     def setup(self, tmp_path, test_project):  # noqa: F811
         header = tmp_path / "probe_header.h"
         header.write_text(
-            '#define PROBE_STRING "Sapphire 2024"\n'
+            '#define PROBE_STRING "MyApp 2024"\n'
             "#define PROBE_NUMBER 42\n"
             "#define PROBE_EMPTY\n"
             "#define PROBE_SPACES 1 + 2\n"
@@ -679,7 +679,7 @@ class TestCheckDefineWithCompiler:
             include_dirs=[tmp_path],
         )
 
-        assert values["PROBE_STRING"] == '"Sapphire 2024"'
+        assert values["PROBE_STRING"] == '"MyApp 2024"'
         assert values["PROBE_EMPTY"] == ""
         assert values["PROBE_NOPE"] is None
 
@@ -735,7 +735,7 @@ class TestChecksUseTheEnvironment:
     @pytest.fixture
     def setup(self, tmp_path, test_project):  # noqa: F811
         (tmp_path / "cfg.h").write_text(
-            "#ifdef SAPPHIRE\n"
+            "#ifdef MYAPP\n"
             '#define DIR "/right/path"\n'
             "#else\n"
             '#define DIR "/wrong/path"\n'
@@ -750,13 +750,13 @@ class TestChecksUseTheEnvironment:
 
     def test_env_defines_reach_the_probe(self, setup):
         config, env, tmp_path = setup
-        env.cc.defines = ["SAPPHIRE"]
+        env.cc.defines = ["MYAPP"]
         env.cc.includes = [tmp_path]
         checks = ToolChecks(config, env, "cc")
 
         value = checks.check_define("DIR", headers=["cfg.h"])
 
-        assert value == '"/right/path"'  # the #ifdef SAPPHIRE branch
+        assert value == '"/right/path"'  # the #ifdef MYAPP branch
 
     def test_env_includes_let_check_header_find_a_project_header(self, setup):
         config, env, tmp_path = setup
@@ -775,13 +775,13 @@ class TestChecksUseTheEnvironment:
 
     def test_per_call_defines_add_to_the_environments(self, setup):
         config, env, tmp_path = setup
-        env.cc.defines = ["SAPPHIRE"]
+        env.cc.defines = ["MYAPP"]
         env.cc.includes = [tmp_path]
         checks = ToolChecks(config, env, "cc")
 
-        # GATE comes from the call, SAPPHIRE from the environment; both apply.
+        # GATE comes from the call, MYAPP from the environment; both apply.
         (tmp_path / "gated.h").write_text(
-            "#if defined(SAPPHIRE) && defined(GATE)\n#define BOTH 1\n#endif\n"
+            "#if defined(MYAPP) && defined(GATE)\n#define BOTH 1\n#endif\n"
         )
         value = checks.check_define("BOTH", headers=["gated.h"], defines=["GATE"])
 
@@ -792,7 +792,7 @@ class TestChecksUseTheEnvironment:
         env.cc.includes = [tmp_path]
         plain = ToolChecks(config, env, "cc").check_define("DIR", headers=["cfg.h"])
 
-        env.cc.defines = ["SAPPHIRE"]
+        env.cc.defines = ["MYAPP"]
         defined = ToolChecks(config, env, "cc").check_define("DIR", headers=["cfg.h"])
 
         assert plain != defined  # not served from the first answer's cache entry
@@ -823,8 +823,8 @@ class TestCheckDefineAsString:
 
     def test_concatenates_adjacent_literals(self):
         assert (
-            _decode_c_string('"/Applications/" "Sapphire 2022" "/config"', "DIR")
-            == "/Applications/Sapphire 2022/config"
+            _decode_c_string('"/Applications/" "MyApp 2022" "/config"', "DIR")
+            == "/Applications/MyApp 2022/config"
         )
 
     def test_decodes_simple_escapes(self):
@@ -854,7 +854,7 @@ class TestCheckDefineAsStringWithCompiler:
     @pytest.fixture
     def checks(self, tmp_path, test_project):  # noqa: F811
         (tmp_path / "s.h").write_text(
-            '#define DIR "/Applications/BorisFX/" "Sapphire 2022 Adobe" "/config"\n'
+            '#define DIR "/Applications/Acme/" "MyApp 2022 Pro" "/config"\n'
             "#define NUM 42\n"
         )
         config = Configure(build_dir=tmp_path)
@@ -868,7 +868,7 @@ class TestCheckDefineAsStringWithCompiler:
     def test_reads_a_concatenated_path_macro(self, checks):
         value = checks.check_define("DIR", headers=["s.h"], as_string=True)
 
-        assert value == "/Applications/BorisFX/Sapphire 2022 Adobe/config"
+        assert value == "/Applications/Acme/MyApp 2022 Pro/config"
 
     def test_undefined_stays_none(self, checks):
         assert checks.check_define("NOPE", headers=["s.h"], as_string=True) is None
@@ -880,7 +880,7 @@ class TestCheckDefineAsStringWithCompiler:
     def test_batch_form_decodes_each(self, checks):
         values = checks.check_defines(["DIR"], headers=["s.h"], as_string=True)
 
-        assert values["DIR"].startswith("/Applications/BorisFX/")
+        assert values["DIR"].startswith("/Applications/Acme/")
 
 
 class TestDecodeCStringEscapes:

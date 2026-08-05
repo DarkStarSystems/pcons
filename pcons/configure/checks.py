@@ -684,7 +684,7 @@ int main(void) {{ return 0; }}
             (not defined)                  ``None``
             ``#define FOO``                ``""``
             ``#define FOO 42``             ``"42"``
-            ``#define FOO "Sapphire"``     ``'"Sapphire"'``
+            ``#define FOO "MyApp"``     ``'"MyApp"'``
             =============================  ==================
 
             Quotes are kept, so a string literal is distinguishable from a
