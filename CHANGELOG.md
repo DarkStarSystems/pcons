@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-05
+
+This release turns a class of silent mistakes into errors. Several things that
+pcons used to accept and quietly ignore now raise, so a build script that has
+been carrying a typo will stop rather than keep building the wrong thing --
+see **Changed** below for each one and what to write instead.
+
 ### Added
 
 - **`depends=` on the compile builders** (`Program`, `StaticLibrary`, `SharedLibrary`,
@@ -1434,7 +1441,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/DarkStarSystems/pcons/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/DarkStarSystems/pcons/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/DarkStarSystems/pcons/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/DarkStarSystems/pcons/compare/v0.22.0...v0.23.0
