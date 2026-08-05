@@ -2,6 +2,7 @@
 """Tests for Project.Install() method."""
 
 import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -767,6 +768,10 @@ class TestInstallMode:
 
         assert "--mode" not in (tmp_path / "build" / "build.ninja").read_text()
 
+    @pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Windows has no POSIX mode bits; chmod only toggles read-only",
+    )
     def test_the_copy_command_applies_it(self, tmp_path):
         import os
         import stat
