@@ -3,6 +3,8 @@
 
 from pcons.core.flags import (
     DEFAULT_SEPARATED_ARG_FLAGS,
+    Flag,
+    FlagList,
     FlagPair,
     deduplicate_flags,
     get_separated_arg_flags_from_toolchains,
@@ -192,6 +194,23 @@ class TestDeduplicateFlags:
         )
         assert result == flags  # every occurrence preserved
 
+    def test_passthrough_survives_being_a_separated_arg_flag_too(self):
+        """A toolchain listing -Xlinker in both sets still keeps every directive.
+
+        UnixToolchain does list it in both: it does take the next token,
+        and it must not de-duplicate. Knowing only the first of those
+        collapses the repeated ``-Xlinker -rpath`` and leaves ``/b``
+        with no directive in front of it.
+        """
+        flags = ["-Xlinker", "-rpath", "-Xlinker", "/a"]
+        flags += ["-Xlinker", "-rpath", "-Xlinker", "/b"]
+        result = deduplicate_flags(
+            flags,
+            separated_arg_flags=frozenset({"-Xlinker"}),
+            passthrough_flags=frozenset({"-Xlinker"}),
+        )
+        assert result == flags
+
 
 class TestMergeFlags:
     """Tests for merge_flags function."""
@@ -316,6 +335,26 @@ class TestIntegrationWithEffectiveRequirements:
 
         # path1 should not be duplicated, path2 should be added
         assert eff.link_flags == ["-F", "path1", "-F", "path2"]
+
+    def test_rpath_directives_survive_env_wide_requirements(self, tmp_path):
+        """Two -Xlinker -rpath directives both reach env.link.flags.
+
+        The whole path, as a build script drives it: the toolchain says
+        -Xlinker is pass-through, and that has to reach the merge, or the
+        second directive loses its -rpath and the linker reads /b as a
+        stray argument.
+        """
+        from pcons.core.project import Project
+        from pcons.core.target import UsageRequirements
+
+        project = Project("rpath", root_dir=tmp_path)
+        env = project.Environment(toolchain="c")
+
+        rpaths = ["-Xlinker", "-rpath", "-Xlinker", "/a"]
+        rpaths += ["-Xlinker", "-rpath", "-Xlinker", "/b"]
+        env.use(UsageRequirements(link_flags=list(rpaths)))
+
+        assert list(env.link.flags) == rpaths
 
     def test_real_world_macos_frameworks(self):
         """Test a realistic macOS scenario with multiple frameworks."""
@@ -557,6 +596,42 @@ class TestFlagPairMerge:
             frozenset(["-include"]),
         )
         assert existing == ["-include", "header1.h", "-include", "header2.h"]
+
+
+class TestRepeatedMerges:
+    """Merging the same flags twice must not grow the list.
+
+    Usage requirements reach a target by every dependency path that
+    carries them, so merge_flags() sees the same flags repeatedly. Both
+    cases here were minimized by the property tests in tests/fuzz/.
+
+    The destination is a FlagList, which is what a tool's flags are: it
+    holds the flag groups, so a repeat is recognized as the same flag.
+    Merging into a bare list of strings can only compare tokens, and a
+    pair that isn't one the toolchain knows reads as two of them.
+    """
+
+    def test_merge_same_flag_pair_twice(self):
+        """A FlagPair is recognized in a list it is already in."""
+        existing = FlagList(separated=frozenset(["-I"]))
+        for _ in range(3):
+            merge_flags(existing, [FlagPair("-custom", "value")], frozenset(["-I"]))
+        assert existing == ["-custom", "value"]
+
+    def test_merge_pair_after_separated_flag_twice(self):
+        """A lone separated-arg flag before a pair isn't re-added.
+
+        ``-F`` has no argument of its own here, so the tokens read as
+        ``-F -I inc``; only the grouping tells the second merge that the
+        ``-I inc`` belongs together and the ``-F`` stands alone.
+        """
+        separated = frozenset(["-I", "-F"])
+        existing = FlagList(separated=separated)
+        flags = ["-F", FlagPair("-I", "inc")]
+        merge_flags(existing, flags, separated)
+        merge_flags(existing, flags, separated)
+        assert existing == ["-F", "-I", "inc"]
+        assert existing.groups == (Flag(("-F",)), FlagPair("-I", "inc"))
 
 
 class TestIncludeFlagPairs:
