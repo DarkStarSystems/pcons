@@ -60,6 +60,32 @@ class TestPathFlagRelativization:
 
         assert "-include arm_acle.h" in content
 
+    def test_equals_form(self, tmp_path, gcc_toolchain):
+        """`--sysroot=<path>` joins flag to argument with an "=".
+
+        Split naively on the flag name, the argument reads as "=/opt/sdk" --
+        not absolute, because of the leading "=" -- and gets relativized into
+        `--sysroot../=/opt/sdk`, which the compiler rejects outright. Only the
+        WASI job caught this, and only because it links against a real SDK.
+        """
+        sdk = tmp_path.parent / "wasi-sysroot"
+        project = _project_with_flags(tmp_path, gcc_toolchain, [f"--sysroot={sdk}"])
+
+        content = _generate(project, tmp_path)
+
+        assert f"--sysroot={sdk}" in content
+        assert "--sysroot../" not in content
+
+    def test_equals_form_with_in_tree_path(self, tmp_path, gcc_toolchain):
+        """The "=" survives when the path *is* rewritten."""
+        project = _project_with_flags(
+            tmp_path, gcc_toolchain, [f"--sysroot={tmp_path / 'sysroot'}"]
+        )
+
+        content = _generate(project, tmp_path)
+
+        assert "--sysroot=$topdir/sysroot" in content
+
     def test_path_outside_the_tree_stays_absolute(self, tmp_path, gcc_toolchain):
         outside = tmp_path.parent / "elsewhere-sdk"
         project = _project_with_flags(

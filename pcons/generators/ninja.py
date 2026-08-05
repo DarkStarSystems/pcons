@@ -1137,6 +1137,14 @@ class NinjaGenerator(BaseGenerator):
             path = token[len(prefix) :]
             if not path:
                 return token
+            # "--sysroot=<path>": the "=" joins the flag to its argument and
+            # is no part of the path. Left in, the path reads as relative and
+            # comes back as "--sysroot../=/opt/sdk".
+            if path.startswith("="):
+                prefix += "="
+                path = path[1:]
+                if not path:
+                    return token
         else:
             path = token
             prefix = ""

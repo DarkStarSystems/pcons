@@ -191,6 +191,10 @@ see **Changed** below for each one and what to write instead.
   `processorArchitecture` literally, so the dependency never bound. An unmappable
   architecture now raises instead of reaching the manifest, and `create_app_manifest()`
   takes an explicit `arch=` like its counterpart.
+- **A path flag spelled with `=` is no longer mangled.** `--sysroot=/opt/wasi-sdk` was
+  split on the flag name alone, leaving `=/opt/wasi-sdk` — which does not look absolute,
+  so it was rewritten relative to the build directory and reached the compiler as
+  `--sysroot../=/opt/wasi-sdk`.
 - **`configure_file()` and `write_file()` read and write UTF-8**, not the locale's
   encoding — a build file has to come out the same on every machine, and cp1252 would
   refuse a plist containing `©` or make the write-if-changed comparison mismatch on every

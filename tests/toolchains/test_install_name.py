@@ -233,15 +233,28 @@ class TestSharedLibrariesShareOneRule:
 
         assert len(self._link_rules(content)) == 2
 
-    def test_a_hand_written_flag_wins(self, test_project):  # noqa: F811
+    @pytest.mark.parametrize(
+        ("is_macos", "written"),
+        [
+            (True, "-Wl,-install_name,@rpath/mine.dylib"),
+            (False, "-Wl,-soname,libmine.so"),
+        ],
+    )
+    def test_a_hand_written_flag_wins(self, is_macos, written, test_project):  # noqa: F811
         """`existing_flags` is how the automatic one steps aside; a marker
-        can't be compared against the caller's strings."""
+        can't be compared against the caller's strings.
+
+        Each platform recognizes only its own flag, so the platform is pinned
+        rather than left to whichever host runs the test.
+        """
         from pcons.toolchains.gcc import GccToolchain
 
-        target = _make_shared_target()
-        flags = GccToolchain().get_link_flags_for_target(
-            target, "libfoo.dylib", ["-Wl,-install_name,@rpath/mine.dylib"]
-        )
+        with patch("pcons.toolchains.unix.get_platform") as platform:
+            platform.return_value.is_macos = is_macos
+            platform.return_value.is_linux = not is_macos
+            flags = GccToolchain().get_link_flags_for_target(
+                _make_shared_target(), "libfoo", [written]
+            )
 
         assert flags == []
 
