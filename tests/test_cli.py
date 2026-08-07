@@ -1467,6 +1467,69 @@ class TestUnreadCachedVarWarning:
         assert not any("NEWVAR" in m for m in msgs)
 
 
+class TestSourceDirMismatch:
+    """The cache records its source dir and refuses to apply to another tree."""
+
+    def _script(self, dir_: Path, body: str) -> Path:
+        dir_.mkdir(parents=True, exist_ok=True)
+        script = dir_ / "pcons-build.py"
+        script.write_text(body)
+        return script
+
+    def test_records_source_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        src = self._script(
+            tmp_path / "a", "from pcons import Project\nProject('demo')\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(src, build_dir)[0] == 0
+        assert BuildCache(build_dir).get("source_dir") == str(src.parent)
+
+    def test_moved_cache_is_ignored_with_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        build_dir = tmp_path / "build"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("HELLO", raising=False)
+        _clear_cli_vars()
+
+        # Configure in source tree A.
+        src_a = self._script(
+            tmp_path / "a", "from pcons import Project\nProject('demo')\n"
+        )
+        assert run_script(src_a, build_dir, variables={"HELLO": "1"})[0] == 0
+
+        # Simulate a separate process: a real second `pcons` run starts with a
+        # clean project tree. (run_script doesn't reset it; the CLI process does.)
+        from pcons.core.project import Project
+
+        Project._clear_tree()
+
+        # A script in tree B, same build dir, must not inherit A's HELLO.
+        src_b = self._script(
+            tmp_path / "b",
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_var('HELLO', 'def') == 'def'\n"
+            "Project('demo')\n",
+        )
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="pcons"):
+            assert run_script(src_b, build_dir)[0] == 0
+        assert any("source dir" in r.message for r in caplog.records)
+
+        # The cache now belongs to B.
+        from pcons.core.cache import BuildCache
+
+        assert BuildCache(build_dir).get("source_dir") == str(src_b.parent)
+
+
 class TestCacheCommand:
     """Tests for the `pcons cache` subcommand (list/show/clear/path)."""
 

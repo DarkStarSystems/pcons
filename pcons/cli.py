@@ -188,14 +188,18 @@ def _persist_run_settings(
     variables: dict[str, str],
     variant: str | None,
     generator: str | None,
+    source_dir: str,
 ) -> None:
     """Persist the settings resolved for this run into the build-dir cache.
 
     The caller has already merged the cache with this run's command line (CLI
     wins). Environment overrides are intentionally excluded from these values,
     so a transient ``VAR=x pcons`` never rewrites the persisted cache.
+
+    ``source_dir`` is recorded so a later run can detect a cache that belongs to
+    a different source tree (a copied or moved build dir) and refuse to apply it.
     """
-    updates: dict[str, object] = {}
+    updates: dict[str, object] = {"source_dir": source_dir}
     if variables:
         updates["vars"] = dict(variables)
     if variant:
@@ -257,6 +261,20 @@ def run_script(
     # The core readers (get_var/get_variant/Generator) only see the PCONS_* env
     # vars set from these values below.
     cache = pcons.core.cache.BuildCache(build_dir)
+    current_source = str(script_path.parent.absolute())
+    recorded_source = cache.get("source_dir")
+    if isinstance(recorded_source, str) and recorded_source != current_source:
+        # The cache belongs to a different source tree (copied or moved build
+        # dir). Ignore its settings and start fresh rather than silently applying
+        # values meant for another project.
+        logger.warning(
+            "cache at %s was created for source dir %s but this run's source is "
+            "%s; ignoring the persisted settings and starting fresh.",
+            cache.path,
+            recorded_source,
+            current_source,
+        )
+        fresh = True
     if fresh:
         # Discard any persisted settings before resolving, so this run starts
         # from a clean cache (like cmake --fresh). The subsequent reads then see
@@ -362,7 +380,9 @@ def run_script(
             BaseGenerator._generate_pending(top_level)
             if persist:
                 _warn_unread_cached_vars(cached_vars, cli_vars)
-                _persist_run_settings(cache, persist_vars, persist_variant, persist_gen)
+                _persist_run_settings(
+                    cache, persist_vars, persist_variant, persist_gen, current_source
+                )
             return 0, pcons.get_registered_projects()
         except ValueError:
             logger.error("No Project created in build script")
