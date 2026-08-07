@@ -410,6 +410,50 @@ class TestRunScriptEnvironment:
         exit_code, _ = run_script(script, build_dir)
         assert exit_code == 0
 
+    def test_env_var_beats_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A same-named env var wins over the persisted cache (precedence trap).
+
+        Folding the cache into PCONS_VARS naively would invert env > cache, since
+        get_var checks PCONS_VARS before the environment. run_script must leave an
+        env-shadowed cached var out of PCONS_VARS so the env value still wins.
+        """
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("MY_VAR", raising=False)
+        _clear_cli_vars()
+
+        # First run persists MY_VAR=42 (no assertion).
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variables={"MY_VAR": "42"})[0] == 0
+
+        # Second run: a same-named env var must win over the cached 42.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "val = pcons.get_var('MY_VAR')\n"
+            "assert val == '7', f'Got {val!r}'\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.setenv("MY_VAR", "7")
+        assert run_script(script, build_dir)[0] == 0
+
+        # And the env override must not have rewritten the cache to 7.
+        assert self._persisted_var(build_dir, "MY_VAR") == "42"
+
+    def _persisted_var(self, build_dir: Path, name: str) -> str | None:
+        import json
+
+        from pcons.core.cache import CACHE_FILE
+
+        cache_file = build_dir / CACHE_FILE
+        if not cache_file.exists():
+            return None
+        return json.loads(cache_file.read_text()).get("vars", {}).get(name)
+
     def test_run_script_persists_variant_and_generator(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

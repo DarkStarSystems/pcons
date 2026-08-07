@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from pcons.core.errors import PconsError
 
 if TYPE_CHECKING:
+    from pcons.core.cache import BuildCache
     from pcons.core.project import Project
 
 # Set up logging
@@ -155,28 +156,30 @@ def _merge_generator_spec(cached: str | None, new_spec: str) -> str:
     return ":".join(build + new_aux)
 
 
-def _persist_run_settings(
-    variables: dict[str, str] | None,
-    variant: str | None,
-    gen_spec: str | None,
-) -> None:
-    """Persist the settings chosen on this run into the build-dir cache."""
-    import pcons.core.cache
+def _as_str(value: object) -> str | None:
+    """Return *value* when it is a string, else None (cache values are untyped)."""
+    return value if isinstance(value, str) else None
 
-    cache = pcons.core.cache.get_cache()
+
+def _persist_run_settings(
+    cache: BuildCache,
+    variables: dict[str, str],
+    variant: str | None,
+    generator: str | None,
+) -> None:
+    """Persist the settings resolved for this run into the build-dir cache.
+
+    The caller has already merged the cache with this run's command line (CLI
+    wins). Environment overrides are intentionally excluded from these values,
+    so a transient ``VAR=x pcons`` never rewrites the persisted cache.
+    """
     updates: dict[str, object] = {}
     if variables:
-        existing = cache.get("vars")
-        base = existing if isinstance(existing, dict) else {}
-        updates["vars"] = {**base, **variables}
+        updates["vars"] = dict(variables)
     if variant:
         updates["variant"] = variant
-    if gen_spec:
-        cached_gen = cache.get("generator")
-        cached_str = cached_gen if isinstance(cached_gen, str) else None
-        merged = _merge_generator_spec(cached_str, gen_spec)
-        if merged:
-            updates["generator"] = merged
+    if generator:
+        updates["generator"] = generator
     cache.update(updates)
 
 
@@ -217,14 +220,42 @@ def run_script(
     # manifest on the second pass.
     script_path = script_path.absolute()
 
+    # Resolve persisted settings up front, before recording the invocation, so
+    # the regen command carries the effective vars/variant/generator and stays
+    # self-contained however the user arrived at them. Precedence lives here, in
+    # one place: this run's command line > environment > persisted cache > default.
+    # The core readers (get_var/get_variant/Generator) only see the PCONS_* env
+    # vars set from these values below.
+    cache = pcons.core.cache.BuildCache(build_dir)
+    cli_vars = dict(variables or {})
+    cached_vars = cache.get("vars")
+    cached_vars = cached_vars if isinstance(cached_vars, dict) else {}
+    # `persist_vars` (cache <- CLI) is what gets written back, independent of the
+    # environment. `effective_vars` is what the script reads this run: it drops
+    # any cached var shadowed by a same-named env var, so `VAR=x pcons` still
+    # beats the cache. Env keys are unknowable in general, but cache keys are, so
+    # we omit those from PCONS_VARS and let get_var fall through to the env.
+    persist_vars = {**cached_vars, **cli_vars}
+    effective_vars = {
+        k: v for k, v in persist_vars.items() if k in cli_vars or k not in os.environ
+    }
+
+    cached_variant = _as_str(cache.get("variant"))
+    effective_variant = variant or os.environ.get("VARIANT") or cached_variant
+    persist_variant = variant or cached_variant
+
+    cached_gen = _as_str(cache.get("generator"))
+    cli_gen = ":".join(generator) if isinstance(generator, list) else generator
+    merged_gen = _merge_generator_spec(cached_gen, cli_gen) if cli_gen else None
+    effective_gen = merged_gen or os.environ.get("GENERATOR") or cached_gen
+    persist_gen = merged_gen or cached_gen
+
     pcons.core.invocation.record(
         pcons.core.invocation.Invocation(
             script=script_path,
-            variables=dict(variables or {}),
-            variant=variant,
-            generators=(
-                [generator] if isinstance(generator, str) else list(generator or [])
-            ),
+            variables=dict(effective_vars),
+            variant=effective_variant,
+            generators=effective_gen.split(":") if effective_gen else [],
         )
     )
 
@@ -245,16 +276,14 @@ def run_script(
     set_env_var("PCONS_BUILD_DIR", str(build_dir.absolute()))
     set_env_var("PCONS_SOURCE_DIR", str(script_path.parent.absolute()))
 
-    if variables:
-        set_env_var("PCONS_VARS", json.dumps(variables))
+    if effective_vars:
+        set_env_var("PCONS_VARS", json.dumps(effective_vars))
 
-    if variant:
-        set_env_var("PCONS_VARIANT", variant)
+    if effective_variant:
+        set_env_var("PCONS_VARIANT", effective_variant)
 
-    gen_spec: str | None = None
-    if generator:
-        gen_spec = ":".join(generator) if isinstance(generator, list) else generator
-        set_env_var("PCONS_GENERATOR", gen_spec)
+    if effective_gen:
+        set_env_var("PCONS_GENERATOR", effective_gen)
 
     if reconfigure:
         set_env_var("PCONS_RECONFIGURE", "1")
@@ -266,11 +295,11 @@ def run_script(
     logger.info("Running %s", script_path)
     logger.debug("  PCONS_BUILD_DIR=%s", os.environ["PCONS_BUILD_DIR"])
     logger.debug("  PCONS_SOURCE_DIR=%s", os.environ["PCONS_SOURCE_DIR"])
-    if variables:
+    if effective_vars:
         logger.debug("  PCONS_VARS=%s", os.environ["PCONS_VARS"])
-    if variant:
-        logger.debug("  PCONS_VARIANT=%s", variant)
-    if generator:
+    if effective_variant:
+        logger.debug("  PCONS_VARIANT=%s", effective_variant)
+    if effective_gen:
         logger.debug("  PCONS_GENERATOR=%s", os.environ["PCONS_GENERATOR"])
 
     # Save and modify sys.path and cwd for script imports
@@ -296,7 +325,7 @@ def run_script(
 
             top_level = Project.top_level()
             BaseGenerator._generate_pending(top_level)
-            _persist_run_settings(variables, variant, gen_spec)
+            _persist_run_settings(cache, persist_vars, persist_variant, persist_gen)
             return 0, pcons.get_registered_projects()
         except ValueError:
             logger.error("No Project created in build script")

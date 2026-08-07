@@ -10,7 +10,7 @@ import json
 import os
 from typing import overload
 
-from pcons.core.cache import get_cache, reset_cache
+from pcons.core.cache import reset_cache
 
 # Internal storage for CLI variables (parsed PCONS_VARS for the current run)
 _cli_vars: dict[str, str] | None = None
@@ -45,14 +45,15 @@ def get_var(name: str, default: str | None = None) -> str | None:
         port = get_var('PORT', default='ofx')
         use_cuda = get_var('USE_CUDA', default='0') == '1'
 
-    Values configured on the command line persist across runs in the per-build-dir
-    cache (CMakeCache-like), so a later bare `pcons configure` still sees them.
+    Values configured on the command line persist across runs: the CLI folds a
+    prior configure's cached vars into PCONS_VARS before the script runs, so a
+    later bare `pcons configure` still sees them (CMakeCache-like). This reader
+    consults only PCONS_VARS and the environment; the cache never appears here.
 
     Precedence (highest to lowest):
-        1. Command line: pcons VAR=value  (this run)
+        1. Command line: pcons VAR=value  (this run, via PCONS_VARS)
         2. Environment variable: VAR=value pcons
-        3. Persisted cache: value configured on the command line in a prior run
-        4. default
+        3. default
 
     Args:
         name: Variable name.
@@ -91,11 +92,6 @@ def get_var(name: str, default: str | None = None) -> str | None:
     if env_value is not None:
         return env_value
 
-    # Then the persisted cache. "vars" is public, guard against a non-dict.
-    cached_vars = get_cache().get("vars")
-    if isinstance(cached_vars, dict) and name in cached_vars:
-        return str(cached_vars[name])
-
     return default
 
 
@@ -108,14 +104,15 @@ def get_variant(default: str = "release") -> str:
     Or when running directly:
         VARIANT=debug python pcons-build.py
 
-    A variant chosen on the command line persists across runs in the per-build-dir
-    cache, so a later bare `pcons configure` reuses it (like CMAKE_BUILD_TYPE).
+    A variant chosen on the command line persists across runs: the CLI folds a
+    prior configure's cached variant into PCONS_VARIANT before the script runs,
+    so a later bare `pcons configure` reuses it (like CMAKE_BUILD_TYPE). This
+    reader consults only the environment; the cache never appears here.
 
     Precedence (highest to lowest):
         1. PCONS_VARIANT (set by pcons CLI)
         2. VARIANT environment variable
-        3. Persisted cache from a prior configure
-        4. default parameter
+        3. default parameter
 
     Args:
         default: Default variant if not set.
@@ -123,11 +120,4 @@ def get_variant(default: str = "release") -> str:
     Returns:
         The variant name.
     """
-    cached = get_cache().get("variant")
-    cached_str = cached if isinstance(cached, str) else None
-    return (
-        os.environ.get("PCONS_VARIANT")
-        or os.environ.get("VARIANT")
-        or cached_str
-        or default
-    )
+    return os.environ.get("PCONS_VARIANT") or os.environ.get("VARIANT") or default
