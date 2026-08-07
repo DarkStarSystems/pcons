@@ -1583,3 +1583,50 @@ class TestCacheCommand:
     def test_cache_missing_reports_cleanly(self, tmp_path: Path, capsys) -> None:
         assert cmd_cache(self._args(tmp_path / "nope", "list")) == 0
         assert "No cache" in capsys.readouterr().out
+
+
+class TestCacheCLI:
+    """End-to-end CLI coverage: real argparse + subprocess, not run_script directly.
+
+    Exercises the wiring the in-process tests bypass: KEY=value parsing, the
+    `cache` subcommand, and the --fresh flag through an actual `pcons` invocation.
+    """
+
+    def _script(self, tmp_path: Path) -> None:
+        (tmp_path / "pcons-build.py").write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "pcons.get_var('HELLO')\n"
+            "Project('demo')\n"
+        )
+
+    def _run(self, tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "pcons.cli", *args],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+
+    def test_var_persists_across_cli_runs(self, tmp_path: Path) -> None:
+        self._script(tmp_path)
+        r = self._run(tmp_path, "generate", "HELLO=42")
+        assert r.returncode == 0, r.stderr
+        r = self._run(tmp_path, "cache", "list")
+        assert r.returncode == 0, r.stderr
+        assert "HELLO=42" in r.stdout
+
+    def test_cache_clear_via_cli(self, tmp_path: Path) -> None:
+        self._script(tmp_path)
+        assert self._run(tmp_path, "generate", "HELLO=42").returncode == 0
+        assert self._run(tmp_path, "cache", "clear").returncode == 0
+        r = self._run(tmp_path, "cache", "list")
+        assert "HELLO=42" not in r.stdout
+
+    def test_fresh_flag_via_cli(self, tmp_path: Path) -> None:
+        self._script(tmp_path)
+        assert self._run(tmp_path, "generate", "HELLO=1").returncode == 0
+        assert self._run(tmp_path, "generate", "--fresh", "WORLD=2").returncode == 0
+        r = self._run(tmp_path, "cache", "list")
+        assert "HELLO" not in r.stdout
+        assert "WORLD=2" in r.stdout
