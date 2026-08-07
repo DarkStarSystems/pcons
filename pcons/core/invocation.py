@@ -80,6 +80,9 @@ class Invocation:
         for gen in self.generators:
             argv += ["-G", gen]
         argv += [f"{key}={value}" for key, value in sorted(self.variables.items())]
+        # A regen re-invoke is self-contained from this argv; it must not write
+        # its own cache file into the build dir it regenerates. See PR #64.
+        argv.append("--no-cache")
         return argv
 
 

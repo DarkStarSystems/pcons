@@ -191,6 +191,7 @@ def run_script(
     generator: list[str] | str | None = None,
     reconfigure: bool = False,
     extra_env: dict[str, str] | None = None,
+    persist: bool = True,
 ) -> tuple[int, list[Project]]:
     """Execute a Python build script in-process via exec(), so its Project
     objects are accessible through the global registry.
@@ -203,6 +204,10 @@ def run_script(
         generator: Generator to pass via PCONS_GENERATOR (ninja, make).
         reconfigure: If True, set PCONS_RECONFIGURE=1.
         extra_env: Additional environment variables to set.
+        persist: If True (default), write the resolved settings back to the
+            build-dir cache after a successful run. A regen re-invoke (ninja's
+            self-regeneration rule) passes False so it never writes a cache into
+            the directory it regenerates; its argv is already self-contained.
 
     Returns:
         Tuple of (exit_code, list of registered Projects).
@@ -325,7 +330,8 @@ def run_script(
 
             top_level = Project.top_level()
             BaseGenerator._generate_pending(top_level)
-            _persist_run_settings(cache, persist_vars, persist_variant, persist_gen)
+            if persist:
+                _persist_run_settings(cache, persist_vars, persist_variant, persist_gen)
             return 0, pcons.get_registered_projects()
         except ValueError:
             logger.error("No Project created in build script")
@@ -617,6 +623,7 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
         generator=generator,
         reconfigure=reconfigure,
         extra_env=extra_env if extra_env else None,
+        persist=not getattr(args, "no_cache", False),
     )
 
     if exit_code != 0:
@@ -1276,6 +1283,14 @@ def create_full_parser() -> argparse.ArgumentParser:
     )
     add_common_args(gen_parser)
     add_generate_args(gen_parser)
+    # Internal: the self-regeneration rule re-invokes `generate` with this so it
+    # doesn't persist a cache into the directory it regenerates. Not for users.
+    gen_parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
     gen_parser.add_argument(
         "--graph",
         nargs="?",

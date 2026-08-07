@@ -501,6 +501,36 @@ class TestRunScriptEnvironment:
         assert exit_code == 1
         assert not (build_dir / CACHE_FILE).exists()
 
+    def test_regen_run_does_not_persist(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """persist=False (a regen re-invoke) writes no cache into the build dir."""
+        from pcons.core.cache import CACHE_FILE
+
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        exit_code, _ = run_script(
+            script, build_dir, variables={"X": "1"}, variant="debug", persist=False
+        )
+        assert exit_code == 0
+        assert not (build_dir / CACHE_FILE).exists()
+
+    def test_regen_command_carries_no_cache_flag(self, tmp_path: Path) -> None:
+        """The self-regeneration argv ends with --no-cache so it never persists."""
+        from pcons.core.invocation import Invocation
+
+        (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
+        inv = Invocation(script=Path("pcons-build.py"), variant="release")
+        argv = inv.command(root_dir=tmp_path, run_dir=tmp_path / "build")
+
+        assert argv is not None
+        assert "--no-cache" in argv
+
     def _persisted_generator(self, build_dir: Path) -> str | None:
         import json
 
