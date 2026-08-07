@@ -19,7 +19,6 @@ from pcons.builders import register_builtin_builders  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
 from pcons.configure.config_file import configure_file, write_file  # noqa: E402
 from pcons.configure.platform import Platform, get_platform  # noqa: E402
-from pcons.core.cache import BuildCache, get_cache  # noqa: E402
 from pcons.core.context import context  # noqa: E402
 from pcons.core.flags import FlagPair  # noqa: E402
 from pcons.core.preset import (  # noqa: E402
@@ -144,9 +143,6 @@ __all__ = [
     # CLI variable access
     "get_var",
     "get_variant",
-    # Per-build-dir cache
-    "get_cache",
-    "BuildCache",
     # Install helpers
     "install_dir",
     # Project registry (for CLI use)
