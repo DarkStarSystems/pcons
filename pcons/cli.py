@@ -754,6 +754,50 @@ def cmd_clean(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_cache(args: argparse.Namespace) -> int:
+    """Inspect or clear the per-build-dir cache (pcons_cache.json).
+
+    Reads the cache file directly; never runs the build script. The build
+    directory comes from -B / $PCONS_BUILD_DIR (default 'build').
+    """
+    from pcons.core.cache import BuildCache
+
+    cache = BuildCache(Path(args.build_dir))
+    action = getattr(args, "cache_action", None) or "list"
+
+    if action == "path":
+        print(cache.path)
+        return 0
+
+    if cache.path is None or not cache.path.exists():
+        print(f"No cache at {cache.path}")
+        return 0
+
+    if action == "clear":
+        cache.clear()
+        print(f"Cleared {cache.path}")
+        return 0
+
+    # list / show: print the user-facing settings, one per line.
+    cached_vars = cache.get("vars")
+    if isinstance(cached_vars, dict):
+        for key in sorted(cached_vars):
+            print(f"{key}={cached_vars[key]}")
+    variant = cache.get("variant")
+    if isinstance(variant, str):
+        print(f"variant={variant}")
+    generator = cache.get("generator")
+    if isinstance(generator, str):
+        print(f"generator={generator}")
+
+    if action == "show":
+        source_dir = cache.get("source_dir")
+        if isinstance(source_dir, str):
+            print(f"# source_dir: {source_dir}")
+        print(f"# cache file: {cache.path}")
+    return 0
+
+
 def cmd_info(args: argparse.Namespace) -> int:
     """Show the build script's docstring; with --targets, run the script
     and list all defined targets grouped by type."""
@@ -1097,7 +1141,7 @@ def _find_command_index(argv: list[str]) -> int | None:
     command name (e.g. ``--build-dir test``) is not mistaken for the
     subcommand.
     """
-    valid_commands = {"info", "init", "generate", "build", "clean", "test"}
+    valid_commands = {"info", "init", "generate", "build", "clean", "test", "cache"}
     # Options that take a value (-C/--directory is consumed before this runs)
     options_with_value = {
         "-B",
@@ -1353,6 +1397,20 @@ def create_full_parser() -> argparse.ArgumentParser:
         "-a", "--all", action="store_true", help="Remove entire build directory"
     )
     clean_parser.set_defaults(func=cmd_clean)
+
+    # pcons cache
+    cache_parser = subparsers.add_parser(
+        "cache", help="Inspect or clear the per-build-dir cache"
+    )
+    add_common_args(cache_parser)
+    cache_parser.add_argument(
+        "cache_action",
+        nargs="?",
+        choices=["list", "show", "clear", "path"],
+        default="list",
+        help="list (default) / show / clear / path",
+    )
+    cache_parser.set_defaults(func=cmd_cache)
 
     # pcons test is dispatched in main() before argparse runs (so the
     # runner can own its own flags). This subparser exists only so that

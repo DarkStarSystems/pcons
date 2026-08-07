@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from pcons import (
 )
 from pcons.cli import (
     _find_command_index,
+    cmd_cache,
     find_command_in_argv,
     find_script,
     parse_variables,
@@ -1385,3 +1387,58 @@ generator.generate(project)
         )
         assert result.returncode == 0
         assert not (tmp_path / "build").exists()
+
+
+class TestCacheCommand:
+    """Tests for the `pcons cache` subcommand (list/show/clear/path)."""
+
+    def _populate(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        run_script(
+            script,
+            build_dir,
+            variables={"HELLO": "42"},
+            variant="debug",
+            generator="ninja",
+        )
+        return build_dir
+
+    def _args(self, build_dir: Path, action: str) -> argparse.Namespace:
+        return argparse.Namespace(build_dir=str(build_dir), cache_action=action)
+
+    def test_cache_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        build_dir = self._populate(tmp_path, monkeypatch)
+        assert cmd_cache(self._args(build_dir, "list")) == 0
+        out = capsys.readouterr().out
+        assert "HELLO=42" in out
+        assert "variant=debug" in out
+        assert "generator=ninja" in out
+
+    def test_cache_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        from pcons.core.cache import CACHE_FILE
+
+        build_dir = self._populate(tmp_path, monkeypatch)
+        assert cmd_cache(self._args(build_dir, "path")) == 0
+        assert str(build_dir / CACHE_FILE) in capsys.readouterr().out
+
+    def test_cache_clear(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        build_dir = self._populate(tmp_path, monkeypatch)
+        assert cmd_cache(self._args(build_dir, "clear")) == 0
+        capsys.readouterr()
+        # After clearing, list shows no settings.
+        assert cmd_cache(self._args(build_dir, "list")) == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_cache_missing_reports_cleanly(self, tmp_path: Path, capsys) -> None:
+        assert cmd_cache(self._args(tmp_path / "nope", "list")) == 0
+        assert "No cache" in capsys.readouterr().out
