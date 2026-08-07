@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from pcons.core.cache import (
     CACHE_FILE,
@@ -121,13 +120,18 @@ class TestCacheSingleton:
         monkeypatch.setenv("PCONS_BUILD_DIR", str(second))
         assert get_cache().get("k") is None  # fresh build dir
 
-    def test_missing_build_dir_defaults_to_build(self, monkeypatch, tmp_path) -> None:
-        # Matches Project's fallback so the direct-run flow sees the cache.
+    def test_missing_build_dir_is_in_memory(self, monkeypatch, tmp_path) -> None:
+        # No PCONS_BUILD_DIR (direct-run flow) => in-memory only. A stray
+        # ./build/pcons_cache.json must not leak into an unrelated build.
         monkeypatch.chdir(tmp_path)
+        stray = tmp_path / "build"
+        stray.mkdir()
+        (stray / CACHE_FILE).write_text(json.dumps({"vars": {"PORT": "9"}}))
         reset_cache()
         monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
 
         cache = get_cache()
-        assert cache.path == Path("build") / CACHE_FILE  # relative to cwd
-        cache.set("k", "v")
-        assert json.loads((tmp_path / "build" / CACHE_FILE).read_text()) == {"k": "v"}
+        assert cache.path is None
+        assert cache.get("vars") is None  # stray file not read
+        cache.set("k", "v")  # save is a no-op
+        assert json.loads((stray / CACHE_FILE).read_text()) == {"vars": {"PORT": "9"}}

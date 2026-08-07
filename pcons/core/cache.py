@@ -107,23 +107,22 @@ class BuildCache:
         self.save()
 
 
-DEFAULT_BUILD_DIR = "build"
-
 _cache: BuildCache | None = None
 
 
 def get_cache() -> BuildCache:
     """Return the build-dir cache singleton.
 
-    The build directory is taken from ``PCONS_BUILD_DIR``, falling back to
-    ``build`` (the same default as :class:`Project`) so the direct-run flow
-    (``python pcons-build.py``) sees the cache written by a prior configure.
-    Call :func:`reset_cache` to rebind after the environment changes, for
-    example between build-script runs.
+    The build directory is taken from ``PCONS_BUILD_DIR``. When that is unset
+    (the ``python pcons-build.py`` direct-run flow), the cache is in-memory only
+    and nothing is read from or written to disk, so a stray ``pcons_cache.json``
+    in some default directory can't leak into an unrelated build. Call
+    :func:`reset_cache` to rebind after the environment changes, for example
+    between build-script runs.
     """
     global _cache
     if _cache is None:
-        _cache = BuildCache(os.environ.get("PCONS_BUILD_DIR") or DEFAULT_BUILD_DIR)
+        _cache = BuildCache(os.environ.get("PCONS_BUILD_DIR"))
     return _cache
 
 
