@@ -192,6 +192,7 @@ def run_script(
     reconfigure: bool = False,
     extra_env: dict[str, str] | None = None,
     persist: bool = True,
+    fresh: bool = False,
 ) -> tuple[int, list[Project]]:
     """Execute a Python build script in-process via exec(), so its Project
     objects are accessible through the global registry.
@@ -208,6 +209,8 @@ def run_script(
             build-dir cache after a successful run. A regen re-invoke (ninja's
             self-regeneration rule) passes False so it never writes a cache into
             the directory it regenerates; its argv is already self-contained.
+        fresh: If True, discard the persisted cache before resolving settings,
+            so the run starts clean (like cmake --fresh).
 
     Returns:
         Tuple of (exit_code, list of registered Projects).
@@ -232,6 +235,11 @@ def run_script(
     # The core readers (get_var/get_variant/Generator) only see the PCONS_* env
     # vars set from these values below.
     cache = pcons.core.cache.BuildCache(build_dir)
+    if fresh:
+        # Discard any persisted settings before resolving, so this run starts
+        # from a clean cache (like cmake --fresh). The subsequent reads then see
+        # nothing, and only this run's own settings get persisted below.
+        cache.clear()
     cli_vars = dict(variables or {})
     cached_vars = cache.get("vars")
     cached_vars = cached_vars if isinstance(cached_vars, dict) else {}
@@ -624,6 +632,7 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
         reconfigure=reconfigure,
         extra_env=extra_env if extra_env else None,
         persist=not getattr(args, "no_cache", False),
+        fresh=getattr(args, "fresh", False),
     )
 
     if exit_code != 0:
@@ -1168,6 +1177,11 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         "--reconfigure",
         action="store_true",
         help="Force re-run configuration checks",
+    )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Discard the persisted cache and start clean (like cmake --fresh)",
     )
     parser.add_argument("-b", "--build-script", help="Path to pcons-build.py script")
 

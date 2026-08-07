@@ -501,6 +501,51 @@ class TestRunScriptEnvironment:
         assert exit_code == 1
         assert not (build_dir / CACHE_FILE).exists()
 
+    def test_fresh_discards_persisted_settings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--fresh drops stale cached vars, keeping only this run's own."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        # First run persists HELLO.
+        assert run_script(script, build_dir, variables={"HELLO": "1"})[0] == 0
+        assert self._persisted_var(build_dir, "HELLO") == "1"
+
+        # A --fresh run with a different var must not carry HELLO forward.
+        assert (
+            run_script(script, build_dir, variables={"WORLD": "2"}, fresh=True)[0] == 0
+        )
+        assert self._persisted_var(build_dir, "HELLO") is None
+        assert self._persisted_var(build_dir, "WORLD") == "2"
+
+    def test_fresh_ignores_cached_value_for_this_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A --fresh run reads the default, not a previously cached value."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("MY_VAR", raising=False)
+        _clear_cli_vars()
+
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variables={"MY_VAR": "42"})[0] == 0
+
+        # --fresh with no CLI var -> get_var sees the default, not cached 42.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_var('MY_VAR', 'default') == 'default'\n"
+            "Project('demo')\n"
+        )
+        assert run_script(script, build_dir, fresh=True)[0] == 0
+
     def test_regen_run_does_not_persist(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
