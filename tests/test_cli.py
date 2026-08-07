@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import shutil
 import subprocess
 import sys
@@ -1387,6 +1388,83 @@ generator.generate(project)
         )
         assert result.returncode == 0
         assert not (tmp_path / "build").exists()
+
+
+class TestUnreadCachedVarWarning:
+    """The CLI warns about persisted vars the build script never reads (typos)."""
+
+    def _run(
+        self,
+        script: Path,
+        build_dir: Path,
+        caplog,
+        **kwargs,
+    ) -> list[str]:
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="pcons"):
+            assert run_script(script, build_dir, **kwargs)[0] == 0
+        return [r.message for r in caplog.records]
+
+    def test_warns_on_typo_cached_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        # Persist a typo'd var and a real one.
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert (
+            run_script(script, build_dir, variables={"FEATRUE": "on", "FEATURE": "on"})[
+                0
+            ]
+            == 0
+        )
+
+        # A later bare run whose script reads only FEATURE.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "pcons.get_var('FEATURE')\n"
+            "Project('demo')\n"
+        )
+        msgs = self._run(script, build_dir, caplog)
+        assert any("FEATRUE" in m for m in msgs)
+        assert not any("'FEATURE'" in m for m in msgs)
+
+    def test_no_warning_when_all_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variables={"PORT": "8080"})[0] == 0
+
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "pcons.get_var('PORT')\n"
+            "Project('demo')\n"
+        )
+        msgs = self._run(script, build_dir, caplog)
+        assert not any("PORT" in m for m in msgs)
+
+    def test_no_warning_for_var_set_this_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        """A var set fresh on this run's command line is not nagged, even unread."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        msgs = self._run(script, build_dir, caplog, variables={"NEWVAR": "1"})
+        assert not any("NEWVAR" in m for m in msgs)
 
 
 class TestCacheCommand:

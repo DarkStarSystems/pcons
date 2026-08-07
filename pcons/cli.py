@@ -161,6 +161,28 @@ def _as_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _warn_unread_cached_vars(
+    cached_vars: dict[str, str], cli_vars: dict[str, str]
+) -> None:
+    """Warn about persisted vars the build script never read this run.
+
+    Catches a typo like `pcons FEATRUE=on`, which persists and then does nothing
+    forever (CMake warns about unused cache entries the same way). Only vars that
+    came from the cache are checked; a var set fresh on this run's command line is
+    not nagged, since the script may only start reading it on a later run.
+    """
+    import pcons.core.vars
+
+    read = pcons.core.vars._accessed_var_names()
+    unread = sorted(set(cached_vars) - read - set(cli_vars))
+    for name in unread:
+        logger.warning(
+            "cached variable %r was never read by the build script "
+            "(typo, or no longer used?). `pcons cache clear` or --fresh to drop it.",
+            name,
+        )
+
+
 def _persist_run_settings(
     cache: BuildCache,
     variables: dict[str, str],
@@ -339,6 +361,7 @@ def run_script(
             top_level = Project.top_level()
             BaseGenerator._generate_pending(top_level)
             if persist:
+                _warn_unread_cached_vars(cached_vars, cli_vars)
                 _persist_run_settings(cache, persist_vars, persist_variant, persist_gen)
             return 0, pcons.get_registered_projects()
         except ValueError:

@@ -15,12 +15,22 @@ from pcons.core.cache import reset_cache
 # Internal storage for CLI variables (parsed PCONS_VARS for the current run)
 _cli_vars: dict[str, str] | None = None
 
+# Names passed to get_var this run, so the CLI can warn about persisted vars the
+# build script never reads (a typo like `pcons FEATRUE=on`).
+_accessed_vars: set[str] = set()
+
 
 def _clear_cli_vars() -> None:
     """Clear cached CLI variables and the build-dir cache. Used for testing."""
     global _cli_vars
     _cli_vars = None
+    _accessed_vars.clear()
     reset_cache()
+
+
+def _accessed_var_names() -> set[str]:
+    """Return the variable names get_var has been called with this run."""
+    return set(_accessed_vars)
 
 
 @overload
@@ -63,6 +73,8 @@ def get_var(name: str, default: str | None = None) -> str | None:
         The variable value, or default if not set.
     """
     global _cli_vars
+
+    _accessed_vars.add(name)
 
     # Lazy-load CLI vars from environment on first access
     if _cli_vars is None:
