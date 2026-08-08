@@ -11,6 +11,10 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import FrameType
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +69,41 @@ def get_source_location(depth: int = 1) -> SourceLocation:
         del frame  # Avoid reference cycles
 
 
+#: This package's directory. Frames from inside it are pcons calling itself.
+_PCONS_ROOT = str(Path(__file__).resolve().parent.parent)
+
+
 def get_caller_location() -> SourceLocation:
-    """Capture the source location of the caller's caller — for methods
-    recording where they were called from."""
-    return get_source_location(depth=2)
+    """Capture where a build script called into pcons.
+
+    Frames inside pcons are skipped, so a convenience wrapper that forwards to
+    another entry point — ``project.Command()`` delegating to
+    ``env.Command()`` — reports the line somebody wrote rather than the line
+    that forwarded it. A fixed depth cannot do both: it is right for one call
+    path and wrong for the other, which is how a diagnostic ends up naming
+    pcons's own source instead of the build script's.
+
+    Falls back to the immediate caller when every frame is pcons's, which is
+    pcons calling itself with nobody to blame.
+    """
+    frame = inspect.currentframe()
+    try:
+        frame = frame.f_back if frame else None  # the caller of this function
+        first = frame
+        while frame is not None:
+            filename = frame.f_code.co_filename
+            if not str(Path(filename).resolve()).startswith(_PCONS_ROOT):
+                return _location_of(frame)
+            frame = frame.f_back
+        return _location_of(first) if first else SourceLocation("<unknown>", 0)
+    finally:
+        del frame
+
+
+def _location_of(frame: FrameType) -> SourceLocation:
+    """Describe one stack frame."""
+    return SourceLocation(
+        filename=frame.f_code.co_filename,
+        lineno=frame.f_lineno,
+        function=frame.f_code.co_name if frame.f_code.co_name != "<module>" else None,
+    )

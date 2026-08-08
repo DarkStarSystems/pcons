@@ -60,6 +60,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a script reading `sys.argv` by membership will appear to work for
   months. `$SOURCES` says the same thing without the warning, and
   `${SOURCES[0]}` names only the first.
+- **Diagnostics name the build script, whichever entry point was used.**
+  Source locations were captured a fixed number of frames up, which is right
+  for `env.Command()` and names pcons's own source for `project.Command()`,
+  since one forwards to the other. The first frame outside pcons is what gets
+  reported now.
 - **`project.Command`'s documentation had `$SOURCE` backwards**, describing it
   as the first source when it is all of them (`env.Command` had it right). A
   command written from that description silently receives the remaining
