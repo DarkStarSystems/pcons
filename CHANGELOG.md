@@ -54,6 +54,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A command that writes `$SOURCE` where several sources will land now
+  warns.** Both spellings mean every source, but only the plural says so; in
+  the singular the extras reach the command as arguments it never asked for,
+  and a script reading `sys.argv` by membership will appear to work for
+  months. `$SOURCES` says the same thing without the warning, and
+  `${SOURCES[0]}` names only the first.
 - **`project.Command`'s documentation had `$SOURCE` backwards**, describing it
   as the first source when it is all of them (`env.Command` had it right). A
   command written from that description silently receives the remaining

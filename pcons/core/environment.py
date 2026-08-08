@@ -8,6 +8,7 @@ namespaces (env.cc, env.cxx, etc.) and cross-tool variables.
 from __future__ import annotations
 
 import logging
+import re
 from collections import UserList
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -36,6 +37,39 @@ else:
     _EnvironmentStubs = object
 
 logger = logging.getLogger(__name__)
+
+
+#: ``$SOURCE`` or ``${SOURCE}``, but not ``$SOURCES`` or ``${SOURCES[0]}``.
+_SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
+
+
+def _warn_if_source_reads_as_singular(
+    command: str | list[str], sources: int, at: SourceLocation
+) -> None:
+    """Flag ``$SOURCE`` written where more than one source will land.
+
+    The two spellings mean the same thing -- every source -- but only the
+    plural one says so. Written in the singular against several sources, the
+    author almost certainly expects one, and the extras arrive as arguments
+    the command never asked for. A script that reads ``sys.argv`` by
+    membership rather than by position will appear to work for months.
+
+    A warning rather than an error: consuming every source is a perfectly
+    good thing for a command to do. Saying it as ``$SOURCES`` is silent.
+    """
+    if sources < 2:
+        return
+    text = command if isinstance(command, str) else " ".join(map(str, command))
+    if not _SINGULAR_SOURCE.search(text):
+        return
+    logger.warning(
+        "%s: $SOURCE with %d sources expands to all of them, so the rest "
+        "reach the command as arguments. Write $SOURCES to say that is what "
+        "you meant, or ${SOURCES[0]} to name only the first -- either way "
+        "every source stays a dependency.",
+        at,
+        sources,
+    )
 
 
 def _first_repr(value: Any) -> str:
@@ -1277,6 +1311,10 @@ class Environment(_EnvironmentStubs):
                     target_sources.append(src)
                 else:
                     immediate_sources.append(src)
+
+        _warn_if_source_reads_as_singular(
+            command, len(source_list), get_caller_location()
+        )
 
         # Create the builder
         # A worker is a launcher with a lifecycle; the edge only ever sees

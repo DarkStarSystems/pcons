@@ -67,3 +67,59 @@ def test_every_source_is_still_a_dependency(tmp_path: Path) -> None:
     edge = next(line for line in text.splitlines() if line.startswith("build out.txt"))
     assert "entry.py" in edge
     assert "shared.py" in edge
+
+
+class TestSingularSourceWarning:
+    """`$SOURCE` written where several sources will land.
+
+    The spelling that reads as "one" is the one that means "all", and the
+    mistake is quiet, so it is worth a word at the moment it is written.
+    """
+
+    @staticmethod
+    def _command(tmp_path: Path, command, sources: list[str]) -> None:
+        for name in sources:
+            (tmp_path / name).write_text("")
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            name="gen",
+            target=project.build_dir / "out.txt",
+            source=[tmp_path / name for name in sources],
+            command=command,
+        )
+
+    def test_warns_on_the_singular_with_several_sources(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        self._command(tmp_path, ["run", "$SOURCE"], ["a.py", "b.py"])
+
+        assert "$SOURCE with 2 sources" in caplog.text
+        assert "${SOURCES[0]}" in caplog.text
+
+    def test_the_plural_says_what_it_means(self, tmp_path: Path, caplog) -> None:
+        """`cat $SOURCES > $TARGET` is a perfectly good command."""
+        self._command(tmp_path, ["cat", "$SOURCES"], ["a.py", "b.py"])
+
+        assert caplog.text == ""
+
+    def test_an_index_is_explicit(self, tmp_path: Path, caplog) -> None:
+        self._command(tmp_path, ["run", "${SOURCES[0]}"], ["a.py", "b.py"])
+
+        assert caplog.text == ""
+
+    def test_one_source_is_unambiguous(self, tmp_path: Path, caplog) -> None:
+        self._command(tmp_path, ["run", "$SOURCE"], ["a.py"])
+
+        assert caplog.text == ""
+
+    def test_the_string_form_too(self, tmp_path: Path, caplog) -> None:
+        self._command(tmp_path, "run $SOURCE --out $TARGET", ["a.py", "b.py"])
+
+        assert "$SOURCE with 2 sources" in caplog.text
+
+    def test_a_source_within_a_larger_token(self, tmp_path: Path, caplog) -> None:
+        """`./$SOURCE` runs a just-built tool, and has the same problem."""
+        self._command(tmp_path, ["./$SOURCE", "$TARGET"], ["tool", "data"])
+
+        assert "$SOURCE with 2 sources" in caplog.text
