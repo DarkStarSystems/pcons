@@ -288,8 +288,18 @@ class CommandBuilder:
         target: str | Path | list[str | Path],
         source: str | Path | list[str | Path] | None = None,
         command: str | list[str] = "",
+        restat: bool = False,
+        write_if_different: bool = False,
+        cwd: str | Path | None = None,
+        launcher: Sequence[str] | None = None,
     ) -> Target:
         """Create a Command target.
+
+        Keep this signature in step with :meth:`Project.Command`, which is
+        what users actually call: the typing stub for ``project.Command`` is
+        generated from *this* one, so an argument missing here is an argument
+        their editor says does not exist. ``tests/test_gen_stubs.py`` checks
+        the two still agree.
 
         Args:
             project: The project to add the target to.
@@ -298,12 +308,25 @@ class CommandBuilder:
             target: Output file(s).
             source: Input file(s).
             command: The shell command to run.
+            restat: Re-check the output timestamp after running.
+            write_if_different: Restore identically-rewritten outputs.
+            cwd: Directory to run the command in.
+            launcher: Program to run this command behind, as tokens.
 
         Returns:
             A new Target configured as a command.
         """
         # Delegate to env.Command which handles all the complexity
-        return env.Command(target=target, source=source, command=command, name=name)
+        return env.Command(
+            target=target,
+            source=source,
+            command=command,
+            name=name,
+            restat=restat,
+            write_if_different=write_if_different,
+            cwd=cwd,
+            launcher=launcher,
+        )
 
 
 def _validate_builder_name(name: object, builder_name: str) -> None:

@@ -300,3 +300,36 @@ def test_module_can_be_invoked_with_python_dash_m() -> None:
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert "class _ProjectBuilders" in result.stdout
+
+
+# ---- registry vs. the methods Project really defines -------------------------
+
+
+class TestRegisteredSignaturesMatchProject:
+    """A stub is only as good as the signature it is generated from.
+
+    `project.Command` is a real method, but its typing stub comes from the
+    *registered* builder, so an argument the registry has not heard of is one
+    a user's editor says does not exist. They drifted once already: restat,
+    write_if_different and cwd were callable but unknown to the stub.
+    """
+
+    @staticmethod
+    def _params(func: object, drop: int) -> dict[str, object]:
+        from inspect import signature
+
+        params = list(signature(func).parameters.values())[drop:]
+        return {p.name: p.default for p in params}
+
+    def test_command_signatures_agree(self) -> None:
+        from pcons.builders.compile import CommandBuilder
+        from pcons.core.project import Project
+
+        registered = self._params(CommandBuilder.create_target, 1)  # drop `project`
+        method = self._params(Project.Command, 1)  # drop `self`
+
+        assert registered == method, (
+            "pcons/builders/compile.py CommandBuilder.create_target and "
+            "Project.Command have drifted; the generated stub follows the "
+            "former, so users lose the arguments missing from it."
+        )

@@ -77,6 +77,10 @@ if TYPE_CHECKING:
             target: str | Path | list[str | Path],
             source: str | Path | list[str | Path] | None = None,
             command: str | list[str] = '',
+            restat: bool = False,
+            write_if_different: bool = False,
+            cwd: str | Path | None = None,
+            launcher: Sequence[str] | None = None,
         ) -> Target:
             """Create a custom command target."""
             ...
