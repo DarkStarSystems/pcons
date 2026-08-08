@@ -1637,6 +1637,7 @@ pcons clean --all  # Remove entire build directory
 | `--variant=NAME` or `-v NAME` | Set build variant (debug, release) |
 | `-B DIR` or `--build-dir=DIR` | Set build directory (default: build) |
 | `-C` or `--reconfigure` | Force re-run configuration |
+| `--fresh` | Discard the persisted cache and start clean |
 | `-j N` or `--jobs=N` | Number of parallel build jobs |
 | `--verbose` | Show verbose output |
 | `--debug` | Show debug output |
@@ -1659,6 +1660,60 @@ port = get_var("PORT", default="ofx")
 use_cuda = get_var("USE_CUDA", default="0") == "1"
 prefix = get_var("PREFIX", default="/usr/local")
 ```
+
+### Persistent Configuration Cache
+
+Settings you choose on the command line persist per build directory, like
+CMake's `CMakeCache.txt`. Configure once, then run bare:
+
+```bash
+pcons generate PORT=ofx --variant=debug -G ninja   # choose settings
+pcons                                               # reuses PORT, variant, generator
+```
+
+What persists: build variables, the variant, and the generator. They are stored
+in `<build_dir>/pcons_cache.json` and written only after a successful run.
+
+Precedence, highest to lowest:
+
+1. This run's command line (`PORT=x`, `--variant`, `-G`)
+2. Environment: `PORT=x pcons`, `VARIANT`, `GENERATOR`, and the `PCONS_VARS` /
+   `PCONS_VARIANT` / `PCONS_GENERATOR` forms
+3. Persisted cache from a prior run
+4. The `default` passed to `get_var` / `get_variant`
+
+An environment value overrides the cache but is not written to it, so exporting
+one steers a run without changing what a later bare run reuses.
+
+The cache is tied to `$PCONS_BUILD_DIR`, which `pcons` always sets (and `-B`
+overrides). Running the script directly with `python pcons-build.py` uses no
+cache, so the same environment produces the same build either way.
+
+Inspect and reset:
+
+```bash
+pcons cache list      # show persisted vars, variant, generator
+pcons cache show      # same, plus the cache file path and source dir
+pcons cache path      # print the cache file path
+pcons cache clear     # empty the cache
+pcons generate --fresh PORT=y   # ignore the old cache, start clean
+```
+
+Change settings through these commands, not by editing `pcons_cache.json`. The
+file is not a regeneration input, so a hand-edit is not picked up automatically,
+and the self-regeneration command pins the values it was generated with, so a
+manual change would be overwritten on the next run anyway.
+
+Two guards catch stale caches:
+
+- A variable that was persisted but the build script never reads is reported
+  (`pcons FEATRUE=on` typo, or a setting you dropped).
+- A cache whose recorded source directory no longer matches (a copied or moved
+  build dir) is ignored with a warning and rebuilt for the current tree.
+
+There is no API to read or write the cache from a build script; it holds only
+the settings above. If you need structured configuration, write a Python config
+file and import it from `pcons-build.py`.
 
 ---
 

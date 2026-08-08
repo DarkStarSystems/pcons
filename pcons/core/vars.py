@@ -10,14 +10,27 @@ import json
 import os
 from typing import overload
 
-# Internal storage for CLI variables
+from pcons.core.cache import reset_cache
+
+# Internal storage for CLI variables (parsed PCONS_VARS for the current run)
 _cli_vars: dict[str, str] | None = None
+
+# Names passed to get_var this run, so the CLI can warn about persisted vars the
+# build script never reads (a typo like `pcons FEATRUE=on`).
+_accessed_vars: set[str] = set()
 
 
 def _clear_cli_vars() -> None:
-    """Clear the cached CLI variables. Used for testing purposes."""
+    """Clear cached CLI variables and the build-dir cache. Used for testing."""
     global _cli_vars
     _cli_vars = None
+    _accessed_vars.clear()
+    reset_cache()
+
+
+def _accessed_var_names() -> set[str]:
+    """Return the variable names get_var has been called with this run."""
+    return set(_accessed_vars)
 
 
 @overload
@@ -42,9 +55,15 @@ def get_var(name: str, default: str | None = None) -> str | None:
         port = get_var('PORT', default='ofx')
         use_cuda = get_var('USE_CUDA', default='0') == '1'
 
+    Values configured on the command line persist across runs: the CLI folds a
+    prior configure's cached vars into PCONS_VARS before the script runs, so a
+    later bare `pcons configure` still sees them (CMakeCache-like). This reader
+    consults only PCONS_VARS and the environment; the cache never appears here.
+
     Precedence (highest to lowest):
-        1. Command line: pcons VAR=value
+        1. Command line: pcons VAR=value  (this run, via PCONS_VARS)
         2. Environment variable: VAR=value pcons
+        3. default
 
     Args:
         name: Variable name.
@@ -54,6 +73,8 @@ def get_var(name: str, default: str | None = None) -> str | None:
         The variable value, or default if not set.
     """
     global _cli_vars
+
+    _accessed_vars.add(name)
 
     # Lazy-load CLI vars from environment on first access
     if _cli_vars is None:
@@ -78,8 +99,12 @@ def get_var(name: str, default: str | None = None) -> str | None:
     if name in _cli_vars:
         return _cli_vars[name]
 
-    # Fall back to environment
-    return os.environ.get(name, default)
+    # Then OS environment
+    env_value = os.environ.get(name)
+    if env_value is not None:
+        return env_value
+
+    return default
 
 
 def get_variant(default: str = "release") -> str:
@@ -90,6 +115,11 @@ def get_variant(default: str = "release") -> str:
 
     Or when running directly:
         VARIANT=debug python pcons-build.py
+
+    A variant chosen on the command line persists across runs: the CLI folds a
+    prior configure's cached variant into PCONS_VARIANT before the script runs,
+    so a later bare `pcons configure` reuses it (like CMAKE_BUILD_TYPE). This
+    reader consults only the environment; the cache never appears here.
 
     Precedence (highest to lowest):
         1. PCONS_VARIANT (set by pcons CLI)

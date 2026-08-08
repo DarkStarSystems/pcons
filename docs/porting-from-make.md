@@ -764,7 +764,7 @@ Print statements work during generation. Your IDE gives completion for pcons bec
 
 6. **Automatic header dependency tracking**: Pcons handles `-MMD` style dependency tracking automatically via Ninja's `depfile` mechanism. Don't add `-MMD` or `-MP` to your flags.
 
-7. **Build variables**: `pcons FOO=bar` sets `FOO` for that run only (accessible via `pcons.get_var("FOO")`). Unlike Make's `?=` conditional assignment, there's no persistence — document which variables your build expects.
+7. **Build variables**: `pcons FOO=bar` sets `FOO` (accessible via `pcons.get_var("FOO")`) and persists it per build directory in `pcons_cache.json`, so a later bare `pcons` reuses it. Precedence: command line > environment > persisted cache > default. Inspect with `pcons cache list`, reset with `--fresh`.
 
 8. **Source globbing**: Make's `$(wildcard src/*.c)` maps to Python's `Path("src").glob("*.c")`. However, explicit source lists are generally preferred — they catch missing files immediately rather than silently building whatever happens to be on disk.
 

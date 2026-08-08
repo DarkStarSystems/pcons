@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING
 from pcons.core.errors import PconsError
 
 if TYPE_CHECKING:
+    from pcons.core.cache import BuildCache
     from pcons.core.project import Project
 
 # Set up logging
@@ -127,6 +128,98 @@ def _cancel_pending_generation() -> None:
     BaseGenerator._clear_pending()
 
 
+def _split_generators(spec: str | None) -> tuple[list[str], list[str]]:
+    """Split a colon-separated generator spec into (build, auxiliary) name lists."""
+    import pcons
+
+    build: list[str] = []
+    aux: list[str] = []
+    for name in [n.strip().lower() for n in (spec or "").split(":") if n.strip()]:
+        gen = pcons.GENERATORS.get(name)
+        if getattr(gen, "_is_build_generator", False):
+            build.append(name)
+        else:
+            aux.append(name)
+    return build, aux
+
+
+def _merge_generator_spec(cached: str | None, new_spec: str) -> str:
+    """Merge a new ``-G`` spec into the cached one.
+
+    A new build generator replaces the cached one (the build slot is sticky);
+    auxiliary generators come from the new spec. So an aux-only ``-G metadata``
+    keeps the cached build generator, leaving a later bare run something to build.
+    """
+    cached_build, _ = _split_generators(cached)
+    new_build, new_aux = _split_generators(new_spec)
+    build = new_build if new_build else cached_build
+    return ":".join(build + new_aux)
+
+
+def _as_str(value: object) -> str | None:
+    """Return *value* when it is a string, else None (cache values are untyped)."""
+    return value if isinstance(value, str) else None
+
+
+def _parse_pcons_vars(raw: str | None) -> dict[str, str]:
+    """Parse an inherited ``PCONS_VARS`` JSON blob, tolerating a malformed one."""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _warn_unread_cached_vars(
+    cached_vars: dict[str, str], cli_vars: dict[str, str]
+) -> None:
+    """Warn about persisted vars the build script never read this run.
+
+    Catches a typo like `pcons FEATRUE=on`, which persists and then does nothing
+    forever (CMake warns about unused cache entries the same way). Only vars that
+    came from the cache are checked; a var set fresh on this run's command line is
+    not nagged, since the script may only start reading it on a later run.
+    """
+    import pcons.core.vars
+
+    read = pcons.core.vars._accessed_var_names()
+    unread = sorted(set(cached_vars) - read - set(cli_vars))
+    for name in unread:
+        logger.warning(
+            "cached variable %r was never read by the build script "
+            "(typo, or no longer used?). `pcons cache clear` or --fresh to drop it.",
+            name,
+        )
+
+
+def _persist_run_settings(
+    cache: BuildCache,
+    variables: dict[str, str],
+    variant: str | None,
+    generator: str | None,
+    source_dir: str,
+) -> None:
+    """Persist the settings resolved for this run into the build-dir cache.
+
+    The caller has already merged the cache with this run's command line (CLI
+    wins). Environment overrides are intentionally excluded from these values,
+    so a transient ``VAR=x pcons`` never rewrites the persisted cache.
+
+    ``source_dir`` is recorded so a later run can detect a cache that belongs to
+    a different source tree (a copied or moved build dir) and refuse to apply it.
+    """
+    updates: dict[str, object] = {"source_dir": source_dir}
+    if variables:
+        updates["vars"] = dict(variables)
+    if variant:
+        updates["variant"] = variant
+    if generator:
+        updates["generator"] = generator
+    cache.update(updates)
+
+
 def run_script(
     script_path: Path,
     build_dir: Path,
@@ -135,6 +228,8 @@ def run_script(
     generator: list[str] | str | None = None,
     reconfigure: bool = False,
     extra_env: dict[str, str] | None = None,
+    persist: bool = True,
+    fresh: bool = False,
 ) -> tuple[int, list[Project]]:
     """Execute a Python build script in-process via exec(), so its Project
     objects are accessible through the global registry.
@@ -147,11 +242,18 @@ def run_script(
         generator: Generator to pass via PCONS_GENERATOR (ninja, make).
         reconfigure: If True, set PCONS_RECONFIGURE=1.
         extra_env: Additional environment variables to set.
+        persist: If True (default), write the resolved settings back to the
+            build-dir cache after a successful run. A regen re-invoke (ninja's
+            self-regeneration rule) passes False so it never writes a cache into
+            the directory it regenerates; its argv is already self-contained.
+        fresh: If True, discard the persisted cache before resolving settings,
+            so the run starts clean (like cmake --fresh).
 
     Returns:
         Tuple of (exit_code, list of registered Projects).
     """
     import pcons
+    import pcons.core.cache
     import pcons.core.invocation
     import pcons.core.vars
 
@@ -163,14 +265,78 @@ def run_script(
     # manifest on the second pass.
     script_path = script_path.absolute()
 
+    # Resolve persisted settings up front, before recording the invocation, so
+    # the regen command carries the effective vars/variant/generator and stays
+    # self-contained however the user arrived at them. Precedence lives here, in
+    # one place: this run's command line > environment > persisted cache > default.
+    # The core readers (get_var/get_variant/Generator) only see the PCONS_* env
+    # vars set from these values below.
+    cache = pcons.core.cache.BuildCache(build_dir)
+    current_source = str(script_path.parent.absolute())
+    recorded_source = cache.get("source_dir")
+    if isinstance(recorded_source, str) and recorded_source != current_source:
+        # The cache belongs to a different source tree (copied or moved build
+        # dir). Ignore its settings and start fresh rather than silently applying
+        # values meant for another project.
+        logger.warning(
+            "cache at %s was created for source dir %s but this run's source is "
+            "%s; ignoring the persisted settings and starting fresh.",
+            cache.path,
+            recorded_source,
+            current_source,
+        )
+        fresh = True
+    if fresh:
+        # Discard any persisted settings before resolving, so this run starts
+        # from a clean cache (like cmake --fresh). The subsequent reads then see
+        # nothing, and only this run's own settings get persisted below.
+        cache.clear()
+    cli_vars = dict(variables or {})
+    # An inherited PCONS_VARS (exported by the user) overrides the cache but loses
+    # to this run's own KEY=value args; like any environment value it is not
+    # persisted, so it never rewrites the cache.
+    inherited_vars = _parse_pcons_vars(os.environ.get("PCONS_VARS"))
+    cached_vars = cache.get("vars")
+    cached_vars = cached_vars if isinstance(cached_vars, dict) else {}
+    # `persist_vars` (cache <- this run's CLI) is what gets written back. `effective
+    # _vars` is what the script reads: cache < inherited PCONS_VARS < this-run CLI,
+    # and a cached var shadowed by a same-named bare env var is dropped so `VAR=x
+    # pcons` still beats the cache (env names are unknowable, but cache keys aren't,
+    # so we omit those from PCONS_VARS and let get_var fall through to the env).
+    persist_vars = {**cached_vars, **cli_vars}
+    merged_vars = {**cached_vars, **inherited_vars, **cli_vars}
+    effective_vars = {
+        k: v
+        for k, v in merged_vars.items()
+        if k in cli_vars or k in inherited_vars or k not in os.environ
+    }
+
+    cached_variant = _as_str(cache.get("variant"))
+    effective_variant = (
+        variant
+        or os.environ.get("PCONS_VARIANT")
+        or os.environ.get("VARIANT")
+        or cached_variant
+    )
+    persist_variant = variant or cached_variant
+
+    cached_gen = _as_str(cache.get("generator"))
+    cli_gen = ":".join(generator) if isinstance(generator, list) else generator
+    merged_gen = _merge_generator_spec(cached_gen, cli_gen) if cli_gen else None
+    effective_gen = (
+        merged_gen
+        or os.environ.get("PCONS_GENERATOR")
+        or os.environ.get("GENERATOR")
+        or cached_gen
+    )
+    persist_gen = merged_gen or cached_gen
+
     pcons.core.invocation.record(
         pcons.core.invocation.Invocation(
             script=script_path,
-            variables=dict(variables or {}),
-            variant=variant,
-            generators=(
-                [generator] if isinstance(generator, str) else list(generator or [])
-            ),
+            variables=dict(effective_vars),
+            variant=effective_variant,
+            generators=effective_gen.split(":") if effective_gen else [],
         )
     )
 
@@ -191,15 +357,14 @@ def run_script(
     set_env_var("PCONS_BUILD_DIR", str(build_dir.absolute()))
     set_env_var("PCONS_SOURCE_DIR", str(script_path.parent.absolute()))
 
-    if variables:
-        set_env_var("PCONS_VARS", json.dumps(variables))
+    if effective_vars:
+        set_env_var("PCONS_VARS", json.dumps(effective_vars))
 
-    if variant:
-        set_env_var("PCONS_VARIANT", variant)
+    if effective_variant:
+        set_env_var("PCONS_VARIANT", effective_variant)
 
-    if generator:
-        gen_spec = ":".join(generator) if isinstance(generator, list) else generator
-        set_env_var("PCONS_GENERATOR", gen_spec)
+    if effective_gen:
+        set_env_var("PCONS_GENERATOR", effective_gen)
 
     if reconfigure:
         set_env_var("PCONS_RECONFIGURE", "1")
@@ -211,11 +376,11 @@ def run_script(
     logger.info("Running %s", script_path)
     logger.debug("  PCONS_BUILD_DIR=%s", os.environ["PCONS_BUILD_DIR"])
     logger.debug("  PCONS_SOURCE_DIR=%s", os.environ["PCONS_SOURCE_DIR"])
-    if variables:
+    if effective_vars:
         logger.debug("  PCONS_VARS=%s", os.environ["PCONS_VARS"])
-    if variant:
-        logger.debug("  PCONS_VARIANT=%s", variant)
-    if generator:
+    if effective_variant:
+        logger.debug("  PCONS_VARIANT=%s", effective_variant)
+    if effective_gen:
         logger.debug("  PCONS_GENERATOR=%s", os.environ["PCONS_GENERATOR"])
 
     # Save and modify sys.path and cwd for script imports
@@ -241,6 +406,11 @@ def run_script(
 
             top_level = Project.top_level()
             BaseGenerator._generate_pending(top_level)
+            if persist:
+                _warn_unread_cached_vars(cached_vars, cli_vars)
+                _persist_run_settings(
+                    cache, persist_vars, persist_variant, persist_gen, current_source
+                )
             return 0, pcons.get_registered_projects()
         except ValueError:
             logger.error("No Project created in build script")
@@ -271,6 +441,8 @@ def run_script(
                 os.environ[key] = previous
             else:
                 os.environ.pop(key, None)
+        # PCONS_BUILD_DIR is restored above; drop the singleton bound to it.
+        pcons.core.cache.reset_cache()
 
 
 def _find_ninja(override: str | None = None) -> list[str] | None:
@@ -530,6 +702,8 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
         generator=generator,
         reconfigure=reconfigure,
         extra_env=extra_env if extra_env else None,
+        persist=not getattr(args, "no_cache", False),
+        fresh=getattr(args, "fresh", False),
     )
 
     if exit_code != 0:
@@ -588,6 +762,13 @@ def cmd_build(args: argparse.Namespace) -> int:
     elif makefile.exists():
         return run_make(build_dir, targets=targets, jobs=jobs, verbose=verbose)
     elif xcodeproj_files:
+        # Xcode picks the configuration at build time; fall back to the cached
+        # variant so a bare build matches what was generated, not Release.
+        if variant is None:
+            import pcons.core.cache
+
+            cached = pcons.core.cache.BuildCache(build_dir).get("variant")
+            variant = cached if isinstance(cached, str) else None
         return run_xcodebuild(
             build_dir,
             targets=targets,
@@ -642,6 +823,50 @@ def cmd_clean(args: argparse.Namespace) -> int:
     except OSError as e:
         logger.error("Failed to run ninja: %s", e)
         return 1
+
+
+def cmd_cache(args: argparse.Namespace) -> int:
+    """Inspect or clear the per-build-dir cache (pcons_cache.json).
+
+    Reads the cache file directly; never runs the build script. The build
+    directory comes from -B / $PCONS_BUILD_DIR (default 'build').
+    """
+    from pcons.core.cache import BuildCache
+
+    cache = BuildCache(Path(args.build_dir))
+    action = getattr(args, "cache_action", None) or "list"
+
+    if action == "path":
+        print(cache.path)
+        return 0
+
+    if cache.path is None or not cache.path.exists():
+        print(f"No cache at {cache.path}")
+        return 0
+
+    if action == "clear":
+        cache.clear()
+        print(f"Cleared {cache.path}")
+        return 0
+
+    # list / show: print the user-facing settings, one per line.
+    cached_vars = cache.get("vars")
+    if isinstance(cached_vars, dict):
+        for key in sorted(cached_vars):
+            print(f"{key}={cached_vars[key]}")
+    variant = cache.get("variant")
+    if isinstance(variant, str):
+        print(f"variant={variant}")
+    generator = cache.get("generator")
+    if isinstance(generator, str):
+        print(f"generator={generator}")
+
+    if action == "show":
+        source_dir = cache.get("source_dir")
+        if isinstance(source_dir, str):
+            print(f"# source_dir: {source_dir}")
+        print(f"# cache file: {cache.path}")
+    return 0
 
 
 def cmd_info(args: argparse.Namespace) -> int:
@@ -987,7 +1212,7 @@ def _find_command_index(argv: list[str]) -> int | None:
     command name (e.g. ``--build-dir test``) is not mistaken for the
     subcommand.
     """
-    valid_commands = {"info", "init", "generate", "build", "clean", "test"}
+    valid_commands = {"info", "init", "generate", "build", "clean", "test", "cache"}
     # Options that take a value (-C/--directory is consumed before this runs)
     options_with_value = {
         "-B",
@@ -1067,6 +1292,11 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         "--reconfigure",
         action="store_true",
         help="Force re-run configuration checks",
+    )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Discard the persisted cache and start clean (like cmake --fresh)",
     )
     parser.add_argument("-b", "--build-script", help="Path to pcons-build.py script")
 
@@ -1182,6 +1412,14 @@ def create_full_parser() -> argparse.ArgumentParser:
     )
     add_common_args(gen_parser)
     add_generate_args(gen_parser)
+    # Internal: the self-regeneration rule re-invokes `generate` with this so it
+    # doesn't persist a cache into the directory it regenerates. Not for users.
+    gen_parser.add_argument(
+        "--no-cache",
+        action="store_true",
+        default=False,
+        help=argparse.SUPPRESS,
+    )
     gen_parser.add_argument(
         "--graph",
         nargs="?",
@@ -1230,6 +1468,20 @@ def create_full_parser() -> argparse.ArgumentParser:
         "-a", "--all", action="store_true", help="Remove entire build directory"
     )
     clean_parser.set_defaults(func=cmd_clean)
+
+    # pcons cache
+    cache_parser = subparsers.add_parser(
+        "cache", help="Inspect or clear the per-build-dir cache"
+    )
+    add_common_args(cache_parser)
+    cache_parser.add_argument(
+        "cache_action",
+        nargs="?",
+        choices=["list", "show", "clear", "path"],
+        default="list",
+        help="list (default) / show / clear / path",
+    )
+    cache_parser.set_defaults(func=cmd_cache)
 
     # pcons test is dispatched in main() before argparse runs (so the
     # runner can own its own flags). This subparser exists only so that

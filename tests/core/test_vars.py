@@ -17,6 +17,7 @@ class TestGetVar:
         """Test get_var returns default when not set."""
         _clear_cli_vars()
         monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         monkeypatch.delenv("TEST_VAR", raising=False)
 
         assert get_var("TEST_VAR", "default_value") == "default_value"
@@ -25,6 +26,7 @@ class TestGetVar:
         """Test get_var returns None when not set and no default given."""
         _clear_cli_vars()
         monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         monkeypatch.delenv("TEST_VAR", raising=False)
 
         assert get_var("TEST_VAR") is None
@@ -33,6 +35,7 @@ class TestGetVar:
         """Test get_var returns None when default is None."""
         _clear_cli_vars()
         monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         monkeypatch.delenv("TEST_VAR", raising=False)
 
         assert get_var("TEST_VAR", None) is None
@@ -41,6 +44,7 @@ class TestGetVar:
         """Test get_var reads from environment variable."""
         _clear_cli_vars()
         monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         monkeypatch.setenv("TEST_VAR", "env_value")
 
         assert get_var("TEST_VAR", "default") == "env_value"
@@ -48,6 +52,7 @@ class TestGetVar:
     def test_get_var_from_pcons_vars(self, monkeypatch) -> None:
         """Test get_var reads from PCONS_VARS JSON."""
         _clear_cli_vars()
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         monkeypatch.setenv("PCONS_VARS", '{"TEST_VAR": "cli_value"}')
         monkeypatch.setenv("TEST_VAR", "env_value")  # Should be overridden
 

@@ -99,8 +99,11 @@ def Generator(
     """Get a generator instance based on CLI option or environment.
 
     Precedence: PCONS_GENERATOR (set by ``pcons -G``), then the GENERATOR
-    environment variable, then *default*. Colon-separated names (e.g.
-    ``ninja:metadata``) run each generator in order on the same project.
+    environment variable, then *default*. The CLI resolves any generator cached
+    by a prior configure into PCONS_GENERATOR before the script runs, so a later
+    bare ``pcons configure`` still reuses it (like cmake -G). Colon-separated
+    names (e.g. ``ninja:metadata``) run each generator in order on the same
+    project.
 
     Args:
         default: Generator name if not otherwise set ("ninja", "make",

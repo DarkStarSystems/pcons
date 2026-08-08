@@ -8,6 +8,7 @@ import pytest
 
 from pcons.core import invocation
 from pcons.core.builder_registry import BuilderRegistry
+from pcons.core.cache import reset_cache
 from pcons.core.preset import _PRESET_REGISTRY
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator
@@ -97,6 +98,30 @@ def clear_tool_env_vars(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def clear_pcons_env_vars(monkeypatch):
+    """Isolate tests from pcons' own runtime environment variables.
+
+    PCONS_BUILD_DIR/SOURCE_DIR/VARS/VARIANT/GENERATOR (and the bare VARIANT/
+    GENERATOR that get_variant/Generator honor) steer build-dir resolution, the
+    persisted cache, and variant/generator selection. An exported one - e.g. set
+    by an IDE integration in the dev's shell - would silently perturb every
+    run_script-driven test, sending build files to the wrong directory. Tests
+    that exercise these set them explicitly via monkeypatch after this fixture.
+    """
+    for var in (
+        "PCONS_BUILD_DIR",
+        "PCONS_SOURCE_DIR",
+        "PCONS_VARS",
+        "PCONS_VARIANT",
+        "PCONS_GENERATOR",
+        "PCONS_RECONFIGURE",
+        "VARIANT",
+        "GENERATOR",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
 def clear_project_tree():
     """Ensure global Project/generator/registry state is isolated per test.
 
@@ -108,12 +133,14 @@ def clear_project_tree():
     Project._clear_tree()
     BaseGenerator._clear_pending()
     invocation.clear()
+    reset_cache()
     registries = _snapshot_registries()
     yield
     _restore_registries(registries)
     Project._clear_tree()
     BaseGenerator._clear_pending()
     invocation.clear()
+    reset_cache()
 
 
 @pytest.fixture(autouse=True)

@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import argparse
+import logging
 import shutil
 import subprocess
 import sys
@@ -19,6 +21,7 @@ from pcons import (
 )
 from pcons.cli import (
     _find_command_index,
+    cmd_cache,
     find_command_in_argv,
     find_script,
     parse_variables,
@@ -382,6 +385,250 @@ class TestRunScriptEnvironment:
         assert "PCONS_BUILD_DIR" not in os.environ
         assert "PCONS_VARIANT" not in os.environ
         assert "CUSTOM_ENV" not in os.environ
+
+    def test_run_script_persists_vars_across_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A var configured in one run is readable by a later bare run."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        # Second run has no CLI vars; get_var must read the persisted value.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "val = pcons.get_var('MY_VAR')\n"
+            "assert val == '42', f'Got {val!r}'\n"
+            "Project('demo')\n"
+        )
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("MY_VAR", raising=False)
+        _clear_cli_vars()
+
+        # First run: configure MY_VAR=42.
+        exit_code, _ = run_script(script, build_dir, variables={"MY_VAR": "42"})
+        assert exit_code == 0
+
+        # Second run: no CLI vars -> reads persisted 42.
+        exit_code, _ = run_script(script, build_dir)
+        assert exit_code == 0
+
+    def test_env_var_beats_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A same-named env var wins over the persisted cache (precedence trap).
+
+        Folding the cache into PCONS_VARS naively would invert env > cache, since
+        get_var checks PCONS_VARS before the environment. run_script must leave an
+        env-shadowed cached var out of PCONS_VARS so the env value still wins.
+        """
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("MY_VAR", raising=False)
+        _clear_cli_vars()
+
+        # First run persists MY_VAR=42 (no assertion).
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variables={"MY_VAR": "42"})[0] == 0
+
+        # Second run: a same-named env var must win over the cached 42.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "val = pcons.get_var('MY_VAR')\n"
+            "assert val == '7', f'Got {val!r}'\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.setenv("MY_VAR", "7")
+        assert run_script(script, build_dir)[0] == 0
+
+        # And the env override must not have rewritten the cache to 7.
+        assert self._persisted_var(build_dir, "MY_VAR") == "42"
+
+    def _persisted_var(self, build_dir: Path, name: str) -> str | None:
+        import json
+
+        from pcons.core.cache import CACHE_FILE
+
+        cache_file = build_dir / CACHE_FILE
+        if not cache_file.exists():
+            return None
+        return json.loads(cache_file.read_text()).get("vars", {}).get(name)
+
+    def test_run_script_persists_variant_and_generator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--variant and -G configured in one run are reused by a later bare run."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "variant = pcons.get_variant()\n"
+            "assert variant == 'debug', f'Got {variant!r}'\n"
+            "assert isinstance(pcons.Generator(), pcons.MakefileGenerator)\n"
+            "Project('demo')\n"
+        )
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARIANT", raising=False)
+        monkeypatch.delenv("VARIANT", raising=False)
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.delenv("GENERATOR", raising=False)
+        _clear_cli_vars()
+
+        # First run: configure variant=debug, generator=make.
+        exit_code, _ = run_script(script, build_dir, variant="debug", generator="make")
+        assert exit_code == 0
+
+        # Second run: no CLI settings -> both read from the cache.
+        exit_code, _ = run_script(script, build_dir)
+        assert exit_code == 0
+
+    def test_failed_configure_does_not_persist(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A build script that fails must not poison the cache."""
+        from pcons.core.cache import CACHE_FILE
+
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("raise RuntimeError('boom')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        exit_code, _ = run_script(script, build_dir, variables={"MY_VAR": "42"})
+        assert exit_code == 1
+        assert not (build_dir / CACHE_FILE).exists()
+
+    def test_fresh_discards_persisted_settings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--fresh drops stale cached vars, keeping only this run's own."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        # First run persists HELLO.
+        assert run_script(script, build_dir, variables={"HELLO": "1"})[0] == 0
+        assert self._persisted_var(build_dir, "HELLO") == "1"
+
+        # A --fresh run with a different var must not carry HELLO forward.
+        assert (
+            run_script(script, build_dir, variables={"WORLD": "2"}, fresh=True)[0] == 0
+        )
+        assert self._persisted_var(build_dir, "HELLO") is None
+        assert self._persisted_var(build_dir, "WORLD") == "2"
+
+    def test_fresh_ignores_cached_value_for_this_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A --fresh run reads the default, not a previously cached value."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("MY_VAR", raising=False)
+        _clear_cli_vars()
+
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variables={"MY_VAR": "42"})[0] == 0
+
+        # --fresh with no CLI var -> get_var sees the default, not cached 42.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_var('MY_VAR', 'default') == 'default'\n"
+            "Project('demo')\n"
+        )
+        assert run_script(script, build_dir, fresh=True)[0] == 0
+
+    def test_regen_run_does_not_persist(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """persist=False (a regen re-invoke) writes no cache into the build dir."""
+        from pcons.core.cache import CACHE_FILE
+
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        exit_code, _ = run_script(
+            script, build_dir, variables={"X": "1"}, variant="debug", persist=False
+        )
+        assert exit_code == 0
+        assert not (build_dir / CACHE_FILE).exists()
+
+    def test_regen_command_carries_no_cache_flag(self, tmp_path: Path) -> None:
+        """The self-regeneration argv ends with --no-cache so it never persists."""
+        from pcons.core.invocation import Invocation
+
+        (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
+        inv = Invocation(script=Path("pcons-build.py"), variant="release")
+        argv = inv.command(root_dir=tmp_path, run_dir=tmp_path / "build")
+
+        assert argv is not None
+        assert "--no-cache" in argv
+
+    def _persisted_generator(self, build_dir: Path) -> str | None:
+        import json
+
+        from pcons.core.cache import CACHE_FILE
+
+        cache_file = build_dir / CACHE_FILE
+        if not cache_file.exists():
+            return None
+        return json.loads(cache_file.read_text()).get("generator")
+
+    def test_aux_generator_keeps_cached_build_generator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An aux-only -G metadata run keeps the cached build generator (sticky)."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.delenv("GENERATOR", raising=False)
+        _clear_cli_vars()
+
+        # Build generator persisted.
+        assert run_script(script, build_dir, generator="make")[0] == 0
+        assert self._persisted_generator(build_dir) == "make"
+
+        # Aux-only run: build slot stays make, metadata added (not erased).
+        assert run_script(script, build_dir, generator="metadata")[0] == 0
+        assert self._persisted_generator(build_dir) == "make:metadata"
+
+    def test_build_generator_replaces_cached_build_generator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A new build generator replaces the cached one; aux from the new spec."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_GENERATOR", raising=False)
+        monkeypatch.delenv("GENERATOR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir, generator=["ninja", "metadata"])[0] == 0
+        assert self._persisted_generator(build_dir) == "ninja:metadata"
+
+        # make replaces ninja in the build slot; new spec has no aux.
+        assert run_script(script, build_dir, generator="make")[0] == 0
+        assert self._persisted_generator(build_dir) == "make"
 
 
 class TestDirectoryArg:
@@ -1141,3 +1388,343 @@ generator.generate(project)
         )
         assert result.returncode == 0
         assert not (tmp_path / "build").exists()
+
+
+class TestUnreadCachedVarWarning:
+    """The CLI warns about persisted vars the build script never reads (typos)."""
+
+    def _run(
+        self,
+        script: Path,
+        build_dir: Path,
+        caplog,
+        **kwargs,
+    ) -> list[str]:
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="pcons"):
+            assert run_script(script, build_dir, **kwargs)[0] == 0
+        return [r.message for r in caplog.records]
+
+    def test_warns_on_typo_cached_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        # Persist a typo'd var and a real one.
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert (
+            run_script(script, build_dir, variables={"FEATRUE": "on", "FEATURE": "on"})[
+                0
+            ]
+            == 0
+        )
+
+        # A later bare run whose script reads only FEATURE.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "pcons.get_var('FEATURE')\n"
+            "Project('demo')\n"
+        )
+        msgs = self._run(script, build_dir, caplog)
+        assert any("FEATRUE" in m for m in msgs)
+        assert not any("'FEATURE'" in m for m in msgs)
+
+    def test_no_warning_when_all_read(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variables={"PORT": "8080"})[0] == 0
+
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "pcons.get_var('PORT')\n"
+            "Project('demo')\n"
+        )
+        msgs = self._run(script, build_dir, caplog)
+        assert not any("PORT" in m for m in msgs)
+
+    def test_no_warning_for_var_set_this_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        """A var set fresh on this run's command line is not nagged, even unread."""
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        msgs = self._run(script, build_dir, caplog, variables={"NEWVAR": "1"})
+        assert not any("NEWVAR" in m for m in msgs)
+
+
+class TestSourceDirMismatch:
+    """The cache records its source dir and refuses to apply to another tree."""
+
+    def _script(self, dir_: Path, body: str) -> Path:
+        dir_.mkdir(parents=True, exist_ok=True)
+        script = dir_ / "pcons-build.py"
+        script.write_text(body)
+        return script
+
+    def test_records_source_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        src = self._script(
+            tmp_path / "a", "from pcons import Project\nProject('demo')\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(src, build_dir)[0] == 0
+        assert BuildCache(build_dir).get("source_dir") == str(src.parent)
+
+    def test_moved_cache_is_ignored_with_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        build_dir = tmp_path / "build"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("HELLO", raising=False)
+        _clear_cli_vars()
+
+        # Configure in source tree A.
+        src_a = self._script(
+            tmp_path / "a", "from pcons import Project\nProject('demo')\n"
+        )
+        assert run_script(src_a, build_dir, variables={"HELLO": "1"})[0] == 0
+
+        # Simulate a separate process: a real second `pcons` run starts with a
+        # clean project tree. (run_script doesn't reset it; the CLI process does.)
+        from pcons.core.project import Project
+
+        Project._clear_tree()
+
+        # A script in tree B, same build dir, must not inherit A's HELLO.
+        src_b = self._script(
+            tmp_path / "b",
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_var('HELLO', 'def') == 'def'\n"
+            "Project('demo')\n",
+        )
+        caplog.clear()
+        with caplog.at_level(logging.WARNING, logger="pcons"):
+            assert run_script(src_b, build_dir)[0] == 0
+        assert any("source dir" in r.message for r in caplog.records)
+
+        # The cache now belongs to B.
+        from pcons.core.cache import BuildCache
+
+        assert BuildCache(build_dir).get("source_dir") == str(src_b.parent)
+
+
+class TestEnvOverridesCache:
+    """An exported PCONS_* env var overrides the persisted cache (but not a CLI
+    flag), and is itself never persisted."""
+
+    def _persisted(self, build_dir: Path, key: str) -> object:
+        from pcons.core.cache import BuildCache
+
+        return BuildCache(build_dir).get(key)
+
+    def test_pcons_variant_env_overrides_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        # Persist variant=release.
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variant="release")[0] == 0
+
+        # An exported PCONS_VARIANT beats the cached release.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_variant() == 'debug', pcons.get_variant()\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.setenv("PCONS_VARIANT", "debug")
+        assert run_script(script, build_dir)[0] == 0
+        # But the env value did not rewrite the cache.
+        assert self._persisted(build_dir, "variant") == "release"
+
+    def test_cli_variant_beats_pcons_variant_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_variant() == 'release', pcons.get_variant()\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.setenv("PCONS_VARIANT", "debug")
+        _clear_cli_vars()
+
+        # The --variant flag wins over the exported PCONS_VARIANT.
+        assert run_script(script, build_dir, variant="release")[0] == 0
+
+    def test_pcons_generator_env_overrides_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, generator="ninja")[0] == 0
+
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert isinstance(pcons.Generator(), pcons.MakefileGenerator)\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.setenv("PCONS_GENERATOR", "make")
+        assert run_script(script, build_dir)[0] == 0
+        assert self._persisted(build_dir, "generator") == "ninja"
+
+    def test_pcons_vars_env_overrides_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PORT", raising=False)
+        _clear_cli_vars()
+
+        # Persist PORT=1.
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variables={"PORT": "1"})[0] == 0
+
+        # An exported PCONS_VARS overrides the cached PORT.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_var('PORT') == '2', pcons.get_var('PORT')\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.setenv("PCONS_VARS", '{"PORT": "2"}')
+        assert run_script(script, build_dir)[0] == 0
+        # The env value did not rewrite the cached PORT.
+        assert self._persisted(build_dir, "vars") == {"PORT": "1"}
+
+
+class TestCacheCommand:
+    """Tests for the `pcons cache` subcommand (list/show/clear/path)."""
+
+    def _populate(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        run_script(
+            script,
+            build_dir,
+            variables={"HELLO": "42"},
+            variant="debug",
+            generator="ninja",
+        )
+        return build_dir
+
+    def _args(self, build_dir: Path, action: str) -> argparse.Namespace:
+        return argparse.Namespace(build_dir=str(build_dir), cache_action=action)
+
+    def test_cache_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        build_dir = self._populate(tmp_path, monkeypatch)
+        assert cmd_cache(self._args(build_dir, "list")) == 0
+        out = capsys.readouterr().out
+        assert "HELLO=42" in out
+        assert "variant=debug" in out
+        assert "generator=ninja" in out
+
+    def test_cache_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        from pcons.core.cache import CACHE_FILE
+
+        build_dir = self._populate(tmp_path, monkeypatch)
+        assert cmd_cache(self._args(build_dir, "path")) == 0
+        assert str(build_dir / CACHE_FILE) in capsys.readouterr().out
+
+    def test_cache_clear(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        build_dir = self._populate(tmp_path, monkeypatch)
+        assert cmd_cache(self._args(build_dir, "clear")) == 0
+        capsys.readouterr()
+        # After clearing, list shows no settings.
+        assert cmd_cache(self._args(build_dir, "list")) == 0
+        assert capsys.readouterr().out.strip() == ""
+
+    def test_cache_missing_reports_cleanly(self, tmp_path: Path, capsys) -> None:
+        assert cmd_cache(self._args(tmp_path / "nope", "list")) == 0
+        assert "No cache" in capsys.readouterr().out
+
+
+class TestCacheCLI:
+    """End-to-end CLI coverage: real argparse + subprocess, not run_script directly.
+
+    Exercises the wiring the in-process tests bypass: KEY=value parsing, the
+    `cache` subcommand, and the --fresh flag through an actual `pcons` invocation.
+    """
+
+    def _script(self, tmp_path: Path) -> None:
+        (tmp_path / "pcons-build.py").write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "pcons.get_var('HELLO')\n"
+            "Project('demo')\n"
+        )
+
+    def _run(self, tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, "-m", "pcons.cli", *args],
+            capture_output=True,
+            text=True,
+            cwd=tmp_path,
+        )
+
+    def test_var_persists_across_cli_runs(self, tmp_path: Path) -> None:
+        self._script(tmp_path)
+        r = self._run(tmp_path, "generate", "HELLO=42")
+        assert r.returncode == 0, r.stderr
+        r = self._run(tmp_path, "cache", "list")
+        assert r.returncode == 0, r.stderr
+        assert "HELLO=42" in r.stdout
+
+    def test_cache_clear_via_cli(self, tmp_path: Path) -> None:
+        self._script(tmp_path)
+        assert self._run(tmp_path, "generate", "HELLO=42").returncode == 0
+        assert self._run(tmp_path, "cache", "clear").returncode == 0
+        r = self._run(tmp_path, "cache", "list")
+        assert "HELLO=42" not in r.stdout
+
+    def test_fresh_flag_via_cli(self, tmp_path: Path) -> None:
+        self._script(tmp_path)
+        assert self._run(tmp_path, "generate", "HELLO=1").returncode == 0
+        assert self._run(tmp_path, "generate", "--fresh", "WORLD=2").returncode == 0
+        r = self._run(tmp_path, "cache", "list")
+        assert "HELLO" not in r.stdout
+        assert "WORLD=2" in r.stdout
