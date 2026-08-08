@@ -3631,11 +3631,7 @@ PythonWorker(setup="mypkg.warmup:connect")  # ready by doing
 
 `preload` names installed packages to import — never a module of the project being built, which has to load fresh or an edit to it would be masked by the copy the worker already holds. `setup` is the general case: a `package.module:function` called once, free to open, claim or warm whatever the actions need.
 
-Three things hold whatever kind of worker you bring:
-
-- **Every action is isolated.** Nothing one action does may be observable by the next. This is the contract's one hard requirement, because getting it wrong yields a wrong build rather than a slow one. `PythonWorker` achieves it by forking a child per action.
-- **A worker is an optimization.** With none reachable — plain `ninja`, CI, Windows, a worker that will not start — the command runs directly. A generated build file always stands alone.
-- **Nothing supervises workers.** The first action that needs one starts it; it exits after `idle_timeout` seconds of quiet.
+Whatever kind of worker you bring, the contract holds: every action is isolated from the ones before it, nothing supervises workers (the first action that needs one starts it, and it exits when idle), and a worker is only ever an optimization — with none reachable, the command runs directly and the build is slower rather than broken. [The worker protocol](worker-protocol.md) is the detail.
 
 Two things to watch for with `PythonWorker`:
 

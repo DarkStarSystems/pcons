@@ -1,19 +1,15 @@
 # SPDX-License-Identifier: MIT
 """Command launchers: tokens that run *in front of* an edge's command.
 
-A launcher wraps the program an edge would otherwise run directly —
-``ccache``, ``time``, ``valgrind``, a persistent-worker client. It is kept as
-its own token list rather than folded into the tool's ``cmd``, for two
-reasons. Commands stay lists until a generator quotes them, so a launcher
-merged into ``cmd`` as ``"ccache gcc"`` becomes one shell word and fails.
-And keeping it separate lets each generator decide: ninja and make prefix it,
-while ``compile_commands.json`` reports the compiler an IDE actually wants.
+``ccache`` before the compiler, ``time`` before anything worth measuring, a
+persistent-worker client. See the Command Launchers section of the user guide
+for how they are declared.
 
-Launchers are set per tool namespace, so they follow the tool that runs the
-edge::
-
-    env.cc.launcher = ["ccache"]
-    env.cc.launcher = ["ccache", "time"]   # outermost first
+Kept as its own token list rather than folded into a tool's ``cmd``, for two
+reasons that are easy to undo by accident: commands stay lists until a
+generator quotes them, so ``"ccache gcc"`` merged into ``cmd`` becomes one
+shell word and fails; and keeping it separate lets each generator decide,
+which is how ``compile_commands.json`` reports the compiler an IDE wants.
 """
 
 from __future__ import annotations

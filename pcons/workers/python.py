@@ -33,16 +33,11 @@ def PythonWorker(  # noqa: N802 - a factory, named for what it returns
             only -- never a module of the project being built, which has to
             load fresh or an edit to it would be masked by the copy the worker
             already holds.
-        setup: ``package.module:function`` to call once the imports are done,
-            for readiness that is not an import: opening a connection,
-            claiming a licence, warming a cache.
-        python: Interpreter to run, defaulting to the one running pcons.
+        setup: ``package.module:function`` called once the imports are done,
+            for readiness that is not an import.
+        python: Interpreter to run, defaulting to the one running pcons, which
+            is not the project's if pcons came from uvx or a global install.
         idle_timeout: Seconds to wait for work before exiting.
-
-    Returns:
-        A Worker that runs Python actions, and nothing else -- a command that
-        is not an interpreter running a script is handed back and run
-        directly, rather than approximated.
     """
     from pathlib import Path
 

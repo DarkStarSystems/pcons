@@ -1,14 +1,13 @@
 # The worker protocol
 
 pcons does not implement workers. It defines what one has to do, and runs a
-client in front of each action that uses one. This document is that contract.
+client in front of each action that uses one. This document is that contract:
+what a worker must do, and what pcons guarantees in return. For what workers
+are *for* and how a build script declares one, see [Persistent
+Workers](user-guide.md#persistent-workers) in the user guide.
+
 Anything that can listen on a Unix socket can be a worker: a Python process, a
 compiled binary, a thin client for a service that is already running.
-
-A worker exists because an action costs more to *start* than to run — opening
-a connection, claiming a licence, warming a cache, loading a model, spinning up
-a runtime. The worker pays that once, and every action after it starts ready.
-
 `pcons/workers/python_server.py` implements everything below in about 150 lines
 of standard library, and is worth reading beside this page.
 

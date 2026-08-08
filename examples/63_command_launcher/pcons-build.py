@@ -2,27 +2,16 @@
 # SPDX-License-Identifier: MIT
 """Running commands behind a launcher.
 
-A launcher is a program that runs *in front of* the command an edge would
-otherwise run: ``ccache`` in front of the compiler, ``time`` in front of
-anything you want to measure, ``valgrind`` in front of a test.
+A launcher runs in front of the command an edge would otherwise run:
+``ccache`` before the compiler, ``time`` before anything worth measuring.
+See the Command Launchers section of the user guide.
 
-    env.cc.launcher = ["ccache"]
+Two stacked launchers wrap every C compile here, and a third belongs to a
+single command. Both stand-ins ship with the example so it runs anywhere;
+the real thing needs only a program name. For a compiler cache there is a
+shortcut that finds whichever is installed::
 
-It belongs to the tool namespace, so it follows the tool rather than any one
-target, and it is a list of tokens like every other command in pcons -- which
-is what keeps a launcher whose path contains a space from falling apart.
-
-Launchers stack, outermost first. Here two of them wrap every C compile: a
-stand-in for a compiler cache, and one for ``time``. Both are shipped with the
-example so it runs anywhere; the real thing needs only the program's name.
-
-For the common case there is a shortcut that picks whichever cache is
-installed and sets it on ``cc`` and ``cxx`` for you:
-
-    env.use_compiler_cache()          # sccache if present, else ccache
-
-Note that ``compile_commands.json`` reports the compiler itself, without the
-launchers, so clangd and friends still see the real compile.
+    env.use_compiler_cache()
 """
 
 import sys
