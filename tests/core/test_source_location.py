@@ -68,10 +68,39 @@ class TestGetSourceLocation:
 
 
 class TestGetCallerLocation:
+    """Where a build script called into pcons.
+
+    Not "one frame up": pcons reaches its builders by more than one path, and
+    a fixed depth is right for one of them and wrong for the other. The rule
+    is the first frame that is not pcons's own.
+    """
+
     def helper(self):
         return get_caller_location()
 
-    def test_captures_callers_caller(self):
-        loc = self.helper()
-        # Should capture this function, not helper()
-        assert loc.function == "test_captures_callers_caller"
+    def test_reports_the_first_frame_outside_pcons(self):
+        """This test file is not pcons, so `helper` is where it stops."""
+        assert self.helper().function == "helper"
+
+    def test_reports_the_caller_of_a_pcons_entry_point(self):
+        """The case that matters: a builder called from a build script."""
+        loc = get_caller_location()
+
+        assert loc.function == "test_reports_the_caller_of_a_pcons_entry_point"
+
+    def test_a_wrapper_inside_pcons_is_stepped_over(self, tmp_path):
+        """project.Command() forwards to env.Command(); the line worth naming
+        is the one somebody wrote, not the one that forwarded it."""
+        from pcons import Project
+
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        target = project.Command(
+            "gen",
+            env,
+            target=project.build_dir / "out.txt",
+            source=None,
+            command=["run"],
+        )
+
+        assert target.defined_at.filename == __file__

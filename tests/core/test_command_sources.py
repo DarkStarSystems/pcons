@@ -123,3 +123,47 @@ class TestSingularSourceWarning:
         self._command(tmp_path, ["./$SOURCE", "$TARGET"], ["tool", "data"])
 
         assert "$SOURCE with 2 sources" in caplog.text
+
+
+class TestWarningAttribution:
+    """The warning must name the line somebody wrote.
+
+    `project.Command` forwards to `env.Command`, so a fixed frame depth is
+    right for one entry point and names pcons's own source for the other --
+    the same two-entry-points shape as the docstrings that disagreed.
+    """
+
+    @staticmethod
+    def _sources(tmp_path: Path) -> list[Path]:
+        for name in ("a.py", "b.py"):
+            (tmp_path / name).write_text("")
+        return [tmp_path / "a.py", tmp_path / "b.py"]
+
+    def test_through_env_command(self, tmp_path: Path, caplog) -> None:
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            name="gen",
+            target=project.build_dir / "out.txt",
+            source=self._sources(tmp_path),
+            command=["run", "$SOURCE"],
+        )
+
+        assert __file__ in caplog.text
+        assert "pcons/core" not in caplog.text
+
+    def test_through_project_command(self, tmp_path: Path, caplog) -> None:
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        project.Command(
+            "gen",
+            env,
+            target=project.build_dir / "out.txt",
+            source=self._sources(tmp_path),
+            command=["run", "$SOURCE"],
+        )
+
+        assert __file__ in caplog.text
+        assert "pcons/core" not in caplog.text
