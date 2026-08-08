@@ -838,52 +838,20 @@ class Environment(_EnvironmentStubs):
             self.target_arch = arch
 
     def use_compiler_cache(self, tool: str | None = None) -> None:
-        """Wrap compile commands with a compiler cache tool.
+        """Run the compile commands behind a compiler cache.
 
-        Prepends ccache or sccache to the cc and cxx commands. Only wraps
-        compile tools, never the linker or archiver.
+        Sets ccache or sccache as the launcher on the cc and cxx tools; the
+        linker and archiver are left alone, having nothing to cache. Which
+        caches exist, and their quirks, live in
+        :mod:`pcons.tools.compiler_cache`.
 
         Args:
             tool: "ccache", "sccache", or None for auto-detect.
                   Auto-detect tries sccache first, then ccache.
         """
-        import shutil
+        from pcons.tools.compiler_cache import apply_compiler_cache
 
-        if tool is None:
-            for candidate in ("sccache", "ccache"):
-                if shutil.which(candidate):
-                    tool = candidate
-                    break
-            if tool is None:
-                logger.warning("No compiler cache found (tried sccache, ccache)")
-                return
-
-        if tool not in ("ccache", "sccache"):
-            logger.warning("Unknown compiler cache tool '%s'", tool)
-            return
-
-        if not shutil.which(tool):
-            logger.warning("Compiler cache '%s' not found in PATH", tool)
-            return
-
-        # Warn about ccache + MSVC incompatibility
-        if tool == "ccache":
-            for tool_name in ("cc", "cxx"):
-                if self.has_tool(tool_name):
-                    t = getattr(self, tool_name)
-                    cmd = t.get("cmd", "")
-                    if isinstance(cmd, str) and ("cl.exe" in cmd or cmd.endswith("cl")):
-                        logger.warning(
-                            "ccache does not support MSVC cl.exe; use sccache instead"
-                        )
-                        return
-
-        for tool_name in ("cc", "cxx"):
-            if self.has_tool(tool_name):
-                t = getattr(self, tool_name)
-                cmd = t.get("cmd", "")
-                if isinstance(cmd, str) and cmd and not cmd.startswith(tool):
-                    t.cmd = f"{tool} {cmd}"
+        apply_compiler_cache(self, tool)
 
     def apply_preset(self, name: KnownFeaturePreset | str) -> None:
         """Apply a named feature preset to this environment.

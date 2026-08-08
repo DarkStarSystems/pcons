@@ -31,6 +31,7 @@ if TYPE_CHECKING:
         libdirs: list[Path | str]  # library search directories
         frameworks: list[str]  # macOS frameworks
         frameworkdirs: list[Path | str]  # macOS framework search dirs
+        launcher: list[Any]  # program to run in front of the command, e.g. ccache
         exe: str  # path to the tool executable
         version: str  # the tool's detected version
         depflags: list[Any]  # flags that make the compiler emit a depfile

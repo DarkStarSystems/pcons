@@ -44,7 +44,10 @@ class ToolConfig(_ToolConfigStubs):
             **defaults: Default variable values.
         """
         object.__setattr__(self, "_name", name)
-        object.__setattr__(self, "_vars", dict(defaults))
+        # Every tool that runs a command can be run behind one (ccache, a
+        # profiler, a persistent-worker client), so the variable is always
+        # there rather than depending on the tool's author to declare it.
+        object.__setattr__(self, "_vars", {"launcher": [], **defaults})
         # Back-reference to the owning Environment, set when the tool is added.
         # Used only by explain(); None for detached/standalone ToolConfigs.
         object.__setattr__(self, "_env", None)
@@ -87,7 +90,7 @@ class ToolConfig(_ToolConfigStubs):
 
     # Variable names that should always be lists (flags, paths, etc.)
     # Command templates (objcmd, linkcmd, etc.) can be strings or lists.
-    _LIST_ONLY_VARS = frozenset({"flags", "includes", "defines", "libs"})
+    _LIST_ONLY_VARS = frozenset({"flags", "includes", "defines", "libs", "launcher"})
 
     def mark_declared(self) -> None:
         """Note that the owning tool has declared the variables it consumes.

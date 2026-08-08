@@ -3457,11 +3457,29 @@ env.use_compiler_cache("ccache")
 env.use_compiler_cache("sccache")
 ```
 
-This prepends the cache tool to the `cc` and `cxx` commands. Only compile commands are wrapped — the linker and archiver are left unchanged. If the requested tool isn't in PATH, a warning is logged and no changes are made.
+This sets the cache as the *launcher* on the `cc` and `cxx` tools (see below). Only compile commands are affected — the linker and archiver have nothing to cache. If the requested tool isn't in PATH, a warning is logged and no changes are made.
 
 Notes:
 - On MSVC (`cl.exe`), only sccache works. If you request ccache with an MSVC toolchain, pcons warns and does nothing.
-- Commands are never double-wrapped: calling `use_compiler_cache()` when commands are already wrapped is a no-op.
+- Calling `use_compiler_cache()` twice is a no-op, and it leaves any launcher you set yourself in place.
+
+### Command Launchers
+
+A launcher is a program that runs *in front of* the command an edge would otherwise run: `ccache` ahead of the compiler, `time` or `valgrind` ahead of anything you want to measure or check. It belongs to a tool namespace, so it follows the tool rather than any one target:
+
+```python
+env.cc.launcher = ["ccache"]
+env.cc.launcher = ["ccache", "time"]  # stacked, outermost first
+```
+
+Like every command in pcons, a launcher is a list of tokens rather than a string, so a program whose path contains a space stays one argument.
+
+Two things worth knowing:
+
+- **Launcher tokens are passed through as written.** They are a program and its arguments, not paths in the dependency graph, so pcons does not rewrite them for the directory the build runs in. Use absolute paths (`project.root_dir / "tools" / "wrap.py"`).
+- **`compile_commands.json` reports the compiler itself**, without launchers, so clangd and other tools see the real compile.
+
+See `examples/63_command_launcher` for two stacked launchers wrapping every C compile.
 
 ### Multiple Toolchains
 

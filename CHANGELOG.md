@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Command launchers.** A tool can now be run behind another program --
+  `env.cc.launcher = ["ccache"]` -- and they stack, outermost first. Launchers
+  are token lists like every other command in pcons, so one whose path contains
+  a space stays a single argument, and `compile_commands.json` reports the
+  compiler itself rather than whatever is wrapping it. See
+  `examples/63_command_launcher`.
+
+### Fixed
+
+- **`env.use_compiler_cache()` produced a build that could not run.** It
+  prepended the cache to the compiler as a string, so `ccache` and the compiler
+  became a single shell word: every compile failed with `ccache /usr/bin/cc: No
+  such file or directory` (exit 127). It now sets a launcher instead. The old
+  tests asserted on the command string and skipped entirely unless a cache was
+  installed, so this was invisible; the new example builds through a stub cache
+  on every platform in CI.
+
 ## [0.25.0] - 2026-08-05
 
 This release turns a class of silent mistakes into errors. Several things that

@@ -974,6 +974,10 @@ class GenericCommandBuilder(BaseBuilder):
 
         command = self._expand_command(env)
 
+        from pcons.core.launcher import resolve_launcher
+
+        launcher = resolve_launcher(env, "command")
+
         # Build info lives on the first (primary) target
         if result:
             primary = result[0]
@@ -981,6 +985,7 @@ class GenericCommandBuilder(BaseBuilder):
                 "tool": "command",
                 "command_var": "cmdline",
                 "command": command,
+                "launcher": launcher,
                 "rule_name": self._rule_name,
                 "language": None,
                 "sources": sources,

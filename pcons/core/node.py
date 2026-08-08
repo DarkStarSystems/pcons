@@ -91,6 +91,11 @@ class BuildInfo(TypedDict, total=False):
     # -fmodule-mapper=/-Mno-modules to specific object compiles.
     extra_command_flags: list[str]
 
+    # Tokens that run in front of the command (ccache, a profiler, a
+    # persistent-worker client). Kept apart from `command` so a generator
+    # reporting the real tool, like compile_commands.json, can drop it.
+    launcher: list[str]
+
     # Environment reference for command expansion
     # Used by resolver to expand command templates
     env: Any  # Environment, but avoid circular import

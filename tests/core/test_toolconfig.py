@@ -169,7 +169,8 @@ class TestToolConfigNamespace:
     def test_as_dict(self):
         tc = ToolConfig("cc", cmd="gcc", flags=["-Wall"])
         d = tc.as_dict()
-        assert d == {"cmd": "gcc", "flags": ["-Wall"]}
+        # Every tool namespace carries an (empty) launcher.
+        assert d == {"cmd": "gcc", "flags": ["-Wall"], "launcher": []}
 
     def test_as_namespace(self):
         tc = ToolConfig("cc", cmd="gcc", flags=["-Wall"])
