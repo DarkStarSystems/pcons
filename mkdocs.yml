@@ -31,6 +31,7 @@ nav:
   - User Guide: user-guide.md
   - Qt: qt.md
   - Presets: presets.md
+  - Worker protocol: worker-protocol.md
   - Porting from CMake: porting-from-cmake.md
   - Porting from Make: porting-from-make.md
   - Changelog: changelog.md

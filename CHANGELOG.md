@@ -37,14 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   launcher=[...])` -- for wrapping one expensive step rather than every edge
   a tool runs. See `examples/63_command_launcher`.
 
-- **Persistent workers**, for actions that cost more to start than to run.
-  `env.Command(..., worker=Worker(preload=[...]))` routes an action through a
-  process that has already paid its startup cost, and forks a pristine child
-  per action so nothing one leaks into the next. The first action that needs a
-  worker starts it, and it exits when idle, so nothing has to manage its
-  lifetime. With no worker listening -- plain `ninja`, CI, Windows -- the
-  command runs directly, so a generated build file still builds by itself. See
-  `examples/64_persistent_worker`.
+- **Persistent workers**, for actions that cost more to start than to run --
+  opening a connection, claiming a licence, warming a cache, loading a model.
+  `env.Command(..., worker=Worker(command=[...]))` routes an action through a
+  process that has already paid that cost. pcons defines what a worker must do
+  (`docs/worker-protocol.md`) rather than implementing one, so a project can
+  bring any kind: a script, a compiled binary, a client for a running service.
+  `PythonWorker(preload=[...], setup=...)` is bundled for Python actions. The
+  first action that needs a worker starts it and it exits when idle, so nothing
+  has to manage its lifetime; with none reachable -- plain `ninja`, CI, Windows
+  -- the command runs directly, so a generated build file still builds by
+  itself. See `examples/64_persistent_worker`.
 
 ### Fixed
 
