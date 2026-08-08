@@ -30,6 +30,7 @@ import json
 import os
 import runpy
 import socket
+import subprocess
 import sys
 import threading
 from pathlib import Path
@@ -53,18 +54,85 @@ def become_ready(modules: list[str], setup: str) -> None:
         getattr(module, attribute)()
 
 
-def environment_stamp(python: str) -> str:
-    """A cheap fingerprint of the interpreter's environment.
+def venv_of(python: str) -> Path:
+    """The environment an interpreter belongs to.
 
-    A worker holds library code in memory, so a changed virtualenv makes it
-    stale. Comparing this on every request costs one stat and turns "the
-    build used the old library" into a restart.
+    Deliberately *not* resolved: uv's ``.venv/bin/python`` is a symlink to an
+    interpreter that lives outside the venv and knows nothing about the
+    packages installed in it.
     """
-    config = Path(python).resolve().parent.parent / "pyvenv.cfg"
+    return Path(python).parent.parent
+
+
+def environment_stamp(python: str) -> str:
+    """A fingerprint of the environment a worker serves.
+
+    Named by directory rather than by executable, because ``python`` and
+    ``python3`` in one ``bin/`` are the same environment; and carrying
+    ``pyvenv.cfg``'s mtime, so that recreating the venv makes a worker holding
+    its code stand down.
+    """
+    venv = venv_of(python)
     try:
-        return f"{python}:{config.stat().st_mtime_ns}"
+        return f"{venv}:{(venv / 'pyvenv.cfg').stat().st_mtime_ns}"
     except OSError:
-        return python
+        return str(venv)
+
+
+def os_thread_count() -> int | None:
+    """Threads in this process as the operating system counts them.
+
+    ``threading.active_count()`` sees only Python threads, and the hazard that
+    makes forking unsafe is native ones -- OpenMP, TBB, a threaded BLAS --
+    which numpy, scipy and scikit-learn routinely start while being imported.
+    Asked once, after becoming ready, since that is when they would appear.
+
+    Returns None when it cannot be determined, which is not the same as one.
+    """
+    try:
+        with open("/proc/self/status", encoding="utf-8") as status:  # Linux
+            for line in status:
+                if line.startswith("Threads:"):
+                    return int(line.split()[1])
+    except OSError:
+        pass
+    try:  # macOS and the BSDs: one line per thread, after a header
+        listing = subprocess.run(
+            ["ps", "-M", str(os.getpid())],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        if listing.returncode == 0:
+            rows = [row for row in listing.stdout.splitlines()[1:] if row.strip()]
+            return len(rows) or None
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
+def fork_hazard() -> str:
+    """Why forking would be unsafe here, or "" when it is safe.
+
+    Erring towards refusing: an unknown thread count is treated as a reason to
+    stand aside, because the cost of being wrong is a corrupted child rather
+    than a slow build.
+    """
+    if threading.active_count() != 1:
+        return "the worker has started Python threads, so forking is unsafe"
+    native = os_thread_count()
+    if native is None:
+        return "the worker cannot count its own threads, so forking may be unsafe"
+    if native > 1:
+        return f"the worker has {native} native threads, so forking is unsafe"
+    return ""
+
+
+def debug(message: str) -> None:
+    """Explain a refusal. Discarded unless the client asked to hear it."""
+    if os.environ.get("PCONS_WORKER_DEBUG"):
+        print(f"pcons worker: {message}", file=sys.stderr, flush=True)
 
 
 def recv_request(conn: socket.socket) -> tuple[dict, list[int]]:
@@ -136,7 +204,16 @@ def run_request(request: dict, fds: list[int]) -> int:
 def serve(sock_path: Path, modules: list[str], setup: str, idle_timeout: float) -> int:
     """Listen until nothing has asked for work in *idle_timeout* seconds."""
     become_ready(modules, setup)
-    stamp = environment_stamp(sys.executable)
+
+    # Asked once, now, rather than per request: threads appear while becoming
+    # ready, and asking the operating system is not free.
+    hazard = fork_hazard()
+    if hazard:
+        debug(hazard)
+    # The environment served is adopted from the first client, which stamps
+    # the interpreter it asked to have started -- so both sides agree on it
+    # even when pcons itself is running from somewhere else entirely.
+    state: dict = {"stamp": None, "hazard": hazard}
 
     # Bind to a temporary name and rename into place, so a second worker
     # racing to start loses the rename rather than unlinking a live socket.
@@ -159,7 +236,7 @@ def serve(sock_path: Path, modules: list[str], setup: str, idle_timeout: float) 
                 conn, _ = server.accept()
             except TimeoutError:
                 return 0
-            _serve_one(server, conn, stamp)
+            _serve_one(server, conn, state)
             _reap()
     finally:
         server.close()
@@ -167,7 +244,31 @@ def serve(sock_path: Path, modules: list[str], setup: str, idle_timeout: float) 
         sock_path.unlink(missing_ok=True)
 
 
-def _serve_one(server: socket.socket, conn: socket.socket, stamp: str) -> None:
+def _refusal(request: dict, state: dict) -> str:
+    """Why this worker will not run the request, or "" when it will.
+
+    Refusing costs a build the worker's speed. Approximating costs it its
+    correctness, so anything not exactly right is refused.
+    """
+    if state["hazard"]:
+        return state["hazard"]
+
+    argv = list(request.get("argv", []))
+    runnable = script_argv(argv)
+    if runnable is None:
+        return f"not an interpreter running a script: {' '.join(argv[:2])}"
+
+    # Running the script in *this* interpreter is only right if it is the one
+    # the action asked for. A different venv would import different packages.
+    wanted = venv_of(argv[0])
+    if wanted != venv_of(sys.executable):
+        return f"the action wants {wanted}, this worker is {venv_of(sys.executable)}"
+
+    request["runnable"] = runnable
+    return ""
+
+
+def _serve_one(server: socket.socket, conn: socket.socket, state: dict) -> None:
     """Fork a child to handle one connection, or refuse it with a reason."""
     with conn:
         try:
@@ -175,21 +276,24 @@ def _serve_one(server: socket.socket, conn: socket.socket, stamp: str) -> None:
         except (OSError, ValueError):
             return
 
-        if request.get("stamp") != stamp:
-            # The virtualenv moved under us; the client will start a worker
-            # that matches, and this one is of no further use.
-            reply(conn, error=REPLY_STALE)
+        stamp = request.get("stamp")
+        if state["stamp"] is None:
+            # Adopt the first environment described to us. A worker need not
+            # know how a stamp is made -- only that a different one means the
+            # environment it holds in memory is no longer the one being built.
+            state["stamp"] = stamp
+        elif stamp != state["stamp"]:
+            reply(conn, error="the environment changed under this worker")
+            debug("environment changed; standing down")
             raise SystemExit(0)
 
-        runnable = script_argv(list(request.get("argv", [])))
-        # Forking a threaded process is not safe, and something preloaded here
-        # may have started a thread.
-        if runnable is None or threading.active_count() != 1:
-            reply(conn, error=REPLY_UNSUPPORTED)
+        refusal = _refusal(request, state)
+        if refusal:
+            reply(conn, error=refusal)
+            debug(f"refused: {refusal}")
             for fd in fds:
                 os.close(fd)
             return
-        request["runnable"] = runnable
 
         pid = os.fork()
         if pid == 0:

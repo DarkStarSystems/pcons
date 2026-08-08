@@ -3621,6 +3621,13 @@ Three things hold whatever kind of worker you bring:
 - **A worker is an optimization.** With none reachable — plain `ninja`, CI, Windows, a worker that will not start — the command runs directly. A generated build file always stands alone.
 - **Nothing supervises workers.** The first action that needs one starts it; it exits after `idle_timeout` seconds of quiet.
 
+Two things to watch for with `PythonWorker`:
+
+- **The action must run an interpreter directly.** `uv run python model.py` starts with `uv`, not an interpreter, so it falls back and runs at full cost — silently, because that is indistinguishable from having no worker. Name the interpreter: `command=[sys.executable, "$SOURCE", ...]`.
+- **The worker must be the environment your action needs.** `python=` defaults to the interpreter running pcons, which is not the project's if pcons came from `uvx` or a global install. Pass the project's interpreter explicitly, and note that the action's own interpreter must match it — a worker refuses an action belonging to a different environment rather than running it against different packages.
+
+When a build is slower than expected, `PCONS_WORKER_DEBUG=1` says why a worker was not used, and keeps the worker's stderr instead of discarding it.
+
 See `examples/64_persistent_worker` for a runnable version.
 
 ### Multiple Toolchains

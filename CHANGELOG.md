@@ -47,7 +47,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first action that needs a worker starts it and it exits when idle, so nothing
   has to manage its lifetime; with none reachable -- plain `ninja`, CI, Windows
   -- the command runs directly, so a generated build file still builds by
-  itself. See `examples/64_persistent_worker`.
+  itself. See `examples/64_persistent_worker`. Set `PCONS_WORKER_DEBUG=1` to
+  be told why a worker was not used, since a refusal otherwise looks exactly
+  like a build with no worker in it.
 
 ### Fixed
 

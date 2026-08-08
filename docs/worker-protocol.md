@@ -123,18 +123,45 @@ produce a slow build, it produces a wrong one, silently.
 
 `{"error": "..."}` instead, or a closed connection, means the action did not
 run — the client will then run it directly. Refusing is always safe;
-approximating is not. `python_server.py` refuses any command that is not an
-interpreter running a script, rather than reimplementing interpreter flags.
+approximating is not. Put a human-readable reason in `error`: it is what
+`PCONS_WORKER_DEBUG=1` shows, and a refusal is otherwise indistinguishable
+from there being no worker at all.
 
-**Notice when it has gone stale.** `stamp` is opaque to pcons, and identifies
-the environment the client is running in; today it fingerprints the
-interpreter's virtualenv. A worker that captured one at startup and sees a
-different one is holding state from an environment that no longer exists, and
-should refuse and exit.
+`python_server.py` refuses anything that is not an interpreter running a
+script, rather than reimplementing interpreter flags — and refuses a script
+whose interpreter belongs to a different environment than its own, which
+would otherwise run the action against a different set of packages than the
+build script asked for.
+
+**Refuse if forking would be unsafe.** If isolation comes from `fork`, check
+before offering to serve — and check with the operating system.
+`threading.active_count()` sees only Python threads, while the hazard is
+native ones: OpenMP, TBB, a threaded BLAS, all of which numpy, scipy and
+scikit-learn commonly start while being imported.
+
+**Notice when it has gone stale.** `stamp` identifies the environment the
+worker is being asked to serve — the client derives it from the *start
+command's* interpreter, not from whatever is running pcons, which may be a
+different installation entirely. A worker does not need to know how it is
+made: **adopt the first stamp you are given, and stand down when a later
+request carries a different one.** That means a recreated virtualenv retires
+the worker holding its old code, whatever language the worker is written in.
 
 **Exit when idle.** `PCONS_WORKER_IDLE_TIMEOUT` seconds without a request
 means nobody is building any more. Nothing supervises workers, by design;
 they are expected to go away on their own.
+
+## When a worker is not being used
+
+A refusal and an absent worker look identical from the outside: the build is
+simply slower. Set `PCONS_WORKER_DEBUG=1` to be told which it was:
+
+```
+pcons worker: running directly (the action wants /a/.venv, this worker is /b/.venv)
+```
+
+It also stops the client discarding the worker's own stderr, which is the only
+thing that explains a worker that will not start.
 
 ## What pcons guarantees in return
 

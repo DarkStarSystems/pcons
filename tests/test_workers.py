@@ -134,6 +134,122 @@ def test_client_and_worker_agree_on_the_environment_stamp() -> None:
     )
 
 
+class TestEnvironmentStamp:
+    """Telling one environment from another, and noticing when it changes."""
+
+    @staticmethod
+    def _fake_venv(root: Path, link_to: Path | None = None) -> Path:
+        """A venv whose bin/python is a symlink out of it, as uv builds them."""
+        (root / "bin").mkdir(parents=True)
+        (root / "pyvenv.cfg").write_text("home = /somewhere\n")
+        target = link_to or Path(sys.executable)
+        for name in ("python", "python3"):
+            (root / "bin" / name).symlink_to(target)
+        return root / "bin" / "python"
+
+    def test_the_venv_is_not_followed_through_its_symlink(self, tmp_path: Path) -> None:
+        """uv's bin/python points outside the venv; resolving it lands
+        somewhere that knows nothing about the packages installed here."""
+        python = self._fake_venv(tmp_path / "venv")
+
+        assert python_server.venv_of(str(python)) == tmp_path / "venv"
+
+    def test_a_changed_environment_is_noticed(self, tmp_path: Path) -> None:
+        """The whole point of the stamp: a recreated venv must not be served
+        from memory by a worker holding the old one."""
+        python = self._fake_venv(tmp_path / "venv")
+        before = python_server.environment_stamp(str(python))
+
+        os.utime(tmp_path / "venv" / "pyvenv.cfg", (1, 1))
+
+        assert python_server.environment_stamp(str(python)) != before
+
+    def test_python_and_python3_are_one_environment(self, tmp_path: Path) -> None:
+        """Same interpreter, two names in one bin/ -- and a worker started by
+        one name serving a client that named the other."""
+        self._fake_venv(tmp_path / "venv")
+        bin_dir = tmp_path / "venv" / "bin"
+
+        assert python_server.environment_stamp(
+            str(bin_dir / "python")
+        ) == python_server.environment_stamp(str(bin_dir / "python3"))
+
+    def test_a_missing_pyvenv_cfg_is_not_fatal(self, tmp_path: Path) -> None:
+        """Not every interpreter lives in a venv."""
+        assert python_server.environment_stamp("/usr/bin/python3")
+
+
+class TestForkSafety:
+    """Whether this process may fork at all."""
+
+    def test_a_single_threaded_process_may_fork(self, monkeypatch) -> None:
+        """Counts are injected: a test runner has threads of its own, so the
+        ambient process is never the one being described."""
+        monkeypatch.setattr(python_server.threading, "active_count", lambda: 1)
+        monkeypatch.setattr(python_server, "os_thread_count", lambda: 1)
+
+        assert python_server.fork_hazard() == ""
+
+    def test_python_threads_are_a_hazard(self, monkeypatch) -> None:
+        monkeypatch.setattr(python_server.threading, "active_count", lambda: 2)
+
+        assert "Python threads" in python_server.fork_hazard()
+
+    def test_native_threads_are_a_hazard(self, monkeypatch) -> None:
+        """The ones threading.active_count() cannot see: OpenMP, a threaded
+        BLAS -- exactly what a numpy/scipy preload set starts."""
+        monkeypatch.setattr(python_server.threading, "active_count", lambda: 1)
+        monkeypatch.setattr(python_server, "os_thread_count", lambda: 8)
+
+        assert "8 native threads" in python_server.fork_hazard()
+
+    def test_the_operating_system_is_asked_too(self) -> None:
+        """threading.active_count() cannot see OpenMP or a threaded BLAS,
+        which is exactly what a numpy/scipy preload set starts."""
+        count = python_server.os_thread_count()
+
+        assert count is None or count >= 1
+
+    def test_an_unknown_thread_count_is_treated_as_unsafe(self, monkeypatch) -> None:
+        """A corrupted child costs more than a slow build."""
+        monkeypatch.setattr(python_server, "os_thread_count", lambda: None)
+
+        assert python_server.fork_hazard() != ""
+
+
+class TestRefusals:
+    """What a worker declines, and whether it says why."""
+
+    @staticmethod
+    def _state() -> dict:
+        return {"stamp": None, "hazard": ""}
+
+    def test_an_action_for_another_environment(self) -> None:
+        """Running it here would import a different set of packages."""
+        request = {"argv": ["/elsewhere/.venv/bin/python", "act.py"]}
+
+        reason = python_server._refusal(request, self._state())
+
+        assert "wants /elsewhere/.venv" in reason
+
+    def test_an_action_this_worker_cannot_run(self) -> None:
+        request = {"argv": ["cc", "-c", "main.c"]}
+
+        assert "not an interpreter" in python_server._refusal(request, self._state())
+
+    def test_a_fork_hazard_refuses_everything(self) -> None:
+        request = {"argv": [sys.executable, "act.py"]}
+        state = {"stamp": None, "hazard": "the worker has 4 native threads"}
+
+        assert python_server._refusal(request, state) == state["hazard"]
+
+    def test_an_action_it_can_run(self) -> None:
+        request = {"argv": [sys.executable, "act.py", "--out", "x"]}
+
+        assert python_server._refusal(request, self._state()) == ""
+        assert request["runnable"] == ["act.py", "--out", "x"]
+
+
 # A worker that is not pcons's: it implements the protocol and nothing else,
 # which is the claim this file exists to check.
 FOREIGN_WORKER = """
@@ -253,6 +369,29 @@ class TestEndToEnd:
 
         assert result.returncode == 42  # the status the foreign worker chose
         assert "served by a foreign worker" in result.stdout
+
+    def test_a_worker_named_differently_from_the_client(self, tmp_path: Path) -> None:
+        """`bin/python` and `bin/python3` are one environment. Comparing the
+        two names refused every request, which looked exactly like no worker."""
+        bin_dir = Path(sys.executable).parent
+        other_name = bin_dir / ("python" if sys.executable.endswith("3") else "python3")
+        if not other_name.exists():
+            pytest.skip("this interpreter has only one name")
+
+        script = tmp_path / "act.py"
+        script.write_text("print('served')\n")
+        worker = PythonWorker(python=str(other_name))
+        sock = self._socket("names")
+        proc = self._start(list(worker.command), sock)
+        try:
+            result = self._run(worker, sock, str(other_name), str(script))
+        finally:
+            proc.kill()
+            proc.wait()
+            sock.unlink(missing_ok=True)
+
+        assert result.returncode == 0
+        assert "served" in result.stdout
 
     def test_the_command_runs_directly_when_no_worker_answers(
         self, tmp_path: Path
