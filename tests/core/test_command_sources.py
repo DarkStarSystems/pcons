@@ -167,3 +167,34 @@ class TestWarningAttribution:
 
         assert __file__ in caplog.text
         assert "pcons/core" not in caplog.text
+
+
+class TestRegisteredBuilder:
+    """`project.Command` is a method, but a builder of the same name is also
+    registered, and the typing stub comes from that one (see issue #68).
+
+    Nothing exercised it, so it could forward wrongly and no test would say.
+    """
+
+    def test_it_forwards_everything_it_accepts(self, tmp_path: Path) -> None:
+        from pcons.builders.compile import CommandBuilder
+
+        (tmp_path / "in.txt").write_text("")
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        target = CommandBuilder.create_target(
+            project,
+            "gen",
+            env,
+            target=project.build_dir / "out.txt",
+            source=tmp_path / "in.txt",
+            command=["copy", "$SOURCE", "$TARGET"],
+            restat=True,
+            launcher=["time"],
+        )
+
+        assert target.name == "gen"
+        node = target.output_nodes[0]
+        assert node._build_info["restat"] is True
+        assert node._build_info["launcher"] == ["time"]

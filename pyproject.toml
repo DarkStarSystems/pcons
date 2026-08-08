@@ -146,6 +146,14 @@ omit = [
     "pcons/core/_toolconfig_stubs.py",
     "pcons/core/_usage_requirements_stubs.py",
     "pcons/core/_toolchain_names.py",
+    # A worker and the client that reaches it only ever run as separate
+    # processes -- ninja starts the client, the client starts the worker --
+    # so coverage in the test process cannot see them however thoroughly they
+    # are exercised. tests/test_workers.py drives both end to end, over a real
+    # socket; measuring them here would report a number about how they are
+    # started rather than about how well they are tested.
+    "pcons/workers/client.py",
+    "pcons/workers/python_server.py",
 ]
 
 [tool.coverage.report]
