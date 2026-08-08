@@ -43,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per action so nothing one leaks into the next. The first action that needs a
   worker starts it, and it exits when idle, so nothing has to manage its
   lifetime. With no worker listening -- plain `ninja`, CI, Windows -- the
-  command runs directly, so a generated build file still builds by itself.
+  command runs directly, so a generated build file still builds by itself. See
+  `examples/64_persistent_worker`.
 
 ### Fixed
 

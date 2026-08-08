@@ -37,8 +37,12 @@ import hashlib
 import os
 import sys
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 __all__ = ["Worker", "socket_dir"]
 
@@ -64,7 +68,9 @@ class Worker:
             forgotten one does not outlive the session by much.
     """
 
-    preload: tuple[str, ...] = field(default_factory=tuple)
+    # A list or a single name is accepted; __post_init__ stores a tuple, so
+    # two workers asking for the same modules compare equal.
+    preload: Sequence[str] | str = ()
     python: str = ""
     idle_timeout: float = 900.0
 

@@ -3592,7 +3592,7 @@ Ninja assumes starting a command is free. For a compiler it is. For an action th
 A worker is a process kept alive across actions, so that cost is paid once:
 
 ```python
-from pcons.workers import Worker
+from pcons import Worker
 
 env.Command(
     target="report.pdf",
@@ -3613,6 +3613,8 @@ Practical notes:
 - **Two actions share a worker** when they name the same interpreter and the same preload set.
 - **Only an interpreter running a script** is handed to a worker. Any other command, including `python -c`, runs directly rather than being approximated.
 - The socket lives in a private per-user directory, since it accepts commands to run.
+
+See `examples/64_persistent_worker` for a runnable version.
 
 ### Multiple Toolchains
 
