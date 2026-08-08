@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-08-08
+
+This release is mostly about the edit-build loop: `pcons --watch` rebuilds as you
+type, and commands can now run behind a launcher or inside a persistent worker
+when starting a tool costs more than running it. Build scripts get typed
+`get_var()` and a per-build-directory cache, so a setting you chose once stays
+chosen.
+
 ### Added
 
 - **`--watch`: rebuild as you edit.** `pcons --watch` (or `pcons build --watch`)
@@ -23,6 +31,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   successfully. `--watch` now asks ninja whether work remains and passes on its
   answer, naming the output; and if the watch ends up feeding itself, it stops
   and names the file responsible rather than spinning.
+- **`get_var()` converts to the type its default implies.** It always returned a
+  string, so every project invented its own truth table for boolean options and
+  they disagreed: `get_var("USE_CUDA", "0") == "1"` silently ignores `USE_CUDA=ON`,
+  and the user who typed the CMake spelling gets the flag dropped with no warning
+  at all. Pass a typed
+  default instead -- `get_var("USE_CUDA", False)`, `get_var("OPT_LEVEL", 2)`,
+  `get_var("PREFIX", Path("/usr/local"))` -- or `type=bool` where there is no
+  default. Booleans take `1/on/yes/true/y` and their opposites, case-insensitively;
+  a value that doesn't parse is an error naming the variable. With neither a
+  default nor a `type=`, `get_var()` returns the raw string as before. (PR #66)
+- **Settings chosen on the command line persist per build directory.** `pcons
+  VAR=x` followed by a bare `pcons` used to lose `x`. Build variables, the variant
+  and the generator are now remembered in the build directory, like CMake's cache.
+  The current command line still wins, then the environment, then the cache; only a
+  successful run writes, and only the values it was given, so neither a failed
+  configure nor a bare run can clobber what's there. `pcons cache
+  list|show|clear|path` inspects it, `--fresh` discards it first, and `get_cache()`
+  gives a build script the same store for its own data. (PR #64)
 - **Command launchers**: run a tool behind another program.
   `env.cc.launcher = ["ccache"]`, or `env.Command(..., launcher=[...])` for one
   edge; they stack, outermost first. `compile_commands.json` still reports the
@@ -92,6 +118,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   merge: once for a `FlagPair` whose flag the toolchain doesn't list as taking a
   separate argument (`FlagPair("-custom", "value")`), and once for a separated-argument
   flag that had been written out ungrouped. Found by the new property tests.
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20)
 
 ## [0.25.0] - 2026-08-05
 
@@ -1537,7 +1567,8 @@ see **Changed** below for each one and what to write instead.
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/DarkStarSystems/pcons/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/DarkStarSystems/pcons/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/DarkStarSystems/pcons/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/DarkStarSystems/pcons/compare/v0.23.0...v0.23.1

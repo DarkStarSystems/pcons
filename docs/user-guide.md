@@ -1234,7 +1234,7 @@ env.use(pkg)
 ```
 
 > If your project uses [rez](https://rez.readthedocs.io), see
-> [Integrations → Rez](#rez-vfx-animation-package-manager) for native
+> [Integrations → Rez](#rez-vfxanimation-package-manager) for native
 > rez-resolve support — `RezFinder` plugs into `find_package()` and
 > `rez_environment(env)` injects every resolved package's flags.
 
