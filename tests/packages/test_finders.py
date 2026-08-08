@@ -327,7 +327,7 @@ class TestPkgConfigFinderMocked:
 
 
 class TestFinderChainContract:
-    """The chain's contract (docs/plan-design-cleanup.md 4e): precedence is
+    """The chain's contract (plans/plan-design-cleanup.md 4e): precedence is
     insertion order (user-added finders go to the front), availability is
     filtered on add, and negative find_package results are cached."""
 

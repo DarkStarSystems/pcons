@@ -411,7 +411,7 @@
   <!-- Examples -->
   <section id="examples">
     <h2 class="section-title">Simple and expressive</h2>
-    <p class="section-subtitle">Real build scripts from the pcons examples.</p>
+    <p class="section-subtitle">Real build scripts from the pcons examples &mdash; <a href="https://github.com/DarkStarSystems/pcons/tree/main/examples">66 of them</a>, every one built and verified on Linux, macOS and Windows on every commit.</p>
     <div class="code-section">
       <div>
         <div class="code-block">
@@ -472,8 +472,21 @@ app.<span class="fn">link</span>(lib)</code></pre>
       <span>WASI</span>
       <span>Emscripten</span>
       <span>Metal</span>
+      <span>Qt 6</span>
     </div>
     <div class="features" style="margin-top: 1.5rem;">
+      <div class="feature">
+        <h3>Qt 6, without the autogen tax</h3>
+        <p><code>find_qt()</code> discovery, <code>QtProgram</code> with automoc/autouic/autorcc, QML modules, translations, and <code>ninja deploy</code>. The <code>Q_OBJECT</code> scan runs at generate time rather than on every build, and each moc output is its own translation unit &mdash; so touching one header recompiles one file. Tested against real Qt on Linux, macOS and Windows in CI. <a href="https://pcons.readthedocs.io/en/latest/qt/">Qt guide &rarr;</a></p>
+      </div>
+      <div class="feature">
+        <h3>Command launchers</h3>
+        <p><code>env.cc.launcher = ["ccache"]</code> &mdash; or sccache, or a profiler, or your own wrapper. They stack, they work per tool or per command, and <code>compile_commands.json</code> still reports the real compiler so clangd is never confused.</p>
+      </div>
+      <div class="feature">
+        <h3>The graph regenerates itself</h3>
+        <p><code>build.ninja</code> knows about your build script and every module it imports. Change a flag, add a source, switch branches &mdash; <code>ninja</code> re-runs pcons first, in the same invocation. <code>pcons --watch</code> turns that into a live rebuild loop.</p>
+      </div>
       <div class="feature">
         <h3>Generators</h3>
         <p>Ninja (default), Makefile, Xcode, compile_commands.json, and Mermaid or Graphviz dependency diagrams.</p>
@@ -599,8 +612,8 @@ app.<span class="fn">link</span>(lib)</code></pre>
   <!-- Status -->
   <section>
     <div class="cta">
-      <h2>Ready for small-scale production use</h2>
-      <p>pcons is working in several medium-sized projects, and still under active development. C, C++ (including C++20 modules), Fortran, and Swift compilation, static and shared libraries, programs, install targets, installers, unit tests, and mixed-language builds are all tested and working across Linux, macOS, and Windows.</p>
+      <h2>Production-ready for small and medium projects</h2>
+      <p>pcons is working in several medium-sized projects, and still under active development. C, C++ (including C++20 modules), Fortran, Swift and Qt 6, static and shared libraries, cross-compilation to Android, iOS and WebAssembly, install targets, native installers, and unit tests are all tested and working across Linux, macOS, and Windows &mdash; on every commit.</p>
       <div class="hero-actions">
         <a href="https://pcons.readthedocs.io" class="btn btn-primary">Get Started</a>
         <a href="https://github.com/DarkStarSystems/pcons" class="btn btn-secondary">Contribute on GitHub</a>

@@ -204,7 +204,7 @@ class TestDefaultGenerationContract:
     generator was explicitly requested: auxiliary generators (dot,
     mermaid, metadata) are additive companions — adding a diagram must
     not cancel the build. Run an auxiliary generator alone via
-    PCONS_GENERATOR / --generator (docs/plan-design-cleanup.md 4a)."""
+    PCONS_GENERATOR / --generator (plans/plan-design-cleanup.md 4a)."""
 
     def test_auxiliary_generator_is_additive(self, tmp_path):
         from pcons.core.project import Project
@@ -241,7 +241,7 @@ class TestDefaultGenerationContract:
 
 class TestRootSymlinkOptOut:
     """root_symlink=False keeps generation strictly inside build_dir
-    (docs/plan-design-cleanup.md 4b)."""
+    (plans/plan-design-cleanup.md 4b)."""
 
     def test_root_symlink_disabled(self, tmp_path):
         from pcons.core.project import Project

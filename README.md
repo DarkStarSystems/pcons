@@ -30,6 +30,20 @@ Pcons currently supports C and C++, ObjC and C++, Swift, Fortran, CUDA, assembly
 
 Pcons can build not just executables, but also tar/zip archives, python packages, Windows installers, and MacOS installer packages.
 
+## What's in the box
+
+- **[Qt 6](https://pcons.readthedocs.io/en/latest/qt/)** — `find_qt()`, automoc/autouic/autorcc, QML modules, translations, `ninja deploy`
+- **C++20 modules** — named modules, partitions and `import std` on GCC, Clang and MSVC, with dependency scanning
+- **[Tests and fuzzing](https://pcons.readthedocs.io/en/latest/user-guide/#testing)** — `project.Test()`, `pcons test`, gtest/doctest/Catch2 case discovery, JUnit XML, libFuzzer/AFL++
+- **Compiler caching** — `env.use_compiler_cache()`, or any command run behind a launcher
+- **`pcons --watch`** — rebuild on every save, including edits to the build script itself
+- **Configure checks** — `check_header()`, `check_flag()`, `try_compile()`, `configure_file()`, all cached
+- **Generated sources** — code generators, multi-phase builds, and outputs that don't rebuild the world when they haven't changed
+- **Installers** — signed and notarized `.pkg` and `.dmg`, MSIX packages, WinSxS assemblies
+- **Cross-compilation** — Android NDK, iOS, WebAssembly (WASI and Emscripten) presets
+- **`compile_commands.json`** — for clangd and friends, always reporting the real compiler
+- **`env.explain()`** — where did this flag come from? Every one, attributed to the preset that set it
+
 ## Why another software build tool?
 
 I was one of the original developers of SCons, and helped maintain it for many years. I love that python is the config language; that makes build descriptions incredibly flexible and powerful. Recently I've been using CMake for more projects, and despite the deeply painful configuration language, I've come to appreciate its power: conan integration, the separation between *describing* the build andrunning it, and dependency propagation, among other things. I feel that SCons hasn't kept up with modern python; like any very widely used mature project, it has a lot of accumulated wisdom but also a bit ossified ways of doing things.
@@ -42,13 +56,25 @@ Here's a [comparison](COMPARISONS.md) between pcons and other common modern buil
 
 ✅ **Ready for small-scale production use** - and still under active development, so feedback is very welcome. It's working in several medium-sized projects.
 
-Core functionality is working and well tested: C/C++/Fortran compilation, static and shared libraries, programs, install targets, installers (Win/Mac), and mixed-language builds. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
+Core functionality is working and well tested across Linux, macOS and Windows, on every commit: C/C++/ObjC/Fortran/Swift/CUDA compilation, C++20 modules, Qt 6, static and shared libraries, install targets, installers, cross-compilation, and mixed-language builds. There are 66 self-contained [examples](examples/), each built and verified in CI. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 
 ### Rust / Go interop
 
 pcons links Rust crates into C/C++ projects: `project.CargoBuild()` drives `cargo build` and links the resulting library, with optional [cbindgen](https://github.com/mozilla/cbindgen) header generation. See `examples/43_rust_cxx_hybrid` (hand-written FFI header) and `examples/44_rust_cxx_cbindgen` (cbindgen-generated header). Go support is straightforward to add on the same pattern — [open an issue](https://github.com/DarkStarSystems/pcons/issues) if you'd like it.
 
+## Quick Start
+
+Already have C or C++ sources? `pcons init` reads them and writes the build script for you:
+
+```bash
+cd myproject
+uvx pcons init    # writes pcons-build.py from the sources it finds
+uvx pcons         # generate build.ninja and build
+```
+
 ## Quick Example
+
+Or write it yourself — it is ordinary Python:
 
 ```python
 # pcons-build.py

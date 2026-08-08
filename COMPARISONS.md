@@ -57,7 +57,7 @@ Qt is a good stress-test of a build system: three code generators (moc/uic/rcc),
 - **Silent failures are loud.** A header that gains `Q_OBJECT` after generation fails the build with a "re-run pcons" message naming the file (a cheap guard edge with a depfile over every scanned file and directory). A `.cpp` with `Q_OBJECT` but no `#include "foo.moc"` is a generate-time error showing the exact line to add — in CMake both cases surface as undefined-vtable link errors, often much later.
 - **One call for QML modules.** `QtQmlModule` handles qmltyperegistrar, `qmldir` synthesis, and resource embedding under `:/qt/qml/<uri>/` with no backing-target/plugin-target split.
 
-**CMake** is Qt's own build system and the most complete: `qt_add_executable`, `qt_add_qml_module`, AUTOMOC/AUTOUIC/AUTORCC, static-plugin handling, qmlcachegen AOT compilation, and deployment scripts. The cost is opacity: build-time scanning, mystery `_autogen` rebuilds, errors reported against generated files, and the aggregate-TU rebuild tax. Areas where CMake is still ahead of pcons: qmlcachegen, QML plugin libraries/singletons, static-Qt plugin imports, and `build.ninja` self-regeneration after branch switches.
+**CMake** is Qt's own build system and the most complete: `qt_add_executable`, `qt_add_qml_module`, AUTOMOC/AUTOUIC/AUTORCC, static-plugin handling, qmlcachegen AOT compilation, and deployment scripts. The cost is opacity: build-time scanning, mystery `_autogen` rebuilds, errors reported against generated files, and the aggregate-TU rebuild tax. Areas where CMake is still ahead of pcons: qmlcachegen, QML plugin libraries/singletons and static-Qt plugin imports.
 
 **Bazel** has no official Qt support; community rule sets (e.g. `rules_qt`) wrap moc/uic/rcc in explicit per-target macros. Workable, but headers must be listed by hand and hermetic Qt toolchain setup is on you.
 
@@ -67,7 +67,7 @@ Qt is a good stress-test of a build system: three code generators (moc/uic/rcc),
 
 ## Package / Dependency Management
 
-**pcons** integrates with external package managers (pkg-config, Conan, vcpkg) but doesn't manage downloads itself at configure time. The `pcons-fetch` tool can build and install dependencies from source, wrapping CMake/autotools/Meson projects. Dependencies are represented as `ImportedTarget` objects with full usage-requirement propagation.
+**pcons** integrates with external package managers (pkg-config, Conan, vcpkg) but doesn't manage downloads itself at configure time. The `pcons-fetch` tool can build and install dependencies from source, wrapping CMake and autotools projects. Dependencies are represented as `ImportedTarget` objects with full usage-requirement propagation.
 
 **Bazel** has `MODULE.bazel` (Bzlmod) for declaring external dependencies, with a registry model. It can download and build external deps hermetically. First-class support for Go modules, Maven, npm, etc. Remote repositories are a core Bazel concept.
 
@@ -79,7 +79,7 @@ Qt is a good stress-test of a build system: three code generators (moc/uic/rcc),
 
 **pcons** relies entirely on Ninja for incrementality. Ninja's depfile mechanism handles header dependency tracking correctly. Build correctness is high for standard C/C++ patterns. Commands that may produce unchanged output (code generators, configure steps) can use `restat=True` to avoid unnecessary downstream rebuilds.
 
-For Bazel-style action-level caching (skip recompilation when an input is byte-identical to a previous version, even if its mtime changed), pcons has built-in `ccache`/`sccache` support: call `env.use_compiler_cache()` in your build script and pcons wraps the compile commands automatically (auto-detects sccache then ccache, or pass `"ccache"`/`"sccache"` explicitly). Pcons can also drive [n2](https://github.com/evmar/n2), a Rust rewrite of Ninja, via `pcons --ninja=n2` or `NINJA=n2` for more advanced (but not fully content-based) rebuild tracking; see the [author's design notes](https://neugierig.org/software/blog/2022/03/n2.html).
+For Bazel-style action-level caching (skip recompilation when an input is byte-identical to a previous version, even if its mtime changed), pcons has built-in `ccache`/`sccache` support: call `env.use_compiler_cache()` in your build script (auto-detects sccache then ccache, or pass `"ccache"`/`"sccache"` explicitly). It is one use of a general mechanism — any command can be run behind a launcher, per tool or per edge, and they stack; `compile_commands.json` still reports the compiler itself rather than whatever is wrapping it. Pcons can also drive [n2](https://github.com/evmar/n2), a Rust rewrite of Ninja, via `pcons --ninja=n2` or `NINJA=n2` for more advanced (but not fully content-based) rebuild tracking; see the [author's design notes](https://neugierig.org/software/blog/2022/03/n2.html).
 
 **Bazel** has the most sophisticated incremental build system of the three. Content-addressed action cache, remote cache sharing across CI and developer machines, and correct hermetic sandboxing mean stale builds are virtually impossible.
 
@@ -417,9 +417,9 @@ pcons and Meson are comparable in line count for simple cases. pcons pulls ahead
 | **Graph output**        | Mermaid, DOT built-in                             | `bazel query`                          | None built-in                      |
 | **Platform installers** | .pkg, .dmg, MSIX built-in                         | External rules needed                  | External tools needed              |
 | **Learning curve**      | Low (plain Python)                                | High (Starlark + concepts)             | Low-Medium (custom DSL)            |
-| **Production maturity** | Early (v0.10.x, active dev)                       | Very mature (Google-backed)            | Mature (used by GNOME, Mesa, etc.) |
+| **Production maturity** | Beta (v0.25.x, active dev)                        | Very mature (Google-backed)            | Mature (used by GNOME, Mesa, etc.) |
 | **Wasm support**        | WASI + Emscripten built-in                        | Via custom rules                       | Limited                            |
-| **Compiler caching**    | ccache/sccache wrapper                            | Remote cache built-in                  | ccache integration                 |
+| **Compiler caching**    | ccache/sccache, or any launcher                   | Remote cache built-in                  | ccache integration                 |
 | **Testing**             | `project.Test()` + JSON manifest + `pcons test` / `ninja test` / `make test`; gtest/doctest/catch2 discovery; fixtures via `depends_on` | `cc_test` + `bazel test`        | `test()` + `meson test`            |
 
 ---
