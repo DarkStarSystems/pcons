@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pcons import (
@@ -147,7 +149,9 @@ class TestGetVarTypes:
             get_var("TEST_VAR", type=list)  # type: ignore[call-overload]
 
     def test_unsupported_default_raises(self, clean_env) -> None:
-        with pytest.raises(ConfigureError, match="expected bool, int, float or str"):
+        with pytest.raises(
+            ConfigureError, match="expected bool, int, float, str, Path"
+        ):
             get_var("TEST_VAR", [1])  # type: ignore[call-overload]
 
     def test_int_from_env(self, clean_env) -> None:
@@ -174,6 +178,44 @@ class TestGetVarTypes:
 
         assert get_var("TEST_VAR", "cuda") == "ofx"
         assert get_var("TEST_VAR", type=str) == "ofx"
+
+    def test_path_from_env(self, clean_env) -> None:
+        clean_env.setenv("TEST_VAR", "/opt/tools")
+
+        assert get_var("TEST_VAR", Path("/usr/local")) == Path("/opt/tools")
+
+    def test_path_default(self, clean_env) -> None:
+        assert get_var("TEST_VAR", Path("/usr/local")) == Path("/usr/local")
+
+    def test_path_explicit_type(self, clean_env) -> None:
+        assert get_var("TEST_VAR", type=Path) is None
+
+        clean_env.setenv("TEST_VAR", "build/out")
+        assert get_var("TEST_VAR", type=Path) == Path("build/out")
+
+    def test_path_kept_relative(self, clean_env) -> None:
+        """A relative path is taken verbatim, not resolved against the cwd."""
+        clean_env.setenv("TEST_VAR", "dist")
+
+        assert get_var("TEST_VAR", type=Path) == Path("dist")
+
+    def test_path_rejects_empty(self, clean_env) -> None:
+        clean_env.setenv("TEST_VAR", "  ")
+
+        with pytest.raises(ConfigureError, match="not a valid path"):
+            get_var("TEST_VAR", type=Path)
+
+    def test_concrete_path_default_infers_path(self, clean_env) -> None:
+        """Path("/x") is a PosixPath/WindowsPath, which must fold to Path."""
+        clean_env.setenv("TEST_VAR", "/opt")
+        default = Path("/usr")
+        assert type(default) is not Path
+
+        assert get_var("TEST_VAR", default, type=Path) == Path("/opt")
+
+    def test_path_conflicting_with_str_type_raises(self, clean_env) -> None:
+        with pytest.raises(ConfigureError, match="conflicts with"):
+            get_var("TEST_VAR", Path("/usr"), type=str)  # type: ignore[call-overload]
 
     def test_bool_is_not_read_as_int(self, clean_env) -> None:
         """bool is an int subclass; inference must check bool first."""

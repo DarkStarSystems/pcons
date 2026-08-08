@@ -9,17 +9,19 @@ from __future__ import annotations
 import builtins
 import json
 import os
+from pathlib import Path, PurePath
 from typing import TypeAlias, overload
 
 from pcons.core.cache import reset_cache
 from pcons.core.errors import ConfigureError
 
 # Types get_var can convert a raw variable string into.
-VarValue: TypeAlias = bool | int | float | str
+VarValue: TypeAlias = bool | int | float | str | Path
 
 _TRUE_VALUES = frozenset({"1", "on", "yes", "true", "y"})
 _FALSE_VALUES = frozenset({"0", "off", "no", "false", "n"})
-_SUPPORTED_TYPES: tuple[builtins.type[VarValue], ...] = (bool, int, float, str)
+_SUPPORTED_TYPES: tuple[builtins.type[VarValue], ...] = (bool, int, float, str, Path)
+_SUPPORTED_NAMES = ", ".join(t.__name__ for t in _SUPPORTED_TYPES)
 
 # Internal storage for CLI variables (parsed PCONS_VARS for the current run)
 _cli_vars: dict[str, str] | None = None
@@ -42,6 +44,20 @@ def _accessed_var_names() -> set[str]:
     return set(_accessed_vars)
 
 
+def _var_type_of(candidate: builtins.type[object]) -> builtins.type[VarValue] | None:
+    """Map a class to the conversion it selects, or None if unsupported.
+
+    ``Path("/x")`` is a PosixPath or a WindowsPath, so a Path default would
+    otherwise select a per-platform class no caller can name portably.
+    """
+    if issubclass(candidate, PurePath):
+        return Path
+    for supported in _SUPPORTED_TYPES:
+        if candidate is supported:
+            return supported
+    return None
+
+
 def _resolve_var_type(
     name: str,
     default: VarValue | None,
@@ -49,27 +65,28 @@ def _resolve_var_type(
 ) -> builtins.type[VarValue]:
     """Pick the type a variable's raw string should be converted to."""
     if requested is not None:
-        if requested not in _SUPPORTED_TYPES:
+        target = _var_type_of(requested)
+        if target is None:
             raise ConfigureError(
                 f"get_var({name!r}): unsupported type={requested!r}; "
-                "expected bool, int, float or str"
+                f"expected {_SUPPORTED_NAMES}"
             )
-        if default is not None and builtins.type(default) is not requested:
+        if default is not None and _var_type_of(builtins.type(default)) is not target:
             raise ConfigureError(
                 f"get_var({name!r}): default {default!r} is "
                 f"{builtins.type(default).__name__}, which conflicts with "
                 f"type={requested.__name__}"
             )
-        return requested
+        return target
 
     if default is None:
         return str
 
-    inferred = builtins.type(default)
-    if inferred not in _SUPPORTED_TYPES:
+    inferred = _var_type_of(builtins.type(default))
+    if inferred is None:
         raise ConfigureError(
             f"get_var({name!r}): default {default!r} is a "
-            f"{inferred.__name__}; expected bool, int, float or str"
+            f"{builtins.type(default).__name__}; expected {_SUPPORTED_NAMES}"
         )
     return inferred
 
@@ -77,6 +94,10 @@ def _resolve_var_type(
 def _coerce_var(name: str, raw: str, target: builtins.type[VarValue]) -> VarValue:
     """Convert a raw variable string to ``target``, or raise."""
     text = raw.strip()
+    if target is Path:
+        if not text:
+            raise ConfigureError(f"{name}={raw!r} is not a valid path; it is empty")
+        return Path(text)
     if target is bool:
         lowered = text.lower()
         if lowered in _TRUE_VALUES:
@@ -155,6 +176,12 @@ def get_var(
 
 @overload
 def get_var(
+    name: str, default: Path, *, type: builtins.type[Path] | None = None
+) -> Path: ...
+
+
+@overload
+def get_var(
     name: str, default: None = None, *, type: builtins.type[bool]
 ) -> bool | None: ...
 
@@ -178,6 +205,12 @@ def get_var(
 
 
 @overload
+def get_var(
+    name: str, default: None = None, *, type: builtins.type[Path]
+) -> Path | None: ...
+
+
+@overload
 def get_var(name: str, default: None) -> str | None: ...
 
 
@@ -196,6 +229,7 @@ def get_var(
         port = get_var('PORT', 'ofx')
         use_cuda = get_var('USE_CUDA', False)
         opt_level = get_var('OPT_LEVEL', 2)
+        prefix = get_var('PREFIX', Path('/usr/local'))
 
     The default's type drives the conversion, so `get_var('X', False)` returns a
     bool and `get_var('X', 2)` returns an int. Pass `type=` when there is no
@@ -203,8 +237,10 @@ def get_var(
     default and no `type=`, the raw string is returned, as before.
 
     Booleans accept 1/on/yes/true/y and 0/off/no/false/n, case-insensitive; any
-    other value raises rather than reading as false. The default itself is never
-    parsed, it is returned as-is when the variable is unset.
+    other value raises rather than reading as false. A Path is taken verbatim,
+    not resolved, so a relative value stays relative to whatever the caller
+    resolves it against. The default itself is never parsed, it is returned
+    as-is when the variable is unset.
 
     Values configured on the command line persist across runs: the CLI folds a
     prior configure's cached vars into PCONS_VARS before the script runs, so a
@@ -219,8 +255,8 @@ def get_var(
     Args:
         name: Variable name.
         default: Default value if not set. Its type selects the conversion.
-        type: Explicit conversion type (bool, int, float or str). Must agree with
-            the default's type when both are given.
+        type: Explicit conversion type (bool, int, float, str or Path). Must
+            agree with the default's type when both are given.
 
     Returns:
         The variable value converted to the requested type, or default if not set.

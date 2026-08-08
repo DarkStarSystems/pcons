@@ -189,8 +189,8 @@ def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path
         return dest
     from pcons import get_var
 
-    prefix = get_var("PCONS_INSTALL_PREFIX", str(project.root_dir / "dist"))
-    return Path(prefix) / dest
+    prefix = get_var("PCONS_INSTALL_PREFIX", project.root_dir / "dist")
+    return prefix / dest
 
 
 def _mode_flags(target: Target) -> dict[str, list[str]]:
