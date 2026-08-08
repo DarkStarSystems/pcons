@@ -1,34 +1,32 @@
 # SPDX-License-Identifier: MIT
 """Persistent workers: pay an action's startup cost once, not every build.
 
-Ninja assumes starting a command is free. For ``cc`` it is. For an action that
-must become *ready* before it can do anything — load a large library, connect
-to a remote service, claim a licence, warm a cache — startup can dominate the
-build, and it is paid again on every edit.
+Ninja assumes starting a command is free. Often it is. But an action can cost
+far more to *start* than to run — it may have to open a connection, claim a
+licence, warm a cache, spin up a runtime, load a large model — and a build pays
+that again on every edit.
 
-A worker is a process kept alive across actions, so whatever it takes to
-become ready is paid once. It then forks a pristine child per request, so
-every action still runs in a process that has never seen another action's
-state. Ninja cannot start the worker itself — it would get a fresh one per
-action, which is the thing being avoided — so it runs a small client that
-hands the work to a worker, starting one if none is listening.
-
-Workers are declared per command:
+A worker is a process that is already started. Ninja cannot run one directly:
+it would get a fresh one per action, which is the thing being avoided. So
+pcons puts a small client in front of the action, which hands the work to a
+worker over a socket, starting one if nobody is listening.
 
     env.Command(
         target="report.pdf",
         source="report.py",
         command="python $SOURCE --out $TARGET",
-        worker=Worker(preload=["heavy_toolkit"]),
+        worker=Worker(command=["python", "my_worker.py"]),
     )
 
-This worker becomes ready by importing Python modules, which is the form the
-readiness takes here; the client, the protocol and the fork-per-request
-arrangement care about none of that.
+**pcons does not implement workers.** It defines what one must do — see
+``docs/worker-protocol.md`` — and a project brings whichever kind suits it: a
+Python process, a compiled binary, a client for something already running.
+:mod:`pcons.workers.python` is a worker for Python actions, useful in its own
+right and worth reading as a worked example of the contract.
 
-Fork is what keeps it honest. A worker that reset itself between actions
-instead would carry the previous one's state — a cache populated before an
-edit, a connection holding a stale handle — and quietly build the wrong thing.
+What the build gets back is bounded: a worker is an optimization, and a build
+that cannot reach one runs its commands directly and is merely slower. That is
+also what makes a generated build file stand alone under plain ninja or in CI.
 """
 
 from __future__ import annotations
@@ -48,50 +46,41 @@ __all__ = ["Worker", "socket_dir"]
 
 #: Where a worker's socket lives. AF_UNIX caps the whole path at around 104
 #: bytes, which a build directory nested a few levels down blows through on
-#: its own, so it is keyed by a hash under a short directory of our choosing.
+#: its own, so sockets are named by hash under a short directory of our own.
 _SOCKET_DIR_NAME = "pcons-workers"
 
 
 @dataclass(frozen=True)
 class Worker:
-    """A ready-to-run process to hand a command to.
+    """A process to hand an action to, and how to start one.
 
     Args:
-        preload: What this worker does to become ready: Python modules it
-            imports before forking. Installed packages only -- never a module
-            of the project being built, whose whole purpose is to change
-            between builds. The parent holds the preloaded state; the child
-            loads the command's own code fresh, which is what keeps an edit
-            from being masked by what the parent already has.
-        python: Interpreter to run, defaulting to the one running pcons.
-        idle_timeout: Seconds a worker waits for work before exiting, so a
-            forgotten one does not outlive the session by much.
+        command: How to start a worker. pcons appends the socket path as the
+            final argument; everything before it is yours. It is run detached,
+            and must implement ``docs/worker-protocol.md``.
+        key: Extra identity material. Two workers with the same start command
+            share one process, which is usually what you want -- add
+            something here to keep them apart, such as a version whose change
+            should not be served by an already-running worker.
+        idle_timeout: Seconds a worker should wait for work before exiting.
+            Passed on to it in ``PCONS_WORKER_IDLE_TIMEOUT``, since only the
+            worker can decide what to do about it.
     """
 
-    # A list or a single name is accepted; __post_init__ stores a tuple, so
-    # two workers asking for the same modules compare equal.
-    preload: Sequence[str] | str = ()
-    python: str = ""
+    command: Sequence[str] = ()
+    key: Sequence[str] = ()
     idle_timeout: float = 900.0
 
     def __post_init__(self) -> None:
-        # Accept a list and a bare string, both of which read naturally.
-        preload = self.preload
-        if isinstance(preload, str):
-            object.__setattr__(self, "preload", (preload,))
-        else:
-            object.__setattr__(self, "preload", tuple(preload))
-        if not self.python:
-            object.__setattr__(self, "python", sys.executable)
+        object.__setattr__(self, "command", tuple(self.command))
+        object.__setattr__(self, "key", tuple(self.key))
+        if not self.command:
+            raise ValueError("Worker(command=...) needs a command to start a worker")
 
     @property
     def identity(self) -> str:
-        """What makes two workers the same one: interpreter and preload set.
-
-        Everything a worker holds comes from these, so anything else sharing
-        them can share the worker.
-        """
-        material = "\0".join([self.python, *sorted(self.preload)])
+        """What makes two workers the same one: how they start, and *key*."""
+        material = "\0".join([*self.command, "\0key\0", *self.key])
         return hashlib.sha256(material.encode("utf-8")).hexdigest()[:16]
 
     @property
@@ -102,17 +91,18 @@ class Worker:
     def launcher(self) -> list[str]:
         """Command tokens that route an action through this worker.
 
-        The client execs the command directly when no worker answers, so a
-        generated build file still builds by itself -- with plain ninja, or in
-        CI, where nothing started a worker.
+        The client's own arguments come first, then ``--``, then the action.
+        A count rather than a separator delimits the start command, so a start
+        command containing ``--`` cannot be misread as the end of one.
         """
         client = Path(__file__).parent / "client.py"
         return [
-            self.python,
+            sys.executable,
             str(client),
             str(self.socket_path),
-            ",".join(sorted(self.preload)),
             str(self.idle_timeout),
+            str(len(self.command)),
+            *self.command,
             "--",
         ]
 
@@ -120,10 +110,11 @@ class Worker:
 def socket_dir() -> Path:
     """The per-user directory holding worker sockets, created if needed.
 
-    Kept short, because AF_UNIX paths are, and private, because a socket that
-    runs commands is not something to share with the rest of the machine.
+    Kept short, because AF_UNIX addresses are, and private, because a socket
+    that runs commands is nobody else's business.
     """
     base = Path("/tmp") if os.name != "nt" else Path(tempfile.gettempdir())
-    directory = base / f"{_SOCKET_DIR_NAME}-{os.getuid() if os.name != 'nt' else ''}"
+    suffix = os.getuid() if os.name != "nt" else os.environ.get("USERNAME", "")
+    directory = base / f"{_SOCKET_DIR_NAME}-{suffix}"
     directory.mkdir(mode=0o700, exist_ok=True)
     return directory

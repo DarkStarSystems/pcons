@@ -2,34 +2,35 @@
 # SPDX-License-Identifier: MIT
 """Running an action in a persistent worker.
 
-Ninja assumes starting a command is free. For an action that has to become
-*ready* before it can do anything — load a large library, reach a service,
-claim a licence — startup can cost more than the work, and every edit pays it
-again.
+Ninja assumes starting a command is free. Often it is. But an action can cost
+far more to *start* than to run — it may have to open a connection, claim a
+licence, warm a cache, spin up a runtime — and a build pays that again on every
+edit. A worker is a process that is already started, so it does not.
 
-A worker is a process kept alive across actions, so that cost is paid once:
+pcons does not implement workers: it defines what one must do
+(``docs/worker-protocol.md``) and a project brings whichever kind suits it. A
+worker declared as::
 
-    worker=Worker(preload=["heavy_toolkit"])
+    worker=Worker(command=["my-worker", "--profile=render"])
 
-``preload`` is what this worker does to become ready. List installed packages
-only, never a module of the project being built — that one has to be loaded
-fresh, or an edit to it would be masked by the copy the worker already holds.
-This example preloads a standard-library parser so it runs anywhere; a real
-project would name the package whose import it is tired of waiting for.
+can be anything that speaks the protocol — a compiled binary, a client for a
+service already running, a script. ``PythonWorker`` below is the one pcons
+bundles, for actions that run a Python script; it becomes ready by importing
+what it is told to, and ``setup=`` covers readiness that is not an import.
 
-Every action still runs in a fresh forked child, so nothing one action does
-can reach the next. ``src/render.py`` prints whether it started with the
-parser already loaded, which is how you can tell a worker was used.
+Whatever the kind, the contract holds: every action is served in isolation, so
+nothing one does can reach the next, and an unreachable worker means the
+command runs directly rather than the build failing. That is why this example
+works the same on Windows, which has no fork, and under plain ``ninja``.
 
-Nothing here starts the worker: the first action that needs one starts it, and
-it exits once it has been idle. If none can be reached — plain ``ninja``, CI,
-or Windows, which has no fork — the command simply runs directly, so this
-build works either way.
+``src/render.py`` prints whether it started with the parser already loaded,
+which is how you can see a worker was used. Nothing starts one here: the first
+action that needs it does, and it exits once idle.
 """
 
 import sys
 
-from pcons import Project, Worker
+from pcons import Project, PythonWorker
 
 project = Project("worker_demo")
 
@@ -44,7 +45,7 @@ report = env.Command(
     source=[src_dir / "render.py", src_dir / "items.xml"],
     command=[python, "${SOURCES[0]}", "${SOURCES[1]}", "$TARGET"],
     # Short, so an example run leaves nothing lingering for long.
-    worker=Worker(preload=["xml.dom.minidom"], idle_timeout=30),
+    worker=PythonWorker(preload=["xml.dom.minidom"], idle_timeout=30),
 )
 
 project.Default(report)

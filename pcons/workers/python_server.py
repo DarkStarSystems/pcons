@@ -1,25 +1,30 @@
 # SPDX-License-Identifier: MIT
-"""The worker process: become ready once, fork a pristine child per request.
+"""A worker for Python actions, and a worked example of the contract.
 
-    python server.py <socket> <comma-separated modules> <idle timeout>
+    python python_server.py [--preload m1,m2] [--setup pkg.mod:fn] <socket>
 
-Started by the client when no worker is listening (see client.py); nothing
-else knows about it. Standard library only, and never imports pcons: whatever
-this process holds is inherited by every action it runs.
+One of many possible workers: it implements docs/worker-protocol.md and knows
+how to run a Python script. Read it alongside that document if you are writing
+a worker of your own -- the shape here (become ready once, then serve each
+action in isolation) is what the contract asks for, whatever the language.
 
-Becoming ready here means importing the modules it was asked to preload. That
-is one way for a process to be expensive to start; the arrangement around it --
-one long-lived parent, a fresh child per action -- suits any of them.
+Becoming ready means importing the modules named by --preload and calling the
+--setup function, which is where anything else belongs: opening a connection,
+claiming a licence, warming a cache.
 
-Each request is served by a forked child that owns the connection and reports
-its own exit status, so requests are concurrent and a child that dies takes
-nothing with it. The client passes its own stdout and stderr as file
-descriptors, which the child writes to directly -- output reaches ninja in the
-order the program produced it, with nothing relaying or reordering it.
+Isolation comes from forking: each request is served by a child that owns the
+connection and reports its own exit status, so requests are concurrent, a
+child that dies takes nothing with it, and nothing one action does can reach
+the next. A worker in a language without fork owes the contract the same
+guarantee by its own means.
+
+Standard library only, and never imports pcons: whatever this process holds is
+inherited by every action it runs.
 """
 
 from __future__ import annotations
 
+import argparse
 import array
 import json
 import os
@@ -33,10 +38,19 @@ REPLY_STALE = "stale"
 REPLY_UNSUPPORTED = "unsupported"
 
 
-def preload(modules: list[str]) -> None:
-    """Do the expensive setup once, in the parent, before any action runs."""
+def become_ready(modules: list[str], setup: str) -> None:
+    """Do the expensive work once, in the parent, before any action runs.
+
+    Importing is the cheap case to express; *setup* is the general one --
+    ``package.module:function``, called with no arguments, free to open
+    whatever the actions to come will need.
+    """
     for name in modules:
         __import__(name)
+    if setup:
+        module_name, _, attribute = setup.partition(":")
+        module = __import__(module_name, fromlist=["*"])
+        getattr(module, attribute)()
 
 
 def environment_stamp(python: str) -> str:
@@ -119,9 +133,9 @@ def run_request(request: dict, fds: list[int]) -> int:
     return 0
 
 
-def serve(sock_path: Path, modules: list[str], idle_timeout: float) -> int:
+def serve(sock_path: Path, modules: list[str], setup: str, idle_timeout: float) -> int:
     """Listen until nothing has asked for work in *idle_timeout* seconds."""
-    preload(modules)
+    become_ready(modules, setup)
     stamp = environment_stamp(sys.executable)
 
     # Bind to a temporary name and rename into place, so a second worker
@@ -202,9 +216,19 @@ def _reap() -> None:
 
 
 def main(argv: list[str]) -> int:
-    sock_path, modules_spec, timeout = argv[0], argv[1], argv[2]
-    modules = [m for m in modules_spec.split(",") if m]
-    return serve(Path(sock_path), modules, float(timeout))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--preload", default="", help="modules to import, comma-separated"
+    )
+    parser.add_argument("--setup", default="", help="package.module:function to call")
+    parser.add_argument("socket", help="where to listen; pcons appends this")
+    args = parser.parse_args(argv)
+
+    # The client passes the timeout in the environment rather than in the
+    # command, so that a worker's own arguments stay its own business.
+    idle_timeout = float(os.environ.get("PCONS_WORKER_IDLE_TIMEOUT", "900"))
+    modules = [m for m in args.preload.split(",") if m]
+    return serve(Path(args.socket), modules, args.setup, idle_timeout)
 
 
 if __name__ == "__main__":

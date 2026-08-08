@@ -3587,9 +3587,9 @@ See `examples/63_command_launcher` for two stacked launchers wrapping every C co
 
 ### Persistent Workers
 
-Ninja assumes starting a command is free. For a compiler it is. For an action that must become *ready* before it can do anything — load a large library, connect to a service, claim a licence, warm a cache — startup can be most of the build, and it is paid again on every edit.
+Ninja assumes starting a command is free. Often it is. But an action can cost far more to *start* than to run — it may have to open a connection, claim a licence, warm a cache, spin up a runtime, load a large model — and a build pays that again on every edit.
 
-A worker is a process kept alive across actions, so that cost is paid once:
+A worker is a process that is already started. pcons puts a small client in front of the action, which hands the work to a worker over a socket and starts one if nobody is listening:
 
 ```python
 from pcons import Worker
@@ -3598,21 +3598,28 @@ env.Command(
     target="report.pdf",
     source="report.py",
     command="python $SOURCE --out $TARGET",
-    worker=Worker(preload=["heavy_toolkit"]),
+    worker=Worker(command=["my-worker", "--profile=render"]),
 )
 ```
 
-`preload` is what this worker does to become ready: modules it imports before any action runs. List installed packages only — never a module of the project being built, whose whole point is to change between builds.
+**pcons does not implement workers.** It defines what one must do — see [the worker protocol](worker-protocol.md) — and your project brings whichever kind suits it: a Python process, a compiled binary, a client for something already running. Two actions share a worker when their `Worker` compares equal.
 
-Each action still runs in a **fresh forked child**, so nothing one action does can reach the next. A worker that reset itself between actions instead would carry the previous one's state — a cache populated before an edit, say — and quietly build the wrong thing.
+For actions that run a Python script, `PythonWorker` is bundled:
 
-Practical notes:
+```python
+from pcons import PythonWorker
 
-- **Nothing has to start the worker.** The first action that needs one starts it; later builds reuse it. It exits on its own after `idle_timeout` seconds (15 minutes by default).
-- **The generated build file still stands alone.** With no worker listening — plain `ninja`, CI, or Windows, which has no `fork` — the command simply runs directly. A build that cannot reach a worker is a slower build, not a failed one.
-- **Two actions share a worker** when they name the same interpreter and the same preload set.
-- **Only an interpreter running a script** is handed to a worker. Any other command, including `python -c`, runs directly rather than being approximated.
-- The socket lives in a private per-user directory, since it accepts commands to run.
+PythonWorker(preload=["heavy_toolkit"])  # ready by importing
+PythonWorker(setup="mypkg.warmup:connect")  # ready by doing
+```
+
+`preload` names installed packages to import — never a module of the project being built, which has to load fresh or an edit to it would be masked by the copy the worker already holds. `setup` is the general case: a `package.module:function` called once, free to open, claim or warm whatever the actions need.
+
+Three things hold whatever kind of worker you bring:
+
+- **Every action is isolated.** Nothing one action does may be observable by the next. This is the contract's one hard requirement, because getting it wrong yields a wrong build rather than a slow one. `PythonWorker` achieves it by forking a child per action.
+- **A worker is an optimization.** With none reachable — plain `ninja`, CI, Windows, a worker that will not start — the command runs directly. A generated build file always stands alone.
+- **Nothing supervises workers.** The first action that needs one starts it; it exits after `idle_timeout` seconds of quiet.
 
 See `examples/64_persistent_worker` for a runnable version.
 

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """What ninja actually runs: hand the command to a worker, or just run it.
 
-    client.py <socket> <modules> <idle timeout> -- <command> [args...]
+    client.py <socket> <idle timeout> <n> <start command (n tokens)> -- <command>
 
 Started once per action, so it must start fast: standard library only, and no
 pcons import (which costs more than this whole hop). It never fails a build on
@@ -45,12 +45,20 @@ def connect(sock_path: Path) -> socket.socket | None:
     return conn
 
 
-def spawn(sock_path: Path, modules: str, idle_timeout: str) -> subprocess.Popen | None:
-    """Start a worker and detach from it; it outlives this build."""
-    server = Path(__file__).parent / "server.py"
+def spawn(
+    sock_path: Path, start: list[str], idle_timeout: str
+) -> subprocess.Popen | None:
+    """Start a worker and detach from it; it outlives this build.
+
+    The socket path is appended to whatever the project asked to be run, and
+    the idle timeout goes in the environment: a worker needs both, and neither
+    is worth making every worker parse for itself.
+    """
+    env = dict(os.environ, PCONS_WORKER_IDLE_TIMEOUT=idle_timeout)
     try:
         return subprocess.Popen(  # noqa: S603
-            [sys.executable, str(server), str(sock_path), modules, idle_timeout],
+            [*start, str(sock_path)],
+            env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -127,17 +135,18 @@ def submit(conn: socket.socket, argv: list[str]) -> dict | None:
 
 
 def main(argv: list[str]) -> int:
-    separator = argv.index("--")
     sock_path = Path(argv[0])
-    modules, idle_timeout = argv[1], argv[2]
-    command = argv[separator + 1 :]
+    idle_timeout = argv[1]
+    start_argc = int(argv[2])
+    start = argv[3 : 3 + start_argc]
+    command = argv[3 + start_argc + 1 :]  # skip the "--" that follows
 
     if os.name == "nt" or not hasattr(socket, "AF_UNIX"):
         return run_directly(command)
 
     conn = connect(sock_path)
     if conn is None:
-        started = spawn(sock_path, modules, idle_timeout)
+        started = spawn(sock_path, start, idle_timeout)
         import time
 
         conn = wait_for(sock_path, time.monotonic() + STARTUP_TIMEOUT, started)
