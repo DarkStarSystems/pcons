@@ -1186,7 +1186,7 @@ class NinjaGenerator(BaseGenerator):
             return
         from pcons.core.vars import get_var
 
-        if get_var("PCONS_WARN_BUILD_DIR_PATHS", "1") == "0":
+        if not get_var("PCONS_WARN_BUILD_DIR_PATHS", True):
             return
         build_dir = "/".join(self._build_dir_parts)
         # Only where a path can start: the token itself, or after a separator

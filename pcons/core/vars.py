@@ -6,11 +6,20 @@ This module provides functions for managing variables passed via the command lin
 
 from __future__ import annotations
 
+import builtins
 import json
 import os
-from typing import overload
+from typing import TypeAlias, overload
 
 from pcons.core.cache import reset_cache
+from pcons.core.errors import ConfigureError
+
+# Types get_var can convert a raw variable string into.
+VarValue: TypeAlias = bool | int | float | str
+
+_TRUE_VALUES = frozenset({"1", "on", "yes", "true", "y"})
+_FALSE_VALUES = frozenset({"0", "off", "no", "false", "n"})
+_SUPPORTED_TYPES: tuple[builtins.type[VarValue], ...] = (bool, int, float, str)
 
 # Internal storage for CLI variables (parsed PCONS_VARS for the current run)
 _cli_vars: dict[str, str] | None = None
@@ -33,48 +42,61 @@ def _accessed_var_names() -> set[str]:
     return set(_accessed_vars)
 
 
-@overload
-def get_var(name: str) -> str | None: ...
+def _resolve_var_type(
+    name: str,
+    default: VarValue | None,
+    requested: builtins.type[VarValue] | None,
+) -> builtins.type[VarValue]:
+    """Pick the type a variable's raw string should be converted to."""
+    if requested is not None:
+        if requested not in _SUPPORTED_TYPES:
+            raise ConfigureError(
+                f"get_var({name!r}): unsupported type={requested!r}; "
+                "expected bool, int, float or str"
+            )
+        if default is not None and builtins.type(default) is not requested:
+            raise ConfigureError(
+                f"get_var({name!r}): default {default!r} is "
+                f"{builtins.type(default).__name__}, which conflicts with "
+                f"type={requested.__name__}"
+            )
+        return requested
+
+    if default is None:
+        return str
+
+    inferred = builtins.type(default)
+    if inferred not in _SUPPORTED_TYPES:
+        raise ConfigureError(
+            f"get_var({name!r}): default {default!r} is a "
+            f"{inferred.__name__}; expected bool, int, float or str"
+        )
+    return inferred
 
 
-@overload
-def get_var(name: str, default: str) -> str: ...
+def _coerce_var(name: str, raw: str, target: builtins.type[VarValue]) -> VarValue:
+    """Convert a raw variable string to ``target``, or raise."""
+    text = raw.strip()
+    if target is bool:
+        lowered = text.lower()
+        if lowered in _TRUE_VALUES:
+            return True
+        if lowered in _FALSE_VALUES:
+            return False
+        raise ConfigureError(
+            f"{name}={raw!r} is not a boolean; expected one of "
+            f"{', '.join(sorted(_TRUE_VALUES))} (true) or "
+            f"{', '.join(sorted(_FALSE_VALUES))} (false)"
+        )
+    try:
+        return target(text)  # type: ignore[call-arg]
+    except ValueError as e:
+        raise ConfigureError(f"{name}={raw!r} is not a valid {target.__name__}") from e
 
 
-@overload
-def get_var(name: str, default: None) -> str | None: ...
-
-
-def get_var(name: str, default: str | None = None) -> str | None:
-    """Get a build variable set on the command line or from environment.
-
-    Variables can be set when invoking pcons:
-        pcons PORT=ofx USE_CUDA=1
-
-    In your pcons-build.py, access them with:
-        port = get_var('PORT', default='ofx')
-        use_cuda = get_var('USE_CUDA', default='0') == '1'
-
-    Values configured on the command line persist across runs: the CLI folds a
-    prior configure's cached vars into PCONS_VARS before the script runs, so a
-    later bare `pcons configure` still sees them (CMakeCache-like). This reader
-    consults only PCONS_VARS and the environment; the cache never appears here.
-
-    Precedence (highest to lowest):
-        1. Command line: pcons VAR=value  (this run, via PCONS_VARS)
-        2. Environment variable: VAR=value pcons
-        3. default
-
-    Args:
-        name: Variable name.
-        default: Default value if not set.
-
-    Returns:
-        The variable value, or default if not set.
-    """
+def _raw_var(name: str) -> str | None:
+    """Return a variable's raw string from PCONS_VARS or the environment."""
     global _cli_vars
-
-    _accessed_vars.add(name)
 
     # Lazy-load CLI vars from environment on first access
     if _cli_vars is None:
@@ -100,11 +122,122 @@ def get_var(name: str, default: str | None = None) -> str | None:
         return _cli_vars[name]
 
     # Then OS environment
-    env_value = os.environ.get(name)
-    if env_value is not None:
-        return env_value
+    return os.environ.get(name)
 
-    return default
+
+@overload
+def get_var(name: str) -> str | None: ...
+
+
+@overload
+def get_var(
+    name: str, default: bool, *, type: builtins.type[bool] | None = None
+) -> bool: ...
+
+
+@overload
+def get_var(
+    name: str, default: int, *, type: builtins.type[int] | None = None
+) -> int: ...
+
+
+@overload
+def get_var(
+    name: str, default: float, *, type: builtins.type[float] | None = None
+) -> float: ...
+
+
+@overload
+def get_var(
+    name: str, default: str, *, type: builtins.type[str] | None = None
+) -> str: ...
+
+
+@overload
+def get_var(
+    name: str, default: None = None, *, type: builtins.type[bool]
+) -> bool | None: ...
+
+
+@overload
+def get_var(
+    name: str, default: None = None, *, type: builtins.type[int]
+) -> int | None: ...
+
+
+@overload
+def get_var(
+    name: str, default: None = None, *, type: builtins.type[float]
+) -> float | None: ...
+
+
+@overload
+def get_var(
+    name: str, default: None = None, *, type: builtins.type[str]
+) -> str | None: ...
+
+
+@overload
+def get_var(name: str, default: None) -> str | None: ...
+
+
+def get_var(
+    name: str,
+    default: VarValue | None = None,
+    *,
+    type: builtins.type[VarValue] | None = None,
+) -> VarValue | None:
+    """Get a build variable set on the command line or from environment.
+
+    Variables can be set when invoking pcons:
+        pcons PORT=ofx USE_CUDA=1
+
+    In your pcons-build.py, access them with:
+        port = get_var('PORT', 'ofx')
+        use_cuda = get_var('USE_CUDA', False)
+        opt_level = get_var('OPT_LEVEL', 2)
+
+    The default's type drives the conversion, so `get_var('X', False)` returns a
+    bool and `get_var('X', 2)` returns an int. Pass `type=` when there is no
+    default: `get_var('BUILD_TESTS', type=bool)` returns None when unset. With no
+    default and no `type=`, the raw string is returned, as before.
+
+    Booleans accept 1/on/yes/true/y and 0/off/no/false/n, case-insensitive; any
+    other value raises rather than reading as false. The default itself is never
+    parsed, it is returned as-is when the variable is unset.
+
+    Values configured on the command line persist across runs: the CLI folds a
+    prior configure's cached vars into PCONS_VARS before the script runs, so a
+    later bare `pcons configure` still sees them (CMakeCache-like). This reader
+    consults only PCONS_VARS and the environment; the cache never appears here.
+
+    Precedence (highest to lowest):
+        1. Command line: pcons VAR=value  (this run, via PCONS_VARS)
+        2. Environment variable: VAR=value pcons
+        3. default
+
+    Args:
+        name: Variable name.
+        default: Default value if not set. Its type selects the conversion.
+        type: Explicit conversion type (bool, int, float or str). Must agree with
+            the default's type when both are given.
+
+    Returns:
+        The variable value converted to the requested type, or default if not set.
+
+    Raises:
+        ConfigureError: The value cannot be converted, or type and default disagree.
+    """
+    _accessed_vars.add(name)
+
+    target = _resolve_var_type(name, default, type)
+
+    raw = _raw_var(name)
+    if raw is None:
+        return default
+    if target is str:
+        return raw
+    return _coerce_var(name, raw, target)
 
 
 def get_variant(default: str = "release") -> str:

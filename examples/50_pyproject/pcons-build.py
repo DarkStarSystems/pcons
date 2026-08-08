@@ -152,7 +152,7 @@ cmd = project.Command(
 # the staging dir is then the site-packages image, so we install to its root (".")
 # to place the extension and stubs at the top level where Python will import them.
 # Otherwise we follow the usual bin/lib convention.
-if get_var("PCONS_BUILD_WHEEL"):
+if get_var("PCONS_BUILD_WHEEL", False):
     install_destination = "."
 else:
     install_destination = install_dir(env, "shared_library")
