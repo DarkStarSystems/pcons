@@ -1677,9 +1677,13 @@ in `<build_dir>/pcons_cache.json` and written only after a successful run.
 Precedence, highest to lowest:
 
 1. This run's command line (`PORT=x`, `--variant`, `-G`)
-2. Environment (`PORT=x pcons`, `VARIANT`, `GENERATOR`)
+2. Environment: `PORT=x pcons`, `VARIANT`, `GENERATOR`, and the `PCONS_VARS` /
+   `PCONS_VARIANT` / `PCONS_GENERATOR` forms
 3. Persisted cache from a prior run
 4. The `default` passed to `get_var` / `get_variant`
+
+An environment value overrides the cache but is not written to it, so exporting
+one steers a run without changing what a later bare run reuses.
 
 The cache is tied to `$PCONS_BUILD_DIR`, which `pcons` always sets (and `-B`
 overrides). Running the script directly with `python pcons-build.py` uses no

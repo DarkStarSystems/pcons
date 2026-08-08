@@ -1530,6 +1530,104 @@ class TestSourceDirMismatch:
         assert BuildCache(build_dir).get("source_dir") == str(src_b.parent)
 
 
+class TestEnvOverridesCache:
+    """An exported PCONS_* env var overrides the persisted cache (but not a CLI
+    flag), and is itself never persisted."""
+
+    def _persisted(self, build_dir: Path, key: str) -> object:
+        from pcons.core.cache import BuildCache
+
+        return BuildCache(build_dir).get(key)
+
+    def test_pcons_variant_env_overrides_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        # Persist variant=release.
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variant="release")[0] == 0
+
+        # An exported PCONS_VARIANT beats the cached release.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_variant() == 'debug', pcons.get_variant()\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.setenv("PCONS_VARIANT", "debug")
+        assert run_script(script, build_dir)[0] == 0
+        # But the env value did not rewrite the cache.
+        assert self._persisted(build_dir, "variant") == "release"
+
+    def test_cli_variant_beats_pcons_variant_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_variant() == 'release', pcons.get_variant()\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.setenv("PCONS_VARIANT", "debug")
+        _clear_cli_vars()
+
+        # The --variant flag wins over the exported PCONS_VARIANT.
+        assert run_script(script, build_dir, variant="release")[0] == 0
+
+    def test_pcons_generator_env_overrides_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, generator="ninja")[0] == 0
+
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert isinstance(pcons.Generator(), pcons.MakefileGenerator)\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.setenv("PCONS_GENERATOR", "make")
+        assert run_script(script, build_dir)[0] == 0
+        assert self._persisted(build_dir, "generator") == "ninja"
+
+    def test_pcons_vars_env_overrides_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PORT", raising=False)
+        _clear_cli_vars()
+
+        # Persist PORT=1.
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, variables={"PORT": "1"})[0] == 0
+
+        # An exported PCONS_VARS overrides the cached PORT.
+        script.write_text(
+            "import pcons\n"
+            "from pcons import Project\n"
+            "assert pcons.get_var('PORT') == '2', pcons.get_var('PORT')\n"
+            "Project('demo')\n"
+        )
+        monkeypatch.setenv("PCONS_VARS", '{"PORT": "2"}')
+        assert run_script(script, build_dir)[0] == 0
+        # The env value did not rewrite the cached PORT.
+        assert self._persisted(build_dir, "vars") == {"PORT": "1"}
+
+
 class TestCacheCommand:
     """Tests for the `pcons cache` subcommand (list/show/clear/path)."""
 

@@ -161,6 +161,17 @@ def _as_str(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
+def _parse_pcons_vars(raw: str | None) -> dict[str, str]:
+    """Parse an inherited ``PCONS_VARS`` JSON blob, tolerating a malformed one."""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _warn_unread_cached_vars(
     cached_vars: dict[str, str], cli_vars: dict[str, str]
 ) -> None:
@@ -281,26 +292,43 @@ def run_script(
         # nothing, and only this run's own settings get persisted below.
         cache.clear()
     cli_vars = dict(variables or {})
+    # An inherited PCONS_VARS (exported by the user) overrides the cache but loses
+    # to this run's own KEY=value args; like any environment value it is not
+    # persisted, so it never rewrites the cache.
+    inherited_vars = _parse_pcons_vars(os.environ.get("PCONS_VARS"))
     cached_vars = cache.get("vars")
     cached_vars = cached_vars if isinstance(cached_vars, dict) else {}
-    # `persist_vars` (cache <- CLI) is what gets written back, independent of the
-    # environment. `effective_vars` is what the script reads this run: it drops
-    # any cached var shadowed by a same-named env var, so `VAR=x pcons` still
-    # beats the cache. Env keys are unknowable in general, but cache keys are, so
-    # we omit those from PCONS_VARS and let get_var fall through to the env.
+    # `persist_vars` (cache <- this run's CLI) is what gets written back. `effective
+    # _vars` is what the script reads: cache < inherited PCONS_VARS < this-run CLI,
+    # and a cached var shadowed by a same-named bare env var is dropped so `VAR=x
+    # pcons` still beats the cache (env names are unknowable, but cache keys aren't,
+    # so we omit those from PCONS_VARS and let get_var fall through to the env).
     persist_vars = {**cached_vars, **cli_vars}
+    merged_vars = {**cached_vars, **inherited_vars, **cli_vars}
     effective_vars = {
-        k: v for k, v in persist_vars.items() if k in cli_vars or k not in os.environ
+        k: v
+        for k, v in merged_vars.items()
+        if k in cli_vars or k in inherited_vars or k not in os.environ
     }
 
     cached_variant = _as_str(cache.get("variant"))
-    effective_variant = variant or os.environ.get("VARIANT") or cached_variant
+    effective_variant = (
+        variant
+        or os.environ.get("PCONS_VARIANT")
+        or os.environ.get("VARIANT")
+        or cached_variant
+    )
     persist_variant = variant or cached_variant
 
     cached_gen = _as_str(cache.get("generator"))
     cli_gen = ":".join(generator) if isinstance(generator, list) else generator
     merged_gen = _merge_generator_spec(cached_gen, cli_gen) if cli_gen else None
-    effective_gen = merged_gen or os.environ.get("GENERATOR") or cached_gen
+    effective_gen = (
+        merged_gen
+        or os.environ.get("PCONS_GENERATOR")
+        or os.environ.get("GENERATOR")
+        or cached_gen
+    )
     persist_gen = merged_gen or cached_gen
 
     pcons.core.invocation.record(

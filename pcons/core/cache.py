@@ -2,9 +2,9 @@
 """Per-build-directory persistent cache.
 
 A small key/value store persisted as JSON in the build directory
-(``pcons_cache.json``), CMakeCache-like. Used to carry CLI-configured settings
-(build variables, variant, generator) across runs, and available to build scripts
-for caching arbitrary data.
+(``pcons_cache.json``), CMakeCache-like. Used internally to carry CLI-configured
+settings (build variables, variant, generator) across runs. Not public API: build
+scripts read settings through ``get_var`` / ``get_variant``, never this store.
 
 The cache is separate from :class:`pcons.configure.config.Configure`
 (``pcons_config.json``), which stores configure-check results with its own
