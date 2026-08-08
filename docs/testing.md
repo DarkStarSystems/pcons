@@ -1,11 +1,9 @@
 # Testing
 
-Pcons keeps the build-system / test-runner split clean: build scripts
-**declare** tests via `project.Test(...)`, the configure step writes a
-JSON manifest (`<build_dir>/tests.json`), and a separate runner —
-`pcons test` (or `ninja test`) — executes them. This is the same model
-CMake uses with CTest, and it keeps pcons itself out of the business
-of running things at build time.
+Build scripts declare tests with `project.Test(...)`. The configure step writes
+them to a JSON manifest at `<build_dir>/tests.json`, and a separate runner —
+`pcons test`, or `ninja test` / `make test` — executes them. The build system
+itself never runs a test, the same split CMake has with CTest.
 
 ## Declaring Tests
 
