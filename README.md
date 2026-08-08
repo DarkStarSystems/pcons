@@ -32,17 +32,17 @@ Pcons can build not just executables, but also tar/zip archives, python packages
 
 ## What's in the box
 
-- **[Qt 6](https://pcons.readthedocs.io/en/latest/qt/)** — `find_qt()`, automoc/autouic/autorcc, QML modules, translations, `ninja deploy`
-- **C++20 modules** — named modules, partitions and `import std` on GCC, Clang and MSVC, with dependency scanning
-- **[Tests and fuzzing](https://pcons.readthedocs.io/en/latest/user-guide/#testing)** — `project.Test()`, `pcons test`, gtest/doctest/Catch2 case discovery, JUnit XML, libFuzzer/AFL++
-- **Compiler caching** — `env.use_compiler_cache()`, or any command run behind a launcher
-- **`pcons --watch`** — rebuild on every save, including edits to the build script itself
-- **Configure checks** — `check_header()`, `check_flag()`, `try_compile()`, `configure_file()`, all cached
-- **Generated sources** — code generators, multi-phase builds, and outputs that don't rebuild the world when they haven't changed
-- **Installers** — signed and notarized `.pkg` and `.dmg`, MSIX packages, WinSxS assemblies
-- **Cross-compilation** — Android NDK, iOS, WebAssembly (WASI and Emscripten) presets
-- **`compile_commands.json`** — for clangd and friends, always reporting the real compiler
-- **`env.explain()`** — where did this flag come from? Every one, attributed to the preset that set it
+- **[Qt 6](https://pcons.readthedocs.io/en/latest/qt/)**: `find_qt()`, automoc/autouic/autorcc, QML modules, translations, and `ninja deploy`
+- **C++20 modules**: named modules, partitions, and `import std` on GCC, Clang and MSVC, with automatic dependency scanning
+- **[Tests and fuzzing](https://pcons.readthedocs.io/en/latest/testing/)**: `project.Test()`, `pcons test`, gtest/doctest/Catch2 case discovery, JUnit XML, libFuzzer/AFL++
+- **Compiler caching**: `env.use_compiler_cache()`, or run any command behind a launcher
+- **`pcons --watch`**: rebuilds on every save, including edits to the build script itself
+- **Configure checks**: `check_header()`, `check_flag()`, `try_compile()`, `configure_file()`, all cached
+- **Generated sources**: code generators and multi-phase builds; if a generated file didn't change, its consumers don't rebuild
+- **Installers**: signed and notarized `.pkg` and `.dmg`, MSIX packages, WinSxS assemblies
+- **Cross-compilation**: presets for Android NDK, iOS, and WebAssembly (WASI and Emscripten)
+- **`compile_commands.json`**: for clangd and friends; it always reports the real compiler
+- **`env.explain()`**: where did this flag come from? Every flag, traced back to the preset that set it
 
 ## Why another software build tool?
 
@@ -56,7 +56,7 @@ Here's a [comparison](COMPARISONS.md) between pcons and other common modern buil
 
 ✅ **Ready for small-scale production use** - and still under active development, so feedback is very welcome. It's working in several medium-sized projects.
 
-Core functionality is working and well tested across Linux, macOS and Windows, on every commit: C/C++/ObjC/Fortran/Swift/CUDA compilation, C++20 modules, Qt 6, static and shared libraries, install targets, installers, cross-compilation, and mixed-language builds. There are 66 self-contained [examples](examples/), each built and verified in CI. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
+Core functionality is working and well tested across Linux, macOS and Windows, on every commit: C/C++/ObjC/Fortran/Swift/CUDA compilation, C++20 modules, Qt 6, static and shared libraries, install targets, installers, cross-compilation, and mixed-language builds. There are 66 self-contained [examples](examples/), and every one is built and verified in CI. See [ARCHITECTURE.md](ARCHITECTURE.md) for design details.
 
 ### Rust / Go interop
 
@@ -74,7 +74,7 @@ uvx pcons         # generate build.ninja and build
 
 ## Quick Example
 
-Or write it yourself — it is ordinary Python:
+Or write it yourself; it's ordinary Python:
 
 ```python
 # pcons-build.py

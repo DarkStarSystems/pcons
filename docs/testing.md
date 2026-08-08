@@ -1,9 +1,9 @@
 # Testing
 
 Build scripts declare tests with `project.Test(...)`. The configure step writes
-them to a JSON manifest at `<build_dir>/tests.json`, and a separate runner —
-`pcons test`, or `ninja test` / `make test` — executes them. The build system
-itself never runs a test, the same split CMake has with CTest.
+them to a JSON manifest at `<build_dir>/tests.json`, and a separate runner
+(`pcons test`, or `ninja test` / `make test`) executes them. The build system
+itself never runs a test; it's the same split CMake has with CTest.
 
 ## Declaring Tests
 

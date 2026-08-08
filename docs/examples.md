@@ -1,8 +1,8 @@
 # Examples
 
 Every example below is a self-contained project with its own `pcons-build.py`,
-built and verified on Linux, macOS and Windows on every commit — so each one is
-both a worked answer and a guarantee that the feature still works.
+built and verified on Linux, macOS and Windows on every commit. If it's listed
+here, it works.
 
 Browse them at
 [github.com/DarkStarSystems/pcons/tree/main/examples](https://github.com/DarkStarSystems/pcons/tree/main/examples),

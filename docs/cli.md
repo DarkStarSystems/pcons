@@ -5,9 +5,9 @@ pcons [options] [KEY=value ...] [target ...]
 pcons <command> [options] [KEY=value ...] [target ...]
 ```
 
-With no command, pcons generates build files and then builds — the two steps
-you almost always want together. Everything below is what the CLI accepts; for
-what the features *are*, see the [user guide](user-guide.md).
+With no command, pcons generates build files and then builds. This page covers
+what the CLI accepts; the [user guide](user-guide.md) covers what the features
+do.
 
 ## Commands
 
@@ -33,8 +33,8 @@ Generate build files without building.
 
 ### `pcons build`
 
-Build with the tool matching the generated files — ninja, make or xcodebuild —
-regenerating them first if they are stale.
+Build with the tool that matches the generated files (ninja, make or
+xcodebuild), regenerating them first if they're stale.
 
 | Option | |
 |---|---|
@@ -60,8 +60,8 @@ Show the build script's documentation and the variables it reads.
 
 ### `pcons init`
 
-Write a `pcons-build.py` for the current directory, adopting any C or C++
-sources it finds, or scaffolding a hello-world program if there are none.
+Write a `pcons-build.py` for the current directory. It adopts any C or C++
+sources it finds; if there are none, it scaffolds a hello-world program.
 
 | Option | |
 |---|---|
@@ -84,7 +84,7 @@ pcons cache path     # where it lives
 ### `pcons test`
 
 Run the tests declared by `project.Test()`. This subcommand takes the test
-runner's own options (`-L`, `-R`, `-E`, `--junit`, …) rather than the ones
+runner's own options (`-L`, `-R`, `-E`, `--junit` and so on), not the ones
 below; see [Testing](testing.md).
 
 ## Options
@@ -95,7 +95,7 @@ Accepted by every command unless noted:
 |---|---|
 | `-h`, `--help` | Show help and exit |
 | `--version` | Show the version and exit |
-| `-C DIR`, `--directory DIR` | Change to *DIR* before doing anything else. Handled before all other arguments |
+| `-C DIR`, `--directory DIR` | Change to *DIR* first, before anything else is parsed |
 | `-B DIR`, `--build-dir DIR` | Build directory. Default: `$PCONS_BUILD_DIR`, else `build` |
 | `-b FILE`, `--build-script FILE` | Path to the build script. Default: `pcons-build.py` in the current directory |
 | `-v`, `--verbose` | Verbose output |
@@ -111,8 +111,8 @@ takes none of the generate-time ones.
 
 ## Build variables
 
-Any `KEY=value` argument becomes a build variable the script can read with
-`get_var()`, and is remembered per build directory for later runs:
+Any `KEY=value` argument becomes a build variable your script can read with
+`get_var()`. It's remembered per build directory, so later runs pick it up:
 
 ```bash
 pcons PORT=ofx USE_CUDA=1 PREFIX=/usr/local
@@ -159,6 +159,6 @@ Read by a persistent worker and its client:
 
 ## Exit status
 
-`0` on success, non-zero otherwise: a build script that fails, a build tool that
-fails, or arguments pcons cannot make sense of. Under `--watch`, a failed build
-leaves the watch running and only Ctrl-C ends the session, which exits `0`.
+`0` on success, non-zero otherwise: the build script failed, the build tool
+failed, or pcons couldn't parse the arguments. Under `--watch` a failed build
+leaves the watch running; only Ctrl-C ends the session, and that exits `0`.

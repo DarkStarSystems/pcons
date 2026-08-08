@@ -2,9 +2,10 @@
 # SPDX-License-Identifier: MIT
 """Write docs/examples.md from the examples' own test.toml descriptions.
 
-The catalogue is generated rather than written because every example already
-carries a one-line description that CI reads, and a hand-maintained second
-copy would be wrong within a release. Run it after adding an example:
+Every example already carries a one-line description that CI reads, so the
+catalogue is generated from those instead of being maintained by hand; a second
+copy of the list would be out of date within a release. Run it after adding an
+example:
 
     python scripts/gen_examples_index.py        # rewrite the page
     python scripts/gen_examples_index.py --check  # fail if it is out of date
@@ -23,8 +24,8 @@ PAGE = ROOT / "docs" / "examples.md"
 HEADER = """# Examples
 
 Every example below is a self-contained project with its own `pcons-build.py`,
-built and verified on Linux, macOS and Windows on every commit — so each one is
-both a worked answer and a guarantee that the feature still works.
+built and verified on Linux, macOS and Windows on every commit. If it's listed
+here, it works.
 
 Browse them at
 [github.com/DarkStarSystems/pcons/tree/main/examples](https://github.com/DarkStarSystems/pcons/tree/main/examples),

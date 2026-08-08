@@ -1616,7 +1616,7 @@ The build directory is never watched (reacting to the build's own output would
 loop forever), nor are VCS directories, virtualenvs, tool caches, or editor
 scratch files. Anything ninja knows how to build is also left out, wherever it
 lands — so a command that generates a file next to its sources, or an in-source
-build (`-B .`), does not retrigger the build that wrote it.
+build (`-B .`), doesn't retrigger the build that wrote it.
 
 Two things a watch reports that an ordinary build does not:
 
@@ -3198,9 +3198,9 @@ env.Command(
 )
 ```
 
-Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .` — the shared module arrives as an extra argument. A script that reads `sys.argv` by membership rather than by position will appear to work, which is what makes this worth spelling out. Use `${SOURCES[0]}` to name the entry point, and every source still becomes a dependency ninja watches.
+Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .`, so the shared module arrives as an extra argument. A script that checks `sys.argv` by membership instead of by position will appear to work, which is why it's worth spelling out. Use `${SOURCES[0]}` to name the entry point, and every source still becomes a dependency ninja watches.
 
-pcons warns when a command written in the singular meets more than one source, since that spelling reads as "one" and means "all". Write `$SOURCES` when consuming them all is the intent — `cat $SOURCES > $TARGET` is a perfectly good command, and says so.
+pcons warns when you write the singular and the command has more than one source: that spelling reads as "one" but means "all". Write `$SOURCES` when consuming them all is the intent — `cat $SOURCES > $TARGET` is a perfectly good command, and says so.
 
 ### Persistent Workers
 
