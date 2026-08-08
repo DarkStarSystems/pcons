@@ -23,8 +23,9 @@ _FALSE_VALUES = frozenset({"0", "off", "no", "false", "n"})
 _SUPPORTED_TYPES: tuple[builtins.type[VarValue], ...] = (bool, int, float, str, Path)
 _SUPPORTED_NAMES = ", ".join(t.__name__ for t in _SUPPORTED_TYPES)
 
-# Internal storage for CLI variables (parsed PCONS_VARS for the current run)
-_cli_vars: dict[str, str] | None = None
+# Internal storage for CLI variables (parsed PCONS_VARS for the current run).
+# Values are whatever the JSON held; _raw_var vets them on access.
+_cli_vars: dict[str, object] | None = None
 
 # Names passed to get_var this run, so the CLI can warn about persisted vars the
 # build script never reads (a typo like `pcons FEATRUE=on`).
@@ -44,12 +45,17 @@ def _accessed_var_names() -> set[str]:
     return set(_accessed_vars)
 
 
-def _var_type_of(candidate: builtins.type[object]) -> builtins.type[VarValue] | None:
+def _var_type_of(candidate: object) -> builtins.type[VarValue] | None:
     """Map a class to the conversion it selects, or None if unsupported.
 
     ``Path("/x")`` is a PosixPath or a WindowsPath, so a Path default would
     otherwise select a per-platform class no caller can name portably.
+
+    ``candidate`` is whatever the caller passed as ``type=``, which is not
+    necessarily a class: ``list[str]`` and ``Path("/usr")`` both reach here.
     """
+    if not isinstance(candidate, builtins.type):
+        return None
     if issubclass(candidate, PurePath):
         return Path
     for supported in _SUPPORTED_TYPES:
@@ -65,17 +71,16 @@ def _resolve_var_type(
 ) -> builtins.type[VarValue]:
     """Pick the type a variable's raw string should be converted to."""
     if requested is not None:
+        if default is not None:
+            raise ConfigureError(
+                f"get_var({name!r}): pass a default or type=, not both; "
+                f"the default {default!r} already selects the conversion"
+            )
         target = _var_type_of(requested)
         if target is None:
             raise ConfigureError(
                 f"get_var({name!r}): unsupported type={requested!r}; "
                 f"expected {_SUPPORTED_NAMES}"
-            )
-        if default is not None and _var_type_of(builtins.type(default)) is not target:
-            raise ConfigureError(
-                f"get_var({name!r}): default {default!r} is "
-                f"{builtins.type(default).__name__}, which conflicts with "
-                f"type={requested.__name__}"
             )
         return target
 
@@ -110,7 +115,7 @@ def _coerce_var(name: str, raw: str, target: builtins.type[VarValue]) -> VarValu
             f"{', '.join(sorted(_FALSE_VALUES))} (false)"
         )
     try:
-        return target(text)  # type: ignore[call-arg]
+        return target(text)
     except ValueError as e:
         raise ConfigureError(f"{name}={raw!r} is not a valid {target.__name__}") from e
 
@@ -140,44 +145,47 @@ def _raw_var(name: str) -> str | None:
     # Check CLI vars first
     assert _cli_vars is not None
     if name in _cli_vars:
-        return _cli_vars[name]
+        value = _cli_vars[name]
+        # PCONS_VARS carries the raw text of `VAR=value` arguments, so every
+        # value is a string. A hand-written one holding a JSON bool, number or
+        # list is a mistake worth naming, not something to convert.
+        if not isinstance(value, str):
+            raise ConfigureError(
+                f"PCONS_VARS[{name!r}] is {builtins.type(value).__name__} "
+                f"{value!r}; its values must be strings"
+            )
+        return value
 
     # Then OS environment
     return os.environ.get(name)
 
 
+# A default and a type= are mutually exclusive: the default's own type selects
+# the conversion, so the pair is either redundant or a conflict, and the
+# implementation raises on it. The overloads say so, rather than typing calls
+# that can only fail.
 @overload
 def get_var(name: str) -> str | None: ...
 
 
 @overload
-def get_var(
-    name: str, default: bool, *, type: builtins.type[bool] | None = None
-) -> bool: ...
+def get_var(name: str, default: bool) -> bool: ...
 
 
 @overload
-def get_var(
-    name: str, default: int, *, type: builtins.type[int] | None = None
-) -> int: ...
+def get_var(name: str, default: int) -> int: ...
 
 
 @overload
-def get_var(
-    name: str, default: float, *, type: builtins.type[float] | None = None
-) -> float: ...
+def get_var(name: str, default: float) -> float: ...
 
 
 @overload
-def get_var(
-    name: str, default: str, *, type: builtins.type[str] | None = None
-) -> str: ...
+def get_var(name: str, default: str) -> str: ...
 
 
 @overload
-def get_var(
-    name: str, default: Path, *, type: builtins.type[Path] | None = None
-) -> Path: ...
+def get_var(name: str, default: Path) -> Path: ...
 
 
 @overload
@@ -234,7 +242,8 @@ def get_var(
     The default's type drives the conversion, so `get_var('X', False)` returns a
     bool and `get_var('X', 2)` returns an int. Pass `type=` when there is no
     default: `get_var('BUILD_TESTS', type=bool)` returns None when unset. With no
-    default and no `type=`, the raw string is returned, as before.
+    default and no `type=`, the raw string is returned, as before. A default and
+    a `type=` together raise: the default already picks the conversion.
 
     Booleans accept 1/on/yes/true/y and 0/off/no/false/n, case-insensitive; any
     other value raises rather than reading as false. A Path is taken verbatim,
@@ -255,14 +264,15 @@ def get_var(
     Args:
         name: Variable name.
         default: Default value if not set. Its type selects the conversion.
-        type: Explicit conversion type (bool, int, float, str or Path). Must
-            agree with the default's type when both are given.
+        type: Explicit conversion type (bool, int, float, str or Path), for
+            when there is no default. Cannot be combined with one.
 
     Returns:
         The variable value converted to the requested type, or default if not set.
 
     Raises:
-        ConfigureError: The value cannot be converted, or type and default disagree.
+        ConfigureError: The value cannot be converted, the type is unsupported,
+            or a default and a type= were both given.
     """
     _accessed_vars.add(name)
 

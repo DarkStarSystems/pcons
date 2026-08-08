@@ -1654,11 +1654,13 @@ pcons PORT=ofx USE_CUDA=1 PREFIX=/usr/local
 Access them in `pcons-build.py`:
 
 ```python
+from pathlib import Path
+
 from pcons import get_var
 
 port = get_var("PORT", "ofx")
 use_cuda = get_var("USE_CUDA", False)
-prefix = get_var("PREFIX", "/usr/local")
+prefix = get_var("PREFIX", Path("/usr/local"))
 ```
 
 #### Typed Variables
@@ -1681,6 +1683,9 @@ unset, which is falsy, so it still reads well in a condition:
 if get_var("BUILD_TESTS", type=bool):
     ...
 ```
+
+A default and a `type=` together raise: the default already picks the
+conversion, so the pair is either redundant or a contradiction.
 
 Booleans accept `1`, `on`, `yes`, `true`, `y` and `0`, `off`, `no`, `false`, `n`,
 case-insensitive. Any other value raises `ConfigureError` instead of silently

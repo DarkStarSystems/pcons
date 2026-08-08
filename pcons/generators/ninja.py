@@ -1184,9 +1184,16 @@ class NinjaGenerator(BaseGenerator):
         """
         if not self._build_dir_parts or token in self._warned_build_dir_paths:
             return
+        from pcons.core.errors import ConfigureError
         from pcons.core.vars import get_var
 
-        if not get_var("PCONS_WARN_BUILD_DIR_PATHS", True):
+        try:
+            warn = get_var("PCONS_WARN_BUILD_DIR_PATHS", True)
+        except ConfigureError:
+            # A switch that silences a warning must not be able to fail
+            # generation, so an unreadable value just leaves the warning on.
+            warn = True
+        if not warn:
             return
         build_dir = "/".join(self._build_dir_parts)
         # Only where a path can start: the token itself, or after a separator

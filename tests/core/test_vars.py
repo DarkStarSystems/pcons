@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -135,18 +136,29 @@ class TestGetVarTypes:
         clean_env.setenv("TEST_VAR", "on")
         assert get_var("TEST_VAR", type=bool) is True
 
-    def test_explicit_type_matching_default(self, clean_env) -> None:
-        clean_env.setenv("TEST_VAR", "off")
-
-        assert get_var("TEST_VAR", True, type=bool) is False
-
-    def test_type_conflicting_with_default_raises(self, clean_env) -> None:
-        with pytest.raises(ConfigureError, match="conflicts with"):
+    def test_default_and_type_together_raises(self, clean_env) -> None:
+        with pytest.raises(ConfigureError, match="not both"):
             get_var("TEST_VAR", "on", type=bool)  # type: ignore[call-overload]
+
+    def test_agreeing_default_and_type_still_raises(self, clean_env) -> None:
+        """The default's type already selects the conversion; type= is for
+        when there is no default. Allowing both means two ways to say one
+        thing, and a pair that can disagree."""
+        with pytest.raises(ConfigureError, match="not both"):
+            get_var("TEST_VAR", True, type=bool)  # type: ignore[call-overload]
 
     def test_unsupported_type_raises(self, clean_env) -> None:
         with pytest.raises(ConfigureError, match="unsupported type"):
             get_var("TEST_VAR", type=list)  # type: ignore[call-overload]
+
+    def test_non_class_type_raises(self, clean_env) -> None:
+        """A value where a class belongs must be reported, not crash."""
+        with pytest.raises(ConfigureError, match="unsupported type"):
+            get_var("TEST_VAR", type=Path("/usr"))  # type: ignore[call-overload]
+
+    def test_subscripted_generic_type_raises(self, clean_env) -> None:
+        with pytest.raises(ConfigureError, match="unsupported type"):
+            get_var("TEST_VAR", type=list[str])  # type: ignore[call-overload]
 
     def test_unsupported_default_raises(self, clean_env) -> None:
         with pytest.raises(
@@ -211,14 +223,62 @@ class TestGetVarTypes:
         default = Path("/usr")
         assert type(default) is not Path
 
-        assert get_var("TEST_VAR", default, type=Path) == Path("/opt")
-
-    def test_path_conflicting_with_str_type_raises(self, clean_env) -> None:
-        with pytest.raises(ConfigureError, match="conflicts with"):
-            get_var("TEST_VAR", Path("/usr"), type=str)  # type: ignore[call-overload]
+        assert get_var("TEST_VAR", default) == Path("/opt")
 
     def test_bool_is_not_read_as_int(self, clean_env) -> None:
         """bool is an int subclass; inference must check bool first."""
         clean_env.setenv("TEST_VAR", "on")
 
         assert get_var("TEST_VAR", False) is True
+
+
+class TestPconsVarsPayload:
+    """PCONS_VARS carries raw `VAR=value` text, so its values are strings.
+    A hand-written one holding a JSON bool or number must be reported."""
+
+    @pytest.mark.parametrize("payload", ['{"TEST_VAR": true}', '{"TEST_VAR": 3}'])
+    def test_non_string_value_raises(self, clean_env, payload) -> None:
+        clean_env.setenv("PCONS_VARS", payload)
+
+        with pytest.raises(ConfigureError, match="must be strings"):
+            get_var("TEST_VAR", False)
+
+    def test_non_string_value_raises_without_a_type(self, clean_env) -> None:
+        clean_env.setenv("PCONS_VARS", '{"TEST_VAR": ["a"]}')
+
+        with pytest.raises(ConfigureError, match="must be strings"):
+            get_var("TEST_VAR")
+
+    def test_an_unread_bad_value_is_left_alone(self, clean_env) -> None:
+        """Only the variable actually asked for is checked."""
+        clean_env.setenv("PCONS_VARS", '{"OTHER_VAR": true, "TEST_VAR": "ok"}')
+
+        assert get_var("TEST_VAR", "x") == "ok"
+
+    def test_invalid_json_warns_and_drops_the_overrides(self, clean_env) -> None:
+        """pcons writes PCONS_VARS itself, so a payload that will not parse is
+        someone else's doing. Warn and fall back rather than abort."""
+        clean_env.setenv("PCONS_VARS", '{"TEST_VAR": ')
+        clean_env.setenv("TEST_VAR", "from_env")
+
+        with pytest.warns(UserWarning, match="invalid JSON"):
+            assert get_var("TEST_VAR", "default") == "from_env"
+
+    def test_invalid_json_is_parsed_once(self, clean_env) -> None:
+        """The warning is not repeated for every variable the script reads."""
+        clean_env.setenv("PCONS_VARS", "not json at all")
+
+        with pytest.warns(UserWarning, match="invalid JSON"):
+            assert get_var("TEST_VAR", "default") == "default"
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert get_var("OTHER_VAR", "default") == "default"
+
+    def test_an_empty_payload_is_not_a_parse_error(self, clean_env) -> None:
+        """PCONS_VARS='' is how the CLI says "no overrides"."""
+        clean_env.setenv("PCONS_VARS", "")
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            assert get_var("TEST_VAR", "default") == "default"
