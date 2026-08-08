@@ -29,13 +29,17 @@ theme:
 nav:
   - Home: index.md
   - User Guide: user-guide.md
+  - Examples: examples.md
+  - Testing: testing.md
   - Qt: qt.md
+  - Command line: cli.md
   - Presets: presets.md
-  - Worker protocol: worker-protocol.md
   - Porting from CMake: porting-from-cmake.md
   - Porting from Make: porting-from-make.md
+  - Reference:
+      - Worker protocol: worker-protocol.md
+      - Architecture: architecture.md
   - Changelog: changelog.md
-  - Architecture: architecture.md
   - Contributing: contributing.md
 
 markdown_extensions:

@@ -1,0 +1,19 @@
+# Test configuration for the paths-with-spaces example
+
+[test]
+description = "Paths with spaces throughout: a source file, its directory, an include directory, and a define whose value contains spaces"
+
+expected_outputs = [
+    "build/my_program",
+]
+
+[verify]
+commands = [
+    { run = "./build/my_program", expect_stdout = "Hello from pcons!" },
+]
+
+[skip]
+# Ninja quotes these correctly, which is what the example is for. The Makefile
+# generator does not escape spaces, so make reads one path as several targets
+# (see issue #70); Xcode drives its own compile commands.
+generators = ["make", "xcode"]
