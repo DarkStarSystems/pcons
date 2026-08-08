@@ -42,6 +42,46 @@ cannot reach one is slower, never broken, which is also what lets a generated
 Two actions share a worker when their `Worker` compares equal — the same start
 command, and the same `key`.
 
+## Reading the generated command
+
+A worker turns a short command in the build script into a long one in
+`build.ninja`. It is worth being able to read it, because this is what you see
+when a build using a worker misbehaves:
+
+```
+command = <python> .../workers/client.py <socket> 30 4 <python> .../workers/python_server.py --preload xml.dom.minidom -- <python> $source_0 $source_1 $out
+          └─────── the client ──────────┘ └──1──┘ └2┘ └3┘ └──────── how to start a worker (4 tokens) ────────────┘ └4┘ └──────── the action ────────┘
+```
+
+1. **The socket** this worker listens on, named after the `Worker`'s identity.
+2. **The idle timeout**, passed to the worker in the environment when the
+   client starts one.
+3. **How many tokens the start command occupies.** A count rather than a
+   separator, so a start command containing `--` cannot be misread as the end
+   of one.
+4. **`--`**, after which everything is the action itself — exactly the command
+   the build script asked for, and exactly what runs if no worker can be
+   reached.
+
+Two things follow that are useful when something is wrong:
+
+- **To run the action by hand, take everything after the `--`.** That is the
+  command with the worker removed, which is how you tell an action that is
+  broken from a worker that is. Ask ninja for the version with `$in` and `$out`
+  already filled in, and run it from the build directory:
+
+  ```bash
+  ninja -C build -t commands report.txt
+  ```
+- **To watch a worker start, run the start command yourself** with the socket
+  path appended, and without redirecting its output. The client discards it,
+  which is right for a build and unhelpful when you are debugging one.
+
+The paths are absolute, including the interpreter's, for the same reason the
+regeneration edge's are: a build directory should keep working from any
+directory, and pin the tools it was configured with rather than whichever
+happen to be on `PATH` later.
+
 ## What a worker must do
 
 **Listen on the socket path it was given.** `AF_UNIX`, `SOCK_STREAM`. Bind a
