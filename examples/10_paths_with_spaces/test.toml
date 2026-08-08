@@ -13,7 +13,10 @@ commands = [
 ]
 
 [skip]
-# Ninja quotes these correctly, which is what the example is for. The Makefile
-# generator does not escape spaces, so make reads one path as several targets
-# (see issue #70); Xcode drives its own compile commands.
+# POSIX ninja quotes these paths when it expands them, which is what the example
+# checks. The Makefile generator doesn't escape spaces at all, so make reads one
+# path as several targets (issue #70), and Xcode drives its own compile commands.
 generators = ["make", "xcode"]
+# On Windows nothing supplies the quoting and the compiler sees several
+# arguments (issue #72).
+platforms = ["windows"]
