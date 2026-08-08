@@ -1,0 +1,31 @@
+# Test configuration for the persistent-worker example
+
+[test]
+description = "An action run in a persistent worker: the worker holds the expensive setup, each action gets a fresh forked child, and the build works the same when no worker can be reached"
+
+expected_outputs = [
+    "build/report.txt",
+]
+
+[verify]
+# The output is what matters, and it must be identical whether the action ran
+# in a worker or directly -- which is the whole safety claim. Whether a worker
+# was used is deliberately not asserted: there is none on Windows, which has no
+# fork, and the build is expected to be correct there too.
+commands = [
+    { run = "uv run python check_report.py", expect_stdout = "report ok" },
+]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "Editing the source re-runs the action, through the warm worker"
+touch = "src/items.xml"
+expect_rebuild = ["report.txt"]
+
+[skip]
+# Xcode drives its own commands; a generic command edge has nowhere to go
+# (same as examples/60_command_cwd).
+generators = ["xcode"]

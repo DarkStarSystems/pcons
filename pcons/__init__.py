@@ -49,6 +49,7 @@ from pcons.toolchains import (
 )  # noqa: E402
 from pcons.tools.install import install_dir  # noqa: E402
 from pcons.util.add_subdirectory import add_subdirectory  # noqa: E402
+from pcons.workers import Worker  # noqa: E402
 
 # Register built-in builders before any user code runs
 register_builtin_builders()
@@ -162,6 +163,7 @@ __all__ = [
     "PackageDescription",
     "Project",
     "Target",
+    "Worker",
     # Presets (contributed-preset registry)
     "register_preset",
     "preset",
