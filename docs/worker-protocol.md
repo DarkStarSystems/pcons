@@ -144,8 +144,15 @@ worker is being asked to serve — the client derives it from the *start
 command's* interpreter, not from whatever is running pcons, which may be a
 different installation entirely. A worker does not need to know how it is
 made: **adopt the first stamp you are given, and stand down when a later
-request carries a different one.** That means a recreated virtualenv retires
-the worker holding its old code, whatever language the worker is written in.
+request carries a different one.** Installing, upgrading or removing a
+package retires the worker holding the old copy, whatever language the worker
+is written in.
+
+The stamp watches `site-packages`, not `pyvenv.cfg`. That file is written once
+when a virtualenv is created and never touched again — neither `uv pip
+install` nor a `uv sync` that removes packages moves it — so a worker keyed on
+it would go on serving last week's library, which is precisely what the stamp
+exists to prevent.
 
 **Exit when idle.** `PCONS_WORKER_IDLE_TIMEOUT` seconds without a request
 means nobody is building any more. Nothing supervises workers, by design;

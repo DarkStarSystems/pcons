@@ -114,19 +114,38 @@ def venv_of(python: str) -> Path:
     return Path(python).parent.parent
 
 
+def package_dirs(venv: Path) -> list[Path]:
+    """Where an environment keeps its packages.
+
+    Globbed rather than derived: the version in ``lib/python3.x`` belongs to
+    the interpreter, and asking it would mean starting one.
+    """
+    return sorted(venv.glob("lib/python*/site-packages")) + sorted(
+        venv.glob("Lib/site-packages")  # Windows
+    )
+
+
 def environment_stamp(python: str) -> str:
     """A fingerprint of the environment a worker serves.
 
     Named by directory rather than by executable, because ``python`` and
-    ``python3`` in one ``bin/`` are the same environment; and carrying
-    ``pyvenv.cfg``'s mtime, so that recreating the venv makes a worker holding
-    its code stand down.
+    ``python3`` in one ``bin/`` are the same environment.
+
+    Fingerprinted by what installing and uninstalling actually moves, which is
+    ``site-packages``. ``pyvenv.cfg`` is written once when the venv is created
+    and never touched again -- neither `uv pip install` nor a `uv sync` that
+    removes packages changes it -- so a worker keyed on that alone would go on
+    serving last week's library from memory, which is the one thing the stamp
+    exists to prevent.
     """
     venv = venv_of(python)
-    try:
-        return f"{venv}:{(venv / 'pyvenv.cfg').stat().st_mtime_ns}"
-    except OSError:
-        return str(venv)
+    marks = []
+    for candidate in [venv / "pyvenv.cfg", *package_dirs(venv)]:
+        try:
+            marks.append(str(candidate.stat().st_mtime_ns))
+        except OSError:
+            pass  # not every interpreter lives in a virtualenv
+    return f"{venv}:{'.'.join(marks)}" if marks else str(venv)
 
 
 def submit(conn: socket.socket, argv: list[str], worker_python: str) -> dict | None:
