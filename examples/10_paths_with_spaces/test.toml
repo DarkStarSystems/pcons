@@ -17,6 +17,3 @@ commands = [
 # checks. The Makefile generator doesn't escape spaces at all, so make reads one
 # path as several targets (issue #70), and Xcode drives its own compile commands.
 generators = ["make", "xcode"]
-# On Windows nothing supplies the quoting and the compiler sees several
-# arguments (issue #72).
-platforms = ["windows"]
