@@ -140,7 +140,7 @@ class MakefileGenerator(BaseGenerator):
         for directory in sorted(self._directories):
             escaped = self._make_build_relative_path(directory)
             f.write(f"{escaped}:\n")
-            f.write("\tmkdir -p $@\n")
+            f.write('\tmkdir -p "$@"\n')
             f.write("\n")
 
     def _write_build_rules(self, f: TextIO, project: Project) -> None:
@@ -707,15 +707,20 @@ class MakefileGenerator(BaseGenerator):
         )
 
     def _escape_path(self, path: Path | str) -> str:
-        """Escape a path for use in Makefiles ($ -> $$). Spaces in build
-        paths are generally unsupported by make and best avoided."""
-        path_str = str(path)
-        return self.ESCAPE_DOLLAR.sub("$$", path_str)
+        """Escape a path for a position where make parses names.
+
+        Targets, prerequisites and include lines are split on whitespace, so a
+        space in a path has to be escaped or make reads one name as several.
+        `$` doubles, as everywhere in a makefile. A backslash-escaped space
+        also survives into a recipe unharmed, since that is what the shell
+        wants too.
+        """
+        path_str = self.ESCAPE_DOLLAR.sub("$$", str(path))
+        return path_str.replace(" ", "\\ ")
 
     def _make_build_relative_path(self, path: Path | str) -> str:
-        """Strip the build_dir prefix and $-escape for the Makefile."""
-        path_str = self._strip_build_dir_prefix(path)
-        return self.ESCAPE_DOLLAR.sub("$$", path_str)
+        """Strip the build_dir prefix and escape for a make name position."""
+        return self._escape_path(self._strip_build_dir_prefix(path))
 
     def _node_out_raw(self, node: FileNode) -> str:
         """Return the unescaped output path for *node*, honoring its role.
@@ -732,8 +737,8 @@ class MakefileGenerator(BaseGenerator):
         return self._strip_build_dir_prefix(node.path)
 
     def _node_path(self, node: FileNode) -> str:
-        """Render a Makefile rule-target path for *node* ($-escaped)."""
-        return self.ESCAPE_DOLLAR.sub("$$", self._node_out_raw(node))
+        """Render a Makefile rule-target path for *node*, escaped for make."""
+        return self._escape_path(self._node_out_raw(node))
 
     def _run_in_dir(self, command: str, cwd: Path) -> str:
         """Wrap *command* so it runs in *cwd*, and come back afterwards.
