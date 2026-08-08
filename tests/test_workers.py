@@ -109,9 +109,12 @@ class TestWhatThePythonWorkerWillRun:
     """It stands in only for commands it can actually run."""
 
     def test_an_interpreter_and_a_script(self) -> None:
-        assert python_server.script_argv(
-            ["/usr/bin/python3", "gen.py", "--out", "x"]
-        ) == ["gen.py", "--out", "x"]
+        interpreter = str(Path("/usr/bin/python3"))
+        assert python_server.script_argv([interpreter, "gen.py", "--out", "x"]) == [
+            "gen.py",
+            "--out",
+            "x",
+        ]
 
     def test_another_program_is_not_ours(self) -> None:
         assert python_server.script_argv(["cc", "-c", "main.c"]) is None
@@ -245,11 +248,13 @@ class TestRefusals:
 
     def test_an_action_for_another_environment(self) -> None:
         """Running it here would import a different set of packages."""
-        request = {"argv": ["/elsewhere/.venv/bin/python", "act.py"]}
+        other = Path("/elsewhere/.venv")
+        request = {"argv": [str(other / "bin" / "python"), "act.py"]}
 
         reason = python_server._refusal(request, self._state())
 
-        assert "wants /elsewhere/.venv" in reason
+        # Rendered through Path on both sides: the separator is the platform's.
+        assert f"wants {other}" in reason
 
     def test_an_action_this_worker_cannot_run(self) -> None:
         request = {"argv": ["cc", "-c", "main.c"]}
