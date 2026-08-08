@@ -417,6 +417,54 @@ class TestBuildDispatch:
         assert cli.cmd_build(self._args(tmp_path)) == 0
         assert ran == ["make"]
 
+    def test_runs_xcodebuild_for_an_xcode_build(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from pcons import cli
+
+        self._no_regeneration(monkeypatch)
+        (tmp_path / "demo.xcodeproj").mkdir()
+        seen: dict = {}
+        monkeypatch.setattr(cli, "run_xcodebuild", lambda *a, **k: seen.update(k) or 0)
+
+        assert cli.cmd_build(self._args(tmp_path, variant="debug")) == 0
+        assert seen["configuration"] == "debug"
+
+    def test_stale_build_files_are_regenerated_first(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from pcons import cli
+
+        (tmp_path / "pcons-build.py").write_text("")
+        (tmp_path / "build.ninja").write_text("")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(cli, "_needs_generation", lambda *a, **k: True)
+        order = []
+        monkeypatch.setattr(
+            cli, "cmd_generate", lambda args: order.append("generate") or (0, None)
+        )
+        monkeypatch.setattr(
+            cli, "run_ninja", lambda *a, **k: order.append("build") or 0
+        )
+
+        assert cli.cmd_build(self._args(tmp_path)) == 0
+        assert order == ["generate", "build"]
+
+    def test_a_failed_regeneration_stops_the_build(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from pcons import cli
+
+        (tmp_path / "pcons-build.py").write_text("")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(cli, "_needs_generation", lambda *a, **k: True)
+        monkeypatch.setattr(cli, "cmd_generate", lambda args: (1, None))
+        monkeypatch.setattr(
+            cli, "run_ninja", lambda *a, **k: pytest.fail("should not build")
+        )
+
+        assert cli.cmd_build(self._args(tmp_path)) == 1
+
     def test_no_build_files_is_an_error(self, tmp_path: Path, monkeypatch) -> None:
         from pcons import cli
 
