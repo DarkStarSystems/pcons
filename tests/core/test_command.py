@@ -1520,6 +1520,16 @@ class TestBuildDirPathWarning:
 
         assert "runs *in* the build directory" not in caplog.text
 
+    @pytest.mark.parametrize("raw", ["", "silent", "quiet", "2"])
+    def test_a_value_it_does_not_know_still_warns(
+        self, tmp_path, caplog, monkeypatch, raw
+    ):
+        """A warning knob must not be able to fail generation."""
+        monkeypatch.setenv("PCONS_WARN_BUILD_DIR_PATHS", raw)
+        self._generate(tmp_path, ["tool", "-Wl,build/libfoo.dylib", "$SOURCE"])
+
+        assert "runs *in* the build directory" in caplog.text
+
 
 class TestOutsideBuildDirIndexedTargets:
     """A `${TARGETS[n]}` naming an outside-build destination must agree with

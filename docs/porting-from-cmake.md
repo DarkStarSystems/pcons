@@ -33,7 +33,7 @@ This guide maps common CMake patterns to their pcons equivalents. It's designed 
 | `check_c_compiler_flag(f VAR)` | `checks.check_flag("f")` |
 | `check_c_source_compiles(src VAR)` | `checks.try_compile(src)` |
 | `add_compile_options(-Wall)` | `env.cc.flags.append("-Wall")` |
-| `option(OPT "desc" ON)` | `pcons.get_var("OPT", "ON")` or `os.environ.get("OPT", "ON")` |
+| `option(OPT "desc" ON)` | `pcons.get_var("OPT", True)` (bool, accepts `ON`/`1`/`yes`/`true`) |
 | `install(TARGETS t DESTINATION d)` | `project.Install(d, [t])` |
 | `add_custom_target(name DEPENDS ...)` | `project.Alias("name", targets...)` |
 | `add_custom_command(...)` | `env.Command(target, source, cmd)` |

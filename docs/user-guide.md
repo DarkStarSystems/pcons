@@ -1654,12 +1654,51 @@ pcons PORT=ofx USE_CUDA=1 PREFIX=/usr/local
 Access them in `pcons-build.py`:
 
 ```python
+from pathlib import Path
+
 from pcons import get_var
 
-port = get_var("PORT", default="ofx")
-use_cuda = get_var("USE_CUDA", default="0") == "1"
-prefix = get_var("PREFIX", default="/usr/local")
+port = get_var("PORT", "ofx")
+use_cuda = get_var("USE_CUDA", False)
+prefix = get_var("PREFIX", Path("/usr/local"))
 ```
+
+#### Typed Variables
+
+The default's type selects the conversion, so a variable never has to be parsed
+by hand:
+
+```python
+use_cuda = get_var("USE_CUDA", False)  # bool
+opt_level = get_var("OPT_LEVEL", 2)  # int
+scale = get_var("SCALE", 1.0)  # float
+port = get_var("PORT", "ofx")  # str
+prefix = get_var("PREFIX", Path("/usr/local"))  # Path
+```
+
+Pass `type=` when there is no default. The result is `None` when the variable is
+unset, which is falsy, so it still reads well in a condition:
+
+```python
+if get_var("BUILD_TESTS", type=bool):
+    ...
+```
+
+A default and a `type=` together raise: the default already picks the
+conversion, so the pair is either redundant or a contradiction.
+
+Booleans accept `1`, `on`, `yes`, `true`, `y` and `0`, `off`, `no`, `false`, `n`,
+case-insensitive. Any other value raises `ConfigureError` instead of silently
+reading as false, so `USE_CUDA=enabled` is reported rather than ignored. `int`
+and `float` raise the same way on a value they cannot parse.
+
+A `Path` is taken verbatim, never resolved, so `PREFIX=dist` stays relative and
+you decide what it is relative to. An empty value is an error rather than
+`Path(".")`.
+
+The default itself is never parsed, it is returned as-is when the variable is
+unset. With no default and no `type=`, `get_var` returns the raw string or
+`None`.
 
 ### Persistent Configuration Cache
 
@@ -3126,7 +3165,7 @@ builds so one build script can serve both:
 ```python
 from pcons import get_var, install_dir
 
-if get_var("PCONS_BUILD_WHEEL"):
+if get_var("PCONS_BUILD_WHEEL", False):
     # Wheel build: the install prefix is the site-packages image.
     # Lay files out exactly as they should appear after installation.
     dest = "."
@@ -3948,7 +3987,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `find_c_toolchain(prefer=[...])` | Find toolchain with explicit preference order |
 | `find_cuda_toolchain()` | Find CUDA toolchain (returns `None` if nvcc not found) |
 | `configure_file(template, output, vars)` | Substitute variables in a template file (CMake or @VAR@ style) |
-| `get_var(name, default)` | Get a build variable |
+| `get_var(name, default, type=None)` | Get a build variable, converted to the default's type (or `type=`): bool, int, float, str, Path |
 | `get_variant(default)` | Get the build variant |
 | `ensure_msvc(msvc_ver, sdk_ver)` | Install MSVC toolchain via msvcup (Windows only; import from `pcons.contrib.windows.msvcup`) |
 
