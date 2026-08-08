@@ -1589,30 +1589,13 @@ rez quirk, not pcons-specific.
 
 ---
 
-## Build Commands
+## Command-line reference
 
-### pcons generate
+Every subcommand and option is on its own page: [Command-line reference](cli.md).
 
-Generate Ninja build files without building:
+---
 
-```bash
-pcons generate                     # Generate build.ninja
-pcons generate --variant=debug     # Generate for debug build
-pcons generate CC=clang CXX=clang++  # Pass variables
-```
-
-### pcons build
-
-Build targets using Ninja:
-
-```bash
-pcons build              # Build all default targets
-pcons build myapp        # Build specific target
-pcons build -j8          # Use 8 parallel jobs
-pcons build --verbose    # Show commands being run
-```
-
-### Watching for changes
+## Watching for changes
 
 `--watch` builds once and then rebuilds whenever anything in the source tree
 changes. It works with the default command and with `pcons build`, and takes
@@ -1633,7 +1616,7 @@ The build directory is never watched (reacting to the build's own output would
 loop forever), nor are VCS directories, virtualenvs, tool caches, or editor
 scratch files. Anything ninja knows how to build is also left out, wherever it
 lands — so a command that generates a file next to its sources, or an in-source
-build (`-B .`), does not retrigger the build that wrote it.
+build (`-B .`), doesn't retrigger the build that wrote it.
 
 Two things a watch reports that an ordinary build does not:
 
@@ -1662,40 +1645,7 @@ with `uvx pcons --watch`. On any other platform pcons installs without it and
 `--watch` says so; ask for it explicitly with `pip install 'pcons[watch]'`,
 which builds from source and needs a Rust toolchain.
 
-### pcons (default)
-
-Running `pcons` without a subcommand does both generate and build:
-
-```bash
-pcons                    # Generate + Build
-pcons --variant=debug    # Generate + Build with variant
-pcons FOO=bar            # Pass variables
-```
-
-### pcons clean
-
-Clean build artifacts:
-
-```bash
-pcons clean        # Run ninja -t clean
-pcons clean --all  # Remove entire build directory
-```
-
-### Command-Line Options
-
-| Option | Description |
-|--------|-------------|
-| `--variant=NAME` or `-v NAME` | Set build variant (debug, release) |
-| `-B DIR` or `--build-dir=DIR` | Set build directory (default: build) |
-| `-C` or `--reconfigure` | Force re-run configuration |
-| `--fresh` | Discard the persisted cache and start clean |
-| `-j N` or `--jobs=N` | Number of parallel build jobs |
-| `--watch` | Rebuild whenever a watched file changes (needs `pcons[watch]`) |
-| `--verbose` | Show verbose output |
-| `--debug` | Show debug output |
-| `KEY=value` | Pass build variables |
-
-### Build Variables
+## Build Variables
 
 Pass variables to your build script:
 
@@ -1715,7 +1665,7 @@ use_cuda = get_var("USE_CUDA", False)
 prefix = get_var("PREFIX", Path("/usr/local"))
 ```
 
-#### Typed Variables
+### Typed Variables
 
 The default's type selects the conversion, so a variable never has to be parsed
 by hand:
@@ -1752,7 +1702,7 @@ The default itself is never parsed, it is returned as-is when the variable is
 unset. With no default and no `type=`, `get_var` returns the raw string or
 `None`.
 
-### Persistent Configuration Cache
+## Persistent Configuration Cache
 
 Settings you choose on the command line persist per build directory, like
 CMake's `CMakeCache.txt`. Configure once, then run bare:
@@ -1808,360 +1758,11 @@ file and import it from `pcons-build.py`.
 
 ---
 
+---
+
 ## Testing
 
-Pcons keeps the build-system / test-runner split clean: build scripts
-**declare** tests via `project.Test(...)`, the configure step writes a
-JSON manifest (`<build_dir>/tests.json`), and a separate runner —
-`pcons test` (or `ninja test`) — executes them. This is the same model
-CMake uses with CTest, and it keeps pcons itself out of the business
-of running things at build time.
-
-### Declaring Tests
-
-```python
-test_prog = project.Program("math_test", env, sources=["src/math.c", "src/test_math.c"])
-
-# Most basic: run the program; pass = exit 0.
-project.Test("math.add", test_prog, args=["add"], labels=["unit", "fast"])
-project.Test("math.mul", test_prog, args=["mul"], labels=["unit", "fast"])
-
-# should_fail=True inverts the exit code (XFAIL-style assertions).
-project.Test(
-    "math.expected_failure",
-    test_prog,
-    args=["bad-input"],
-    should_fail=True,
-    labels=["xfail"],
-)
-
-# disabled=True keeps the test in the manifest but always skips it.
-project.Test(
-    "math.slow", test_prog, args=["heavy"], labels=["slow"], disabled=True, timeout=60
-)
-```
-
-The full set of fields (all keyword-only):
-
-| Field | Type | Purpose |
-|---|---|---|
-| `args` | `Sequence[str]` | Arguments passed after the program. |
-| `cwd` | `Path \| str \| None` | Working directory; defaults to the build dir. |
-| `env` | `dict[str, str] \| None` | Extra environment variables for the test process. |
-| `labels` | `Sequence[str]` | Tags for filtering (`unit`, `integration`, `slow`, `fuzz`, ...). |
-| `timeout` | `float \| None` | Seconds before the runner kills the test. |
-| `should_fail` | `bool` | If True, a non-zero exit code is a pass. |
-| `serial` | `bool` | Don't run in parallel with other tests. |
-| `disabled` | `bool` | Record the test but always skip. |
-| `data` | `Sequence[Path \| str]` | Runtime data files (informational in v1). |
-| `depends_on` | `Sequence[str]` | Names of tests that must pass before this one runs. |
-| `discover` | `"gtest" \| "doctest" \| "catch2" \| None` | Expand into one entry per test case in the binary. |
-
-`program` can be a `Target` (the typical case — depending on it ensures
-`ninja test-build` compiles it first), or a `Path` / `str` to an
-existing script or external binary.
-
-### Fixtures and Test Ordering: `depends_on`
-
-`depends_on` lets one test gate another. If a dependency fails (or
-times out, errors, or skips because of its own failed dep), all
-dependent tests are reported as skipped — no point running them.
-
-```python
-# Fixture-style: start a server, run tests against it, stop it.
-start = project.Test("server.start", start_script, labels=["fixture"])
-project.Test(
-    "api.list_users",
-    api_test,
-    args=["list-users"],
-    depends_on=["server.start"],
-    labels=["api"],
-)
-project.Test(
-    "api.create_user",
-    api_test,
-    args=["create-user"],
-    depends_on=["server.start"],
-    labels=["api"],
-)
-project.Test(
-    "server.stop", stop_script, depends_on=["server.start"], labels=["fixture"]
-)
-```
-
-When you filter with `-L` / `-R`, deps of selected tests are
-auto-included so fixtures keep working:
-
-```bash
-pcons test -L api    # still runs server.start (and server.stop)
-```
-
-### Test-Case Discovery: `discover`
-
-For binaries built against GoogleTest, doctest, or Catch2, listing
-every test case in the Python build script is tedious. Set
-`discover=` and the runner queries the binary at run time, expanding
-your single `project.Test()` into one entry per test case:
-
-```python
-unit_tests = project.Program("unit_tests", env, sources=[...])
-project.Test("unit", unit_tests, discover="gtest", labels=["unit"])
-```
-
-Run-time output:
-```
-Test project: myproject (84 tests)
-      Start  1: unit.MathSuite.Add
- 1/84 Test #1: unit.MathSuite.Add ..................... Passed  0.01s
-      Start  2: unit.MathSuite.Subtract
- 2/84 Test #2: unit.MathSuite.Subtract ................ Passed  0.01s
- ...
-```
-
-Each case becomes a separate test that:
-
-- Inherits the parent's `labels`, `timeout`, `env`, `cwd`, etc.
-- Runs the binary with the framework's single-case filter
-  (`--gtest_filter=...`, `--test-case=...`, or a positional name).
-- Appears in `--list`, JUnit output, and label/regex filters.
-
-Protocols supported:
-
-| `discover=` | Listing flag | Invocation |
-|---|---|---|
-| `"gtest"` | `--gtest_list_tests` | `<bin> --gtest_filter=Suite.Case` |
-| `"doctest"` | `--list-test-cases --no-version` | `<bin> --test-case="<name>"` |
-| `"catch2"` | `--list-test-names-only` | `<bin> "<name>"` |
-
-If discovery fails (binary missing, framework not cooperative), the
-runner falls back to running the parent as a single test and prints a
-warning. References to the discovered parent in another test's
-`depends_on` are rewritten to wait on every child.
-
-### Tweaking Tests After Creation: `set_test_property`
-
-Sometimes a property depends on context that isn't known at the
-`project.Test()` call site — a slow test that needs a bigger timeout
-under a particular toolchain, a label applied to every test in a
-generated batch. `set_test_property()` / `set_test_properties()`
-update an unresolved test, mirroring CMake's `set_tests_properties()`:
-
-```python
-from pcons import set_test_property, set_test_properties
-
-t = project.Test("slow_one", prog)
-set_test_property(t, "timeout", 600)
-
-# Bulk: one call, many tests, many properties.
-slow_tests = [t1, t2, t3]
-set_test_properties(*slow_tests, timeout=600, labels=["slow"])
-```
-
-Valid property names are the same kwargs accepted by `project.Test()`:
-`args`, `cwd`, `env`, `labels`, `timeout`, `should_fail`, `serial`,
-`disabled`, `data`, `depends_on`, `discover`, `program`.
-
-### Running Tests
-
-```bash
-ninja test                    # build, then run, all tests
-pcons test                    # same effect, runs the test runner directly
-pcons test -L unit            # only run "unit"-labeled tests
-pcons test -L unit -LE slow   # unit, excluding slow
-pcons test -R '^math\.'       # only run tests whose name matches the regex
-pcons test --list             # show what would run, without running
-pcons test -j 1               # serial mode (default: CPU count)
-pcons test --junit out.xml    # emit JUnit XML for CI
-pcons test --stop-on-fail     # stop after the first failure
-pcons test -V                 # verbose: show stderr from failed tests
-```
-
-The runner picks up the manifest from the current build directory (or
-walks upward to find one). Exit code is 0 if every selected test
-passed, non-zero otherwise — which is why `ninja test` "just works"
-for CI failure detection.
-
-### The Test Manifest
-
-`<build_dir>/tests.json` is plain JSON, versioned, and stable:
-
-```json
-{
-  "version": 1,
-  "project": "myproject",
-  "build_dir": "build",
-  "tests": [
-    {
-      "name": "math.add",
-      "command": ["test_math", "add"],
-      "cwd": null,
-      "env": {},
-      "labels": ["unit", "fast"],
-      "timeout": null,
-      "should_fail": false,
-      "serial": false,
-      "disabled": false,
-      "data": [],
-      "defined_at": "pcons-build.py:34"
-    }
-  ]
-}
-```
-
-You can read it, grep it, and feed it to any other runner you like —
-nothing in the format depends on the pcons runtime.
-
-### Fuzzing
-
-Pcons doesn't have a dedicated fuzz-test builder — a fuzz target is just
-a fuzzer-instrumented `Program` plus one or two `Test`s. The same shape
-works for libFuzzer, AFL++, and Honggfuzz; only the build flags and the
-campaign invocation change. See `examples/41_fuzzing/` for a complete
-libFuzzer harness; the recipes below show the engine-specific bits.
-
-The recommended pattern is two tests per harness:
-
-- a **regression** test that replays a committed seed corpus (fast,
-  deterministic, runs on every commit), and
-- a **campaign** test that actually fuzzes for a bounded wall-clock time
-  (labelled `["fuzz"]` so `pcons test -L fuzz` runs only campaigns and
-  `pcons test -LE fuzz` excludes them).
-
-#### libFuzzer (clang built-in)
-
-Same `LLVMFuzzerTestOneInput` entrypoint; libFuzzer's `main()` is linked
-in by `-fsanitize=fuzzer`.
-
-```python
-fuzz_flags = ["-fsanitize=fuzzer,address", "-g", "-O1"]
-env.cc.flags.extend(fuzz_flags)
-env.link.flags.extend(fuzz_flags)
-
-harness = project.Program("fuzz_parser", env, sources=["fuzz_parser.c", "parser.c"])
-
-project.Test("parser.regression", harness, args=["-runs=0", corpus_dir], timeout=30)
-project.Test(
-    "parser.campaign",
-    harness,
-    args=[
-        "-create_missing_dirs=1",
-        "campaign-corpus",
-        corpus_dir,
-        "-max_total_time=60",
-    ],
-    labels=["fuzz"],
-    timeout=90,
-)
-```
-
-```c
-int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
-    parse_keyvalue(data, size);
-    return 0;
-}
-```
-
-#### AFL++
-
-The same `LLVMFuzzerTestOneInput` entrypoint works in persistent mode.
-The compiler driver becomes `afl-clang-fast`; the campaign is run by
-`afl-fuzz` rather than the harness binary itself.
-
-```python
-# Easiest setup: run pcons with CC=afl-clang-fast (and CXX=afl-clang-fast++).
-# Or point a custom toolchain at the AFL++ driver explicitly.
-
-harness = project.Program("fuzz_parser", env, sources=["fuzz_parser.c", "parser.c"])
-
-project.Test(
-    "parser.regression",
-    "afl-showmap",
-    args=[
-        "-o",
-        "/dev/null",
-        "-i",
-        corpus_dir,
-        "--",
-        str(harness.output_nodes[0].path),
-        "@@",
-    ],
-)
-
-project.Test(
-    "parser.campaign",
-    "afl-fuzz",
-    args=[
-        "-V",
-        "60",
-        "-i",
-        corpus_dir,
-        "-o",
-        findings_dir,
-        "--",
-        str(harness.output_nodes[0].path),
-    ],
-    labels=["fuzz"],
-    timeout=120,
-)
-```
-
-#### Honggfuzz
-
-Same harness; build with `hfuzz-clang` and link against `libhfuzz.a`. The
-campaign is run by the `honggfuzz` binary.
-
-```python
-# Easiest setup: CC=hfuzz-clang (and CXX=hfuzz-clang++).
-
-harness = project.Program("fuzz_parser", env, sources=["fuzz_parser.c", "parser.c"])
-
-project.Test(
-    "parser.campaign",
-    "honggfuzz",
-    args=[
-        "-i",
-        corpus_dir,
-        "-o",
-        findings_dir,
-        "--run_time",
-        "60",
-        "--",
-        str(harness.output_nodes[0].path),
-    ],
-    labels=["fuzz"],
-    timeout=120,
-)
-```
-
-#### Conventions
-
-- Keep the seed corpus in the source tree (committed) and pass it as an
-  absolute path so it resolves correctly from the build directory.
-- For libFuzzer's regression mode, pass `-runs=0` before the corpus dir.
-  Without it, libFuzzer treats the directory as a live corpus and keeps
-  fuzzing instead of exiting.
-- For the campaign, give libFuzzer two corpus paths — a build-relative
-  output dir first (writable; new findings go there) and the seed corpus
-  second (treated read-only). Without this split, the campaign writes
-  every new-coverage input back into the seed corpus and pollutes the
-  source tree.
-- Label fuzz tests `["fuzz"]` so users can filter them on or off.
-- Pair a fast regression test with a slower campaign — CI on every
-  commit runs the regression; nightly CI runs the campaign with a real
-  budget (`-max_total_time=600`, `-V 600`, `--run_time 600`).
-
-#### Platform notes
-
-- **Linux**: works out of the box with a modern clang.
-- **macOS**: Apple's Xcode clang does not ship libFuzzer; install
-  Homebrew LLVM (`brew install llvm`) and use that clang. The
-  `examples/41_fuzzing/pcons-build.py` script also adds an explicit
-  `-L<llvm>/lib/c++` to the link line, because Homebrew's libFuzzer
-  archive references libc++ symbols that resolve only against
-  Homebrew's libc++ — not Apple's SDK libc++.
-- **Windows**: clang-cl supports `-fsanitize=fuzzer,address`, but the
-  CRT and ASan DLL setup is more involved than what fits in a small
-  example.
+Declaring tests, running them, discovery and fuzzing have their own page: [Testing](testing.md).
 
 ---
 
@@ -3556,7 +3157,7 @@ Notes:
 
 ### Command Launchers
 
-A launcher is a program that runs *in front of* the command an edge would otherwise run: `ccache` ahead of the compiler, `time` or `valgrind` ahead of anything you want to measure or check. It belongs to a tool namespace, so it follows the tool rather than any one target:
+A launcher runs in front of the command an edge would otherwise run: `ccache` ahead of the compiler, `valgrind` ahead of a test. Set it on a tool namespace and it follows that tool:
 
 ```python
 env.cc.launcher = ["ccache"]
@@ -3587,7 +3188,7 @@ See `examples/63_command_launcher` for two stacked launchers wrapping every C co
 
 ### Sources a command depends on but does not name
 
-`$SOURCE` and `$SOURCES` mean the same thing: *every* source, space-separated. That is what you want when the command consumes them all, and not what you want for a script whose siblings must be watched but not passed to it:
+`$SOURCE` and `$SOURCES` mean the same thing: every source, space-separated. That's right when the command consumes them all. It's wrong for a script whose siblings need watching but not passing:
 
 ```python
 env.Command(
@@ -3597,48 +3198,51 @@ env.Command(
 )
 ```
 
-Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .` — the shared module arrives as an extra argument. A script that reads `sys.argv` by membership rather than by position will appear to work, which is what makes this worth spelling out. Use `${SOURCES[0]}` to name the entry point, and every source still becomes a dependency ninja watches.
+Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .`, so the shared module arrives as an extra argument. A script that checks `sys.argv` by membership won't notice. Use `${SOURCES[0]}` to name the entry point; every source is still a dependency ninja watches.
 
-pcons warns when a command written in the singular meets more than one source, since that spelling reads as "one" and means "all". Write `$SOURCES` when consuming them all is the intent — `cat $SOURCES > $TARGET` is a perfectly good command, and says so.
+pcons warns when you write the singular and the command has more than one source: that spelling reads as "one" but means "all". Write `$SOURCES` when consuming them all is the intent — `cat $SOURCES > $TARGET` is a perfectly good command, and says so.
 
 ### Persistent Workers
 
-Ninja assumes starting a command is free. Often it is. But an action can cost far more to *start* than to run — it may have to open a connection, claim a licence, warm a cache, spin up a runtime, load a large model — and a build pays that again on every edit.
-
-A worker is a process that is already started. pcons puts a small client in front of the action, which hands the work to a worker over a socket and starts one if nobody is listening:
-
-```python
-from pcons import Worker
-
-env.Command(
-    target="report.pdf",
-    source="report.py",
-    command="python $SOURCE --out $TARGET",
-    worker=Worker(command=["my-worker", "--profile=render"]),
-)
-```
-
-**pcons does not implement workers.** It defines what one must do — see [the worker protocol](worker-protocol.md) — and your project brings whichever kind suits it: a Python process, a compiled binary, a client for something already running. Two actions share a worker when their `Worker` compares equal.
-
-For actions that run a Python script, `PythonWorker` is bundled:
+Some actions cost more to start than to run: loading a large library, opening a
+connection, claiming a licence. The build pays that on every edit. A worker is a
+process that's already started, so the cost is paid once.
 
 ```python
 from pcons import PythonWorker
 
-PythonWorker(preload=["heavy_toolkit"])  # ready by importing
-PythonWorker(setup="mypkg.warmup:connect")  # ready by doing
+env.Command(
+    target="report.pdf",
+    source="report.py",
+    command=[sys.executable, "$SOURCE", "--out", "$TARGET"],
+    worker=PythonWorker(preload=["heavy_toolkit"]),
+)
 ```
 
-`preload` names installed packages to import — never a module of the project being built, which has to load fresh or an edit to it would be masked by the copy the worker already holds. `setup` is the general case: a `package.module:function` called once, free to open, claim or warm whatever the actions need.
+`preload` lists installed packages to import up front. Don't list a module of
+the project being built: it has to load fresh, or an edit to it would be masked
+by the copy the worker holds. For readiness that isn't an import,
+`setup="mypkg.warmup:connect"` calls a function once.
 
-Whatever kind of worker you bring, the contract holds: every action is isolated from the ones before it, nothing supervises workers (the first action that needs one starts it, and it exits when idle), and a worker is only ever an optimization — with none reachable, the command runs directly and the build is slower rather than broken. [The worker protocol](worker-protocol.md) is the detail.
+Nothing starts the worker; the first action that needs one starts it, and it
+exits when idle. Every action runs in a fresh forked child, so nothing one
+action does can reach the next. If no worker can be reached (plain `ninja`, CI,
+Windows) the command runs directly, and the build is slower rather than broken.
 
-Two things to watch for with `PythonWorker`:
+Two traps, both silent:
 
-- **The action must run an interpreter directly.** `uv run python model.py` starts with `uv`, not an interpreter, so it falls back and runs at full cost — silently, because that is indistinguishable from having no worker. Name the interpreter: `command=[sys.executable, "$SOURCE", ...]`.
-- **The worker must be the environment your action needs.** `python=` defaults to the interpreter running pcons, which is not the project's if pcons came from `uvx` or a global install. Pass the project's interpreter explicitly, and note that the action's own interpreter must match it — a worker refuses an action belonging to a different environment rather than running it against different packages.
+- **The action must name an interpreter.** `uv run python model.py` starts with
+  `uv`, so it falls back and runs at full cost. Use `sys.executable`.
+- **The worker must be the environment the action needs.** `python=` defaults to
+  whatever is running pcons, which isn't the project's venv if pcons came from
+  `uvx`. Pass the project's interpreter, and make the action use the same one; a
+  worker refuses an action from a different environment.
 
-When a build is slower than expected, `PCONS_WORKER_DEBUG=1` says why a worker was not used, and keeps the worker's stderr instead of discarding it.
+`PCONS_WORKER_DEBUG=1` says why a worker wasn't used, and keeps its stderr.
+
+pcons doesn't implement workers, it defines what one must do, so you can bring
+any kind: a compiled binary, a client for a service that's already running. See
+[the worker protocol](worker-protocol.md). `PythonWorker` is the one that ships.
 
 See `examples/64_persistent_worker` for a runnable version.
 

@@ -437,7 +437,7 @@ class TestEnvironmentRepr:
 
 class TestUseUnifiedWithRequirements:
     """env.use() flows through the same translation and merge path as
-    target.link() (docs/plan-design-cleanup.md 2d)."""
+    target.link() (plans/plan-design-cleanup.md 2d)."""
 
     def _env(self):
         env = Environment()
