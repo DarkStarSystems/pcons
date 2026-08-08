@@ -27,6 +27,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+watch = [
+    "watchfiles>=1.0",  # native filesystem notification for `pcons --watch`
+]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=4.0",
@@ -71,6 +74,7 @@ dev = [
     "pytest-xdist>=3.8",
     "mypy>=1.0",
     "ruff>=0.4",
+    "watchfiles>=1.0",
 ]
 
 [tool.pytest.ini_options]

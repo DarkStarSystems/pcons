@@ -121,6 +121,7 @@ Pcons provides several commands:
 
 ```bash
 pcons                    # Generate build files AND build (default)
+pcons --watch            # ... and keep rebuilding as files change
 pcons generate           # Only generate build.ninja
 pcons build              # Only run ninja (assumes build.ninja exists)
 pcons clean              # Clean build artifacts
@@ -1611,6 +1612,36 @@ pcons build -j8          # Use 8 parallel jobs
 pcons build --verbose    # Show commands being run
 ```
 
+### Watching for changes
+
+`--watch` builds once and then rebuilds whenever anything in the source tree
+changes. It works with the default command and with `pcons build`, and takes
+the same targets and options as a normal build:
+
+```bash
+pcons --watch            # Build, then rebuild on every change
+pcons --watch myapp      # Watch, building only 'myapp'
+pcons build --watch -j8
+```
+
+Editing the build script counts as a change: ninja re-runs pcons to bring
+`build.ninja` up to date before building, so adding a source file or changing a
+flag takes effect without restarting the watch. A build that fails does not
+stop the watch — the next edit is usually the fix. Press Ctrl-C to stop.
+
+The build directory is never watched (reacting to the build's own output would
+loop forever), nor are VCS directories, virtualenvs, tool caches, or editor
+scratch files.
+
+Watching uses the platform's native filesystem notification through the
+optional [watchfiles](https://pypi.org/project/watchfiles/) package, which is
+not installed by default:
+
+```bash
+pip install 'pcons[watch]'
+uv tool install pcons --with watchfiles   # for a tool install
+```
+
 ### pcons (default)
 
 Running `pcons` without a subcommand does both generate and build:
@@ -1639,6 +1670,7 @@ pcons clean --all  # Remove entire build directory
 | `-C` or `--reconfigure` | Force re-run configuration |
 | `--fresh` | Discard the persisted cache and start clean |
 | `-j N` or `--jobs=N` | Number of parallel build jobs |
+| `--watch` | Rebuild whenever a watched file changes (needs `pcons[watch]`) |
 | `--verbose` | Show verbose output |
 | `--debug` | Show debug output |
 | `KEY=value` | Pass build variables |
