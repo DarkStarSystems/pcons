@@ -902,13 +902,22 @@ def _quote_for_shell(
         if re.fullmatch(rf"\${ninja_vars}(?:\.\w+)*", s):
             return s
 
+        # $in and $out are the two variables ninja escapes for the shell
+        # itself, so a token carrying one must not be quoted here as well: our
+        # quotes would nest inside ninja's and the path would split at its
+        # spaces. `/Fo$out` is the case that bites, since a prefixed output
+        # flag puts the variable inside a larger token.
+        ninja_escapes_the_path = re.search(r"\$(?:in|out)\b", s) is not None
+
         # Any shell metacharacter (not just whitespace) means the shell could
         # interpret this token specially: backticks/`$(...)` (command
         # substitution), `;`/`|`/`&` (command separators), `()`/`<>` etc.
         # Decide on quoting - and escape backslash/quote/backtick for the
         # quoted form - using the token's original content, before the $
         # escaping below inserts backslashes of its own.
-        needs_quote = any(c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>#")
+        needs_quote = not ninja_escapes_the_path and any(
+            c in s for c in " \t\n\"'\\$`!*?[](){}|&;<>#"
+        )
         if needs_quote:
             if platform.system() == "Windows":
                 # Ninja runs cmd.exe on Windows. Backslash is not an escape

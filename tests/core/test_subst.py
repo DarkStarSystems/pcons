@@ -796,3 +796,38 @@ class TestPathToken:
     def test_str_fallback(self):
         token = PathToken(prefix="-I", path="src", path_type="project")
         assert str(token) == "-Isrc"
+
+
+class TestNinjaPathVariableQuoting:
+    """ninja escapes $in and $out for the shell; nothing else escapes them.
+
+    Quoting a token that carries one puts our quotes around ninja's, and the
+    path splits at its spaces. That was issue #72: `/Fo$out` became
+    `"/Fo"obj/src with spaces/x.obj""`, which clang-cl read as four arguments.
+    """
+
+    def test_a_prefixed_out_is_left_to_ninja(self) -> None:
+        assert to_shell_command(["/Fo$out"], shell="ninja") == "/Fo$out"
+
+    def test_a_prefixed_in_is_left_to_ninja(self) -> None:
+        assert to_shell_command(["--src=$in"], shell="ninja") == "--src=$in"
+
+    def test_a_bare_variable_is_unchanged(self) -> None:
+        assert to_shell_command(["$out"], shell="ninja") == "$out"
+
+    def test_our_own_variables_are_still_quoted(self) -> None:
+        """$topdir and $target_N are pcons's, written into the build statement;
+        ninja expands them verbatim, so the quoting has to be ours."""
+        assert (
+            to_shell_command(["-I$topdir/My Headers"], shell="ninja")
+            == '"-I$topdir/My Headers"'
+        )
+        assert to_shell_command(["/Fo$target_0"], shell="ninja") == '"/Fo$target_0"'
+
+    def test_a_real_compile_line(self) -> None:
+        """The clang-cl shape from examples/10_paths_with_spaces."""
+        line = to_shell_command(
+            ["clang-cl", "/c", "/Fo$out", "-I$topdir/My Headers", "$in"], shell="ninja"
+        )
+
+        assert line == 'clang-cl /c /Fo$out "-I$topdir/My Headers" $in'
