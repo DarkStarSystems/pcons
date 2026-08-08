@@ -305,31 +305,47 @@ def test_module_can_be_invoked_with_python_dash_m() -> None:
 # ---- registry vs. the methods Project really defines -------------------------
 
 
-class TestRegisteredSignaturesMatchProject:
-    """A stub is only as good as the signature it is generated from.
+class TestBuildersHaveOneDefinition:
+    """A builder reachable two ways is a builder that can disagree with itself.
 
-    `project.Command` is a real method, but its typing stub comes from the
-    *registered* builder, so an argument the registry has not heard of is one
-    a user's editor says does not exist. They drifted once already: restat,
-    write_if_different and cwd were callable but unknown to the stub.
+    `project.Command` used to be a real method *and* a registered builder. The
+    method always won, so the registered one never ran -- but the typing stub
+    is generated from the registration, so the two drifted: `restat`,
+    `write_if_different` and `cwd` were all callable and all unknown to an
+    editor (issue #68). Now there is one definition and the stub describes the
+    code that runs.
     """
 
-    @staticmethod
-    def _params(func: object, drop: int) -> dict[str, object]:
-        from inspect import signature
-
-        params = list(signature(func).parameters.values())[drop:]
-        return {p.name: p.default for p in params}
-
-    def test_command_signatures_agree(self) -> None:
-        from pcons.builders.compile import CommandBuilder
+    def test_registered_builders_are_not_shadowed_by_methods(self) -> None:
+        from pcons.builders import register_builtin_builders
+        from pcons.core.builder_registry import BuilderRegistry
         from pcons.core.project import Project
 
-        registered = self._params(CommandBuilder.create_target, 1)  # drop `project`
-        method = self._params(Project.Command, 1)  # drop `self`
+        register_builtin_builders()
+        shadowed = [name for name in BuilderRegistry.all() if name in vars(Project)]
 
-        assert registered == method, (
-            "pcons/builders/compile.py CommandBuilder.create_target and "
-            "Project.Command have drifted; the generated stub follows the "
-            "former, so users lose the arguments missing from it."
+        assert not shadowed, (
+            f"{shadowed} are registered builders and also methods on Project. "
+            f"The method wins, so the registration never runs -- while the "
+            f"typing stub is generated from it, and the two will drift."
         )
+
+    def test_command_still_dispatches(self, tmp_path) -> None:
+        """Removing the method must not remove the API."""
+        from pcons.core.project import Project
+
+        (tmp_path / "in.txt").write_text("")
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        target = project.Command(
+            "gen",
+            env,
+            target=project.build_dir / "out.txt",
+            source=tmp_path / "in.txt",
+            command=["copy", "$SOURCE", "$TARGET"],
+            restat=True,
+        )
+
+        assert target.name == "gen"
+        assert target.output_nodes[0]._build_info["restat"] is True

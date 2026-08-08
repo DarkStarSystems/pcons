@@ -296,11 +296,10 @@ class CommandBuilder:
     ) -> Target:
         """Create a Command target.
 
-        Keep this signature in step with :meth:`Project.Command`, which is
-        what users actually call: the typing stub for ``project.Command`` is
-        generated from *this* one, so an argument missing here is an argument
-        their editor says does not exist. ``tests/test_gen_stubs.py`` checks
-        the two still agree.
+        This is what ``project.Command(...)`` calls, and what its typing stub
+        is generated from, so an argument missing here is an argument a user's
+        editor says doesn't exist. It delegates to :meth:`Environment.Command`,
+        which holds the documentation and does the work.
 
         Args:
             project: The project to add the target to.
