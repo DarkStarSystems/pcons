@@ -106,9 +106,6 @@ Accepted by every command unless noted:
 | `--fresh` | Discard the persisted cache before this run, like `cmake --fresh` |
 | `--modules-path PATHS` | Extra directories to search for pcons add-on modules, separated by `:` (`;` on Windows) |
 
-`clean` accepts only the options above that concern locating the build; `init`
-takes none of the generate-time ones.
-
 ## Build variables
 
 Any `KEY=value` argument becomes a build variable your script can read with

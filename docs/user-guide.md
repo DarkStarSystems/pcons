@@ -3157,7 +3157,7 @@ Notes:
 
 ### Command Launchers
 
-A launcher is a program that runs *in front of* the command an edge would otherwise run: `ccache` ahead of the compiler, `time` or `valgrind` ahead of anything you want to measure or check. It belongs to a tool namespace, so it follows the tool rather than any one target:
+A launcher runs in front of the command an edge would otherwise run: `ccache` ahead of the compiler, `valgrind` ahead of a test. Set it on a tool namespace and it follows that tool:
 
 ```python
 env.cc.launcher = ["ccache"]
@@ -3188,7 +3188,7 @@ See `examples/63_command_launcher` for two stacked launchers wrapping every C co
 
 ### Sources a command depends on but does not name
 
-`$SOURCE` and `$SOURCES` mean the same thing: *every* source, space-separated. That is what you want when the command consumes them all, and not what you want for a script whose siblings must be watched but not passed to it:
+`$SOURCE` and `$SOURCES` mean the same thing: every source, space-separated. That's right when the command consumes them all. It's wrong for a script whose siblings need watching but not passing:
 
 ```python
 env.Command(
@@ -3198,48 +3198,51 @@ env.Command(
 )
 ```
 
-Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .`, so the shared module arrives as an extra argument. A script that checks `sys.argv` by membership instead of by position will appear to work, which is why it's worth spelling out. Use `${SOURCES[0]}` to name the entry point, and every source still becomes a dependency ninja watches.
+Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .`, so the shared module arrives as an extra argument. A script that checks `sys.argv` by membership won't notice. Use `${SOURCES[0]}` to name the entry point; every source is still a dependency ninja watches.
 
 pcons warns when you write the singular and the command has more than one source: that spelling reads as "one" but means "all". Write `$SOURCES` when consuming them all is the intent — `cat $SOURCES > $TARGET` is a perfectly good command, and says so.
 
 ### Persistent Workers
 
-Ninja assumes starting a command is free. Often it is. But an action can cost far more to *start* than to run — it may have to open a connection, claim a licence, warm a cache, spin up a runtime, load a large model — and a build pays that again on every edit.
-
-A worker is a process that is already started. pcons puts a small client in front of the action, which hands the work to a worker over a socket and starts one if nobody is listening:
-
-```python
-from pcons import Worker
-
-env.Command(
-    target="report.pdf",
-    source="report.py",
-    command="python $SOURCE --out $TARGET",
-    worker=Worker(command=["my-worker", "--profile=render"]),
-)
-```
-
-**pcons does not implement workers.** It defines what one must do — see [the worker protocol](worker-protocol.md) — and your project brings whichever kind suits it: a Python process, a compiled binary, a client for something already running. Two actions share a worker when their `Worker` compares equal.
-
-For actions that run a Python script, `PythonWorker` is bundled:
+Some actions cost more to start than to run: loading a large library, opening a
+connection, claiming a licence. The build pays that on every edit. A worker is a
+process that's already started, so the cost is paid once.
 
 ```python
 from pcons import PythonWorker
 
-PythonWorker(preload=["heavy_toolkit"])  # ready by importing
-PythonWorker(setup="mypkg.warmup:connect")  # ready by doing
+env.Command(
+    target="report.pdf",
+    source="report.py",
+    command=[sys.executable, "$SOURCE", "--out", "$TARGET"],
+    worker=PythonWorker(preload=["heavy_toolkit"]),
+)
 ```
 
-`preload` names installed packages to import — never a module of the project being built, which has to load fresh or an edit to it would be masked by the copy the worker already holds. `setup` is the general case: a `package.module:function` called once, free to open, claim or warm whatever the actions need.
+`preload` lists installed packages to import up front. Don't list a module of
+the project being built: it has to load fresh, or an edit to it would be masked
+by the copy the worker holds. For readiness that isn't an import,
+`setup="mypkg.warmup:connect"` calls a function once.
 
-Whatever kind of worker you bring, the contract holds: every action is isolated from the ones before it, nothing supervises workers (the first action that needs one starts it, and it exits when idle), and a worker is only ever an optimization — with none reachable, the command runs directly and the build is slower rather than broken. [The worker protocol](worker-protocol.md) is the detail.
+Nothing starts the worker; the first action that needs one starts it, and it
+exits when idle. Every action runs in a fresh forked child, so nothing one
+action does can reach the next. If no worker can be reached (plain `ninja`, CI,
+Windows) the command runs directly, and the build is slower rather than broken.
 
-Two things to watch for with `PythonWorker`:
+Two traps, both silent:
 
-- **The action must run an interpreter directly.** `uv run python model.py` starts with `uv`, not an interpreter, so it falls back and runs at full cost — silently, because that is indistinguishable from having no worker. Name the interpreter: `command=[sys.executable, "$SOURCE", ...]`.
-- **The worker must be the environment your action needs.** `python=` defaults to the interpreter running pcons, which is not the project's if pcons came from `uvx` or a global install. Pass the project's interpreter explicitly, and note that the action's own interpreter must match it — a worker refuses an action belonging to a different environment rather than running it against different packages.
+- **The action must name an interpreter.** `uv run python model.py` starts with
+  `uv`, so it falls back and runs at full cost. Use `sys.executable`.
+- **The worker must be the environment the action needs.** `python=` defaults to
+  whatever is running pcons, which isn't the project's venv if pcons came from
+  `uvx`. Pass the project's interpreter, and make the action use the same one; a
+  worker refuses an action from a different environment.
 
-When a build is slower than expected, `PCONS_WORKER_DEBUG=1` says why a worker was not used, and keeps the worker's stderr instead of discarding it.
+`PCONS_WORKER_DEBUG=1` says why a worker wasn't used, and keeps its stderr.
+
+pcons doesn't implement workers, it defines what one must do, so you can bring
+any kind: a compiled binary, a client for a service that's already running. See
+[the worker protocol](worker-protocol.md). `PythonWorker` is the one that ships.
 
 See `examples/64_persistent_worker` for a runnable version.
 
