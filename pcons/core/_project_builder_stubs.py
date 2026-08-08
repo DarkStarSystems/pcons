@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from pcons.core.environment import Environment as Env
@@ -81,6 +81,7 @@ if TYPE_CHECKING:
             write_if_different: bool = False,
             cwd: str | Path | None = None,
             launcher: Sequence[str] | None = None,
+            worker: Any = None,
         ) -> Target:
             """Create a custom command target."""
             ...

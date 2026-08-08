@@ -3585,6 +3585,35 @@ Two things worth knowing:
 
 See `examples/63_command_launcher` for two stacked launchers wrapping every C compile, and a third belonging to one command.
 
+### Persistent Workers
+
+Ninja assumes starting a command is free. For a compiler it is. For an action that must become *ready* before it can do anything — load a large library, connect to a service, claim a licence, warm a cache — startup can be most of the build, and it is paid again on every edit.
+
+A worker is a process kept alive across actions, so that cost is paid once:
+
+```python
+from pcons.workers import Worker
+
+env.Command(
+    target="report.pdf",
+    source="report.py",
+    command="python $SOURCE --out $TARGET",
+    worker=Worker(preload=["heavy_toolkit"]),
+)
+```
+
+`preload` is what this worker does to become ready: modules it imports before any action runs. List installed packages only — never a module of the project being built, whose whole point is to change between builds.
+
+Each action still runs in a **fresh forked child**, so nothing one action does can reach the next. A worker that reset itself between actions instead would carry the previous one's state — a cache populated before an edit, say — and quietly build the wrong thing.
+
+Practical notes:
+
+- **Nothing has to start the worker.** The first action that needs one starts it; later builds reuse it. It exits on its own after `idle_timeout` seconds (15 minutes by default).
+- **The generated build file still stands alone.** With no worker listening — plain `ninja`, CI, or Windows, which has no `fork` — the command simply runs directly. A build that cannot reach a worker is a slower build, not a failed one.
+- **Two actions share a worker** when they name the same interpreter and the same preload set.
+- **Only an interpreter running a script** is handed to a worker. Any other command, including `python -c`, runs directly rather than being approximated.
+- The socket lives in a private per-user directory, since it accepts commands to run.
+
 ### Multiple Toolchains
 
 Pcons supports combining multiple toolchains in a single environment. This is useful for projects that mix languages, such as C++ with CUDA, or C++ with Cython.

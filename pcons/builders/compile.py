@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pcons.core.builder_registry import builder
 from pcons.core.node import Node
@@ -292,6 +292,7 @@ class CommandBuilder:
         write_if_different: bool = False,
         cwd: str | Path | None = None,
         launcher: Sequence[str] | None = None,
+        worker: Any = None,
     ) -> Target:
         """Create a Command target.
 
@@ -326,6 +327,7 @@ class CommandBuilder:
             write_if_different=write_if_different,
             cwd=cwd,
             launcher=launcher,
+            worker=worker,
         )
 
 

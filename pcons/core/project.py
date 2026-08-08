@@ -1430,6 +1430,7 @@ class Project(_ProjectBuilders):
         write_if_different: bool = False,
         cwd: str | Path | None = None,
         launcher: Sequence[str] | None = None,
+        worker: Any = None,
     ) -> Target:
         """Create a custom command target.
 
@@ -1477,6 +1478,7 @@ class Project(_ProjectBuilders):
             write_if_different=write_if_different,
             cwd=cwd,
             launcher=launcher,
+            worker=worker,
         )
 
     def __str__(self) -> str:

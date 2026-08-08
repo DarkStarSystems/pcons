@@ -1108,6 +1108,7 @@ class Environment(_EnvironmentStubs):
         write_if_different: bool = False,
         cwd: str | Path | None = None,
         launcher: Sequence[str] | None = None,
+        worker: Any = None,
     ) -> Target:
         """Run an arbitrary shell command to build targets from sources.
 
@@ -1193,6 +1194,11 @@ class Environment(_EnvironmentStubs):
                    a launcher on a tool namespace (``env.cc.launcher``), which
                    follows every edge that tool runs, this one applies to this
                    command alone. See :mod:`pcons.core.launcher`.
+            worker: A :class:`pcons.workers.Worker` to run this command in,
+                   for an action that costs more to start than to run.
+                   Renders to a launcher, so the generated build file still
+                   builds standalone: with no worker listening, the command
+                   runs directly. See :mod:`pcons.workers`.
 
         Returns:
             Target object representing the command outputs.
@@ -1273,6 +1279,11 @@ class Environment(_EnvironmentStubs):
                     immediate_sources.append(src)
 
         # Create the builder
+        # A worker is a launcher with a lifecycle; the edge only ever sees
+        # the tokens that route it through one.
+        if worker is not None:
+            launcher = [*(launcher or []), *worker.launcher()]
+
         builder = GenericCommandBuilder(
             command,
             restat=restat or write_if_different,
