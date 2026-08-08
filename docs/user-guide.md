@@ -1631,7 +1631,28 @@ stop the watch — the next edit is usually the fix. Press Ctrl-C to stop.
 
 The build directory is never watched (reacting to the build's own output would
 loop forever), nor are VCS directories, virtualenvs, tool caches, or editor
-scratch files.
+scratch files. Anything ninja knows how to build is also left out, wherever it
+lands — so a command that generates a file next to its sources, or an in-source
+build (`-B .`), does not retrigger the build that wrote it.
+
+Two things a watch reports that an ordinary build does not:
+
+- **A build that did not converge.** If a command never creates the output it
+  declares, ninja reruns it on every build and says nothing. After each
+  successful build pcons asks ninja whether work remains, and passes on its
+  answer:
+
+  ```
+  WARNING: the build did not converge: ninja still has work to do right after a
+  successful build ... Ninja explains:
+  WARNING:     output declared.txt doesn't exist
+  ```
+
+- **A rebuild loop.** If several builds in a row are triggered the instant the
+  previous one finished, all by the same file, the watch stops and names it —
+  that file is written by the build itself, so each build is asking for the
+  next. Declare it as an output of the command that writes it, or send it to the
+  build directory.
 
 Watching uses the platform's native filesystem notification (inotify, FSEvents,
 ReadDirectoryChangesW) through the
