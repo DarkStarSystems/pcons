@@ -592,6 +592,82 @@ def run_xcodebuild(
         return 1
 
 
+def _parse_ninja_targets(stdout: str, build_dir: Path) -> set[Path]:
+    """Absolute paths from ``ninja -t targets all`` output (``path: rule``).
+
+    Phony rules name aliases rather than files, and an alias can collide with
+    a real directory name, so they are left out.
+    """
+    outputs: set[Path] = set()
+    for line in stdout.splitlines():
+        # rpartition, not split: a Windows path carries its own colon.
+        path, sep, rule = line.rpartition(":")
+        if not sep or not path.strip() or rule.strip() == "phony":
+            continue
+        # Normalize after joining: ninja names outputs relative to the build
+        # directory, and one outside it ("../src/generated.txt") keeps its ".."
+        # through a pathlib join, which would never match a watched path.
+        outputs.add(Path(os.path.normpath(build_dir / path.strip())))
+    return outputs
+
+
+def ninja_outputs(build_dir: Path, runner: str | None = None) -> set[Path]:
+    """Every file ninja knows how to build, as absolute paths.
+
+    Asked of ninja rather than taken from the Project, because a watch outlives
+    the run that generated the manifest: later regenerations happen inside
+    ninja's own subprocess, where pcons never sees the resulting graph.
+    """
+    ninja_cmd = _find_ninja(runner)
+    if ninja_cmd is None:
+        return set()
+    cmd = [*ninja_cmd, "-C", str(build_dir), "-t", "targets", "all"]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except OSError as e:
+        logger.debug("Could not list ninja targets: %s", e)
+        return set()
+    if result.returncode != 0:
+        return set()
+    return _parse_ninja_targets(result.stdout, build_dir.resolve())
+
+
+def _explain_reasons(output: str) -> list[str]:
+    """Ninja's own explanations for the work it still wants to do."""
+    marker = "ninja explain:"
+    return [
+        line.split(marker, 1)[1].strip()
+        for line in output.splitlines()
+        if marker in line
+    ]
+
+
+def unconverged_reasons(
+    build_dir: Path, targets: list[str] | None = None, runner: str | None = None
+) -> list[str]:
+    """Ask ninja whether the build that just finished actually converged.
+
+    A command that never creates the output it declares leaves ninja with work
+    to do forever: it reruns that edge on every build and says nothing, exiting
+    0 each time. One dry run straight afterwards turns a silent rebuild-forever
+    into a message naming the output. Returns the reasons, empty when all is
+    well (and when there is no ninja build to ask about).
+    """
+    ninja_cmd = _find_ninja(runner)
+    if ninja_cmd is None:
+        return []
+    cmd = [*ninja_cmd, "-C", str(build_dir), "-n", "-d", "explain", *(targets or [])]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except OSError as e:
+        logger.debug("Could not probe for convergence: %s", e)
+        return []
+    combined = result.stdout + result.stderr
+    if result.returncode != 0 or "no work to do" in combined:
+        return []
+    return _explain_reasons(combined)
+
+
 def run_make(
     build_dir: Path,
     targets: list[str] | None = None,
@@ -751,8 +827,32 @@ def _watch_build(args: argparse.Namespace) -> int:
         logger.error("%s", e)
         return 1
 
+    # What ninja knows how to build. Refreshed whenever the manifest changes and
+    # consulted live by the watch, so an output landing in the source tree never
+    # retriggers the build that wrote it.
+    outputs: set[Path] = set()
+    manifest_mtime = 0.0
+    runner = getattr(args, "ninja", None)
+
+    def build() -> int:
+        nonlocal manifest_mtime
+        code = _build_targets(args)
+        build_dir = Path(args.build_dir).absolute()
+
+        manifest = build_dir / "build.ninja"
+        mtime = manifest.stat().st_mtime if manifest.exists() else 0.0
+        if mtime != manifest_mtime:
+            manifest_mtime = mtime
+            outputs.clear()
+            outputs.update(ninja_outputs(build_dir, runner))
+
+        if code == 0:
+            _, targets = parse_variables(getattr(args, "extra", []))
+            _warn_unconverged(unconverged_reasons(build_dir, targets, runner))
+        return code
+
     try:
-        watch.run_build(lambda: _build_targets(args))
+        watch.run_build(build)
     except KeyboardInterrupt:
         # Interrupted before the watch (and its handler) is up.
         return 0
@@ -763,9 +863,31 @@ def _watch_build(args: argparse.Namespace) -> int:
     script = _find_build_script(args)
     root = (script.parent if script else Path.cwd()).absolute()
 
+    # An in-source build (-B .) has nothing to exclude by directory without
+    # excluding the project; there the output list carries it alone.
+    excluded_dirs = [build_dir] if build_dir != root else []
+
     return watch.watch_and_build(
-        lambda: _build_targets(args), [root], excluded_dirs=[build_dir]
+        build,
+        [root],
+        excluded_dirs=excluded_dirs,
+        excluded_paths=outputs,
     )
+
+
+def _warn_unconverged(reasons: list[str], limit: int = 5) -> None:
+    """Report a build that left ninja with work still to do."""
+    if not reasons:
+        return
+    logger.warning(
+        "the build did not converge: ninja still has work to do right after a "
+        "successful build, so it will run these again every time. Usually a "
+        "command does not create the output it declares. Ninja explains:"
+    )
+    for reason in reasons[:limit]:
+        logger.warning("    %s", reason)
+    if len(reasons) > limit:
+        logger.warning("    ... and %d more", len(reasons) - limit)
 
 
 def _find_build_script(args: argparse.Namespace) -> Path | None:

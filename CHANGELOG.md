@@ -13,10 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   builds, then rebuilds whenever anything in the source tree changes, until you
   press Ctrl-C. Editing the build script counts: ninja re-runs pcons first, so a
   new source file or a changed flag takes effect without restarting. A failed
-  build leaves the watch running. The build directory, VCS directories, caches
-  and editor scratch files are never watched. Native filesystem notification
-  comes from `watchfiles`, which now installs with pcons on Linux, macOS and
-  Windows; elsewhere, `pip install 'pcons[watch]'`.
+  build leaves the watch running. Nothing the build itself writes is watched:
+  the build directory, and anything ninja knows how to build wherever it lands,
+  so a generator writing beside its sources -- or an in-source build (`-B .`) --
+  does not retrigger itself. Nor are VCS directories, caches or editor scratch
+  files. Native filesystem notification comes from `watchfiles`, which now
+  installs with pcons on Linux, macOS and Windows; elsewhere,
+  `pip install 'pcons[watch]'`.
+- **A watch reports a build that did not converge.** When a command never
+  creates the output it declares, ninja reruns it on every build and says
+  nothing about it, exiting 0 each time. After each successful build under
+  `--watch`, pcons asks ninja whether work remains and passes on its
+  explanation, naming the output that never appeared. Should the watch still
+  end up feeding itself -- a tool rewriting a source file on every build, say --
+  it stops after a few immediate rebuilds and names the file responsible,
+  rather than spinning.
 - **Command launchers.** A tool can now be run behind another program --
   `env.cc.launcher = ["ccache"]` -- and they stack, outermost first. Launchers
   are token lists like every other command in pcons, so one whose path contains
