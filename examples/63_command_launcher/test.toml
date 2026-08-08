@@ -1,11 +1,12 @@
 # Test configuration for the command-launcher example
 
 [test]
-description = "Commands run behind a launcher: two stacked wrappers (a compiler-cache stand-in and a timer) in front of every C compile, with compile_commands.json still reporting the real compiler"
+description = "Commands run behind a launcher: two stacked wrappers (a compiler-cache stand-in and a timer) in front of every C compile, a third belonging to a single command, and compile_commands.json still reporting the real compiler"
 
 expected_outputs = [
     "build/obj.hello/src/hello.c.o",
     "build/hello",
+    "build/manifest.txt",
     # Written only by the launchers, so its existence proves they ran.
     "build/launchers.log",
 ]

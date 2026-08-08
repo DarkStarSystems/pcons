@@ -1429,6 +1429,7 @@ class Project(_ProjectBuilders):
         restat: bool = False,
         write_if_different: bool = False,
         cwd: str | Path | None = None,
+        launcher: Sequence[str] | None = None,
     ) -> Target:
         """Create a custom command target.
 
@@ -1452,6 +1453,8 @@ class Project(_ProjectBuilders):
                    identical content, and set ``restat``.
             cwd: Directory to run the command in, instead of the build
                    directory; relative to the project root.
+            launcher: Program to run this command behind, as tokens; see
+                   ``env.Command``.
 
         Returns:
             A new Target configured as a command.
@@ -1473,6 +1476,7 @@ class Project(_ProjectBuilders):
             restat=restat,
             write_if_different=write_if_different,
             cwd=cwd,
+            launcher=launcher,
         )
 
     def __str__(self) -> str:

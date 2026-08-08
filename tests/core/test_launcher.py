@@ -51,6 +51,81 @@ class TestResolveLauncher:
             env.cc.launcher = "ccache"
 
 
+class TestPerCommandLauncher:
+    """A launcher belonging to one edge rather than to a tool."""
+
+    @staticmethod
+    def _command_rule(tmp_path: Path, **command_kwargs) -> str:
+        from pcons import Project
+
+        source = tmp_path / "in.txt"
+        source.write_text("x\n")
+
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            name="gen",
+            target=project.build_dir / "out.txt",
+            source=source,
+            command=["copy", "$SOURCE", "$TARGET"],
+            **command_kwargs,
+        )
+        Generator().generate(project)
+        BaseGenerator._generate_pending(project)
+        text = (tmp_path / "build" / "build.ninja").read_text(encoding="utf-8")
+        return next(
+            line for line in text.splitlines() if line.strip().startswith("command =")
+        )
+
+    def test_launcher_precedes_the_command(self, tmp_path: Path) -> None:
+        rule = self._command_rule(tmp_path, launcher=["valgrind", "-q"])
+
+        assert "valgrind -q copy" in rule
+
+    def test_no_launcher_by_default(self, tmp_path: Path) -> None:
+        assert self._command_rule(tmp_path).strip().startswith("command = copy")
+
+    def test_a_tool_launcher_runs_outside_a_per_edge_one(self, test_project) -> None:
+        """Ordering is outermost first, so a tool's wrapper wraps them all."""
+        env = Environment()
+        env.add_tool("cc").set("cmd", "gcc")
+        env.cc.launcher = ["ccache"]
+
+        assert resolve_launcher(env, "cc", ["worker-client"]) == [
+            "ccache",
+            "worker-client",
+        ]
+
+    def test_it_reaches_the_edge_and_not_its_neighbours(self, tmp_path: Path) -> None:
+        """The point of a per-command launcher: only that command gets it."""
+        from pcons import Project
+
+        source = tmp_path / "in.txt"
+        source.write_text("x\n")
+
+        project = Project("demo", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            name="wrapped",
+            target=project.build_dir / "a.txt",
+            source=source,
+            command=["copy", "$SOURCE", "$TARGET"],
+            launcher=["valgrind"],
+        )
+        env.Command(
+            name="plain",
+            target=project.build_dir / "b.txt",
+            source=source,
+            command=["convert", "$SOURCE", "$TARGET"],
+        )
+        Generator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        text = (tmp_path / "build" / "build.ninja").read_text(encoding="utf-8")
+        assert "valgrind copy" in text
+        assert "valgrind convert" not in text
+
+
 class TestGeneratedCommands:
     """What a launcher does to the build files."""
 

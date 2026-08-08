@@ -53,4 +53,25 @@ env.cc.launcher = [
     log,
 ]
 
-project.Program("hello", env, sources=[project.root_dir / "src" / "hello.c"])
+hello = project.Program("hello", env, sources=[project.root_dir / "src" / "hello.c"])
+
+# A launcher can also belong to one command rather than to a tool. This is
+# what a persistent-worker client would use: the wrapper applies to this edge
+# alone, and runs inside any launcher set on the `command` tool.
+manifest = env.Command(
+    name="manifest",
+    target=project.build_dir / "manifest.txt",
+    source=project.root_dir / "src" / "hello.c",
+    command=[
+        python,
+        "-c",
+        "import pathlib, sys; pathlib.Path(sys.argv[2]).write_text(sys.argv[1])",
+        "$SOURCE",
+        "$TARGET",
+    ],
+    launcher=[python, prefix_log, "command", log],
+)
+
+# Naming any default target replaces the automatic set, so both go here: a
+# command target is not built unless something asks for it.
+project.Default(hello, manifest)
