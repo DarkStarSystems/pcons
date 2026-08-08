@@ -33,8 +33,10 @@ if TYPE_CHECKING:
 
 INSTALL_HINT = (
     "--watch needs the 'watchfiles' package, which is not installed.\n"
-    "Install it with:  pip install 'pcons[watch]'\n"
-    "or, for a tool install:  uv tool install pcons --with watchfiles"
+    "It comes with pcons on Linux, macOS and Windows; on other platforms ask "
+    "for it explicitly:\n"
+    "    pip install 'pcons[watch]'\n"
+    "It builds from source where there is no wheel, which needs a Rust toolchain."
 )
 
 #: Directories whose contents never justify a rebuild.

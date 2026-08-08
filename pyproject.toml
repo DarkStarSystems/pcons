@@ -24,11 +24,17 @@ dependencies = [
     "tomli>=2.0;python_version<'3.11'",  # TOML parsing (built-in in 3.11+)
     "tomli-w>=1.0",  # TOML writing
     "pbxproj>=3.0.0",  # Xcode project file manipulation
+    # Native filesystem notification for `pcons --watch`. Marked to the
+    # platforms pcons supports, which are the ones watchfiles ships wheels
+    # for: elsewhere pcons still installs, and only --watch is unavailable.
+    "watchfiles>=1.0; sys_platform == 'linux' or sys_platform == 'darwin' or sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]
+# Nothing extra on the platforms above, where watchfiles is already a
+# dependency. Elsewhere this asks for it anyway, building from source.
 watch = [
-    "watchfiles>=1.0",  # native filesystem notification for `pcons --watch`
+    "watchfiles>=1.0",
 ]
 dev = [
     "pytest>=8.0",
@@ -74,7 +80,6 @@ dev = [
     "pytest-xdist>=3.8",
     "mypy>=1.0",
     "ruff>=0.4",
-    "watchfiles>=1.0",
 ]
 
 [tool.pytest.ini_options]

@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   press Ctrl-C. Editing the build script counts: ninja re-runs pcons first, so a
   new source file or a changed flag takes effect without restarting. A failed
   build leaves the watch running. The build directory, VCS directories, caches
-  and editor scratch files are never watched. Needs the optional `watchfiles`
-  package for native filesystem notification: `pip install 'pcons[watch]'`.
+  and editor scratch files are never watched. Native filesystem notification
+  comes from `watchfiles`, which now installs with pcons on Linux, macOS and
+  Windows; elsewhere, `pip install 'pcons[watch]'`.
 - **Command launchers.** A tool can now be run behind another program --
   `env.cc.launcher = ["ccache"]` -- and they stack, outermost first. Launchers
   are token lists like every other command in pcons, so one whose path contains

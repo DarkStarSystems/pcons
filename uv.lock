@@ -617,6 +617,7 @@ source = { editable = "." }
 dependencies = [
     { name = "pbxproj" },
     { name = "tomli-w" },
+    { name = "watchfiles", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
 
 [package.optional-dependencies]
@@ -641,7 +642,6 @@ dev = [
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
     { name = "ruff" },
-    { name = "watchfiles" },
 ]
 
 [package.metadata]
@@ -655,6 +655,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
     { name = "tomli-w", specifier = ">=1.0" },
+    { name = "watchfiles", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=1.0" },
     { name = "watchfiles", marker = "extra == 'watch'", specifier = ">=1.0" },
 ]
 provides-extras = ["dev", "docs", "watch"]
@@ -666,7 +667,6 @@ dev = [
     { name = "pytest-cov", specifier = ">=4.0" },
     { name = "pytest-xdist", specifier = ">=3.8" },
     { name = "ruff", specifier = ">=0.4" },
-    { name = "watchfiles", specifier = ">=1.0" },
 ]
 
 [[package]]

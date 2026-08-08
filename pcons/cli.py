@@ -1334,7 +1334,7 @@ def add_watch_arg(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help=(
             "Build, then rebuild whenever a source or the build script "
-            "changes (Ctrl-C to stop). Needs: pip install 'pcons[watch]'"
+            "changes (Ctrl-C to stop)"
         ),
     )
 

@@ -1633,14 +1633,13 @@ The build directory is never watched (reacting to the build's own output would
 loop forever), nor are VCS directories, virtualenvs, tool caches, or editor
 scratch files.
 
-Watching uses the platform's native filesystem notification through the
-optional [watchfiles](https://pypi.org/project/watchfiles/) package, which is
-not installed by default:
-
-```bash
-pip install 'pcons[watch]'
-uv tool install pcons --with watchfiles   # for a tool install
-```
+Watching uses the platform's native filesystem notification (inotify, FSEvents,
+ReadDirectoryChangesW) through the
+[watchfiles](https://pypi.org/project/watchfiles/) package. It installs with
+pcons on Linux, macOS and Windows, so `--watch` works out of the box — including
+with `uvx pcons --watch`. On any other platform pcons installs without it and
+`--watch` says so; ask for it explicitly with `pip install 'pcons[watch]'`,
+which builds from source and needs a Rust toolchain.
 
 ### pcons (default)
 
