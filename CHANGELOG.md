@@ -73,6 +73,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   targets are written to per-edge ninja variables, and those values were not escaped:
   one dollar in a filename and ninja rejected `build.ninja` outright with "bad
   $-escape", so nothing built at all.
+- **A space in a path no longer breaks the Makefile generator.** It escaped `$` and
+  nothing else, so make read `obj.my_program/src with spaces/my program.c.o` as three
+  targets and stopped with "No rule to make target". Targets, prerequisites,
+  order-only prerequisites and include lines now escape spaces too.
+- **Paths with spaces reach the compiler intact on Windows.** A token containing
+  `$out` was quoted by pcons and then again by ninja, so clang-cl got
+  `"/Fo"obj.my_program/my program.c.obj""` and read it as four arguments. ninja
+  escapes `$in` and `$out` for the platform it runs on, so pcons leaves those tokens
+  alone; `$topdir` and the rest are still quoted here, since ninja expands them
+  verbatim. `examples/10_paths_with_spaces` now runs on every platform, under both
+  ninja and make.
 - **A command argument starting with `#` is now quoted.** Unquoted, `/bin/sh` read it
   as a comment and silently discarded it *and every argument after it* -- the command
   ran, and did something other than what the build script said.
