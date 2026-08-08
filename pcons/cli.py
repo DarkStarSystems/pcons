@@ -641,6 +641,11 @@ def cmd_default(args: argparse.Namespace) -> int:
     """Default command (bare 'pcons'): generate, then build."""
     load_user_modules(args)
 
+    # cmd_build generates on its own when the build files are stale, which is
+    # the right entry point for a watch: it regenerates only when needed.
+    if getattr(args, "watch", False):
+        return cmd_build(args)
+
     result, project = cmd_generate(args)
     if result != 0:
         return result
@@ -721,7 +726,58 @@ def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
 
 def cmd_build(args: argparse.Namespace) -> int:
     """Build targets with the build tool matching the generated files
-    (ninja, make, or xcodebuild), regenerating them first if stale."""
+    (ninja, make, or xcodebuild), regenerating them first if stale.
+
+    With --watch, build once and then keep rebuilding as sources change.
+    """
+    if getattr(args, "watch", False):
+        return _watch_build(args)
+    return _build_targets(args)
+
+
+def _watch_build(args: argparse.Namespace) -> int:
+    """Build, then rebuild whenever a watched file changes.
+
+    Each iteration is just another build: ninja's regen edge re-runs pcons
+    when the build description itself changed, so editing the build script
+    needs no special handling here.
+    """
+    from pcons import watch
+
+    setup_logging(args.verbose, args.debug)
+    try:
+        watch.ensure_available()
+    except PconsError as e:
+        logger.error("%s", e)
+        return 1
+
+    try:
+        watch.run_build(lambda: _build_targets(args))
+    except KeyboardInterrupt:
+        # Interrupted before the watch (and its handler) is up.
+        return 0
+
+    # Read the build directory only now: the first build settles it, since
+    # the build script may choose a directory other than the requested one.
+    build_dir = Path(args.build_dir).absolute()
+    script = _find_build_script(args)
+    root = (script.parent if script else Path.cwd()).absolute()
+
+    return watch.watch_and_build(
+        lambda: _build_targets(args), [root], excluded_dirs=[build_dir]
+    )
+
+
+def _find_build_script(args: argparse.Namespace) -> Path | None:
+    """Locate the build script named by --build-script, or in the cwd."""
+    script_arg = getattr(args, "build_script", None)
+    if script_arg:
+        return Path(script_arg)
+    return find_script("pcons-build.py")
+
+
+def _build_targets(args: argparse.Namespace) -> int:
+    """Run one build, regenerating build files first if they are stale."""
     setup_logging(args.verbose, args.debug)
 
     build_dir = Path(args.build_dir)
@@ -729,9 +785,7 @@ def cmd_build(args: argparse.Namespace) -> int:
     # Auto-generate if build files are missing or stale
     build_script = getattr(args, "build_script", None)
     if _needs_generation(build_dir, build_script=build_script):
-        script = (
-            find_script("pcons-build.py") if not build_script else Path(build_script)
-        )
+        script = _find_build_script(args)
         if script is not None and script.exists():
             logger.info("Build files missing or out of date, regenerating...")
             load_user_modules(args)
@@ -1273,6 +1327,18 @@ def add_build_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_watch_arg(parser: argparse.ArgumentParser) -> None:
+    """Add --watch to a parser that builds."""
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help=(
+            "Build, then rebuild whenever a source or the build script "
+            "changes (Ctrl-C to stop). Needs: pip install 'pcons[watch]'"
+        ),
+    )
+
+
 def add_generate_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments for generate-related commands."""
     parser.add_argument(
@@ -1325,6 +1391,7 @@ def create_default_parser() -> argparse.ArgumentParser:
     add_common_args(parser)
     add_generate_args(parser)
     add_build_args(parser)
+    add_watch_arg(parser)
     parser.add_argument(
         "-j", "--jobs", type=int, help="Number of parallel jobs for build"
     )
@@ -1367,6 +1434,7 @@ def create_full_parser() -> argparse.ArgumentParser:
     add_common_args(parser)
     add_generate_args(parser)
     add_build_args(parser)
+    add_watch_arg(parser)
     parser.add_argument(
         "-j", "--jobs", type=int, help="Number of parallel jobs for build"
     )
@@ -1451,6 +1519,7 @@ def create_full_parser() -> argparse.ArgumentParser:
     add_common_args(build_parser)
     add_generate_args(build_parser)
     add_build_args(build_parser)
+    add_watch_arg(build_parser)
     build_parser.add_argument("-j", "--jobs", type=int, help="Number of parallel jobs")
     build_parser.add_argument(
         "extra",
