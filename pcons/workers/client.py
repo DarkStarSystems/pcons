@@ -3,12 +3,9 @@
 
     client.py <socket> <idle timeout> <n> <start command (n tokens)> -- <command>
 
-Started once per action, so it must start fast: standard library only, and no
-pcons import (which costs more than this whole hop). It never fails a build on
-its own account -- anything unexpected and it execs the command directly, which
-is also what happens under plain ninja, in CI, or on a platform without fork.
-The worker is an optimization, and a build that cannot reach one is still a
-correct build, only a slower one.
+The client side of ``docs/worker-protocol.md``. Started once per action, so it
+must start fast: standard library only, and no pcons import, which would cost
+more than this whole hop.
 """
 
 from __future__ import annotations

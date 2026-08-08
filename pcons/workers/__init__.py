@@ -1,32 +1,13 @@
 # SPDX-License-Identifier: MIT
-"""Persistent workers: pay an action's startup cost once, not every build.
+"""Persistent workers: run an action in a process that is already started.
 
-Ninja assumes starting a command is free. Often it is. But an action can cost
-far more to *start* than to run — it may have to open a connection, claim a
-licence, warm a cache, spin up a runtime, load a large model — and a build pays
-that again on every edit.
+pcons implements no workers. It defines what one must do — ``docs/worker
+-protocol.md``, which this package is the client side of — and a project
+brings whichever kind suits it. :mod:`pcons.workers.python` is one, bundled
+because Python actions are common and because it doubles as a worked example
+of the contract.
 
-A worker is a process that is already started. Ninja cannot run one directly:
-it would get a fresh one per action, which is the thing being avoided. So
-pcons puts a small client in front of the action, which hands the work to a
-worker over a socket, starting one if nobody is listening.
-
-    env.Command(
-        target="report.pdf",
-        source="report.py",
-        command="python $SOURCE --out $TARGET",
-        worker=Worker(command=["python", "my_worker.py"]),
-    )
-
-**pcons does not implement workers.** It defines what one must do — see
-``docs/worker-protocol.md`` — and a project brings whichever kind suits it: a
-Python process, a compiled binary, a client for something already running.
-:mod:`pcons.workers.python` is a worker for Python actions, useful in its own
-right and worth reading as a worked example of the contract.
-
-What the build gets back is bounded: a worker is an optimization, and a build
-that cannot reach one runs its commands directly and is merely slower. That is
-also what makes a generated build file stand alone under plain ninja or in CI.
+    env.Command(..., worker=Worker(command=["my-worker", "--profile=render"]))
 """
 
 from __future__ import annotations
@@ -55,9 +36,7 @@ class Worker:
     """A process to hand an action to, and how to start one.
 
     Args:
-        command: How to start a worker. pcons appends the socket path as the
-            final argument; everything before it is yours. It is run detached,
-            and must implement ``docs/worker-protocol.md``.
+        command: How to start a worker; the socket path is appended to it.
         key: Extra identity material. Two workers with the same start command
             share one process, which is usually what you want -- add
             something here to keep them apart, such as a version whose change
@@ -91,9 +70,9 @@ class Worker:
     def launcher(self) -> list[str]:
         """Command tokens that route an action through this worker.
 
-        The client's own arguments come first, then ``--``, then the action.
-        A count rather than a separator delimits the start command, so a start
-        command containing ``--`` cannot be misread as the end of one.
+        The layout is annotated in ``docs/worker-protocol.md``; the count
+        delimits the start command so that one containing ``--`` cannot be
+        misread as the end of it.
         """
         client = Path(__file__).parent / "client.py"
         return [

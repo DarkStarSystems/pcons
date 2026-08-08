@@ -11,73 +11,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`--watch`: rebuild as you edit.** `pcons --watch` (or `pcons build --watch`)
   builds, then rebuilds whenever anything in the source tree changes, until you
-  press Ctrl-C. Editing the build script counts: ninja re-runs pcons first, so a
-  new source file or a changed flag takes effect without restarting. A failed
-  build leaves the watch running. Nothing the build itself writes is watched:
-  the build directory, and anything ninja knows how to build wherever it lands,
-  so a generator writing beside its sources -- or an in-source build (`-B .`) --
-  does not retrigger itself. Nor are VCS directories, caches or editor scratch
-  files. Native filesystem notification comes from `watchfiles`, which now
-  installs with pcons on Linux, macOS and Windows; elsewhere,
-  `pip install 'pcons[watch]'`.
-- **A watch reports a build that did not converge.** When a command never
-  creates the output it declares, ninja reruns it on every build and says
-  nothing about it, exiting 0 each time. After each successful build under
-  `--watch`, pcons asks ninja whether work remains and passes on its
-  explanation, naming the output that never appeared. Should the watch still
-  end up feeding itself -- a tool rewriting a source file on every build, say --
-  it stops after a few immediate rebuilds and names the file responsible,
-  rather than spinning.
-- **Command launchers.** A tool can now be run behind another program --
-  `env.cc.launcher = ["ccache"]` -- and they stack, outermost first. Launchers
-  are token lists like every other command in pcons, so one whose path contains
-  a space stays a single argument, and `compile_commands.json` reports the
-  compiler itself rather than whatever is wrapping it. A launcher can belong
-  to a single command instead of to a tool -- `env.Command(...,
-  launcher=[...])` -- for wrapping one expensive step rather than every edge
-  a tool runs. See `examples/63_command_launcher`.
-
-- **Persistent workers**, for actions that cost more to start than to run --
-  opening a connection, claiming a licence, warming a cache, loading a model.
+  press Ctrl-C. Editing the build script counts, so a new source file or a
+  changed flag takes effect without restarting, and a failed build leaves the
+  watch running. Nothing the build itself writes is watched, including outputs
+  that land outside the build directory, so a generator writing beside its
+  sources does not retrigger itself. Native filesystem notification comes from
+  `watchfiles`, which now installs with pcons on Linux, macOS and Windows;
+  elsewhere, `pip install 'pcons[watch]'`.
+- **A watch says when a build did not converge.** A command that never creates
+  the output it declares leaves ninja rerunning it on every build, silently and
+  successfully. `--watch` now asks ninja whether work remains and passes on its
+  answer, naming the output; and if the watch ends up feeding itself, it stops
+  and names the file responsible rather than spinning.
+- **Command launchers**: run a tool behind another program.
+  `env.cc.launcher = ["ccache"]`, or `env.Command(..., launcher=[...])` for one
+  edge; they stack, outermost first. `compile_commands.json` still reports the
+  compiler rather than whatever is wrapping it. See
+  `examples/63_command_launcher` and the user guide.
+- **Persistent workers**, for actions that cost more to start than to run.
   `env.Command(..., worker=Worker(command=[...]))` routes an action through a
-  process that has already paid that cost. pcons defines what a worker must do
-  (`docs/worker-protocol.md`) rather than implementing one, so a project can
-  bring any kind: a script, a compiled binary, a client for a running service.
-  `PythonWorker(preload=[...], setup=...)` is bundled for Python actions. The
-  first action that needs a worker starts it and it exits when idle, so nothing
-  has to manage its lifetime; with none reachable -- plain `ninja`, CI, Windows
-  -- the command runs directly, so a generated build file still builds by
-  itself. See `examples/64_persistent_worker`. Set `PCONS_WORKER_DEBUG=1` to
-  be told why a worker was not used, since a refusal otherwise looks exactly
-  like a build with no worker in it. Installing or removing a package retires
-  the workers holding the old copy.
+  process that has already paid that cost, and forks a pristine child per
+  action so nothing one leaks into the next. pcons defines what a worker must
+  do (`docs/worker-protocol.md`) rather than implementing one, so a project can
+  bring any kind; `PythonWorker(preload=[...], setup=...)` is bundled for
+  Python actions. Workers start on demand and exit when idle, and a build that
+  cannot reach one runs its commands directly. `PCONS_WORKER_DEBUG=1` says why
+  a worker was not used. See `examples/64_persistent_worker`.
 
 ### Fixed
 
+- **`env.use_compiler_cache()` produced a build that could not run.** It
+  prepended the cache to the compiler as a string, so the two became one shell
+  word and every compile failed with `ccache /usr/bin/cc: No such file or
+  directory`. It sets a launcher now. The old tests asserted on the command
+  string and skipped entirely unless a cache was installed, so this was
+  invisible.
 - **A command that writes `$SOURCE` where several sources will land now
   warns.** Both spellings mean every source, but only the plural says so; in
-  the singular the extras reach the command as arguments it never asked for,
-  and a script reading `sys.argv` by membership will appear to work for
-  months. `$SOURCES` says the same thing without the warning, and
-  `${SOURCES[0]}` names only the first.
+  the singular the extras reach the command as arguments it never asked for.
+  `project.Command`'s documentation had this backwards. Use `$SOURCES` when
+  that is the intent, or `${SOURCES[0]}` to name only the first.
 - **Diagnostics name the build script, whichever entry point was used.**
-  Source locations were captured a fixed number of frames up, which is right
-  for `env.Command()` and names pcons's own source for `project.Command()`,
-  since one forwards to the other. The first frame outside pcons is what gets
-  reported now.
-- **`project.Command`'s documentation had `$SOURCE` backwards**, describing it
-  as the first source when it is all of them (`env.Command` had it right). A
-  command written from that description silently receives the remaining
-  sources as extra arguments. Use `${SOURCES[0]}` to name an entry script
-  whose siblings are listed only so that editing them rebuilds.
-
-- **`env.use_compiler_cache()` produced a build that could not run.** It
-  prepended the cache to the compiler as a string, so `ccache` and the compiler
-  became a single shell word: every compile failed with `ccache /usr/bin/cc: No
-  such file or directory` (exit 127). It now sets a launcher instead. The old
-  tests asserted on the command string and skipped entirely unless a cache was
-  installed, so this was invisible; the new example builds through a stub cache
-  on every platform in CI.
+  Source locations were captured a fixed number of frames up, so the same
+  mistake was reported against `pcons/core/project.py` when written one way
+  and against the build script when written the other.
+- **`project.Command` accepts what it documents.** Its typing stub is
+  generated from the registered builder, which had never gained `restat`,
+  `write_if_different` or `cwd`; a test now compares the two signatures.
 
 ## [0.25.0] - 2026-08-05
 

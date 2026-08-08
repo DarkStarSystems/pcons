@@ -3,20 +3,9 @@
 
     python python_server.py [--preload m1,m2] [--setup pkg.mod:fn] <socket>
 
-One of many possible workers: it implements docs/worker-protocol.md and knows
-how to run a Python script. Read it alongside that document if you are writing
-a worker of your own -- the shape here (become ready once, then serve each
-action in isolation) is what the contract asks for, whatever the language.
-
-Becoming ready means importing the modules named by --preload and calling the
---setup function, which is where anything else belongs: opening a connection,
-claiming a licence, warming a cache.
-
-Isolation comes from forking: each request is served by a child that owns the
-connection and reports its own exit status, so requests are concurrent, a
-child that dies takes nothing with it, and nothing one action does can reach
-the next. A worker in a language without fork owes the contract the same
-guarantee by its own means.
+Implements ``docs/worker-protocol.md``; read this beside it if you are writing
+a worker of your own. Isolation, which the contract requires and leaves to the
+worker, comes from forking a child per request here.
 
 Standard library only, and never imports pcons: whatever this process holds is
 inherited by every action it runs.
