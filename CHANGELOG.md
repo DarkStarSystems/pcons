@@ -37,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   launcher=[...])` -- for wrapping one expensive step rather than every edge
   a tool runs. See `examples/63_command_launcher`.
 
+- **Persistent workers**, for actions that cost more to start than to run.
+  `env.Command(..., worker=Worker(preload=[...]))` routes an action through a
+  process that has already paid its startup cost, and forks a pristine child
+  per action so nothing one leaks into the next. The first action that needs a
+  worker starts it, and it exits when idle, so nothing has to manage its
+  lifetime. With no worker listening -- plain `ninja`, CI, Windows -- the
+  command runs directly, so a generated build file still builds by itself.
+
 ### Fixed
 
 - **`env.use_compiler_cache()` produced a build that could not run.** It
