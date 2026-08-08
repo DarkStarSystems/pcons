@@ -610,3 +610,25 @@ class TestMakefileMatchesNinja:
         content = self._makefile(tmp_path, gcc_toolchain, build)
 
         assert "--mode 755" in content
+
+
+class TestPathsWithSpaces:
+    """make splits names on whitespace, so a space in a path has to be escaped.
+
+    Unescaped, `obj/src with spaces/x.o` is three names, and make reports "No
+    rule to make target `obj/src'" — issue #70.
+    """
+
+    def test_a_target_escapes_its_spaces(self) -> None:
+        assert MakefileGenerator()._escape_path(
+            "obj/src with spaces/my program.c.o"
+        ) == ("obj/src\\ with\\ spaces/my\\ program.c.o")
+
+    def test_dollars_are_still_doubled(self) -> None:
+        assert MakefileGenerator()._escape_path("obj/a$b.o") == "obj/a$$b.o"
+
+    def test_both_at_once(self) -> None:
+        assert MakefileGenerator()._escape_path("a $b/c d.o") == "a\\ $$b/c\\ d.o"
+
+    def test_a_path_without_spaces_is_untouched(self) -> None:
+        assert MakefileGenerator()._escape_path("obj/plain.o") == "obj/plain.o"
