@@ -3597,7 +3597,9 @@ env.Command(
 )
 ```
 
-Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .` — the shared module arrives as an extra argument. A script that ignores unexpected arguments will appear to work, which is what makes this worth spelling out. Use `${SOURCES[0]}` to name the entry point, and every source still becomes a dependency ninja watches.
+Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .` — the shared module arrives as an extra argument. A script that reads `sys.argv` by membership rather than by position will appear to work, which is what makes this worth spelling out. Use `${SOURCES[0]}` to name the entry point, and every source still becomes a dependency ninja watches.
+
+pcons warns when a command written in the singular meets more than one source, since that spelling reads as "one" and means "all". Write `$SOURCES` when consuming them all is the intent — `cat $SOURCES > $TARGET` is a perfectly good command, and says so.
 
 ### Persistent Workers
 
