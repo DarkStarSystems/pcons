@@ -21,12 +21,23 @@ import subprocess
 import sys
 from pathlib import Path
 
+#: Set PCONS_WORKER_DEBUG=1 to keep the worker's stderr and hear why an
+#: action fell back. Without it, a refusal looks exactly like no worker at all.
+DEBUG = bool(os.environ.get("PCONS_WORKER_DEBUG"))
+
 CONNECT_TIMEOUT = 5.0
 STARTUP_TIMEOUT = 120.0  # a worker is slow to start; that is why it exists
 
 
-def run_directly(argv: list[str]) -> int:
+def note(reason: str) -> None:
+    """Say why a worker was not used, when anyone asked to be told."""
+    if DEBUG:
+        print(f"pcons worker: running directly ({reason})", file=sys.stderr)
+
+
+def run_directly(argv: list[str], reason: str = "no worker") -> int:
     """Run the command in this process's place, as if no worker existed."""
+    note(reason)
     os.execvp(argv[0], argv)
     return 1  # not reached
 
@@ -61,7 +72,10 @@ def spawn(
             env=env,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            # A worker is not a place to report to the terminal -- except when
+            # debugging one, where its stderr is the only thing that explains
+            # why it would not start.
+            stderr=None if DEBUG else subprocess.DEVNULL,
             start_new_session=True,
         )
     except OSError:
@@ -90,16 +104,32 @@ def wait_for(
     return None
 
 
+def venv_of(python: str) -> Path:
+    """The environment an interpreter belongs to.
+
+    Deliberately *not* resolved: uv's ``.venv/bin/python`` is a symlink to an
+    interpreter that lives outside the venv and knows nothing about the
+    packages installed in it.
+    """
+    return Path(python).parent.parent
+
+
 def environment_stamp(python: str) -> str:
-    """Must agree with the server's, or the worker is serving stale code."""
-    config = Path(python).resolve().parent.parent / "pyvenv.cfg"
+    """A fingerprint of the environment a worker serves.
+
+    Named by directory rather than by executable, because ``python`` and
+    ``python3`` in one ``bin/`` are the same environment; and carrying
+    ``pyvenv.cfg``'s mtime, so that recreating the venv makes a worker holding
+    its code stand down.
+    """
+    venv = venv_of(python)
     try:
-        return f"{python}:{config.stat().st_mtime_ns}"
+        return f"{venv}:{(venv / 'pyvenv.cfg').stat().st_mtime_ns}"
     except OSError:
-        return python
+        return str(venv)
 
 
-def submit(conn: socket.socket, argv: list[str]) -> dict | None:
+def submit(conn: socket.socket, argv: list[str], worker_python: str) -> dict | None:
     """Send one request, with our own stdio, and wait for the verdict.
 
     Passing the file descriptors means the command writes straight to ninja's
@@ -109,7 +139,10 @@ def submit(conn: socket.socket, argv: list[str]) -> dict | None:
         "argv": argv,
         "cwd": os.getcwd(),
         "env": dict(os.environ),
-        "stamp": environment_stamp(sys.executable),
+        # The worker's environment, not this process's: pcons may well be
+        # running from somewhere else entirely (uvx, a global install), and
+        # what matters is the environment the action will run in.
+        "stamp": environment_stamp(worker_python),
     }
     fds = array.array("i", [0, 1, 2])
     try:
@@ -142,7 +175,7 @@ def main(argv: list[str]) -> int:
     command = argv[3 + start_argc + 1 :]  # skip the "--" that follows
 
     if os.name == "nt" or not hasattr(socket, "AF_UNIX"):
-        return run_directly(command)
+        return run_directly(command, "no AF_UNIX on this platform")
 
     conn = connect(sock_path)
     if conn is None:
@@ -151,15 +184,17 @@ def main(argv: list[str]) -> int:
 
         conn = wait_for(sock_path, time.monotonic() + STARTUP_TIMEOUT, started)
     if conn is None:
-        return run_directly(command)
+        return run_directly(command, "no worker is listening")
 
+    worker_python = start[0] if start else sys.executable
     with conn:
-        answer = submit(conn, command)
+        answer = submit(conn, command, worker_python)
 
     if answer is None or "exit" not in answer:
         # Refused (a stale worker, or one that cannot fork), or died mid-run.
         # Either way the command has not run, so run it.
-        return run_directly(command)
+        reason = (answer or {}).get("error") or "the worker did not answer"
+        return run_directly(command, reason)
     exit_code = answer["exit"]
     return exit_code if isinstance(exit_code, int) else 1
 
