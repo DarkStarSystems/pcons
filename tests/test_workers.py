@@ -141,6 +141,7 @@ class TestEnvironmentStamp:
     def _fake_venv(root: Path, link_to: Path | None = None) -> Path:
         """A venv whose bin/python is a symlink out of it, as uv builds them."""
         (root / "bin").mkdir(parents=True)
+        (root / "lib" / "python3.12" / "site-packages").mkdir(parents=True)
         (root / "pyvenv.cfg").write_text("home = /somewhere\n")
         target = link_to or Path(sys.executable)
         for name in ("python", "python3"):
@@ -154,15 +155,33 @@ class TestEnvironmentStamp:
 
         assert python_server.venv_of(str(python)) == tmp_path / "venv"
 
-    def test_a_changed_environment_is_noticed(self, tmp_path: Path) -> None:
-        """The whole point of the stamp: a recreated venv must not be served
-        from memory by a worker holding the old one."""
+    def test_an_installed_or_removed_package_is_noticed(self, tmp_path: Path) -> None:
+        """What the stamp is actually for. `uv pip install` and a `uv sync`
+        that removes packages both move site-packages and neither touches
+        pyvenv.cfg, so a worker keyed on that alone serves stale library code
+        until it times out."""
+        python = self._fake_venv(tmp_path / "venv")
+        before = python_server.environment_stamp(str(python))
+
+        os.utime(tmp_path / "venv" / "lib" / "python3.12" / "site-packages", (1, 1))
+
+        assert python_server.environment_stamp(str(python)) != before
+
+    def test_a_recreated_venv_is_noticed(self, tmp_path: Path) -> None:
         python = self._fake_venv(tmp_path / "venv")
         before = python_server.environment_stamp(str(python))
 
         os.utime(tmp_path / "venv" / "pyvenv.cfg", (1, 1))
 
         assert python_server.environment_stamp(str(python)) != before
+
+    def test_an_untouched_environment_stamps_the_same(self, tmp_path: Path) -> None:
+        """Otherwise no worker would ever be reused."""
+        python = self._fake_venv(tmp_path / "venv")
+
+        assert python_server.environment_stamp(
+            str(python)
+        ) == python_server.environment_stamp(str(python))
 
     def test_python_and_python3_are_one_environment(self, tmp_path: Path) -> None:
         """Same interpreter, two names in one bin/ -- and a worker started by
