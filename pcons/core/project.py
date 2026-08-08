@@ -1443,10 +1443,13 @@ class Project(_ProjectBuilders):
             target: Output file(s) that the command produces.
             source: Input file(s) that the command depends on.
             command: The shell command to run. Supports variable substitution:
-                    - $SOURCE / $in: First source file
-                    - $SOURCES: All source files (space-separated)
-                    - $TARGET / $out: First target file
-                    - $TARGETS: All target files (space-separated)
+                    - $SOURCE / $SOURCES: *All* source files, space-separated;
+                      the two spellings mean the same thing. To name only the
+                      first -- an entry script whose siblings are listed as
+                      sources so that edits to them rebuild -- use
+                      ${SOURCES[0]}.
+                    - $TARGET / $TARGETS: All target files (space-separated)
+                    - ${SOURCES[n]} / ${TARGETS[n]}: One of them, by index
             restat: If True, Ninja will re-check the output timestamp after
                    running the command. If the output didn't actually change,
                    downstream targets won't be rebuilt.

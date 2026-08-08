@@ -3585,6 +3585,20 @@ Two things worth knowing:
 
 See `examples/63_command_launcher` for two stacked launchers wrapping every C compile, and a third belonging to one command.
 
+### Sources a command depends on but does not name
+
+`$SOURCE` and `$SOURCES` mean the same thing: *every* source, space-separated. That is what you want when the command consumes them all, and not what you want for a script whose siblings must be watched but not passed to it:
+
+```python
+env.Command(
+    target="organizer.stl",
+    source=["organizer.py", "gridfinity.py"],  # both must trigger a rebuild
+    command=[python, "${SOURCES[0]}", "--out", "."],  # only the first is run
+)
+```
+
+Written with `$SOURCE`, that command becomes `python organizer.py gridfinity.py --out .` — the shared module arrives as an extra argument. A script that ignores unexpected arguments will appear to work, which is what makes this worth spelling out. Use `${SOURCES[0]}` to name the entry point, and every source still becomes a dependency ninja watches.
+
 ### Persistent Workers
 
 Ninja assumes starting a command is free. Often it is. But an action can cost far more to *start* than to run — it may have to open a connection, claim a licence, warm a cache, spin up a runtime, load a large model — and a build pays that again on every edit.
