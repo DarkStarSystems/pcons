@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
@@ -831,6 +831,7 @@ class GenericCommandBuilder(BaseBuilder):
         rule_name: str | None = None,
         restat: bool = False,
         cwd: Path | None = None,
+        launcher: Sequence[str] | None = None,
     ) -> None:
         """Initialize a generic command builder.
 
@@ -850,6 +851,9 @@ class GenericCommandBuilder(BaseBuilder):
             cwd: Absolute directory to run the command in, instead of the
                 build directory. Generators render this edge's paths as seen
                 from there; see the generators' ``_run_in_dir``.
+            launcher: Program to run this command behind, as tokens. Applies
+                to this edge alone, after any launcher on the ``command``
+                tool; see :mod:`pcons.core.launcher`.
         """
         super().__init__(
             name="Command",
@@ -864,6 +868,7 @@ class GenericCommandBuilder(BaseBuilder):
         self._rule_name = rule_name
         self._restat = restat
         self._cwd = cwd
+        self._launcher = list(launcher) if launcher else []
 
     def _tokenize_command(self, command: str | list[str]) -> list:
         """Convert command string to tokenized list with typed markers.
@@ -976,7 +981,7 @@ class GenericCommandBuilder(BaseBuilder):
 
         from pcons.core.launcher import resolve_launcher
 
-        launcher = resolve_launcher(env, "command")
+        launcher = resolve_launcher(env, "command", self._launcher)
 
         # Build info lives on the first (primary) target
         if result:

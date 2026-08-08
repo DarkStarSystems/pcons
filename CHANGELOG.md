@@ -32,8 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `env.cc.launcher = ["ccache"]` -- and they stack, outermost first. Launchers
   are token lists like every other command in pcons, so one whose path contains
   a space stays a single argument, and `compile_commands.json` reports the
-  compiler itself rather than whatever is wrapping it. See
-  `examples/63_command_launcher`.
+  compiler itself rather than whatever is wrapping it. A launcher can belong
+  to a single command instead of to a tool -- `env.Command(...,
+  launcher=[...])` -- for wrapping one expensive step rather than every edge
+  a tool runs. See `examples/63_command_launcher`.
 
 ### Fixed
 

@@ -1107,6 +1107,7 @@ class Environment(_EnvironmentStubs):
         restat: bool = False,
         write_if_different: bool = False,
         cwd: str | Path | None = None,
+        launcher: Sequence[str] | None = None,
     ) -> Target:
         """Run an arbitrary shell command to build targets from sources.
 
@@ -1187,6 +1188,11 @@ class Environment(_EnvironmentStubs):
                    rather than writing ``cd ... &&`` into the command,
                    which would also strand the ``write_if_different``
                    wrapper (see ``pcons.tools.stable_output``).
+            launcher: Program to run this command behind, as tokens --
+                   ``["valgrind", "-q"]``, a persistent-worker client. Unlike
+                   a launcher on a tool namespace (``env.cc.launcher``), which
+                   follows every edge that tool runs, this one applies to this
+                   command alone. See :mod:`pcons.core.launcher`.
 
         Returns:
             Target object representing the command outputs.
@@ -1271,6 +1277,7 @@ class Environment(_EnvironmentStubs):
             command,
             restat=restat or write_if_different,
             cwd=self._resolve_cwd(cwd),
+            launcher=launcher,
         )
 
         # Build the targets with immediate sources

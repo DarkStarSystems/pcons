@@ -3565,12 +3565,25 @@ env.cc.launcher = ["ccache", "time"]  # stacked, outermost first
 
 Like every command in pcons, a launcher is a list of tokens rather than a string, so a program whose path contains a space stays one argument.
 
+A launcher can also belong to a single command rather than to a tool, which is what a wrapper for one expensive step wants:
+
+```python
+env.Command(
+    target="model.stl",
+    source="model.py",
+    command="python $SOURCE --out $TARGET",
+    launcher=["valgrind", "-q"],
+)
+```
+
+Both compose, outermost first: a launcher on the tool runs outside the one on the command.
+
 Two things worth knowing:
 
 - **Launcher tokens are passed through as written.** They are a program and its arguments, not paths in the dependency graph, so pcons does not rewrite them for the directory the build runs in. Use absolute paths (`project.root_dir / "tools" / "wrap.py"`).
 - **`compile_commands.json` reports the compiler itself**, without launchers, so clangd and other tools see the real compile.
 
-See `examples/63_command_launcher` for two stacked launchers wrapping every C compile.
+See `examples/63_command_launcher` for two stacked launchers wrapping every C compile, and a third belonging to one command.
 
 ### Multiple Toolchains
 
