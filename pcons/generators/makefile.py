@@ -312,7 +312,11 @@ class MakefileGenerator(BaseGenerator):
 
                 from pcons.core.subst import to_shell_command
 
-                command = to_shell_command(expanded_tokens, shell="bash")
+                # Launchers (ccache, a profiler) run in front of the command,
+                # passed through as written: they are a program and its
+                # arguments, not paths this edge builds from.
+                launcher = cast("list[str]", build_info.get("launcher") or [])
+                command = to_shell_command([*launcher, *expanded_tokens], shell="bash")
             else:
                 command = str(custom_command)
                 command = self._convert_command_variables(command)

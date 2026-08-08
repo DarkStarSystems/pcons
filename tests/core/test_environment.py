@@ -7,6 +7,7 @@ import pytest
 
 from pcons.core.environment import Environment
 from pcons.core.toolconfig import ToolConfig
+from pcons.tools import compiler_cache
 
 
 class TestEnvironmentBasic:
@@ -295,119 +296,134 @@ class TestEnvironmentOverride:
 
 
 class TestCompilerCache:
-    """Tests for use_compiler_cache()."""
+    """use_compiler_cache() sets a launcher on the compile tools.
 
-    def test_auto_detect_skips_when_not_found(self, test_project) -> None:  # noqa: F811
-        """Auto-detect should be a no-op when no cache tool is found."""
+    A real ccache is never needed: what matters is which program is chosen and
+    where it ends up, so `shutil.which` is faked. The previous tests skipped
+    whenever no cache was installed, which is why a broken implementation
+    (a string-prepended `cmd`, unrunnable once quoted) went unnoticed.
+    """
+
+    @staticmethod
+    def _env_with_compilers() -> Environment:
         env = Environment()
-        cc = env.add_tool("cc")
-        cc.set("cmd", "gcc")
-        cxx = env.add_tool("cxx")
-        cxx.set("cmd", "g++")
+        env.add_tool("cc").set("cmd", "gcc")
+        env.add_tool("cxx").set("cmd", "g++")
+        return env
 
-        # This should not raise; if neither ccache nor sccache is
-        # installed, it logs a warning and returns.
+    @staticmethod
+    def _installed(*names: str):
+        """A `shutil.which` that finds only *names*."""
+        return lambda prog: f"/usr/bin/{prog}" if prog in names else None
+
+    def test_sets_the_launcher_and_leaves_cmd_alone(
+        self, test_project, monkeypatch
+    ) -> None:  # noqa: F811
+        """The compiler stays the compiler; the cache runs in front of it."""
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed("ccache"))
+        env = self._env_with_compilers()
+
+        env.use_compiler_cache("ccache")
+
+        assert env.cc.launcher == ["ccache"]
+        assert env.cxx.launcher == ["ccache"]
+        assert env.cc.cmd == "gcc"
+        assert env.cxx.cmd == "g++"
+
+    def test_auto_detect_prefers_sccache(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(
+            compiler_cache.shutil, "which", self._installed("ccache", "sccache")
+        )
+        env = self._env_with_compilers()
+
         env.use_compiler_cache()
-        # cmd might or might not be wrapped depending on the test machine
 
-    def test_explicit_tool_wraps_commands(self, test_project) -> None:  # noqa: F811
-        """Explicit tool name should wrap cc and cxx commands."""
-        import shutil
+        assert env.cc.launcher == ["sccache"]
 
+    def test_auto_detect_is_a_no_op_when_none_installed(
+        self, test_project, monkeypatch
+    ) -> None:  # noqa: F811
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed())
+        env = self._env_with_compilers()
+
+        env.use_compiler_cache()
+
+        assert env.cc.launcher == []
+
+    def test_no_double_wrapping(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed("ccache"))
+        env = self._env_with_compilers()
+
+        env.use_compiler_cache("ccache")
+        env.use_compiler_cache("ccache")
+
+        assert env.cc.launcher == ["ccache"]
+
+    def test_keeps_a_launcher_that_is_already_there(
+        self, test_project, monkeypatch
+    ) -> None:  # noqa: F811
+        """Launchers compose, so a cache must not displace one."""
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed("ccache"))
+        env = self._env_with_compilers()
+        env.cc.launcher = ["time"]
+
+        env.use_compiler_cache("ccache")
+
+        assert env.cc.launcher == ["time", "ccache"]
+
+    def test_skips_tools_not_present(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed("ccache"))
         env = Environment()
-        cc = env.add_tool("cc")
-        cc.set("cmd", "gcc")
-        cxx = env.add_tool("cxx")
-        cxx.set("cmd", "g++")
+        env.add_tool("cc").set("cmd", "gcc")  # no cxx
 
-        # Only test if a cache tool is available
-        tool = None
-        for candidate in ("ccache", "sccache"):
-            if shutil.which(candidate):
-                tool = candidate
-                break
+        env.use_compiler_cache("ccache")
 
-        if tool is None:
-            pytest.skip("No compiler cache tool available")
+        assert env.cc.launcher == ["ccache"]
+        assert not env.has_tool("cxx")
 
-        env.use_compiler_cache(tool)
+    def test_linker_is_left_alone(self, test_project, monkeypatch) -> None:  # noqa: F811
+        """Nothing to cache about a link, and ccache cannot drive one."""
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed("ccache"))
+        env = self._env_with_compilers()
+        env.add_tool("link").set("cmd", "ld")
 
-        assert env.cc.cmd.startswith(tool)
-        assert env.cxx.cmd.startswith(tool)
-        # Original command should still be there
-        assert "gcc" in env.cc.cmd
-        assert "g++" in env.cxx.cmd
+        env.use_compiler_cache("ccache")
 
-    def test_no_double_wrapping(self, test_project) -> None:  # noqa: F811
-        """Should not double-wrap if already prefixed."""
-        import shutil
+        assert env.link.launcher == []
 
-        tool = None
-        for candidate in ("ccache", "sccache"):
-            if shutil.which(candidate):
-                tool = candidate
-                break
-
-        if tool is None:
-            pytest.skip("No compiler cache tool available")
-
+    def test_ccache_refuses_msvc(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed("ccache"))
         env = Environment()
-        cc = env.add_tool("cc")
-        cc.set("cmd", f"{tool} gcc")
+        env.add_tool("cc").set("cmd", "cl.exe")
 
-        env.use_compiler_cache(tool)
+        env.use_compiler_cache("ccache")
 
-        # Should not be double-wrapped
-        assert env.cc.cmd == f"{tool} gcc"
+        assert env.cc.launcher == []
 
-    def test_skips_tools_not_present(self, test_project) -> None:  # noqa: F811
-        """Should skip tools that don't exist."""
-        import shutil
-
-        tool = None
-        for candidate in ("ccache", "sccache"):
-            if shutil.which(candidate):
-                tool = candidate
-                break
-
-        if tool is None:
-            pytest.skip("No compiler cache tool available")
-
+    def test_sccache_accepts_msvc(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed("sccache"))
         env = Environment()
-        cc = env.add_tool("cc")
-        cc.set("cmd", "gcc")
-        # No cxx tool
+        env.add_tool("cc").set("cmd", "cl.exe")
 
-        env.use_compiler_cache(tool)
-        assert env.cc.cmd.startswith(tool)
+        env.use_compiler_cache("sccache")
 
-    def test_unknown_tool_warns(self, test_project) -> None:  # noqa: F811
-        """Unknown tool name should warn and not modify."""
-        env = Environment()
-        cc = env.add_tool("cc")
-        cc.set("cmd", "gcc")
+        assert env.cc.launcher == ["sccache"]
+
+    def test_unknown_tool_warns(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed("ccache"))
+        env = self._env_with_compilers()
 
         env.use_compiler_cache("nonexistent-cache-tool")
-        assert env.cc.cmd == "gcc"
 
-    def test_missing_explicit_tool_warns(self, test_project) -> None:  # noqa: F811
-        """Explicit tool not in PATH should warn and not modify."""
-        import shutil
+        assert env.cc.launcher == []
 
-        env = Environment()
-        cc = env.add_tool("cc")
-        cc.set("cmd", "gcc")
+    def test_missing_explicit_tool_warns(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(compiler_cache.shutil, "which", self._installed())
+        env = self._env_with_compilers()
 
-        # Use a tool name that's valid but not installed
-        if shutil.which("ccache") is None:
-            env.use_compiler_cache("ccache")
-            assert env.cc.cmd == "gcc"
-        elif shutil.which("sccache") is None:
-            env.use_compiler_cache("sccache")
-            assert env.cc.cmd == "gcc"
-        else:
-            # Both installed, skip this test
-            pytest.skip("Both ccache and sccache installed")
+        env.use_compiler_cache("ccache")
+
+        assert env.cc.launcher == []
 
 
 class TestEnvironmentRepr:

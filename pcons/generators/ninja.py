@@ -189,6 +189,8 @@ class NinjaGenerator(BaseGenerator):
         extra_command_flags = build_info.get("extra_command_flags") or []
         cwd = cast("Path | None", build_info.get("cwd"))
 
+        launcher = cast("list[str]", build_info.get("launcher") or [])
+
         if command_raw is None:
             command = self._expand_command_fallback(node, build_info, env)
         elif isinstance(command_raw, list):
@@ -203,8 +205,11 @@ class NinjaGenerator(BaseGenerator):
                 target_count=len(all_targets) or 1,
                 cwd=cwd,
             )
+            # Launcher tokens are a program and its arguments, not paths in the
+            # graph, so they are passed through as written rather than
+            # rewritten for the execution directory. Quoting still applies.
             command = to_shell_command(
-                relativized_tokens,
+                [*launcher, *relativized_tokens],
                 shell="ninja",
                 extra_ninja_vars=frozenset(cast(dict, build_info.get("vars") or {})),
             )
@@ -213,6 +218,8 @@ class NinjaGenerator(BaseGenerator):
             for flag in extra_command_flags:
                 if f" {flag}" not in command:
                     command = f"{command} {flag}"
+            if launcher:
+                command = f"{to_shell_command(launcher, shell='ninja')} {command}"
 
         if cwd is not None:
             command = self._run_in_dir(command, cwd)

@@ -472,6 +472,14 @@ class Resolver:
         # Tokens stay separate; the generator joins them with shell quoting
         command_tokens = env.subst_list(cmd_template, **extra_vars)
         build_info["command"] = command_tokens
+
+        # Kept beside the command rather than in front of it: generators that
+        # report the real compiler (compile_commands.json) leave it out.
+        from pcons.core.launcher import resolve_launcher
+
+        launcher = resolve_launcher(env, tool_name)
+        if launcher:
+            build_info["launcher"] = launcher
         trace(
             "subst",
             "  Expanded command: %s",
