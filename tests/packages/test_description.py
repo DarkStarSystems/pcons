@@ -200,3 +200,70 @@ class TestPackageDescription:
         assert merged.include_dirs == ["/usr/include/qt5"]
         assert merged.libraries == ["Qt5Core", "Qt5Widgets"]
         assert merged.defines == ["QT_WIDGETS_LIB"]
+
+
+class TestSystemIncludeDirs:
+    """System include dirs: -isystem rather than -I, warnings suppressed."""
+
+    def test_compile_flags_spell_them_isystem(self) -> None:
+        pkg = PackageDescription(
+            name="doctest",
+            include_dirs=["/opt/inc"],
+            system_include_dirs=["/opt/vendor"],
+        )
+
+        assert pkg.get_compile_flags() == ["-I/opt/inc", "-isystem", "/opt/vendor"]
+
+    def test_toml_roundtrip(self, tmp_path: Path) -> None:
+        pkg = PackageDescription(
+            name="roundtrip",
+            include_dirs=["/usr/include"],
+            system_include_dirs=["/opt/vendor/include"],
+        )
+
+        toml_path = tmp_path / "test.pcons-pkg.toml"
+        pkg.to_toml(toml_path)
+
+        loaded = PackageDescription.from_toml(toml_path)
+        assert loaded.include_dirs == ["/usr/include"]
+        assert loaded.system_include_dirs == ["/opt/vendor/include"]
+
+    def test_as_system_moves_the_include_dirs(self) -> None:
+        pkg = PackageDescription(name="p", include_dirs=["/a", "/b"])
+
+        systemized = pkg.as_system()
+
+        assert systemized.include_dirs == []
+        assert systemized.system_include_dirs == ["/a", "/b"]
+
+    def test_as_system_leaves_the_original_alone(self) -> None:
+        pkg = PackageDescription(name="p", include_dirs=["/a"])
+
+        pkg.as_system()
+
+        assert pkg.include_dirs == ["/a"]
+        assert pkg.system_include_dirs == []
+
+    def test_as_system_is_idempotent(self) -> None:
+        pkg = PackageDescription(
+            name="p", include_dirs=["/a"], system_include_dirs=["/b"]
+        )
+
+        systemized = pkg.as_system().as_system()
+
+        assert systemized.system_include_dirs == ["/b", "/a"]
+
+    def test_merge_component_carries_them(self) -> None:
+        pkg = PackageDescription(name="p", system_include_dirs=["/base"])
+        comp = ComponentDescription(name="c", system_include_dirs=["/comp"])
+
+        merged = pkg.merge_component(comp)
+
+        assert merged.system_include_dirs == ["/base", "/comp"]
+
+    def test_component_toml_roundtrip(self) -> None:
+        comp = ComponentDescription(name="c", system_include_dirs=["/vendor"])
+
+        loaded = ComponentDescription.from_dict("c", comp.to_dict())
+
+        assert loaded.system_include_dirs == ["/vendor"]
