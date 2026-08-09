@@ -555,6 +555,43 @@ Cflags: -isystem "${includedir}" -DVENDOR
         assert pkg.compile_flags == []
         assert "VENDOR" in pkg.defines
 
+    def test_parse_single_pc_file_joined_isystem(self, tmp_path: Path) -> None:
+        """GCC and Clang also accept -isystem<dir> as one token."""
+        pc_file = tmp_path / "vendor.pc"
+        pc_file.write_text(
+            """prefix=/opt/vendor
+includedir=${prefix}/include
+
+Name: vendor
+Version: 1.0
+Cflags: -isystem${includedir}
+"""
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        pkg = finder._parse_single_pc_file(pc_file)
+
+        assert pkg is not None
+        assert pkg.system_include_dirs == ["/opt/vendor/include"]
+        assert pkg.compile_flags == []
+
+    def test_parse_single_pc_file_trailing_isystem(self, tmp_path: Path) -> None:
+        """A malformed .pc is the compiler's to report, not ours to swallow."""
+        pc_file = tmp_path / "vendor.pc"
+        pc_file.write_text(
+            """Name: vendor
+Version: 1.0
+Cflags: -DVENDOR -isystem
+"""
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        pkg = finder._parse_single_pc_file(pc_file)
+
+        assert pkg is not None
+        assert pkg.system_include_dirs == []
+        assert pkg.compile_flags == ["-isystem"]
+
     def test_parse_pc_files_manually(self, tmp_path: Path) -> None:
         """Test manual .pc file parsing."""
         # Create multiple .pc files
