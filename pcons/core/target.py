@@ -277,6 +277,28 @@ class UsageRequirements(_UsageRequirementsStubs):
             result._data[k] = type(v)(v)
         return result
 
+    def make_includes_system(self) -> None:
+        """Move every include directory to ``system_include_dirs``, in place.
+
+        Headers that are not ours to fix should not be held to our warning
+        set. Idempotent, and safe to call after the lists are populated, which
+        is what makes it usable on a target someone else created::
+
+            vendored.public.make_includes_system()
+
+        Prefer the ``system=`` argument of ``find_package()`` / ``env.use()``
+        when the requirements come from a package.
+        """
+        include_dirs = self._data.get("include_dirs")
+        if not include_dirs:
+            return
+        moved = list(include_dirs)
+        include_dirs.clear()
+        system = self.system_include_dirs
+        for inc in moved:
+            if inc not in system:
+                system.append(inc)
+
     def items(self) -> list[tuple[str, list[Any] | UserList[Any]]]:
         """Return all (name, list) pairs."""
         return list(self._data.items())

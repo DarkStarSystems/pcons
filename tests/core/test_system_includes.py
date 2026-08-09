@@ -54,6 +54,49 @@ class TestEffectiveRequirements:
         assert eff.system_includes == [Path("vendor")]
 
 
+class TestMakeIncludesSystem:
+    def test_moves_include_dirs_over(self):
+        reqs = UsageRequirements()
+        reqs.include_dirs = [Path("vendor"), Path("vendor/detail")]
+
+        reqs.make_includes_system()
+
+        assert reqs.include_dirs == []
+        assert reqs.system_include_dirs == [Path("vendor"), Path("vendor/detail")]
+
+    def test_keeps_the_dirs_already_marked_system(self):
+        reqs = UsageRequirements()
+        reqs.include_dirs = [Path("a")]
+        reqs.system_include_dirs = [Path("b")]
+
+        reqs.make_includes_system()
+
+        assert reqs.system_include_dirs == [Path("b"), Path("a")]
+
+    def test_is_idempotent(self):
+        reqs = UsageRequirements()
+        reqs.include_dirs = [Path("vendor")]
+
+        reqs.make_includes_system()
+        reqs.make_includes_system()
+
+        assert reqs.system_include_dirs == [Path("vendor")]
+
+    def test_leaves_a_target_someone_else_created_usable(self, tmp_path, gcc_toolchain):
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        vendored = project.HeaderOnlyLibrary("vendored")
+        vendored.public.include_dirs.append("vendor")
+        app = project.Program("app", env, sources=[])
+        app.link(vendored)
+
+        vendored.public.make_includes_system()
+        effective = compute_effective_requirements(app, env)
+
+        assert Path("vendor") in effective.system_includes
+        assert Path("vendor") not in effective.includes
+
+
 class TestPropagation:
     def test_public_system_includes_reach_a_consumer(self, tmp_path, gcc_toolchain):
         project = Project("p", root_dir=tmp_path, build_dir="build")
