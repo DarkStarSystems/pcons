@@ -22,6 +22,7 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -29,6 +30,14 @@ from pathlib import Path
 from pcons.configure.platform import get_platform
 
 logger = logging.getLogger(__name__)
+
+# `msvcup install` fetches its payloads from Microsoft's CDN, which truncates
+# transfers often enough to fail a build on its own ("Content-Length is N but
+# only read M"). Retrying is cheap and safe: msvcup checksums every artifact
+# and skips the ones already installed, so an attempt resumes where the last
+# one stopped rather than starting over.
+_INSTALL_ATTEMPTS = 3
+_INSTALL_RETRY_DELAY = 5.0  # seconds before the first retry, doubled after each
 
 # SHA-256 checksums for the pinned msvcup release archives, keyed by
 # (msvcup_version, host_arch). These are the checksums GitHub computes
@@ -234,7 +243,11 @@ class MsvcUp:
     # -- Install + autoenv ----------------------------------------------------
 
     def _run_install(self, msvcup_exe: Path) -> None:
-        """Run msvcup install with specified versions."""
+        """Run msvcup install with specified versions.
+
+        Retried on failure: the download is the flakiest part of the process
+        and the one pcons can do something about. See ``_INSTALL_ATTEMPTS``.
+        """
         lock_file = self._lock_file or Path(self.MSVCUP_DIR) / "msvcup.lock"
         cmd = [
             str(msvcup_exe),
@@ -252,7 +265,24 @@ class MsvcUp:
         logger.info(
             "Installing MSVC %s + SDK %s...", self._msvc_version, self._sdk_version
         )
-        subprocess.run(cmd, check=True)
+        delay = _INSTALL_RETRY_DELAY
+        for attempt in range(1, _INSTALL_ATTEMPTS + 1):
+            try:
+                subprocess.run(cmd, check=True)
+                return
+            except subprocess.CalledProcessError:
+                if attempt == _INSTALL_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "msvcup install failed (attempt %d of %d); "
+                    "retrying in %.0fs. Already-installed components are "
+                    "skipped, so this resumes rather than restarting.",
+                    attempt,
+                    _INSTALL_ATTEMPTS,
+                    delay,
+                )
+                time.sleep(delay)
+                delay *= 2
 
     def _run_autoenv(self, msvcup_exe: Path) -> Path:
         """Run msvcup autoenv to generate wrapper executables."""

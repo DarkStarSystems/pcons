@@ -5,13 +5,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pcons.contrib.windows.msvcup import MsvcUp, ensure_msvc
+from pcons.contrib.windows.msvcup import _INSTALL_ATTEMPTS, MsvcUp, ensure_msvc
 
 
 class TestMsvcUpInit:
@@ -176,6 +177,48 @@ class TestCommandConstruction:
             ],
             check=True,
         )
+
+    @patch("time.sleep")
+    @patch("subprocess.run")
+    def test_install_retries_a_failed_download(
+        self, mock_run: MagicMock, mock_sleep: MagicMock
+    ):
+        """A truncated CDN fetch is retried; the second attempt wins."""
+        mock_run.side_effect = [
+            subprocess.CalledProcessError(255, "msvcup"),
+            None,
+        ]
+        up = MsvcUp("14.44.17.14", "10.0.22621.7")
+        up._run_install(Path(r"C:\msvcup\bin\msvcup.exe"))
+        assert mock_run.call_count == 2
+        # Same command both times: msvcup skips what it already installed.
+        assert mock_run.call_args_list[0] == mock_run.call_args_list[1]
+        mock_sleep.assert_called_once_with(5.0)
+
+    @patch("time.sleep")
+    @patch("subprocess.run")
+    def test_install_gives_up_after_the_last_attempt(
+        self, mock_run: MagicMock, mock_sleep: MagicMock
+    ):
+        """A genuine failure still surfaces, with the original error."""
+        failure = subprocess.CalledProcessError(255, "msvcup")
+        mock_run.side_effect = failure
+        up = MsvcUp("14.44.17.14", "10.0.22621.7")
+        with pytest.raises(subprocess.CalledProcessError) as exc_info:
+            up._run_install(Path(r"C:\msvcup\bin\msvcup.exe"))
+        assert exc_info.value is failure
+        assert mock_run.call_count == _INSTALL_ATTEMPTS
+        # Backoff doubles, and there is no sleep after the final attempt.
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [5.0, 10.0]
+
+    @patch("subprocess.run")
+    def test_autoenv_is_not_retried(self, mock_run: MagicMock):
+        """autoenv runs off already-installed files, so it makes no network call."""
+        mock_run.side_effect = subprocess.CalledProcessError(1, "msvcup")
+        up = MsvcUp("14.44.17.14", "10.0.22621.7", target_cpu="x64")
+        with pytest.raises(subprocess.CalledProcessError):
+            up._run_autoenv(Path(r"C:\msvcup\bin\msvcup.exe"))
+        assert mock_run.call_count == 1
 
     @patch("subprocess.run")
     def test_autoenv_command_x64(self, mock_run: MagicMock):
