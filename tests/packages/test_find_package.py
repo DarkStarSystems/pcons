@@ -7,6 +7,8 @@ and returns ImportedTarget objects.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pcons.core.errors import PackageNotFoundError
@@ -209,6 +211,51 @@ class TestFindPackage:
         project.find_package("pkg", version="2.0")
 
         assert call_count == 2
+
+
+class TestFindPackageSystem:
+    """find_package(system=True): the package's headers arrive as -isystem."""
+
+    def test_it_moves_the_include_dirs(self) -> None:
+        project = Project("test")
+        doctest = _make_pkg("doctest", include_dirs=["/opt/doctest/include"])
+        project.add_package_finder(MockFinder({"doctest": doctest}))
+
+        target = project.find_package("doctest", system=True)
+
+        assert target is not None
+        assert list(target.public.include_dirs) == []
+        assert list(target.public.system_include_dirs) == [Path("/opt/doctest/include")]
+
+    def test_it_is_off_by_default(self) -> None:
+        project = Project("test")
+        zlib = _make_pkg("zlib", include_dirs=["/usr/include"])
+        project.add_package_finder(MockFinder({"zlib": zlib}))
+
+        target = project.find_package("zlib")
+
+        assert target is not None
+        assert list(target.public.include_dirs) == [Path("/usr/include")]
+
+    def test_the_same_package_cannot_be_had_both_ways(self) -> None:
+        project = Project("test")
+        doctest = _make_pkg("doctest", include_dirs=["/opt/doctest/include"])
+        project.add_package_finder(MockFinder({"doctest": doctest}))
+
+        project.find_package("doctest")
+
+        with pytest.raises(ValueError, match="already found with system=False"):
+            project.find_package("doctest", system=True)
+
+    def test_it_still_caches(self) -> None:
+        project = Project("test")
+        doctest = _make_pkg("doctest", include_dirs=["/opt/doctest/include"])
+        project.add_package_finder(MockFinder({"doctest": doctest}))
+
+        first = project.find_package("doctest", system=True)
+        second = project.find_package("doctest", system=True)
+
+        assert first is second
 
 
 class TestAddPackageFinder:

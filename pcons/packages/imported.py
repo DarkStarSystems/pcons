@@ -28,6 +28,8 @@ def requirements_from_package(package: Any) -> UsageRequirements:
     reqs = UsageRequirements()
     for inc_dir in getattr(package, "include_dirs", ()) or ():
         reqs.include_dirs.append(Path(inc_dir))
+    for inc_dir in getattr(package, "system_include_dirs", ()) or ():
+        reqs.system_include_dirs.append(Path(inc_dir))
     for define in getattr(package, "defines", ()) or ():
         reqs.defines.append(define)
     for flag in getattr(package, "compile_flags", ()) or ():
@@ -83,6 +85,7 @@ class ImportedTarget(Target):
         *,
         package: PackageDescription | None = None,
         requested_components: Sequence[str] | None = None,
+        system: bool = False,
     ) -> None:
         """Create an imported target.
 
@@ -90,8 +93,12 @@ class ImportedTarget(Target):
             name: Target name (usually the package name).
             package: Package description with all the details.
             requested_components: Which components were requested.
+            system: Treat the package's headers as system headers, so
+                warnings from them are suppressed in every dependent.
         """
         super().__init__(name)
+        if system and package is not None:
+            package = package.as_system()
         self.package = package
         self.is_imported = True
         self.requested_components = requested_components or []
@@ -109,6 +116,7 @@ class ImportedTarget(Target):
         reqs = requirements_from_package(package)
         for name in (
             "include_dirs",
+            "system_include_dirs",
             "defines",
             "compile_flags",
             "link_libs",
@@ -128,12 +136,17 @@ class ImportedTarget(Target):
         cls,
         package: PackageDescription,
         components: Sequence[str] | None = None,
+        *,
+        system: bool = False,
     ) -> ImportedTarget:
         """Create an imported target from a package description.
 
         Args:
             package: The package description.
             components: Optional list of components to include.
+            system: Treat the package's headers as system headers
+                (``-isystem``, ``/external:I``), so their warnings are
+                suppressed in every dependent.
 
         Returns:
             ImportedTarget instance.
@@ -150,6 +163,7 @@ class ImportedTarget(Target):
             name=package.name,
             package=merged_pkg,
             requested_components=components,
+            system=system,
         )
 
     @property
@@ -172,6 +186,13 @@ class ImportedTarget(Target):
         if self.package is None:
             return []
         return [Path(d) for d in self.package.include_dirs]
+
+    @property
+    def system_include_dirs(self) -> list[Path]:
+        """Get include directories treated as system headers."""
+        if self.package is None:
+            return []
+        return [Path(d) for d in self.package.system_include_dirs]
 
     @property
     def library_dirs(self) -> list[Path]:

@@ -235,3 +235,54 @@ class TestImportedTarget:
         # Library dirs propagate as link_dirs
         # (the toolchain applies -L or /LIBPATH:), not as pre-prefixed link_flags.
         assert Path("/usr/lib") in reqs.link_dirs
+
+
+class TestSystemIncludes:
+    """system=True: the package's headers reach consumers as -isystem."""
+
+    def test_from_package_moves_the_include_dirs(self, test_project):  # noqa: F811
+        pkg = PackageDescription(name="doctest", include_dirs=["/opt/doctest/include"])
+
+        target = ImportedTarget.from_package(pkg, system=True)
+
+        assert list(target.public.include_dirs) == []
+        assert list(target.public.system_include_dirs) == [Path("/opt/doctest/include")]
+
+    def test_the_package_description_is_left_alone(self, test_project):  # noqa: F811
+        pkg = PackageDescription(name="doctest", include_dirs=["/opt/doctest/include"])
+
+        ImportedTarget.from_package(pkg, system=True)
+
+        assert pkg.include_dirs == ["/opt/doctest/include"]
+
+    def test_the_target_reports_the_moved_dirs(self, test_project):  # noqa: F811
+        pkg = PackageDescription(name="nanobind", include_dirs=["/opt/nb/include"])
+
+        target = ImportedTarget.from_package(pkg, system=True)
+
+        assert target.include_dirs == []
+        assert target.system_include_dirs == [Path("/opt/nb/include")]
+
+    def test_a_declared_system_dir_needs_no_flag(self, test_project):  # noqa: F811
+        pkg = PackageDescription(
+            name="robin-map", system_include_dirs=["/opt/robin/include"]
+        )
+
+        target = ImportedTarget.from_package(pkg)
+
+        assert list(target.public.system_include_dirs) == [Path("/opt/robin/include")]
+
+    def test_it_propagates_to_a_consumer(self, test_project):  # noqa: F811
+        from pcons.core.target import Target
+
+        doctest = ImportedTarget.from_package(
+            PackageDescription(name="doctest", include_dirs=["/opt/doctest/include"]),
+            system=True,
+        )
+        app = Target("app")
+        app.link_private(doctest)
+
+        reqs = app.collect_usage_requirements()
+
+        assert Path("/opt/doctest/include") in reqs.system_include_dirs
+        assert Path("/opt/doctest/include") not in reqs.include_dirs

@@ -1071,7 +1071,7 @@ class Environment(_EnvironmentStubs):
                 if d not in link.frameworkdirs:
                     link.frameworkdirs.append(d)
 
-    def use(self, package: Any) -> None:
+    def use(self, package: Any, *, system: bool = False) -> None:
         """Apply a package's settings to this environment.
 
         This is the preferred way to use external packages. It applies all
@@ -1090,11 +1090,17 @@ class Environment(_EnvironmentStubs):
         Args:
             package: A PackageDescription, ImportedTarget, or any object with
                     include_dirs, defines, libraries, etc. attributes.
+            system: If True, the package's include directories are applied as
+                   system includes (-isystem, /external:I), so warnings from
+                   its headers are suppressed. The package is left unchanged.
 
         Example:
             # Find and use a package
             pkg = finder.find("fmt")
             env.use(pkg)
+
+            # Third-party headers, held to no warning set of ours
+            env.use(finder.find("doctest"), system=True)
 
             # Or with ImportedTarget
             target = ImportedTarget.from_package(pkg)
@@ -1113,6 +1119,12 @@ class Environment(_EnvironmentStubs):
             from pcons.packages.imported import requirements_from_package
 
             reqs = requirements_from_package(package)
+
+        if system:
+            # Clone first: system= describes this use, not the package, which
+            # may be used unsystem'd elsewhere.
+            reqs = reqs.clone()
+            reqs.make_includes_system()
 
         apply_requirements_to_env(self, reqs)
 
