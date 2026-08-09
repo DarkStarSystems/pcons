@@ -22,6 +22,7 @@ from pcons import (
 from pcons.cli import (
     _find_command_index,
     cmd_cache,
+    create_full_parser,
     find_command_in_argv,
     find_script,
     parse_variables,
@@ -1728,3 +1729,40 @@ class TestCacheCLI:
         r = self._run(tmp_path, "cache", "list")
         assert "HELLO" not in r.stdout
         assert "WORLD=2" in r.stdout
+
+
+class TestGlobalOptionsBeforeTheCommand:
+    """Options accepted by both parsers must survive the subcommand.
+
+    argparse applies a subparser's defaults on top of what the top-level
+    parser already parsed, so `pcons -B out generate` used to fall back to
+    `build/` without a word.
+    """
+
+    def test_build_dir_before_the_command(self) -> None:
+        args = create_full_parser().parse_args(["-B", "out", "generate"])
+        assert args.build_dir == "out"
+
+    def test_build_dir_after_the_command_still_wins(self) -> None:
+        args = create_full_parser().parse_args(["-B", "out", "generate", "-B", "late"])
+        assert args.build_dir == "late"
+
+    def test_build_dir_defaults_when_given_nowhere(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        args = create_full_parser().parse_args(["generate"])
+        assert args.build_dir == "build"
+
+    def test_verbose_before_the_command(self) -> None:
+        args = create_full_parser().parse_args(["-v", "generate"])
+        assert args.verbose is True
+
+    def test_variant_before_the_command(self) -> None:
+        args = create_full_parser().parse_args(["--variant", "release", "build"])
+        assert args.variant == "release"
+
+    def test_command_only_options_are_unaffected(self) -> None:
+        args = create_full_parser().parse_args(["clean", "--all"])
+        assert args.all is True
+        assert create_full_parser().parse_args(["clean"]).all is False

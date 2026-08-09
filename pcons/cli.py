@@ -1525,6 +1525,26 @@ def _add_command(
     return sub
 
 
+def _keep_options_given_before_the_command(
+    parser: argparse.ArgumentParser,
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    """Stop subparser defaults from overwriting the top-level parser's values.
+
+    argparse applies a subparser's own defaults unconditionally, on top of
+    what the top-level parser already stored for the same dest, so
+    `pcons -B out generate` silently fell back to `build/` and `pcons -v
+    generate` printed nothing. Suppressing the default on every dest the two
+    parsers share leaves the subparser writing only what the user actually
+    spelled after the subcommand; otherwise the earlier value stands.
+    """
+    shared = {a.dest for a in parser._actions if a.option_strings}
+    for sub in subparsers.choices.values():
+        for action in sub._actions:
+            if action.option_strings and action.dest in shared:
+                action.default = argparse.SUPPRESS
+
+
 def create_default_parser() -> argparse.ArgumentParser:
     """Create the no-subcommand parser: accepts KEY=value args and targets
     as positionals."""
@@ -1718,6 +1738,8 @@ def create_full_parser() -> argparse.ArgumentParser:
         help="Run tests declared by project.Test() in pcons-build.py",
         add_help=False,
     )
+
+    _keep_options_given_before_the_command(parser, subparsers)
 
     return parser
 
