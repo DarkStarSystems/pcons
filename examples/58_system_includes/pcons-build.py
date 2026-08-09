@@ -18,11 +18,20 @@ SDK's headers without handing them its warnings:
 
     sdk.public.system_include_dirs.append(sdk_dir)
 
+External packages take the same treatment through a ``system=`` argument,
+which moves the package's include dirs to the system list without any list
+surgery on the target::
+
+    doctest = project.find_package("doctest", system=True)
+    imported = ImportedTarget.from_package(description, system=True)
+    env.use(description, system=True)
+
 Both spellings are relativized in the generated build files, so build.ninja
 stays relocatable.
 """
 
-from pcons import Project
+from pcons import ImportedTarget, Project
+from pcons.packages.description import PackageDescription
 
 project = Project("system_includes")
 env = project.Environment(toolchain="c")
@@ -38,4 +47,16 @@ sdk.public.system_include_dirs.append(project.root_dir / "vendor")
 app = project.Program("sdk_demo", env, sources=["src/main.c"])
 app.link(sdk)
 
-project.Default(app)
+# Same headers, arriving as an external package instead of a target. This is
+# what a package finder or pcons-fetch hands you; system=True says its include
+# dirs are -isystem, and leaves the description itself untouched.
+sdk_package = PackageDescription(
+    name="noisy_sdk_pkg",
+    include_dirs=[str(project.root_dir / "vendor")],
+)
+imported = ImportedTarget.from_package(sdk_package, system=True)
+
+pkg_app = project.Program("pkg_demo", env, sources=["src/main.c"])
+pkg_app.link(imported)
+
+project.Default(app, pkg_app)

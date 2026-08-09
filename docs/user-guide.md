@@ -799,8 +799,23 @@ app.link(sdk)
 
 Everything that works for `includes` works here: transitive propagation, deduplication, and path relativization in the generated build files. See `examples/58_system_includes`.
 
-!!! note "Packages"
-    Imported packages (`find_package()`, pkg-config, Conan) still contribute ordinary `-I` include dirs. Marking them system by default is a deliberate behavior change and is not in place yet.
+An external package takes the same treatment through a `system=` argument, which moves its include dirs across without any list surgery:
+
+```python
+doctest = project.find_package("doctest", system=True)
+nanobind = ImportedTarget.from_package(description, system=True)
+env.use(description, system=True)
+```
+
+`system=` is off by default, and deliberately so: `-isystem` on a directory the compiler already searches — which is what a system or pkg-config prefix usually is — reorders the include search and can break the standard library. Reach for it on prefixes owned by a package manager or a fetched source tree. Packages fetched by `pcons-fetch` are already recorded that way, and opt out per package with `system = false` in `deps.toml`.
+
+A package that spells `-isystem` in its pkg-config `Cflags` needs no argument: both the pkg-config and Conan finders read it into `system_include_dirs`, so MSVC gets `/external:I` rather than a flag it doesn't understand.
+
+To systemize a target someone else created, `make_includes_system()` moves its include dirs in place:
+
+```python
+vendored.public.make_includes_system()
+```
 
 ### Shared/Dynamic Library
 
@@ -1050,6 +1065,10 @@ boost = project.find_package("boost", components=["filesystem", "system"])
 # Optional dependency — returns None if not found
 optional = project.find_package("optional-dep", required=False)
 
+# Third-party headers as system headers (-isystem): found the same way,
+# but their warnings never reach your -Werror. See "System Include Directories".
+doctest = project.find_package("doctest", system=True)
+
 # Use as a dependency (public requirements auto-propagate)
 app = project.Program("myapp", env, sources=["main.cpp"])
 app.link_private(zlib)
@@ -1231,6 +1250,10 @@ env.use(pkg)
 # - Adds library_dirs to link.libdirs
 # - Adds libraries to link.libs
 # - Adds link_flags to link.flags
+
+# Same, but the include dirs land on cxx.system_includes (-isystem), so the
+# package's headers produce no warnings. The package itself is unchanged.
+env.use(pkg, system=True)
 ```
 
 > If your project uses [rez](https://rez.readthedocs.io), see
@@ -3656,6 +3679,7 @@ Ninja handles this natively; GNU make 4.x does too. GNU make 3.81 — still `/us
 | `project.resolve()` | Resolve all dependencies |
 | `project.node(path)` | Get/create a file node |
 | `project.find_package(name, ...)` | Find external package (returns ImportedTarget) |
+| `project.find_package(name, system=True)` | Same, with the package's headers as system headers (`-isystem`) |
 | `project.add_package_finder(finder)` | Prepend a custom package finder |
 
 ### Target Methods
@@ -3671,6 +3695,7 @@ Ninja handles this natively; GNU make 4.x does too. GNU make 3.81 — still `/us
 | `target.add_dependency(t)` | Add a non-link build dependency |
 | `target.public.include_dirs` | Include dirs for consumers |
 | `target.public.system_include_dirs` | Like `include_dirs`, but as system headers (warnings suppressed) |
+| `target.public.make_includes_system()` | Move every include dir to `system_include_dirs`, in place |
 | `target.public.link_libs.append(t)` | Low-level form of `link()` (append a `Target` or `-l` name) |
 | `target.private.link_libs.append(t)` | Low-level form of `link_private()` |
 | `target.public.link_libs` | Libraries to link (`-l`; placed after objects) |

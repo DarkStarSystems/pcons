@@ -77,7 +77,7 @@ uvx pcons
 | [`55_qt_translations`](https://github.com/DarkStarSystems/pcons/tree/main/examples/55_qt_translations) | Qt translations: lrelease-compiled .qm catalogs embedded as resources |
 | [`56_qt_deploy`](https://github.com/DarkStarSystems/pcons/tree/main/examples/56_qt_deploy) | Qt deployment: macdeployqt makes a relocatable .app (ninja deploy) |
 | [`57_staged_generation`](https://github.com/DarkStarSystems/pcons/tree/main/examples/57_staged_generation) | Targets discovered from a manifest the build itself produces, via the build.ninja regen edge |
-| [`58_system_includes`](https://github.com/DarkStarSystems/pcons/tree/main/examples/58_system_includes) | Third-party headers via system_includes: found like -I, exempt from -Werror |
+| [`58_system_includes`](https://github.com/DarkStarSystems/pcons/tree/main/examples/58_system_includes) | Third-party headers via system_includes and system=True packages: found like -I, exempt from -Werror |
 | [`59_codegen_sources`](https://github.com/DarkStarSystems/pcons/tree/main/examples/59_codegen_sources) | A built generator plus a variable-length input list: declared source order, ${SOURCES[n:]} slices, and a globbed directory as a configure dependency |
 | [`60_command_cwd`](https://github.com/DarkStarSystems/pcons/tree/main/examples/60_command_cwd) | A generator that must run from the source root: env.Command(cwd=...) moves the command and its paths, and write_if_different keeps identical output from rebuilding the world |
 | [`61_command_substitution`](https://github.com/DarkStarSystems/pcons/tree/main/examples/61_command_substitution) | Markers embedded in an argument: ./${SOURCES[0]}, --out=$TARGET, a prefix repeated over a slice, and $$ for a literal dollar |

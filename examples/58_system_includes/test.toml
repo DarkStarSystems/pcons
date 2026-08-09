@@ -1,16 +1,20 @@
 # Test configuration for the system-includes example
 
 [test]
-description = "Third-party headers via system_includes: found like -I, exempt from -Werror"
+description = "Third-party headers via system_includes and system=True packages: found like -I, exempt from -Werror"
 
 expected_outputs = [
     "build/obj.sdk_demo/src/main.c.o",
     "build/sdk_demo",
+    "build/obj.pkg_demo/src/main.c.o",
+    "build/pkg_demo",
 ]
 
 [verify]
 commands = [
     { run = "build/sdk_demo", expect_stdout = "sdk says 42" },
+    # Same headers, reached through an imported package with system=True.
+    { run = "build/pkg_demo", expect_stdout = "sdk says 42" },
     # The path must be relativized, not baked in absolute: build.ninja has to
     # stay relocatable and shareable between checkouts.
     { run = "grep -c -- \"-isystem[$]topdir/vendor\" build/build.ninja", expect_stdout = "1" },
