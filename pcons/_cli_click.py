@@ -15,6 +15,7 @@ into, instead of two parsers repeating the same lists and drifting apart.
 
 from __future__ import annotations
 
+import argparse
 import os
 from collections.abc import Callable
 from typing import Any, TypeVar
@@ -27,6 +28,10 @@ from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
 F = TypeVar("F", bound=Callable[..., Any])
 
 GENERATORS = ["ninja", "make", "makefile", "metadata", "xcode"]
+
+# Set on the group's context when an unresolvable command name was routed to the
+# catch-all command, so the group callback knows not to run it a second time.
+ROUTED_TO_DEFAULT = "pcons.routed_to_default"
 
 
 class MergingCommand(click.Command):
@@ -65,6 +70,10 @@ class PconsGroup(click.Group):
 
     DEFAULT_COMMAND = "_default"
 
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """Declaration order, which groups the commands by what they do."""
+        return [name for name in self.commands if name != self.DEFAULT_COMMAND]
+
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
@@ -82,18 +91,54 @@ class PconsGroup(click.Group):
             if default is None:
                 raise
             # A None name leaves the sub-context's command path as the group's
-            # own, so usage and errors read "pcons", not "pcons _default".
+            # own, so usage and errors read "pcons", not "pcons _default". It
+            # also leaves ctx.invoked_subcommand None, which is what the group
+            # callback sees when there is no command at all, hence the marker.
+            ctx.meta[ROUTED_TO_DEFAULT] = True
             return None, default, args
 
 
 def _chdir(ctx: click.Context, param: click.Parameter, value: str | None) -> str | None:
-    """Change directory before any other option is processed."""
+    """Change directory before any other option is processed.
+
+    Prints and exits 1 rather than raising a UsageError, which would exit 2:
+    the directory being missing is not a usage mistake, and the code the CLI
+    has always returned here is 1.
+    """
     if value:
         try:
             os.chdir(value)
         except OSError as e:
-            raise click.UsageError(f"-C {value}: {e}") from e
+            click.echo(f"error: -C {value}: {e}", err=True)
+            ctx.exit(1)
     return value
+
+
+def _namespace(
+    ctx: click.Context, command: str | None, **kw: Any
+) -> argparse.Namespace:
+    """Hand the existing cmd_* functions the Namespace they already take.
+
+    This is a boundary, not a pattern. The command implementations keep their
+    argparse signature, so the conversion touches the parser layer only.
+
+    Values spelled before the command name live on the parent context and are
+    picked up here, so a command sees the union of both sides. `MergingCommand`
+    has already decided which of the two wins for the options both carry.
+    """
+    params = dict(ctx.parent.params) if ctx.parent is not None else {}
+    params.update(kw)
+    params["command"] = command
+    params.setdefault("extra", [])
+    params.setdefault("targets", [])
+    ns = argparse.Namespace(**params)
+    # click hands back tuples where argparse handed back lists, and downstream
+    # code tests `generator` for falsiness rather than for emptiness.
+    ns.extra = list(ns.extra)
+    generator = getattr(ns, "generator", None)
+    if generator is not None:
+        ns.generator = list(generator) or None
+    return ns
 
 
 def _debug_help() -> str:
