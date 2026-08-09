@@ -107,6 +107,10 @@ class TestImportedTarget:
         assert target.compile_flags == []
         assert target.link_flags == []
         assert target.libraries == []
+        assert target.include_dirs == []
+        assert target.system_include_dirs == []
+        assert target.library_dirs == []
+        assert target.defines == []
         assert target.version == ""
 
     def test_repr(self, test_project):  # noqa: F811
