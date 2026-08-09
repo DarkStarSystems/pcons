@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner, Result
 
 from pcons import (
     Generator,
@@ -20,13 +21,8 @@ from pcons import (
     NinjaGenerator,
 )
 from pcons.cli import (
-    OPTIONS_WITH_VALUE,
-    VALID_COMMANDS,
-    _build_dir_args,
-    _find_command_index,
+    cli,
     cmd_cache,
-    create_full_parser,
-    find_command_in_argv,
     find_script,
     parse_variables,
     run_script,
@@ -238,80 +234,6 @@ class TestParseVariables:
         variables, remaining = parse_variables(["=value"])
         assert variables == {}
         assert remaining == ["=value"]
-
-
-class TestFindCommandInArgv:
-    """Tests for find_command_in_argv function."""
-
-    def test_find_command_first_positional(self) -> None:
-        """Test finding command as first positional argument."""
-        assert find_command_in_argv(["build"]) == "build"
-        assert find_command_in_argv(["generate"]) == "generate"
-        assert find_command_in_argv(["clean"]) == "clean"
-        assert find_command_in_argv(["info"]) == "info"
-        assert find_command_in_argv(["init"]) == "init"
-
-    def test_find_command_after_options(self) -> None:
-        """Test finding command after flag options."""
-        assert find_command_in_argv(["-v", "build"]) == "build"
-        assert find_command_in_argv(["--verbose", "generate"]) == "generate"
-        # --debug now takes a value, so use = syntax
-        assert find_command_in_argv(["--debug=resolve", "generate"]) == "generate"
-
-    def test_find_command_after_option_with_value(self) -> None:
-        """Test finding command after options that take values."""
-        assert find_command_in_argv(["-B", "mybuild", "build"]) == "build"
-        assert find_command_in_argv(["--build-dir", "out", "generate"]) == "generate"
-        assert find_command_in_argv(["-j", "4", "build"]) == "build"
-
-    def test_no_command_with_variable(self) -> None:
-        """Test that KEY=value is not mistaken for a command."""
-        assert find_command_in_argv(["VAR=value"]) is None
-        assert find_command_in_argv(["BUILD_PLUGINS=1"]) is None
-
-    def test_no_command_with_options_and_variable(self) -> None:
-        """Test no command found when only options and variables present."""
-        assert find_command_in_argv(["-B", "build/release", "VAR=1"]) is None
-        assert find_command_in_argv(["--verbose", "-B", "out", "FOO=bar"]) is None
-
-    def test_no_command_empty_argv(self) -> None:
-        """Test no command when argv is empty."""
-        assert find_command_in_argv([]) is None
-
-    def test_no_command_only_options(self) -> None:
-        """Test no command when only options are present."""
-        assert find_command_in_argv(["-v", "--debug"]) is None
-        assert find_command_in_argv(["-B", "build"]) is None  # build is value of -B
-
-    def test_invalid_command_returns_none(self) -> None:
-        """Test that invalid commands return None."""
-        assert find_command_in_argv(["notacommand"]) is None
-        assert find_command_in_argv(["BUILD"]) is None  # case sensitive
-
-
-class TestFindCommandIndex:
-    """Tests for _find_command_index (returns the position, not the name)."""
-
-    def test_index_of_first_positional_command(self) -> None:
-        assert _find_command_index(["build"]) == 0
-        assert _find_command_index(["-v", "generate"]) == 1
-
-    def test_option_value_equal_to_command_is_not_the_command(self) -> None:
-        # The motivating bug: an option value that equals a command name
-        # must not be reported as the subcommand.
-        assert _find_command_index(["--build-dir", "test", "test"]) == 2
-        assert _find_command_index(["-B", "build", "build"]) == 2
-
-    def test_equals_option_then_command(self) -> None:
-        assert _find_command_index(["--build-dir=out", "test"]) == 1
-
-    def test_boolean_flag_then_command(self) -> None:
-        assert _find_command_index(["--unknown-flag", "clean"]) == 1
-
-    def test_no_command_returns_none(self) -> None:
-        assert _find_command_index([]) is None
-        assert _find_command_index(["notacommand"]) is None
-        assert _find_command_index(["--build-dir", "out"]) is None
 
 
 class TestRunScriptEnvironment:
@@ -1191,8 +1113,8 @@ class TestCLIArgumentParsing:
         the dispatch point by scanning raw argv for the literal string
         "test" (sys.argv.index("test")) finds the option value first and
         hands the runner a bogus leading "test" positional, which its
-        argparse rejects. Dispatch must instead reuse the same
-        skip-options-and-their-values logic as find_command_in_argv.
+        argparse rejects. The option's value must be consumed as a value
+        before the first remaining token is read as the command.
         """
         import json as _json
 
@@ -1737,86 +1659,149 @@ class TestCacheCLI:
         assert "WORLD=2" in r.stdout
 
 
-class TestGlobalOptionsBeforeTheCommand:
-    """Options accepted by both parsers must survive the subcommand.
+def _capture_command(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> list[argparse.Namespace]:
+    """Stand in for a cmd_* entry point so a test can read what it was handed."""
+    seen: list[argparse.Namespace] = []
 
-    argparse applies a subparser's defaults on top of what the top-level
-    parser already parsed, so `pcons -B out generate` used to fall back to
-    `build/` without a word.
+    def fake(args: argparse.Namespace) -> int:
+        seen.append(args)
+        return 0
+
+    monkeypatch.setattr(f"pcons.cli.{name}", fake)
+    return seen
+
+
+def _capture_test_runner(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Stand in for the test runner and record the argv the CLI forwards."""
+    seen: list[list[str]] = []
+
+    def fake(argv: list[str]) -> int:
+        seen.append(argv)
+        return 0
+
+    monkeypatch.setattr("pcons.test_runner.main", fake)
+    return seen
+
+
+def _invoke(*argv: str) -> Result:
+    return CliRunner().invoke(cli, list(argv))
+
+
+class TestGlobalOptionsBeforeTheCommand:
+    """An option spelled before the subcommand must survive it.
+
+    argparse applied a subparser's defaults on top of what the top-level
+    parser had already stored, so `pcons -B out generate` used to fall back
+    to `build/` without a word.
     """
 
-    def test_build_dir_before_the_command(self) -> None:
-        args = create_full_parser().parse_args(["-B", "out", "generate"])
-        assert args.build_dir == "out"
+    def test_build_dir_before_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-B", "out", "generate").exit_code == 0
+        assert seen[0].build_dir == "out"
 
-    def test_build_dir_after_the_command_still_wins(self) -> None:
-        args = create_full_parser().parse_args(["-B", "out", "generate", "-B", "late"])
-        assert args.build_dir == "late"
+    def test_build_dir_after_the_command_still_wins(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-B", "out", "generate", "-B", "late").exit_code == 0
+        assert seen[0].build_dir == "late"
 
     def test_build_dir_defaults_when_given_nowhere(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
-        args = create_full_parser().parse_args(["generate"])
-        assert args.build_dir == "build"
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("generate").exit_code == 0
+        assert seen[0].build_dir == "build"
 
-    def test_verbose_before_the_command(self) -> None:
-        args = create_full_parser().parse_args(["-v", "generate"])
-        assert args.verbose is True
+    def test_build_dir_from_the_environment_loses_to_the_command_line(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The subcommand's own value comes from the environment, not the
+        command line, so it must not beat a -B spelled before the command."""
+        monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-B", "out", "generate").exit_code == 0
+        assert seen[0].build_dir == "out"
 
-    def test_variant_before_the_command(self) -> None:
-        args = create_full_parser().parse_args(["--variant", "release", "build"])
-        assert args.variant == "release"
+    def test_verbose_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-v", "generate").exit_code == 0
+        assert seen[0].verbose is True
 
-    def test_command_only_options_are_unaffected(self) -> None:
-        args = create_full_parser().parse_args(["clean", "--all"])
-        assert args.all is True
-        assert create_full_parser().parse_args(["clean"]).all is False
+    def test_variant_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen = _capture_command(monkeypatch, "cmd_build")
+        assert _invoke("--variant", "release", "build").exit_code == 0
+        assert seen[0].variant == "release"
+
+    def test_command_only_options_are_unaffected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "cmd_clean")
+        assert _invoke("clean", "--all").exit_code == 0
+        assert seen[0].all is True
+        assert _invoke("clean").exit_code == 0
+        assert seen[1].all is False
 
 
 class TestCommandDetection:
-    """Finding the subcommand means stepping over every option value."""
+    """The subcommand must be found whatever precedes it.
 
-    def test_generator_before_the_command(self) -> None:
-        # -G was missing from the scanner's table, so `make` read as the first
-        # positional, `generate` became a build target, and pcons generated and
-        # then asked the build tool for a target named "generate".
-        assert find_command_in_argv(["-G", "make", "generate"]) == "generate"
-        assert find_command_in_argv(["--generator", "make", "generate"]) == "generate"
+    Locating it used to mean scanning argv against a hand-written table of
+    every value-taking option in this CLI and in the test runner, so an
+    option missing from the table turned the next token into the command.
+    click parses against each command's own declarations, so there is no
+    table left to keep complete.
+    """
 
-    def test_option_value_that_names_a_command(self) -> None:
-        assert find_command_in_argv(["-G", "make", "-B", "test", "build"]) == "build"
+    def test_generator_before_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # -G was missing from that table, so `make` read as the first
+        # positional, `generate` became a build target, and pcons generated
+        # and then asked the build tool for a target named "generate".
+        ran_default = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-G", "make", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0].command == "generate"
+        assert seen[0].generator == ["make"]
 
-    def test_every_value_taking_option_is_known_to_the_scanner(self) -> None:
-        """OPTIONS_WITH_VALUE must cover both parsers, or detection misreads argv.
+    def test_long_generator_before_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("--generator", "make", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0].command == "generate"
 
-        The scanner runs before argparse, so it cannot ask a parser what an
-        option does. Adding a value-taking option anywhere and forgetting this
-        table silently turns the next token into the subcommand.
-        """
-        from pcons.test_runner import build_parser as build_test_runner_parser
+    def test_option_value_that_names_a_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "cmd_build")
+        assert _invoke("-G", "make", "-B", "test", "build").exit_code == 0
+        assert seen[0].command == "build"
+        assert seen[0].build_dir == "test"
 
-        parser = create_full_parser()
-        parsers = [parser, build_test_runner_parser()]
-        for action in parser._actions:
-            if isinstance(action, argparse._SubParsersAction):
-                parsers.extend(action.choices.values())
 
-        taking_a_value = {
-            option
-            for p in parsers
-            for action in p._actions
-            if action.option_strings and action.nargs != 0
-            for option in action.option_strings
-        }
-        assert taking_a_value <= OPTIONS_WITH_VALUE
+class TestDirectoryOption:
+    """-C DIR chdirs before anything else, on either side of the command."""
 
-    def test_every_subcommand_is_detectable(self) -> None:
-        parser = create_full_parser()
-        subparsers = next(
-            a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
-        )
-        assert set(subparsers.choices) == VALID_COMMANDS
+    def test_missing_directory_before_the_command(self, tmp_path: Path) -> None:
+        result = _invoke("-C", str(tmp_path / "nope"), "generate")
+        assert result.exit_code == 1
+        assert "error: -C" in result.output
+
+    def test_missing_directory_after_the_command(self, tmp_path: Path) -> None:
+        result = _invoke("generate", "-C", str(tmp_path / "nope"))
+        assert result.exit_code == 1
+        assert "error: -C" in result.output
 
 
 class TestBuildDirArgs:
@@ -1832,14 +1817,27 @@ class TestBuildDirArgs:
             ["-v", "-B", "out"],
         ],
     )
-    def test_every_spelling_is_forwarded(self, argv: list[str]) -> None:
-        assert _build_dir_args(argv) == ["-B", "out"]
+    def test_every_spelling_is_forwarded(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke(*argv, "test").exit_code == 0
+        assert seen == [["-B", "out"]]
 
-    def test_nothing_to_forward(self) -> None:
-        assert _build_dir_args(["-v", "--no-color"]) == []
+    def test_nothing_to_forward(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With no -B the runner searches upward for the manifest itself, so
+        forwarding a default build directory would silently stop the search."""
+        monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke("test", "--list").exit_code == 0
+        assert seen == [["--list"]]
 
-    def test_trailing_option_without_a_value(self) -> None:
-        assert _build_dir_args(["-B"]) == []
+    def test_trailing_option_without_a_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke("-B").exit_code == 2
+        assert seen == []
 
     def test_main_hands_the_runner_the_build_dir(
         self, monkeypatch: pytest.MonkeyPatch
