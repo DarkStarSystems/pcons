@@ -530,6 +530,31 @@ Cflags: -I"${includedir}"
         assert pkg.include_dirs == ["C:/Users/me/.conan2/p/nanob123/p/nanobind/include"]
         assert pkg.library_dirs == ["C:/Users/me/.conan2/p/nanob123/p/lib"]
 
+    def test_parse_single_pc_file_isystem(self, tmp_path: Path) -> None:
+        """-isystem in Cflags is a system include dir, not an opaque flag.
+
+        Kept out of compile_flags so MSVC can spell it /external:I.
+        """
+        pc_file = tmp_path / "vendor.pc"
+        pc_file.write_text(
+            """prefix=/opt/vendor
+includedir=${prefix}/include
+
+Name: vendor
+Version: 1.0
+Cflags: -isystem "${includedir}" -DVENDOR
+"""
+        )
+
+        finder = ConanFinder(output_folder=tmp_path)
+        pkg = finder._parse_single_pc_file(pc_file)
+
+        assert pkg is not None
+        assert pkg.system_include_dirs == ["/opt/vendor/include"]
+        assert pkg.include_dirs == []
+        assert pkg.compile_flags == []
+        assert "VENDOR" in pkg.defines
+
     def test_parse_pc_files_manually(self, tmp_path: Path) -> None:
         """Test manual .pc file parsing."""
         # Create multiple .pc files

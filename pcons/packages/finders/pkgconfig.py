@@ -99,20 +99,40 @@ class PkgConfigFinder(BaseFinder):
             return []
         return shlex.split(flags_str)
 
-    def _extract_includes(self, flags: list[str]) -> tuple[list[str], list[str]]:
-        """Extract -I flags from a list of flags.
+    def _extract_includes(
+        self, flags: list[str]
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Extract -I and -isystem flags from a list of flags.
+
+        ``-isystem`` is spelled as two tokens by every producer worth
+        supporting, but ``-isystem<dir>`` is also accepted by GCC and Clang,
+        so both forms are read. Keeping them out of ``compile_flags`` is what
+        lets MSVC spell them ``/external:I``.
 
         Returns:
-            Tuple of (include_dirs, remaining_flags).
+            Tuple of (include_dirs, system_include_dirs, remaining_flags).
         """
         includes: list[str] = []
+        system_includes: list[str] = []
         remaining: list[str] = []
+        expecting_system_dir = False
         for flag in flags:
-            if flag.startswith("-I"):
+            if expecting_system_dir:
+                system_includes.append(flag)
+                expecting_system_dir = False
+            elif flag == "-isystem":
+                expecting_system_dir = True
+            elif flag.startswith("-isystem"):
+                system_includes.append(flag[len("-isystem") :])
+            elif flag.startswith("-I"):
                 includes.append(flag[2:])
             else:
                 remaining.append(flag)
-        return includes, remaining
+        if expecting_system_dir:
+            # Trailing -isystem with nothing after it: pass it through rather
+            # than swallowing it, so the compiler reports the malformed .pc.
+            remaining.append("-isystem")
+        return includes, system_includes, remaining
 
     def _extract_defines(self, flags: list[str]) -> tuple[list[str], list[str]]:
         """Extract -D flags from a list of flags.
@@ -239,7 +259,7 @@ class PkgConfigFinder(BaseFinder):
         libs = self._parse_flags(libs_str) if success else []
 
         # Parse cflags
-        include_dirs, cflags = self._extract_includes(cflags)
+        include_dirs, system_include_dirs, cflags = self._extract_includes(cflags)
         defines, compile_flags = self._extract_defines(cflags)
 
         # Parse libs
@@ -276,6 +296,7 @@ class PkgConfigFinder(BaseFinder):
                         pkg_components[comp_name] = ComponentDescription(
                             name=comp_name,
                             include_dirs=comp_desc.include_dirs,
+                            system_include_dirs=comp_desc.system_include_dirs,
                             library_dirs=comp_desc.library_dirs,
                             libraries=comp_desc.libraries,
                             defines=comp_desc.defines,
@@ -287,6 +308,7 @@ class PkgConfigFinder(BaseFinder):
             name=package_name,
             version=version_str,
             include_dirs=include_dirs,
+            system_include_dirs=system_include_dirs,
             library_dirs=library_dirs,
             libraries=libraries,
             defines=defines,

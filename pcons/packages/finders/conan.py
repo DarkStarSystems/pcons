@@ -748,6 +748,10 @@ class ConanFinder(BaseFinder):
             pkg.include_dirs = dedupe(
                 pkg.include_dirs + [d for dep in deps for d in dep.include_dirs]
             )
+            pkg.system_include_dirs = dedupe(
+                pkg.system_include_dirs
+                + [d for dep in deps for d in dep.system_include_dirs]
+            )
             pkg.library_dirs = dedupe(
                 pkg.library_dirs + [d for dep in deps for d in dep.library_dirs]
             )
@@ -857,16 +861,27 @@ class ConanFinder(BaseFinder):
 
         # Parse cflags
         include_dirs: list[str] = []
+        system_include_dirs: list[str] = []
         defines: list[str] = []
         compile_flags: list[str] = []
 
+        expect_system_dir = False
         for flag in tokenize(cflags):
-            if flag.startswith("-I"):
+            if expect_system_dir:
+                system_include_dirs.append(strip_quotes(flag))
+                expect_system_dir = False
+            elif flag == "-isystem":
+                expect_system_dir = True
+            elif flag.startswith("-isystem"):
+                system_include_dirs.append(strip_quotes(flag[len("-isystem") :]))
+            elif flag.startswith("-I"):
                 include_dirs.append(strip_quotes(flag[2:]))
             elif flag.startswith("-D"):
                 defines.append(strip_quotes(flag[2:]))
             else:
                 compile_flags.append(flag)
+        if expect_system_dir:
+            compile_flags.append("-isystem")
 
         # Parse libs
         library_dirs: list[str] = []
@@ -899,6 +914,7 @@ class ConanFinder(BaseFinder):
             name=name,
             version=version,
             include_dirs=include_dirs,
+            system_include_dirs=system_include_dirs,
             library_dirs=library_dirs,
             libraries=libraries,
             defines=defines,

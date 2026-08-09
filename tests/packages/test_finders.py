@@ -117,9 +117,41 @@ class TestPkgConfigFinder:
         """Test extracting include directories."""
         finder = PkgConfigFinder()
         flags = ["-I/usr/include", "-I/opt/include", "-DTEST"]
-        includes, remaining = finder._extract_includes(flags)
+        includes, system_includes, remaining = finder._extract_includes(flags)
         assert includes == ["/usr/include", "/opt/include"]
+        assert system_includes == []
         assert remaining == ["-DTEST"]
+
+    def test_extract_includes_separates_isystem(self) -> None:
+        """-isystem is a system include, not an opaque compile flag."""
+        finder = PkgConfigFinder()
+        flags = ["-I/usr/include", "-isystem", "/opt/vendor", "-DTEST"]
+
+        includes, system_includes, remaining = finder._extract_includes(flags)
+
+        assert includes == ["/usr/include"]
+        assert system_includes == ["/opt/vendor"]
+        assert remaining == ["-DTEST"]
+
+    def test_extract_includes_reads_the_joined_isystem_spelling(self) -> None:
+        finder = PkgConfigFinder()
+
+        includes, system_includes, remaining = finder._extract_includes(
+            ["-isystem/opt/vendor"]
+        )
+
+        assert includes == []
+        assert system_includes == ["/opt/vendor"]
+        assert remaining == []
+
+    def test_a_trailing_isystem_is_passed_through(self) -> None:
+        """A malformed .pc is the compiler's to report, not ours to swallow."""
+        finder = PkgConfigFinder()
+
+        _, system_includes, remaining = finder._extract_includes(["-isystem"])
+
+        assert system_includes == []
+        assert remaining == ["-isystem"]
 
 
 class TestSystemFinder:
