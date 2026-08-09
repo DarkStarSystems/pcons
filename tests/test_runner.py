@@ -44,6 +44,7 @@ from pcons.test_runner import (
 
 def _make_exit_script(tmp_path: Path, name: str, body: str) -> Path:
     """Write an executable Python script that the runner can subprocess."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
     p = tmp_path / name
     p.write_text(f"#!{sys.executable}\n{body}\n")
     p.chmod(p.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -51,6 +52,7 @@ def _make_exit_script(tmp_path: Path, name: str, body: str) -> Path:
 
 
 def _make_manifest(tmp_path: Path, tests: list[dict]) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     manifest = tmp_path / "tests.json"
     manifest.write_text(
         json.dumps(
@@ -153,6 +155,22 @@ class TestManifestDiscovery:
         nested.mkdir(parents=True)
         found = find_manifest(nested)
         assert found == m
+
+    def test_named_build_dir_wins_over_the_default_one(self, tmp_path):
+        _make_manifest(tmp_path / "build", [])
+        wanted = _make_manifest(tmp_path / "out", [])
+        assert find_manifest(tmp_path, Path("out")) == wanted
+
+    def test_named_build_dir_never_falls_back(self, tmp_path):
+        # The whole point: a run pointed at a build directory with no
+        # manifest must say so, not quietly run build/'s stale binaries.
+        _make_manifest(tmp_path / "build", [])
+        (tmp_path / "out").mkdir()
+        assert find_manifest(tmp_path, Path("out")) is None
+
+    def test_named_build_dir_may_be_absolute(self, tmp_path):
+        wanted = _make_manifest(tmp_path / "out", [])
+        assert find_manifest(tmp_path, tmp_path / "out") == wanted
 
     def test_load_manifest_validates_shape(self, tmp_path):
         bad = tmp_path / "tests.json"
@@ -713,6 +731,32 @@ class TestManifestLoading:
         sub = tmp_path / "deep" / "nest"
         sub.mkdir(parents=True)
         assert find_manifest(sub) is None
+
+    def test_build_dir_option_selects_the_manifest(self, tmp_path, monkeypatch, capsys):
+        # Two build directories, only one named. Running the wrong one's
+        # tests is the failure this guards against, so the manifests point
+        # at scripts that report which directory they came from.
+        for name in ("build", "out"):
+            script = _make_exit_script(tmp_path / name, "probe.py", "pass")
+            _make_manifest(
+                tmp_path / name,
+                [{"name": f"from-{name}", "command": [str(script)], "labels": []}],
+            )
+        monkeypatch.chdir(tmp_path)
+
+        assert main(["-B", "out", "-j", "1", "--no-color"]) == 0
+        printed = capsys.readouterr().out
+        assert "from-out" in printed
+        assert "from-build" not in printed
+
+    def test_build_dir_defaults_to_the_environment(self, tmp_path, monkeypatch, capsys):
+        _make_manifest(tmp_path / "build", [])
+        _make_manifest(tmp_path / "out", [])
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PCONS_BUILD_DIR", str(tmp_path / "nowhere"))
+
+        assert main(["--no-color"]) == 2
+        assert "no tests.json found in" in capsys.readouterr().err
 
     def test_load_rejects_non_object_root(self, tmp_path):
         path = tmp_path / "tests.json"

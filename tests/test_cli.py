@@ -20,6 +20,7 @@ from pcons import (
     NinjaGenerator,
 )
 from pcons.cli import (
+    _build_dir_args,
     _find_command_index,
     cmd_cache,
     create_full_parser,
@@ -1766,3 +1767,26 @@ class TestGlobalOptionsBeforeTheCommand:
         args = create_full_parser().parse_args(["clean", "--all"])
         assert args.all is True
         assert create_full_parser().parse_args(["clean"]).all is False
+
+
+class TestBuildDirArgs:
+    """`pcons test` owns its parser, so the CLI hands it the build dir."""
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["-B", "out"],
+            ["--build-dir", "out"],
+            ["--build-dir=out"],
+            ["-Bout"],
+            ["-v", "-B", "out"],
+        ],
+    )
+    def test_every_spelling_is_forwarded(self, argv: list[str]) -> None:
+        assert _build_dir_args(argv) == ["-B", "out"]
+
+    def test_nothing_to_forward(self) -> None:
+        assert _build_dir_args(["-v", "--no-color"]) == []
+
+    def test_trailing_option_without_a_value(self) -> None:
+        assert _build_dir_args(["-B"]) == []
