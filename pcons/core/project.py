@@ -227,7 +227,7 @@ class Project(_ProjectBuilders):
         self._resolved = False
         # None caches a negative find_package result for the key.
         self._found_packages: dict[
-            tuple[str, str | None, tuple[str, ...]], Target | None
+            tuple[str, str | None, tuple[str, ...], bool], Target | None
         ] = {}
         self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
         # Files the build description read while running: the generated build
@@ -1304,6 +1304,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: Literal[True] = True,
+        system: bool = False,
     ) -> Target: ...
 
     @overload
@@ -1314,6 +1315,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: bool,
+        system: bool = False,
     ) -> Target | None: ...
 
     def find_package(
@@ -1323,6 +1325,7 @@ class Project(_ProjectBuilders):
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: bool = True,
+        system: bool = False,
     ) -> Target | None:
         """Find an external package and return it as an ImportedTarget.
 
@@ -1339,6 +1342,13 @@ class Project(_ProjectBuilders):
             components: Optional list of package components.
             required: If True (default), raises PackageNotFoundError when
                      the package is not found. If False, returns None.
+            system: If True, the package's include directories are treated as
+                   system headers (-isystem, /external:I), so warnings from
+                   its headers are suppressed in every dependent. Off by
+                   default: -isystem on a directory the compiler already
+                   searches (/usr/include) reorders the search and can break
+                   the standard library. Use it for prefixes owned by a
+                   package manager or a fetched source tree.
 
         Returns:
             An ImportedTarget representing the package, or None if not
@@ -1351,11 +1361,29 @@ class Project(_ProjectBuilders):
             zlib = project.find_package("zlib")
             openssl = project.find_package("openssl", version=">=3.0")
             boost = project.find_package("boost", components=["filesystem"])
+            doctest = project.find_package("doctest", system=True)
 
             app.link(zlib)
             env.use(openssl)
         """
-        cache_key = (name, version, tuple(components or []))
+        cache_key = (name, version, tuple(components or []), system)
+        # One package is one target, and a target name is unique, so the two
+        # spellings of the same package cannot both exist. Say which two,
+        # rather than letting Target.__init__ report a name collision.
+        conflicting = next(
+            (
+                k
+                for k in self._found_packages
+                if k[:3] == cache_key[:3] and k[3] != system
+            ),
+            None,
+        )
+        if conflicting is not None:
+            raise ValueError(
+                f"Package '{name}' was already found with system={conflicting[3]}; "
+                f"requesting system={system} would need a second target of the "
+                f"same name. Pick one spelling for the whole project."
+            )
         if cache_key not in self._found_packages:
             if self._package_finder_chain is None:
                 from pcons.packages.finders import (
@@ -1377,7 +1405,7 @@ class Project(_ProjectBuilders):
                 from pcons.packages.imported import ImportedTarget
 
                 self._found_packages[cache_key] = ImportedTarget.from_package(
-                    pkg, components=components
+                    pkg, components=components, system=system
                 )
 
         target = self._found_packages[cache_key]

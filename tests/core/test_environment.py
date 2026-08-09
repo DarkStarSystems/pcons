@@ -498,6 +498,29 @@ class TestUseUnifiedWithRequirements:
         assert str(Path("/opt/fancy/include")) in env.cc.includes
         assert "fancy" in env.link.libs
 
+    def test_use_system_applies_isystem_includes(self, test_project):  # noqa: F811
+        """system=True puts the package's include dirs on the system list."""
+        env = self._env()
+        env.use(self._pkg(), system=True)
+
+        inc = str(Path("/opt/fancy/include"))
+        assert inc in env.cc.system_includes
+        assert inc in env.cxx.system_includes
+        assert inc not in env.cc.includes
+        assert "fancy" in env.link.libs
+
+    def test_use_system_leaves_the_package_alone(self, test_project):  # noqa: F811
+        """system= describes one use; the same target can be used plainly
+        elsewhere."""
+        from pcons.packages.imported import ImportedTarget
+
+        target = ImportedTarget.from_package(self._pkg())
+        env = self._env()
+        env.use(target, system=True)
+
+        assert list(target.public.include_dirs) == [Path("/opt/fancy/include")]
+        assert list(target.public.system_include_dirs) == []
+
     def test_use_rejects_target_link_libs(self, test_project):  # noqa: F811
         """A build Target in link_libs is per-target info; use() fails fast."""
         from pcons.core.target import Target, UsageRequirements
