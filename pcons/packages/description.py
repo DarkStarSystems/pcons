@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +19,8 @@ class ComponentDescription:
     Attributes:
         name: Component name.
         include_dirs: Additional include directories for this component.
+        system_include_dirs: Like include_dirs, but marked as system headers
+            (-isystem) so warnings from them are suppressed.
         library_dirs: Additional library directories for this component.
         libraries: Libraries for this component.
         defines: Preprocessor definitions for this component.
@@ -29,6 +31,7 @@ class ComponentDescription:
 
     name: str
     include_dirs: list[str] = field(default_factory=list)
+    system_include_dirs: list[str] = field(default_factory=list)
     library_dirs: list[str] = field(default_factory=list)
     libraries: list[str] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
@@ -41,6 +44,8 @@ class ComponentDescription:
         result: dict[str, Any] = {}
         if self.include_dirs:
             result["include_dirs"] = self.include_dirs
+        if self.system_include_dirs:
+            result["system_include_dirs"] = self.system_include_dirs
         if self.library_dirs:
             result["library_dirs"] = self.library_dirs
         if self.libraries:
@@ -61,6 +66,7 @@ class ComponentDescription:
         return cls(
             name=name,
             include_dirs=data.get("include_dirs", []),
+            system_include_dirs=data.get("system_include_dirs", []),
             library_dirs=data.get("library_dirs", []),
             libraries=data.get("libraries", []),
             defines=data.get("defines", []),
@@ -80,6 +86,9 @@ class PackageDescription:
         name: Package name (e.g., "zlib", "openssl", "boost").
         version: Package version string.
         include_dirs: Include directories (-I flags).
+        system_include_dirs: Include directories to treat as system headers
+            (-isystem, /external:I): searched like any other include path, but
+            warnings from headers found there are suppressed.
         library_dirs: Library directories (-L flags).
         libraries: Libraries to link (-l flags, without the -l prefix).
         defines: Preprocessor definitions (-D flags, without the -D prefix).
@@ -117,6 +126,7 @@ class PackageDescription:
     name: str
     version: str = ""
     include_dirs: list[str] = field(default_factory=list)
+    system_include_dirs: list[str] = field(default_factory=list)
     library_dirs: list[str] = field(default_factory=list)
     libraries: list[str] = field(default_factory=list)
     defines: list[str] = field(default_factory=list)
@@ -151,6 +161,8 @@ class PackageDescription:
         paths: dict[str, Any] = {}
         if self.include_dirs:
             paths["include_dirs"] = self.include_dirs
+        if self.system_include_dirs:
+            paths["system_include_dirs"] = self.system_include_dirs
         if self.library_dirs:
             paths["library_dirs"] = self.library_dirs
         if paths:
@@ -225,6 +237,7 @@ class PackageDescription:
             found_by=package.get("found_by", ""),
             dependencies=package.get("dependencies", []),
             include_dirs=paths.get("include_dirs", []),
+            system_include_dirs=paths.get("system_include_dirs", []),
             library_dirs=paths.get("library_dirs", []),
             libraries=link.get("libraries", []),
             link_flags=link.get("flags", []),
@@ -257,6 +270,13 @@ class PackageDescription:
         """Get include directory flags (-I...)."""
         return [f"-I{d}" for d in self.include_dirs]
 
+    def get_system_include_flags(self) -> list[str]:
+        """Get system include directory flags (-isystem ...)."""
+        flags: list[str] = []
+        for d in self.system_include_dirs:
+            flags.extend(["-isystem", d])
+        return flags
+
     def get_library_dir_flags(self) -> list[str]:
         """Get library directory flags (-L...)."""
         return [f"-L{d}" for d in self.library_dirs]
@@ -273,6 +293,7 @@ class PackageDescription:
         """Get all compile flags."""
         flags: list[str] = []
         flags.extend(self.get_include_flags())
+        flags.extend(self.get_system_include_flags())
         flags.extend(self.get_define_flags())
         flags.extend(self.compile_flags)
         return flags
@@ -309,6 +330,19 @@ class PackageDescription:
         """
         return self.components.get(name)
 
+    def as_system(self) -> PackageDescription:
+        """Return a copy whose include directories are all system includes.
+
+        Third-party headers are not ours to fix, so their warnings should not
+        reach our warning set. Idempotent: already-system dirs stay put and are
+        not duplicated.
+        """
+        if not self.include_dirs:
+            return self
+        system = list(self.system_include_dirs)
+        system.extend(d for d in self.include_dirs if d not in system)
+        return replace(self, include_dirs=[], system_include_dirs=system)
+
     def merge_component(self, component: ComponentDescription) -> PackageDescription:
         """Return a new description with the component's settings merged in."""
         return PackageDescription(
@@ -318,6 +352,8 @@ class PackageDescription:
             found_by=self.found_by,
             dependencies=self.dependencies + component.dependencies,
             include_dirs=self.include_dirs + component.include_dirs,
+            system_include_dirs=self.system_include_dirs
+            + component.system_include_dirs,
             library_dirs=self.library_dirs + component.library_dirs,
             libraries=self.libraries + component.libraries,
             defines=self.defines + component.defines,
