@@ -1381,6 +1381,38 @@ def load_user_modules(args: argparse.Namespace) -> None:
     modules.load_modules(extra_paths)
 
 
+VALID_COMMANDS = {"info", "init", "generate", "build", "clean", "test", "cache"}
+
+# Every option that takes a value, across this CLI and the test runner, so
+# _find_command_index() can step over the value instead of reading it as the
+# subcommand. -C/--directory is absent because it is consumed before this runs.
+# Must stay complete: test_every_value_taking_option_is_known_to_the_scanner
+# fails when a new one is added without being listed here.
+OPTIONS_WITH_VALUE = {
+    "-B",
+    "--build-dir",
+    "-b",
+    "--build-script",
+    "--variant",
+    "-G",
+    "--generator",
+    "-j",
+    "--jobs",
+    "--graph",
+    "--mermaid",
+    "--debug",
+    "--lang",
+    "--modules-path",
+    "--ninja",
+    "--manifest",
+    "--junit",
+    "-L",
+    "-LE",
+    "-R",
+    "-E",
+}
+
+
 def _find_command_index(argv: list[str]) -> int | None:
     """Find the index of the subcommand token in argv, or None.
 
@@ -1388,33 +1420,11 @@ def _find_command_index(argv: list[str]) -> int | None:
     command name (e.g. ``--build-dir test``) is not mistaken for the
     subcommand.
     """
-    valid_commands = {"info", "init", "generate", "build", "clean", "test", "cache"}
-    # Options that take a value (-C/--directory is consumed before this runs)
-    options_with_value = {
-        "-B",
-        "--build-dir",
-        "-b",
-        "--build-script",
-        "--variant",
-        "-j",
-        "--jobs",
-        "--graph",
-        "--mermaid",
-        "--debug",
-        "--modules-path",
-        "--ninja",
-        "--manifest",
-        "--junit",
-        "-L",
-        "-LE",
-        "-R",
-        "-E",
-    }
     i = 0
     while i < len(argv):
         arg = argv[i]
         if arg.startswith("-"):
-            if arg in options_with_value:
+            if arg in OPTIONS_WITH_VALUE:
                 i += 2  # Skip option and its value
             elif "=" in arg:
                 i += 1  # Option with value like --build-dir=foo
@@ -1422,7 +1432,7 @@ def _find_command_index(argv: list[str]) -> int | None:
                 i += 1  # Boolean flag
         else:
             # First positional argument
-            if arg in valid_commands:
+            if arg in VALID_COMMANDS:
                 return i
             return None
     return None

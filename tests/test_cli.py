@@ -20,6 +20,8 @@ from pcons import (
     NinjaGenerator,
 )
 from pcons.cli import (
+    OPTIONS_WITH_VALUE,
+    VALID_COMMANDS,
     _build_dir_args,
     _find_command_index,
     cmd_cache,
@@ -1770,6 +1772,51 @@ class TestGlobalOptionsBeforeTheCommand:
         args = create_full_parser().parse_args(["clean", "--all"])
         assert args.all is True
         assert create_full_parser().parse_args(["clean"]).all is False
+
+
+class TestCommandDetection:
+    """Finding the subcommand means stepping over every option value."""
+
+    def test_generator_before_the_command(self) -> None:
+        # -G was missing from the scanner's table, so `make` read as the first
+        # positional, `generate` became a build target, and pcons generated and
+        # then asked the build tool for a target named "generate".
+        assert find_command_in_argv(["-G", "make", "generate"]) == "generate"
+        assert find_command_in_argv(["--generator", "make", "generate"]) == "generate"
+
+    def test_option_value_that_names_a_command(self) -> None:
+        assert find_command_in_argv(["-G", "make", "-B", "test", "build"]) == "build"
+
+    def test_every_value_taking_option_is_known_to_the_scanner(self) -> None:
+        """OPTIONS_WITH_VALUE must cover both parsers, or detection misreads argv.
+
+        The scanner runs before argparse, so it cannot ask a parser what an
+        option does. Adding a value-taking option anywhere and forgetting this
+        table silently turns the next token into the subcommand.
+        """
+        from pcons.test_runner import build_parser as build_test_runner_parser
+
+        parser = create_full_parser()
+        parsers = [parser, build_test_runner_parser()]
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                parsers.extend(action.choices.values())
+
+        taking_a_value = {
+            option
+            for p in parsers
+            for action in p._actions
+            if action.option_strings and action.nargs != 0
+            for option in action.option_strings
+        }
+        assert taking_a_value <= OPTIONS_WITH_VALUE
+
+    def test_every_subcommand_is_detectable(self) -> None:
+        parser = create_full_parser()
+        subparsers = next(
+            a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+        )
+        assert set(subparsers.choices) == VALID_COMMANDS
 
 
 class TestBuildDirArgs:
