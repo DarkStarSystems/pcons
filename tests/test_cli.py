@@ -30,6 +30,9 @@ from pcons.cli import (
     run_script,
     setup_logging,
 )
+from pcons.cli import (
+    main as cli_main,
+)
 from pcons.core.vars import _clear_cli_vars
 
 
@@ -1790,3 +1793,17 @@ class TestBuildDirArgs:
 
     def test_trailing_option_without_a_value(self) -> None:
         assert _build_dir_args(["-B"]) == []
+
+    def test_main_hands_the_runner_the_build_dir(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: list[list[str]] = []
+
+        def fake_runner(argv: list[str]) -> int:
+            seen.append(argv)
+            return 0
+
+        monkeypatch.setattr("pcons.test_runner.main", fake_runner)
+        monkeypatch.setattr(sys, "argv", ["pcons", "-B", "out", "test", "-j", "1"])
+        assert cli_main() == 0
+        assert seen == [["-B", "out", "-j", "1"]]
