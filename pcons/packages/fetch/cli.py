@@ -416,6 +416,7 @@ def generate_package_description(
     version: str,
     install_prefix: Path,
     build_system: str,
+    system: bool = True,
 ) -> tuple[PackageDescription, list[Path]]:
     """Generate a PackageDescription for an installed package.
 
@@ -428,6 +429,10 @@ def generate_package_description(
         version: Package version.
         install_prefix: Installation prefix.
         build_system: Build system used (for metadata).
+        system: Record the include directory as a system include, so the
+            fetched headers are held to no warning set of the consumer's.
+            On by default: a fetched prefix is third-party by construction,
+            and is never a directory the compiler already searches.
 
     Returns:
         Tuple of (PackageDescription, list of .pc file paths).
@@ -442,6 +447,13 @@ def generate_package_description(
             "Found pkg-config files: %s",
             ", ".join(p.name for p in pc_files),
         )
+        if system:
+            logger.info(
+                "%s carries pkg-config metadata, which spells its include dirs "
+                "-I; pass system=True to find_package() to treat them as "
+                "system headers.",
+                name,
+            )
         return (
             PackageDescription(
                 name=name,
@@ -484,7 +496,8 @@ def generate_package_description(
         PackageDescription(
             name=name,
             version=version,
-            include_dirs=include_dirs,
+            include_dirs=[] if system else include_dirs,
+            system_include_dirs=include_dirs if system else [],
             library_dirs=library_dirs,
             libraries=libraries,
             prefix=str(install_prefix),
@@ -555,7 +568,11 @@ def fetch_package(
         return False
 
     pkg_desc, pc_files = generate_package_description(
-        name, version, install_prefix, build_system
+        name,
+        version,
+        install_prefix,
+        build_system,
+        system=pkg_config.get("system", True),
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
