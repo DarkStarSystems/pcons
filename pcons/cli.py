@@ -1461,6 +1461,13 @@ def add_watch_arg(parser: argparse.ArgumentParser) -> None:
     )
 
 
+def add_jobs_arg(parser: argparse.ArgumentParser) -> None:
+    """Add -j/--jobs to a parser that builds."""
+    parser.add_argument(
+        "-j", "--jobs", type=int, help="Number of parallel jobs for build"
+    )
+
+
 def add_generate_args(parser: argparse.ArgumentParser) -> None:
     """Add arguments for generate-related commands."""
     parser.add_argument(
@@ -1487,6 +1494,35 @@ def add_generate_args(parser: argparse.ArgumentParser) -> None:
         help="Discard the persisted cache and start clean (like cmake --fresh)",
     )
     parser.add_argument("-b", "--build-script", help="Path to pcons-build.py script")
+
+
+def _add_command(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+    name: str,
+    *,
+    help: str,
+    description: str | None = None,
+    generate: bool = False,
+    build: bool = False,
+    watch: bool = False,
+    jobs: bool = False,
+) -> argparse.ArgumentParser:
+    """Create a subparser with the common options plus the groups it opts into.
+
+    Every subcommand accepts the common options, so they are added here
+    instead of being repeated at each call site.
+    """
+    sub = subparsers.add_parser(name, help=help, description=description)
+    add_common_args(sub)
+    if generate:
+        add_generate_args(sub)
+    if build:
+        add_build_args(sub)
+    if watch:
+        add_watch_arg(sub)
+    if jobs:
+        add_jobs_arg(sub)
+    return sub
 
 
 def create_default_parser() -> argparse.ArgumentParser:
@@ -1557,18 +1593,17 @@ def create_full_parser() -> argparse.ArgumentParser:
     add_generate_args(parser)
     add_build_args(parser)
     add_watch_arg(parser)
-    parser.add_argument(
-        "-j", "--jobs", type=int, help="Number of parallel jobs for build"
-    )
+    add_jobs_arg(parser)
 
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
     # pcons info
-    info_parser = subparsers.add_parser(
-        "info", help="Show build script info and available variables"
+    info_parser = _add_command(
+        subparsers,
+        "info",
+        help="Show build script info and available variables",
+        generate=True,
     )
-    add_common_args(info_parser)
-    add_generate_args(info_parser)
     info_parser.add_argument(
         "-t",
         "--targets",
@@ -1583,7 +1618,9 @@ def create_full_parser() -> argparse.ArgumentParser:
     info_parser.set_defaults(func=cmd_info)
 
     # pcons init
-    init_parser = subparsers.add_parser("init", help="Initialize a new pcons project")
+    init_parser = _add_command(
+        subparsers, "init", help="Initialize a new pcons project"
+    )
     init_parser.add_argument(
         "-f", "--force", action="store_true", help="Overwrite existing files"
     )
@@ -1593,15 +1630,15 @@ def create_full_parser() -> argparse.ArgumentParser:
         default="cpp",
         help="Language for the starter program when no sources are found (default: cpp)",
     )
-    add_common_args(init_parser)
     init_parser.set_defaults(func=cmd_init)
 
     # pcons generate
-    gen_parser = subparsers.add_parser(
-        "generate", help="Generate build files from pcons-build.py"
+    gen_parser = _add_command(
+        subparsers,
+        "generate",
+        help="Generate build files from pcons-build.py",
+        generate=True,
     )
-    add_common_args(gen_parser)
-    add_generate_args(gen_parser)
     # Internal: the self-regeneration rule re-invokes `generate` with this so it
     # doesn't persist a cache into the directory it regenerates. Not for users.
     gen_parser.add_argument(
@@ -1632,17 +1669,17 @@ def create_full_parser() -> argparse.ArgumentParser:
     gen_parser.set_defaults(func=_cmd_generate_wrapper)
 
     # pcons build
-    build_parser = subparsers.add_parser(
+    build_parser = _add_command(
+        subparsers,
         "build",
         help="Build targets (auto-generates if needed)",
         description="Build targets using the appropriate build tool. "
         "If build files are missing or out of date, generates them first.",
+        generate=True,
+        build=True,
+        watch=True,
+        jobs=True,
     )
-    add_common_args(build_parser)
-    add_generate_args(build_parser)
-    add_build_args(build_parser)
-    add_watch_arg(build_parser)
-    build_parser.add_argument("-j", "--jobs", type=int, help="Number of parallel jobs")
     build_parser.add_argument(
         "extra",
         nargs="*",
@@ -1652,19 +1689,18 @@ def create_full_parser() -> argparse.ArgumentParser:
     build_parser.set_defaults(func=cmd_build)
 
     # pcons clean
-    clean_parser = subparsers.add_parser("clean", help="Clean build artifacts")
-    add_common_args(clean_parser)
-    add_build_args(clean_parser)
+    clean_parser = _add_command(
+        subparsers, "clean", help="Clean build artifacts", build=True
+    )
     clean_parser.add_argument(
         "-a", "--all", action="store_true", help="Remove entire build directory"
     )
     clean_parser.set_defaults(func=cmd_clean)
 
     # pcons cache
-    cache_parser = subparsers.add_parser(
-        "cache", help="Inspect or clear the per-build-dir cache"
+    cache_parser = _add_command(
+        subparsers, "cache", help="Inspect or clear the per-build-dir cache"
     )
-    add_common_args(cache_parser)
     cache_parser.add_argument(
         "cache_action",
         nargs="?",
