@@ -1428,6 +1428,22 @@ def _find_command_index(argv: list[str]) -> int | None:
     return None
 
 
+def _build_dir_args(argv: list[str]) -> list[str]:
+    """Re-spell a -B/--build-dir found in *argv* as a plain ``-B DIR`` pair.
+
+    Used to hand the global build directory to `pcons test`, which owns its
+    own parser and so never sees what came before the subcommand.
+    """
+    for i, arg in enumerate(argv):
+        if arg in ("-B", "--build-dir") and i + 1 < len(argv):
+            return ["-B", argv[i + 1]]
+        if arg.startswith("--build-dir="):
+            return ["-B", arg.split("=", 1)[1]]
+        if arg.startswith("-B") and len(arg) > 2:
+            return ["-B", arg[2:]]
+    return []
+
+
 def find_command_in_argv(argv: list[str]) -> str | None:
     """Return the command name found in argv, or None."""
     idx = _find_command_index(argv)
@@ -1790,7 +1806,11 @@ def main() -> int:
         # literal "test", which could match an option's value.
         idx = _find_command_index(sys.argv[1:])
         assert idx is not None  # command == "test" guarantees a match
-        return test_main(sys.argv[idx + 2 :])
+        # Options before the subcommand never reach argparse here, so forward
+        # the build directory explicitly rather than letting the runner fall
+        # back to `build/` and run some other directory's binaries. The
+        # runner's own -B comes later in argv and still wins.
+        return test_main(_build_dir_args(sys.argv[1 : idx + 1]) + sys.argv[idx + 2 :])
 
     # Special case: if --help or -h is present without a command,
     # use the full parser so help shows available commands

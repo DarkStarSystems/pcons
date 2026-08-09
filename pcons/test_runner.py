@@ -73,14 +73,29 @@ def _color(text: str, color: str, enabled: bool) -> str:
 # ----- Manifest discovery ---------------------------------------------------
 
 
-def find_manifest(start: Path) -> Path | None:
-    """Walk upward from *start* looking for a tests.json.
+def _env_build_dir() -> Path | None:
+    """The build directory the surrounding pcons run was pointed at, if any."""
+    value = os.environ.get("PCONS_BUILD_DIR")
+    return Path(value) if value else None
 
-    Checks ``start/tests.json``, then ``start/build/tests.json``, then
-    repeats one directory up, and so on until the filesystem root. This
-    is robust to the user running ``pcons test`` from their project root
-    or from inside the build directory.
+
+def find_manifest(start: Path, build_dir: Path | None = None) -> Path | None:
+    """Locate the tests.json to run.
+
+    With *build_dir* set, from ``-B`` or ``$PCONS_BUILD_DIR``, only that
+    directory's manifest counts: searching elsewhere is how a run pointed at
+    one build directory ends up executing another one's binaries, silently
+    and green.
+
+    Without it, walk upward from *start*, checking ``tests.json`` then
+    ``build/tests.json`` at each level up to the filesystem root, so
+    ``pcons test`` works from the project root or from inside the default
+    build directory.
     """
+    if build_dir is not None:
+        candidate = (start / build_dir) / "tests.json"
+        return candidate if candidate.is_file() else None
+
     current = start.resolve()
     while True:
         for candidate in (current / "tests.json", current / "build" / "tests.json"):
@@ -815,6 +830,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to tests.json (default: searched upward from cwd)",
     )
     parser.add_argument(
+        "-B",
+        "--build-dir",
+        type=Path,
+        default=_env_build_dir(),
+        help=(
+            "Build directory holding tests.json "
+            "(default: $PCONS_BUILD_DIR, else searched upward from cwd)"
+        ),
+    )
+    parser.add_argument(
         "-j",
         "--jobs",
         type=int,
@@ -887,10 +912,11 @@ def main(argv: list[str] | None = None) -> int:
     # Locate manifest
     manifest_path: Path | None = args.manifest
     if manifest_path is None:
-        manifest_path = find_manifest(Path.cwd())
+        manifest_path = find_manifest(Path.cwd(), args.build_dir)
     if manifest_path is None or not manifest_path.is_file():
+        where = f" in {args.build_dir}" if args.build_dir else ""
         sys.stderr.write(
-            "error: no tests.json found. Run 'pcons generate' first, "
+            f"error: no tests.json found{where}. Run 'pcons generate' first, "
             "or pass --manifest=PATH.\n"
         )
         return 2

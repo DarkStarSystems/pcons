@@ -162,12 +162,17 @@ pcons test -j 1               # serial mode (default: CPU count)
 pcons test --junit out.xml    # emit JUnit XML for CI
 pcons test --stop-on-fail     # stop after the first failure
 pcons test -V                 # verbose: show stderr from failed tests
+pcons -B build-release test   # run the tests in another build directory
 ```
 
-The runner picks up the manifest from the current build directory (or
-walks upward to find one). Exit code is 0 if every selected test
-passed, non-zero otherwise — which is why `ninja test` "just works"
-for CI failure detection.
+With `-B DIR` or `$PCONS_BUILD_DIR` set, the runner reads `DIR/tests.json`
+and nothing else: if that directory has no manifest the run fails rather
+than falling back and executing another directory's binaries. Given
+neither, it looks for `tests.json` in the current directory, then
+`build/tests.json`, then repeats one level up.
+
+Exit code is 0 if every selected test passed, non-zero otherwise — which
+is why `ninja test` "just works" for CI failure detection.
 
 ## The Test Manifest
 
