@@ -92,11 +92,31 @@ class TestGeneratePackageDescription:
         assert pc_files == []
         assert pkg.name == "mylib"
         assert pkg.version == "1.0"
-        assert str(include_dir.resolve()) in pkg.include_dirs
+        # A fetched prefix is third-party by construction, so its headers are
+        # system headers unless the deps file says otherwise.
+        assert str(include_dir.resolve()) in pkg.system_include_dirs
+        assert pkg.include_dirs == []
         assert str(lib_dir.resolve()) in pkg.library_dirs
         assert "test" in pkg.libraries
         assert "foo" in pkg.libraries
         assert "pcons-fetch" in pkg.found_by
+
+    def test_generate_with_system_off(self, tmp_path: Path) -> None:
+        """system=False keeps the include dir a plain -I."""
+        install_prefix = tmp_path / "install"
+        include_dir = install_prefix / "include"
+        include_dir.mkdir(parents=True)
+
+        pkg, _ = generate_package_description(
+            name="mylib",
+            version="1.0",
+            install_prefix=install_prefix,
+            build_system="cmake",
+            system=False,
+        )
+
+        assert str(include_dir.resolve()) in pkg.include_dirs
+        assert pkg.system_include_dirs == []
 
     def test_generate_empty_install(self, tmp_path: Path) -> None:
         """Test generating description with empty install prefix."""
@@ -562,8 +582,36 @@ class TestFetchPackage:
         data = tomllib.loads(pkg_file.read_text())
         assert data["package"]["name"] == "mylib"
         assert data["package"]["version"] == "1.0"
-        assert any("include" in d for d in data["paths"]["include_dirs"])
+        assert any("include" in d for d in data["paths"]["system_include_dirs"])
+        assert "include_dirs" not in data["paths"]
         assert "mylib" in data["link"]["libraries"]
+
+    def test_fetch_package_honours_system_false(self, tmp_path: Path) -> None:
+        """system = false in deps.toml keeps the headers a plain -I."""
+        archive_path = tmp_path / "source.zip"
+        with zipfile.ZipFile(archive_path, "w") as zf:
+            zf.writestr("hdrlib/include/hdrlib.h", "#pragma once\n")
+
+        def fake_urlretrieve(url: str, dest: str) -> tuple[str, None]:
+            Path(dest).write_bytes(archive_path.read_bytes())
+            return str(dest), None
+
+        deps_dir = tmp_path / ".deps"
+        output_dir = tmp_path / "output"
+        pkg_config = {
+            "url": "https://example.com/hdrlib-1.0.zip",
+            "version": "1.0",
+            "build": "none",
+            "system": False,
+        }
+
+        with patch("urllib.request.urlretrieve", side_effect=fake_urlretrieve):
+            ok = fetch_package("hdrlib", pkg_config, deps_dir, output_dir)
+
+        assert ok
+        data = tomllib.loads((output_dir / "hdrlib.pcons-pkg.toml").read_text())
+        assert any("include" in d for d in data["paths"]["include_dirs"])
+        assert "system_include_dirs" not in data["paths"]
 
     def test_fetch_package_missing_url(self, tmp_path: Path) -> None:
         """fetch_package should fail when no URL is provided."""
