@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from click.testing import CliRunner, Result
 
 from pcons import (
     Generator,
@@ -20,16 +23,23 @@ from pcons import (
     NinjaGenerator,
 )
 from pcons.cli import (
-    OPTIONS_WITH_VALUE,
-    VALID_COMMANDS,
-    _build_dir_args,
-    _find_command_index,
+    _find_ninja,
+    _needs_generation,
+    _parse_pcons_vars,
+    cli,
+    cli_cache,
+    cli_default,
+    cmd_build,
     cmd_cache,
-    create_full_parser,
-    find_command_in_argv,
+    cmd_clean,
+    cmd_default,
     find_script,
+    load_user_modules,
     parse_variables,
+    run_make,
+    run_ninja,
     run_script,
+    run_xcodebuild,
     setup_logging,
 )
 from pcons.cli import (
@@ -52,6 +62,77 @@ def _has_c_compiler() -> bool:
         ):
             return True
     return False
+
+
+def _capture_command(
+    monkeypatch: pytest.MonkeyPatch, name: str
+) -> list[argparse.Namespace]:
+    """Stand in for a cmd_* entry point so a test can read what it was handed."""
+    seen: list[argparse.Namespace] = []
+
+    def fake(args: argparse.Namespace) -> int:
+        seen.append(args)
+        return 0
+
+    monkeypatch.setattr(f"pcons.cli.{name}", fake)
+    return seen
+
+
+def _capture_test_runner(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    """Stand in for the test runner and record the argv the CLI forwards."""
+    seen: list[list[str]] = []
+
+    def fake(argv: list[str]) -> int:
+        seen.append(argv)
+        return 0
+
+    monkeypatch.setattr("pcons.test_runner.main", fake)
+    return seen
+
+
+def _invoke(*argv: str) -> Result:
+    """Run the CLI in this process and return click's Result.
+
+    catch_exceptions=False: otherwise a crash inside a command lands in
+    result.exception and the test reads as passing.
+
+    The commands call logging.basicConfig(force=True), which binds a handler
+    to whatever sys.stderr is at the time, here the runner's capture buffer.
+    The handlers are restored so that buffer does not swallow the log output
+    of every later test in the session.
+    """
+    handlers = logging.root.handlers[:]
+    level = logging.root.level
+    try:
+        return CliRunner().invoke(cli, list(argv), catch_exceptions=False)
+    finally:
+        logging.root.handlers[:] = handlers
+        logging.root.setLevel(level)
+
+
+def _main(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
+    """Run the CLI through main(), the way the console script does.
+
+    CliRunner drives cli.main(standalone_mode=True), so click's own standalone
+    handler produces every exit code the rest of this file observes. main()
+    passes standalone_mode=False and handles the outcome itself, so its
+    exception handling, its prog_name and its return-value bridge only run
+    here.
+
+    The logging handlers are saved and restored for the reason given on
+    _invoke, capsys being the buffer that would otherwise be captured.
+    """
+    handlers = logging.root.handlers[:]
+    level = logging.root.level
+    try:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(sys, "argv", ["pcons", *argv])
+            code = cli_main()
+    finally:
+        logging.root.handlers[:] = handlers
+        logging.root.setLevel(level)
+    out, err = capsys.readouterr()
+    return code, out, err
 
 
 class TestFindScript:
@@ -240,80 +321,6 @@ class TestParseVariables:
         assert remaining == ["=value"]
 
 
-class TestFindCommandInArgv:
-    """Tests for find_command_in_argv function."""
-
-    def test_find_command_first_positional(self) -> None:
-        """Test finding command as first positional argument."""
-        assert find_command_in_argv(["build"]) == "build"
-        assert find_command_in_argv(["generate"]) == "generate"
-        assert find_command_in_argv(["clean"]) == "clean"
-        assert find_command_in_argv(["info"]) == "info"
-        assert find_command_in_argv(["init"]) == "init"
-
-    def test_find_command_after_options(self) -> None:
-        """Test finding command after flag options."""
-        assert find_command_in_argv(["-v", "build"]) == "build"
-        assert find_command_in_argv(["--verbose", "generate"]) == "generate"
-        # --debug now takes a value, so use = syntax
-        assert find_command_in_argv(["--debug=resolve", "generate"]) == "generate"
-
-    def test_find_command_after_option_with_value(self) -> None:
-        """Test finding command after options that take values."""
-        assert find_command_in_argv(["-B", "mybuild", "build"]) == "build"
-        assert find_command_in_argv(["--build-dir", "out", "generate"]) == "generate"
-        assert find_command_in_argv(["-j", "4", "build"]) == "build"
-
-    def test_no_command_with_variable(self) -> None:
-        """Test that KEY=value is not mistaken for a command."""
-        assert find_command_in_argv(["VAR=value"]) is None
-        assert find_command_in_argv(["BUILD_PLUGINS=1"]) is None
-
-    def test_no_command_with_options_and_variable(self) -> None:
-        """Test no command found when only options and variables present."""
-        assert find_command_in_argv(["-B", "build/release", "VAR=1"]) is None
-        assert find_command_in_argv(["--verbose", "-B", "out", "FOO=bar"]) is None
-
-    def test_no_command_empty_argv(self) -> None:
-        """Test no command when argv is empty."""
-        assert find_command_in_argv([]) is None
-
-    def test_no_command_only_options(self) -> None:
-        """Test no command when only options are present."""
-        assert find_command_in_argv(["-v", "--debug"]) is None
-        assert find_command_in_argv(["-B", "build"]) is None  # build is value of -B
-
-    def test_invalid_command_returns_none(self) -> None:
-        """Test that invalid commands return None."""
-        assert find_command_in_argv(["notacommand"]) is None
-        assert find_command_in_argv(["BUILD"]) is None  # case sensitive
-
-
-class TestFindCommandIndex:
-    """Tests for _find_command_index (returns the position, not the name)."""
-
-    def test_index_of_first_positional_command(self) -> None:
-        assert _find_command_index(["build"]) == 0
-        assert _find_command_index(["-v", "generate"]) == 1
-
-    def test_option_value_equal_to_command_is_not_the_command(self) -> None:
-        # The motivating bug: an option value that equals a command name
-        # must not be reported as the subcommand.
-        assert _find_command_index(["--build-dir", "test", "test"]) == 2
-        assert _find_command_index(["-B", "build", "build"]) == 2
-
-    def test_equals_option_then_command(self) -> None:
-        assert _find_command_index(["--build-dir=out", "test"]) == 1
-
-    def test_boolean_flag_then_command(self) -> None:
-        assert _find_command_index(["--unknown-flag", "clean"]) == 1
-
-    def test_no_command_returns_none(self) -> None:
-        assert _find_command_index([]) is None
-        assert _find_command_index(["notacommand"]) is None
-        assert _find_command_index(["--build-dir", "out"]) is None
-
-
 class TestRunScriptEnvironment:
     """Tests for run_script environment handling."""
 
@@ -367,6 +374,52 @@ class TestRunScriptEnvironment:
             script, tmp_path / "build", generator=["ninja", "metadata"]
         )
         assert exit_code == 0
+
+    def test_reconfigure_reaches_the_script_as_an_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PCONS_RECONFIGURE is the whole of --reconfigure. Drop the one line
+        that sets it and the flag parses, the run succeeds, and the cached
+        configuration is reused anyway."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "import os\n"
+            "from pcons import Project\n"
+            "assert os.environ['PCONS_RECONFIGURE'] == '1'\n"
+            "Project('demo')\n"
+        )
+
+        monkeypatch.delenv("PCONS_RECONFIGURE", raising=False)
+        _clear_cli_vars()
+
+        exit_code, _ = run_script(script, tmp_path / "build", reconfigure=True)
+        assert exit_code == 0
+
+    def test_a_pcons_error_is_reported_without_a_traceback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        """A PconsError carries an actionable message a traceback would bury,
+        so it gets its own arm. It must also cancel the pending generation:
+        build files written from a half-run script are worse than none."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "from pcons.core.errors import PconsError\n"
+            "Project('demo')\n"
+            "raise PconsError('no toolchain for wombat')\n"
+        )
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        with caplog.at_level(logging.ERROR, logger="pcons"):
+            exit_code, projects = run_script(script, tmp_path / "build")
+
+        assert exit_code == 1
+        assert projects == []
+        assert "no toolchain for wombat" in caplog.text
+        assert "Traceback" not in caplog.text
+        assert not (tmp_path / "build" / "build.ninja").exists()
 
     def test_run_script_cleans_up_new_environment_keys(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -639,9 +692,16 @@ class TestRunScriptEnvironment:
 
 
 class TestDirectoryArg:
-    """Tests for -C/--directory argument."""
+    """Tests for -C/--directory argument.
 
-    def test_dash_c_changes_directory(self, tmp_path: Path) -> None:
+    -C chdirs for real and CliRunner does not undo it, so each test that
+    lands somewhere new fences the invocation with monkeypatch.chdir, which
+    restores the original cwd at teardown whatever the CLI did in between.
+    """
+
+    def test_dash_c_changes_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that -C changes to the specified directory."""
         # Create a pcons-build.py in a subdirectory
         subdir = tmp_path / "myproject"
@@ -649,62 +709,49 @@ class TestDirectoryArg:
         (subdir / "pcons-build.py").write_text('"""Test project."""\nprint("ok")\n')
 
         # Run pcons from tmp_path with -C myproject
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "-C", str(subdir), "info"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("-C", str(subdir), "info")
+        assert result.exit_code == 0
         assert "Test project" in result.stdout
 
-    def test_long_form_directory(self, tmp_path: Path) -> None:
+    def test_long_form_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test --directory=DIR form."""
         subdir = tmp_path / "myproject"
         subdir.mkdir()
         (subdir / "pcons-build.py").write_text('"""Long form test."""\nprint("ok")\n')
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", f"--directory={subdir}", "info"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke(f"--directory={subdir}", "info")
+        assert result.exit_code == 0
         assert "Long form test" in result.stdout
 
     def test_dash_c_invalid_directory(self, tmp_path: Path) -> None:
         """Test -C with non-existent directory."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "-C", str(tmp_path / "nope"), "info"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0
+        result = _invoke("-C", str(tmp_path / "nope"), "info")
+        assert result.exit_code != 0
         assert "error" in result.stderr
 
     def test_dash_c_missing_arg(self) -> None:
-        """Test -C without a directory argument."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "-C"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0
+        """-C with no directory is a usage error, so it exits 2.
+
+        A -C naming a directory that does not exist is a different thing and
+        still exits 1, pinned by TestDirectoryOption. Every other option that
+        misses its value exits 2, and -C used to be the exception.
+        """
+        result = _invoke("-C")
+        assert result.exit_code == 2
         assert "requires an argument" in result.stderr
 
-    def test_dash_c_init(self, tmp_path: Path) -> None:
+    def test_dash_c_init(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test -C works with init command."""
         subdir = tmp_path / "newproject"
         subdir.mkdir()
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "-C", str(subdir), "init"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("-C", str(subdir), "init")
+        assert result.exit_code == 0
         assert (subdir / "pcons-build.py").exists()
         # Should NOT exist in the original directory
         assert not (tmp_path / "pcons-build.py").exists()
@@ -715,13 +762,8 @@ class TestCLICommands:
 
     def test_pcons_help(self) -> None:
         """Test pcons --help."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "--help"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert "pcons" in result.stdout
+        result = _invoke("--help")
+        assert result.exit_code == 0
         assert "generate" in result.stdout
         assert "build" in result.stdout
         assert "clean" in result.stdout
@@ -729,26 +771,18 @@ class TestCLICommands:
 
     def test_pcons_version(self) -> None:
         """Test pcons --version."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "--version"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
+        result = _invoke("--version")
+        assert result.exit_code == 0
         # Check version is present (don't hardcode specific version)
         import pcons
 
         assert pcons.__version__ in result.stdout
 
-    def test_pcons_init(self, tmp_path: Path) -> None:
+    def test_pcons_init(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test pcons init in an empty dir scaffolds a working starter."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("init")
+        assert result.exit_code == 0
         assert (tmp_path / "pcons-build.py").exists()
         # Empty dir: a hello-world C++ starter source is created
         assert (tmp_path / "src" / "main.cpp").exists()
@@ -771,37 +805,35 @@ class TestCLICommands:
         assert "from pcons.core" not in build_content
         assert "from pcons.generators" not in build_content
 
-    def test_pcons_init_adopts_swift_sources(self, tmp_path: Path) -> None:
+    def test_pcons_init_adopts_swift_sources(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A directory of .swift sources gets toolchain="swift"."""
         (tmp_path / "src").mkdir()
         (tmp_path / "src" / "main.swift").write_text('print("hi")\n')
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("init")
+        assert result.exit_code == 0
         build_content = (tmp_path / "pcons-build.py").read_text()
         assert 'toolchain="swift"' in build_content
         assert '"src/main.swift",' in build_content
         # No starter source scaffolded over existing code
         assert not (tmp_path / "src" / "main.cpp").exists()
 
-    def test_pcons_init_lang_c(self, tmp_path: Path) -> None:
+    def test_pcons_init_lang_c(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons init --lang c scaffolds a C starter."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init", "--lang", "c"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("init", "--lang", "c")
+        assert result.exit_code == 0
         assert (tmp_path / "src" / "main.c").exists()
         assert '"src/main.c",' in (tmp_path / "pcons-build.py").read_text()
 
-    def test_pcons_init_adopts_existing_sources(self, tmp_path: Path) -> None:
+    def test_pcons_init_adopts_existing_sources(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons init generates a target from existing sources."""
         (tmp_path / "src" / "util").mkdir(parents=True)
         (tmp_path / "include").mkdir()
@@ -809,13 +841,9 @@ class TestCLICommands:
         (tmp_path / "src" / "util" / "helper.cpp").write_text("void helper() {}\n")
         (tmp_path / "include" / "helper.h").write_text("void helper();\n")
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("init")
+        assert result.exit_code == 0
         # No starter source is scaffolded over existing code
         assert not (tmp_path / "src" / "main.c").exists()
 
@@ -824,67 +852,49 @@ class TestCLICommands:
         assert '"src/util/helper.cpp",' in build_content
         assert 'include_dirs.append("include")' in build_content
 
-    def test_pcons_init_creates_valid_python(self, tmp_path: Path) -> None:
+    def test_pcons_init_creates_valid_python(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that init creates syntactically valid Python."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        assert _invoke("init").exit_code == 0
 
         # Verify it's valid Python by compiling it
         build_py = tmp_path / "pcons-build.py"
-        result = subprocess.run(
-            [sys.executable, "-m", "py_compile", str(build_py)],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, f"Invalid Python: {result.stderr}"
+        compile(build_py.read_text(), str(build_py), "exec")
 
     @pytest.mark.skipif(
         sys.platform == "win32",
         reason="Windows doesn't have Unix-style executable permissions",
     )
-    def test_pcons_init_creates_executable(self, tmp_path: Path) -> None:
+    def test_pcons_init_creates_executable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that init creates an executable file."""
         import stat
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        assert _invoke("init").exit_code == 0
 
         build_py = tmp_path / "pcons-build.py"
         mode = build_py.stat().st_mode
         assert mode & stat.S_IXUSR, "pcons-build.py should be executable"
 
-    def test_pcons_init_template_runs(self, tmp_path: Path) -> None:
+    def test_pcons_init_template_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that the init template can actually run and generate ninja."""
         # Skip if no C compiler available
         if not _has_c_compiler():
             pytest.skip("no C compiler found")
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert _invoke("init").exit_code == 0
 
         # Run the generated pcons-build.py via pcons generate
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "generate"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0, f"generate failed: {result.stderr}"
+        result = _invoke("generate")
+        assert result.exit_code == 0, f"generate failed: {result.output}"
         assert (tmp_path / "build" / "build.ninja").exists()
 
     def test_auto_generate_without_generate_call(self, tmp_path: Path) -> None:
@@ -892,6 +902,9 @@ class TestCLICommands:
         (tmp_path / "pcons-build.py").write_text(
             "from pcons import Project\nproject = Project('auto')\n"
         )
+        # Subprocess: the generation this pins happens in an atexit hook, which
+        # only runs when the interpreter itself exits, and the script is run
+        # directly rather than through the CLI.
         result = subprocess.run(
             [sys.executable, "pcons-build.py"],
             capture_output=True,
@@ -908,6 +921,8 @@ class TestCLICommands:
             "project = Project('crash')\n"
             "raise RuntimeError('boom')\n"
         )
+        # Subprocess: same atexit path as the test above, and the traceback it
+        # asserts on is written by the interpreter, not by pcons.
         result = subprocess.run(
             [sys.executable, "pcons-build.py"],
             capture_output=True,
@@ -918,7 +933,9 @@ class TestCLICommands:
         assert "boom" in result.stderr
         assert not (tmp_path / "build" / "build.ninja").exists()
 
-    def test_no_auto_generate_on_sys_exit_via_cli(self, tmp_path: Path) -> None:
+    def test_no_auto_generate_on_sys_exit_via_cli(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A script that sys.exit()s nonzero under the CLI must not generate."""
         (tmp_path / "pcons-build.py").write_text(
             "import sys\n"
@@ -926,44 +943,31 @@ class TestCLICommands:
             "project = Project('bail')\n"
             "sys.exit(3)\n"
         )
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "generate"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 3
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert _invoke("generate").exit_code == 3
         assert not (tmp_path / "build" / "build.ninja").exists()
 
-    def test_pcons_init_force(self, tmp_path: Path) -> None:
+    def test_pcons_init_force(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons init --force overwrites files."""
         # Create existing file
         (tmp_path / "pcons-build.py").write_text("# old content")
+        monkeypatch.chdir(tmp_path)
 
         # Without --force should fail
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode != 0
+        assert _invoke("init").exit_code != 0
 
         # With --force should succeed
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "init", "--force"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        assert _invoke("init", "--force").exit_code == 0
 
         # Check content was replaced
         build_content = (tmp_path / "pcons-build.py").read_text()
         assert "from pcons import Project" in build_content
         assert 'toolchain="c++"' in build_content
 
-    def test_pcons_info(self, tmp_path: Path) -> None:
+    def test_pcons_info(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test pcons info shows pcons-build.py docstring."""
         # Create a pcons-build.py with a docstring
         build_py = tmp_path / "pcons-build.py"
@@ -975,65 +979,56 @@ Variables:
 print("hello")
 ''')
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "info"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info")
+        assert result.exit_code == 0
         assert "My project build script" in result.stdout
         assert "FOO" in result.stdout
 
-    def test_pcons_info_no_docstring(self, tmp_path: Path) -> None:
+    def test_pcons_info_no_docstring(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons info handles missing docstring gracefully."""
         build_py = tmp_path / "pcons-build.py"
         build_py.write_text('print("hello")\n')
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "info"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info")
+        assert result.exit_code == 0
         assert "No docstring found" in result.stdout
 
-    def test_pcons_info_no_script(self, tmp_path: Path) -> None:
+    def test_pcons_info_no_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons info without pcons-build.py."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "info"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode != 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info")
+        assert result.exit_code != 0
         assert "No pcons-build.py found" in result.stderr
 
-    def test_pcons_generate_no_script(self, tmp_path: Path) -> None:
+    def test_pcons_generate_no_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons generate without pcons-build.py."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "generate"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode != 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("generate")
+        assert result.exit_code != 0
         assert "No pcons-build.py found" in result.stderr
 
-    def test_pcons_build_no_build_files(self, tmp_path: Path) -> None:
+    def test_pcons_build_no_build_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons build without any build files (ninja, make, or xcode)."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "build"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode != 0
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("build")
+        assert result.exit_code != 0
         assert "No build files found" in result.stderr
 
     def test_main_entry_point_propagates_exit_code(self, tmp_path: Path) -> None:
         """__main__.py must call sys.exit(main()) so build failures propagate."""
+        # Subprocess: the assertion is about pcons/__main__.py wiring
+        # sys.exit(main()), which only a real process exit code shows.
         result = subprocess.run(
             [sys.executable, "-m", "pcons", "build"],
             capture_output=True,
@@ -1042,30 +1037,26 @@ print("hello")
         )
         assert result.returncode != 0
 
-    def test_pcons_clean_no_ninja(self, tmp_path: Path) -> None:
+    def test_pcons_clean_no_ninja(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons clean without build.ninja (should succeed)."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "clean"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
         # Clean with no build.ninja should succeed (nothing to clean)
-        assert result.returncode == 0
+        assert _invoke("clean").exit_code == 0
 
-    def test_pcons_clean_all(self, tmp_path: Path) -> None:
+    def test_pcons_clean_all(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons clean --all removes build directory."""
         build_dir = tmp_path / "build"
         build_dir.mkdir()
         (build_dir / "hello.o").write_text("# fake object file")
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "clean", "--all"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert _invoke("clean", "--all").exit_code == 0
         assert not build_dir.exists()
 
 
@@ -1075,55 +1066,72 @@ class TestCLIArgumentParsing:
     These tests ensure that KEY=value arguments are not mistaken for commands.
     """
 
-    def test_variable_without_command_no_build_script(self, tmp_path: Path) -> None:
+    def test_variable_without_command_no_build_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test that VAR=value without a command doesn't error on argument parsing.
 
         Without pcons-build.py it should fail gracefully, not with 'invalid choice'.
         """
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "FOO=bar"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("FOO=bar")
         # Should fail because no pcons-build.py, not because of argument parsing
-        assert result.returncode != 0
+        assert result.exit_code != 0
         assert "No pcons-build.py found" in result.stderr
         assert "invalid choice" not in result.stderr
 
-    def test_variable_with_build_dir_option(self, tmp_path: Path) -> None:
+    def test_variable_with_build_dir_option(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test -B option with variable doesn't confuse argument parsing."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "-B", "mybuild", "VAR=value"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("-B", "mybuild", "VAR=value")
         # Should fail because no pcons-build.py, not because of argument parsing
-        assert result.returncode != 0
+        assert result.exit_code != 0
         assert "No pcons-build.py found" in result.stderr
         assert "invalid choice" not in result.stderr
 
-    def test_multiple_variables_without_command(self, tmp_path: Path) -> None:
+    def test_multiple_variables_without_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test multiple KEY=value args without a command."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "FOO=1", "BAR=2", "BAZ=3"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode != 0
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("FOO=1", "BAR=2", "BAZ=3")
+        assert result.exit_code != 0
         assert "No pcons-build.py found" in result.stderr
         assert "invalid choice" not in result.stderr
+
+    def test_target_without_a_build_script_goes_straight_to_the_build(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A named target with nothing to generate from belongs to an existing
+        build.ninja, so it is built rather than generated.
+
+        The target reaches the build as `extra`, which is where `_build_targets`
+        reads it from. There is no separate `targets` attribute.
+        """
+        monkeypatch.chdir(tmp_path)
+        ran_default = _capture_command(monkeypatch, "cmd_default")
+        seen = _capture_command(monkeypatch, "cmd_build")
+        assert _invoke("hello").exit_code == 0
+        assert not ran_default
+        assert seen[0].extra == ["hello"]
+
+    def test_a_bare_dash_is_not_a_target(self) -> None:
+        """A first token that looks like an option stays an error.
+
+        Only an unresolvable command *name* falls through to the catch-all. A
+        bare `-` is the one option-shaped token click's group parser hands on
+        rather than rejecting itself, so it is what reaches that guard.
+        """
+        result = _invoke("-")
+        assert result.exit_code == 2
+        assert "No such command '-'." in result.stderr
 
     def test_help_shows_commands(self) -> None:
         """Test that --help shows available commands."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "--help"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
+        result = _invoke("--help")
+        assert result.exit_code == 0
         # Should show available commands
         assert "info" in result.stdout
         assert "init" in result.stdout
@@ -1131,14 +1139,31 @@ class TestCLIArgumentParsing:
         assert "build" in result.stdout
         assert "clean" in result.stdout
 
+    def test_value_options_name_their_value(self) -> None:
+        """Every option that takes a value spells a metavar of its own.
+
+        click falls back to the type name, so an option declared without one
+        reads `--build-dir TEXT`, which says less than the name it replaced.
+        The brackets on --graph and --mermaid are what marks their value as
+        optional, since click renders those exactly like a required one.
+        """
+        result = _invoke("--help")
+        assert result.exit_code == 0
+        assert "-B, --build-dir DIR" in result.stdout
+        assert "-b, --build-script FILE" in result.stdout
+        assert "-j, --jobs N" in result.stdout
+        assert "TEXT" not in result.stdout
+        assert "INTEGER" not in result.stdout
+
+        result = _invoke("generate", "--help")
+        assert result.exit_code == 0
+        assert "--graph [FILE]" in result.stdout
+        assert "--mermaid [FILE]" in result.stdout
+
     def test_subcommand_help(self) -> None:
         """Test that subcommand --help works."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "build", "--help"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
+        result = _invoke("build", "--help")
+        assert result.exit_code == 0
         assert "targets" in result.stdout
         assert "--jobs" in result.stdout
 
@@ -1166,21 +1191,8 @@ class TestCLIArgumentParsing:
         )
         # --list returns 0 without executing; that's enough to confirm
         # the dispatch path reached the runner.
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pcons.cli",
-                "test",
-                "--manifest",
-                str(manifest),
-                "--list",
-                "--no-color",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
+        result = _invoke("test", "--manifest", str(manifest), "--list", "--no-color")
+        assert result.exit_code == 0
         assert "demo" in result.stdout
 
     def test_test_dispatch_not_confused_by_option_value(self, tmp_path: Path) -> None:
@@ -1191,8 +1203,8 @@ class TestCLIArgumentParsing:
         the dispatch point by scanning raw argv for the literal string
         "test" (sys.argv.index("test")) finds the option value first and
         hands the runner a bogus leading "test" positional, which its
-        argparse rejects. Dispatch must instead reuse the same
-        skip-options-and-their-values logic as find_command_in_argv.
+        argparse rejects. The option's value must be consumed as a value
+        before the first remaining token is read as the command.
         """
         import json as _json
 
@@ -1213,26 +1225,21 @@ class TestCLIArgumentParsing:
                 }
             )
         )
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pcons.cli",
-                "--build-dir",
-                "test",
-                "test",
-                "--manifest",
-                str(manifest),
-                "--list",
-                "--no-color",
-            ],
-            capture_output=True,
-            text=True,
+        result = _invoke(
+            "--build-dir",
+            "test",
+            "test",
+            "--manifest",
+            str(manifest),
+            "--list",
+            "--no-color",
         )
-        assert result.returncode == 0, result.stderr
+        assert result.exit_code == 0, result.output
         assert "demo" in result.stdout
 
-    def test_generate_with_variable(self, tmp_path: Path) -> None:
+    def test_generate_with_variable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons generate VAR=value works."""
         # Create a minimal pcons-build.py that just prints the variable
         build_py = tmp_path / "pcons-build.py"
@@ -1242,27 +1249,21 @@ from pcons import get_var
 print(f"TEST_VAR={get_var('TEST_VAR', 'not_set')}")
 """)
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "generate", "TEST_VAR=myvalue"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("generate", "TEST_VAR=myvalue")
         # The script will fail (no ninja generation) but should have received the var
         assert "TEST_VAR=myvalue" in result.stdout
 
     def test_options_before_and_after_command(self) -> None:
         """Test that options work both before and after command."""
         # Options before command
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "-v", "build", "--help"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
+        result = _invoke("-v", "build", "--help")
+        assert result.exit_code == 0
         assert "targets" in result.stdout
 
-    def test_info_targets(self, tmp_path: Path) -> None:
+    def test_info_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Test pcons info --targets lists targets by type."""
         build_py = tmp_path / "pcons-build.py"
         build_py.write_text("""\
@@ -1280,13 +1281,10 @@ project.Alias("all", hello)
 """)
         (tmp_path / "hello.in").write_text("hi")
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.cli", "info", "--targets"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info", "--targets")
+        assert result.exit_code == 0
         assert "Aliases:" in result.stdout
         assert "all" in result.stdout
         assert "Targets:" in result.stdout
@@ -1355,6 +1353,9 @@ generator.generate(project)
 """
         )
 
+        # Subprocess for the whole cycle: this test compiles and links with a
+        # real toolchain, runs real ninja and then executes the binary, so the
+        # thing under test is the tools pcons drives, not pcons' own parsing.
         # Run generate (which includes configuration)
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "generate"],
@@ -1365,7 +1366,7 @@ generator.generate(project)
         assert result.returncode == 0, f"generate failed: {result.stderr}"
         assert (tmp_path / "build" / "build.ninja").exists()
 
-        # Run build
+        # Run build (subprocess: invokes real ninja and a real compiler)
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "build"],
             capture_output=True,
@@ -1377,7 +1378,7 @@ generator.generate(project)
             tmp_path / "build" / "hello.exe"
         ).exists()
 
-        # Run the built program
+        # Run the built program (subprocess: it is a compiled binary, not pcons)
         hello_path = tmp_path / "build" / "hello"
         if not hello_path.exists():
             hello_path = tmp_path / "build" / "hello.exe"
@@ -1386,7 +1387,7 @@ generator.generate(project)
         assert result.returncode == 0
         assert "Hello, pcons!" in result.stdout
 
-        # Run clean
+        # Run clean (subprocess: last step of the same end-to-end sequence)
         result = subprocess.run(
             [sys.executable, "-m", "pcons.cli", "clean", "--all"],
             capture_output=True,
@@ -1685,16 +1686,44 @@ class TestCacheCommand:
         assert cmd_cache(self._args(build_dir, "list")) == 0
         assert capsys.readouterr().out.strip() == ""
 
+    def test_cache_show_names_the_source_dir_and_the_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """`show` is `list` plus where the cache came from.
+
+        Those two lines are the only way to tell a cache written for another
+        source tree from a stale one, which is the failure `run_script` warns
+        about. Nothing else prints either.
+        """
+        build_dir = self._populate(tmp_path, monkeypatch)
+        assert cmd_cache(self._args(build_dir, "show")) == 0
+        out = capsys.readouterr().out
+        assert "HELLO=42" in out
+        assert f"# source_dir: {tmp_path}" in out
+        assert "# cache file:" in out
+
     def test_cache_missing_reports_cleanly(self, tmp_path: Path, capsys) -> None:
         assert cmd_cache(self._args(tmp_path / "nope", "list")) == 0
         assert "No cache" in capsys.readouterr().out
 
+    def test_action_and_build_dir_reach_the_command(self, tmp_path: Path) -> None:
+        """Every test above calls cmd_cache directly, so nothing else checks
+        that the CLI hands it the positional action and the build directory."""
+        from pcons.core.cache import CACHE_FILE
+
+        result = _invoke("-B", str(tmp_path), "cache", "path")
+        assert result.exit_code == 0
+        assert result.stdout.strip() == str(tmp_path / CACHE_FILE)
+
 
 class TestCacheCLI:
-    """End-to-end CLI coverage: real argparse + subprocess, not run_script directly.
+    """The cache outlives the process that wrote it.
 
-    Exercises the wiring the in-process tests bypass: KEY=value parsing, the
-    `cache` subcommand, and the --fresh flag through an actual `pcons` invocation.
+    Every other cache test runs one `pcons` in this interpreter, where the
+    project registry and the vars cache are module state that a second
+    in-process run inherits. These assert that a value configured by one
+    invocation is read back by the *next* one, which only separate processes
+    can show.
     """
 
     def _script(self, tmp_path: Path) -> None:
@@ -1706,6 +1735,9 @@ class TestCacheCLI:
         )
 
     def _run(self, tmp_path: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        # Subprocess: a fresh interpreter per run is the point, see the class
+        # docstring. In-process these would share the caches they are meant to
+        # prove were persisted to disk and re-read.
         return subprocess.run(
             [sys.executable, "-m", "pcons.cli", *args],
             capture_output=True,
@@ -1738,88 +1770,121 @@ class TestCacheCLI:
 
 
 class TestGlobalOptionsBeforeTheCommand:
-    """Options accepted by both parsers must survive the subcommand.
+    """An option spelled before the subcommand must survive it.
 
-    argparse applies a subparser's defaults on top of what the top-level
-    parser already parsed, so `pcons -B out generate` used to fall back to
-    `build/` without a word.
+    argparse applied a subparser's defaults on top of what the top-level
+    parser had already stored, so `pcons -B out generate` used to fall back
+    to `build/` without a word.
     """
 
-    def test_build_dir_before_the_command(self) -> None:
-        args = create_full_parser().parse_args(["-B", "out", "generate"])
-        assert args.build_dir == "out"
+    def test_build_dir_before_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-B", "out", "generate").exit_code == 0
+        assert seen[0].build_dir == "out"
 
-    def test_build_dir_after_the_command_still_wins(self) -> None:
-        args = create_full_parser().parse_args(["-B", "out", "generate", "-B", "late"])
-        assert args.build_dir == "late"
+    def test_build_dir_after_the_command_still_wins(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-B", "out", "generate", "-B", "late").exit_code == 0
+        assert seen[0].build_dir == "late"
 
     def test_build_dir_defaults_when_given_nowhere(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
-        args = create_full_parser().parse_args(["generate"])
-        assert args.build_dir == "build"
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("generate").exit_code == 0
+        assert seen[0].build_dir == "build"
 
-    def test_verbose_before_the_command(self) -> None:
-        args = create_full_parser().parse_args(["-v", "generate"])
-        assert args.verbose is True
+    def test_build_dir_from_the_environment_loses_to_the_command_line(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The subcommand's own value comes from the environment, not the
+        command line, so it must not beat a -B spelled before the command."""
+        monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-B", "out", "generate").exit_code == 0
+        assert seen[0].build_dir == "out"
 
-    def test_variant_before_the_command(self) -> None:
-        args = create_full_parser().parse_args(["--variant", "release", "build"])
-        assert args.variant == "release"
+    def test_verbose_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-v", "generate").exit_code == 0
+        assert seen[0].verbose is True
 
-    def test_command_only_options_are_unaffected(self) -> None:
-        args = create_full_parser().parse_args(["clean", "--all"])
-        assert args.all is True
-        assert create_full_parser().parse_args(["clean"]).all is False
+    def test_variant_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        seen = _capture_command(monkeypatch, "cmd_build")
+        assert _invoke("--variant", "release", "build").exit_code == 0
+        assert seen[0].variant == "release"
+
+    def test_command_only_options_are_unaffected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "cmd_clean")
+        assert _invoke("clean", "--all").exit_code == 0
+        assert seen[0].all is True
+        assert _invoke("clean").exit_code == 0
+        assert seen[1].all is False
 
 
 class TestCommandDetection:
-    """Finding the subcommand means stepping over every option value."""
+    """The subcommand must be found whatever precedes it.
 
-    def test_generator_before_the_command(self) -> None:
-        # -G was missing from the scanner's table, so `make` read as the first
-        # positional, `generate` became a build target, and pcons generated and
-        # then asked the build tool for a target named "generate".
-        assert find_command_in_argv(["-G", "make", "generate"]) == "generate"
-        assert find_command_in_argv(["--generator", "make", "generate"]) == "generate"
+    Locating it used to mean scanning argv against a hand-written table of
+    every value-taking option in this CLI and in the test runner, so an
+    option missing from the table turned the next token into the command.
+    click parses against each command's own declarations, so there is no
+    table left to keep complete.
+    """
 
-    def test_option_value_that_names_a_command(self) -> None:
-        assert find_command_in_argv(["-G", "make", "-B", "test", "build"]) == "build"
+    def test_generator_before_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # -G was missing from that table, so `make` read as the first
+        # positional, `generate` became a build target, and pcons generated
+        # and then asked the build tool for a target named "generate".
+        ran_default = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-G", "make", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0].command == "generate"
+        assert seen[0].generator == ["make"]
 
-    def test_every_value_taking_option_is_known_to_the_scanner(self) -> None:
-        """OPTIONS_WITH_VALUE must cover both parsers, or detection misreads argv.
+    def test_long_generator_before_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("--generator", "make", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0].command == "generate"
 
-        The scanner runs before argparse, so it cannot ask a parser what an
-        option does. Adding a value-taking option anywhere and forgetting this
-        table silently turns the next token into the subcommand.
-        """
-        from pcons.test_runner import build_parser as build_test_runner_parser
-
-        parser = create_full_parser()
-        parsers = [parser, build_test_runner_parser()]
-        for action in parser._actions:
-            if isinstance(action, argparse._SubParsersAction):
-                parsers.extend(action.choices.values())
-
-        taking_a_value = {
-            option
-            for p in parsers
-            for action in p._actions
-            if action.option_strings and action.nargs != 0
-            for option in action.option_strings
-        }
-        assert taking_a_value <= OPTIONS_WITH_VALUE
-
-    def test_every_subcommand_is_detectable(self) -> None:
-        parser = create_full_parser()
-        subparsers = next(
-            a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
-        )
-        assert set(subparsers.choices) == VALID_COMMANDS
+    def test_option_value_that_names_a_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "cmd_build")
+        assert _invoke("-G", "make", "-B", "test", "build").exit_code == 0
+        assert seen[0].command == "build"
+        assert seen[0].build_dir == "test"
 
 
-class TestBuildDirArgs:
+class TestDirectoryOption:
+    """-C DIR chdirs before anything else, on either side of the command."""
+
+    def test_missing_directory_before_the_command(self, tmp_path: Path) -> None:
+        result = _invoke("-C", str(tmp_path / "nope"), "generate")
+        assert result.exit_code == 1
+        assert "error: -C" in result.output
+
+    def test_missing_directory_after_the_command(self, tmp_path: Path) -> None:
+        result = _invoke("generate", "-C", str(tmp_path / "nope"))
+        assert result.exit_code == 1
+        assert "error: -C" in result.output
+
+
+class TestBuildDirForwardedToTheRunner:
     """`pcons test` owns its parser, so the CLI hands it the build dir."""
 
     @pytest.mark.parametrize(
@@ -1832,14 +1897,28 @@ class TestBuildDirArgs:
             ["-v", "-B", "out"],
         ],
     )
-    def test_every_spelling_is_forwarded(self, argv: list[str]) -> None:
-        assert _build_dir_args(argv) == ["-B", "out"]
+    def test_every_spelling_is_forwarded(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke(*argv, "test").exit_code == 0
+        assert seen == [["-B", "out"]]
 
-    def test_nothing_to_forward(self) -> None:
-        assert _build_dir_args(["-v", "--no-color"]) == []
+    def test_nothing_to_forward(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With no -B the runner searches upward for the manifest itself, so
+        forwarding a default build directory would silently stop the search."""
+        monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke("test", "--list").exit_code == 0
+        assert seen == [["--list"]]
 
-    def test_trailing_option_without_a_value(self) -> None:
-        assert _build_dir_args(["-B"]) == []
+    def test_build_dir_without_a_value_is_a_usage_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A dangling -B is rejected, not tolerated: nothing runs behind it."""
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke("-B").exit_code == 2
+        assert seen == []
 
     def test_main_hands_the_runner_the_build_dir(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1854,3 +1933,927 @@ class TestBuildDirArgs:
         monkeypatch.setattr(sys, "argv", ["pcons", "-B", "out", "test", "-j", "1"])
         assert cli_main() == 0
         assert seen == [["-B", "out", "-j", "1"]]
+
+
+class TestDoubleDashEscape:
+    """`--` marks the rest of argv as targets, dashes and all.
+
+    click's group parser consumes the `--` while reading the group's own
+    options, so without help the token after it is parsed as an option again
+    and `pcons -- -foo` fails with "No such option: -f".
+
+    A command name is not rescued: it cannot start with a dash, so the escape
+    never reaches one.
+    """
+
+    @pytest.mark.parametrize(
+        ("argv", "extra"),
+        [
+            (["--", "-foo"], ["-foo"]),
+            (["--", "-j"], ["-j"]),
+            (["--", "--verbose"], ["--verbose"]),
+            (["--", "-foo", "-bar"], ["-foo", "-bar"]),
+            (["--", "--"], ["--"]),
+            (["--", "-B", "out"], ["-B", "out"]),
+            (["--", "-foo", "generate"], ["-foo", "generate"]),
+            (["--", "CC=clang"], ["CC=clang"]),
+            (["hello", "--", "-foo"], ["hello", "-foo"]),
+            (["--"], []),
+        ],
+    )
+    def test_targets_survive_the_escape(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str], extra: list[str]
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_run_default")
+        assert _invoke(*argv).exit_code == 0
+        assert seen[0].extra == extra
+
+    def test_escaped_options_are_not_applied(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_run_default")
+        assert _invoke("--", "--verbose", "-B", "out").exit_code == 0
+        assert seen[0].verbose is False
+        assert seen[0].build_dir == "build"
+
+    def test_a_command_name_is_still_a_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-B", "out", "--", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0].command == "generate"
+        assert seen[0].build_dir == "out"
+
+    def test_a_typo_without_the_escape_is_still_an_error(self) -> None:
+        assert _invoke("hello", "--nope").exit_code == 2
+        assert _invoke("--nope").exit_code == 2
+
+
+class TestCatchAllNameIsNotReserved:
+    """The catch-all command's name is internal, so a target may use it.
+
+    click resolves a registered command name before any fallback runs, so the
+    hidden command's own name would otherwise be swallowed here rather than
+    built, and silently: it is not a command a user can be told about.
+    """
+
+    @pytest.mark.parametrize(
+        ("argv", "extra"),
+        [
+            (["_default"], ["_default"]),
+            (["_default", "hello"], ["_default", "hello"]),
+            (["_default", "CC=clang"], ["_default", "CC=clang"]),
+            (["--", "_default"], ["_default"]),
+            (["-B", "out", "_default"], ["_default"]),
+        ],
+    )
+    def test_it_is_an_ordinary_target(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str], extra: list[str]
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_run_default")
+        assert _invoke(*argv).exit_code == 0
+        assert seen[0].extra == extra
+
+    def test_a_real_command_still_resolves(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the catch-all's own name is refused, not every name."""
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("generate").exit_code == 0
+        assert seen[0].command == "generate"
+
+
+class TestDoubleDashBeforeTheRunner:
+    """`pcons test` consumes one `--` and passes any further one on.
+
+    Everything after `test` reaches the test runner untouched, so the only job
+    left for the separator is to shield a token the CLI would otherwise claim
+    as its own, which means `-C` and `--help`. It does that job and is then
+    spent, the way a wrapper conventionally treats it. A runner argument that
+    has to be a literal `--` is written as a second one.
+
+    The old parser forwarded the separator instead, so `pcons test -- --list`
+    reached the runner as a positional it has no use for and errored.
+    """
+
+    @pytest.mark.parametrize(
+        ("argv", "forwarded"),
+        [
+            (["test", "-x"], ["-x"]),
+            (["test", "--", "-x"], ["-x"]),
+            (["test", "--", "--list"], ["--list"]),
+            (["test", "--", "-C", "sub"], ["-C", "sub"]),
+            (["test", "--", "--", "-x"], ["--", "-x"]),
+            (["test", "--list", "--", "-x"], ["--list", "-x"]),
+            (["-B", "out", "test", "--", "-x"], ["-B", "out", "-x"]),
+        ],
+    )
+    def test_one_separator_is_consumed(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str], forwarded: list[str]
+    ) -> None:
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke(*argv).exit_code == 0
+        assert seen == [forwarded]
+
+    def test_the_separator_is_what_makes_dash_c_reach_the_runner(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unescaped, -C is the CLI's own option and the runner never sees it."""
+        monkeypatch.chdir(tmp_path)
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke("test", "-C", str(tmp_path)).exit_code == 0
+        assert seen == [[]]
+
+
+class TestCatchAllUsageLine:
+    """The catch-all command is hidden, so it reports the group's path.
+
+    click builds a command path as "<parent> <name>" and only lstrips it, so
+    the nameless catch-all used to render "pcons  " with two spaces on the
+    commonest error path there is, a target plus a mistyped option.
+    """
+
+    def test_error_usage_names_the_program_once(self) -> None:
+        result = _invoke("hello", "--nope")
+        assert result.exit_code == 2
+        assert "Usage: cli [OPTIONS] [EXTRA]...\n" in result.stderr
+        assert "Try 'cli --help' for help.\n" in result.stderr
+        assert "cli  " not in result.stderr
+
+    def test_help_usage_names_the_program_once(self) -> None:
+        result = _invoke("hello", "--help")
+        assert result.exit_code == 0
+        assert result.stdout.startswith("Usage: cli [OPTIONS] [EXTRA]...\n")
+
+
+class TestCommandInvokedWithoutTheGroup:
+    """A command object invoked on its own still runs.
+
+    MergingCommand reads the values spelled before the command name off the
+    parent context. Invoking the command object directly, which a test can do
+    and the CLI never does, leaves it without a parent. Nothing else exercises
+    the guard that allows it.
+    """
+
+    def test_a_merging_command_has_no_parent_to_merge_from(
+        self, tmp_path: Path
+    ) -> None:
+        from pcons.core.cache import CACHE_FILE
+
+        result = CliRunner().invoke(
+            cli_cache, ["-B", str(tmp_path), "path"], catch_exceptions=False
+        )
+        assert result.exit_code == 0
+        assert result.stdout.strip() == str(tmp_path / CACHE_FILE)
+
+    def test_the_catch_all_reports_its_own_path_without_a_group(self) -> None:
+        """It borrows the group's command path, and there is none to borrow."""
+        result = CliRunner().invoke(cli_default, ["--help"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert result.stdout.startswith("Usage: _default [OPTIONS] [EXTRA]...\n")
+
+
+class TestProductionEntryPoint:
+    """main() is what the console script calls, and CliRunner cannot reach it.
+
+    Everything else here runs under CliRunner, which drives
+    cli.main(standalone_mode=True). main() passes standalone_mode=False and
+    handles the outcome itself: delete e.show() from it and every usage error
+    goes silent in production with the whole suite still green.
+    """
+
+    def test_a_usage_error_is_reported_and_exits_2(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, _out, err = _main(capsys, "--bogus")
+        assert code == 2
+        assert "No such option '--bogus'" in err
+
+    def test_the_error_names_the_program_once(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """prog_name is only visible here: CliRunner calls the program 'cli'.
+
+        An error is what pins it. `pcons --version` cannot: click's version
+        option memoizes the program name in its own closure the first time it
+        runs, so within one interpreter it reports whichever name got there
+        first.
+        """
+        code, _out, err = _main(capsys, "hello", "--nope")
+        assert code == 2
+        assert "Usage: pcons [OPTIONS] [EXTRA]...\n" in err
+        assert "Try 'pcons --help' for help.\n" in err
+        assert "pcons  " not in err
+
+    def test_a_command_result_becomes_the_exit_code(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """standalone_mode=False returns what the command returned, so main()
+        is the only thing turning it into a process exit code."""
+        monkeypatch.chdir(tmp_path)
+        code, _out, err = _main(capsys)
+        assert code == 1
+        assert "No pcons-build.py found" in err
+
+    def test_an_interrupt_exits_130_without_a_traceback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def interrupted(args: argparse.Namespace) -> int:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("pcons.cli._cmd_generate_wrapper", interrupted)
+        code, out, err = _main(capsys, "generate")
+        assert code == 130
+        assert "Traceback" not in out + err
+
+
+def test_windows_argv_expansion_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """click expands ~, $VAR, %VAR% and globs in argv on Windows unless told not to.
+
+    This asserts the keyword rather than the behaviour: CliRunner always passes
+    an explicit argv, so the expansion is unreachable from a test, and it is
+    Windows-only besides. Asserting the keyword is what fails on any platform
+    when someone deletes it.
+    """
+    seen: dict[str, object] = {}
+
+    def fake_main(**kw: object) -> int:
+        seen.update(kw)
+        return 0
+
+    monkeypatch.setattr("pcons.cli.cli.main", fake_main)
+    assert cli_main() == 0
+    assert seen["windows_expand_args"] is False
+
+
+def _at(path: Path, when: float) -> Path:
+    """Stamp *path* with an explicit mtime, so no test races the clock."""
+    os.utime(path, (when, when))
+    return path
+
+
+class TestNeedsGeneration:
+    """Whether an existing build directory is out of date.
+
+    This decides, with nothing printed either way, whether `pcons build`
+    reruns the build script first. Break it in one direction and an edit to
+    pcons-build.py never reaches the build; break it in the other and every
+    build regenerates.
+    """
+
+    def test_no_build_files_at_all(self, tmp_path: Path) -> None:
+        assert _needs_generation(tmp_path) is True
+
+    def test_a_script_newer_than_the_build_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "build.ninja").write_text("")
+        _at(tmp_path / "build.ninja", 1000)
+        (tmp_path / "pcons-build.py").write_text("")
+        _at(tmp_path / "pcons-build.py", 2000)
+        assert _needs_generation(tmp_path) is True
+
+    def test_a_script_older_than_the_build_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "build.ninja").write_text("")
+        _at(tmp_path / "build.ninja", 2000)
+        (tmp_path / "pcons-build.py").write_text("")
+        _at(tmp_path / "pcons-build.py", 1000)
+        assert _needs_generation(tmp_path) is False
+
+    def test_a_makefile_is_a_build_file_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The make generator writes no build.ninja, so a build directory it
+        made must not read as empty and regenerate on every build."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "Makefile").write_text("")
+        _at(tmp_path / "Makefile", 2000)
+        (tmp_path / "pcons-build.py").write_text("")
+        _at(tmp_path / "pcons-build.py", 1000)
+        assert _needs_generation(tmp_path) is False
+
+    def test_an_xcode_project_is_a_build_file_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Xcode's output is a directory, not a file, so it needs its own check."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "demo.xcodeproj").mkdir()
+        _at(tmp_path / "demo.xcodeproj", 2000)
+        (tmp_path / "pcons-build.py").write_text("")
+        _at(tmp_path / "pcons-build.py", 1000)
+        assert _needs_generation(tmp_path) is False
+
+    def test_a_named_script_that_is_missing(self, tmp_path: Path) -> None:
+        """-b names a script that is not there: regenerate, and let generate
+        report it. Answering False would build stale files and say nothing."""
+        (tmp_path / "build.ninja").write_text("")
+        missing = str(tmp_path / "nope.py")
+        assert _needs_generation(tmp_path, build_script=missing) is True
+
+    def test_no_script_anywhere_leaves_the_build_files_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A build directory can be used without its source tree; there is
+        nothing to regenerate from, so the existing files stand."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "build.ninja").write_text("")
+        assert _needs_generation(tmp_path) is False
+
+
+class TestFindNinjaRunner:
+    """Which program a build actually runs.
+
+    Every failure here is silent: --ninja or $NINJA quietly ignored and the
+    default used instead, or the uvx fallback lost so pcons declares ninja
+    missing on a machine that has uv.
+    """
+
+    @staticmethod
+    def _which(monkeypatch: pytest.MonkeyPatch, table: dict[str, str]) -> None:
+        monkeypatch.setattr(shutil, "which", lambda name: table.get(name))
+
+    def test_an_override_is_resolved_on_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("NINJA", raising=False)
+        self._which(monkeypatch, {"n2": "/opt/n2", "ninja": "/usr/bin/ninja"})
+        assert _find_ninja("n2") == ["/opt/n2"]
+
+    def test_an_override_may_be_an_absolute_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A runner outside PATH is named by path, and which() will not find it."""
+        monkeypatch.delenv("NINJA", raising=False)
+        self._which(monkeypatch, {})
+        runner = str(tmp_path / "n2")
+        assert _find_ninja(runner) == [runner]
+
+    def test_an_unresolvable_override_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Not a silent fall back to ninja: the user asked for another runner."""
+        monkeypatch.delenv("NINJA", raising=False)
+        self._which(monkeypatch, {"ninja": "/usr/bin/ninja"})
+        assert _find_ninja("n2") is None
+
+    def test_the_ninja_env_var_names_the_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NINJA", "n2")
+        self._which(monkeypatch, {"n2": "/opt/n2", "ninja": "/usr/bin/ninja"})
+        assert _find_ninja() == ["/opt/n2"]
+
+    def test_an_explicit_override_beats_the_env_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("NINJA", "n2")
+        self._which(monkeypatch, {"n2": "/opt/n2", "samu": "/opt/samu"})
+        assert _find_ninja("samu") == ["/opt/samu"]
+
+    def test_ninja_on_path_is_the_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("NINJA", raising=False)
+        self._which(monkeypatch, {"ninja": "/usr/bin/ninja", "uvx": "/usr/bin/uvx"})
+        assert _find_ninja() == ["/usr/bin/ninja"]
+
+    def test_uvx_is_the_fallback_when_ninja_is_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("NINJA", raising=False)
+        self._which(monkeypatch, {"uvx": "/usr/bin/uvx"})
+        assert _find_ninja() == ["/usr/bin/uvx", "ninja"]
+
+    def test_nothing_to_run(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NINJA", raising=False)
+        self._which(monkeypatch, {})
+        assert _find_ninja() is None
+
+
+class TestBuildToolCommandLines:
+    """What pcons hands the build tool.
+
+    All argv assembly. A dropped -j or a dropped target still exits 0, so
+    the visible failure is a build that quietly did the wrong amount of
+    work rather than an error.
+    """
+
+    @staticmethod
+    def _record(
+        monkeypatch: pytest.MonkeyPatch, returncode: int = 0
+    ) -> list[list[str]]:
+        seen: list[list[str]] = []
+
+        def fake_run(cmd: list[str], *a: object, **kw: object) -> object:
+            seen.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, returncode)
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        return seen
+
+    @staticmethod
+    def _only(monkeypatch: pytest.MonkeyPatch, name: str, path: str) -> None:
+        monkeypatch.delenv("NINJA", raising=False)
+        monkeypatch.setattr(shutil, "which", lambda n: path if n == name else None)
+
+    def test_ninja_gets_the_build_dir_jobs_verbose_and_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "build.ninja").write_text("")
+        self._only(monkeypatch, "ninja", "/usr/bin/ninja")
+        seen = self._record(monkeypatch, returncode=7)
+        assert run_ninja(tmp_path, targets=["a", "b"], jobs=3, verbose=True) == 7
+        assert seen == [
+            ["/usr/bin/ninja", "-C", str(tmp_path), "-j", "3", "-v", "a", "b"]
+        ]
+
+    def test_ninja_gets_only_the_build_dir_by_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "build.ninja").write_text("")
+        self._only(monkeypatch, "ninja", "/usr/bin/ninja")
+        seen = self._record(monkeypatch)
+        assert run_ninja(tmp_path) == 0
+        assert seen == [["/usr/bin/ninja", "-C", str(tmp_path)]]
+
+    def test_ninja_needs_a_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        assert run_ninja(tmp_path) == 1
+        assert seen == []
+
+    def test_a_missing_ninja_is_reported_not_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "build.ninja").write_text("")
+        self._only(monkeypatch, "nothing", "")
+        seen = self._record(monkeypatch)
+        assert run_ninja(tmp_path) == 1
+        assert seen == []
+
+    def test_make_gets_the_build_dir_jobs_and_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "Makefile").write_text("")
+        self._only(monkeypatch, "make", "/usr/bin/make")
+        seen = self._record(monkeypatch, returncode=2)
+        assert run_make(tmp_path, targets=["a"], jobs=4) == 2
+        assert seen == [["/usr/bin/make", "-C", str(tmp_path), "-j", "4", "a"]]
+
+    def test_make_needs_a_makefile(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        assert run_make(tmp_path) == 1
+        assert seen == []
+
+    def test_a_missing_make_is_reported_not_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "Makefile").write_text("")
+        self._only(monkeypatch, "nothing", "")
+        seen = self._record(monkeypatch)
+        assert run_make(tmp_path) == 1
+        assert seen == []
+
+    def test_xcodebuild_maps_targets_jobs_and_the_variant(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Xcode spells all of these differently from ninja, and the variant
+        becomes a configuration name rather than being passed through."""
+        (tmp_path / "demo.xcodeproj").mkdir()
+        self._only(monkeypatch, "xcodebuild", "/usr/bin/xcodebuild")
+        seen = self._record(monkeypatch, returncode=3)
+        code = run_xcodebuild(
+            tmp_path, targets=["a", "b"], jobs=2, configuration="debug"
+        )
+        assert code == 3
+        assert seen == [
+            [
+                "/usr/bin/xcodebuild",
+                "-project",
+                str(tmp_path / "demo.xcodeproj"),
+                "-configuration",
+                "Debug",
+                "-jobs",
+                "2",
+                "-target",
+                "a",
+                "-target",
+                "b",
+                "-quiet",
+            ]
+        ]
+
+    def test_xcodebuild_defaults_to_release_and_speaks_up_when_verbose(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """-quiet is the default, so verbose is spelled by its absence."""
+        (tmp_path / "demo.xcodeproj").mkdir()
+        self._only(monkeypatch, "xcodebuild", "/usr/bin/xcodebuild")
+        seen = self._record(monkeypatch)
+        assert run_xcodebuild(tmp_path, verbose=True) == 0
+        assert seen == [
+            [
+                "/usr/bin/xcodebuild",
+                "-project",
+                str(tmp_path / "demo.xcodeproj"),
+                "-configuration",
+                "Release",
+            ]
+        ]
+
+    def test_xcodebuild_needs_a_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        assert run_xcodebuild(tmp_path) == 1
+        assert seen == []
+
+    def test_a_missing_xcodebuild_is_reported_not_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "demo.xcodeproj").mkdir()
+        self._only(monkeypatch, "nothing", "")
+        seen = self._record(monkeypatch)
+        assert run_xcodebuild(tmp_path) == 1
+        assert seen == []
+
+
+class TestCleanRunsTheBuildTool:
+    """`pcons clean` without --all delegates to the runner.
+
+    The three tests below are the whole non---all path: nothing else runs
+    it, because every other clean test either passes --all or stops at the
+    missing build.ninja.
+    """
+
+    @staticmethod
+    def _args(build_dir: Path, runner: str | None = None) -> argparse.Namespace:
+        return argparse.Namespace(
+            build_dir=str(build_dir),
+            verbose=False,
+            debug=None,
+            all=False,
+            ninja=runner,
+        )
+
+    def test_clean_asks_ninja_to_clean(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "build.ninja").write_text("")
+        TestBuildToolCommandLines._only(monkeypatch, "ninja", "/usr/bin/ninja")
+        seen = TestBuildToolCommandLines._record(monkeypatch, returncode=5)
+        assert cmd_clean(self._args(tmp_path)) == 5
+        assert seen == [["/usr/bin/ninja", "-C", str(tmp_path), "-t", "clean"]]
+
+    def test_clean_refuses_n2_rather_than_running_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """n2 has no `-t clean`. Running it anyway would fail with n2's own
+        message, which says nothing about `pcons clean --all` being the way out."""
+        (tmp_path / "build.ninja").write_text("")
+        TestBuildToolCommandLines._only(monkeypatch, "n2", "/opt/n2")
+        seen = TestBuildToolCommandLines._record(monkeypatch)
+        assert cmd_clean(self._args(tmp_path, runner="n2")) == 1
+        assert seen == []
+
+    def test_clean_without_a_runner_is_an_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "build.ninja").write_text("")
+        TestBuildToolCommandLines._only(monkeypatch, "nothing", "")
+        seen = TestBuildToolCommandLines._record(monkeypatch)
+        assert cmd_clean(self._args(tmp_path)) == 1
+        assert seen == []
+
+    def test_clean_all_succeeds_with_nothing_to_remove(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons clean --all` runs unconditionally in CI scripts, so a tree
+        that was never built has to be a success rather than an error."""
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert _invoke("clean", "--all").exit_code == 0
+
+
+class TestGraphOptionsReachTheBuildScript:
+    """--graph and --mermaid are delivered to the script as environment.
+
+    Two lines in cmd_generate are the only link between the click option and
+    PCONS_GRAPH. Drop either and `pcons generate --graph g.dot` still exits
+    0, having written no graph and said nothing.
+    """
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+        seen: list[dict[str, object]] = []
+
+        def fake_run_script(
+            script: Path, build_dir: Path, **kw: object
+        ) -> tuple[int, list[object]]:
+            seen.append(kw)
+            return 0, []
+
+        monkeypatch.setattr("pcons.cli.run_script", fake_run_script)
+        return seen
+
+    @staticmethod
+    def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text("")
+
+    def test_named_files_become_the_two_env_vars(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        result = _invoke("generate", "--graph", "g.dot", "--mermaid", "m.mmd")
+        assert result.exit_code == 0
+        assert seen[0]["extra_env"] == {
+            "PCONS_GRAPH": "g.dot",
+            "PCONS_MERMAID": "m.mmd",
+        }
+
+    def test_a_bare_flag_asks_for_stdout(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--graph takes an optional value; bare, it means "-"."""
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        assert _invoke("generate", "--graph").exit_code == 0
+        assert seen[0]["extra_env"] == {"PCONS_GRAPH": "-"}
+
+    def test_neither_option_sends_no_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        assert _invoke("generate").exit_code == 0
+        assert seen[0]["extra_env"] is None
+
+
+class TestModulesSearchPath:
+    """--modules-path carries several directories, separated the way PATH is.
+
+    Split it wrong and the second directory's modules are silently absent,
+    so a toolchain the user wrote never registers and the build falls back
+    to a built-in one.
+    """
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+        seen: list[object] = []
+
+        def fake_load(extra_paths: object = None) -> dict[str, object]:
+            seen.append(extra_paths)
+            return {}
+
+        monkeypatch.setattr("pcons.modules.load_modules", fake_load)
+        return seen
+
+    def test_the_search_path_is_split_on_the_path_separator(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        spec = os.pathsep.join(["one", "two"])
+        load_user_modules(argparse.Namespace(modules_path=spec))
+        assert seen == [["one", "two"]]
+
+    def test_no_search_path_loads_the_defaults(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        load_user_modules(argparse.Namespace(modules_path=None))
+        assert seen == [None]
+
+
+class TestBuildDirectoryChosenByTheScript:
+    """A build script may pick a build directory other than the requested one.
+
+    Both build entry points re-read it off the resolved Project afterwards.
+    Drop that and the build runs in the empty directory that was asked for,
+    reporting no build files immediately after a successful generate.
+    """
+
+    def test_the_default_command_builds_where_the_script_put_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
+        monkeypatch.setattr(
+            "pcons.cli.cmd_generate",
+            lambda args: (0, SimpleNamespace(build_dir=elsewhere)),
+        )
+        seen = _capture_command(monkeypatch, "cmd_build")
+        args = argparse.Namespace(build_dir=str(tmp_path / "asked"), watch=False)
+        assert cmd_default(args) == 0
+        assert seen[0].build_dir == str(elsewhere)
+
+    def test_a_regenerated_build_runs_where_the_script_put_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "build.ninja").write_text("")
+        (tmp_path / "pcons-build.py").write_text("")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
+        monkeypatch.setattr(
+            "pcons.cli.cmd_generate",
+            lambda args: (0, SimpleNamespace(build_dir=elsewhere)),
+        )
+        seen: list[Path] = []
+
+        def fake_run_ninja(build_dir: Path, **kw: object) -> int:
+            seen.append(build_dir)
+            return 0
+
+        monkeypatch.setattr("pcons.cli.run_ninja", fake_run_ninja)
+        args = argparse.Namespace(
+            build_dir=str(tmp_path / "asked"),
+            verbose=False,
+            debug=None,
+            watch=False,
+            extra=[],
+        )
+        assert cmd_build(args) == 0
+        assert seen == [elsewhere]
+
+    def test_watch_generates_through_the_build_and_not_beside_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A watch loop regenerates only when the build files are stale, which
+        is cmd_build's job. A separate generate here would run the script twice
+        on the first pass and once more on every later one."""
+
+        def refuse(args: argparse.Namespace) -> tuple[int, object]:
+            raise AssertionError("generate ran beside the build")
+
+        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
+        monkeypatch.setattr("pcons.cli.cmd_generate", refuse)
+        seen = _capture_command(monkeypatch, "cmd_build")
+        args = argparse.Namespace(build_dir=str(tmp_path), watch=True)
+        assert cmd_default(args) == 0
+        assert len(seen) == 1
+
+
+class TestXcodeConfiguration:
+    """Xcode picks its configuration at build time, unlike ninja and make,
+    where the variant is baked into the generated files.
+
+    So a bare `pcons build` has to recover it from the cache. Without that
+    lookup, building after `pcons --variant debug generate` quietly produces
+    Release.
+    """
+
+    def test_a_bare_build_keeps_the_variant_it_was_generated_with(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        (build_dir / "demo.xcodeproj").mkdir(parents=True)
+        cache = BuildCache(build_dir)
+        cache.set("variant", "debug")
+        cache.save()
+
+        seen: list[str | None] = []
+
+        def fake_run_xcodebuild(
+            build_dir: Path, configuration: str | None = None, **kw: object
+        ) -> int:
+            seen.append(configuration)
+            return 0
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("pcons.cli.run_xcodebuild", fake_run_xcodebuild)
+        args = argparse.Namespace(
+            build_dir=str(build_dir),
+            verbose=False,
+            debug=None,
+            watch=False,
+            extra=[],
+        )
+        assert cmd_build(args) == 0
+        assert seen == ["debug"]
+
+    def test_an_explicit_variant_wins_over_the_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        (build_dir / "demo.xcodeproj").mkdir(parents=True)
+        cache = BuildCache(build_dir)
+        cache.set("variant", "debug")
+        cache.save()
+
+        seen: list[str | None] = []
+
+        def fake_run_xcodebuild(
+            build_dir: Path, configuration: str | None = None, **kw: object
+        ) -> int:
+            seen.append(configuration)
+            return 0
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("pcons.cli.run_xcodebuild", fake_run_xcodebuild)
+        args = argparse.Namespace(
+            build_dir=str(build_dir),
+            verbose=False,
+            debug=None,
+            watch=False,
+            extra=[],
+            variant="release",
+        )
+        assert cmd_build(args) == 0
+        assert seen == ["release"]
+
+
+class TestInheritedVariables:
+    """A nested pcons run inherits PCONS_VARS as a JSON object.
+
+    It is tolerated rather than trusted: the value comes from an environment
+    pcons does not own, and a malformed one must not take down every run in
+    the shell that exported it.
+    """
+
+    def test_a_malformed_blob_is_ignored(self) -> None:
+        assert _parse_pcons_vars("{not json") == {}
+
+    def test_a_json_value_that_is_not_an_object_is_ignored(self) -> None:
+        assert _parse_pcons_vars('["A"]') == {}
+
+    def test_nothing_inherited(self) -> None:
+        assert _parse_pcons_vars(None) == {}
+
+    def test_an_object_is_read(self) -> None:
+        assert _parse_pcons_vars('{"A": "1"}') == {"A": "1"}
+
+
+class TestNamedBuildScriptErrors:
+    """-b names a script that has to exist.
+
+    Reported by name rather than falling back to the script in the current
+    directory, which would generate or describe a different project than the
+    one asked for.
+    """
+
+    def test_generate_reports_a_missing_named_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("generate", "-b", "nope.py")
+        assert result.exit_code == 1
+        assert "Build script not found: nope.py" in result.stderr
+
+    def test_info_reports_a_missing_named_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "pcons-build.py").write_text('"""Other project."""\n')
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info", "-b", "nope.py")
+        assert result.exit_code == 1
+        assert "Build script not found: nope.py" in result.stderr
+        assert "Other project" not in result.stdout
+
+    def test_info_reports_a_syntax_error_rather_than_raising(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """info parses the script to read its docstring. A half-written one is
+        the normal case for `pcons info`, so it gets a message, not a traceback."""
+        (tmp_path / "pcons-build.py").write_text("def (:\n")
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info")
+        assert result.exit_code == 1
+        assert "Failed to parse" in result.stderr
+
+    def test_info_targets_carries_the_scripts_exit_code_out(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--targets runs the script for real, so a script that bails takes the
+        command with it, code and all. The listing must not print either: a
+        half-run script has half the targets, which reads as the whole set."""
+        (tmp_path / "pcons-build.py").write_text(
+            "import sys\nfrom pcons import Project\nProject('demo')\nsys.exit(3)\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info", "--targets")
+        assert result.exit_code == 3
+        assert "Targets:" not in result.stdout

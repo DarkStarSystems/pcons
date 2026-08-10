@@ -20,7 +20,13 @@ arguments are targets to build, or `KEY=value` build variables.
 pcons                     # generate and build the default targets
 pcons myapp               # build one target
 pcons CC=clang myapp      # set a build variable, then build
+pcons -- -myapp           # build a target whose name starts with a dash
 ```
+
+`--` marks everything after it as a target or a build variable, never an
+option. A bare `-` is not a target unless written that way. A command name is
+not protected by it: `pcons -- build` still runs the `build` command, since no
+command name starts with a dash.
 
 ### `pcons generate`
 
@@ -87,24 +93,45 @@ Run the tests declared by `project.Test()`. This subcommand takes the test
 runner's own options (`-L`, `-R`, `-E`, `--junit` and so on), not the ones
 below; see [Testing](testing.md).
 
+Everything after `test` reaches the runner untouched, apart from `-C DIR`.
+Write `pcons test -- -C DIR` to hand `-C` to the runner instead: the first
+`--` is consumed, and any further one is passed on.
+
 ## Options
 
-Accepted by every command unless noted:
+Every option below may be written before the command or after it. Spelled on
+both sides, the later one wins.
+
+Accepted by every command:
+
+| Option | |
+|---|---|
+| `-C DIR`, `--directory DIR` | Change to *DIR* first, before anything else is parsed |
+
+Accepted by every command except `test`, which hands everything after it to the
+test runner:
 
 | Option | |
 |---|---|
 | `-h`, `--help` | Show help and exit |
-| `--version` | Show the version and exit |
-| `-C DIR`, `--directory DIR` | Change to *DIR* first, before anything else is parsed |
 | `-B DIR`, `--build-dir DIR` | Build directory. Default: `$PCONS_BUILD_DIR`, else `build` |
-| `-b FILE`, `--build-script FILE` | Path to the build script. Default: `pcons-build.py` in the current directory |
 | `-v`, `--verbose` | Verbose output |
 | `--debug SUBSYSTEMS` | Trace named subsystems, comma-separated: `configure`, `resolve`, `generate`, `subst`, `env`, `deps`; or `all`, or `help` to list them |
+| `--modules-path PATHS` | Extra directories to search for pcons add-on modules, separated by `:` (`;` on Windows) |
+
+Accepted by the commands that run the build script, which are `pcons`,
+`generate`, `build` and `info`:
+
+| Option | |
+|---|---|
+| `-b FILE`, `--build-script FILE` | Path to the build script. Default: `pcons-build.py` in the current directory |
 | `--variant NAME` | Build variant, e.g. `debug`, `release` |
 | `-G NAME`, `--generator NAME` | Generator: `ninja` (default), `make`, `xcode`, `metadata`. Repeatable |
 | `--reconfigure` | Re-run configure checks instead of using cached results |
 | `--fresh` | Discard the persisted cache before this run, like `cmake --fresh` |
-| `--modules-path PATHS` | Extra directories to search for pcons add-on modules, separated by `:` (`;` on Windows) |
+
+`--version` prints the version and exits. It belongs to `pcons` itself, not to
+its commands.
 
 ## Build variables
 

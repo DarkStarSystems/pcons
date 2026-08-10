@@ -14,6 +14,23 @@ import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import click
+from click.core import ParameterSource
+
+from pcons import __version__
+from pcons._cli_click import (
+    ROUTED_TO_DEFAULT,
+    DefaultCommand,
+    MergingCommand,
+    PconsGroup,
+    _namespace,
+    build_options,
+    common_options,
+    directory_option,
+    generate_options,
+    jobs_option,
+    watch_option,
+)
 from pcons.core.errors import PconsError
 
 if TYPE_CHECKING:
@@ -1340,35 +1357,6 @@ env.apply_preset("warnings")
     return 0
 
 
-def add_common_args(parser: argparse.ArgumentParser) -> None:
-    """Add common arguments to a parser.
-
-    Note: -C/--directory is handled before argparse in _apply_directory_arg().
-    """
-    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-    from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
-
-    subsystem_names = ",".join(SUBSYSTEM_DESCRIPTIONS.keys()) + ",all,help"
-    parser.add_argument(
-        "--debug",
-        type=str,
-        metavar="SUBSYSTEMS",
-        help=f"Enable debug tracing for subsystems (comma-separated): {subsystem_names}",
-    )
-    parser.add_argument(
-        "-B",
-        "--build-dir",
-        default=os.environ.get("PCONS_BUILD_DIR", "build"),
-        help="Build directory (default: $PCONS_BUILD_DIR, or 'build')",
-    )
-    parser.add_argument(
-        "--modules-path",
-        type=str,
-        metavar="PATHS",
-        help="Additional paths to search for pcons modules (colon/semicolon-separated)",
-    )
-
-
 def load_user_modules(args: argparse.Namespace) -> None:
     """Load user modules from search paths."""
     from pcons import modules
@@ -1381,475 +1369,263 @@ def load_user_modules(args: argparse.Namespace) -> None:
     modules.load_modules(extra_paths)
 
 
-VALID_COMMANDS = {"info", "init", "generate", "build", "clean", "test", "cache"}
+_DESCRIPTION = """\
+A Python-based build system that generates Ninja files.
 
-# Every option that takes a value, across this CLI and the test runner, so
-# _find_command_index() can step over the value instead of reading it as the
-# subcommand. -C/--directory is absent because it is consumed before this runs.
-# Must stay complete: test_every_value_taking_option_is_known_to_the_scanner
-# fails when a new one is added without being listed here.
-OPTIONS_WITH_VALUE = {
-    "-B",
-    "--build-dir",
-    "-b",
-    "--build-script",
-    "--variant",
-    "-G",
-    "--generator",
-    "-j",
-    "--jobs",
-    "--graph",
-    "--mermaid",
-    "--debug",
+\b
+Without a subcommand, generates build files and builds specified
+targets (or default targets if none given):
+  pcons                     Generate and build default targets
+  pcons hello               Generate and build 'hello'
+  pcons CC=clang hello      Set CC=clang, generate and build 'hello'
+"""
+
+_EPILOG = """\
+Use -C DIR to change to DIR before doing anything else.
+
+Run 'pcons <command> --help' for command-specific help.
+
+\b
+GitHub:  https://github.com/DarkStarSystems/pcons
+Docs:    https://pcons.readthedocs.io/
+"""
+
+
+def _run_default(args: argparse.Namespace) -> int:
+    """The no-subcommand path: build the named targets, or generate and build.
+
+    A non-KEY=value argument with no build script to run is a target of an
+    existing build.ninja, not something to generate from.
+    """
+    _variables, remaining = parse_variables(args.extra)
+    if remaining and not find_script("pcons-build.py"):
+        return cmd_build(args)
+    return cmd_default(args)
+
+
+@click.group(
+    cls=PconsGroup,
+    invoke_without_command=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
+    help=_DESCRIPTION,
+    epilog=_EPILOG,
+)
+@click.version_option(__version__, "--version", message="%(prog)s %(version)s")
+@directory_option
+@common_options
+@generate_options
+@build_options
+@watch_option
+@jobs_option
+@click.pass_context
+def cli(ctx: click.Context, **kw: object) -> None:
+    # A command name that resolved to nothing has already been routed to the
+    # catch-all command, which is about to run. Only a command line naming no
+    # command at all gets it invoked from here.
+    if ctx.invoked_subcommand is None and not ctx.meta.get(ROUTED_TO_DEFAULT):
+        ctx.exit(_run_default(_namespace(ctx, None, **kw)))
+
+
+@cli.command(
+    "info",
+    cls=MergingCommand,
+    short_help="Show build script info and available variables",
+    help=(
+        "Show build script info and available variables.\n\n"
+        "EXTRA is build variables (KEY=value)."
+    ),
+)
+@directory_option
+@common_options
+@generate_options
+@click.option(
+    "-t",
+    "--targets",
+    is_flag=True,
+    default=False,
+    help="List all build targets (runs the build script)",
+)
+@click.argument("extra", nargs=-1)
+@click.pass_context
+def cli_info(ctx: click.Context, **kw: object) -> None:
+    ctx.exit(cmd_info(_namespace(ctx, "info", **kw)))
+
+
+@cli.command("init", cls=MergingCommand, short_help="Initialize a new pcons project")
+@directory_option
+@common_options
+@click.option(
+    "-f", "--force", is_flag=True, default=False, help="Overwrite existing files"
+)
+@click.option(
     "--lang",
-    "--modules-path",
-    "--ninja",
-    "--manifest",
-    "--junit",
-    "-L",
-    "-LE",
-    "-R",
-    "-E",
-}
+    type=click.Choice(["c", "cpp"]),
+    default="cpp",
+    help="Language for the starter program when no sources are found (default: cpp)",
+)
+@click.pass_context
+def cli_init(ctx: click.Context, **kw: object) -> None:
+    ctx.exit(cmd_init(_namespace(ctx, "init", **kw)))
 
 
-def _find_command_index(argv: list[str]) -> int | None:
-    """Find the index of the subcommand token in argv, or None.
-
-    Skips options and their values so an option value that equals a
-    command name (e.g. ``--build-dir test``) is not mistaken for the
-    subcommand.
-    """
-    i = 0
-    while i < len(argv):
-        arg = argv[i]
-        if arg.startswith("-"):
-            if arg in OPTIONS_WITH_VALUE:
-                i += 2  # Skip option and its value
-            elif "=" in arg:
-                i += 1  # Option with value like --build-dir=foo
-            else:
-                i += 1  # Boolean flag
-        else:
-            # First positional argument
-            if arg in VALID_COMMANDS:
-                return i
-            return None
-    return None
-
-
-def _build_dir_args(argv: list[str]) -> list[str]:
-    """Re-spell a -B/--build-dir found in *argv* as a plain ``-B DIR`` pair.
-
-    Used to hand the global build directory to `pcons test`, which owns its
-    own parser and so never sees what came before the subcommand.
-    """
-    for i, arg in enumerate(argv):
-        if arg in ("-B", "--build-dir") and i + 1 < len(argv):
-            return ["-B", argv[i + 1]]
-        if arg.startswith("--build-dir="):
-            return ["-B", arg.split("=", 1)[1]]
-        if arg.startswith("-B") and len(arg) > 2:
-            return ["-B", arg[2:]]
-    return []
-
-
-def find_command_in_argv(argv: list[str]) -> str | None:
-    """Return the command name found in argv, or None."""
-    idx = _find_command_index(argv)
-    return argv[idx] if idx is not None else None
+@cli.command(
+    "generate",
+    cls=MergingCommand,
+    short_help="Generate build files from pcons-build.py",
+    help=(
+        "Generate build files from pcons-build.py.\n\n"
+        "EXTRA is build variables (KEY=value)."
+    ),
+)
+@directory_option
+@common_options
+@generate_options
+# Internal: the self-regeneration rule re-invokes `generate` with this so it
+# doesn't persist a cache into the directory it regenerates. Not for users.
+@click.option("--no-cache", is_flag=True, default=False, hidden=True)
+# --graph and --mermaid take an optional value: the filename, or stdout when
+# the option stands alone. Do not spell `default=None` here. click decides an
+# option may stand alone by testing whether its default is unset, and an
+# explicit None counts as a default, which turns `--graph` back into an option
+# that demands an argument. Absent, the value is None either way.
+#
+# The brackets in the metavar are literal text. click renders an option that
+# may stand alone exactly like one that may not, so `--graph FILE` would read
+# as if the filename were required. Only the help record uses the metavar, so
+# the brackets cost nothing elsewhere.
+@click.option(
+    "--graph",
+    is_flag=False,
+    flag_value="-",
+    metavar="[FILE]",
+    help="Output dependency graph in DOT format (default: stdout)",
+)
+@click.option(
+    "--mermaid",
+    is_flag=False,
+    flag_value="-",
+    metavar="[FILE]",
+    help="Output dependency graph in Mermaid format (default: stdout)",
+)
+@click.argument("extra", nargs=-1)
+@click.pass_context
+def cli_generate(ctx: click.Context, **kw: object) -> None:
+    ctx.exit(_cmd_generate_wrapper(_namespace(ctx, "generate", **kw)))
 
 
-def add_build_args(parser: argparse.ArgumentParser) -> None:
-    """Add arguments that affect how the build is run (not generated)."""
-
-    # n2 is a ninja-compatible runner (Rust rewrite of Ninja) with more advanced
-    # rebuild tracking.
-    parser.add_argument(
-        "--ninja",
-        metavar="PROG",
-        help=(
-            "Ninja-compatible runner to invoke (e.g., 'n2'). "
-            "Defaults to the NINJA env var, then 'ninja'."
-        ),
-    )
-
-
-def add_watch_arg(parser: argparse.ArgumentParser) -> None:
-    """Add --watch to a parser that builds."""
-    parser.add_argument(
-        "--watch",
-        action="store_true",
-        help=(
-            "Build, then rebuild whenever a source or the build script "
-            "changes (Ctrl-C to stop)"
-        ),
-    )
+@cli.command(
+    "build",
+    cls=MergingCommand,
+    short_help="Build targets (auto-generates if needed)",
+    help=(
+        "Build targets using the appropriate build tool. "
+        "If build files are missing or out of date, generates them first.\n\n"
+        "EXTRA is build variables (KEY=value) and/or targets to build."
+    ),
+)
+@directory_option
+@common_options
+@generate_options
+@build_options
+@watch_option
+@jobs_option
+@click.argument("extra", nargs=-1)
+@click.pass_context
+def cli_build(ctx: click.Context, **kw: object) -> None:
+    ctx.exit(cmd_build(_namespace(ctx, "build", **kw)))
 
 
-def add_jobs_arg(parser: argparse.ArgumentParser) -> None:
-    """Add -j/--jobs to a parser that builds."""
-    parser.add_argument(
-        "-j", "--jobs", type=int, help="Number of parallel jobs for build"
-    )
+@cli.command("clean", cls=MergingCommand, short_help="Clean build artifacts")
+@directory_option
+@common_options
+@build_options
+@click.option(
+    "-a", "--all", is_flag=True, default=False, help="Remove entire build directory"
+)
+@click.pass_context
+def cli_clean(ctx: click.Context, **kw: object) -> None:
+    ctx.exit(cmd_clean(_namespace(ctx, "clean", **kw)))
 
 
-def add_generate_args(parser: argparse.ArgumentParser) -> None:
-    """Add arguments for generate-related commands."""
-    parser.add_argument(
-        "--variant",
-        metavar="NAME",
-        help="Build variant (debug, release, etc.)",
-    )
-    parser.add_argument(
-        "-G",
-        "--generator",
-        metavar="NAME",
-        action="append",
-        choices=["ninja", "make", "makefile", "metadata", "xcode"],
-        help="Generator to use (ninja, make, metadata, xcode). Repeatable. Default: ninja",
-    )
-    parser.add_argument(
-        "--reconfigure",
-        action="store_true",
-        help="Force re-run configuration checks",
-    )
-    parser.add_argument(
-        "--fresh",
-        action="store_true",
-        help="Discard the persisted cache and start clean (like cmake --fresh)",
-    )
-    parser.add_argument("-b", "--build-script", help="Path to pcons-build.py script")
+@cli.command(
+    "cache", cls=MergingCommand, short_help="Inspect or clear the per-build-dir cache"
+)
+@directory_option
+@common_options
+@click.argument(
+    "cache_action",
+    required=False,
+    default="list",
+    type=click.Choice(["list", "show", "clear", "path"]),
+)
+@click.pass_context
+def cli_cache(ctx: click.Context, **kw: object) -> None:
+    ctx.exit(cmd_cache(_namespace(ctx, "cache", **kw)))
 
 
-def _add_command(
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-    name: str,
-    *,
-    help: str,
-    description: str | None = None,
-    generate: bool = False,
-    build: bool = False,
-    watch: bool = False,
-    jobs: bool = False,
-) -> argparse.ArgumentParser:
-    """Create a subparser with the common options plus the groups it opts into.
+@cli.command(
+    "test",
+    short_help="Run tests declared by project.Test() in pcons-build.py",
+    # The runner owns its own flags, so everything after `test` is handed over
+    # untouched, including --help.
+    context_settings={"ignore_unknown_options": True, "help_option_names": []},
+)
+@directory_option
+@click.argument("argv", nargs=-1, type=click.UNPROCESSED)
+@click.pass_context
+def cli_test(ctx: click.Context, argv: tuple[str, ...]) -> None:
+    from pcons.test_runner import main as test_main
 
-    Every subcommand accepts the common options, so they are added here
-    instead of being repeated at each call site.
-    """
-    sub = subparsers.add_parser(name, help=help, description=description)
-    add_common_args(sub)
-    if generate:
-        add_generate_args(sub)
-    if build:
-        add_build_args(sub)
-    if watch:
-        add_watch_arg(sub)
-    if jobs:
-        add_jobs_arg(sub)
-    return sub
-
-
-def _keep_options_given_before_the_command(
-    parser: argparse.ArgumentParser,
-    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
-) -> None:
-    """Stop subparser defaults from overwriting the top-level parser's values.
-
-    argparse applies a subparser's own defaults unconditionally, on top of
-    what the top-level parser already stored for the same dest, so
-    `pcons -B out generate` silently fell back to `build/` and `pcons -v
-    generate` printed nothing. Suppressing the default on every dest the two
-    parsers share leaves the subparser writing only what the user actually
-    spelled after the subcommand; otherwise the earlier value stands.
-    """
-    shared = {a.dest for a in parser._actions if a.option_strings}
-    for sub in subparsers.choices.values():
-        for action in sub._actions:
-            if action.option_strings and action.dest in shared:
-                action.default = argparse.SUPPRESS
+    # Options before the subcommand never reach the runner's parser, so a build
+    # directory spelled there is forwarded explicitly. It goes first, so the
+    # runner's own -B, spelled after `test`, still wins. Only a -B the user
+    # actually typed is forwarded: with none, the runner searches upward from
+    # the current directory for the manifest, and passing it a default would
+    # silently stop that search.
+    forwarded: list[str] = []
+    parent = ctx.parent
+    if (
+        parent is not None
+        and parent.get_parameter_source("build_dir") is ParameterSource.COMMANDLINE
+    ):
+        forwarded = ["-B", str(parent.params["build_dir"])]
+    ctx.exit(test_main(forwarded + list(argv)))
 
 
-def create_default_parser() -> argparse.ArgumentParser:
-    """Create the no-subcommand parser: accepts KEY=value args and targets
-    as positionals."""
-    from pcons import __version__
-
-    parser = argparse.ArgumentParser(
-        prog="pcons",
-        description="A Python-based build system that generates Ninja files.",
-        epilog=(
-            "Use -C DIR to change to DIR before doing anything else.\n"
-            "\n"
-            "Run 'pcons <command> --help' for command-specific help.\n"
-            "\n"
-            "GitHub:  https://github.com/DarkStarSystems/pcons\n"
-            "Docs:    https://pcons.readthedocs.io/"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
-    )
-    add_common_args(parser)
-    add_generate_args(parser)
-    add_build_args(parser)
-    add_watch_arg(parser)
-    parser.add_argument(
-        "-j", "--jobs", type=int, help="Number of parallel jobs for build"
-    )
-    parser.add_argument(
-        "extra",
-        nargs="*",
-        help="Build variables (KEY=value) and/or targets to build",
-    )
-    return parser
-
-
-def create_full_parser() -> argparse.ArgumentParser:
-    """Create the parser with subcommands, used when argv names one."""
-    from pcons import __version__
-
-    parser = argparse.ArgumentParser(
-        prog="pcons",
-        description=(
-            "A Python-based build system that generates Ninja files.\n"
-            "\n"
-            "Without a subcommand, generates build files and builds specified\n"
-            "targets (or default targets if none given):\n"
-            "  pcons                     Generate and build default targets\n"
-            "  pcons hello               Generate and build 'hello'\n"
-            "  pcons CC=clang hello      Set CC=clang, generate and build 'hello'"
-        ),
-        epilog=(
-            "Use -C DIR to change to DIR before doing anything else.\n"
-            "\n"
-            "Run 'pcons <command> --help' for command-specific help.\n"
-            "\n"
-            "GitHub:  https://github.com/DarkStarSystems/pcons\n"
-            "Docs:    https://pcons.readthedocs.io/"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-    )
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
-    )
-    add_common_args(parser)
-    add_generate_args(parser)
-    add_build_args(parser)
-    add_watch_arg(parser)
-    add_jobs_arg(parser)
-
-    subparsers = parser.add_subparsers(dest="command", help="Commands")
-
-    # pcons info
-    info_parser = _add_command(
-        subparsers,
-        "info",
-        help="Show build script info and available variables",
-        generate=True,
-    )
-    info_parser.add_argument(
-        "-t",
-        "--targets",
-        action="store_true",
-        help="List all build targets (runs the build script)",
-    )
-    info_parser.add_argument(
-        "extra",
-        nargs="*",
-        help="Build variables (KEY=value)",
-    )
-    info_parser.set_defaults(func=cmd_info)
-
-    # pcons init
-    init_parser = _add_command(
-        subparsers, "init", help="Initialize a new pcons project"
-    )
-    init_parser.add_argument(
-        "-f", "--force", action="store_true", help="Overwrite existing files"
-    )
-    init_parser.add_argument(
-        "--lang",
-        choices=["c", "cpp"],
-        default="cpp",
-        help="Language for the starter program when no sources are found (default: cpp)",
-    )
-    init_parser.set_defaults(func=cmd_init)
-
-    # pcons generate
-    gen_parser = _add_command(
-        subparsers,
-        "generate",
-        help="Generate build files from pcons-build.py",
-        generate=True,
-    )
-    # Internal: the self-regeneration rule re-invokes `generate` with this so it
-    # doesn't persist a cache into the directory it regenerates. Not for users.
-    gen_parser.add_argument(
-        "--no-cache",
-        action="store_true",
-        default=False,
-        help=argparse.SUPPRESS,
-    )
-    gen_parser.add_argument(
-        "--graph",
-        nargs="?",
-        const="-",
-        metavar="FILE",
-        help="Output dependency graph in DOT format (default: stdout)",
-    )
-    gen_parser.add_argument(
-        "--mermaid",
-        nargs="?",
-        const="-",
-        metavar="FILE",
-        help="Output dependency graph in Mermaid format (default: stdout)",
-    )
-    gen_parser.add_argument(
-        "extra",
-        nargs="*",
-        help="Build variables (KEY=value)",
-    )
-    gen_parser.set_defaults(func=_cmd_generate_wrapper)
-
-    # pcons build
-    build_parser = _add_command(
-        subparsers,
-        "build",
-        help="Build targets (auto-generates if needed)",
-        description="Build targets using the appropriate build tool. "
-        "If build files are missing or out of date, generates them first.",
-        generate=True,
-        build=True,
-        watch=True,
-        jobs=True,
-    )
-    build_parser.add_argument(
-        "extra",
-        nargs="*",
-        metavar="arg",
-        help="Build variables (KEY=value) and/or targets to build",
-    )
-    build_parser.set_defaults(func=cmd_build)
-
-    # pcons clean
-    clean_parser = _add_command(
-        subparsers, "clean", help="Clean build artifacts", build=True
-    )
-    clean_parser.add_argument(
-        "-a", "--all", action="store_true", help="Remove entire build directory"
-    )
-    clean_parser.set_defaults(func=cmd_clean)
-
-    # pcons cache
-    cache_parser = _add_command(
-        subparsers, "cache", help="Inspect or clear the per-build-dir cache"
-    )
-    cache_parser.add_argument(
-        "cache_action",
-        nargs="?",
-        choices=["list", "show", "clear", "path"],
-        default="list",
-        help="list (default) / show / clear / path",
-    )
-    cache_parser.set_defaults(func=cmd_cache)
-
-    # pcons test is dispatched in main() before argparse runs (so the
-    # runner can own its own flags). This subparser exists only so that
-    # `pcons --help` lists it; argument parsing is never reached.
-    subparsers.add_parser(
-        "test",
-        help="Run tests declared by project.Test() in pcons-build.py",
-        add_help=False,
-    )
-
-    _keep_options_given_before_the_command(parser, subparsers)
-
-    return parser
-
-
-def _apply_directory_arg() -> None:
-    """Handle -C DIR / --directory DIR (or --directory=DIR) before any
-    other parsing: chdir there and remove the consumed args from sys.argv."""
-    i = 1
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg in ("-C", "--directory"):
-            if i + 1 >= len(sys.argv):
-                print("error: -C/--directory requires an argument", file=sys.stderr)
-                sys.exit(1)
-            target_dir = sys.argv[i + 1]
-            try:
-                os.chdir(target_dir)
-            except OSError as e:
-                print(f"error: -C {target_dir}: {e}", file=sys.stderr)
-                sys.exit(1)
-            # Remove -C and DIR from argv so argparse doesn't see them
-            del sys.argv[i : i + 2]
-        elif arg.startswith("--directory="):
-            target_dir = arg.split("=", 1)[1]
-            try:
-                os.chdir(target_dir)
-            except OSError as e:
-                print(f"error: --directory={target_dir}: {e}", file=sys.stderr)
-                sys.exit(1)
-            del sys.argv[i]
-        else:
-            i += 1
+@cli.command("_default", cls=DefaultCommand, hidden=True)
+@directory_option
+@common_options
+@generate_options
+@build_options
+@watch_option
+@jobs_option
+@click.argument("extra", nargs=-1)
+@click.pass_context
+def cli_default(ctx: click.Context, **kw: object) -> None:
+    ctx.exit(_run_default(_namespace(ctx, None, **kw)))
 
 
 def main() -> int:
     """Main entry point for the pcons CLI."""
-    _apply_directory_arg()
-
-    command = find_command_in_argv(sys.argv[1:])
-
-    # `pcons test` is dispatched directly to the test runner, which has
-    # its own argument parser. This avoids duplicating the runner's flags
-    # (-L, -R, --junit, etc.) in pcons's top-level argparse.
-    if command == "test":
-        from pcons.test_runner import main as test_main
-
-        # Locate the subcommand positionally, not by scanning for the
-        # literal "test", which could match an option's value.
-        idx = _find_command_index(sys.argv[1:])
-        assert idx is not None  # command == "test" guarantees a match
-        # Options before the subcommand never reach argparse here, so forward
-        # the build directory explicitly rather than letting the runner fall
-        # back to `build/` and run some other directory's binaries. The
-        # runner's own -B comes later in argv and still wins.
-        return test_main(_build_dir_args(sys.argv[1 : idx + 1]) + sys.argv[idx + 2 :])
-
-    # Special case: if --help or -h is present without a command,
-    # use the full parser so help shows available commands
-    if command is None and ("-h" in sys.argv or "--help" in sys.argv):
-        parser = create_full_parser()
-        parser.parse_args()  # This will print help and exit
-        return 0
-
-    if command is None:
-        parser = create_default_parser()
-        args = parser.parse_args()
-        args.command = None
-
-        extra = getattr(args, "extra", [])
-        variables, remaining = parse_variables(extra)
-
-        # Non-KEY=value args with no pcons-build.py: treat as targets
-        # for an existing build.ninja
-        if remaining and not find_script("pcons-build.py"):
-            args.targets = remaining
-            return cmd_build(args)
-
-        return cmd_default(args)
-
-    parser = create_full_parser()
-    args = parser.parse_args()
-    args.extra = getattr(args, "extra", [])
-
-    return args.func(args)
+    try:
+        # windows_expand_args: with args=None on Windows, click applies
+        # expanduser, expandvars and glob to every token. pcons positionals are
+        # build variables and target names, not paths, and the expansion runs
+        # after the shell, so quoting cannot escape it: cmd would keep
+        # "CFLAGS=-DV=%FOO%" literal and click would then substitute it. Unix
+        # has no such rewrite, so leaving it on makes Windows strictly worse.
+        result = cli.main(
+            args=None,
+            prog_name="pcons",
+            standalone_mode=False,
+            windows_expand_args=False,
+        )
+    except click.ClickException as e:
+        e.show()
+        return e.exit_code
+    except click.exceptions.Abort:
+        return 130
+    return result if isinstance(result, int) else 0
 
 
 if __name__ == "__main__":
