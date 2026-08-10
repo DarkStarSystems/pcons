@@ -1784,7 +1784,7 @@ class TestDirectoryOption:
         assert "error: -C" in result.output
 
 
-class TestBuildDirArgs:
+class TestBuildDirForwardedToTheRunner:
     """`pcons test` owns its parser, so the CLI hands it the build dir."""
 
     @pytest.mark.parametrize(
@@ -1812,9 +1812,10 @@ class TestBuildDirArgs:
         assert _invoke("test", "--list").exit_code == 0
         assert seen == [["--list"]]
 
-    def test_trailing_option_without_a_value(
+    def test_build_dir_without_a_value_is_a_usage_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """A dangling -B is rejected, not tolerated: nothing runs behind it."""
         seen = _capture_test_runner(monkeypatch)
         assert _invoke("-B").exit_code == 2
         assert seen == []
