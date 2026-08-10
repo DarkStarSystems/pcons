@@ -215,6 +215,11 @@ class BaseGenerator:
             for func in pending:
                 func()
 
+            # --graph/--mermaid, once every generator has run: the graph then
+            # describes the project the build files were written from, and a
+            # bad destination cannot cost the user those build files.
+            project._output_graphs_if_requested()
+
             if BaseGenerator.__atexit_registered:
                 # Nothing pending anymore; drop the atexit hook.
                 import atexit

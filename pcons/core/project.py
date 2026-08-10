@@ -1057,55 +1057,72 @@ class Project(_ProjectBuilders):
 
         self._resolved = True
 
-        # Check for graph output requests (set by CLI --graph/--mermaid options)
-        self._output_graphs_if_requested()
-
     def _output_graphs_if_requested(self) -> None:
-        """Output dependency graphs if requested via PCONS_GRAPH/PCONS_MERMAID env vars."""
+        """Output dependency graphs if requested via PCONS_GRAPH/PCONS_MERMAID env vars.
+
+        Called once the deferred-generation pass has drained, so the graph
+        describes the same project the build files do. A script may call
+        resolve() itself and go on adding targets, so writing from resolve()
+        would snapshot a project still under construction.
+        """
+        if not (os.environ.get("PCONS_GRAPH") or os.environ.get("PCONS_MERMAID")):
+            return
+        if not self._resolved:
+            self.resolve()
+
         graph_path = os.environ.get("PCONS_GRAPH")
         if graph_path:
             from pcons.generators.dot import DotGenerator
 
-            self._output_graph(DotGenerator, graph_path, "deps.dot", "DOT")
+            self._output_graph(DotGenerator, graph_path, "DOT")
 
         mermaid_path = os.environ.get("PCONS_MERMAID")
         if mermaid_path:
             from pcons.generators.mermaid import MermaidGenerator
 
-            self._output_graph(MermaidGenerator, mermaid_path, "deps.mmd", "Mermaid")
+            self._output_graph(MermaidGenerator, mermaid_path, "Mermaid")
 
     def _output_graph(
         self,
         generator_class: type,
         output_path_str: str,
-        default_filename: str,
         format_name: str,
     ) -> None:
         """Write a dependency graph to stdout or a file.
 
+        Writes it here and now. Queueing it with generator.generate() would
+        put it on a pending list the caller is already draining, where nothing
+        would run it.
+
         Args:
             generator_class: The generator class to instantiate.
             output_path_str: "-" for stdout, or a file path.
-            default_filename: Filename to use when writing to stdout via temp dir.
             format_name: Human-readable format name for log messages.
-        """
-        import tempfile
 
+        Raises:
+            PconsError: The destination cannot be written. The path came from
+                the command line, so the message names it rather than letting
+                an errno from mkdir or open reach the user as a traceback.
+        """
+        import sys
+
+        gen = generator_class()
         if output_path_str == "-":
-            print(f"# {format_name} dependency graph")
-            with tempfile.TemporaryDirectory() as tmpdir:
-                gen = generator_class(
-                    output_filename=default_filename, output_dir=Path(tmpdir)
-                )
-                gen.generate(self)
-                print((Path(tmpdir) / default_filename).read_text())
-        else:
-            output_path = Path(output_path_str)
-            gen = generator_class(
-                output_filename=output_path.name, output_dir=output_path.parent
-            )
-            gen.generate(self)
-            logger.info("Wrote %s graph to %s", format_name, output_path_str)
+            gen.write(self, sys.stdout)
+            return
+
+        output_path = Path(output_path_str)
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, "w", encoding="utf-8") as f:
+                gen.write(self, f)
+        except OSError as e:
+            from pcons.core.errors import PconsError
+
+            raise PconsError(
+                f"Cannot write {format_name} graph to {output_path_str}: {e.strerror}"
+            ) from e
+        logger.info("Wrote %s graph to %s", format_name, output_path_str)
 
     def _mark_generated(self):
         """Called by build-file generators; makes later generate() calls no-ops."""
