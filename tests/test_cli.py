@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -3009,3 +3010,57 @@ class TestValuesReachTheWork:
         seen = _capture_args(monkeypatch, "_generate", result=(0, None))
         assert _invoke("-B", str(tmp_path), "-G", "make", "generate").exit_code == 0
         assert seen[0]["generator"] == ["make"]
+
+
+def _walk(command: click.Command) -> Iterator[click.Command]:
+    """Every command in the tree, the groups themselves included.
+
+    A group's callback takes parameters like any other, and `cache` is a group.
+    Reads `commands` rather than `list_commands`, which hides the catch-all.
+    """
+    yield command
+    if isinstance(command, click.Group):
+        for sub in command.commands.values():
+            yield from _walk(sub)
+
+
+def _named_parameters(command: click.Command) -> set[str]:
+    """The callback's own parameters, excluding ctx and any **kw."""
+    callback = command.callback
+    assert callback is not None, command.name
+    params = inspect.signature(callback).parameters
+    return {
+        name
+        for name, p in params.items()
+        if name != "ctx" and p.kind is not p.VAR_KEYWORD
+    }
+
+
+class TestSignaturesMatchTheDecorators:
+    """Nothing else checks the decorators above a command against the
+    parameters below it.
+
+    click calls the callback with the option names as keyword arguments, so a
+    parameter spelled differently from the option that feeds it is a TypeError
+    the first time that command runs. Several commands are only reached by tests
+    that stub the work functions, so that can be a release away.
+
+    Only one direction is checkable. A command takes **kw for what it declares
+    and does not consume, and six do, so "every option has a parameter" cannot
+    fail for them. "Every parameter is a declared option" is the typo direction
+    and is the one that matters.
+    """
+
+    def test_every_named_parameter_is_an_option_the_command_declares(self) -> None:
+        for command in _walk(cli):
+            declared = {
+                p.name for p in command.params if p.expose_value and p.name is not None
+            }
+            assert _named_parameters(command) <= declared, command.name
+
+    def test_every_command_is_walked(self) -> None:
+        """The check above is silent about a command it never reaches."""
+        names = {command.name for command in _walk(cli)}
+        assert {"generate", "build", "clean", "cache", "list", "path", "_default"} <= (
+            names
+        )

@@ -207,7 +207,6 @@ def _chdir(ctx: click.Context, param: click.Parameter, value: str | None) -> str
     return value
 
 
-
 def _generator_names() -> list[str]:
     """The registered generator names, in registration order.
 
