@@ -1772,6 +1772,62 @@ class TestBuildDirArgs:
         assert seen == [["-B", "out", "-j", "1"]]
 
 
+class TestDoubleDashEscape:
+    """`--` marks the rest of argv as targets, dashes and all.
+
+    click's group parser consumes the `--` while reading the group's own
+    options, so without help the token after it is parsed as an option again
+    and `pcons -- -foo` fails with "No such option: -f".
+
+    A command name is not rescued: it cannot start with a dash, so the escape
+    never reaches one.
+    """
+
+    @pytest.mark.parametrize(
+        ("argv", "extra"),
+        [
+            (["--", "-foo"], ["-foo"]),
+            (["--", "-j"], ["-j"]),
+            (["--", "--verbose"], ["--verbose"]),
+            (["--", "-foo", "-bar"], ["-foo", "-bar"]),
+            (["--", "--"], ["--"]),
+            (["--", "-B", "out"], ["-B", "out"]),
+            (["--", "-foo", "generate"], ["-foo", "generate"]),
+            (["--", "CC=clang"], ["CC=clang"]),
+            (["hello", "--", "-foo"], ["hello", "-foo"]),
+            (["--"], []),
+        ],
+    )
+    def test_targets_survive_the_escape(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str], extra: list[str]
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_run_default")
+        assert _invoke(*argv).exit_code == 0
+        assert seen[0].extra == extra
+
+    def test_escaped_options_are_not_applied(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_run_default")
+        assert _invoke("--", "--verbose", "-B", "out").exit_code == 0
+        assert seen[0].verbose is False
+        assert seen[0].build_dir == "build"
+
+    def test_a_command_name_is_still_a_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("-B", "out", "--", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0].command == "generate"
+        assert seen[0].build_dir == "out"
+
+    def test_a_typo_without_the_escape_is_still_an_error(self) -> None:
+        assert _invoke("hello", "--nope").exit_code == 2
+        assert _invoke("--nope").exit_code == 2
+
+
 class TestCatchAllUsageLine:
     """The catch-all command is hidden, so it reports the group's path.
 

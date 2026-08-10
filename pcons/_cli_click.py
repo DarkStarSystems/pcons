@@ -33,6 +33,10 @@ GENERATORS = ["ninja", "make", "makefile", "metadata", "xcode"]
 # catch-all command, so the group callback knows not to run it a second time.
 ROUTED_TO_DEFAULT = "pcons.routed_to_default"
 
+# Set on the group's context when argv held a `--`, which the group's parser
+# consumes before anything downstream can see it.
+SAW_DOUBLE_DASH = "pcons.saw_double_dash"
+
 
 class MergingCommand(click.Command):
     """Let a subcommand inherit an option spelled before the command name.
@@ -96,9 +100,26 @@ class PconsGroup(click.Group):
         """Declaration order, which groups the commands by what they do."""
         return [name for name in self.commands if name != self.DEFAULT_COMMAND]
 
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        # Recorded before click's parser eats the `--`: after one, a token
+        # starting with a dash is a target to build, not an option.
+        ctx.meta[SAW_DOUBLE_DASH] = "--" in args
+        return super().parse_args(ctx, args)
+
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
+        if args and args[0].startswith("-") and ctx.meta.get(SAW_DOUBLE_DASH):
+            # `pcons -- -foo` builds a target called -foo. No command name
+            # starts with a dash, so this cannot capture one: `pcons -- build`
+            # still runs the build command.
+            default = self.get_command(ctx, self.DEFAULT_COMMAND)
+            if default is not None:
+                ctx.meta[ROUTED_TO_DEFAULT] = True
+                # The `--` goes back in. The group's parser consumed it, and
+                # the catch-all's own parser needs it to stop reading the rest
+                # as options, which is what keeps a plain typo an error.
+                return None, default, ["--", *args]
         try:
             return super().resolve_command(ctx, args)
         except click.NoSuchOption:
