@@ -1770,3 +1770,22 @@ class TestBuildDirArgs:
         monkeypatch.setattr(sys, "argv", ["pcons", "-B", "out", "test", "-j", "1"])
         assert cli_main() == 0
         assert seen == [["-B", "out", "-j", "1"]]
+
+
+def test_windows_argv_expansion_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """click expands ~, $VAR, %VAR% and globs in argv on Windows unless told not to.
+
+    This asserts the keyword rather than the behaviour: CliRunner always passes
+    an explicit argv, so the expansion is unreachable from a test, and it is
+    Windows-only besides. Asserting the keyword is what fails on any platform
+    when someone deletes it.
+    """
+    seen: dict[str, object] = {}
+
+    def fake_main(**kw: object) -> int:
+        seen.update(kw)
+        return 0
+
+    monkeypatch.setattr("pcons.cli.cli.main", fake_main)
+    assert cli_main() == 0
+    assert seen["windows_expand_args"] is False
