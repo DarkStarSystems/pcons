@@ -60,6 +60,28 @@ class MergingCommand(click.Command):
         return super().invoke(ctx)
 
 
+class _GroupPathContext(click.Context):
+    """Report the group's command path as the command's own.
+
+    The catch-all command is hidden and has no name a user can type, so its
+    usage line and its "Try ... for help" hint must read ``pcons``. click
+    builds `Context.command_path` as ``f"{parent} {info_name}"`` and only
+    lstrips it, so an empty name would leave a trailing space.
+    """
+
+    @property
+    def command_path(self) -> str:
+        if self.parent is not None:
+            return self.parent.command_path
+        return super().command_path
+
+
+class DefaultCommand(MergingCommand):
+    """The catch-all command, reporting the group's path instead of its own."""
+
+    context_class = _GroupPathContext
+
+
 class PconsGroup(click.Group):
     """Route an unknown command name to a hidden catch-all command.
 
@@ -90,10 +112,11 @@ class PconsGroup(click.Group):
             default = self.get_command(ctx, self.DEFAULT_COMMAND)
             if default is None:
                 raise
-            # A None name leaves the sub-context's command path as the group's
-            # own, so usage and errors read "pcons", not "pcons _default". It
-            # also leaves ctx.invoked_subcommand None, which is what the group
-            # callback sees when there is no command at all, hence the marker.
+            # A None name keeps ctx.invoked_subcommand None, so the group
+            # callback cannot tell this apart from a command line naming no
+            # command at all, hence the marker. `DefaultCommand` is what makes
+            # usage and errors read "pcons" rather than "pcons " or
+            # "pcons _default".
             ctx.meta[ROUTED_TO_DEFAULT] = True
             return None, default, args
 

@@ -1772,6 +1772,27 @@ class TestBuildDirArgs:
         assert seen == [["-B", "out", "-j", "1"]]
 
 
+class TestCatchAllUsageLine:
+    """The catch-all command is hidden, so it reports the group's path.
+
+    click builds a command path as "<parent> <name>" and only lstrips it, so
+    the nameless catch-all used to render "pcons  " with two spaces on the
+    commonest error path there is, a target plus a mistyped option.
+    """
+
+    def test_error_usage_names_the_program_once(self) -> None:
+        result = _invoke("hello", "--nope")
+        assert result.exit_code == 2
+        assert "Usage: cli [OPTIONS] [EXTRA]...\n" in result.stderr
+        assert "Try 'cli --help' for help.\n" in result.stderr
+        assert "cli  " not in result.stderr
+
+    def test_help_usage_names_the_program_once(self) -> None:
+        result = _invoke("hello", "--help")
+        assert result.exit_code == 0
+        assert result.stdout.startswith("Usage: cli [OPTIONS] [EXTRA]...\n")
+
+
 def test_windows_argv_expansion_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
     """click expands ~, $VAR, %VAR% and globs in argv on Windows unless told not to.
 

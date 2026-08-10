@@ -20,6 +20,7 @@ from click.core import ParameterSource
 from pcons import __version__
 from pcons._cli_click import (
     ROUTED_TO_DEFAULT,
+    DefaultCommand,
     MergingCommand,
     PconsGroup,
     _namespace,
@@ -1587,7 +1588,7 @@ def cli_test(ctx: click.Context, argv: tuple[str, ...]) -> None:
     ctx.exit(test_main(forwarded + list(argv)))
 
 
-@cli.command("_default", cls=MergingCommand, hidden=True)
+@cli.command("_default", cls=DefaultCommand, hidden=True)
 @directory_option
 @common_options
 @generate_options
