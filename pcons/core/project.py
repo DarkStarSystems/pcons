@@ -1369,12 +1369,14 @@ class Project(_ProjectBuilders):
         cache_key = (name, version, tuple(components or []), system)
         # One package is one target, and a target name is unique, so the two
         # spellings of the same package cannot both exist. Say which two,
-        # rather than letting Target.__init__ report a name collision.
+        # rather than letting Target.__init__ report a name collision. A
+        # cached None is a package that was never found, so it owns no target
+        # and conflicts with nothing.
         conflicting = next(
             (
                 k
-                for k in self._found_packages
-                if k[:3] == cache_key[:3] and k[3] != system
+                for k, found in self._found_packages.items()
+                if k[:3] == cache_key[:3] and k[3] != system and found is not None
             ),
             None,
         )

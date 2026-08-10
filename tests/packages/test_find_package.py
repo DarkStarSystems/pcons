@@ -247,6 +247,17 @@ class TestFindPackageSystem:
         with pytest.raises(ValueError, match="already found with system=False"):
             project.find_package("doctest", system=True)
 
+    def test_a_package_that_was_never_found_conflicts_with_nothing(self) -> None:
+        """A cached None owns no target, so it cannot collide with one."""
+        project = Project("test")
+        doctest = _make_pkg("doctest", include_dirs=["/opt/doctest/include"])
+        project.add_package_finder(MockFinder({"doctest": doctest}))
+
+        assert project.find_package("missing", required=False) is None
+
+        target = project.find_package("missing", system=True, required=False)
+        assert target is None
+
     def test_it_still_caches(self) -> None:
         project = Project("test")
         doctest = _make_pkg("doctest", include_dirs=["/opt/doctest/include"])
