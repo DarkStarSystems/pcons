@@ -676,9 +676,14 @@ class TestDirectoryArg:
         assert "error" in result.stderr
 
     def test_dash_c_missing_arg(self) -> None:
-        """Test -C without a directory argument."""
+        """-C with no directory is a usage error, so it exits 2.
+
+        A -C naming a directory that does not exist is a different thing and
+        still exits 1, pinned by TestDirectoryOption. Every other option that
+        misses its value exits 2, and -C used to be the exception.
+        """
         result = _invoke("-C")
-        assert result.exit_code != 0
+        assert result.exit_code == 2
         assert "requires an argument" in result.stderr
 
     def test_dash_c_init(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
