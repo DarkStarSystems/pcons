@@ -1896,6 +1896,40 @@ class TestDoubleDashEscape:
         assert _invoke("--nope").exit_code == 2
 
 
+class TestCatchAllNameIsNotReserved:
+    """The catch-all command's name is internal, so a target may use it.
+
+    click resolves a registered command name before any fallback runs, so the
+    hidden command's own name would otherwise be swallowed here rather than
+    built, and silently: it is not a command a user can be told about.
+    """
+
+    @pytest.mark.parametrize(
+        ("argv", "extra"),
+        [
+            (["_default"], ["_default"]),
+            (["_default", "hello"], ["_default", "hello"]),
+            (["_default", "CC=clang"], ["_default", "CC=clang"]),
+            (["--", "_default"], ["_default"]),
+            (["-B", "out", "_default"], ["_default"]),
+        ],
+    )
+    def test_it_is_an_ordinary_target(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str], extra: list[str]
+    ) -> None:
+        seen = _capture_command(monkeypatch, "_run_default")
+        assert _invoke(*argv).exit_code == 0
+        assert seen[0].extra == extra
+
+    def test_a_real_command_still_resolves(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the catch-all's own name is refused, not every name."""
+        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        assert _invoke("generate").exit_code == 0
+        assert seen[0].command == "generate"
+
+
 class TestDoubleDashBeforeTheRunner:
     """`pcons test` consumes one `--` and passes any further one on.
 

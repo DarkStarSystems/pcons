@@ -99,6 +99,21 @@ class PconsGroup(click.Group):
         """Declaration order, which groups the commands by what they do."""
         return [name for name in self.commands if name != self.DEFAULT_COMMAND]
 
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        """Refuse to resolve the catch-all by name.
+
+        Its name is not part of the interface, so a user typing it means a
+        target called `_default`. Without this it resolves like any other
+        command and the token disappears from the target list.
+        """
+        if cmd_name == self.DEFAULT_COMMAND:
+            return None
+        return super().get_command(ctx, cmd_name)
+
+    def _catch_all(self) -> click.Command | None:
+        """The catch-all command, which only `resolve_command` may reach."""
+        return self.commands.get(self.DEFAULT_COMMAND)
+
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         # Recorded before click's parser eats the `--`: after one, a token
         # starting with a dash is a target to build, not an option.
@@ -112,7 +127,7 @@ class PconsGroup(click.Group):
             # `pcons -- -foo` builds a target called -foo. No command name
             # starts with a dash, so this cannot capture one: `pcons -- build`
             # still runs the build command.
-            default = self.get_command(ctx, self.DEFAULT_COMMAND)
+            default = self._catch_all()
             if default is not None:
                 ctx.meta[ROUTED_TO_DEFAULT] = True
                 # The `--` goes back in. The group's parser consumed it, and
@@ -129,7 +144,7 @@ class PconsGroup(click.Group):
         except click.UsageError:
             if not args or args[0].startswith("-"):
                 raise
-            default = self.get_command(ctx, self.DEFAULT_COMMAND)
+            default = self._catch_all()
             if default is None:
                 raise
             # A None name keeps ctx.invoked_subcommand None, so the group
