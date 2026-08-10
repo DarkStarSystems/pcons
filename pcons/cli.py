@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -751,25 +752,35 @@ def cmd_default(args: argparse.Namespace) -> int:
     return cmd_build(args)
 
 
-def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
-    """Run the generate phase: find and run pcons-build.py, which
-    generates build files in the build directory.
+def _generate(
+    build_dir: Path,
+    *,
+    script: Path | None = None,
+    variables: dict[str, str] | None = None,
+    variant: str | None = None,
+    generator: list[str] | None = None,
+    reconfigure: bool = False,
+    fresh: bool = False,
+    no_cache: bool = False,
+    graph: str | None = None,
+    mermaid: str | None = None,
+) -> tuple[int, Project | None]:
+    """Run the build script, which writes the build files into *build_dir*.
+
+    Logging and user modules are the caller's business: this runs the script
+    and nothing else.
+
+    Args:
+        script: The build script, or None to look for pcons-build.py here.
+        graph: Where to write a DOT dependency graph, "-" for stdout.
+        mermaid: The same, in Mermaid.
 
     Returns:
-        Tuple of (exit_code, first registered Project or None).
+        Tuple of (exit code, first registered Project or None).
     """
-    setup_logging(args.verbose, args.debug)
-
-    build_dir = Path(args.build_dir)
-    script_path = getattr(args, "build_script", None)
-
-    variables, _ = parse_variables(getattr(args, "extra", []))
-
-    script: Path
-    if script_path:
-        script = Path(script_path)
+    if script is not None:
         if not script.exists():
-            logger.error("Build script not found: %s", script_path)
+            logger.error("Build script not found: %s", script)
             return 1, None
     else:
         found_script = find_script("pcons-build.py")
@@ -781,12 +792,6 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
 
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    variant = getattr(args, "variant", None)
-    generator = getattr(args, "generator", None)
-    reconfigure = getattr(args, "reconfigure", False)
-    graph = getattr(args, "graph", None)
-    mermaid = getattr(args, "mermaid", None)
-
     extra_env: dict[str, str] = {}
     if graph:
         extra_env["PCONS_GRAPH"] = graph
@@ -796,19 +801,43 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
     exit_code, _projects = run_script(
         script,
         build_dir,
-        variables=variables,
+        variables=variables or {},
         variant=variant,
         generator=generator,
         reconfigure=reconfigure,
         extra_env=extra_env if extra_env else None,
-        persist=not getattr(args, "no_cache", False),
-        fresh=getattr(args, "fresh", False),
+        persist=not no_cache,
+        fresh=fresh,
     )
 
     if exit_code != 0:
         return exit_code, None
 
     return 0, _projects[0] if _projects else None
+
+
+def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
+    """Run the generate phase: find and run pcons-build.py, which
+    generates build files in the build directory.
+
+    Returns:
+        Tuple of (exit_code, first registered Project or None).
+    """
+    setup_logging(args.verbose, args.debug)
+    script_arg = getattr(args, "build_script", None)
+    variables, _ = parse_variables(getattr(args, "extra", []))
+    return _generate(
+        Path(args.build_dir),
+        script=Path(script_arg) if script_arg else None,
+        variables=variables,
+        variant=getattr(args, "variant", None),
+        generator=getattr(args, "generator", None),
+        reconfigure=getattr(args, "reconfigure", False),
+        fresh=getattr(args, "fresh", False),
+        no_cache=getattr(args, "no_cache", False),
+        graph=getattr(args, "graph", None),
+        mermaid=getattr(args, "mermaid", None),
+    )
 
 
 def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
@@ -829,16 +858,26 @@ def cmd_build(args: argparse.Namespace) -> int:
     return _build_targets(args)
 
 
-def _watch_build(args: argparse.Namespace) -> int:
-    """Build, then rebuild whenever a watched file changes.
+def _watch(
+    *,
+    build: Callable[[], tuple[int, Path]],
+    script: Path | None,
+    targets: list[str] | None = None,
+    ninja: str | None = None,
+) -> int:
+    """Run *build*, then run it again whenever a watched file changes.
 
-    Each iteration is just another build: ninja's regen edge re-runs pcons
-    when the build description itself changed, so editing the build script
-    needs no special handling here.
+    Each iteration is just another build: ninja's regen edge re-runs pcons when
+    the build description itself changed, so editing the build script needs no
+    special handling here.
+
+    Args:
+        build: Runs one build and reports where it ran. Which directory that
+            is settles on the first call, since the script may pick its own.
+        script: The build script, whose directory is the tree to watch.
     """
     from pcons import watch
 
-    setup_logging(args.verbose, args.debug)
     try:
         watch.ensure_available()
     except PconsError as e:
@@ -850,35 +889,32 @@ def _watch_build(args: argparse.Namespace) -> int:
     # retriggers the build that wrote it.
     outputs: set[Path] = set()
     manifest_mtime = 0.0
-    runner = getattr(args, "ninja", None)
+    settled_dir = Path.cwd()
 
-    def build() -> int:
-        nonlocal manifest_mtime
-        code = _build_targets(args)
-        build_dir = Path(args.build_dir).absolute()
+    def build_once() -> int:
+        nonlocal manifest_mtime, settled_dir
+        code, where = build()
+        settled_dir = build_dir = where.absolute()
 
         manifest = build_dir / "build.ninja"
         mtime = manifest.stat().st_mtime if manifest.exists() else 0.0
         if mtime != manifest_mtime:
             manifest_mtime = mtime
             outputs.clear()
-            outputs.update(ninja_outputs(build_dir, runner))
+            outputs.update(ninja_outputs(build_dir, ninja))
 
         if code == 0:
-            _, targets = parse_variables(getattr(args, "extra", []))
-            _warn_unconverged(unconverged_reasons(build_dir, targets, runner))
+            _warn_unconverged(unconverged_reasons(build_dir, targets, ninja))
         return code
 
     try:
-        watch.run_build(build)
+        watch.run_build(build_once)
     except KeyboardInterrupt:
         # Interrupted before the watch (and its handler) is up.
         return 0
 
-    # Read the build directory only now: the first build settles it, since
-    # the build script may choose a directory other than the requested one.
-    build_dir = Path(args.build_dir).absolute()
-    script = _find_build_script(args)
+    # Read the build directory only now: the first build settled it.
+    build_dir = settled_dir
     root = (script.parent if script else Path.cwd()).absolute()
 
     # An in-source build (-B .) has nothing to exclude by directory without
@@ -886,10 +922,27 @@ def _watch_build(args: argparse.Namespace) -> int:
     excluded_dirs = [build_dir] if build_dir != root else []
 
     return watch.watch_and_build(
-        build,
+        build_once,
         [root],
         excluded_dirs=excluded_dirs,
         excluded_paths=outputs,
+    )
+
+
+def _watch_build(args: argparse.Namespace) -> int:
+    """`_watch` with the arguments read off a Namespace."""
+    setup_logging(args.verbose, args.debug)
+    _, targets_list = parse_variables(getattr(args, "extra", []))
+
+    def build() -> tuple[int, Path]:
+        code = _build_targets(args)
+        return code, Path(args.build_dir)
+
+    return _watch(
+        build=build,
+        script=_find_build_script(args),
+        targets=targets_list,
+        ninja=getattr(args, "ninja", None),
     )
 
 
@@ -908,50 +961,34 @@ def _warn_unconverged(reasons: list[str], limit: int = 5) -> None:
         logger.warning("    ... and %d more", len(reasons) - limit)
 
 
+def _resolve_build_script(script: Path | None) -> Path | None:
+    """The build script named on the command line, or the one in the cwd."""
+    return script if script is not None else find_script("pcons-build.py")
+
+
 def _find_build_script(args: argparse.Namespace) -> Path | None:
     """Locate the build script named by --build-script, or in the cwd."""
     script_arg = getattr(args, "build_script", None)
-    if script_arg:
-        return Path(script_arg)
-    return find_script("pcons-build.py")
+    return _resolve_build_script(Path(script_arg) if script_arg else None)
 
 
-def _build_targets(args: argparse.Namespace) -> int:
-    """Run one build, regenerating build files first if they are stale."""
-    setup_logging(args.verbose, args.debug)
-
-    build_dir = Path(args.build_dir)
-
-    # Auto-generate if build files are missing or stale
-    build_script = getattr(args, "build_script", None)
-    if _needs_generation(build_dir, build_script=build_script):
-        script = _find_build_script(args)
-        if script is not None and script.exists():
-            logger.info("Build files missing or out of date, regenerating...")
-            load_user_modules(args)
-            result, project = cmd_generate(args)
-            if result != 0:
-                return result
-            if project:
-                args.build_dir = str(project.build_dir)
-                build_dir = Path(args.build_dir)
-
-    _, targets_list = parse_variables(getattr(args, "extra", []))
-    targets = targets_list or None
-
-    jobs = getattr(args, "jobs", None)
-    verbose = args.verbose
-    variant = getattr(args, "variant", None)
-    ninja_runner = getattr(args, "ninja", None)
-
-    # Detect which generator was used and run the matching build tool
+def _run_build_tool(
+    build_dir: Path,
+    *,
+    targets: list[str] | None = None,
+    jobs: int | None = None,
+    verbose: bool = False,
+    ninja: str | None = None,
+    variant: str | None = None,
+) -> int:
+    """Run whichever build tool matches the files already in *build_dir*."""
     ninja_file = build_dir / "build.ninja"
     makefile = build_dir / "Makefile"
     xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
 
     if ninja_file.exists():
         return run_ninja(
-            build_dir, targets=targets, jobs=jobs, verbose=verbose, runner=ninja_runner
+            build_dir, targets=targets, jobs=jobs, verbose=verbose, runner=ninja
         )
     elif makefile.exists():
         return run_make(build_dir, targets=targets, jobs=jobs, verbose=verbose)
@@ -974,6 +1011,72 @@ def _build_targets(args: argparse.Namespace) -> int:
         logger.error("No build files found in %s", build_dir)
         logger.info("Run 'pcons generate' first to create build files")
         return 1
+
+
+def _build(
+    build_dir: Path,
+    *,
+    regenerate: Callable[[], tuple[int, Project | None]],
+    script: Path | None = None,
+    targets: list[str] | None = None,
+    jobs: int | None = None,
+    verbose: bool = False,
+    ninja: str | None = None,
+    variant: str | None = None,
+) -> tuple[int, Path]:
+    """Run one build, regenerating first if the build files are stale.
+
+    The regeneration is passed in rather than described by more parameters:
+    what it needs is the whole of `_generate`'s signature, and the caller
+    already holds those values.
+
+    Returns:
+        Tuple of (exit code, the directory the build ran in). Not always the
+        one asked for: a regeneration may run a script that picks its own.
+    """
+    if _needs_generation(build_dir, build_script=str(script) if script else None):
+        found = _resolve_build_script(script)
+        if found is not None and found.exists():
+            logger.info("Build files missing or out of date, regenerating...")
+            code, project = regenerate()
+            if code != 0:
+                return code, build_dir
+            if project:
+                build_dir = project.build_dir
+
+    return _run_build_tool(
+        build_dir,
+        targets=targets,
+        jobs=jobs,
+        verbose=verbose,
+        ninja=ninja,
+        variant=variant,
+    ), build_dir
+
+
+def _build_targets(args: argparse.Namespace) -> int:
+    """Run one build, regenerating build files first if they are stale."""
+    setup_logging(args.verbose, args.debug)
+
+    def regenerate() -> tuple[int, Project | None]:
+        load_user_modules(args)
+        return cmd_generate(args)
+
+    _, targets_list = parse_variables(getattr(args, "extra", []))
+    script_arg = getattr(args, "build_script", None)
+    code, build_dir = _build(
+        Path(args.build_dir),
+        regenerate=regenerate,
+        script=Path(script_arg) if script_arg else None,
+        targets=targets_list or None,
+        jobs=getattr(args, "jobs", None),
+        verbose=args.verbose,
+        ninja=getattr(args, "ninja", None),
+        variant=getattr(args, "variant", None),
+    )
+    # _watch_build reads this back to learn where the build actually ran.
+    args.build_dir = str(build_dir)
+    return code
 
 
 def cmd_clean(args: argparse.Namespace) -> int:
@@ -1373,16 +1476,22 @@ env.apply_preset("warnings")
     return 0
 
 
-def load_user_modules(args: argparse.Namespace) -> None:
-    """Load user modules from search paths."""
+def _load_user_modules(modules_path: str | None) -> None:
+    """Load user add-on modules, from *modules_path* as well as the defaults."""
     from pcons import modules
 
     extra_paths: list[Path | str] | None = None
-    modules_path = getattr(args, "modules_path", None)
     if modules_path:
-        extra_paths = modules_path.split(os.pathsep)
+        # list() because load_modules declares list[Path | str], and list is
+        # invariant, so the list[str] that split() returns is not one.
+        extra_paths = list(modules_path.split(os.pathsep))
 
     modules.load_modules(extra_paths)
+
+
+def load_user_modules(args: argparse.Namespace) -> None:
+    """Load user modules from search paths."""
+    _load_user_modules(getattr(args, "modules_path", None))
 
 
 _DESCRIPTION = """\
