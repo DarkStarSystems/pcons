@@ -15,7 +15,6 @@ into, instead of two parsers repeating the same lists and drifting apart.
 
 from __future__ import annotations
 
-import argparse
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -207,31 +206,6 @@ def _chdir(ctx: click.Context, param: click.Parameter, value: str | None) -> str
             ctx.exit(1)
     return value
 
-
-def _namespace(
-    ctx: click.Context, command: str | None, **kw: Any
-) -> argparse.Namespace:
-    """Hand the existing cmd_* functions the Namespace they already take.
-
-    This is a boundary, not a pattern. The command implementations keep their
-    argparse signature, so the conversion touches the parser layer only.
-
-    Values spelled before the command name live on the parent context and are
-    picked up here, so a command sees the union of both sides. `MergingCommand`
-    has already decided which of the two wins for the options both carry.
-    """
-    params = dict(ctx.parent.params) if ctx.parent is not None else {}
-    params.update(kw)
-    params["command"] = command
-    params.setdefault("extra", [])
-    ns = argparse.Namespace(**params)
-    # click hands back tuples where argparse handed back lists, and downstream
-    # code tests `generator` for falsiness rather than for emptiness.
-    ns.extra = list(ns.extra)
-    generator = getattr(ns, "generator", None)
-    if generator is not None:
-        ns.generator = list(generator) or None
-    return ns
 
 
 def _generator_names() -> list[str]:

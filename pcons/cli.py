@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import os
@@ -25,7 +24,6 @@ from pcons._cli_click import (
     MergingCommand,
     MergingGroup,
     PconsGroup,
-    _namespace,
     build_options,
     common_options,
     directory_option,
@@ -109,7 +107,7 @@ def _needs_generation(build_dir: Path, build_script: str | None = None) -> bool:
     if build_script:
         script = Path(build_script)
         if not script.exists():
-            return True  # Script not found; let cmd_generate handle the error
+            return True  # Script not found; let _generate report it
     else:
         script = find_script("pcons-build.py")
 
@@ -732,26 +730,6 @@ def run_make(
         return 1
 
 
-def cmd_default(args: argparse.Namespace) -> int:
-    """Default command (bare 'pcons'): generate, then build."""
-    load_user_modules(args)
-
-    # cmd_build generates on its own when the build files are stale, which is
-    # the right entry point for a watch: it regenerates only when needed.
-    if getattr(args, "watch", False):
-        return cmd_build(args)
-
-    result, project = cmd_generate(args)
-    if result != 0:
-        return result
-
-    # Use the actual build directory from the Project
-    if project:
-        args.build_dir = str(project.build_dir)
-
-    return cmd_build(args)
-
-
 def _generate(
     build_dir: Path,
     *,
@@ -814,48 +792,6 @@ def _generate(
         return exit_code, None
 
     return 0, _projects[0] if _projects else None
-
-
-def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
-    """Run the generate phase: find and run pcons-build.py, which
-    generates build files in the build directory.
-
-    Returns:
-        Tuple of (exit_code, first registered Project or None).
-    """
-    setup_logging(args.verbose, args.debug)
-    script_arg = getattr(args, "build_script", None)
-    variables, _ = parse_variables(getattr(args, "extra", []))
-    return _generate(
-        Path(args.build_dir),
-        script=Path(script_arg) if script_arg else None,
-        variables=variables,
-        variant=getattr(args, "variant", None),
-        generator=getattr(args, "generator", None),
-        reconfigure=getattr(args, "reconfigure", False),
-        fresh=getattr(args, "fresh", False),
-        no_cache=getattr(args, "no_cache", False),
-        graph=getattr(args, "graph", None),
-        mermaid=getattr(args, "mermaid", None),
-    )
-
-
-def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
-    """'generate' subcommand handler: cmd_generate, exit code only."""
-    load_user_modules(args)
-    exit_code, _ = cmd_generate(args)
-    return exit_code
-
-
-def cmd_build(args: argparse.Namespace) -> int:
-    """Build targets with the build tool matching the generated files
-    (ninja, make, or xcodebuild), regenerating them first if stale.
-
-    With --watch, build once and then keep rebuilding as sources change.
-    """
-    if getattr(args, "watch", False):
-        return _watch_build(args)
-    return _build_targets(args)
 
 
 def _watch(
@@ -929,23 +865,6 @@ def _watch(
     )
 
 
-def _watch_build(args: argparse.Namespace) -> int:
-    """`_watch` with the arguments read off a Namespace."""
-    setup_logging(args.verbose, args.debug)
-    _, targets_list = parse_variables(getattr(args, "extra", []))
-
-    def build() -> tuple[int, Path]:
-        code = _build_targets(args)
-        return code, Path(args.build_dir)
-
-    return _watch(
-        build=build,
-        script=_find_build_script(args),
-        targets=targets_list,
-        ninja=getattr(args, "ninja", None),
-    )
-
-
 def _warn_unconverged(reasons: list[str], limit: int = 5) -> None:
     """Report a build that left ninja with work still to do."""
     if not reasons:
@@ -961,15 +880,18 @@ def _warn_unconverged(reasons: list[str], limit: int = 5) -> None:
         logger.warning("    ... and %d more", len(reasons) - limit)
 
 
+def _generators(chosen: tuple[str, ...]) -> list[str] | None:
+    """click's tuple as the list downstream tests for truthiness.
+
+    An empty selection has to become None, not [], because the code below asks
+    whether a generator was named rather than how many were.
+    """
+    return list(chosen) or None
+
+
 def _resolve_build_script(script: Path | None) -> Path | None:
     """The build script named on the command line, or the one in the cwd."""
     return script if script is not None else find_script("pcons-build.py")
-
-
-def _find_build_script(args: argparse.Namespace) -> Path | None:
-    """Locate the build script named by --build-script, or in the cwd."""
-    script_arg = getattr(args, "build_script", None)
-    return _resolve_build_script(Path(script_arg) if script_arg else None)
 
 
 def _run_build_tool(
@@ -1052,31 +974,6 @@ def _build(
         ninja=ninja,
         variant=variant,
     ), build_dir
-
-
-def _build_targets(args: argparse.Namespace) -> int:
-    """Run one build, regenerating build files first if they are stale."""
-    setup_logging(args.verbose, args.debug)
-
-    def regenerate() -> tuple[int, Project | None]:
-        load_user_modules(args)
-        return cmd_generate(args)
-
-    _, targets_list = parse_variables(getattr(args, "extra", []))
-    script_arg = getattr(args, "build_script", None)
-    code, build_dir = _build(
-        Path(args.build_dir),
-        regenerate=regenerate,
-        script=Path(script_arg) if script_arg else None,
-        targets=targets_list or None,
-        jobs=getattr(args, "jobs", None),
-        verbose=args.verbose,
-        ninja=getattr(args, "ninja", None),
-        variant=getattr(args, "variant", None),
-    )
-    # _watch_build reads this back to learn where the build actually ran.
-    args.build_dir = str(build_dir)
-    return code
 
 
 def _clean(build_dir: Path, *, everything: bool, ninja: str | None) -> int:
@@ -1471,11 +1368,6 @@ def _load_user_modules(modules_path: str | None) -> None:
     modules.load_modules(extra_paths)
 
 
-def load_user_modules(args: argparse.Namespace) -> None:
-    """Load user modules from search paths."""
-    _load_user_modules(getattr(args, "modules_path", None))
-
-
 _DESCRIPTION = """\
 A Python-based build system that generates Ninja files.
 
@@ -1498,18 +1390,6 @@ Docs:    https://pcons.readthedocs.io/
 """
 
 
-def _run_default(args: argparse.Namespace) -> int:
-    """The no-subcommand path: build the named targets, or generate and build.
-
-    A non-KEY=value argument with no build script to run is a target of an
-    existing build.ninja, not something to generate from.
-    """
-    _variables, remaining = parse_variables(args.extra)
-    if remaining and not find_script("pcons-build.py"):
-        return cmd_build(args)
-    return cmd_default(args)
-
-
 @click.group(
     cls=PconsGroup,
     invoke_without_command=True,
@@ -1525,12 +1405,16 @@ def _run_default(args: argparse.Namespace) -> int:
 @watch_option
 @jobs_option
 @click.pass_context
-def cli(ctx: click.Context, **kw: object) -> None:
+def cli(ctx: click.Context, **declared_but_unused: object) -> None:
+    # The group declares these so they can be spelled before a command name;
+    # each command reads them off this context. The group itself uses none.
+    #
     # A command name that resolved to nothing has already been routed to the
     # catch-all command, which is about to run. Only a command line naming no
-    # command at all gets it invoked from here.
+    # command at all gets it invoked from here, and forward() hands it the
+    # values parsed here rather than restating them.
     if ctx.invoked_subcommand is None and not ctx.meta.get(ROUTED_TO_DEFAULT):
-        ctx.exit(_run_default(_namespace(ctx, None, **kw)))
+        ctx.exit(ctx.forward(cli_default))
 
 
 @cli.command(
@@ -1668,8 +1552,39 @@ def cli_init(
 )
 @click.argument("extra", nargs=-1)
 @click.pass_context
-def cli_generate(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(_cmd_generate_wrapper(_namespace(ctx, "generate", **kw)))
+def cli_generate(
+    ctx: click.Context,
+    build_dir: Path,
+    verbose: bool,
+    debug: str | None,
+    modules_path: str | None,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    fresh: bool,
+    build_script: str | None,
+    no_cache: bool,
+    graph: str | None,
+    mermaid: str | None,
+    extra: tuple[str, ...],
+) -> None:
+    """Generate build files from pcons-build.py."""
+    setup_logging(verbose, debug)
+    _load_user_modules(modules_path)
+    variables, _ = parse_variables(list(extra))
+    code, _project = _generate(
+        build_dir,
+        script=Path(build_script) if build_script else None,
+        variables=variables,
+        variant=variant,
+        generator=_generators(generator),
+        reconfigure=reconfigure,
+        fresh=fresh,
+        no_cache=no_cache,
+        graph=graph,
+        mermaid=mermaid,
+    )
+    ctx.exit(code)
 
 
 @cli.command(
@@ -1690,8 +1605,61 @@ def cli_generate(ctx: click.Context, **kw: object) -> None:
 @jobs_option
 @click.argument("extra", nargs=-1)
 @click.pass_context
-def cli_build(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_build(_namespace(ctx, "build", **kw)))
+def cli_build(
+    ctx: click.Context,
+    build_dir: Path,
+    verbose: bool,
+    debug: str | None,
+    modules_path: str | None,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    fresh: bool,
+    build_script: str | None,
+    ninja: str | None,
+    watch: bool,
+    jobs: int | None,
+    extra: tuple[str, ...],
+) -> None:
+    """Build targets, generating first if the build files are stale."""
+    setup_logging(verbose, debug)
+    script = Path(build_script) if build_script else None
+    variables, targets = parse_variables(list(extra))
+
+    def regenerate() -> tuple[int, Project | None]:
+        _load_user_modules(modules_path)
+        return _generate(
+            build_dir,
+            script=script,
+            variables=variables,
+            variant=variant,
+            generator=_generators(generator),
+            reconfigure=reconfigure,
+            fresh=fresh,
+        )
+
+    def build_once() -> tuple[int, Path]:
+        return _build(
+            build_dir,
+            regenerate=regenerate,
+            script=script,
+            targets=targets or None,
+            jobs=jobs,
+            verbose=verbose,
+            ninja=ninja,
+            variant=variant,
+        )
+
+    if watch:
+        ctx.exit(
+            _watch(
+                build=build_once,
+                script=_resolve_build_script(script),
+                targets=targets,
+                ninja=ninja,
+            )
+        )
+    ctx.exit(build_once()[0])
 
 
 @cli.command("clean", cls=MergingCommand, short_help="Clean build artifacts")
@@ -1818,8 +1786,73 @@ def cli_test(ctx: click.Context, argv: tuple[str, ...]) -> None:
 @jobs_option
 @click.argument("extra", nargs=-1)
 @click.pass_context
-def cli_default(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(_run_default(_namespace(ctx, None, **kw)))
+def cli_default(
+    ctx: click.Context,
+    build_dir: Path,
+    verbose: bool,
+    debug: str | None,
+    modules_path: str | None,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    fresh: bool,
+    build_script: str | None,
+    ninja: str | None,
+    watch: bool,
+    jobs: int | None,
+    extra: tuple[str, ...],
+) -> None:
+    """The no-subcommand path: generate, then build."""
+    setup_logging(verbose, debug)
+    _load_user_modules(modules_path)
+    script = Path(build_script) if build_script else None
+    variables, targets = parse_variables(list(extra))
+
+    def regenerate() -> tuple[int, Project | None]:
+        return _generate(
+            build_dir,
+            script=script,
+            variables=variables,
+            variant=variant,
+            generator=_generators(generator),
+            reconfigure=reconfigure,
+            fresh=fresh,
+        )
+
+    def build_once(where: Path) -> tuple[int, Path]:
+        return _build(
+            where,
+            regenerate=regenerate,
+            script=script,
+            targets=targets or None,
+            jobs=jobs,
+            verbose=verbose,
+            ninja=ninja,
+            variant=variant,
+        )
+
+    # A non-KEY=value argument with no build script to run is a target of an
+    # existing build.ninja, not something to generate from.
+    if targets and not _resolve_build_script(script):
+        ctx.exit(build_once(build_dir)[0])
+
+    # _build generates on its own when the build files are stale, which is the
+    # right entry point for a watch: it regenerates only when needed.
+    if watch:
+        ctx.exit(
+            _watch(
+                build=lambda: build_once(build_dir),
+                script=_resolve_build_script(script),
+                targets=targets,
+                ninja=ninja,
+            )
+        )
+
+    code, project = regenerate()
+    if code != 0:
+        ctx.exit(code)
+    # The script may pick a build directory other than the one asked for.
+    ctx.exit(build_once(project.build_dir if project else build_dir)[0])
 
 
 def main() -> int:

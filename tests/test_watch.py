@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import importlib.util
 import threading
 import time
@@ -294,25 +293,15 @@ class TestWatchLoop:
 class TestCliWiring:
     """What `pcons build --watch` hands to the watch."""
 
-    @staticmethod
-    def _args() -> argparse.Namespace:
-        return argparse.Namespace(
-            watch=True, verbose=False, debug=None, build_dir="build", extra=[]
-        )
-
     def _run(self, monkeypatch, tmp_path: Path, build_dir: Path) -> dict:
-        """Drive _watch_build with everything below it stubbed out."""
+        """Drive the watch with everything below it stubbed out."""
         from pcons import cli
 
         captured: dict = {}
-        (tmp_path / "pcons-build.py").write_text("")
-
-        def fake_build(args) -> int:
-            args.build_dir = str(build_dir)
-            return 0
+        script = tmp_path / "pcons-build.py"
+        script.write_text("")
 
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(cli, "_build_targets", fake_build)
         monkeypatch.setattr(cli, "ninja_outputs", lambda *a, **k: {tmp_path / "gen.c"})
         monkeypatch.setattr(cli, "unconverged_reasons", lambda *a, **k: [])
         monkeypatch.setattr(
@@ -321,7 +310,14 @@ class TestCliWiring:
         (build_dir / "build.ninja").parent.mkdir(parents=True, exist_ok=True)
         (build_dir / "build.ninja").write_text("")
 
-        assert cli._watch_build(self._args()) == 0
+        # A build reports where it ran, which is how the watch learns the
+        # directory the build script actually chose.
+        assert (
+            cli._watch(
+                build=lambda: (0, build_dir), script=script, targets=[], ninja=None
+            )
+            == 0
+        )
         return captured
 
     def test_build_directory_is_excluded(self, tmp_path: Path, monkeypatch) -> None:
@@ -374,20 +370,13 @@ class TestBuildDispatch:
     """`pcons build` picks the tool that matches the generated files."""
 
     @staticmethod
-    def _args(build_dir: Path, **overrides) -> argparse.Namespace:
-        args = argparse.Namespace(
-            watch=False,
-            verbose=False,
-            debug=None,
-            build_dir=str(build_dir),
-            extra=[],
-            jobs=None,
-            variant=None,
-            ninja=None,
-        )
-        for key, value in overrides.items():
-            setattr(args, key, value)
-        return args
+    def _build(build_dir: Path, **overrides) -> int:
+        """One build, with nothing to regenerate unless a test says otherwise."""
+        from pcons import cli
+
+        overrides.setdefault("regenerate", lambda: (0, None))
+        code, _where = cli._build(build_dir, **overrides)
+        return code
 
     @staticmethod
     def _no_regeneration(monkeypatch) -> None:
@@ -403,7 +392,7 @@ class TestBuildDispatch:
         ran = []
         monkeypatch.setattr(cli, "run_ninja", lambda *a, **k: ran.append("ninja") or 0)
 
-        assert cli.cmd_build(self._args(tmp_path)) == 0
+        assert self._build(tmp_path) == 0
         assert ran == ["ninja"]
 
     def test_runs_make_for_a_makefile_build(self, tmp_path: Path, monkeypatch) -> None:
@@ -414,7 +403,7 @@ class TestBuildDispatch:
         ran = []
         monkeypatch.setattr(cli, "run_make", lambda *a, **k: ran.append("make") or 0)
 
-        assert cli.cmd_build(self._args(tmp_path)) == 0
+        assert self._build(tmp_path) == 0
         assert ran == ["make"]
 
     def test_runs_xcodebuild_for_an_xcode_build(
@@ -427,7 +416,7 @@ class TestBuildDispatch:
         seen: dict = {}
         monkeypatch.setattr(cli, "run_xcodebuild", lambda *a, **k: seen.update(k) or 0)
 
-        assert cli.cmd_build(self._args(tmp_path, variant="debug")) == 0
+        assert self._build(tmp_path, variant="debug") == 0
         assert seen["configuration"] == "debug"
 
     def test_stale_build_files_are_regenerated_first(
@@ -441,13 +430,15 @@ class TestBuildDispatch:
         monkeypatch.setattr(cli, "_needs_generation", lambda *a, **k: True)
         order = []
         monkeypatch.setattr(
-            cli, "cmd_generate", lambda args: order.append("generate") or (0, None)
-        )
-        monkeypatch.setattr(
             cli, "run_ninja", lambda *a, **k: order.append("build") or 0
         )
 
-        assert cli.cmd_build(self._args(tmp_path)) == 0
+        assert (
+            self._build(
+                tmp_path, regenerate=lambda: order.append("generate") or (0, None)
+            )
+            == 0
+        )
         assert order == ["generate", "build"]
 
     def test_a_failed_regeneration_stops_the_build(
@@ -458,19 +449,17 @@ class TestBuildDispatch:
         (tmp_path / "pcons-build.py").write_text("")
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(cli, "_needs_generation", lambda *a, **k: True)
-        monkeypatch.setattr(cli, "cmd_generate", lambda args: (1, None))
         monkeypatch.setattr(
             cli, "run_ninja", lambda *a, **k: pytest.fail("should not build")
         )
 
-        assert cli.cmd_build(self._args(tmp_path)) == 1
+        assert self._build(tmp_path, regenerate=lambda: (1, None)) == 1
 
     def test_no_build_files_is_an_error(self, tmp_path: Path, monkeypatch) -> None:
-        from pcons import cli
 
         self._no_regeneration(monkeypatch)
 
-        assert cli.cmd_build(self._args(tmp_path)) == 1
+        assert self._build(tmp_path) == 1
 
     def test_targets_reach_the_build_tool(self, tmp_path: Path, monkeypatch) -> None:
         from pcons import cli
@@ -480,17 +469,16 @@ class TestBuildDispatch:
         seen: dict = {}
         monkeypatch.setattr(cli, "run_ninja", lambda *a, **k: seen.update(k) or 0)
 
-        cli.cmd_build(self._args(tmp_path, extra=["hello", "PORT=3"]))
+        self._build(tmp_path, targets=["hello"])
 
-        assert seen["targets"] == ["hello"]  # KEY=value is not a target
+        assert seen["targets"] == ["hello"]
 
     def test_named_build_script_is_preferred(self, tmp_path: Path) -> None:
         from pcons import cli
 
         script = tmp_path / "custom-build.py"
-        args = self._args(tmp_path, build_script=str(script))
 
-        assert cli._find_build_script(args) == script
+        assert cli._resolve_build_script(script) == script
 
     def test_interrupt_before_the_watch_starts(
         self, tmp_path: Path, monkeypatch
@@ -498,14 +486,12 @@ class TestBuildDispatch:
         """Ctrl-C during the very first build exits without a traceback."""
         from pcons import cli
 
-        def interrupted(args):
+        def interrupted() -> tuple[int, Path]:
             raise KeyboardInterrupt
 
-        monkeypatch.setattr(cli, "_build_targets", interrupted)
         monkeypatch.setattr(watch, "ensure_available", lambda: None)
-        args = self._args(tmp_path, watch=True)
 
-        assert cli._watch_build(args) == 0
+        assert cli._watch(build=interrupted, script=None, targets=[], ninja=None) == 0
 
 
 class TestNinjaQueries:
@@ -641,14 +627,11 @@ class TestAvailability:
         from pcons import cli
 
         monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
-        monkeypatch.setattr(
-            cli, "_build_targets", lambda _args: pytest.fail("should not build")
-        )
-        args = argparse.Namespace(
-            watch=True, verbose=False, debug=None, build_dir="build"
-        )
 
-        assert cli.cmd_build(args) == 1
+        def refuse() -> tuple[int, Path]:
+            pytest.fail("should not build")
+
+        assert cli._watch(build=refuse, script=None, targets=[], ninja=None) == 1
 
 
 def test_native_watcher_reports_a_change(tmp_path: Path) -> None:

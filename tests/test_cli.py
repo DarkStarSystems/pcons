@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import inspect
 import logging
 import os
@@ -13,6 +12,7 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 import pytest
 from click.testing import CliRunner, Result
 
@@ -31,15 +31,15 @@ from pcons.cli import (
     _cache_show,
     _clean,
     _find_ninja,
+    _load_user_modules,
     _needs_generation,
     _parse_pcons_vars,
     cli,
+    cli_build,
     cli_cache_path,
     cli_default,
-    cmd_build,
-    cmd_default,
+    cli_generate,
     find_script,
-    load_user_modules,
     parse_variables,
     run_make,
     run_ninja,
@@ -70,16 +70,20 @@ def _has_c_compiler() -> bool:
 
 
 def _capture_command(
-    monkeypatch: pytest.MonkeyPatch, name: str
-) -> list[argparse.Namespace]:
-    """Stand in for a cmd_* entry point so a test can read what it was handed."""
-    seen: list[argparse.Namespace] = []
+    monkeypatch: pytest.MonkeyPatch, command: click.Command
+) -> list[dict[str, object]]:
+    """Stand in for a command's body so a test can read what the parser gave it.
 
-    def fake(args: argparse.Namespace) -> int:
-        seen.append(args)
+    click calls a command's callback with its parameters as keyword arguments,
+    so what lands here is exactly what the command would have worked from.
+    """
+    seen: list[dict[str, object]] = []
+
+    def fake(**kw: object) -> int:
+        seen.append(kw)
         return 0
 
-    monkeypatch.setattr(f"pcons.cli.{name}", fake)
+    monkeypatch.setattr(command, "callback", fake)
     return seen
 
 
@@ -1135,15 +1139,16 @@ class TestCLIArgumentParsing:
         """A named target with nothing to generate from belongs to an existing
         build.ninja, so it is built rather than generated.
 
-        The target reaches the build as `extra`, which is where `_build_targets`
-        reads it from. There is no separate `targets` attribute.
+        Asserting that the generate never ran is the point: the target arrives
+        as `extra`, and reading it as something to generate from would run a
+        script that is not there.
         """
         monkeypatch.chdir(tmp_path)
-        ran_default = _capture_command(monkeypatch, "cmd_default")
-        seen = _capture_command(monkeypatch, "cmd_build")
+        generated = _capture_args(monkeypatch, "_generate", result=(0, None))
+        built = _capture_args(monkeypatch, "_build", result=(0, tmp_path))
         assert _invoke("hello").exit_code == 0
-        assert not ran_default
-        assert seen[0].extra == ["hello"]
+        assert not generated
+        assert built[0]["targets"] == ["hello"]
 
     def test_a_bare_dash_is_not_a_target(self) -> None:
         """A first token that looks like an option stays an error.
@@ -1908,24 +1913,24 @@ class TestGlobalOptionsBeforeTheCommand:
     def test_build_dir_before_the_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-B", "out", "generate").exit_code == 0
-        assert seen[0].build_dir == Path("out")
+        assert seen[0]["build_dir"] == Path("out")
 
     def test_build_dir_after_the_command_still_wins(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-B", "out", "generate", "-B", "late").exit_code == 0
-        assert seen[0].build_dir == Path("late")
+        assert seen[0]["build_dir"] == Path("late")
 
     def test_build_dir_defaults_when_given_nowhere(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("generate").exit_code == 0
-        assert seen[0].build_dir == Path("build")
+        assert seen[0]["build_dir"] == Path("build")
 
     def test_build_dir_from_the_environment_loses_to_the_command_line(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1933,19 +1938,19 @@ class TestGlobalOptionsBeforeTheCommand:
         """The subcommand's own value comes from the environment, not the
         command line, so it must not beat a -B spelled before the command."""
         monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-B", "out", "generate").exit_code == 0
-        assert seen[0].build_dir == Path("out")
+        assert seen[0]["build_dir"] == Path("out")
 
     def test_verbose_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-v", "generate").exit_code == 0
-        assert seen[0].verbose is True
+        assert seen[0]["verbose"] is True
 
     def test_variant_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen = _capture_command(monkeypatch, "cmd_build")
+        seen = _capture_command(monkeypatch, cli_build)
         assert _invoke("--variant", "release", "build").exit_code == 0
-        assert seen[0].variant == "release"
+        assert seen[0]["variant"] == "release"
 
     def test_command_only_options_are_unaffected(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1973,29 +1978,33 @@ class TestCommandDetection:
         # -G was missing from that table, so `make` read as the first
         # positional, `generate` became a build target, and pcons generated
         # and then asked the build tool for a target named "generate".
-        ran_default = _capture_command(monkeypatch, "_run_default")
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-G", "make", "generate").exit_code == 0
         assert not ran_default
-        assert seen[0].command == "generate"
-        assert seen[0].generator == ["make"]
+        assert seen
+        assert seen[0]["generator"] == ("make",)
 
     def test_long_generator_before_the_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        ran_default = _capture_command(monkeypatch, "_run_default")
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("--generator", "make", "generate").exit_code == 0
         assert not ran_default
-        assert seen[0].command == "generate"
+        assert seen
 
     def test_option_value_that_names_a_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "cmd_build")
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_build)
+        # cli_build is also where the catch-all ends up, so the guard is what
+        # says `build` resolved as a command rather than as a target named
+        # "build" with "test" for a build directory.
         assert _invoke("-G", "make", "-B", "test", "build").exit_code == 0
-        assert seen[0].command == "build"
-        assert seen[0].build_dir == Path("test")
+        assert not ran_default
+        assert seen[0]["build_dir"] == Path("test")
 
 
 class TestDirectoryOption:
@@ -2092,27 +2101,27 @@ class TestDoubleDashEscape:
     def test_targets_survive_the_escape(
         self, monkeypatch: pytest.MonkeyPatch, argv: list[str], extra: list[str]
     ) -> None:
-        seen = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, cli_default)
         assert _invoke(*argv).exit_code == 0
-        assert seen[0].extra == extra
+        assert list(seen[0]["extra"]) == extra
 
     def test_escaped_options_are_not_applied(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, cli_default)
         assert _invoke("--", "--verbose", "-B", "out").exit_code == 0
-        assert seen[0].verbose is False
-        assert seen[0].build_dir == Path("build")
+        assert seen[0]["verbose"] is False
+        assert seen[0]["build_dir"] == Path("build")
 
     def test_a_command_name_is_still_a_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        ran_default = _capture_command(monkeypatch, "_run_default")
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-B", "out", "--", "generate").exit_code == 0
         assert not ran_default
-        assert seen[0].command == "generate"
-        assert seen[0].build_dir == Path("out")
+        assert seen
+        assert seen[0]["build_dir"] == Path("out")
 
     def test_a_typo_without_the_escape_is_still_an_error(self) -> None:
         assert _invoke("hello", "--nope").exit_code == 2
@@ -2140,17 +2149,17 @@ class TestCatchAllNameIsNotReserved:
     def test_it_is_an_ordinary_target(
         self, monkeypatch: pytest.MonkeyPatch, argv: list[str], extra: list[str]
     ) -> None:
-        seen = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, cli_default)
         assert _invoke(*argv).exit_code == 0
-        assert seen[0].extra == extra
+        assert list(seen[0]["extra"]) == extra
 
     def test_a_real_command_still_resolves(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Only the catch-all's own name is refused, not every name."""
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("generate").exit_code == 0
-        assert seen[0].command == "generate"
+        assert seen
 
 
 class TestDoubleDashBeforeTheRunner:
@@ -2295,10 +2304,10 @@ class TestProductionEntryPoint:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        def interrupted(args: argparse.Namespace) -> int:
+        def interrupted(**kw: object) -> int:
             raise KeyboardInterrupt
 
-        monkeypatch.setattr("pcons.cli._cmd_generate_wrapper", interrupted)
+        monkeypatch.setattr(cli_generate, "callback", interrupted)
         code, out, err = _main(capsys, "generate")
         assert code == 130
         assert "Traceback" not in out + err
@@ -2750,14 +2759,14 @@ class TestModulesSearchPath:
     ) -> None:
         seen = self._record(monkeypatch)
         spec = os.pathsep.join(["one", "two"])
-        load_user_modules(argparse.Namespace(modules_path=spec))
+        _load_user_modules(spec)
         assert seen == [["one", "two"]]
 
     def test_no_search_path_loads_the_defaults(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         seen = self._record(monkeypatch)
-        load_user_modules(argparse.Namespace(modules_path=None))
+        _load_user_modules(None)
         assert seen == [None]
 
 
@@ -2773,15 +2782,13 @@ class TestBuildDirectoryChosenByTheScript:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         elsewhere = tmp_path / "elsewhere"
-        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
         monkeypatch.setattr(
-            "pcons.cli.cmd_generate",
-            lambda args: (0, SimpleNamespace(build_dir=elsewhere)),
+            "pcons.cli._generate",
+            lambda *a, **k: (0, SimpleNamespace(build_dir=elsewhere)),
         )
-        seen = _capture_command(monkeypatch, "cmd_build")
-        args = argparse.Namespace(build_dir=str(tmp_path / "asked"), watch=False)
-        assert cmd_default(args) == 0
-        assert seen[0].build_dir == str(elsewhere)
+        seen = _capture_args(monkeypatch, "_build", result=(0, elsewhere))
+        assert _invoke("-B", str(tmp_path / "asked")).exit_code == 0
+        assert seen[0]["build_dir"] == elsewhere
 
     def test_a_regenerated_build_runs_where_the_script_put_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2791,10 +2798,9 @@ class TestBuildDirectoryChosenByTheScript:
         (elsewhere / "build.ninja").write_text("")
         (tmp_path / "pcons-build.py").write_text("")
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
         monkeypatch.setattr(
-            "pcons.cli.cmd_generate",
-            lambda args: (0, SimpleNamespace(build_dir=elsewhere)),
+            "pcons.cli._generate",
+            lambda *a, **k: (0, SimpleNamespace(build_dir=elsewhere)),
         )
         seen: list[Path] = []
 
@@ -2803,31 +2809,22 @@ class TestBuildDirectoryChosenByTheScript:
             return 0
 
         monkeypatch.setattr("pcons.cli.run_ninja", fake_run_ninja)
-        args = argparse.Namespace(
-            build_dir=str(tmp_path / "asked"),
-            verbose=False,
-            debug=None,
-            watch=False,
-            extra=[],
-        )
-        assert cmd_build(args) == 0
+        assert _invoke("-B", str(tmp_path / "asked"), "build").exit_code == 0
         assert seen == [elsewhere]
 
     def test_watch_generates_through_the_build_and_not_beside_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A watch loop regenerates only when the build files are stale, which
-        is cmd_build's job. A separate generate here would run the script twice
-        on the first pass and once more on every later one."""
+        the build itself decides. A separate generate here would run the script
+        twice on the first pass and once more on every later one."""
 
-        def refuse(args: argparse.Namespace) -> tuple[int, object]:
+        def refuse(*a: object, **k: object) -> tuple[int, object]:
             raise AssertionError("generate ran beside the build")
 
-        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
-        monkeypatch.setattr("pcons.cli.cmd_generate", refuse)
-        seen = _capture_command(monkeypatch, "cmd_build")
-        args = argparse.Namespace(build_dir=str(tmp_path), watch=True)
-        assert cmd_default(args) == 0
+        monkeypatch.setattr("pcons.cli._generate", refuse)
+        seen = _capture_args(monkeypatch, "_watch")
+        assert _invoke("-B", str(tmp_path), "--watch").exit_code == 0
         assert len(seen) == 1
 
 
@@ -2861,14 +2858,7 @@ class TestXcodeConfiguration:
 
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("pcons.cli.run_xcodebuild", fake_run_xcodebuild)
-        args = argparse.Namespace(
-            build_dir=str(build_dir),
-            verbose=False,
-            debug=None,
-            watch=False,
-            extra=[],
-        )
-        assert cmd_build(args) == 0
+        assert _invoke("-B", str(build_dir), "build").exit_code == 0
         assert seen == ["debug"]
 
     def test_an_explicit_variant_wins_over_the_cache(
@@ -2892,15 +2882,10 @@ class TestXcodeConfiguration:
 
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("pcons.cli.run_xcodebuild", fake_run_xcodebuild)
-        args = argparse.Namespace(
-            build_dir=str(build_dir),
-            verbose=False,
-            debug=None,
-            watch=False,
-            extra=[],
-            variant="release",
+        assert (
+            _invoke("-B", str(build_dir), "--variant", "release", "build").exit_code
+            == 0
         )
-        assert cmd_build(args) == 0
         assert seen == ["release"]
 
 
@@ -2977,3 +2962,50 @@ class TestNamedBuildScriptErrors:
         result = _invoke("info", "--targets")
         assert result.exit_code == 3
         assert "Targets:" not in result.stdout
+
+
+class TestValuesReachTheWork:
+    """Options a command declares actually arrive where they are used.
+
+    A command that parses an option and then forgets to pass it on exits 0
+    having done the wrong work, which is the failure this whole layer exists to
+    prevent and the one no exit code reports.
+    """
+
+    def test_jobs_reaches_the_build_tool(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "build.ninja").write_text("")
+        seen: list[object] = []
+        monkeypatch.setattr("pcons.cli._needs_generation", lambda *a, **k: False)
+        monkeypatch.setattr(
+            "pcons.cli.run_ninja", lambda *a, **k: seen.append(k.get("jobs")) or 0
+        )
+        assert _invoke("-B", str(tmp_path), "build", "-j", "3").exit_code == 0
+        assert seen == [3]
+
+    def test_the_graph_option_reaches_the_generate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_args(monkeypatch, "_generate", result=(0, None))
+        assert _invoke("-B", str(tmp_path), "generate", "--graph=g.dot").exit_code == 0
+        assert seen[0]["graph"] == "g.dot"
+
+    def test_no_generator_is_none_rather_than_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """click hands back (), and everything downstream tests truthiness.
+
+        An empty list is falsy too, so this passes either way at the call site
+        and fails only where a generator spec is persisted or merged.
+        """
+        seen = _capture_args(monkeypatch, "_generate", result=(0, None))
+        assert _invoke("-B", str(tmp_path), "generate").exit_code == 0
+        assert seen[0]["generator"] is None
+
+    def test_a_named_generator_arrives_as_a_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_args(monkeypatch, "_generate", result=(0, None))
+        assert _invoke("-B", str(tmp_path), "-G", "make", "generate").exit_code == 0
+        assert seen[0]["generator"] == ["make"]
