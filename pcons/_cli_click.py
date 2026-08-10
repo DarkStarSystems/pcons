@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, TypeVar
 
 import click
@@ -281,6 +282,9 @@ def common_options(f: F) -> F:
     f = click.option(
         "-B",
         "--build-dir",
+        # A Path, so no command has to convert it first. The metavar is spelled
+        # out because click.Path would otherwise print its own.
+        type=click.Path(path_type=Path),
         metavar="DIR",
         envvar="PCONS_BUILD_DIR",
         default="build",

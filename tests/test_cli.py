@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import logging
 import os
 import shutil
@@ -15,6 +16,7 @@ from types import SimpleNamespace
 import pytest
 from click.testing import CliRunner, Result
 
+import pcons.cli as cli_module
 from pcons import (
     Generator,
     MakefileGenerator,
@@ -27,6 +29,7 @@ from pcons.cli import (
     _cache_list,
     _cache_path,
     _cache_show,
+    _clean,
     _find_ninja,
     _needs_generation,
     _parse_pcons_vars,
@@ -34,7 +37,6 @@ from pcons.cli import (
     cli_cache_path,
     cli_default,
     cmd_build,
-    cmd_clean,
     cmd_default,
     find_script,
     load_user_modules,
@@ -76,6 +78,29 @@ def _capture_command(
     def fake(args: argparse.Namespace) -> int:
         seen.append(args)
         return 0
+
+    monkeypatch.setattr(f"pcons.cli.{name}", fake)
+    return seen
+
+
+def _capture_args(
+    monkeypatch: pytest.MonkeyPatch, name: str, result: object = 0
+) -> list[dict[str, object]]:
+    """Stand in for a work function so a test can read the arguments it got.
+
+    Arguments are bound through the real signature, so a value passed
+    positionally is recorded under its parameter's name. Asserting on
+    ``seen[0]["build_dir"]`` would otherwise pass or fail on how the caller
+    chose to spell the call rather than on what it sent.
+    """
+    real = getattr(cli_module, name)
+    seen: list[dict[str, object]] = []
+
+    def fake(*args: object, **kw: object) -> object:
+        bound = inspect.signature(real).bind(*args, **kw)
+        bound.apply_defaults()
+        seen.append(dict(bound.arguments))
+        return result
 
     monkeypatch.setattr(f"pcons.cli.{name}", fake)
     return seen
@@ -1885,14 +1910,14 @@ class TestGlobalOptionsBeforeTheCommand:
     ) -> None:
         seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
         assert _invoke("-B", "out", "generate").exit_code == 0
-        assert seen[0].build_dir == "out"
+        assert seen[0].build_dir == Path("out")
 
     def test_build_dir_after_the_command_still_wins(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
         assert _invoke("-B", "out", "generate", "-B", "late").exit_code == 0
-        assert seen[0].build_dir == "late"
+        assert seen[0].build_dir == Path("late")
 
     def test_build_dir_defaults_when_given_nowhere(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1900,7 +1925,7 @@ class TestGlobalOptionsBeforeTheCommand:
         monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
         assert _invoke("generate").exit_code == 0
-        assert seen[0].build_dir == "build"
+        assert seen[0].build_dir == Path("build")
 
     def test_build_dir_from_the_environment_loses_to_the_command_line(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1910,7 +1935,7 @@ class TestGlobalOptionsBeforeTheCommand:
         monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
         seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
         assert _invoke("-B", "out", "generate").exit_code == 0
-        assert seen[0].build_dir == "out"
+        assert seen[0].build_dir == Path("out")
 
     def test_verbose_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
         seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
@@ -1925,11 +1950,11 @@ class TestGlobalOptionsBeforeTheCommand:
     def test_command_only_options_are_unaffected(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "cmd_clean")
+        seen = _capture_args(monkeypatch, "_clean")
         assert _invoke("clean", "--all").exit_code == 0
-        assert seen[0].all is True
+        assert seen[0]["everything"] is True
         assert _invoke("clean").exit_code == 0
-        assert seen[1].all is False
+        assert seen[1]["everything"] is False
 
 
 class TestCommandDetection:
@@ -1970,7 +1995,7 @@ class TestCommandDetection:
         seen = _capture_command(monkeypatch, "cmd_build")
         assert _invoke("-G", "make", "-B", "test", "build").exit_code == 0
         assert seen[0].command == "build"
-        assert seen[0].build_dir == "test"
+        assert seen[0].build_dir == Path("test")
 
 
 class TestDirectoryOption:
@@ -2077,7 +2102,7 @@ class TestDoubleDashEscape:
         seen = _capture_command(monkeypatch, "_run_default")
         assert _invoke("--", "--verbose", "-B", "out").exit_code == 0
         assert seen[0].verbose is False
-        assert seen[0].build_dir == "build"
+        assert seen[0].build_dir == Path("build")
 
     def test_a_command_name_is_still_a_command(
         self, monkeypatch: pytest.MonkeyPatch
@@ -2087,7 +2112,7 @@ class TestDoubleDashEscape:
         assert _invoke("-B", "out", "--", "generate").exit_code == 0
         assert not ran_default
         assert seen[0].command == "generate"
-        assert seen[0].build_dir == "out"
+        assert seen[0].build_dir == Path("out")
 
     def test_a_typo_without_the_escape_is_still_an_error(self) -> None:
         assert _invoke("hello", "--nope").exit_code == 2
@@ -2605,23 +2630,13 @@ class TestCleanRunsTheBuildTool:
     missing build.ninja.
     """
 
-    @staticmethod
-    def _args(build_dir: Path, runner: str | None = None) -> argparse.Namespace:
-        return argparse.Namespace(
-            build_dir=str(build_dir),
-            verbose=False,
-            debug=None,
-            all=False,
-            ninja=runner,
-        )
-
     def test_clean_asks_ninja_to_clean(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         (tmp_path / "build.ninja").write_text("")
         TestBuildToolCommandLines._only(monkeypatch, "ninja", "/usr/bin/ninja")
         seen = TestBuildToolCommandLines._record(monkeypatch, returncode=5)
-        assert cmd_clean(self._args(tmp_path)) == 5
+        assert _clean(tmp_path, everything=False, ninja=None) == 5
         assert seen == [["/usr/bin/ninja", "-C", str(tmp_path), "-t", "clean"]]
 
     def test_clean_refuses_n2_rather_than_running_it(
@@ -2632,7 +2647,7 @@ class TestCleanRunsTheBuildTool:
         (tmp_path / "build.ninja").write_text("")
         TestBuildToolCommandLines._only(monkeypatch, "n2", "/opt/n2")
         seen = TestBuildToolCommandLines._record(monkeypatch)
-        assert cmd_clean(self._args(tmp_path, runner="n2")) == 1
+        assert _clean(tmp_path, everything=False, ninja="n2") == 1
         assert seen == []
 
     def test_clean_without_a_runner_is_an_error(
@@ -2641,7 +2656,7 @@ class TestCleanRunsTheBuildTool:
         (tmp_path / "build.ninja").write_text("")
         TestBuildToolCommandLines._only(monkeypatch, "nothing", "")
         seen = TestBuildToolCommandLines._record(monkeypatch)
-        assert cmd_clean(self._args(tmp_path)) == 1
+        assert _clean(tmp_path, everything=False, ninja=None) == 1
         assert seen == []
 
     def test_clean_all_succeeds_with_nothing_to_remove(

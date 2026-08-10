@@ -1079,14 +1079,9 @@ def _build_targets(args: argparse.Namespace) -> int:
     return code
 
 
-def cmd_clean(args: argparse.Namespace) -> int:
-    """Clean build artifacts: 'ninja -t clean', or remove the whole
-    build directory with --all."""
-    setup_logging(args.verbose, args.debug)
-
-    build_dir = Path(args.build_dir)
-
-    if args.all:
+def _clean(build_dir: Path, *, everything: bool, ninja: str | None) -> int:
+    """Clean build artifacts: 'ninja -t clean', or the whole directory."""
+    if everything:
         if build_dir.exists():
             logger.info("Removing build directory: %s", build_dir)
             shutil.rmtree(build_dir)
@@ -1100,8 +1095,7 @@ def cmd_clean(args: argparse.Namespace) -> int:
         logger.info("No build.ninja found, nothing to clean")
         return 0
 
-    ninja_runner = getattr(args, "ninja", None)
-    ninja_cmd = _find_ninja(ninja_runner)
+    ninja_cmd = _find_ninja(ninja)
     if ninja_cmd is None:
         logger.error("ninja not found in PATH")
         return 1
@@ -1181,27 +1175,16 @@ def _cache_clear(build_dir: Path) -> int:
     return 0
 
 
-def cmd_info(args: argparse.Namespace) -> int:
-    """Show the build script's docstring; with --targets, run the script
-    and list all defined targets grouped by type."""
-    setup_logging(args.verbose, args.debug)
-
-    script_path = getattr(args, "build_script", None)
-
-    if script_path:
-        script = Path(script_path)
-        if not script.exists():
-            logger.error("Build script not found: %s", script_path)
-            return 1
-    else:
-        found_script = find_script("pcons-build.py")
-        if found_script is None:
-            logger.error("No pcons-build.py found in current directory")
-            return 1
-        script = found_script
-
-    if getattr(args, "targets", False):
-        return _info_targets(args, script)
+def _info(script: Path | None) -> int:
+    """Show the build script's docstring, without running it."""
+    resolved = _resolve_build_script(script)
+    if script is not None and not script.exists():
+        logger.error("Build script not found: %s", script)
+        return 1
+    if resolved is None:
+        logger.error("No pcons-build.py found in current directory")
+        return 1
+    script = resolved
 
     import ast
 
@@ -1234,24 +1217,24 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
-def _info_targets(args: argparse.Namespace, script: Path) -> int:
-    """List all targets defined by the build script."""
+def _info_targets(
+    build_dir: Path,
+    script: Path,
+    *,
+    variables: dict[str, str] | None = None,
+    variant: str | None = None,
+    generator: list[str] | None = None,
+    reconfigure: bool = False,
+) -> int:
+    """Run the build script and list every target it defines."""
     from pcons.core.node import AliasNode, FileNode
 
-    load_user_modules(args)
-
-    build_dir = Path(args.build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
-
-    variables, _ = parse_variables(getattr(args, "extra", []))
-    variant = getattr(args, "variant", None)
-    generator = getattr(args, "generator", None)
-    reconfigure = getattr(args, "reconfigure", False)
 
     exit_code, projects = run_script(
         script,
         build_dir,
-        variables=variables,
+        variables=variables or {},
         variant=variant,
         generator=generator,
         reconfigure=reconfigure,
@@ -1377,7 +1360,7 @@ def _find_c_sources(root: Path, build_dir: str) -> list[Path]:
     return sorted(p.relative_to(root) for p in sources)
 
 
-def cmd_init(args: argparse.Namespace) -> int:
+def _init(build_dir: Path, *, force: bool, lang: str) -> int:
     """Initialize a new pcons project.
 
     Writes a pcons-build.py with a program target for any C/C++ sources
@@ -1386,22 +1369,21 @@ def cmd_init(args: argparse.Namespace) -> int:
     """
     import re
 
-    setup_logging(args.verbose, args.debug)
-
     root = Path.cwd()
     build_py = root / "pcons-build.py"
 
-    if build_py.exists() and not args.force:
+    if build_py.exists() and not force:
         logger.error("pcons-build.py already exists (use --force to overwrite)")
         return 1
 
     name = re.sub(r"[^A-Za-z0-9_-]+", "_", root.name).strip("_") or "myproject"
 
-    sources = _find_c_sources(root, args.build_dir)
+    # str: _find_c_sources compares it against single path components.
+    sources = _find_c_sources(root, str(build_dir))
     scaffolded = None
     if not sources:
-        scaffolded = Path("src") / ("main.cpp" if args.lang == "cpp" else "main.c")
-        hello = _HELLO_CPP if args.lang == "cpp" else _HELLO_C
+        scaffolded = Path("src") / ("main.cpp" if lang == "cpp" else "main.c")
+        hello = _HELLO_CPP if lang == "cpp" else _HELLO_C
         (root / "src").mkdir(exist_ok=True)
         (root / scaffolded).write_text(hello.replace("@NAME@", name))
         logger.info("Created %s", scaffolded)
@@ -1462,7 +1444,7 @@ env.apply_preset("warnings")
         print(
             f"Created pcons-build.py with a program target for {n} source file{'s' if n > 1 else ''}"
         )
-    exe = Path(args.build_dir) / (name + (".exe" if os.name == "nt" else ""))
+    exe = build_dir / (name + (".exe" if os.name == "nt" else ""))
     run_cmd = str(exe) if os.name == "nt" else f"./{exe.as_posix()}"
     print()
     print("Next steps:")
@@ -1572,8 +1554,49 @@ def cli(ctx: click.Context, **kw: object) -> None:
 )
 @click.argument("extra", nargs=-1)
 @click.pass_context
-def cli_info(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_info(_namespace(ctx, "info", **kw)))
+def cli_info(
+    ctx: click.Context,
+    build_dir: Path,
+    verbose: bool,
+    debug: str | None,
+    modules_path: str | None,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    build_script: str | None,
+    targets: bool,
+    extra: tuple[str, ...],
+    **declared_but_unused: object,
+) -> None:
+    """Show build script info and available variables."""
+    # --fresh comes with the options every generating command declares, and
+    # listing targets runs the script without persisting anything.
+    setup_logging(verbose, debug)
+    script = Path(build_script) if build_script else None
+
+    if not targets:
+        ctx.exit(_info(script))
+
+    resolved = _resolve_build_script(script)
+    if script is not None and not script.exists():
+        logger.error("Build script not found: %s", script)
+        ctx.exit(1)
+    if resolved is None:
+        logger.error("No pcons-build.py found in current directory")
+        ctx.exit(1)
+
+    _load_user_modules(modules_path)
+    variables, _ = parse_variables(list(extra))
+    ctx.exit(
+        _info_targets(
+            build_dir,
+            resolved,
+            variables=variables,
+            variant=variant,
+            generator=list(generator) or None,
+            reconfigure=reconfigure,
+        )
+    )
 
 
 @cli.command("init", cls=MergingCommand, short_help="Initialize a new pcons project")
@@ -1589,8 +1612,19 @@ def cli_info(ctx: click.Context, **kw: object) -> None:
     help="Language for the starter program when no sources are found (default: cpp)",
 )
 @click.pass_context
-def cli_init(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_init(_namespace(ctx, "init", **kw)))
+def cli_init(
+    ctx: click.Context,
+    build_dir: Path,
+    verbose: bool,
+    debug: str | None,
+    force: bool,
+    lang: str,
+    **declared_but_unused: object,
+) -> None:
+    # No docstring, as in cli_clean.
+    # --modules-path does nothing here either: scaffolding runs no build script.
+    setup_logging(verbose, debug)
+    ctx.exit(_init(build_dir, force=force, lang=lang))
 
 
 @cli.command(
@@ -1665,11 +1699,29 @@ def cli_build(ctx: click.Context, **kw: object) -> None:
 @common_options
 @build_options
 @click.option(
-    "-a", "--all", is_flag=True, default=False, help="Remove entire build directory"
+    "-a",
+    "--all",
+    "everything",
+    is_flag=True,
+    default=False,
+    help="Remove entire build directory",
 )
 @click.pass_context
-def cli_clean(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_clean(_namespace(ctx, "clean", **kw)))
+def cli_clean(
+    ctx: click.Context,
+    build_dir: Path,
+    verbose: bool,
+    debug: str | None,
+    ninja: str | None,
+    everything: bool,
+    **declared_but_unused: object,
+) -> None:
+    # No docstring: click would print it as this command's description, which
+    # `pcons clean --help` has never had. See the known issue.
+    # --modules-path is declared by common_options and does nothing here, since
+    # cleaning runs no build script.
+    setup_logging(verbose, debug)
+    ctx.exit(_clean(build_dir, everything=everything, ninja=ninja))
 
 
 @cli.group(
