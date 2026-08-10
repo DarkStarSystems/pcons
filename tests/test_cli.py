@@ -22,6 +22,8 @@ from pcons import (
 )
 from pcons.cli import (
     cli,
+    cli_cache,
+    cli_default,
     cmd_cache,
     find_script,
     parse_variables,
@@ -94,6 +96,31 @@ def _invoke(*argv: str) -> Result:
     finally:
         logging.root.handlers[:] = handlers
         logging.root.setLevel(level)
+
+
+def _main(capsys: pytest.CaptureFixture[str], *argv: str) -> tuple[int, str, str]:
+    """Run the CLI through main(), the way the console script does.
+
+    CliRunner drives cli.main(standalone_mode=True), so click's own standalone
+    handler produces every exit code the rest of this file observes. main()
+    passes standalone_mode=False and handles the outcome itself, so its
+    exception handling, its prog_name and its return-value bridge only run
+    here.
+
+    The logging handlers are saved and restored for the reason given on
+    _invoke, capsys being the buffer that would otherwise be captured.
+    """
+    handlers = logging.root.handlers[:]
+    level = logging.root.level
+    try:
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(sys, "argv", ["pcons", *argv])
+            code = cli_main()
+    finally:
+        logging.root.handlers[:] = handlers
+        logging.root.setLevel(level)
+    out, err = capsys.readouterr()
+    return code, out, err
 
 
 class TestFindScript:
@@ -674,7 +701,6 @@ class TestCLICommands:
         """Test pcons --help."""
         result = _invoke("--help")
         assert result.exit_code == 0
-        assert "pcons" in result.stdout
         assert "generate" in result.stdout
         assert "build" in result.stdout
         assert "clean" in result.stdout
@@ -1011,6 +1037,27 @@ class TestCLIArgumentParsing:
         assert result.exit_code != 0
         assert "No pcons-build.py found" in result.stderr
         assert "invalid choice" not in result.stderr
+
+    def test_target_without_a_build_script_goes_straight_to_the_build(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A named target with nothing to generate from belongs to an existing
+        build.ninja, so it is built rather than generated."""
+        monkeypatch.chdir(tmp_path)
+        seen = _capture_command(monkeypatch, "cmd_build")
+        assert _invoke("hello").exit_code == 0
+        assert seen[0].targets == ["hello"]
+
+    def test_a_bare_dash_is_not_a_target(self) -> None:
+        """A first token that looks like an option stays an error.
+
+        Only an unresolvable command *name* falls through to the catch-all. A
+        bare `-` is the one option-shaped token click's group parser hands on
+        rather than rejecting itself, so it is what reaches that guard.
+        """
+        result = _invoke("-")
+        assert result.exit_code == 2
+        assert "No such command '-'." in result.stderr
 
     def test_help_shows_commands(self) -> None:
         """Test that --help shows available commands."""
@@ -1553,6 +1600,15 @@ class TestCacheCommand:
         assert cmd_cache(self._args(tmp_path / "nope", "list")) == 0
         assert "No cache" in capsys.readouterr().out
 
+    def test_action_and_build_dir_reach_the_command(self, tmp_path: Path) -> None:
+        """Every test above calls cmd_cache directly, so nothing else checks
+        that the CLI hands it the positional action and the build directory."""
+        from pcons.core.cache import CACHE_FILE
+
+        result = _invoke("-B", str(tmp_path), "cache", "path")
+        assert result.exit_code == 0
+        assert result.stdout.strip() == str(tmp_path / CACHE_FILE)
+
 
 class TestCacheCLI:
     """The cache outlives the process that wrote it.
@@ -1847,6 +1903,92 @@ class TestCatchAllUsageLine:
         result = _invoke("hello", "--help")
         assert result.exit_code == 0
         assert result.stdout.startswith("Usage: cli [OPTIONS] [EXTRA]...\n")
+
+
+class TestCommandInvokedWithoutTheGroup:
+    """A command object invoked on its own still runs.
+
+    MergingCommand reads the values spelled before the command name off the
+    parent context. Invoking the command object directly, which a test can do
+    and the CLI never does, leaves it without a parent. Nothing else exercises
+    the guard that allows it.
+    """
+
+    def test_a_merging_command_has_no_parent_to_merge_from(
+        self, tmp_path: Path
+    ) -> None:
+        from pcons.core.cache import CACHE_FILE
+
+        result = CliRunner().invoke(
+            cli_cache, ["-B", str(tmp_path), "path"], catch_exceptions=False
+        )
+        assert result.exit_code == 0
+        assert result.stdout.strip() == str(tmp_path / CACHE_FILE)
+
+    def test_the_catch_all_reports_its_own_path_without_a_group(self) -> None:
+        """It borrows the group's command path, and there is none to borrow."""
+        result = CliRunner().invoke(cli_default, ["--help"], catch_exceptions=False)
+        assert result.exit_code == 0
+        assert result.stdout.startswith("Usage: _default [OPTIONS] [EXTRA]...\n")
+
+
+class TestProductionEntryPoint:
+    """main() is what the console script calls, and CliRunner cannot reach it.
+
+    Everything else here runs under CliRunner, which drives
+    cli.main(standalone_mode=True). main() passes standalone_mode=False and
+    handles the outcome itself: delete e.show() from it and every usage error
+    goes silent in production with the whole suite still green.
+    """
+
+    def test_a_usage_error_is_reported_and_exits_2(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        code, _out, err = _main(capsys, "--bogus")
+        assert code == 2
+        assert "No such option '--bogus'" in err
+
+    def test_the_error_names_the_program_once(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """prog_name is only visible here: CliRunner calls the program 'cli'.
+
+        An error is what pins it. `pcons --version` cannot: click's version
+        option memoizes the program name in its own closure the first time it
+        runs, so within one interpreter it reports whichever name got there
+        first.
+        """
+        code, _out, err = _main(capsys, "hello", "--nope")
+        assert code == 2
+        assert "Usage: pcons [OPTIONS] [EXTRA]...\n" in err
+        assert "Try 'pcons --help' for help.\n" in err
+        assert "pcons  " not in err
+
+    def test_a_command_result_becomes_the_exit_code(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """standalone_mode=False returns what the command returned, so main()
+        is the only thing turning it into a process exit code."""
+        monkeypatch.chdir(tmp_path)
+        code, _out, err = _main(capsys)
+        assert code == 1
+        assert "No pcons-build.py found" in err
+
+    def test_an_interrupt_exits_130_without_a_traceback(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        def interrupted(args: argparse.Namespace) -> int:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("pcons.cli._cmd_generate_wrapper", interrupted)
+        code, out, err = _main(capsys, "generate")
+        assert code == 130
+        assert "Traceback" not in out + err
 
 
 def test_windows_argv_expansion_is_off(monkeypatch: pytest.MonkeyPatch) -> None:
