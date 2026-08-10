@@ -1488,18 +1488,23 @@ def cli_init(ctx: click.Context, **kw: object) -> None:
 # option may stand alone by testing whether its default is unset, and an
 # explicit None counts as a default, which turns `--graph` back into an option
 # that demands an argument. Absent, the value is None either way.
+#
+# The brackets in the metavar are literal text. click renders an option that
+# may stand alone exactly like one that may not, so `--graph FILE` would read
+# as if the filename were required. Only the help record uses the metavar, so
+# the brackets cost nothing elsewhere.
 @click.option(
     "--graph",
     is_flag=False,
     flag_value="-",
-    metavar="FILE",
+    metavar="[FILE]",
     help="Output dependency graph in DOT format (default: stdout)",
 )
 @click.option(
     "--mermaid",
     is_flag=False,
     flag_value="-",
-    metavar="FILE",
+    metavar="[FILE]",
     help="Output dependency graph in Mermaid format (default: stdout)",
 )
 @click.argument("extra", nargs=-1)

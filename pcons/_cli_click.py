@@ -246,6 +246,7 @@ def common_options(f: F) -> F:
     f = click.option(
         "-B",
         "--build-dir",
+        metavar="DIR",
         envvar="PCONS_BUILD_DIR",
         default="build",
         help="Build directory (default: $PCONS_BUILD_DIR, or 'build')",
@@ -259,7 +260,9 @@ def common_options(f: F) -> F:
 
 def generate_options(f: F) -> F:
     """Options for commands that generate build files."""
-    f = click.option("-b", "--build-script", help="Path to pcons-build.py script")(f)
+    f = click.option(
+        "-b", "--build-script", metavar="FILE", help="Path to pcons-build.py script"
+    )(f)
     f = click.option(
         "--fresh",
         is_flag=True,
@@ -314,5 +317,5 @@ def watch_option(f: F) -> F:
 
 def jobs_option(f: F) -> F:
     return click.option(
-        "-j", "--jobs", type=int, help="Number of parallel jobs for build"
+        "-j", "--jobs", metavar="N", type=int, help="Number of parallel jobs for build"
     )(f)

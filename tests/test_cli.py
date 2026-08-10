@@ -1139,6 +1139,27 @@ class TestCLIArgumentParsing:
         assert "build" in result.stdout
         assert "clean" in result.stdout
 
+    def test_value_options_name_their_value(self) -> None:
+        """Every option that takes a value spells a metavar of its own.
+
+        click falls back to the type name, so an option declared without one
+        reads `--build-dir TEXT`, which says less than the name it replaced.
+        The brackets on --graph and --mermaid are what marks their value as
+        optional, since click renders those exactly like a required one.
+        """
+        result = _invoke("--help")
+        assert result.exit_code == 0
+        assert "-B, --build-dir DIR" in result.stdout
+        assert "-b, --build-script FILE" in result.stdout
+        assert "-j, --jobs N" in result.stdout
+        assert "TEXT" not in result.stdout
+        assert "INTEGER" not in result.stdout
+
+        result = _invoke("generate", "--help")
+        assert result.exit_code == 0
+        assert "--graph [FILE]" in result.stdout
+        assert "--mermaid [FILE]" in result.stdout
+
     def test_subcommand_help(self) -> None:
         """Test that subcommand --help works."""
         result = _invoke("build", "--help")
