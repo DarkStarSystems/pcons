@@ -23,11 +23,10 @@ from typing import Any, TypeVar
 import click
 from click.core import ParameterSource
 
+import pcons
 from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
 
 F = TypeVar("F", bound=Callable[..., Any])
-
-GENERATORS = ["ninja", "make", "makefile", "metadata", "xcode"]
 
 # Set on the group's context when an unresolvable command name was routed to the
 # catch-all command, so the group callback knows not to run it a second time.
@@ -184,6 +183,26 @@ def _namespace(
     return ns
 
 
+def _generator_names() -> list[str]:
+    """The registered generator names, in registration order.
+
+    Read at import time, which is correct only while `pcons/__init__.py` does
+    not import `pcons.cli`: the registry has to be populated before the option
+    is declared.
+    """
+    return list(pcons.GENERATORS)
+
+
+def _generator_help() -> str:
+    # Several names can point at one generator (`make` and `makefile` do), and
+    # listing both reads as two generators. Name each one once.
+    primary: dict[Any, str] = {}
+    for name, generator in pcons.GENERATORS.items():
+        primary.setdefault(generator, name)
+    names = ", ".join(primary.values())
+    return f"Generator to use ({names}). Repeatable. Default: ninja"
+
+
 def _debug_help() -> str:
     subsystems = ",".join(SUBSYSTEM_DESCRIPTIONS) + ",all,help"
     return f"Enable debug tracing for subsystems (comma-separated): {subsystems}"
@@ -243,8 +262,8 @@ def generate_options(f: F) -> F:
         "--generator",
         metavar="NAME",
         multiple=True,
-        type=click.Choice(GENERATORS),
-        help="Generator to use (ninja, make, metadata, xcode). Repeatable. Default: ninja",
+        type=click.Choice(_generator_names()),
+        help=_generator_help(),
     )(f)
     f = click.option(
         "--variant", metavar="NAME", help="Build variant (debug, release, etc.)"
