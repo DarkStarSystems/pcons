@@ -37,30 +37,65 @@ ROUTED_TO_DEFAULT = "pcons.routed_to_default"
 SAW_DOUBLE_DASH = "pcons.saw_double_dash"
 
 
-class MergingCommand(click.Command):
-    """Let a subcommand inherit an option spelled before the command name.
+def _adopt_options_spelled_earlier(command: click.Command, ctx: click.Context) -> None:
+    """Take an option's value from the command name it was spelled before.
 
     argparse applied a subparser's defaults unconditionally on top of what the
     top-level parser had already stored, so ``pcons -B out generate`` fell back
-    to ``build``. Here the parent value is taken unless the user spelled the
-    option after the subcommand, so the later spelling still wins.
+    to ``build``. Here the parent's value is taken unless the user spelled the
+    option after the command name, so the later spelling still wins.
 
     The test is "not spelled on the command line" rather than "still at its
     default": ``-B`` also reads ``PCONS_BUILD_DIR``, and a value click took
     from the environment must not beat a ``-B`` spelled before the command.
+
+    Reading only the immediate parent is enough however deep the nesting goes,
+    because a `MergingGroup` adopts into its own ``ctx.params`` before it
+    dispatches. By the time ``pcons -B out cache path`` reaches ``path``, the
+    ``cache`` context already carries ``out``, so the value arrives one level at
+    a time rather than needing a walk to the top.
+    """
+    for param in command.params:
+        name = param.name
+        if name is None:
+            continue
+        if ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE:
+            continue
+        # A command invoked on its own, as a test may do, has no group above it.
+        parent = ctx.parent
+        if parent is not None and name in parent.params:
+            ctx.params[name] = parent.params[name]
+
+
+class MergingCommand(click.Command):
+    """A command that inherits an option spelled before its name.
+
+    See `_adopt_options_spelled_earlier`.
     """
 
     def invoke(self, ctx: click.Context) -> Any:
-        parent = ctx.parent
-        # A command invoked on its own, as a test may do, has no group above it.
-        if parent is not None:
-            for param in self.params:
-                name = param.name
-                if name is None or name not in parent.params:
-                    continue
-                if ctx.get_parameter_source(name) is not ParameterSource.COMMANDLINE:
-                    ctx.params[name] = parent.params[name]
+        _adopt_options_spelled_earlier(self, ctx)
         return super().invoke(ctx)
+
+
+class MergingGroup(click.Group):
+    """A group that inherits, and so passes the inheritance on to its commands.
+
+    Without this a subcommand of a subgroup would read this group's untouched
+    default instead of what was spelled before the group's own name.
+
+    Not a subclass of `MergingCommand`: click's Group already derives from
+    Command, and crossing the two hierarchies buys nothing when the behaviour is
+    one shared function.
+    """
+
+    def invoke(self, ctx: click.Context) -> Any:
+        _adopt_options_spelled_earlier(self, ctx)
+        return super().invoke(ctx)
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """Declaration order, as `PconsGroup` does, not click's alphabetical."""
+        return list(self.commands)
 
 
 class _GroupPathContext(click.Context):

@@ -22,6 +22,7 @@ from pcons._cli_click import (
     ROUTED_TO_DEFAULT,
     DefaultCommand,
     MergingCommand,
+    MergingGroup,
     PconsGroup,
     _namespace,
     build_options,
@@ -1018,31 +1019,21 @@ def cmd_clean(args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_cache(args: argparse.Namespace) -> int:
-    """Inspect or clear the per-build-dir cache (pcons_cache.json).
-
-    Reads the cache file directly; never runs the build script. The build
-    directory comes from -B / $PCONS_BUILD_DIR (default 'build').
-    """
+def _open_cache(build_dir: Path) -> BuildCache:
+    """The build directory's cache. Reads the file; never runs the script."""
     from pcons.core.cache import BuildCache
 
-    cache = BuildCache(Path(args.build_dir))
-    action = getattr(args, "cache_action", None) or "list"
+    return BuildCache(build_dir)
 
-    if action == "path":
-        print(cache.path)
-        return 0
 
-    if cache.path is None or not cache.path.exists():
-        print(f"No cache at {cache.path}")
-        return 0
+def _cache_path(build_dir: Path) -> int:
+    """Where the cache lives, whether or not it exists yet."""
+    print(_open_cache(build_dir).path)
+    return 0
 
-    if action == "clear":
-        cache.clear()
-        print(f"Cleared {cache.path}")
-        return 0
 
-    # list / show: print the user-facing settings, one per line.
+def _print_persisted_settings(cache: BuildCache) -> None:
+    """The user-facing settings, one per line."""
     cached_vars = cache.get("vars")
     if isinstance(cached_vars, dict):
         for key in sorted(cached_vars):
@@ -1054,11 +1045,36 @@ def cmd_cache(args: argparse.Namespace) -> int:
     if isinstance(generator, str):
         print(f"generator={generator}")
 
-    if action == "show":
-        source_dir = cache.get("source_dir")
-        if isinstance(source_dir, str):
-            print(f"# source_dir: {source_dir}")
-        print(f"# cache file: {cache.path}")
+
+def _cache_list(build_dir: Path) -> int:
+    cache = _open_cache(build_dir)
+    if cache.path is None or not cache.path.exists():
+        print(f"No cache at {cache.path}")
+        return 0
+    _print_persisted_settings(cache)
+    return 0
+
+
+def _cache_show(build_dir: Path) -> int:
+    cache = _open_cache(build_dir)
+    if cache.path is None or not cache.path.exists():
+        print(f"No cache at {cache.path}")
+        return 0
+    _print_persisted_settings(cache)
+    source_dir = cache.get("source_dir")
+    if isinstance(source_dir, str):
+        print(f"# source_dir: {source_dir}")
+    print(f"# cache file: {cache.path}")
+    return 0
+
+
+def _cache_clear(build_dir: Path) -> int:
+    cache = _open_cache(build_dir)
+    if cache.path is None or not cache.path.exists():
+        print(f"No cache at {cache.path}")
+        return 0
+    cache.clear()
+    print(f"Cleared {cache.path}")
     return 0
 
 
@@ -1547,20 +1563,60 @@ def cli_clean(ctx: click.Context, **kw: object) -> None:
     ctx.exit(cmd_clean(_namespace(ctx, "clean", **kw)))
 
 
-@cli.command(
-    "cache", cls=MergingCommand, short_help="Inspect or clear the per-build-dir cache"
+@cli.group(
+    "cache",
+    cls=MergingGroup,
+    invoke_without_command=True,
+    short_help="Inspect or clear the per-build-dir cache",
+    help=(
+        "Inspect or clear the per-build-dir cache (pcons_cache.json).\n\n"
+        "Reads the cache file directly; never runs the build script. The build "
+        "directory comes from -B / $PCONS_BUILD_DIR (default 'build'). "
+        "Without a subcommand, lists what is persisted."
+    ),
 )
 @directory_option
 @common_options
-@click.argument(
-    "cache_action",
-    required=False,
-    default="list",
-    type=click.Choice(["list", "show", "clear", "path"]),
-)
 @click.pass_context
 def cli_cache(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_cache(_namespace(ctx, "cache", **kw)))
+    if ctx.invoked_subcommand is None:
+        ctx.exit(_cache_list(Path(str(ctx.params["build_dir"]))))
+
+
+@cli_cache.command("list", cls=MergingCommand, short_help="What is persisted")
+@directory_option
+@common_options
+@click.pass_context
+def cli_cache_list(ctx: click.Context, **kw: object) -> None:
+    """List the settings this build directory has persisted."""
+    ctx.exit(_cache_list(Path(str(ctx.params["build_dir"]))))
+
+
+@cli_cache.command("show", cls=MergingCommand, short_help="The whole cache")
+@directory_option
+@common_options
+@click.pass_context
+def cli_cache_show(ctx: click.Context, **kw: object) -> None:
+    """List the persisted settings, then where they came from and live."""
+    ctx.exit(_cache_show(Path(str(ctx.params["build_dir"]))))
+
+
+@cli_cache.command("clear", cls=MergingCommand, short_help="Discard it")
+@directory_option
+@common_options
+@click.pass_context
+def cli_cache_clear(ctx: click.Context, **kw: object) -> None:
+    """Discard the persisted settings."""
+    ctx.exit(_cache_clear(Path(str(ctx.params["build_dir"]))))
+
+
+@cli_cache.command("path", cls=MergingCommand, short_help="Where it lives")
+@directory_option
+@common_options
+@click.pass_context
+def cli_cache_path(ctx: click.Context, **kw: object) -> None:
+    """Print the cache file's path, whether or not it exists yet."""
+    ctx.exit(_cache_path(Path(str(ctx.params["build_dir"]))))
 
 
 @cli.command(

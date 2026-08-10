@@ -23,14 +23,17 @@ from pcons import (
     NinjaGenerator,
 )
 from pcons.cli import (
+    _cache_clear,
+    _cache_list,
+    _cache_path,
+    _cache_show,
     _find_ninja,
     _needs_generation,
     _parse_pcons_vars,
     cli,
-    cli_cache,
+    cli_cache_path,
     cli_default,
     cmd_build,
-    cmd_cache,
     cmd_clean,
     cmd_default,
     find_script,
@@ -1654,14 +1657,11 @@ class TestCacheCommand:
         )
         return build_dir
 
-    def _args(self, build_dir: Path, action: str) -> argparse.Namespace:
-        return argparse.Namespace(build_dir=str(build_dir), cache_action=action)
-
     def test_cache_list(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
         build_dir = self._populate(tmp_path, monkeypatch)
-        assert cmd_cache(self._args(build_dir, "list")) == 0
+        assert _cache_list(build_dir) == 0
         out = capsys.readouterr().out
         assert "HELLO=42" in out
         assert "variant=debug" in out
@@ -1673,17 +1673,17 @@ class TestCacheCommand:
         from pcons.core.cache import CACHE_FILE
 
         build_dir = self._populate(tmp_path, monkeypatch)
-        assert cmd_cache(self._args(build_dir, "path")) == 0
+        assert _cache_path(build_dir) == 0
         assert str(build_dir / CACHE_FILE) in capsys.readouterr().out
 
     def test_cache_clear(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
         build_dir = self._populate(tmp_path, monkeypatch)
-        assert cmd_cache(self._args(build_dir, "clear")) == 0
+        assert _cache_clear(build_dir) == 0
         capsys.readouterr()
         # After clearing, list shows no settings.
-        assert cmd_cache(self._args(build_dir, "list")) == 0
+        assert _cache_list(build_dir) == 0
         assert capsys.readouterr().out.strip() == ""
 
     def test_cache_show_names_the_source_dir_and_the_file(
@@ -1696,24 +1696,127 @@ class TestCacheCommand:
         about. Nothing else prints either.
         """
         build_dir = self._populate(tmp_path, monkeypatch)
-        assert cmd_cache(self._args(build_dir, "show")) == 0
+        assert _cache_show(build_dir) == 0
         out = capsys.readouterr().out
         assert "HELLO=42" in out
         assert f"# source_dir: {tmp_path}" in out
         assert "# cache file:" in out
 
-    def test_cache_missing_reports_cleanly(self, tmp_path: Path, capsys) -> None:
-        assert cmd_cache(self._args(tmp_path / "nope", "list")) == 0
+    @pytest.mark.parametrize("verb", ["list", "show", "clear"])
+    def test_a_missing_cache_reports_cleanly(
+        self, tmp_path: Path, capsys, verb: str
+    ) -> None:
+        """`path` is the one verb that answers without a cache to read."""
+        work = {"list": _cache_list, "show": _cache_show, "clear": _cache_clear}[verb]
+        assert work(tmp_path / "nope") == 0
         assert "No cache" in capsys.readouterr().out
 
-    def test_action_and_build_dir_reach_the_command(self, tmp_path: Path) -> None:
-        """Every test above calls cmd_cache directly, so nothing else checks
-        that the CLI hands it the positional action and the build directory."""
+
+class TestCacheIsAGroup:
+    """`pcons cache` dispatches to a subcommand, not to a positional value.
+
+    The tests above call the work functions, so without these nothing checks
+    that a verb on the command line reaches the right one, nor that the build
+    directory survives the extra context a nested group introduces.
+    """
+
+    @staticmethod
+    def _path(*argv: str) -> str:
+        result = _invoke(*argv)
+        assert result.exit_code == 0, result.output
+        return result.stdout.strip()
+
+    def test_each_verb_reaches_its_own_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         from pcons.core.cache import CACHE_FILE
 
-        result = _invoke("-B", str(tmp_path), "cache", "path")
+        assert self._path("-B", str(tmp_path), "cache", "path") == str(
+            tmp_path / CACHE_FILE
+        )
+        for verb in ("list", "show", "clear"):
+            result = _invoke("-B", str(tmp_path), "cache", verb)
+            assert result.exit_code == 0
+            assert "No cache" in result.stdout
+
+    def test_no_verb_lists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bare `pcons cache` did this when the verb was an optional argument."""
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        bare = _invoke("-B", str(tmp_path), "cache")
+        listed = _invoke("-B", str(tmp_path), "cache", "list")
+        assert bare.exit_code == listed.exit_code == 0
+        assert bare.stdout == listed.stdout
+
+    def test_an_unknown_verb_is_a_usage_error(self, tmp_path: Path) -> None:
+        result = _invoke("-B", str(tmp_path), "cache", "bogus")
+        assert result.exit_code == 2
+        assert "bogus" in result.stderr
+
+    def test_the_help_names_every_verb(self) -> None:
+        result = _invoke("cache", "--help")
         assert result.exit_code == 0
-        assert result.stdout.strip() == str(tmp_path / CACHE_FILE)
+        # Declaration order, so read-only verbs come before the destructive one.
+        assert [
+            line.split()[0]
+            for line in result.stdout.partition("Commands:")[2].strip().splitlines()
+        ] == ["list", "show", "clear", "path"]
+
+    def test_a_build_dir_spelled_before_cache_reaches_the_verb(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The verb is two contexts below the group that owns -B.
+
+        A merge that only reads the immediate parent finds the `cache` group's
+        untouched default here, and the verb silently answers for `build/`.
+        """
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        from pcons.core.cache import CACHE_FILE
+
+        assert self._path("-B", str(tmp_path), "cache", "path") == str(
+            tmp_path / CACHE_FILE
+        )
+
+    def test_a_build_dir_spelled_after_cache_also_reaches_the_verb(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        from pcons.core.cache import CACHE_FILE
+
+        assert self._path("cache", "-B", str(tmp_path), "path") == str(
+            tmp_path / CACHE_FILE
+        )
+
+    def test_the_later_build_dir_wins(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        from pcons.core.cache import CACHE_FILE
+
+        later = tmp_path / "later"
+        assert self._path(
+            "-B", str(tmp_path / "earlier"), "cache", "-B", str(later), "path"
+        ) == str(later / CACHE_FILE)
+
+    def test_a_spelled_build_dir_beats_the_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The merge tests where a value came from, not whether it is a default.
+
+        $PCONS_BUILD_DIR reaches every level, so comparing values cannot tell
+        an inherited `-B` from an environment default two contexts down.
+        """
+        from pcons.core.cache import CACHE_FILE
+
+        monkeypatch.setenv("PCONS_BUILD_DIR", str(tmp_path / "from_env"))
+        spelled = tmp_path / "spelled"
+        assert self._path("-B", str(spelled), "cache", "path") == str(
+            spelled / CACHE_FILE
+        )
+        # With nothing spelled, the environment still decides.
+        assert self._path("cache", "path") == str(tmp_path / "from_env" / CACHE_FILE)
 
 
 class TestCacheCLI:
@@ -2100,10 +2203,12 @@ class TestCommandInvokedWithoutTheGroup:
     def test_a_merging_command_has_no_parent_to_merge_from(
         self, tmp_path: Path
     ) -> None:
+        # A leaf of the cache group, so invoking it alone skips both the group
+        # it normally sits under and the one above that.
         from pcons.core.cache import CACHE_FILE
 
         result = CliRunner().invoke(
-            cli_cache, ["-B", str(tmp_path), "path"], catch_exceptions=False
+            cli_cache_path, ["-B", str(tmp_path)], catch_exceptions=False
         )
         assert result.exit_code == 0
         assert result.stdout.strip() == str(tmp_path / CACHE_FILE)
