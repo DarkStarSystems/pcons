@@ -375,6 +375,52 @@ class TestRunScriptEnvironment:
         )
         assert exit_code == 0
 
+    def test_reconfigure_reaches_the_script_as_an_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PCONS_RECONFIGURE is the whole of --reconfigure. Drop the one line
+        that sets it and the flag parses, the run succeeds, and the cached
+        configuration is reused anyway."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "import os\n"
+            "from pcons import Project\n"
+            "assert os.environ['PCONS_RECONFIGURE'] == '1'\n"
+            "Project('demo')\n"
+        )
+
+        monkeypatch.delenv("PCONS_RECONFIGURE", raising=False)
+        _clear_cli_vars()
+
+        exit_code, _ = run_script(script, tmp_path / "build", reconfigure=True)
+        assert exit_code == 0
+
+    def test_a_pcons_error_is_reported_without_a_traceback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        """A PconsError carries an actionable message a traceback would bury,
+        so it gets its own arm. It must also cancel the pending generation:
+        build files written from a half-run script are worse than none."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "from pcons.core.errors import PconsError\n"
+            "Project('demo')\n"
+            "raise PconsError('no toolchain for wombat')\n"
+        )
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        with caplog.at_level(logging.ERROR, logger="pcons"):
+            exit_code, projects = run_script(script, tmp_path / "build")
+
+        assert exit_code == 1
+        assert projects == []
+        assert "no toolchain for wombat" in caplog.text
+        assert "Traceback" not in caplog.text
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
     def test_run_script_cleans_up_new_environment_keys(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
