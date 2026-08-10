@@ -1399,7 +1399,6 @@ def _run_default(args: argparse.Namespace) -> int:
     """
     _variables, remaining = parse_variables(args.extra)
     if remaining and not find_script("pcons-build.py"):
-        args.targets = remaining
         return cmd_build(args)
     return cmd_default(args)
 

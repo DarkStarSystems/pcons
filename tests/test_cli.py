@@ -1042,11 +1042,17 @@ class TestCLIArgumentParsing:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A named target with nothing to generate from belongs to an existing
-        build.ninja, so it is built rather than generated."""
+        build.ninja, so it is built rather than generated.
+
+        The target reaches the build as `extra`, which is where `_build_targets`
+        reads it from. There is no separate `targets` attribute.
+        """
         monkeypatch.chdir(tmp_path)
+        ran_default = _capture_command(monkeypatch, "cmd_default")
         seen = _capture_command(monkeypatch, "cmd_build")
         assert _invoke("hello").exit_code == 0
-        assert seen[0].targets == ["hello"]
+        assert not ran_default
+        assert seen[0].extra == ["hello"]
 
     def test_a_bare_dash_is_not_a_target(self) -> None:
         """A first token that looks like an option stays an error.

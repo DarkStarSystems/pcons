@@ -174,7 +174,6 @@ def _namespace(
     params.update(kw)
     params["command"] = command
     params.setdefault("extra", [])
-    params.setdefault("targets", [])
     ns = argparse.Namespace(**params)
     # click hands back tuples where argparse handed back lists, and downstream
     # code tests `generator` for falsiness rather than for emptiness.
