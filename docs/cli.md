@@ -87,6 +87,10 @@ Run the tests declared by `project.Test()`. This subcommand takes the test
 runner's own options (`-L`, `-R`, `-E`, `--junit` and so on), not the ones
 below; see [Testing](testing.md).
 
+Everything after `test` reaches the runner untouched, apart from `-C DIR`.
+Write `pcons test -- -C DIR` to hand `-C` to the runner instead: the first
+`--` is consumed, and any further one is passed on.
+
 ## Options
 
 Accepted by every command unless noted:

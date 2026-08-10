@@ -1896,6 +1896,48 @@ class TestDoubleDashEscape:
         assert _invoke("--nope").exit_code == 2
 
 
+class TestDoubleDashBeforeTheRunner:
+    """`pcons test` consumes one `--` and passes any further one on.
+
+    Everything after `test` reaches the test runner untouched, so the only job
+    left for the separator is to shield a token the CLI would otherwise claim
+    as its own, which means `-C` and `--help`. It does that job and is then
+    spent, the way a wrapper conventionally treats it. A runner argument that
+    has to be a literal `--` is written as a second one.
+
+    The old parser forwarded the separator instead, so `pcons test -- --list`
+    reached the runner as a positional it has no use for and errored.
+    """
+
+    @pytest.mark.parametrize(
+        ("argv", "forwarded"),
+        [
+            (["test", "-x"], ["-x"]),
+            (["test", "--", "-x"], ["-x"]),
+            (["test", "--", "--list"], ["--list"]),
+            (["test", "--", "-C", "sub"], ["-C", "sub"]),
+            (["test", "--", "--", "-x"], ["--", "-x"]),
+            (["test", "--list", "--", "-x"], ["--list", "-x"]),
+            (["-B", "out", "test", "--", "-x"], ["-B", "out", "-x"]),
+        ],
+    )
+    def test_one_separator_is_consumed(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str], forwarded: list[str]
+    ) -> None:
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke(*argv).exit_code == 0
+        assert seen == [forwarded]
+
+    def test_the_separator_is_what_makes_dash_c_reach_the_runner(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unescaped, -C is the CLI's own option and the runner never sees it."""
+        monkeypatch.chdir(tmp_path)
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke("test", "-C", str(tmp_path)).exit_code == 0
+        assert seen == [[]]
+
+
 class TestCatchAllUsageLine:
     """The catch-all command is hidden, so it reports the group's path.
 
