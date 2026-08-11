@@ -19,14 +19,15 @@ from click.core import ParameterSource
 
 from pcons import __version__
 from pcons._cli_click import (
-    ROUTED_TO_DEFAULT,
     DefaultCommand,
+    PconsContext,
     PconsGroup,
     build_options,
     common_options,
     directory_option,
     generate_options,
     jobs_option,
+    pass_pcons_context,
     watch_option,
 )
 from pcons.core.errors import PconsError
@@ -1402,8 +1403,8 @@ Docs:    https://pcons.readthedocs.io/
 @build_options
 @watch_option
 @jobs_option
-@click.pass_context
-def cli(ctx: click.Context, **declared_but_unused: object) -> None:
+@pass_pcons_context
+def cli(ctx: PconsContext, **declared_but_unused: object) -> None:
     # The group declares these so they can be spelled before a command name;
     # each command reads them off this context. The group itself uses none.
     #
@@ -1411,7 +1412,7 @@ def cli(ctx: click.Context, **declared_but_unused: object) -> None:
     # catch-all command, which is about to run. Only a command line naming no
     # command at all gets it invoked from here, and forward() hands it the
     # values parsed here rather than restating them.
-    if ctx.invoked_subcommand is None and not ctx.meta.get(ROUTED_TO_DEFAULT):
+    if ctx.invoked_subcommand is None and not ctx.routed_to_default:
         ctx.exit(ctx.forward(cli_default))
 
 
@@ -1434,9 +1435,9 @@ def cli(ctx: click.Context, **declared_but_unused: object) -> None:
     help="List all build targets (runs the build script)",
 )
 @click.argument("extra", nargs=-1)
-@click.pass_context
+@pass_pcons_context
 def cli_info(
-    ctx: click.Context,
+    ctx: PconsContext,
     build_dir: Path,
     verbose: bool,
     debug: str | None,
@@ -1492,9 +1493,9 @@ def cli_info(
     default="cpp",
     help="Language for the starter program when no sources are found (default: cpp)",
 )
-@click.pass_context
+@pass_pcons_context
 def cli_init(
-    ctx: click.Context,
+    ctx: PconsContext,
     build_dir: Path,
     verbose: bool,
     debug: str | None,
@@ -1547,9 +1548,9 @@ def cli_init(
     help="Output dependency graph in Mermaid format (default: stdout)",
 )
 @click.argument("extra", nargs=-1)
-@click.pass_context
+@pass_pcons_context
 def cli_generate(
-    ctx: click.Context,
+    ctx: PconsContext,
     build_dir: Path,
     verbose: bool,
     debug: str | None,
@@ -1599,9 +1600,9 @@ def cli_generate(
 @watch_option
 @jobs_option
 @click.argument("extra", nargs=-1)
-@click.pass_context
+@pass_pcons_context
 def cli_build(
-    ctx: click.Context,
+    ctx: PconsContext,
     build_dir: Path,
     verbose: bool,
     debug: str | None,
@@ -1669,9 +1670,9 @@ def cli_build(
     default=False,
     help="Remove entire build directory",
 )
-@click.pass_context
+@pass_pcons_context
 def cli_clean(
-    ctx: click.Context,
+    ctx: PconsContext,
     build_dir: Path,
     verbose: bool,
     debug: str | None,
@@ -1700,8 +1701,8 @@ def cli_clean(
 )
 @directory_option
 @common_options
-@click.pass_context
-def cli_cache(ctx: click.Context, build_dir: Path, **kw: object) -> None:
+@pass_pcons_context
+def cli_cache(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
     if ctx.invoked_subcommand is None:
         ctx.exit(_cache_list(build_dir))
 
@@ -1709,8 +1710,8 @@ def cli_cache(ctx: click.Context, build_dir: Path, **kw: object) -> None:
 @cli_cache.command("list", short_help="What is persisted")
 @directory_option
 @common_options
-@click.pass_context
-def cli_cache_list(ctx: click.Context, build_dir: Path, **kw: object) -> None:
+@pass_pcons_context
+def cli_cache_list(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
     """List the settings this build directory has persisted."""
     ctx.exit(_cache_list(build_dir))
 
@@ -1718,8 +1719,8 @@ def cli_cache_list(ctx: click.Context, build_dir: Path, **kw: object) -> None:
 @cli_cache.command("show", short_help="The whole cache")
 @directory_option
 @common_options
-@click.pass_context
-def cli_cache_show(ctx: click.Context, build_dir: Path, **kw: object) -> None:
+@pass_pcons_context
+def cli_cache_show(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
     """List the persisted settings, then where they came from and live."""
     ctx.exit(_cache_show(build_dir))
 
@@ -1727,8 +1728,8 @@ def cli_cache_show(ctx: click.Context, build_dir: Path, **kw: object) -> None:
 @cli_cache.command("clear", short_help="Discard it")
 @directory_option
 @common_options
-@click.pass_context
-def cli_cache_clear(ctx: click.Context, build_dir: Path, **kw: object) -> None:
+@pass_pcons_context
+def cli_cache_clear(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
     """Discard the persisted settings."""
     ctx.exit(_cache_clear(build_dir))
 
@@ -1736,8 +1737,8 @@ def cli_cache_clear(ctx: click.Context, build_dir: Path, **kw: object) -> None:
 @cli_cache.command("path", short_help="Where it lives")
 @directory_option
 @common_options
-@click.pass_context
-def cli_cache_path(ctx: click.Context, build_dir: Path, **kw: object) -> None:
+@pass_pcons_context
+def cli_cache_path(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
     """Print the cache file's path, whether or not it exists yet."""
     ctx.exit(_cache_path(build_dir))
 
@@ -1751,8 +1752,8 @@ def cli_cache_path(ctx: click.Context, build_dir: Path, **kw: object) -> None:
 )
 @directory_option
 @click.argument("argv", nargs=-1, type=click.UNPROCESSED)
-@click.pass_context
-def cli_test(ctx: click.Context, argv: tuple[str, ...]) -> None:
+@pass_pcons_context
+def cli_test(ctx: PconsContext, argv: tuple[str, ...]) -> None:
     from pcons.test_runner import main as test_main
 
     # Options before the subcommand never reach the runner's parser, so a build
@@ -1779,9 +1780,9 @@ def cli_test(ctx: click.Context, argv: tuple[str, ...]) -> None:
 @watch_option
 @jobs_option
 @click.argument("extra", nargs=-1)
-@click.pass_context
+@pass_pcons_context
 def cli_default(
-    ctx: click.Context,
+    ctx: PconsContext,
     build_dir: Path,
     verbose: bool,
     debug: str | None,

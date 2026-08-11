@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import os
 from collections.abc import Callable
+from functools import update_wrapper
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
 import click
 from click.core import ParameterSource
@@ -27,14 +28,41 @@ import pcons
 from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
 
 F = TypeVar("F", bound=Callable[..., Any])
+P = ParamSpec("P")
+R = TypeVar("R")
 
-# Set on the group's context when an unresolvable command name was routed to the
-# catch-all command, so the group callback knows not to run it a second time.
-ROUTED_TO_DEFAULT = "pcons.routed_to_default"
 
-# Set on the group's context when argv held a `--`, which the group's parser
-# consumes before anything downstream can see it.
-SAW_DOUBLE_DASH = "pcons.saw_double_dash"
+class PconsContext(click.Context):
+    """Every context in the pcons command tree, carrying what parsing learned.
+
+    Both facts are set and read on the group's own context, so they are
+    attributes rather than entries in the ``ctx.meta`` dictionary every nested
+    context shares. Every command class here declares this as its
+    ``context_class``, so a callback taking `PconsContext` gets one.
+    """
+
+    #: argv held a `--`, which the group's parser consumes before anything
+    #: downstream can see it. After one, a token starting with a dash is a
+    #: target to build, not an option.
+    saw_double_dash: bool = False
+
+    #: an unresolvable command name was routed to the catch-all command, so the
+    #: group callback knows not to run it a second time.
+    routed_to_default: bool = False
+
+
+def pass_pcons_context(f: Callable[Concatenate[PconsContext, P], R]) -> Callable[P, R]:
+    """`click.pass_context`, typed for the context every pcons command gets.
+
+    click types its own decorator against `click.Context`, so a callback
+    annotated with the subclass every command declares as its ``context_class``
+    is rejected there. Same wrapper, one type narrower.
+    """
+
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        return f(cast(PconsContext, click.get_current_context()), *args, **kwargs)
+
+    return update_wrapper(wrapper, f)
 
 
 def _adopt_options_spelled_earlier(command: click.Command, ctx: click.Context) -> None:
@@ -73,6 +101,8 @@ class MergingCommand(click.Command):
     See `_adopt_options_spelled_earlier`.
     """
 
+    context_class = PconsContext
+
     def invoke(self, ctx: click.Context) -> Any:
         _adopt_options_spelled_earlier(self, ctx)
         return super().invoke(ctx)
@@ -89,19 +119,21 @@ class MergingGroup(click.Group):
     one shared function.
     """
 
-    def invoke(self, ctx: click.Context) -> Any:
-        _adopt_options_spelled_earlier(self, ctx)
-        return super().invoke(ctx)
+    context_class = PconsContext
 
     #: A subgroup's commands inherit too, without each restating it.
     command_class = MergingCommand
+
+    def invoke(self, ctx: click.Context) -> Any:
+        _adopt_options_spelled_earlier(self, ctx)
+        return super().invoke(ctx)
 
     def list_commands(self, ctx: click.Context) -> list[str]:
         """Declaration order, as `PconsGroup` does, not click's alphabetical."""
         return list(self.commands)
 
 
-class _GroupPathContext(click.Context):
+class _GroupPathContext(PconsContext):
     """Report the group's command path as the command's own.
 
     The catch-all command is hidden and has no name a user can type, so its
@@ -133,6 +165,8 @@ class PconsGroup(click.Group):
 
     DEFAULT_COMMAND = "_default"
 
+    context_class = PconsContext
+
     #: Every command inherits an option spelled before its name, so no command
     #: has to ask for it. The catch-all overrides this with `DefaultCommand`.
     command_class = MergingCommand
@@ -157,22 +191,25 @@ class PconsGroup(click.Group):
         """The catch-all command, which only `resolve_command` may reach."""
         return self.commands.get(self.DEFAULT_COMMAND)
 
+    # click types these hooks against the base context, and narrowing a
+    # parameter in an override is unsound in general, so the class this group
+    # builds its own context from is spelled out at each one.
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        # Recorded before click's parser eats the `--`: after one, a token
-        # starting with a dash is a target to build, not an option.
-        ctx.meta[SAW_DOUBLE_DASH] = "--" in args
+        # Recorded before click's parser eats the `--`.
+        cast(PconsContext, ctx).saw_double_dash = "--" in args
         return super().parse_args(ctx, args)
 
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
-        if args and args[0].startswith("-") and ctx.meta.get(SAW_DOUBLE_DASH):
+        pcons_ctx = cast(PconsContext, ctx)
+        if args and args[0].startswith("-") and pcons_ctx.saw_double_dash:
             # `pcons -- -foo` builds a target called -foo. No command name
             # starts with a dash, so this cannot capture one: `pcons -- build`
             # still runs the build command.
             default = self._catch_all()
             if default is not None:
-                ctx.meta[ROUTED_TO_DEFAULT] = True
+                pcons_ctx.routed_to_default = True
                 # The `--` goes back in. The group's parser consumed it, and
                 # the catch-all's own parser needs it to stop reading the rest
                 # as options, which is what keeps a plain typo an error.
@@ -192,10 +229,10 @@ class PconsGroup(click.Group):
                 raise
             # A None name keeps ctx.invoked_subcommand None, so the group
             # callback cannot tell this apart from a command line naming no
-            # command at all, hence the marker. `DefaultCommand` is what makes
+            # command at all, hence the flag. `DefaultCommand` is what makes
             # usage and errors read "pcons" rather than "pcons " or
             # "pcons _default".
-            ctx.meta[ROUTED_TO_DEFAULT] = True
+            pcons_ctx.routed_to_default = True
             return None, default, args
 
 
