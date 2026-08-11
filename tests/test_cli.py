@@ -1237,8 +1237,8 @@ class TestCLIArgumentParsing:
         as the value of --build-dir, once as the actual subcommand. Locating
         the dispatch point by scanning raw argv for the literal string
         "test" (sys.argv.index("test")) finds the option value first and
-        hands the runner a bogus leading "test" positional, which its
-        argparse rejects. The option's value must be consumed as a value
+        hands the runner a bogus leading "test" positional, which the
+        runner rejects. The option's value must be consumed as a value
         before the first remaining token is read as the command.
         """
         import json as _json

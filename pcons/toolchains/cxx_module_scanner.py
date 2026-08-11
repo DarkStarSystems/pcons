@@ -45,6 +45,9 @@ All paths in the output are relative to the build directory (where Ninja runs).
 
 from __future__ import annotations
 
+# argparse, not click: a build-edge subprocess, where click costs ~14ms of
+# import per invocation. The CLI here is internal, typed only by pcons's
+# own generators.
 import argparse
 import hashlib
 import json

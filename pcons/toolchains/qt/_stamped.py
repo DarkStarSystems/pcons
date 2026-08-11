@@ -10,6 +10,8 @@ by the `ninja lupdate` / `ninja deploy` utility targets:
 
 from __future__ import annotations
 
+# argparse, not click: this runs under $qt.python, which the user may point
+# at an interpreter that has no pcons, and so no click, installed.
 import argparse
 import subprocess
 import sys
