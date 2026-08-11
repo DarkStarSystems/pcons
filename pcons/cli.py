@@ -1707,45 +1707,45 @@ def cli_clean(
 @directory_option
 @common_options
 @click.pass_context
-def cli_cache(ctx: click.Context, **kw: object) -> None:
+def cli_cache(ctx: click.Context, build_dir: Path, **kw: object) -> None:
     if ctx.invoked_subcommand is None:
-        ctx.exit(_cache_list(Path(str(ctx.params["build_dir"]))))
+        ctx.exit(_cache_list(build_dir))
 
 
 @cli_cache.command("list", cls=MergingCommand, short_help="What is persisted")
 @directory_option
 @common_options
 @click.pass_context
-def cli_cache_list(ctx: click.Context, **kw: object) -> None:
+def cli_cache_list(ctx: click.Context, build_dir: Path, **kw: object) -> None:
     """List the settings this build directory has persisted."""
-    ctx.exit(_cache_list(Path(str(ctx.params["build_dir"]))))
+    ctx.exit(_cache_list(build_dir))
 
 
 @cli_cache.command("show", cls=MergingCommand, short_help="The whole cache")
 @directory_option
 @common_options
 @click.pass_context
-def cli_cache_show(ctx: click.Context, **kw: object) -> None:
+def cli_cache_show(ctx: click.Context, build_dir: Path, **kw: object) -> None:
     """List the persisted settings, then where they came from and live."""
-    ctx.exit(_cache_show(Path(str(ctx.params["build_dir"]))))
+    ctx.exit(_cache_show(build_dir))
 
 
 @cli_cache.command("clear", cls=MergingCommand, short_help="Discard it")
 @directory_option
 @common_options
 @click.pass_context
-def cli_cache_clear(ctx: click.Context, **kw: object) -> None:
+def cli_cache_clear(ctx: click.Context, build_dir: Path, **kw: object) -> None:
     """Discard the persisted settings."""
-    ctx.exit(_cache_clear(Path(str(ctx.params["build_dir"]))))
+    ctx.exit(_cache_clear(build_dir))
 
 
 @cli_cache.command("path", cls=MergingCommand, short_help="Where it lives")
 @directory_option
 @common_options
 @click.pass_context
-def cli_cache_path(ctx: click.Context, **kw: object) -> None:
+def cli_cache_path(ctx: click.Context, build_dir: Path, **kw: object) -> None:
     """Print the cache file's path, whether or not it exists yet."""
-    ctx.exit(_cache_path(Path(str(ctx.params["build_dir"]))))
+    ctx.exit(_cache_path(build_dir))
 
 
 @cli.command(
