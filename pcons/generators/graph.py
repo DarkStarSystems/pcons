@@ -47,15 +47,24 @@ class GraphGenerator(BaseGenerator):
             return Path(self._output_dir_override)
         return super()._resolve_output_dir(project)
 
+    def write(self, project: Project, stream: TextIO) -> None:
+        """Write the diagram for a resolved project to an open text stream.
+
+        The synchronous counterpart of ``generate()``, which only queues the
+        write. Callers that already hold a resolved project and a destination
+        (stdout, say) use this instead.
+        """
+        self._write_header(stream, project)
+        self._write_graph(stream, project)
+        self._write_footer(stream)
+
     def _generate_impl(self, project: Project, output_dir: Path) -> None:
         """Generate the diagram file."""
         output_dir.mkdir(parents=True, exist_ok=True)
         output_file = output_dir / self._output_filename
 
         with open(output_file, "w", encoding="utf-8") as f:
-            self._write_header(f, project)
-            self._write_graph(f, project)
-            self._write_footer(f)
+            self.write(project, f)
 
     # --- format-specific hooks (override in subclasses) ---
 

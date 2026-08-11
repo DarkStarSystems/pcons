@@ -2117,7 +2117,7 @@ MermaidGenerator().generate(project)
 Or from the command line:
 
 ```bash
-pcons generate --mermaid=deps.mmd    # To file
+pcons generate --mermaid=deps.mmd    # To file, relative to the current directory
 pcons generate --mermaid             # To stdout
 pcons generate --graph=deps.dot      # DOT format
 ```
