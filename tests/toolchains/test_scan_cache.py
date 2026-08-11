@@ -105,6 +105,23 @@ class TestScanCache:
             "g++-15", [], str(src)
         )
 
+    def test_the_scan_recipe_is_part_of_the_key(self, tmp_path: Path) -> None:
+        """A pcons whose scan command changed must not trust the old answers.
+
+        Nothing else would notice: the recipe is invisible to the caller, so a
+        cache written by an older scan command would look perfectly valid.
+        """
+        import pcons.toolchains._scan_cache as sc
+
+        src, _ = self._sources(tmp_path)
+        before = ScanCache.key("g++", [], str(src))
+        original = sc.RECIPE
+        try:
+            sc.RECIPE = original + "-changed"
+            assert ScanCache.key("g++", [], str(src)) != before
+        finally:
+            sc.RECIPE = original
+
     def test_it_survives_a_round_trip_through_the_file(self, tmp_path: Path) -> None:
         src, header = self._sources(tmp_path)
         key = ScanCache.key("g++", [], str(src))

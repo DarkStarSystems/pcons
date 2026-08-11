@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 
 CACHE_FILE = "pcons_scan_cache.pkl"
 
+#: What produced the stored answers. Part of every key, so a pcons whose scan
+#: command differs rescans instead of trusting the old one.
+RECIPE: str = "gcc-p1689r5-directives-only-1"
+
 
 def parse_depfile(text: str) -> list[str]:
     """The prerequisites out of a make-style depfile.
@@ -115,8 +119,12 @@ class ScanCache:
 
         Not a stale answer to the same one, so it gets its own entry rather
         than invalidating the old.
+
+        `RECIPE` covers what the caller cannot see: the flags the scan command
+        adds for itself. Bump it whenever that command changes, or an upgraded
+        pcons will reuse answers the old command produced.
         """
-        material = "\0".join([compiler, src, *compile_flags])
+        material = "\0".join([RECIPE, compiler, src, *compile_flags])
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> dict[str, Any] | None:

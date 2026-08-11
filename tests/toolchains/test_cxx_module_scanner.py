@@ -483,6 +483,43 @@ class TestGccScanDiscardsPreprocessedOutput:
         assert run_scan_deps_gcc("g++", ["-std=c++23"], "/x/y.cppm", "y.o") == {}
         return seen[0]
 
+    def test_the_scan_skips_macro_expansion(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the module declarations are wanted, not an expanded TU."""
+        assert "-fdirectives-only" in self._captured_argv(monkeypatch)
+
+    def test_the_scan_does_not_touch_the_flags_it_was_given(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The BMI-compatibility invariant, guarded where it could break.
+
+        `bmi_key_for_flags` hashes a TU's compile flags, and the caller passes
+        the very same list here. Appending a scan-only flag to it in place
+        would change every BMI key and every compile line, so the module
+        interfaces on disk would no longer match what consumes them.
+        """
+        seen: list[list[str]] = []
+
+        class _Ok:
+            returncode = 0
+            stderr = ""
+
+        def _capture(cmd: list[str], *args: object, **kwargs: object) -> _Ok:
+            seen.append(list(cmd))
+            deps = next(a.split("=", 1)[1] for a in cmd if a.startswith("-fdeps-file="))
+            Path(deps).write_text("{}", encoding="utf-8")
+            return _Ok()
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _capture
+        )
+        flags = ["-std=c++23", "-fmodules-ts"]
+        run_scan_deps_gcc("g++", flags, "/x/y.cppm", "y.o")
+
+        assert flags == ["-std=c++23", "-fmodules-ts"]
+        assert "-fdirectives-only" in seen[0]
+
     def test_output_goes_to_the_null_device(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
