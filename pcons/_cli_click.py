@@ -108,17 +108,23 @@ def configure_logging(ctx: click.Context) -> None:
     without ``-v`` settles on beats one spelled before it, and that ``--debug``
     is validated for a command that never reads it: `pcons test` hands its argv
     to another program with its own logging.
+
+    ``--debug`` names subsystems on `pcons` and is a plain flag on
+    `pcons-fetch`, which has no subsystems of its own to name. A flag means
+    all of them.
     """
     params = ctx.params
     if "verbose" not in params and "debug" not in params:
         return
 
+    debug = params.get("debug")
+    if isinstance(debug, bool):
+        debug = "all" if debug else None
+
     # Imported here because `pcons.cli` imports this module, not the reverse.
     from pcons.cli import setup_logging
 
-    setup_logging(
-        bool(params.get("verbose", False)), cast("str | None", params.get("debug"))
-    )
+    setup_logging(bool(params.get("verbose", False)), cast("str | None", debug))
 
 
 def load_declared_modules(command: click.Command, ctx: click.Context) -> None:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import subprocess
 import sys
 import tarfile
@@ -21,24 +22,7 @@ from pcons.packages.fetch.cli import (
     fetch_package,
     generate_package_description,
     load_deps_file,
-    setup_logging,
 )
-
-
-class TestSetupLogging:
-    """Tests for setup_logging."""
-
-    def test_setup_logging_normal(self) -> None:
-        """Test normal logging setup."""
-        setup_logging(verbose=False, debug=False)
-
-    def test_setup_logging_verbose(self) -> None:
-        """Test verbose logging setup."""
-        setup_logging(verbose=True, debug=False)
-
-    def test_setup_logging_debug(self) -> None:
-        """Test debug logging setup."""
-        setup_logging(verbose=False, debug=True)
 
 
 class TestLoadDepsFile:
@@ -348,26 +332,24 @@ build = "autotools"
 def _record_handlers(
     monkeypatch: pytest.MonkeyPatch,
 ) -> list[tuple[str, dict[str, Any]]]:
-    """Replace the three cmd_* handlers with recorders, and return the log.
+    """Replace what each subcommand runs with a recorder, and return the log.
 
-    Each entry is the handler name and what it was asked to do, flattened to a
-    dict so the assertions read the same whether the handler is called with a
-    namespace or with keywords.
+    Each entry is the command's name and the arguments it was handed. The
+    callback is swapped rather than the module attribute, because that is the
+    one reference both the ordinary dispatch and the group's `ctx.invoke`
+    default path go through.
     """
     calls: list[tuple[str, dict[str, Any]]] = []
 
     def recorder(name: str) -> Any:
-        def record(*args: Any, **kwargs: Any) -> int:
-            fields = dict(vars(args[0])) if args else dict(kwargs)
-            fields.pop("func", None)
-            fields.pop("command", None)
-            calls.append((name, fields))
+        def record(**kwargs: Any) -> int:
+            calls.append((f"cmd_{name}", dict(kwargs)))
             return 0
 
         return record
 
-    for name in ("cmd_fetch", "cmd_list", "cmd_clean"):
-        monkeypatch.setattr(fetch_cli, name, recorder(name))
+    for name in ("fetch", "list", "clean"):
+        monkeypatch.setattr(fetch_cli.cli.commands[name], "callback", recorder(name))
     return calls
 
 
@@ -496,6 +478,29 @@ class TestFetchCliDispatch:
         assert _run(monkeypatch, "--debug", "list") == 0
 
         assert calls[0][1]["debug"] is True
+
+
+class TestVerbosityConfiguresLogging:
+    """-v and --debug reach logging, which the command layer owns.
+
+    pcons-fetch has no setup_logging of its own: `MergingCommand` configures
+    it from the merged options, the path `pcons` itself takes.
+    """
+
+    def test_quiet_is_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _record_handlers(monkeypatch)
+        assert _run(monkeypatch, "list") == 0
+        assert logging.getLogger().level == logging.WARNING
+
+    def test_verbose_is_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _record_handlers(monkeypatch)
+        assert _run(monkeypatch, "-v", "list") == 0
+        assert logging.getLogger().level == logging.INFO
+
+    def test_debug_is_debug(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        _record_handlers(monkeypatch)
+        assert _run(monkeypatch, "--debug", "list") == 0
+        assert logging.getLogger().level == logging.DEBUG
 
 
 class TestDownloadSource:

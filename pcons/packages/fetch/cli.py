@@ -24,25 +24,10 @@ from typing import Any
 import click
 
 from pcons import __version__
-from pcons._cli_click import _adopt_options_spelled_earlier
+from pcons._cli_click import MergingGroup
 from pcons.packages.description import PackageDescription
 
 logger = logging.getLogger("pcons-fetch")
-
-
-def setup_logging(verbose: bool = False, debug: bool = False) -> None:
-    """Configure logging based on verbosity level."""
-    if debug:
-        level = logging.DEBUG
-        fmt = "%(levelname)s: %(name)s: %(message)s"
-    elif verbose:
-        level = logging.INFO
-        fmt = "%(levelname)s: %(message)s"
-    else:
-        level = logging.WARNING
-        fmt = "%(levelname)s: %(message)s"
-
-    logging.basicConfig(level=level, format=fmt)
 
 
 def load_deps_file(path: Path) -> dict[str, Any]:
@@ -600,20 +585,58 @@ def fetch_package(
     return True
 
 
-def cmd_fetch(
-    *,
-    deps_file: str,
-    deps_dir: str,
-    output_dir: str,
-    verbose: bool,
-    debug: bool,
-) -> int:
-    """Main fetch command.
+# ----- CLI ------------------------------------------------------------------
 
-    Reads deps.toml and builds all specified packages.
+
+def _verbosity(f: Callable[..., Any]) -> Callable[..., Any]:
+    """The -v/--debug pair every fetch command shares.
+
+    Declared on the group and on each command, so both spellings parse.
+    `MergingCommand` is what makes the two agree, and it is also what turns
+    them into logging: no command configures logging itself.
     """
-    setup_logging(verbose, debug)
+    f = click.option("--debug", is_flag=True, help="Enable debug output")(f)
+    return click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")(
+        f
+    )
 
+
+@click.group(cls=MergingGroup, invoke_without_command=True)
+@click.version_option(
+    __version__, "--version", prog_name="pcons-fetch", message="%(prog)s %(version)s"
+)
+@_verbosity
+@click.pass_context
+def cli(ctx: click.Context, verbose: bool, debug: bool) -> int:
+    """Download and build external dependencies for pcons."""
+    if ctx.invoked_subcommand is not None:
+        return 0
+    # No subcommand: fetch deps.toml if there is one, else say what the
+    # commands are. ctx.invoke fills the rest from `cmd_fetch`'s own defaults,
+    # so they are declared once; it bypasses the command's invoke, so the two
+    # shared options are handed over by name.
+    if Path("deps.toml").exists():
+        return int(ctx.invoke(cmd_fetch, verbose=verbose, debug=debug))
+    click.echo(ctx.get_help())
+    return 0
+
+
+@cli.command("fetch", short_help="Fetch and build dependencies")
+@click.argument("deps_file", default="deps.toml", required=False)
+@click.option(
+    "-d", "--deps-dir", default=".deps", help="Dependencies directory (default: .deps)"
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    default=".",
+    help="Output directory for .pcons-pkg.toml files (default: .)",
+)
+@_verbosity
+def cmd_fetch(
+    deps_file: str, deps_dir: str, output_dir: str, verbose: bool, debug: bool
+) -> int:
+    """Fetch and build the packages in DEPS_FILE (default: deps.toml)."""
     deps_path = Path(deps_file)
     if not deps_path.exists():
         logger.error("Deps file not found: %s", deps_path)
@@ -643,10 +666,11 @@ def cmd_fetch(
     return 0
 
 
-def cmd_list(*, deps_file: str, verbose: bool, debug: bool) -> int:
-    """List packages in deps.toml."""
-    setup_logging(verbose, debug)
-
+@cli.command("list", short_help="List packages in deps.toml")
+@click.argument("deps_file", default="deps.toml", required=False)
+@_verbosity
+def cmd_list(deps_file: str, verbose: bool, debug: bool) -> int:
+    """List the packages declared in DEPS_FILE (default: deps.toml)."""
     deps_path = Path(deps_file)
     if not deps_path.exists():
         logger.error("Deps file not found: %s", deps_path)
@@ -676,10 +700,14 @@ def cmd_list(*, deps_file: str, verbose: bool, debug: bool) -> int:
     return 0
 
 
-def cmd_clean(*, deps_dir: str, all: bool, verbose: bool, debug: bool) -> int:
-    """Clean fetched sources and builds."""
-    setup_logging(verbose, debug)
-
+@cli.command("clean", short_help="Clean fetched sources and builds")
+@click.option(
+    "-d", "--deps-dir", default=".deps", help="Dependencies directory (default: .deps)"
+)
+@click.option("-a", "--all", is_flag=True, help="Remove everything including sources")
+@_verbosity
+def cmd_clean(deps_dir: str, all: bool, verbose: bool, debug: bool) -> int:
+    """Remove the build directory, or with --all the whole deps directory."""
     deps_path = Path(deps_dir)
 
     if not deps_path.exists():
@@ -698,108 +726,6 @@ def cmd_clean(*, deps_dir: str, all: bool, verbose: bool, debug: bool) -> int:
 
     logger.info("Clean complete")
     return 0
-
-
-def _verbosity(f: Callable[..., Any]) -> Callable[..., Any]:
-    """The -v/--debug pair every fetch command shares.
-
-    Declared on the group and on each command, so both spellings parse.
-    `_MergingCommand` is what makes the two agree.
-    """
-    f = click.option("--debug", is_flag=True, help="Enable debug output")(f)
-    return click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")(
-        f
-    )
-
-
-class _MergingCommand(click.Command):
-    """A command that inherits an option spelled before its name.
-
-    ``pcons-fetch -v fetch`` used to run non-verbose: argparse applied the
-    subparser's ``False`` default over what the top-level parser had stored.
-
-    Not `pcons._cli_click.MergingCommand`, which also configures logging out of
-    ``pcons.cli``, where ``--debug`` names a subsystem. Here it is a flag and
-    `setup_logging` above is a different function.
-    """
-
-    def invoke(self, ctx: click.Context) -> Any:
-        _adopt_options_spelled_earlier(self, ctx)
-        return super().invoke(ctx)
-
-
-class _FetchGroup(click.Group):
-    """The group whose commands inherit. See `_MergingCommand`."""
-
-    command_class = _MergingCommand
-
-    def list_commands(self, ctx: click.Context) -> list[str]:
-        """Declaration order, matching what the argparse subparsers listed."""
-        return list(self.commands)
-
-
-@click.group(cls=_FetchGroup, invoke_without_command=True)
-@click.version_option(
-    __version__, "--version", prog_name="pcons-fetch", message="%(prog)s %(version)s"
-)
-@_verbosity
-@click.pass_context
-def cli(ctx: click.Context, verbose: bool, debug: bool) -> int:
-    """Download and build external dependencies for pcons."""
-    if ctx.invoked_subcommand is not None:
-        return 0
-    # No subcommand: fetch deps.toml if there is one, else say what the
-    # commands are. ctx.invoke fills the rest from `cli_fetch`'s own defaults,
-    # so they are declared once; it bypasses the command's invoke, so the two
-    # shared options are handed over by name.
-    if Path("deps.toml").exists():
-        return int(ctx.invoke(cli_fetch, verbose=verbose, debug=debug))
-    click.echo(ctx.get_help())
-    return 0
-
-
-@cli.command("fetch", short_help="Fetch and build dependencies")
-@click.argument("deps_file", default="deps.toml", required=False)
-@click.option(
-    "-d", "--deps-dir", default=".deps", help="Dependencies directory (default: .deps)"
-)
-@click.option(
-    "-o",
-    "--output-dir",
-    default=".",
-    help="Output directory for .pcons-pkg.toml files (default: .)",
-)
-@_verbosity
-def cli_fetch(
-    deps_file: str, deps_dir: str, output_dir: str, verbose: bool, debug: bool
-) -> int:
-    """Fetch and build the packages in DEPS_FILE (default: deps.toml)."""
-    return cmd_fetch(
-        deps_file=deps_file,
-        deps_dir=deps_dir,
-        output_dir=output_dir,
-        verbose=verbose,
-        debug=debug,
-    )
-
-
-@cli.command("list", short_help="List packages in deps.toml")
-@click.argument("deps_file", default="deps.toml", required=False)
-@_verbosity
-def cli_list(deps_file: str, verbose: bool, debug: bool) -> int:
-    """List the packages declared in DEPS_FILE (default: deps.toml)."""
-    return cmd_list(deps_file=deps_file, verbose=verbose, debug=debug)
-
-
-@cli.command("clean", short_help="Clean fetched sources and builds")
-@click.option(
-    "-d", "--deps-dir", default=".deps", help="Dependencies directory (default: .deps)"
-)
-@click.option("-a", "--all", is_flag=True, help="Remove everything including sources")
-@_verbosity
-def cli_clean(deps_dir: str, all: bool, verbose: bool, debug: bool) -> int:
-    """Remove the build directory, or with --all the whole deps directory."""
-    return cmd_clean(deps_dir=deps_dir, all=all, verbose=verbose, debug=debug)
 
 
 def main(argv: list[str] | None = None) -> int:
