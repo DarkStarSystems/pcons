@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 from click.core import ParameterSource
+from click.shell_completion import CompletionItem
 
 from pcons import __version__, _cli_completion
 from pcons import commands as user_commands
@@ -2228,6 +2229,36 @@ class RunGroup(MergingGroup):
             return
         with formatter.section("Commands"):
             formatter.write_dl(rows)
+
+    def shell_complete(
+        self, ctx: click.Context, incomplete: str
+    ) -> list[CompletionItem]:
+        """Complete from the cached listing, not from resolved commands.
+
+        click's own version drops every name whose `get_command` answers None,
+        exactly as `format_commands` did, so a script-declared command would
+        complete to nothing until the script had run -- and completion must not
+        run it. The names and their help come from the cache instead.
+
+        The tail is `Command.shell_complete`, this group's own options.
+        `click.Group.shell_complete` is the method being replaced: calling it
+        would put the dropped names back through `get_command`, which also
+        raises on a name two origins declare, into a stream that carries
+        nothing but completion candidates.
+        """
+        if getattr(ctx, "_protected_args", None):
+            # A command name has already been typed. click would normally have
+            # descended into it by now; it could not, because `get_command`
+            # answers None without the script. Offering the *sibling* names here
+            # would be worse than offering nothing.
+            return []
+        items = [
+            CompletionItem(name, help=help_text)
+            for name, help_text in self.rows(ctx)
+            if name.startswith(incomplete)
+        ]
+        items.extend(super(click.Group, self).shell_complete(ctx, incomplete))
+        return items
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         """The declared command, or None so click reports "No such command".

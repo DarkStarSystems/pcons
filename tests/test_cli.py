@@ -1802,6 +1802,161 @@ class TestRunGroup:
         assert short_help["run"] == "Run a command declared by the build script"
 
 
+class TestRunCompletion:
+    """`pcons run <TAB>`, which completion is already wired for.
+
+    Completion goes through `shell_complete`, and click's own version drops
+    every name whose `get_command` answers None -- the same trap
+    `format_commands` sits in. Without the override these all come back empty.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_registries(self) -> Iterator[None]:
+        from pcons import commands, modules
+
+        commands.clear()
+        modules.clear_modules()
+        yield
+        commands.clear()
+        modules.clear_modules()
+
+    @staticmethod
+    def _complete(incomplete: str = "", *before: str) -> list[tuple[str, str]]:
+        """What the shell would be offered for `pcons run <before> <incomplete>`.
+
+        Driven through `ShellComplete.get_completions`, which is the real entry
+        point: it resolves the context the way the protocol does, so the group's
+        options are parsed and a command name already typed reaches
+        `ctx._protected_args`. Building a `Context` by hand skips both and
+        cannot see either.
+        """
+        from click.shell_completion import ShellComplete
+
+        from pcons.cli import cli
+
+        completer = ShellComplete(cli, {}, "pcons", "_PCONS_COMPLETE")
+        return [
+            (item.value, item.help or "")
+            for item in completer.get_completions(["run", *before], incomplete)
+        ]
+
+    def test_the_declared_names_complete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+
+        offered = self._complete()
+
+        assert ("flash", "Flash the board.") in offered
+        assert ("docs", "Documentation tasks.") in offered
+
+    def test_an_incomplete_name_filters(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+
+        names = [name for name, _ in self._complete("fl")]
+
+        assert "flash" in names
+        assert "docs" not in names
+
+    def test_the_groups_own_options_still_complete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The tail of the override. Drop it and `-B` stops completing."""
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+
+        names = [name for name, _ in self._complete("-")]
+
+        assert "--build-dir" in names
+
+    def test_a_build_dir_that_never_generated_offers_no_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestRunGroup._project(tmp_path, monkeypatch)
+
+        assert self._complete() == []
+
+    def test_completing_does_not_run_the_build_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Completion fires on a keystroke; a build script does configure work."""
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+
+        assert self._complete()
+
+        assert not (tmp_path / "ran-marker").exists()
+
+    def test_nothing_is_offered_once_a_name_has_been_typed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons run docs <TAB>` must not offer `docs`'s siblings.
+
+        click would have descended into the resolved command by now; it cannot,
+        because `get_command` answers None without the script. Re-offering the
+        top-level names there is worse than offering nothing.
+        """
+        from pcons import commands
+
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+        # Generating ran the script in this process, so the registry holds the
+        # real commands and click would descend into them properly. A shell
+        # completing in a fresh process has none of that, which is the case
+        # that went wrong.
+        commands.clear()
+
+        assert self._complete("", "docs") == []
+        assert self._complete("", "flash") == []
+
+    def test_the_build_dir_is_read_during_completion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`-B` has to have been parsed, which only the real context resolution
+        does."""
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path, "-B", "out")
+
+        assert self._complete() == []  # nothing in the default build dir
+
+        names = [name for name, _ in self._complete("", "-B", "out")]
+
+        assert "flash" in names
+
+    def test_a_name_two_origins_declare_does_not_break_completion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """click's version asks `get_command`, which raises on a clash, and the
+        message lands in a stream that carries only candidates."""
+        from pcons import commands
+        from pcons.core.errors import PconsError
+
+        module_dir = tmp_path / "mods"
+        module_dir.mkdir()
+        for name in ("one", "two"):
+            (module_dir / f"{name}.py").write_text(
+                "import pcons\n\n\ndef register():\n"
+                "    @pcons.cli_command('deploy')\n"
+                f"    def deploy_{name}():\n"
+                f'        "Deploy from {name}."\n'
+            )
+        monkeypatch.setenv("PCONS_MODULES_PATH", str(module_dir))
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+
+        offered = self._complete()
+
+        assert [name for name, _ in offered] == ["deploy"]
+        # And the clash is still an error when the name is actually used.
+        with pytest.raises(PconsError):
+            commands.lookup("deploy")
+
+
 class TestNonPersistingRunsLeaveTheCacheAlone:
     """`pcons run` is documented to change nothing in the build directory."""
 
