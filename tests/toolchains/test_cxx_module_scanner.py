@@ -9,6 +9,7 @@ output can be exercised without invoking a real scanner.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -25,6 +26,7 @@ from pcons.toolchains.cxx_module_scanner import (
     merge_scan_compile_flags,
     module_file_for,
     run_scan_deps,
+    run_scan_deps_gcc,
     run_scan_deps_msvc,
     select_modules_scope,
     select_std_module_flags,
@@ -384,6 +386,50 @@ class TestScannerNotFound:
         )
         with pytest.raises(CxxModuleScannerNotFound, match="vcvars64"):
             run_scan_deps_msvc("cl.exe", ["/std:c++20"], "C:/x/y.cpp")
+
+
+class TestGccScanDiscardsPreprocessedOutput:
+    """The GCC scan wants the p1689 JSON, not the preprocessed text.
+
+    `-E` writes the whole translation unit somewhere, and that somewhere used
+    to be a temp file nothing ever read: measured at 3.2 MB for one real C++26
+    source, to extract 91 bytes of JSON.
+    """
+
+    @staticmethod
+    def _captured_argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        seen: list[list[str]] = []
+
+        class _Ok:
+            returncode = 0
+            stderr = ""
+
+        def _capture(cmd: list[str], *args: object, **kwargs: object) -> _Ok:
+            seen.append(list(cmd))
+            # The deps file is named in the command; write valid JSON there so
+            # the runner parses rather than warning.
+            deps = next(a.split("=", 1)[1] for a in cmd if a.startswith("-fdeps-file="))
+            Path(deps).write_text("{}", encoding="utf-8")
+            return _Ok()
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _capture
+        )
+        assert run_scan_deps_gcc("g++", ["-std=c++23"], "/x/y.cppm", "y.o") == {}
+        return seen[0]
+
+    def test_output_goes_to_the_null_device(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        argv = self._captured_argv(monkeypatch)
+        assert argv[-2:] == ["-o", os.devnull]
+
+    def test_no_temp_file_is_created_for_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """os.devnull, not a literal: on Windows it is NUL, not /dev/null."""
+        argv = self._captured_argv(monkeypatch)
+        assert not any(a.endswith(".ii") for a in argv)
 
 
 class _FakeNode:

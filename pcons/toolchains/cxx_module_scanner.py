@@ -52,6 +52,7 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import subprocess
 import sys
 import tempfile
@@ -226,8 +227,6 @@ def run_scan_deps_gcc(
         deps_json = f_deps.name
     with tempfile.NamedTemporaryFile(suffix=".d", delete=False) as f_depfile:
         depfile = f_depfile.name
-    with tempfile.NamedTemporaryFile(suffix=".ii", delete=False) as f_pp:
-        preprocessed = f_pp.name
 
     try:
         cmd = [compiler]
@@ -246,8 +245,12 @@ def run_scan_deps_gcc(
             f"-fdeps-file={deps_json}",
             f"-fdeps-target={obj}",
             "-fdeps-format=p1689r5",
+            # The scan wants the p1689 JSON, not the preprocessed text, and -E
+            # writes megabytes of it per TU: 3.2 MB to extract 91 bytes on a
+            # real C++26 source. os.devnull rather than a literal, since this
+            # runner is used on Windows too, where it is NUL.
             "-o",
-            preprocessed,
+            os.devnull,
         ]
 
         result = subprocess.run(
@@ -288,7 +291,6 @@ def run_scan_deps_gcc(
     finally:
         Path(deps_json).unlink(missing_ok=True)
         Path(depfile).unlink(missing_ok=True)
-        Path(preprocessed).unlink(missing_ok=True)
 
 
 # =============================================================================
