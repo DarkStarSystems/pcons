@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 
 # Re-export commonly used classes for convenient imports
 from pcons.builders import register_builtin_builders  # noqa: E402
+from pcons.commands import cli_command, cli_group  # noqa: E402
 from pcons.configure.config import Configure  # noqa: E402
 from pcons.configure.config_file import configure_file, write_file  # noqa: E402
 from pcons.configure.platform import Platform, get_platform  # noqa: E402
@@ -190,6 +191,9 @@ __all__ = [
     "find_wasi_toolchain",
     # Module system
     "modules",
+    # User-declared CLI commands (`pcons run <name>`)
+    "cli_command",
+    "cli_group",
     # Misc utilities
     "context",
     "add_subdirectory",

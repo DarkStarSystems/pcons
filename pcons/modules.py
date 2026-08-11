@@ -157,9 +157,16 @@ def list_modules() -> list[str]:
 def clear_modules() -> None:
     """Clear all loaded modules (for testing)."""
     global _loaded_modules
+    from pcons import commands
+
     for name in list(_loaded_modules.keys()):
         sys.modules.pop(f"pcons.modules.{name}", None)
     _loaded_modules.clear()
+    # What they declared goes with them. A later load_modules() re-runs every
+    # register(), and a command left behind here would be declared twice by the
+    # same origin -- an error, swallowed by load_modules, abandoning the rest of
+    # that register() and keeping the stale command.
+    commands.clear_module_declarations()
 
 
 class _ModulesNamespace(ModuleType):
