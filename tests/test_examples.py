@@ -112,8 +112,10 @@ def adapt_command_for_windows(cmd: str) -> str:
     # Convert cat to type
     if cmd.startswith("cat "):
         cmd = "type " + cmd[4:].replace("/", "\\")
-    else:
-        # Just adapt the path portion
+    elif not cmd.startswith('"'):
+        # Just adapt the path portion. A quoted first token is already a real
+        # path for this platform -- ${PCONS} is the one that produces one -- and
+        # splitting on whitespace would break it apart.
         parts = cmd.split(maxsplit=1)
         if parts:
             parts[0] = adapt_path_for_windows(parts[0])
@@ -941,6 +943,11 @@ def _example_template_vars() -> dict[str, str]:
     # matching Toolchain.get_install_dir("shared_library").
     shared_install_dir = "bin" if plat.shared_lib_suffix == ".dll" else "lib"
     return {
+        # The pcons under test, as a shell command. Quoted because an
+        # interpreter path may contain spaces, and `-m pcons` rather than a
+        # `pcons` console script so a verify command reaches this checkout
+        # instead of whatever happens to be on PATH.
+        "PCONS": f'"{sys.executable}" -m pcons',
         "BINARY_EXT": plat.exe_suffix,
         "LIBRARY_EXT": plat.shared_lib_suffix,
         "ARCHIVE_EXT": plat.static_lib_suffix,

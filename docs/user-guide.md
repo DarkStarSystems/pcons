@@ -1627,6 +1627,27 @@ Every subcommand and option is on its own page: [Command-line reference](cli.md)
 
 ---
 
+## Commands of your own
+
+A build script can declare commands of its own, reachable as `pcons run <name>`:
+
+```python
+@project.cli_command()
+@click.option("--baud", default=115200)
+def flash(baud: int) -> None:
+    """Flash the board."""
+    ...
+```
+
+The callback closes over the script's `project` and targets, so it knows the
+build directory and every output path without being told. It runs with the
+project resolved and writes no build files. Add-on modules can declare commands
+too, with `pcons.cli_command()`.
+
+The whole of it is on its own page: [Commands of your own](user-commands.md).
+
+---
+
 ## Watching for changes
 
 `--watch` builds once and then rebuilds whenever anything in the source tree
@@ -3917,7 +3938,7 @@ if platform.is_macos():
 | Function/Attribute | Description |
 |-------------------|-------------|
 | `__pcons_module__` | Optional dict with module metadata (name, version, description) |
-| `register()` | Optional function called at load time to register builders |
+| `register()` | Optional function called at load time to register builders, and [CLI commands](user-commands.md#declaring-from-an-add-on-module) |
 | `setup_env(env, ...)` | Convention: Configure an environment for the module's domain |
 
 | `pcons.modules` Function | Description |

@@ -33,6 +33,7 @@ nav:
   - Testing: testing.md
   - Qt: qt.md
   - Command line: cli.md
+  - Commands of your own: user-commands.md
   - Presets: presets.md
   - Porting from CMake: porting-from-cmake.md
   - Porting from Make: porting-from-make.md

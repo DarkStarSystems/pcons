@@ -48,4 +48,8 @@ See the [User Guide](user-guide.md) for:
 - Creating custom tools
 - API reference
 
+Project tasks that are not builds -- flashing, packaging, publishing -- can live
+in the build script too, as `pcons run <name>`. See [Commands of your
+own](user-commands.md).
+
 Porting an existing CMake project? See the [CMake to Pcons Porting Guide](porting-from-cmake.md).
