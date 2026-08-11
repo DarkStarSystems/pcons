@@ -1737,6 +1737,24 @@ class TestCacheCommand:
         assert f"# source_dir: {tmp_path}" in out
         assert "# cache file:" in out
 
+    def test_cache_show_omits_a_source_dir_it_does_not_have(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A cache written before source_dir was recorded still shows what it
+        has, rather than printing a line naming nothing."""
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        cache = BuildCache(build_dir)
+        cache.set("variant", "debug")
+        cache.save()
+        assert _cache_show(build_dir) == 0
+        out = capsys.readouterr().out
+        assert "variant" in out
+        assert "# source_dir:" not in out
+        assert "# cache file:" in out
+
     @pytest.mark.parametrize("verb", ["list", "show", "clear"])
     def test_a_missing_cache_reports_cleanly(
         self, tmp_path: Path, capsys, verb: str
@@ -3128,6 +3146,65 @@ class TestNamedBuildScriptErrors:
         result = _invoke("info", "--targets")
         assert result.exit_code == 3
         assert "Targets:" not in result.stdout
+
+    def test_info_targets_reports_a_missing_named_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--targets has to find the script itself, since it runs it rather
+        than reading its docstring. A -b that names nothing is reported by
+        name, not by falling back to the one in the directory."""
+        (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info", "--targets", "-b", "nope.py")
+        assert result.exit_code == 1
+        assert "Build script not found: nope.py" in result.stderr
+
+    def test_info_targets_reports_an_empty_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info", "--targets")
+        assert result.exit_code == 1
+        assert "No pcons-build.py found" in result.stderr
+
+
+class TestWatchReachesTheWatcher:
+    """`pcons build --watch` builds once and then watches.
+
+    The catch-all has its own watch branch, so a `build` that dropped the
+    option would still work for a bare `pcons` and quietly build once here.
+    """
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+        seen: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            "pcons.cli._watch",
+            lambda **kw: seen.append(kw) or 0,
+        )
+        return seen
+
+    def test_build_watch_hands_over_the_script_and_the_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\n")
+        monkeypatch.chdir(tmp_path)
+        seen = self._record(monkeypatch)
+        assert _invoke("build", "--watch", "hello").exit_code == 0
+        assert len(seen) == 1
+        assert seen[0]["script"] == script
+        assert seen[0]["targets"] == ["hello"]
+        assert callable(seen[0]["build"])
+
+    def test_without_the_flag_nothing_watches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        seen = self._record(monkeypatch)
+        _capture_args(monkeypatch, "_build", result=(0, tmp_path))
+        assert _invoke("build").exit_code == 0
+        assert seen == []
 
 
 class TestValuesReachTheWork:
