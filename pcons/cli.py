@@ -18,6 +18,7 @@ import click
 from click.core import ParameterSource
 
 from pcons import __version__, _cli_completion
+from pcons import commands as user_commands
 from pcons._cli_click import (
     DefaultCommand,
     PconsContext,
@@ -317,6 +318,7 @@ def run_script(
     persist: bool = True,
     fresh: bool = False,
     generate: bool = True,
+    inside: Callable[[], None] | None = None,
 ) -> tuple[int, list[Project]]:
     """Execute a Python build script in-process via exec(), so its Project
     objects are accessible through the global registry.
@@ -336,9 +338,14 @@ def run_script(
         fresh: If True, discard the persisted cache before resolving settings,
             so the run starts clean (like cmake --fresh).
         generate: If False, drop the script's deferred generate requests
-            instead of running them, so no build files are written. For
-            inspection commands (`pcons explain`) that need the project
-            graph but must leave the build directory alone.
+            instead of running them, and resolve the top-level project so the
+            graph is usable without writing any build files. For inspection
+            commands (`pcons explain`) and user-declared commands, which need
+            the project graph but must leave the build directory alone.
+        inside: Called once after the script has run and settled, with the
+            script's environment still up: PCONS_* variables set, sys.path and
+            the cwd still the script's. Its exceptions propagate untouched,
+            since click signals both success and failure by exception.
 
     Returns:
         Tuple of (exit_code, list of registered Projects).
@@ -381,7 +388,22 @@ def run_script(
         # Discard any persisted settings before resolving, so this run starts
         # from a clean cache (like cmake --fresh). The subsequent reads then see
         # nothing, and only this run's own settings get persisted below.
-        cache.clear()
+        #
+        # A run that persists nothing must not mutate the build directory
+        # either: `pcons run` is documented to leave it alone, and it reaches
+        # here whenever the cache was written for another source tree. Writing
+        # the emptied cache out would destroy that directory's vars, variant,
+        # generator and command listing on behalf of a command that only meant
+        # to read.
+        #
+        # So `--fresh --no-cache` together no longer empty the file, only this
+        # run's view of it. The two ask for opposite things and "do not touch
+        # the cache" is the safer half to honour; --no-cache is internal, and
+        # the regen re-invoke that uses it never passes --fresh.
+        if persist:
+            cache.clear()
+        else:
+            cache.discard()
     cli_vars = dict(variables or {})
     # An inherited PCONS_VARS (exported by the user) overrides the cache but loses
     # to this run's own KEY=value args; like any environment value it is not
@@ -482,74 +504,88 @@ def run_script(
     old_path = sys.path.copy()
 
     try:
-        os.chdir(script_path.parent)
-        sys.path.insert(0, str(script_path.parent))
+        # Commands the script declares belong to this run of it, and the
+        # previous run's are dropped on the way in.
+        with user_commands.script_scope():
+            try:
+                os.chdir(script_path.parent)
+                sys.path.insert(0, str(script_path.parent))
 
-        script_source = script_path.read_text()
-        code = compile(script_source, str(script_path), "exec")
-        namespace: dict[str, object] = {
-            "__name__": pcons.core.invocation.RUN_NAME,
-            "__file__": str(script_path),
-        }
-        exec(code, namespace)
+                script_source = script_path.read_text()
+                code = compile(script_source, str(script_path), "exec")
+                namespace: dict[str, object] = {
+                    "__name__": pcons.core.invocation.RUN_NAME,
+                    "__file__": str(script_path),
+                }
+                exec(code, namespace)
 
-        # Run any deferred generate requests registered by the script
-        try:
-            from pcons.generators.generator import BaseGenerator
+                # Run any deferred generate requests registered by the script
+                try:
+                    from pcons.generators.generator import BaseGenerator
 
-            top_level = Project.top_level()
-            if generate:
-                BaseGenerator._generate_pending(top_level)
-            else:
-                BaseGenerator._clear_pending()
-            if persist:
-                _warn_unread_cached_vars(cached_vars, cli_vars)
-                _persist_run_settings(
-                    cache, persist_vars, persist_variant, persist_gen, current_source
-                )
-            return 0, pcons.get_registered_projects()
-        except ValueError:
-            logger.error("No Project created in build script")
-            return 1, []
+                    top_level = Project.top_level()
+                    if generate:
+                        BaseGenerator._generate_pending(top_level)
+                    else:
+                        _cancel_pending_generation()
+                        if not top_level._resolved:
+                            top_level.resolve()
+                    if persist:
+                        _warn_unread_cached_vars(cached_vars, cli_vars)
+                        _persist_run_settings(
+                            cache,
+                            persist_vars,
+                            persist_variant,
+                            persist_gen,
+                            current_source,
+                        )
+                except ValueError:
+                    logger.error("No Project created in build script")
+                    return 1, []
 
-    except SystemExit as e:
-        exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
-        if not isinstance(e.code, int) and e.code is not None:
-            # CPython's top-level handler prints a non-int exit code to
-            # stderr; exec() bypasses it, so match it here.
-            print(e.code, file=sys.stderr)
-        if exit_code != 0:
-            _cancel_pending_generation()
-            return exit_code, pcons.get_registered_projects()
-        # sys.exit(0) ends the script successfully partway; a direct
-        # `python pcons-build.py` run would still generate via the atexit
-        # hook, so the CLI does the same. Left neither run nor cleared,
-        # the pending generation would fire at interpreter shutdown,
-        # after the finally block below has restored cwd and env.
-        from pcons import Project
-        from pcons.generators.generator import BaseGenerator
+            except SystemExit as e:
+                exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
+                if not isinstance(e.code, int) and e.code is not None:
+                    # CPython's top-level handler prints a non-int exit code to
+                    # stderr; exec() bypasses it, so match it here.
+                    print(e.code, file=sys.stderr)
+                if exit_code != 0:
+                    _cancel_pending_generation()
+                    return exit_code, pcons.get_registered_projects()
+                # sys.exit(0) ends the script successfully partway: the
+                # generation it asked for still belongs to this run, and the
+                # finally block below is about to restore cwd and env.
+                from pcons.generators.generator import BaseGenerator
 
-        try:
-            top_level = Project.top_level()
-        except ValueError:
-            _cancel_pending_generation()
-        else:
-            if generate:
-                BaseGenerator._generate_pending(top_level)
-            else:
+                try:
+                    top_level = Project.top_level()
+                except ValueError:
+                    _cancel_pending_generation()
+                else:
+                    if generate:
+                        BaseGenerator._generate_pending(top_level)
+                    else:
+                        _cancel_pending_generation()
+                return exit_code, pcons.get_registered_projects()
+            except PconsError as e:
+                # Expected configure/generate failures carry actionable messages;
+                # a Python traceback would only bury them.
+                logger.error("%s", e)
                 _cancel_pending_generation()
-        return exit_code, pcons.get_registered_projects()
-    except PconsError as e:
-        # Expected configure/generate failures carry actionable messages;
-        # a Python traceback would only bury them.
-        logger.error("%s", e)
-        _cancel_pending_generation()
-        return 1, []
-    except Exception as e:
-        logger.error("Build script failed: %s", e)
-        traceback.print_exc()
-        _cancel_pending_generation()
-        return 1, []
+                return 1, []
+            except Exception as e:
+                logger.error("Build script failed: %s", e)
+                traceback.print_exc()
+                _cancel_pending_generation()
+                return 1, []
+
+            # Outside every handler above, deliberately: click raises to signal
+            # success as well as failure (`ctx.exit(0)` raises
+            # `click.exceptions.Exit`, a RuntimeError), so catching here would
+            # report a user command's normal exit as a failed build script.
+            if inside is not None:
+                inside()
+            return 0, pcons.get_registered_projects()
     finally:
         os.chdir(old_cwd)
         sys.path[:] = old_path

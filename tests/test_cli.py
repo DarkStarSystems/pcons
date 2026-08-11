@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -727,6 +728,370 @@ class TestRunScriptEnvironment:
         # make replaces ninja in the build slot; new spec has no aux.
         assert run_script(script, build_dir, generator="make")[0] == 0
         assert self._persisted_generator(build_dir) == "make"
+
+
+TARGET_SCRIPT = (
+    "from pcons import Project\n"
+    "project = Project('demo')\n"
+    "env = project.Environment()\n"
+    "hello = env.Command(\n"
+    "    target='hello.txt', source='hello.in', command='cp $SOURCE $TARGET'\n"
+    ")\n"
+    "project.Alias('all', hello)\n"
+)
+
+
+def write_target_script(tmp_path: Path) -> Path:
+    """A script with one real target, needing no toolchain to resolve."""
+    (tmp_path / "hello.in").write_text("hi")
+    script = tmp_path / "pcons-build.py"
+    script.write_text(TARGET_SCRIPT)
+    return script
+
+
+class TestRunScriptWithoutGenerating:
+    """`generate=False`: the script runs and resolves, nothing is written.
+
+    A user-declared command runs against a resolved project with no build
+    files (decision 3 of the feature), which is what this parameter is for.
+    """
+
+    def test_no_build_files_are_written(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = write_target_script(tmp_path)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        exit_code, projects = run_script(script, build_dir, generate=False)
+
+        assert exit_code == 0
+        assert len(projects) == 1
+        assert not (build_dir / "build.ninja").exists()
+
+    def test_the_project_comes_back_resolved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Resolution is what `output_nodes` needs, and it costs no build file."""
+        script = write_target_script(tmp_path)
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        _, projects = run_script(script, tmp_path / "build", generate=False)
+
+        project = projects[0]
+        assert project._resolved
+        assert project.get_target("hello").output_nodes
+
+    def test_the_pending_queue_is_emptied_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Skipping the generate call is not enough on its own.
+
+        A skipped call leaves the script's request queued, and the next caller
+        to drain the queue would write build files this run had promised not
+        to. This asserts on `BaseGenerator`'s private state rather than
+        pretending to be black-box; the observable half is the subprocess test
+        below.
+
+        Note what is *not* asserted: that `_generate_pending()` afterwards is a
+        no-op. It is not queue-only — it calls `project.generate()`
+        unconditionally, so calling it again writes build files whatever the
+        queue holds. The queue being empty is the whole of the claim.
+        """
+        from pcons.generators.generator import BaseGenerator
+
+        script = write_target_script(tmp_path)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir, generate=False)[0] == 0
+
+        # Name-mangled private class state, so read it out of the class dict
+        # rather than spelling the mangled attribute.
+        assert not vars(BaseGenerator)["_BaseGenerator__pending"]
+
+    def test_nothing_is_written_when_the_interpreter_exits(
+        self, tmp_path: Path
+    ) -> None:
+        """The observable version: a real process running a real script to exit.
+
+        The in-process test above reads private state; this one runs a script
+        to interpreter exit in its own process and looks at the build
+        directory.
+        """
+        (tmp_path / "hello.in").write_text("hi")
+        script = tmp_path / "pcons-build.py"
+        script.write_text(TARGET_SCRIPT)
+        build_dir = tmp_path / "build"
+        driver = tmp_path / "driver.py"
+        driver.write_text(
+            "from pathlib import Path\n"
+            "from pcons.cli import run_script\n"
+            "code, projects = run_script(\n"
+            "    Path('pcons-build.py'), Path('build'), generate=False\n"
+            ")\n"
+            "assert code == 0, code\n"
+            "assert projects\n"
+        )
+
+        env: dict[str, str] = dict(os.environ)
+        env["PYTHONPATH"] = str(Path(cli_module.__file__).parents[2])
+        env.pop("PCONS_BUILD_DIR", None)
+        result = subprocess.run(
+            [sys.executable, str(driver)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert not (build_dir / "build.ninja").exists(), sorted(
+            p.name for p in build_dir.iterdir()
+        )
+
+    def test_generating_is_still_the_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = write_target_script(tmp_path)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+        assert (build_dir / "build.ninja").exists()
+
+
+class TestRunScriptInsideCallback:
+    """`inside`: a callback holding the script's live environment.
+
+    The one thing this must get right is that its exceptions propagate
+    untouched. click signals success as well as failure by exception, so a
+    handler here would report a user command's normal exit as a failed build
+    script.
+    """
+
+    def test_called_once_with_the_environment_still_up(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "import pcons\n"
+            "project = Project('demo')\n"
+            "pcons.get_var('CC', 'default')\n"
+        )
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        seen: list[dict[str, str]] = []
+
+        def record() -> None:
+            import pcons
+
+            seen.append(
+                {
+                    "build_dir": os.environ["PCONS_BUILD_DIR"],
+                    "vars": os.environ["PCONS_VARS"],
+                    "cwd": os.getcwd(),
+                    "cc": pcons.get_var("CC", "default"),
+                }
+            )
+
+        exit_code, _ = run_script(
+            script,
+            build_dir,
+            variables={"CC": "clang"},
+            generate=False,
+            inside=record,
+        )
+
+        assert exit_code == 0
+        assert len(seen) == 1
+        assert seen[0]["build_dir"] == str(build_dir.absolute())
+        assert json.loads(seen[0]["vars"]) == {"CC": "clang"}
+        assert Path(seen[0]["cwd"]).resolve() == script.parent.resolve()
+        assert seen[0]["cc"] == "clang"
+
+    def test_called_after_the_script_has_settled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The callback sees a resolved project, not a half-built one."""
+        script = write_target_script(tmp_path)
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        resolved: list[bool] = []
+
+        def check() -> None:
+            from pcons.core.project import Project
+
+            resolved.append(Project.top_level()._resolved)
+
+        run_script(script, tmp_path / "build", generate=False, inside=check)
+
+        assert resolved == [True]
+
+    @pytest.mark.parametrize(
+        ("raiser", "expected", "exit_code"),
+        [
+            # click.exceptions.Exit derives from RuntimeError, so the expected
+            # type is pinned exactly: a wide tuple here would be satisfied by
+            # any of these four and could not tell them apart.
+            pytest.param(
+                lambda: (_ for _ in ()).throw(click.exceptions.Exit(0)),
+                click.exceptions.Exit,
+                0,
+                id="exit-0",
+            ),
+            pytest.param(
+                lambda: (_ for _ in ()).throw(click.exceptions.Exit(3)),
+                click.exceptions.Exit,
+                3,
+                id="exit-3",
+            ),
+            pytest.param(
+                lambda: (_ for _ in ()).throw(click.ClickException("no device")),
+                click.ClickException,
+                None,
+                id="click-exception",
+            ),
+            pytest.param(
+                lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+                RuntimeError,
+                None,
+                id="runtime-error",
+            ),
+        ],
+    )
+    def test_an_exception_from_the_callback_propagates_untouched(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        raiser: Callable[[], None],
+        expected: type[BaseException],
+        exit_code: int | None,
+    ) -> None:
+        """No handler, and no `(1, [])` return: click's own exceptions are how a
+        user command reports both success and failure."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        with pytest.raises(expected) as excinfo:
+            run_script(script, tmp_path / "build", generate=False, inside=raiser)
+
+        assert type(excinfo.value) is expected
+        if exit_code is not None:
+            raised = excinfo.value
+            assert isinstance(raised, click.exceptions.Exit)
+            assert raised.exit_code == exit_code
+
+    def test_the_environment_is_restored_when_the_callback_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.setenv("PCONS_BUILD_DIR", "original-build")
+        _clear_cli_vars()
+        before = os.getcwd()
+
+        def boom() -> None:
+            raise click.ClickException("no device")
+
+        with pytest.raises(click.ClickException):
+            run_script(script, tmp_path / "build", generate=False, inside=boom)
+
+        assert os.environ["PCONS_BUILD_DIR"] == "original-build"
+        assert os.getcwd() == before
+
+    def test_not_called_when_the_script_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A command must not run against a project that never finished."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text("raise RuntimeError('bad script')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        calls: list[int] = []
+
+        exit_code, _ = run_script(
+            script,
+            tmp_path / "build",
+            generate=False,
+            inside=lambda: calls.append(1),
+        )
+
+        assert exit_code == 1
+        assert calls == []
+
+    def test_not_called_when_the_script_creates_no_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text("x = 1\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        calls: list[int] = []
+
+        exit_code, _ = run_script(
+            script,
+            tmp_path / "build",
+            generate=False,
+            inside=lambda: calls.append(1),
+        )
+
+        assert exit_code == 1
+        assert calls == []
+
+
+class TestScriptCommandsAreScoped:
+    """`run_script` attributes what the script declares to the script."""
+
+    def test_declarations_are_script_origin_and_replaced_each_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons import commands
+
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "project = Project('demo')\n"
+            "@project.cli_command()\n"
+            "def flash():\n"
+            "    'Flash it.'\n"
+        )
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        commands.clear()
+        try:
+            assert run_script(script, tmp_path / "build", generate=False)[0] == 0
+            assert [e.origin for e in commands.declared()["flash"]] == ["script"]
+
+            # A second run replaces rather than duplicating: declaring the same
+            # name twice in one origin is an error, so a leaked scope would fail.
+            assert run_script(script, tmp_path / "build", generate=False)[0] == 0
+            assert len(commands.declared()["flash"]) == 1
+        finally:
+            commands.clear()
 
 
 class TestDirectoryArg:

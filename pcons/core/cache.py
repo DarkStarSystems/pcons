@@ -102,9 +102,17 @@ class BuildCache:
             del self._data[key]
             self.save()
 
+    def discard(self) -> None:
+        """Forget the cached data without touching the file.
+
+        For a run that must read as though the cache were empty and still leave
+        the build directory as it found it.
+        """
+        self._data = {}
+
     def clear(self) -> None:
         """Drop all cached data and persist."""
-        self._data = {}
+        self.discard()
         self.save()
 
 
