@@ -7,7 +7,6 @@ deps.toml file.
 
 from __future__ import annotations
 
-import argparse
 import hashlib
 import logging
 import shutil
@@ -18,9 +17,14 @@ import tomllib
 import urllib.parse
 import urllib.request
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import click
+
+from pcons import __version__
+from pcons._cli_click import _adopt_options_spelled_earlier
 from pcons.packages.description import PackageDescription
 
 logger = logging.getLogger("pcons-fetch")
@@ -596,35 +600,39 @@ def fetch_package(
     return True
 
 
-def cmd_fetch(args: argparse.Namespace) -> int:
+def cmd_fetch(
+    *,
+    deps_file: str,
+    deps_dir: str,
+    output_dir: str,
+    verbose: bool,
+    debug: bool,
+) -> int:
     """Main fetch command.
 
     Reads deps.toml and builds all specified packages.
     """
-    setup_logging(args.verbose, args.debug)
+    setup_logging(verbose, debug)
 
-    deps_file = Path(args.deps_file)
-    if not deps_file.exists():
-        logger.error("Deps file not found: %s", deps_file)
+    deps_path = Path(deps_file)
+    if not deps_path.exists():
+        logger.error("Deps file not found: %s", deps_path)
         return 1
 
     try:
-        deps_config = load_deps_file(deps_file)
+        deps_config = load_deps_file(deps_path)
     except Exception as e:
         logger.error("Failed to parse deps file: %s", e)
         return 1
 
     packages = deps_config.get("packages", {})
     if not packages:
-        logger.warning("No packages defined in %s", deps_file)
+        logger.warning("No packages defined in %s", deps_path)
         return 0
-
-    deps_dir = Path(args.deps_dir)
-    output_dir = Path(args.output_dir)
 
     failed: list[str] = []
     for name, pkg_config in packages.items():
-        if not fetch_package(name, pkg_config, deps_dir, output_dir):
+        if not fetch_package(name, pkg_config, Path(deps_dir), Path(output_dir)):
             failed.append(name)
 
     if failed:
@@ -635,17 +643,17 @@ def cmd_fetch(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_list(args: argparse.Namespace) -> int:
+def cmd_list(*, deps_file: str, verbose: bool, debug: bool) -> int:
     """List packages in deps.toml."""
-    setup_logging(args.verbose, args.debug)
+    setup_logging(verbose, debug)
 
-    deps_file = Path(args.deps_file)
-    if not deps_file.exists():
-        logger.error("Deps file not found: %s", deps_file)
+    deps_path = Path(deps_file)
+    if not deps_path.exists():
+        logger.error("Deps file not found: %s", deps_path)
         return 1
 
     try:
-        deps_config = load_deps_file(deps_file)
+        deps_config = load_deps_file(deps_path)
     except Exception as e:
         logger.error("Failed to parse deps file: %s", e)
         return 1
@@ -668,22 +676,22 @@ def cmd_list(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_clean(args: argparse.Namespace) -> int:
+def cmd_clean(*, deps_dir: str, all: bool, verbose: bool, debug: bool) -> int:
     """Clean fetched sources and builds."""
-    setup_logging(args.verbose, args.debug)
+    setup_logging(verbose, debug)
 
-    deps_dir = Path(args.deps_dir)
+    deps_path = Path(deps_dir)
 
-    if not deps_dir.exists():
-        logger.info("Dependencies directory does not exist: %s", deps_dir)
+    if not deps_path.exists():
+        logger.info("Dependencies directory does not exist: %s", deps_path)
         return 0
 
-    if args.all:
-        logger.info("Removing entire dependencies directory: %s", deps_dir)
-        shutil.rmtree(deps_dir)
+    if all:
+        logger.info("Removing entire dependencies directory: %s", deps_path)
+        shutil.rmtree(deps_path)
     else:
         # Just remove build directory
-        build_dir = deps_dir / "build"
+        build_dir = deps_path / "build"
         if build_dir.exists():
             logger.info("Removing build directory: %s", build_dir)
             shutil.rmtree(build_dir)
@@ -692,97 +700,120 @@ def cmd_clean(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
+def _verbosity(f: Callable[..., Any]) -> Callable[..., Any]:
+    """The -v/--debug pair every fetch command shares.
+
+    Declared on the group and on each command, so both spellings parse.
+    `_MergingCommand` is what makes the two agree.
+    """
+    f = click.option("--debug", is_flag=True, help="Enable debug output")(f)
+    return click.option("-v", "--verbose", is_flag=True, help="Enable verbose output")(
+        f
+    )
+
+
+class _MergingCommand(click.Command):
+    """A command that inherits an option spelled before its name.
+
+    ``pcons-fetch -v fetch`` used to run non-verbose: argparse applied the
+    subparser's ``False`` default over what the top-level parser had stored.
+
+    Not `pcons._cli_click.MergingCommand`, which also configures logging out of
+    ``pcons.cli``, where ``--debug`` names a subsystem. Here it is a flag and
+    `setup_logging` above is a different function.
+    """
+
+    def invoke(self, ctx: click.Context) -> Any:
+        _adopt_options_spelled_earlier(self, ctx)
+        return super().invoke(ctx)
+
+
+class _FetchGroup(click.Group):
+    """The group whose commands inherit. See `_MergingCommand`."""
+
+    command_class = _MergingCommand
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """Declaration order, matching what the argparse subparsers listed."""
+        return list(self.commands)
+
+
+@click.group(cls=_FetchGroup, invoke_without_command=True)
+@click.version_option(
+    __version__, "--version", prog_name="pcons-fetch", message="%(prog)s %(version)s"
+)
+@_verbosity
+@click.pass_context
+def cli(ctx: click.Context, verbose: bool, debug: bool) -> int:
+    """Download and build external dependencies for pcons."""
+    if ctx.invoked_subcommand is not None:
+        return 0
+    # No subcommand: fetch deps.toml if there is one, else say what the
+    # commands are. ctx.invoke fills the rest from `cli_fetch`'s own defaults,
+    # so they are declared once; it bypasses the command's invoke, so the two
+    # shared options are handed over by name.
+    if Path("deps.toml").exists():
+        return int(ctx.invoke(cli_fetch, verbose=verbose, debug=debug))
+    click.echo(ctx.get_help())
+    return 0
+
+
+@cli.command("fetch", short_help="Fetch and build dependencies")
+@click.argument("deps_file", default="deps.toml", required=False)
+@click.option(
+    "-d", "--deps-dir", default=".deps", help="Dependencies directory (default: .deps)"
+)
+@click.option(
+    "-o",
+    "--output-dir",
+    default=".",
+    help="Output directory for .pcons-pkg.toml files (default: .)",
+)
+@_verbosity
+def cli_fetch(
+    deps_file: str, deps_dir: str, output_dir: str, verbose: bool, debug: bool
+) -> int:
+    """Fetch and build the packages in DEPS_FILE (default: deps.toml)."""
+    return cmd_fetch(
+        deps_file=deps_file,
+        deps_dir=deps_dir,
+        output_dir=output_dir,
+        verbose=verbose,
+        debug=debug,
+    )
+
+
+@cli.command("list", short_help="List packages in deps.toml")
+@click.argument("deps_file", default="deps.toml", required=False)
+@_verbosity
+def cli_list(deps_file: str, verbose: bool, debug: bool) -> int:
+    """List the packages declared in DEPS_FILE (default: deps.toml)."""
+    return cmd_list(deps_file=deps_file, verbose=verbose, debug=debug)
+
+
+@cli.command("clean", short_help="Clean fetched sources and builds")
+@click.option(
+    "-d", "--deps-dir", default=".deps", help="Dependencies directory (default: .deps)"
+)
+@click.option("-a", "--all", is_flag=True, help="Remove everything including sources")
+@_verbosity
+def cli_clean(deps_dir: str, all: bool, verbose: bool, debug: bool) -> int:
+    """Remove the build directory, or with --all the whole deps directory."""
+    return cmd_clean(deps_dir=deps_dir, all=all, verbose=verbose, debug=debug)
+
+
+def main(argv: list[str] | None = None) -> int:
     """Main entry point for pcons-fetch."""
-    from pcons import __version__
-
-    parser = argparse.ArgumentParser(
-        prog="pcons-fetch",
-        description="Download and build external dependencies for pcons.",
-    )
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
-    )
-    parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Enable verbose output"
-    )
-    parser.add_argument("--debug", action="store_true", help="Enable debug output")
-
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
-
-    # pcons-fetch fetch (default if just running with deps file)
-    fetch_parser = subparsers.add_parser("fetch", help="Fetch and build dependencies")
-    fetch_parser.add_argument(
-        "deps_file",
-        nargs="?",
-        default="deps.toml",
-        help="Path to deps.toml (default: deps.toml)",
-    )
-    fetch_parser.add_argument(
-        "--deps-dir",
-        "-d",
-        default=".deps",
-        help="Dependencies directory (default: .deps)",
-    )
-    fetch_parser.add_argument(
-        "--output-dir",
-        "-o",
-        default=".",
-        help="Output directory for .pcons-pkg.toml files (default: .)",
-    )
-    fetch_parser.add_argument("-v", "--verbose", action="store_true")
-    fetch_parser.add_argument("--debug", action="store_true")
-    fetch_parser.set_defaults(func=cmd_fetch)
-
-    # pcons-fetch list
-    list_parser = subparsers.add_parser("list", help="List packages in deps.toml")
-    list_parser.add_argument(
-        "deps_file",
-        nargs="?",
-        default="deps.toml",
-        help="Path to deps.toml (default: deps.toml)",
-    )
-    list_parser.add_argument("-v", "--verbose", action="store_true")
-    list_parser.add_argument("--debug", action="store_true")
-    list_parser.set_defaults(func=cmd_list)
-
-    # pcons-fetch clean
-    clean_parser = subparsers.add_parser(
-        "clean", help="Clean fetched sources and builds"
-    )
-    clean_parser.add_argument(
-        "--deps-dir",
-        "-d",
-        default=".deps",
-        help="Dependencies directory (default: .deps)",
-    )
-    clean_parser.add_argument(
-        "--all",
-        "-a",
-        action="store_true",
-        help="Remove everything including sources",
-    )
-    clean_parser.add_argument("-v", "--verbose", action="store_true")
-    clean_parser.add_argument("--debug", action="store_true")
-    clean_parser.set_defaults(func=cmd_clean)
-
-    args = parser.parse_args()
-
-    if args.command is None:
-        # Default to fetch if deps.toml exists
-        if Path("deps.toml").exists():
-            args.deps_file = "deps.toml"
-            args.deps_dir = ".deps"
-            args.output_dir = "."
-            args.verbose = getattr(args, "verbose", False)
-            args.debug = getattr(args, "debug", False)
-            return cmd_fetch(args)
-        else:
-            parser.print_help()
-            return 0
-
-    result: int = args.func(args)
-    return result
+    try:
+        result = cli.main(args=argv, prog_name="pcons-fetch", standalone_mode=False)
+    except click.ClickException as e:
+        e.show()
+        return e.exit_code
+    except click.exceptions.Exit as e:
+        return e.exit_code
+    except click.exceptions.Abort:
+        return 130
+    return int(result or 0)
 
 
 if __name__ == "__main__":

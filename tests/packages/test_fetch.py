@@ -481,10 +481,6 @@ class TestFetchCliDispatch:
 
         assert calls[0][1]["verbose"] is True
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="argparse applies the subparser's default over it; fixed by the click conversion",
-    )
     def test_verbose_before_the_subcommand(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -494,10 +490,6 @@ class TestFetchCliDispatch:
 
         assert calls[0][1]["verbose"] is True
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="argparse applies the subparser's default over it; fixed by the click conversion",
-    )
     def test_debug_before_the_subcommand(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls = _record_handlers(monkeypatch)
 
