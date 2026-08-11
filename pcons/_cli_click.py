@@ -93,6 +93,9 @@ class MergingGroup(click.Group):
         _adopt_options_spelled_earlier(self, ctx)
         return super().invoke(ctx)
 
+    #: A subgroup's commands inherit too, without each restating it.
+    command_class = MergingCommand
+
     def list_commands(self, ctx: click.Context) -> list[str]:
         """Declaration order, as `PconsGroup` does, not click's alphabetical."""
         return list(self.commands)
@@ -129,6 +132,11 @@ class PconsGroup(click.Group):
     """
 
     DEFAULT_COMMAND = "_default"
+
+    #: Every command inherits an option spelled before its name, so no command
+    #: has to ask for it. The catch-all overrides this with `DefaultCommand`.
+    command_class = MergingCommand
+    group_class = MergingGroup
 
     def list_commands(self, ctx: click.Context) -> list[str]:
         """Declaration order, which groups the commands by what they do."""

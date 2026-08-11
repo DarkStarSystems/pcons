@@ -21,8 +21,6 @@ from pcons import __version__
 from pcons._cli_click import (
     ROUTED_TO_DEFAULT,
     DefaultCommand,
-    MergingCommand,
-    MergingGroup,
     PconsGroup,
     build_options,
     common_options,
@@ -1419,7 +1417,6 @@ def cli(ctx: click.Context, **declared_but_unused: object) -> None:
 
 @cli.command(
     "info",
-    cls=MergingCommand,
     short_help="Show build script info and available variables",
     help=(
         "Show build script info and available variables.\n\n"
@@ -1483,7 +1480,7 @@ def cli_info(
     )
 
 
-@cli.command("init", cls=MergingCommand, short_help="Initialize a new pcons project")
+@cli.command("init", short_help="Initialize a new pcons project")
 @directory_option
 @common_options
 @click.option(
@@ -1513,7 +1510,6 @@ def cli_init(
 
 @cli.command(
     "generate",
-    cls=MergingCommand,
     short_help="Generate build files from pcons-build.py",
     help=(
         "Generate build files from pcons-build.py.\n\n"
@@ -1589,7 +1585,6 @@ def cli_generate(
 
 @cli.command(
     "build",
-    cls=MergingCommand,
     short_help="Build targets (auto-generates if needed)",
     help=(
         "Build targets using the appropriate build tool. "
@@ -1662,7 +1657,7 @@ def cli_build(
     ctx.exit(build_once()[0])
 
 
-@cli.command("clean", cls=MergingCommand, short_help="Clean build artifacts")
+@cli.command("clean", short_help="Clean build artifacts")
 @directory_option
 @common_options
 @build_options
@@ -1694,7 +1689,6 @@ def cli_clean(
 
 @cli.group(
     "cache",
-    cls=MergingGroup,
     invoke_without_command=True,
     short_help="Inspect or clear the per-build-dir cache",
     help=(
@@ -1712,7 +1706,7 @@ def cli_cache(ctx: click.Context, build_dir: Path, **kw: object) -> None:
         ctx.exit(_cache_list(build_dir))
 
 
-@cli_cache.command("list", cls=MergingCommand, short_help="What is persisted")
+@cli_cache.command("list", short_help="What is persisted")
 @directory_option
 @common_options
 @click.pass_context
@@ -1721,7 +1715,7 @@ def cli_cache_list(ctx: click.Context, build_dir: Path, **kw: object) -> None:
     ctx.exit(_cache_list(build_dir))
 
 
-@cli_cache.command("show", cls=MergingCommand, short_help="The whole cache")
+@cli_cache.command("show", short_help="The whole cache")
 @directory_option
 @common_options
 @click.pass_context
@@ -1730,7 +1724,7 @@ def cli_cache_show(ctx: click.Context, build_dir: Path, **kw: object) -> None:
     ctx.exit(_cache_show(build_dir))
 
 
-@cli_cache.command("clear", cls=MergingCommand, short_help="Discard it")
+@cli_cache.command("clear", short_help="Discard it")
 @directory_option
 @common_options
 @click.pass_context
@@ -1739,7 +1733,7 @@ def cli_cache_clear(ctx: click.Context, build_dir: Path, **kw: object) -> None:
     ctx.exit(_cache_clear(build_dir))
 
 
-@cli_cache.command("path", cls=MergingCommand, short_help="Where it lives")
+@cli_cache.command("path", short_help="Where it lives")
 @directory_option
 @common_options
 @click.pass_context
