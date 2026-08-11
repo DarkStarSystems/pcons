@@ -1094,6 +1094,233 @@ class TestScriptCommandsAreScoped:
             commands.clear()
 
 
+class TestHelperDeclaredCommandsSurviveARerun:
+    """`--watch` re-runs the build script in one process, and the listing is
+    written from the registry, so anything the registry loses is deleted from
+    the build directory too."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self) -> Iterator[None]:
+        from pcons import commands
+
+        commands.clear()
+        yield
+        commands.clear()
+
+    @staticmethod
+    def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "tasks.py").write_text(
+            "import pcons\n\n\n"
+            "@pcons.cli_command()\n"
+            "def from_helper():\n"
+            '    "Declared by an imported module."\n'
+        )
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\n"
+            "import tasks  # noqa: F401\n"
+            "project = Project('demo')\n"
+            "env = project.Environment()\n"
+            "env.Command(target='hello.txt', source='hello.in',\n"
+            "            command='cp $SOURCE $TARGET')\n"
+            "\n"
+            "@project.cli_command()\n"
+            "def from_body():\n"
+            '    "Declared by the script body."\n'
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        return tmp_path
+
+    def test_a_second_run_keeps_both(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The helper is already in `sys.modules` the second time, so its
+        decorator never fires again."""
+        from pcons import commands
+
+        self._project(tmp_path, monkeypatch)
+        sys.path.insert(0, str(tmp_path))
+        try:
+            for _ in range(3):
+                assert (
+                    run_script(tmp_path / "pcons-build.py", tmp_path / "build")[0] == 0
+                )
+                assert set(commands.declared()) == {"from-helper", "from-body"}
+        finally:
+            sys.path.remove(str(tmp_path))
+            sys.modules.pop("tasks", None)
+
+    def test_the_persisted_listing_keeps_both(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What the user actually sees: `pcons run` after a re-run."""
+        from pcons.core.cache import BuildCache
+
+        self._project(tmp_path, monkeypatch)
+        sys.path.insert(0, str(tmp_path))
+        try:
+            for _ in range(2):
+                assert (
+                    run_script(tmp_path / "pcons-build.py", tmp_path / "build")[0] == 0
+                )
+        finally:
+            sys.path.remove(str(tmp_path))
+            sys.modules.pop("tasks", None)
+
+        listing = BuildCache(tmp_path / "build").get("commands")
+        assert isinstance(listing, list)
+        assert {entry["name"] for entry in listing} == {"from-helper", "from-body"}
+
+
+class TestPersistedCommandListing:
+    """Generating records what the script declared, so `pcons run` can list it
+    without paying for a script run (decision 7 of the feature)."""
+
+    SCRIPT = (
+        "from pcons import Project\n"
+        "project = Project('demo')\n"
+        "\n"
+        "@project.cli_command()\n"
+        "def flash():\n"
+        "    'Flash the board.'\n"
+        "\n"
+        "@project.cli_group()\n"
+        "def docs():\n"
+        "    'Documentation tasks.'\n"
+        "\n"
+        "@docs.command()\n"
+        "def build():\n"
+        "    'Build them.'\n"
+    )
+
+    @staticmethod
+    def _listing(build_dir: Path) -> object:
+        from pcons.core.cache import BuildCache
+
+        return BuildCache(build_dir).get("commands")
+
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self) -> Iterator[None]:
+        from pcons import commands
+
+        commands.clear()
+        yield
+        commands.clear()
+
+    def test_names_and_short_help_in_declaration_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+
+        # A group is listed by its own name and help; its verbs are not cached,
+        # which is why `pcons run docs --help` has to run the script.
+        assert self._listing(build_dir) == [
+            {"name": "flash", "help": "Flash the board."},
+            {"name": "docs", "help": "Documentation tasks."},
+        ]
+
+    def test_a_deleted_command_disappears(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The one the unconditional write exists for. Skip the write when the
+        list is empty and a deleted name is listed forever."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir)[0] == 0
+
+        assert self._listing(build_dir) == []
+
+    def test_a_script_declaring_nothing_writes_an_empty_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+
+        assert self._listing(build_dir) == []
+
+    def test_a_module_declared_command_is_not_recorded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Module commands come from the filesystem at startup; caching them
+        would list them twice where the module exists."""
+        from pcons import commands
+
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        def from_a_module() -> None:
+            """Deploy it."""
+
+        from_a_module.__module__ = "pcons.modules.deploy"
+        commands.cli_command("deploy")(from_a_module)
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+
+        listing = self._listing(build_dir)
+        assert isinstance(listing, list)
+        assert [entry["name"] for entry in listing] == ["flash", "docs"]
+
+    def test_a_non_generating_run_leaves_the_listing_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons run` must not become a writer of the thing it reads."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+        before = self._listing(build_dir)
+
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, generate=False)[0] == 0
+
+        assert self._listing(build_dir) == before
+
+    def test_nothing_is_written_without_a_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """persist=False is the regen re-invoke, which writes no cache at all."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir, persist=False)[0] == 0
+
+        assert self._listing(build_dir) is None
+
+
 class TestDirectoryArg:
     """Tests for -C/--directory argument.
 

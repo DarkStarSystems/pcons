@@ -281,12 +281,29 @@ def _warn_unread_cached_vars(
         )
 
 
+def _declared_command_listing() -> list[dict[str, str]]:
+    """What the build script declared, for `pcons run` to list without running it.
+
+    Script-origin only: a module's commands are known from the filesystem at
+    startup, and caching them would list them twice on a machine that has the
+    module and once, staler, on one that does not. Declaration order, like
+    `PconsGroup.list_commands`.
+    """
+    return [
+        {"name": name, "help": entry.command.get_short_help_str()}
+        for name, entries in user_commands.declared().items()
+        for entry in entries
+        if entry.origin == user_commands.SCRIPT_ORIGIN
+    ]
+
+
 def _persist_run_settings(
     cache: BuildCache,
     variables: dict[str, str],
     variant: str | None,
     generator: str | None,
     source_dir: str,
+    commands: list[dict[str, str]] | None = None,
 ) -> None:
     """Persist the settings resolved for this run into the build-dir cache.
 
@@ -296,6 +313,12 @@ def _persist_run_settings(
 
     ``source_dir`` is recorded so a later run can detect a cache that belongs to
     a different source tree (a copied or moved build dir) and refuse to apply it.
+
+    ``commands`` is the declared-command listing, written whenever it is given
+    and **including an empty list**: unlike the other keys, which fall back to a
+    default when absent, a stale name left in place would be listed forever after
+    it was deleted from the build script. None means "this run learned nothing
+    about them", which is a non-generating run.
     """
     updates: dict[str, object] = {"source_dir": source_dir}
     if variables:
@@ -304,6 +327,8 @@ def _persist_run_settings(
         updates["variant"] = variant
     if generator:
         updates["generator"] = generator
+    if commands is not None:
+        updates["commands"] = commands
     cache.update(updates)
 
 
@@ -538,6 +563,9 @@ def run_script(
                             persist_variant,
                             persist_gen,
                             current_source,
+                            # Only a generating run records the listing, so a
+                            # non-generating one cannot stale it.
+                            _declared_command_listing() if generate else None,
                         )
                 except ValueError:
                     logger.error("No Project created in build script")
