@@ -1051,10 +1051,10 @@ def main(argv: list[str] | None = None) -> int:
     """
     try:
         result = cli_test.main(args=argv, prog_name="pcons test", standalone_mode=False)
+    # standalone_mode=False makes click return the code for ctx.exit() and for
+    # --help itself, and re-raise only these two.
     except click.ClickException as e:
         e.show()
-        return e.exit_code
-    except click.exceptions.Exit as e:
         return e.exit_code
     except click.exceptions.Abort:
         return 130

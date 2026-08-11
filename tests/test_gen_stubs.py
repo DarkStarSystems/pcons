@@ -261,6 +261,15 @@ class TestMain:
         assert _gen_stubs.main(["--nope"]) == 2
         assert "--nope" in capsys.readouterr().err
 
+    def test_keyboard_interrupt_is_130(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ctrl-C reaches main() as click's Abort, not as a traceback."""
+
+        def interrupt(mode: str) -> int:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(_gen_stubs, "write_or_check", interrupt)
+        assert _gen_stubs.main([]) == 130
+
 
 # ---- UTF-8 round-trip (regression for the cp1252 mojibake on Windows CI) -----
 

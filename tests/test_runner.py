@@ -872,6 +872,15 @@ class TestCLIParsing:
         assert main(["--nope"]) == 2
         assert "--nope" in capsys.readouterr().err
 
+    def test_keyboard_interrupt_is_130(self, tmp_path, monkeypatch):
+        """Ctrl-C reaches main() as click's Abort, not as a traceback."""
+
+        def interrupt(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("pcons.test_runner.find_manifest", interrupt)
+        assert main(["--no-color"]) == 130
+
     def test_build_dir_default_is_read_per_call(self, tmp_path, monkeypatch, capsys):
         """$PCONS_BUILD_DIR is read when the command runs, not at import.
 
