@@ -414,7 +414,11 @@ class TestScanTranslationUnitsOrder:
         import time
 
         def _slow(
-            compiler: str, flags: list[str], src: str, obj: str
+            compiler: str,
+            flags: list[str],
+            src: str,
+            obj: str,
+            prereqs_out: list[str] | None = None,
         ) -> dict[str, object]:
             index = int(obj.removeprefix("tu").removesuffix(".o"))
             time.sleep((8 - index) * 0.01)
@@ -440,7 +444,7 @@ class TestScanTranslationUnitsOrder:
         """One TU is not worth a pool, and must still scan."""
         monkeypatch.setattr(
             "pcons.toolchains.cxx_module_scanner.run_scan_deps_gcc",
-            lambda *a: {"rules": [{"primary-output": a[3]}]},
+            lambda *a, **kw: {"rules": [{"primary-output": a[3]}]},
         )
         results = scan_translation_units(self._specs(1), "unused", scanner_style="gcc")
         assert [r.spec.obj_rel for r in results] == ["tu0.o"]

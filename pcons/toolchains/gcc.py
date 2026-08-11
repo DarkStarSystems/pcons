@@ -439,7 +439,10 @@ class GccToolchain(UnixToolchain):
             specs.append(add_tu_spec(setup, src, obj_node, compile_flags, flag_spec))
 
         results = scan_translation_units(
-            specs, scanner=setup.compiler_cmd, scanner_style="gcc"
+            specs,
+            scanner=setup.compiler_cmd,
+            scanner_style="gcc",
+            build_dir=setup.build_dir,
         )
 
         required_logical_names: set[str] = set()
@@ -471,6 +474,7 @@ class GccToolchain(UnixToolchain):
                     std_specs,
                     scanner=setup.compiler_cmd,
                     scanner_style="gcc",
+                    build_dir=setup.build_dir,
                 )
             )
 

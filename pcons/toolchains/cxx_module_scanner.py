@@ -61,6 +61,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pcons.toolchains._scan_cache import ScanCache, parse_depfile
+
 logger = logging.getLogger(__name__)
 
 
@@ -212,6 +214,7 @@ def run_scan_deps_gcc(
     compile_flags: list[str],
     src: str,
     obj: str,
+    prereqs_out: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Run GCC p1689 scan and return parsed JSON.
 
@@ -220,6 +223,10 @@ def run_scan_deps_gcc(
         compile_flags: List of compiler flags (e.g. ["-std=c++23"]).
         src: Absolute path to the source file.
         obj: Object file path relative to the build directory.
+        prereqs_out: When given, extended with every file the scan read. GCC
+            writes them because the command already asks for a depfile, and
+            they are exactly what decides whether a cached result is still
+            good. Left alone on a failed scan.
 
     Returns:
         Parsed P1689R5 JSON dict, or None on failure.
@@ -267,7 +274,7 @@ def run_scan_deps_gcc(
             return None
 
         try:
-            return json.loads(Path(deps_json).read_text(encoding="utf-8"))
+            p1689 = json.loads(Path(deps_json).read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             print(
                 f"Warning: could not parse GCC p1689 output for {src}: {e}",
@@ -280,6 +287,17 @@ def run_scan_deps_gcc(
                 file=sys.stderr,
             )
             return None
+
+        if prereqs_out is not None:
+            try:
+                prereqs_out.extend(
+                    parse_depfile(Path(depfile).read_text(encoding="utf-8"))
+                )
+            except OSError as e:
+                # No depfile means no way to tell when this result goes stale,
+                # so the caller must not cache it. An empty list says that.
+                logger.debug("No depfile for %s: %s", src, e)
+        return p1689
     except FileNotFoundError as e:
         raise CxxModuleScannerNotFound(
             f"GCC compiler '{compiler}' not found on PATH.\n"
@@ -476,17 +494,39 @@ def _scan_one(
     spec: TuScanSpec,
     scanner: str,
     scanner_style: str,
+    cache: ScanCache | None = None,
 ) -> TuScanResult:
-    """Scan one TU with the runner its style names."""
+    """Scan one TU with the runner its style names.
+
+    With a *cache*, a TU whose every prerequisite is untouched since the last
+    run skips the compiler entirely. Only the GCC runner participates: it is
+    the one that reports what it read.
+    """
     if scanner_style == "msvc":
         p1689 = run_scan_deps_msvc(spec.compiler, spec.compile_flags, str(spec.src))
     elif scanner_style == "gcc":
+        key = (
+            None
+            if cache is None
+            else ScanCache.key(spec.compiler, spec.compile_flags, str(spec.src))
+        )
+        if cache is not None and key is not None:
+            hit = cache.get(key)
+            if hit is not None:
+                return TuScanResult(spec=spec, p1689=hit)
+
+        prereqs: list[str] = []
         p1689 = run_scan_deps_gcc(
             spec.compiler,
             spec.compile_flags,
             str(spec.src),
             spec.obj_rel,
+            prereqs_out=prereqs,
         )
+        # No prerequisites means nothing to invalidate against, so the result
+        # is used but not stored.
+        if cache is not None and key is not None and p1689 is not None and prereqs:
+            cache.put(key, p1689, prereqs)
     else:
         p1689 = run_scan_deps(
             scanner,
@@ -513,6 +553,7 @@ def scan_translation_units(
     specs: list[TuScanSpec],
     scanner: str,
     scanner_style: str = "clang",
+    build_dir: Path | None = None,
 ) -> list[TuScanResult]:
     """Run the scanner on each TU and return parsed results.
 
@@ -520,18 +561,33 @@ def scan_translation_units(
         specs: Per-TU scan inputs.
         scanner: Path to clang-scan-deps (clang style) or cl.exe (msvc style).
         scanner_style: "clang" or "msvc".
+        build_dir: Where to keep scan results between runs. Without it every TU
+            is rescanned. Honoured for the GCC style only, which is the one
+            whose runner reports the files it read.
 
     Returns:
         One TuScanResult per spec, in order. result.p1689 is None if scanning
         that TU failed (a warning is written to stderr by the runner).
     """
-    if len(specs) < 2:
-        return [_scan_one(spec, scanner, scanner_style) for spec in specs]
+    cache = (
+        ScanCache(build_dir)
+        if build_dir is not None and scanner_style == "gcc"
+        else None
+    )
 
-    with ThreadPoolExecutor(max_workers=_scan_workers(len(specs))) as pool:
-        # map preserves input order, which build_module_map and the dyndep
-        # writer both rely on. as_completed would not.
-        return list(pool.map(lambda s: _scan_one(s, scanner, scanner_style), specs))
+    if len(specs) < 2:
+        results = [_scan_one(spec, scanner, scanner_style, cache) for spec in specs]
+    else:
+        with ThreadPoolExecutor(max_workers=_scan_workers(len(specs))) as pool:
+            # map preserves input order, which build_module_map and the dyndep
+            # writer both rely on. as_completed would not.
+            results = list(
+                pool.map(lambda s: _scan_one(s, scanner, scanner_style, cache), specs)
+            )
+
+    if cache is not None:
+        cache.save()
+    return results
 
 
 def build_module_map(

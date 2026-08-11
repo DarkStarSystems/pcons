@@ -437,7 +437,7 @@ class TestGccModulesDepsTracking:
         )
         monkeypatch.setattr(
             "pcons.toolchains.cxx_module_scanner.scan_translation_units",
-            lambda specs, scanner, scanner_style: [
+            lambda specs, scanner, scanner_style, build_dir=None: [
                 SimpleNamespace(
                     spec=s,
                     required_logical_names=set(),
