@@ -100,6 +100,52 @@ Everything after `test` reaches the runner untouched, apart from `-C DIR`.
 Write `pcons test -- -C DIR` to hand `-C` to the runner instead: the first
 `--` is consumed, and any further one is passed on.
 
+### `pcons completion`
+
+Set up tab completion for bash, zsh or fish. The script is generated from the
+command tree, so it completes command names, option names and the values of
+options with a fixed set, such as `-G`.
+
+```bash
+pcons completion install          # write it and wire it up, for $SHELL
+pcons completion install zsh      # for a shell you name
+pcons completion install -y zsh   # without confirming first
+pcons completion uninstall zsh    # undo both edits
+pcons completion show zsh         # print the script, write nothing
+```
+
+`install` says which files it will write and which lines it will add, then asks,
+unless `-y` is given. It writes:
+
+| Shell | Script | Startup file |
+|---|---|---|
+| bash | `~/.bash_completions/pcons.sh` | one `source` line in `~/.bashrc` |
+| zsh | `~/.zfunc/_pcons` | an `fpath` and a `compinit` line in `~/.zshrc` |
+| fish | `~/.config/fish/completions/pcons.fish` | none, fish reads that directory itself |
+
+The startup lines go in one delimited block, so installing twice changes nothing
+and `uninstall` removes what was added and leaves the rest of the file alone.
+Completion takes effect in the next shell.
+
+With no shell named, `$SHELL` decides. It is never guessed: with `$SHELL` unset,
+or naming a shell click writes no script for, the command fails and says so.
+
+To evaluate the script instead of installing it, put this in your startup file:
+
+```bash
+eval "$(pcons completion show bash)"      # or zsh
+pcons completion show fish | source       # fish
+```
+
+That runs pcons on every shell start, which costs about 95 ms. Installing does
+not.
+
+PowerShell is not supported: click, which generates the script, has no
+PowerShell completion class.
+
+Target names are not completed. `pcons hel<TAB>` would have to run the build
+script to know that `hello` exists.
+
 ## Options
 
 Every option below may be written before the command or after it. Spelled on
@@ -112,7 +158,7 @@ Accepted by every command:
 | `-C DIR`, `--directory DIR` | Change to *DIR* first, before anything else is parsed |
 
 Accepted by every command except `test`, which hands everything after it to the
-test runner:
+test runner, and `completion`, which reads nothing from the project:
 
 | Option | |
 |---|---|
