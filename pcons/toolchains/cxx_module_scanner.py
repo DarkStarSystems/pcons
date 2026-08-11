@@ -56,6 +56,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -471,6 +472,43 @@ def select_modules_scope(
 # (content-addressed by source content, scanner/compiler versions, and
 # normalized flags). Scans are currently O(TUs) per configure, which
 # dominates configure latency on large module-heavy projects.
+def _scan_one(
+    spec: TuScanSpec,
+    scanner: str,
+    scanner_style: str,
+) -> TuScanResult:
+    """Scan one TU with the runner its style names."""
+    if scanner_style == "msvc":
+        p1689 = run_scan_deps_msvc(spec.compiler, spec.compile_flags, str(spec.src))
+    elif scanner_style == "gcc":
+        p1689 = run_scan_deps_gcc(
+            spec.compiler,
+            spec.compile_flags,
+            str(spec.src),
+            spec.obj_rel,
+        )
+    else:
+        p1689 = run_scan_deps(
+            scanner,
+            spec.compiler,
+            spec.compile_flags,
+            str(spec.src),
+            spec.obj_rel,
+        )
+    return TuScanResult(spec=spec, p1689=p1689)
+
+
+def _scan_workers(count: int) -> int:
+    """How many scans to have in flight.
+
+    One per core, not the pool default of cores + 4: each scan is a compiler
+    preprocessing a whole translation unit, so oversubscribing costs memory and
+    buys nothing. Threads rather than processes because every scan is a
+    `subprocess.run` that releases the GIL for its whole duration.
+    """
+    return max(1, min(count, os.cpu_count() or 1))
+
+
 def scan_translation_units(
     specs: list[TuScanSpec],
     scanner: str,
@@ -487,27 +525,13 @@ def scan_translation_units(
         One TuScanResult per spec, in order. result.p1689 is None if scanning
         that TU failed (a warning is written to stderr by the runner).
     """
-    results: list[TuScanResult] = []
-    for spec in specs:
-        if scanner_style == "msvc":
-            p1689 = run_scan_deps_msvc(spec.compiler, spec.compile_flags, str(spec.src))
-        elif scanner_style == "gcc":
-            p1689 = run_scan_deps_gcc(
-                spec.compiler,
-                spec.compile_flags,
-                str(spec.src),
-                spec.obj_rel,
-            )
-        else:
-            p1689 = run_scan_deps(
-                scanner,
-                spec.compiler,
-                spec.compile_flags,
-                str(spec.src),
-                spec.obj_rel,
-            )
-        results.append(TuScanResult(spec=spec, p1689=p1689))
-    return results
+    if len(specs) < 2:
+        return [_scan_one(spec, scanner, scanner_style) for spec in specs]
+
+    with ThreadPoolExecutor(max_workers=_scan_workers(len(specs))) as pool:
+        # map preserves input order, which build_module_map and the dyndep
+        # writer both rely on. as_completed would not.
+        return list(pool.map(lambda s: _scan_one(s, scanner, scanner_style), specs))
 
 
 def build_module_map(

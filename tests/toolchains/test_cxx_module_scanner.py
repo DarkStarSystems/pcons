@@ -28,6 +28,7 @@ from pcons.toolchains.cxx_module_scanner import (
     run_scan_deps,
     run_scan_deps_gcc,
     run_scan_deps_msvc,
+    scan_translation_units,
     select_modules_scope,
     select_std_module_flags,
     wire_std_into_targets,
@@ -386,6 +387,66 @@ class TestScannerNotFound:
         )
         with pytest.raises(CxxModuleScannerNotFound, match="vcvars64"):
             run_scan_deps_msvc("cl.exe", ["/std:c++20"], "C:/x/y.cpp")
+
+
+class TestScanTranslationUnitsOrder:
+    """Results must line up with their specs however the scans finished.
+
+    `build_module_map` and the dyndep writer index results against specs, so a
+    pool that yielded completions instead of preserving input order would wire
+    a module to the wrong object file.
+    """
+
+    @staticmethod
+    def _specs(n: int) -> list[TuScanSpec]:
+        return [
+            TuScanSpec(
+                src=Path(f"/src/tu{i}.cppm"),
+                obj_rel=f"tu{i}.o",
+                compiler="g++",
+                compile_flags=[],
+            )
+            for i in range(n)
+        ]
+
+    def test_results_follow_spec_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The first spec sleeps longest, so completion order is reversed."""
+        import time
+
+        def _slow(
+            compiler: str, flags: list[str], src: str, obj: str
+        ) -> dict[str, object]:
+            index = int(obj.removeprefix("tu").removesuffix(".o"))
+            time.sleep((8 - index) * 0.01)
+            return {"rules": [{"primary-output": obj}]}
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps_gcc", _slow
+        )
+        specs = self._specs(8)
+
+        results = scan_translation_units(specs, "unused", scanner_style="gcc")
+
+        assert [r.spec.obj_rel for r in results] == [s.obj_rel for s in specs]
+        # The payload has to travel with its own spec, not just be in the right
+        # slot: a swap of both together would pass the check above.
+        assert [(r.p1689 or {})["rules"][0]["primary-output"] for r in results] == [
+            s.obj_rel for s in specs
+        ]
+
+    def test_a_single_spec_takes_the_direct_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One TU is not worth a pool, and must still scan."""
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps_gcc",
+            lambda *a: {"rules": [{"primary-output": a[3]}]},
+        )
+        results = scan_translation_units(self._specs(1), "unused", scanner_style="gcc")
+        assert [r.spec.obj_rel for r in results] == ["tu0.o"]
+
+    def test_no_specs(self) -> None:
+        assert scan_translation_units([], "unused", scanner_style="gcc") == []
 
 
 class TestGccScanDiscardsPreprocessedOutput:
