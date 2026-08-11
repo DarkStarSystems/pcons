@@ -10,6 +10,7 @@ from hypothesis import settings
 from pcons.core import invocation
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.cache import reset_cache
+from pcons.core.debug import reset_debug
 from pcons.core.preset import _PRESET_REGISTRY
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator
@@ -140,11 +141,16 @@ def clear_project_tree():
     each test and restores them afterwards, so a test that registers a
     builder or preset (directly, or as a side effect of a non-hermetic module
     load) can't leak state into later tests.
+
+    The enabled debug subsystems go with them: they are process-wide, and a
+    test that turns tracing on would otherwise put DEBUG lines in every later
+    test's captured stderr.
     """
     Project._clear_tree()
     BaseGenerator._clear_pending()
     invocation.clear()
     reset_cache()
+    reset_debug()
     registries = _snapshot_registries()
     yield
     _restore_registries(registries)
@@ -152,6 +158,7 @@ def clear_project_tree():
     BaseGenerator._clear_pending()
     invocation.clear()
     reset_cache()
+    reset_debug()
 
 
 @pytest.fixture(autouse=True)

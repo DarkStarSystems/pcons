@@ -12,7 +12,7 @@ import sys
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from click.core import ParameterSource
@@ -21,8 +21,10 @@ from pcons import __version__, _cli_completion
 from pcons import commands as user_commands
 from pcons._cli_click import (
     DefaultCommand,
+    MergingGroup,
     PconsContext,
     PconsGroup,
+    _adopt_options_spelled_earlier,
     build_options,
     common_options,
     configure_logging,
@@ -2056,6 +2058,282 @@ def cli_cache_clear(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
 def cli_cache_path(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
     """Print the cache file's path, whether or not it exists yet."""
     ctx.exit(_cache_path(build_dir))
+
+
+class RunGroup(MergingGroup):
+    """The commands a build script or an add-on module declared.
+
+    Names come from the build directory's cache, so listing and help never run
+    the build script. Dispatch does run it, and hands the command its live
+    environment with the project resolved and no build files written.
+
+    It lives here rather than in `_cli_click` because it has to run the build
+    script, and `cli` imports `_cli_click`; the generic classes there stay
+    generic.
+    """
+
+    @staticmethod
+    def _on_the_command_line(ctx: click.Context, name: str) -> object | None:
+        """A value this context parsed from the command line, and only that.
+
+        Not the default, and **not the environment**: `common_options` gives
+        `-B` an envvar, and `_adopt_options_spelled_earlier`
+        (`pcons/_cli_click.py`) is explicit that a value click took from the
+        environment must not beat a `-B` spelled before the command. Accepting
+        it here would make the listing and the dispatch read different build
+        directories under `PCONS_BUILD_DIR=x pcons -B out run`.
+        """
+        if name in ctx.params and (
+            ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
+        ):
+            return ctx.params[name]
+        return None
+
+    @classmethod
+    def _spelled(cls, ctx: click.Context, name: str) -> object | None:
+        """A value the user spelled, on either side of the command name.
+
+        After the name wins, which is what `_adopt_options_spelled_earlier`
+        promises: "spelled on both sides, the later one wins". Reading the
+        parent first would let `pcons -B other run -B out --help` list `other`
+        while dispatching out of `out`. Neither side counts the environment;
+        the caller falls back to it once nothing was spelled at all.
+
+        The parent is still needed for the help path: `_adopt_options_spelled_earlier`
+        runs after `parse_args`, and `--help` exits from inside it, so a value
+        spelled before this group's name never reaches `ctx.params` here.
+        """
+        here = cls._on_the_command_line(ctx, name)
+        if here is not None:
+            return here
+        parent = ctx.parent
+        return None if parent is None else cls._on_the_command_line(parent, name)
+
+    def _build_dir_option(self) -> click.Parameter | None:
+        return next((p for p in self.params if p.name == "build_dir"), None)
+
+    #: What the listing needs before `--help` can print it.
+    _LISTING_OPTIONS = ("build_dir", "modules_path")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Make the options the listing reads eager, so help sees their values.
+
+        `pcons run -B out --help` must list `out`'s commands, and
+        `pcons run --modules-path mods --help` the modules'. click processes
+        eager parameters first, so with an eager help option the callback prints
+        the listing before either value has reached `ctx.params`. Promoting
+        these two and demoting help (see `get_help_option`) fixes the order
+        whichever way round the user spelled them.
+
+        Only this group's own copies are touched: `common_options` builds a
+        fresh `Option` per command.
+        """
+        super().__init__(*args, **kwargs)
+        for param in self.params:
+            if param.name in self._LISTING_OPTIONS:
+                param.is_eager = True
+
+    def get_help_option(self, ctx: click.Context) -> click.Option | None:
+        """click's own help option, demoted so the listing's options beat it.
+
+        Overriding rather than declaring one keeps `help_option_names` from the
+        context settings, so `run` answers to `-h` and `--help` like every other
+        command. click caches the object, so this runs once.
+        """
+        option = super().get_help_option(ctx)
+        if option is not None:
+            option.is_eager = False
+        return option
+
+    def _build_dir(self, ctx: click.Context) -> Path:
+        """Which build directory to read the listing from.
+
+        The fallback is the parameter's own default rather than a literal
+        "build": `common_options` declares it with an envvar, and a literal here
+        would silently ignore PCONS_BUILD_DIR.
+        """
+        spelled = self._spelled(ctx, "build_dir")
+        if spelled is not None:
+            return Path(str(spelled))
+        option = self._build_dir_option()
+        if option is not None:
+            from_env = option.resolve_envvar_value(ctx)
+            if from_env:
+                return Path(str(from_env))
+            default = option.get_default(ctx)
+            if default is not None:
+                return Path(str(default))
+        return Path("build")
+
+    def _load_modules(self, ctx: click.Context) -> None:
+        """Add-on commands are invisible until their modules are imported.
+
+        Listing and dispatch both need this, and both can be reached without a
+        callback having run first. `load_modules` skips what it already has.
+        """
+        modules_path = self._spelled(ctx, "modules_path")
+        _load_user_modules(modules_path if isinstance(modules_path, str) else None)
+
+    def _cached_rows(self, ctx: click.Context) -> list[tuple[str, str]]:
+        """(name, short help) for the script's commands, as generate left them.
+
+        The cache has no schema version and a build directory outlives a pcons
+        upgrade, so an entry that is not shaped as expected is skipped rather
+        than raised over.
+        """
+        raw = _open_cache(self._build_dir(ctx)).get("commands")
+        if not isinstance(raw, list):
+            return []
+        rows: list[tuple[str, str]] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            help_text = entry.get("help")
+            rows.append((name, help_text if isinstance(help_text, str) else ""))
+        return rows
+
+    def rows(self, ctx: click.Context) -> list[tuple[str, str]]:
+        """Everything on offer: the script's cached names, then the modules'."""
+        self._load_modules(ctx)
+        rows = self._cached_rows(ctx)
+        listed = {name for name, _ in rows}
+        for name, entries in user_commands.declared().items():
+            if name in listed:
+                continue
+            for entry in entries:
+                if entry.origin != user_commands.SCRIPT_ORIGIN:
+                    rows.append((name, entry.command.get_short_help_str()))
+                    break
+        return rows
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """Declaration order, script before modules. Never runs the script."""
+        return [name for name, _ in self.rows(ctx)]
+
+    def format_commands(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        """Format the listing from the cache, not from resolved commands.
+
+        click's own version asks `get_command` for each name and drops whatever
+        answers None, which every script-declared command does until the script
+        has run. Formatting must not run it, so the help text comes from the
+        cache with the name.
+        """
+        rows = self.rows(ctx)
+        if not rows:
+            return
+        with formatter.section("Commands"):
+            formatter.write_dl(rows)
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        """The declared command, or None so click reports "No such command".
+
+        Only meaningful once the script has run, which `invoke` guarantees for
+        the dispatch path. Help and completion go through `rows` instead.
+        """
+        self._load_modules(ctx)
+        try:
+            return user_commands.lookup(cmd_name)
+        except PconsError as e:
+            # A name two origins both declare. Neither runs, and the message
+            # names both so the user can tell which to rename.
+            raise click.ClickException(str(e)) from e
+
+    def invoke(self, ctx: click.Context) -> Any:
+        """Dispatch inside the build script's environment.
+
+        `click.Group.invoke` resolves the name *and* invokes the command, both
+        inside itself, so wrapping it once puts the lookup and the user's
+        callback inside the live environment.
+        """
+        # `MergingGroup.invoke` would do the first two, but only the bare path
+        # reaches it: dispatch goes through the script's window instead. Both
+        # have to happen before the script is read, or -v and --debug say
+        # nothing about the one thing this command does.
+        _adopt_options_spelled_earlier(self, ctx)
+        configure_logging(ctx)
+        # Not `load_declared_modules`: this group needs its modules on the help
+        # and completion paths too, where no command is ever invoked.
+        self._load_modules(ctx)
+        args = [*getattr(ctx, "_protected_args", []), *ctx.args]
+        if not args:
+            # Bare `pcons run` lists, and the listing comes from the cache, so
+            # do not pay for a script run to print it.
+            return super().invoke(ctx)
+
+        script = _resolve_build_script(None)
+        if script is None:
+            # No script, so no window and no project: only a module's commands
+            # can resolve, and a script's name is simply unknown.
+            return super().invoke(ctx)
+
+        parent_invoke = super().invoke  # bound now: a bare super() in the lambda
+        dispatched: list[Any] = []  # would look for it in the closure
+
+        def dispatch() -> None:
+            dispatched.append(parent_invoke(ctx))
+
+        exit_code, _projects = run_script(
+            script,
+            self._build_dir(ctx),
+            generate=False,
+            persist=False,
+            inside=dispatch,
+        )
+        if exit_code != 0:
+            # The script itself failed; it has already said why.
+            ctx.exit(exit_code)
+        if not dispatched:
+            # The script ended itself, cleanly enough that run_script reported
+            # success -- `sys.exit(0)` reaches here. Saying nothing would exit 0
+            # having run no command at all.
+            raise click.ClickException(
+                f"{script} exited before the command could run, "
+                "so nothing was dispatched."
+            )
+        return dispatched[0]
+
+
+@cli.group(
+    "run",
+    cls=RunGroup,
+    invoke_without_command=True,
+    short_help="Run a command declared by the build script",
+    help=(
+        "Run a command declared by the build script or an add-on module.\n\n"
+        "A command runs with the build script's environment live and its "
+        "project resolved, and writes no build files. Without a command name, "
+        "lists what is available; that listing comes from the build directory, "
+        "so a newly declared command appears after the next generate."
+    ),
+)
+@directory_option
+@common_options
+@pass_pcons_context
+def cli_run(ctx: PconsContext, **kw: object) -> None:
+    # A subcommand has already been resolved by RunGroup.invoke by the time this
+    # runs for it; only a bare `pcons run` gets the listing. Logging is set up
+    # there rather than here, since here is already inside the script's window.
+    if ctx.invoked_subcommand is not None:
+        return
+    group = ctx.command
+    assert isinstance(group, RunGroup)
+    rows = group.rows(ctx)
+    if not rows:
+        print(
+            "No commands declared. A build script declares one with "
+            "@project.cli_command(); the listing comes from the build "
+            "directory, so run `pcons generate` first."
+        )
+        ctx.exit(0)
+    width = max(len(name) for name, _ in rows)
+    for name, help_text in rows:
+        print(f"  {name.ljust(width)}  {help_text}".rstrip())
+    ctx.exit(0)
 
 
 @cli.command(
