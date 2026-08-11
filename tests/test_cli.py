@@ -1203,7 +1203,7 @@ class TestCLIArgumentParsing:
         assert "--jobs" in result.stdout
 
     def test_test_subcommand_dispatches_to_runner(self, tmp_path: Path) -> None:
-        """`pcons test` dispatches to pcons.test_runner without argparse."""
+        """`pcons test` hands its argv to pcons.test_runner, which owns them."""
         # Hand-build a manifest so the runner has something to operate on.
         import json as _json
 
