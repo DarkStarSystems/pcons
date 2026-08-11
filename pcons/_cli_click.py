@@ -95,6 +95,47 @@ def _adopt_options_spelled_earlier(command: click.Command, ctx: click.Context) -
             ctx.params[name] = parent.params[name]
 
 
+def configure_logging(ctx: click.Context) -> None:
+    """Set logging up from the options every command shares, once they settle.
+
+    Read out of what the merge left in ``ctx.params``, so ``pcons -v generate``
+    and ``pcons generate -v`` configure the same way. A subgroup's verb runs
+    this after its group already did, and the deeper spelling wins because it
+    runs last.
+
+    A command declaring neither option is left alone. It has nothing to say
+    about logging, and configuring anyway would mean the level a command
+    without ``-v`` settles on beats one spelled before it, and that ``--debug``
+    is validated for a command that never reads it: `pcons test` hands its argv
+    to another program with its own logging.
+    """
+    params = ctx.params
+    if "verbose" not in params and "debug" not in params:
+        return
+
+    # Imported here because `pcons.cli` imports this module, not the reverse.
+    from pcons.cli import setup_logging
+
+    setup_logging(
+        bool(params.get("verbose", False)), cast("str | None", params.get("debug"))
+    )
+
+
+def load_declared_modules(command: click.Command, ctx: click.Context) -> None:
+    """Load add-on modules, for a command that says it wants them.
+
+    Only a command that runs the build script does. Loading executes each
+    module's ``register()``, and `pcons clean` has no reason to run a user's
+    code.
+    """
+    if not getattr(command, "loads_modules", False):
+        return
+
+    from pcons.cli import _load_user_modules
+
+    _load_user_modules(cast("str | None", ctx.params.get("modules_path")))
+
+
 class MergingCommand(click.Command):
     """A command that inherits an option spelled before its name.
 
@@ -103,8 +144,16 @@ class MergingCommand(click.Command):
 
     context_class = PconsContext
 
+    def __init__(self, *args: Any, loads_modules: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        #: run the user's add-on modules before the callback. For a command
+        #: that runs the build script, which is what a module extends.
+        self.loads_modules = loads_modules
+
     def invoke(self, ctx: click.Context) -> Any:
         _adopt_options_spelled_earlier(self, ctx)
+        configure_logging(ctx)
+        load_declared_modules(self, ctx)
         return super().invoke(ctx)
 
 
@@ -121,11 +170,21 @@ class MergingGroup(click.Group):
 
     context_class = PconsContext
 
-    #: A subgroup's commands inherit too, without each restating it.
+    #: A subgroup's commands inherit too, without each restating it, and so
+    #: does a group nested under it: `type` is click's spelling for "this
+    #: class", and without it click would fall back to a plain `click.Group`
+    #: that inherits nothing.
     command_class = MergingCommand
+    group_class = type
+
+    def __init__(self, *args: Any, loads_modules: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.loads_modules = loads_modules
 
     def invoke(self, ctx: click.Context) -> Any:
         _adopt_options_spelled_earlier(self, ctx)
+        configure_logging(ctx)
+        load_declared_modules(self, ctx)
         return super().invoke(ctx)
 
     def list_commands(self, ctx: click.Context) -> list[str]:

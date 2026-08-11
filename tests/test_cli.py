@@ -25,6 +25,7 @@ from pcons import (
     MultiGenerator,
     NinjaGenerator,
 )
+from pcons._cli_click import MergingCommand, MergingGroup, PconsGroup
 from pcons.cli import (
     _cache_clear,
     _cache_list,
@@ -38,8 +39,11 @@ from pcons.cli import (
     cli,
     cli_build,
     cli_cache_path,
+    cli_clean,
     cli_default,
     cli_generate,
+    cli_info,
+    cli_init,
     find_script,
     parse_variables,
     run_make,
@@ -1743,6 +1747,56 @@ class TestCacheCommand:
         assert "No cache" in capsys.readouterr().out
 
 
+class TestNestingPassesOnTheMerge:
+    """The group declares what class its commands and subgroups are, so a
+    declaration does not have to remember `cls=`.
+
+    `pcons cache` is one level deep and would still work if a subgroup did not
+    pass the classes on. Two levels is where it shows: a plain `click.Group`
+    adopts nothing, and an option spelled before the outer name would be lost
+    without a word.
+    """
+
+    @staticmethod
+    def _tree() -> tuple[PconsGroup, list[str]]:
+        seen: list[str] = []
+
+        @click.group(cls=PconsGroup, invoke_without_command=True)
+        @click.option("-B", "--build-dir", default="build")
+        def root(**kw: object) -> None: ...
+
+        @root.group("outer", invoke_without_command=True)
+        @click.option("-B", "--build-dir", default="build")
+        def outer(**kw: object) -> None: ...
+
+        @outer.group("inner", invoke_without_command=True)
+        @click.option("-B", "--build-dir", default="build")
+        def inner(**kw: object) -> None: ...
+
+        @inner.command("verb")
+        @click.option("-B", "--build-dir", default="build")
+        def verb(build_dir: str) -> None:
+            seen.append(build_dir)
+
+        return root, seen
+
+    def test_every_level_is_a_merging_class(self) -> None:
+        root, _ = self._tree()
+        outer = root.commands["outer"]
+        assert isinstance(outer, MergingGroup)
+        inner = outer.commands["inner"]
+        assert isinstance(inner, MergingGroup)
+        assert isinstance(inner.commands["verb"], MergingCommand)
+
+    def test_a_value_spelled_at_the_top_reaches_the_deepest_verb(self) -> None:
+        root, seen = self._tree()
+        result = CliRunner().invoke(
+            root, ["-B", "out", "outer", "inner", "verb"], catch_exceptions=False
+        )
+        assert result.exit_code == 0, result.output
+        assert seen == ["out"]
+
+
 class TestCacheIsAGroup:
     """`pcons cache` dispatches to a subcommand, not to a positional value.
 
@@ -2734,6 +2788,117 @@ class TestGraphOptionsReachTheBuildScript:
         seen = self._record(monkeypatch)
         assert _invoke("generate").exit_code == 0
         assert seen[0]["extra_env"] is None
+
+
+class TestLoggingIsSetUpFromTheMergedOptions:
+    """The merging invoke configures logging, so no command opens by doing it.
+
+    Two things go wrong if it configures for a command that declares neither
+    option. `pcons test` hands its argv to a separate program with its own
+    logging, so validating --debug there rejects a command line the CLI used
+    to accept. And a command with no -v of its own would settle a level that
+    beats one spelled before its name.
+    """
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[tuple[bool, str | None]]:
+        """Record every setup_logging call. _invoke restores the root logger
+        afterwards, so the level itself cannot be read once it returns."""
+        seen: list[tuple[bool, str | None]] = []
+        monkeypatch.setattr(
+            "pcons.cli.setup_logging",
+            lambda verbose, debug: seen.append((verbose, debug)),
+        )
+        return seen
+
+    def test_verbose_reaches_a_command_that_declares_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        _invoke("-v", "clean")
+        assert seen == [(True, None)]
+
+    def test_a_command_without_it_stays_quiet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        _invoke("clean")
+        assert seen == [(False, None)]
+
+    @pytest.mark.parametrize("argv", [["-v", "cache", "list"], ["cache", "-v", "list"]])
+    def test_either_spelling_around_a_subgroup(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        """The group configures, then the verb configures again from its own
+        merged values. Both must see the -v, wherever it was spelled."""
+        seen = self._record(monkeypatch)
+        _invoke(*argv)
+        assert seen == [(True, None), (True, None)]
+
+    def test_a_command_declaring_neither_option_is_left_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _capture_test_runner(monkeypatch)
+        seen = self._record(monkeypatch)
+        _invoke("-v", "test", "--list")
+        assert seen == []
+
+    def test_debug_is_not_validated_for_the_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons --debug bogus test` runs the runner, which owns everything
+        after `test`. Rejecting the subsystem name here would exit 1 with the
+        runner never seeing its argv."""
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke("--debug", "bogus", "test", "--list").exit_code == 0
+        assert seen == [["--list"]]
+
+
+class TestModulesAreLoadedWhereTheyAreDeclared:
+    """Loading runs each module's register(), so only a command that works
+    from the build script asks for it. `pcons clean` runs no user code."""
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+        seen: list[object] = []
+        monkeypatch.setattr(
+            "pcons.cli._load_user_modules", lambda path: seen.append(path)
+        )
+        return seen
+
+    @pytest.mark.parametrize("argv", [["generate"], ["build"], ["info"], ["hello"], []])
+    def test_a_command_that_reaches_the_build_script_loads_them(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        for command in (cli_generate, cli_build, cli_info, cli_default):
+            _capture_command(monkeypatch, command)
+        seen = self._record(monkeypatch)
+        _invoke(*argv)
+        # A bare `pcons` reaches the catch-all through forward(), which calls
+        # the callback rather than the command, so this covers a path the
+        # merging invoke never sees.
+        assert seen == [None]
+
+    @pytest.mark.parametrize(
+        "argv", [["clean"], ["init"], ["cache", "list"], ["cache"], ["test", "--list"]]
+    )
+    def test_a_command_that_does_not_leaves_them_alone(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        _capture_test_runner(monkeypatch)
+        for command in (cli_clean, cli_init):
+            _capture_command(monkeypatch, command)
+        seen = self._record(monkeypatch)
+        _invoke(*argv)
+        assert seen == []
+
+    def test_the_search_path_reaches_the_loader(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _capture_command(monkeypatch, cli_generate)
+        seen = self._record(monkeypatch)
+        _invoke("--modules-path", "one", "generate")
+        assert seen == ["one"]
 
 
 class TestModulesSearchPath:

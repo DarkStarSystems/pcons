@@ -24,9 +24,11 @@ from pcons._cli_click import (
     PconsGroup,
     build_options,
     common_options,
+    configure_logging,
     directory_option,
     generate_options,
     jobs_option,
+    load_declared_modules,
     pass_pcons_context,
     watch_option,
 )
@@ -1413,11 +1415,16 @@ def cli(ctx: PconsContext, **declared_but_unused: object) -> None:
     # command at all gets it invoked from here, and forward() hands it the
     # values parsed here rather than restating them.
     if ctx.invoked_subcommand is None and not ctx.routed_to_default:
+        # forward() calls the callback, so the catch-all's own invoke does not
+        # run and what it sets up has to be set up here.
+        configure_logging(ctx)
+        load_declared_modules(cli_default, ctx)
         ctx.exit(ctx.forward(cli_default))
 
 
 @cli.command(
     "info",
+    loads_modules=True,
     short_help="Show build script info and available variables",
     help=(
         "Show build script info and available variables.\n\n"
@@ -1439,9 +1446,6 @@ def cli(ctx: PconsContext, **declared_but_unused: object) -> None:
 def cli_info(
     ctx: PconsContext,
     build_dir: Path,
-    verbose: bool,
-    debug: str | None,
-    modules_path: str | None,
     variant: str | None,
     generator: tuple[str, ...],
     reconfigure: bool,
@@ -1453,7 +1457,6 @@ def cli_info(
     """Show build script info and available variables."""
     # --fresh comes with the options every generating command declares, and
     # listing targets runs the script without persisting anything.
-    setup_logging(verbose, debug)
     script = Path(build_script) if build_script else None
 
     if not targets:
@@ -1467,7 +1470,6 @@ def cli_info(
         logger.error("No pcons-build.py found in current directory")
         ctx.exit(1)
 
-    _load_user_modules(modules_path)
     variables, _ = parse_variables(list(extra))
     ctx.exit(
         _info_targets(
@@ -1497,20 +1499,17 @@ def cli_info(
 def cli_init(
     ctx: PconsContext,
     build_dir: Path,
-    verbose: bool,
-    debug: str | None,
     force: bool,
     lang: str,
     **declared_but_unused: object,
 ) -> None:
     # No docstring, as in cli_clean.
-    # --modules-path does nothing here either: scaffolding runs no build script.
-    setup_logging(verbose, debug)
     ctx.exit(_init(build_dir, force=force, lang=lang))
 
 
 @cli.command(
     "generate",
+    loads_modules=True,
     short_help="Generate build files from pcons-build.py",
     help=(
         "Generate build files from pcons-build.py.\n\n"
@@ -1552,9 +1551,6 @@ def cli_init(
 def cli_generate(
     ctx: PconsContext,
     build_dir: Path,
-    verbose: bool,
-    debug: str | None,
-    modules_path: str | None,
     variant: str | None,
     generator: tuple[str, ...],
     reconfigure: bool,
@@ -1564,10 +1560,9 @@ def cli_generate(
     graph: str | None,
     mermaid: str | None,
     extra: tuple[str, ...],
+    **declared_but_unused: object,
 ) -> None:
     """Generate build files from pcons-build.py."""
-    setup_logging(verbose, debug)
-    _load_user_modules(modules_path)
     variables, _ = parse_variables(list(extra))
     code, _project = _generate(
         build_dir,
@@ -1586,6 +1581,7 @@ def cli_generate(
 
 @cli.command(
     "build",
+    loads_modules=True,
     short_help="Build targets (auto-generates if needed)",
     help=(
         "Build targets using the appropriate build tool. "
@@ -1605,8 +1601,6 @@ def cli_build(
     ctx: PconsContext,
     build_dir: Path,
     verbose: bool,
-    debug: str | None,
-    modules_path: str | None,
     variant: str | None,
     generator: tuple[str, ...],
     reconfigure: bool,
@@ -1616,14 +1610,13 @@ def cli_build(
     watch: bool,
     jobs: int | None,
     extra: tuple[str, ...],
+    **declared_but_unused: object,
 ) -> None:
     """Build targets, generating first if the build files are stale."""
-    setup_logging(verbose, debug)
     script = Path(build_script) if build_script else None
     variables, targets = parse_variables(list(extra))
 
     def regenerate() -> tuple[int, Project | None]:
-        _load_user_modules(modules_path)
         return _generate(
             build_dir,
             script=script,
@@ -1674,17 +1667,12 @@ def cli_build(
 def cli_clean(
     ctx: PconsContext,
     build_dir: Path,
-    verbose: bool,
-    debug: str | None,
     ninja: str | None,
     everything: bool,
     **declared_but_unused: object,
 ) -> None:
     # No docstring: click would print it as this command's description, which
     # `pcons clean --help` has never had. See the known issue.
-    # --modules-path is declared by common_options and does nothing here, since
-    # cleaning runs no build script.
-    setup_logging(verbose, debug)
     ctx.exit(_clean(build_dir, everything=everything, ninja=ninja))
 
 
@@ -1772,7 +1760,7 @@ def cli_test(ctx: PconsContext, argv: tuple[str, ...]) -> None:
     ctx.exit(test_main(forwarded + list(argv)))
 
 
-@cli.command("_default", cls=DefaultCommand, hidden=True)
+@cli.command("_default", cls=DefaultCommand, hidden=True, loads_modules=True)
 @directory_option
 @common_options
 @generate_options
@@ -1785,8 +1773,6 @@ def cli_default(
     ctx: PconsContext,
     build_dir: Path,
     verbose: bool,
-    debug: str | None,
-    modules_path: str | None,
     variant: str | None,
     generator: tuple[str, ...],
     reconfigure: bool,
@@ -1796,10 +1782,9 @@ def cli_default(
     watch: bool,
     jobs: int | None,
     extra: tuple[str, ...],
+    **declared_but_unused: object,
 ) -> None:
     """The no-subcommand path: generate, then build."""
-    setup_logging(verbose, debug)
-    _load_user_modules(modules_path)
     script = Path(build_script) if build_script else None
     variables, targets = parse_variables(list(extra))
 
