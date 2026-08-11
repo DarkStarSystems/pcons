@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pcons.packages.fetch import cli as fetch_cli
 from pcons.packages.fetch.cli import (
     download_source,
     fetch_package,
@@ -342,6 +343,167 @@ build = "autotools"
         )
         # Should succeed with warning
         assert result.returncode == 0
+
+
+def _record_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Replace the three cmd_* handlers with recorders, and return the log.
+
+    Each entry is the handler name and what it was asked to do, flattened to a
+    dict so the assertions read the same whether the handler is called with a
+    namespace or with keywords.
+    """
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def recorder(name: str) -> Any:
+        def record(*args: Any, **kwargs: Any) -> int:
+            fields = dict(vars(args[0])) if args else dict(kwargs)
+            fields.pop("func", None)
+            fields.pop("command", None)
+            calls.append((name, fields))
+            return 0
+
+        return record
+
+    for name in ("cmd_fetch", "cmd_list", "cmd_clean"):
+        monkeypatch.setattr(fetch_cli, name, recorder(name))
+    return calls
+
+
+def _run(monkeypatch: pytest.MonkeyPatch, *argv: str) -> int:
+    """Drive the entry point over argv, without spawning a subprocess."""
+    monkeypatch.setattr(sys, "argv", ["pcons-fetch", *argv])
+    return fetch_cli.main()
+
+
+class TestFetchCliDispatch:
+    """What each argv spelling asks the handlers to do.
+
+    The subprocess tests above see only an exit code. These see the arguments,
+    which is what pins the defaults.
+    """
+
+    def test_no_args_with_deps_toml_runs_fetch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bare `pcons-fetch` fetches deps.toml when there is one."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "deps.toml").write_text("[packages]\n")
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch) == 0
+
+        assert calls == [
+            (
+                "cmd_fetch",
+                {
+                    "deps_file": "deps.toml",
+                    "deps_dir": ".deps",
+                    "output_dir": ".",
+                    "verbose": False,
+                    "debug": False,
+                },
+            )
+        ]
+
+    def test_no_args_without_deps_toml_prints_help(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """With nothing to fetch, bare `pcons-fetch` is a help request."""
+        monkeypatch.chdir(tmp_path)
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch) == 0
+
+        assert calls == []
+        assert "usage" in capsys.readouterr().out.lower()
+
+    def test_fetch_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`fetch` with no positional still means deps.toml."""
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch, "fetch") == 0
+
+        assert calls[0][1]["deps_file"] == "deps.toml"
+        assert calls[0][1]["deps_dir"] == ".deps"
+        assert calls[0][1]["output_dir"] == "."
+
+    def test_fetch_short_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """-d and -o are the short forms of --deps-dir and --output-dir."""
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch, "fetch", "other.toml", "-d", "D", "-o", "O") == 0
+
+        assert calls == [
+            (
+                "cmd_fetch",
+                {
+                    "deps_file": "other.toml",
+                    "deps_dir": "D",
+                    "output_dir": "O",
+                    "verbose": False,
+                    "debug": False,
+                },
+            )
+        ]
+
+    def test_list_takes_a_deps_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch, "list", "other.toml") == 0
+
+        assert calls == [
+            ("cmd_list", {"deps_file": "other.toml", "verbose": False, "debug": False})
+        ]
+
+    def test_clean_all_short_form(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch, "clean", "-a", "-d", "D") == 0
+
+        assert calls == [
+            (
+                "cmd_clean",
+                {"deps_dir": "D", "all": True, "verbose": False, "debug": False},
+            )
+        ]
+
+    def test_verbose_after_the_subcommand(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch, "fetch", "-v") == 0
+
+        assert calls[0][1]["verbose"] is True
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="argparse applies the subparser's default over it; fixed by the click conversion",
+    )
+    def test_verbose_before_the_subcommand(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch, "-v", "fetch") == 0
+
+        assert calls[0][1]["verbose"] is True
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="argparse applies the subparser's default over it; fixed by the click conversion",
+    )
+    def test_debug_before_the_subcommand(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run(monkeypatch, "--debug", "list") == 0
+
+        assert calls[0][1]["debug"] is True
 
 
 class TestDownloadSource:
