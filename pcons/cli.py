@@ -1786,6 +1786,13 @@ def cli_default(
 ) -> None:
     """The no-subcommand path: generate, then build."""
     script = Path(build_script) if build_script else None
+
+    # Don't try to generate without a pcons-build.py.
+    # (`pcons build` still drives build files without a script; weird corner case but OK)
+    if _resolve_build_script(script) is None:
+        logger.error("No pcons-build.py found in current directory")
+        ctx.exit(1)
+
     variables, targets = parse_variables(list(extra))
 
     def regenerate() -> tuple[int, Project | None]:
@@ -1810,11 +1817,6 @@ def cli_default(
             ninja=ninja,
             variant=variant,
         )
-
-    # A non-KEY=value argument with no build script to run is a target of an
-    # existing build.ninja, not something to generate from.
-    if targets and not _resolve_build_script(script):
-        ctx.exit(build_once(build_dir)[0])
 
     # _build generates on its own when the build files are stale, which is the
     # right entry point for a watch: it regenerates only when needed.

@@ -40,7 +40,9 @@ Generate build files without building.
 ### `pcons build`
 
 Build with the tool that matches the generated files (ninja, make or
-xcodebuild), regenerating them first if they're stale.
+xcodebuild), regenerating them first if they're stale. Unlike a bare `pcons`,
+this needs no `pcons-build.py`: with nothing to regenerate from, it builds
+whatever files are already there. Unusual corner case but OK.
 
 | Option | |
 |---|---|

@@ -1138,21 +1138,18 @@ class TestCLIArgumentParsing:
         assert "No pcons-build.py found" in result.stderr
         assert "invalid choice" not in result.stderr
 
-    def test_target_without_a_build_script_goes_straight_to_the_build(
+    def test_a_target_reaches_the_build_as_a_target(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A named target with nothing to generate from belongs to an existing
-        build.ninja, so it is built rather than generated.
-
-        Asserting that the generate never ran is the point: the target arrives
-        as `extra`, and reading it as something to generate from would run a
-        script that is not there.
+        """A target arrives as `extra`, the same argument KEY=value arrives in,
+        and has to reach the build tool as a target rather than be read as a
+        variable or as something to generate from.
         """
+        (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
         monkeypatch.chdir(tmp_path)
-        generated = _capture_args(monkeypatch, "_generate", result=(0, None))
+        _capture_args(monkeypatch, "_generate", result=(0, None))
         built = _capture_args(monkeypatch, "_build", result=(0, tmp_path))
         assert _invoke("hello").exit_code == 0
-        assert not generated
         assert built[0]["targets"] == ["hello"]
 
     def test_a_bare_dash_is_not_a_target(self) -> None:
@@ -3205,6 +3202,60 @@ class TestWatchReachesTheWatcher:
         _capture_args(monkeypatch, "_build", result=(0, tmp_path))
         assert _invoke("build").exit_code == 0
         assert seen == []
+
+
+class TestTheNoCommandPathNeedsABuildScript:
+    """A bare `pcons` generates, so it says when there is nothing to generate.
+
+    `pcons FOO=bar` has always reported the missing script, because the
+    variable leaves no target behind; a target name took a different path and
+    reached the build tool, which reported missing build files instead. Same
+    state, two stories, and the second one names the consequence rather than
+    the cause.
+    """
+
+    def test_a_target_names_the_missing_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        seen = _capture_args(monkeypatch, "_build", result=(0, tmp_path))
+        result = _invoke("hello")
+        assert result.exit_code == 1
+        assert "No pcons-build.py found" in result.stderr
+        assert seen == []
+
+    def test_watch_is_refused_rather_than_dropped(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The flag was silently ignored here, so the build ran once and the
+        watch the user asked for never started."""
+        monkeypatch.chdir(tmp_path)
+        watched = _capture_args(monkeypatch, "_watch")
+        result = _invoke("--watch", "hello")
+        assert result.exit_code == 1
+        assert "No pcons-build.py found" in result.stderr
+        assert watched == []
+
+    def test_a_named_script_that_is_missing_is_named(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """-b gets past the guard, so the report is of the file the user
+        actually asked for rather than of pcons-build.py."""
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("-b", "nope.py", "hello")
+        assert result.exit_code == 1
+        assert "Build script not found: nope.py" in result.stderr
+
+    def test_build_still_drives_existing_files_without_a_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The guard is on the generating path only. `pcons build` runs the
+        build tool over whatever is already there, script or no script."""
+        monkeypatch.chdir(tmp_path)
+        seen = _capture_args(monkeypatch, "_run_build_tool")
+        assert _invoke("build", "hello").exit_code == 0
+        assert len(seen) == 1
+        assert seen[0]["targets"] == ["hello"]
 
 
 class TestValuesReachTheWork:

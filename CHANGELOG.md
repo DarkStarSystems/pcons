@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The CLI is driven by now [click](https://click.palletsprojects.com/).** Improved help output
+  and error messages now: commands get their own section, each option
+  prints its metavar once, and `-C/--directory` is listed rather than mentioned only
+  in prose. `pcons -- generate` runs `generate` instead of failing, and abbreviated
+  long options (`pcons --verbo`) are no longer silently accepted. click is now a
+  runtime dependency.
+- **`pcons cache` is a group of `list`, `show`, `clear` and `path`.** `pcons cache
+  --help` describes each one; bare `pcons cache` still lists.
+
+### Fixed
+
+- **`--graph` and `--mermaid` write the graph.** : Regression fixed.
+- **`pcons generate --mermaid > deps.mmd` produces a file Mermaid accepts.** The
+  `# Mermaid dependency graph` label above it was a DOT comment, not a Mermaid one.
+  Dropped for both formats; stdout now carries the diagram and nothing else.
+- **A bare `pcons <target>` with no `pcons-build.py` says so**, instead of reporting
+  the missing build files that followed from it. `pcons build <target>` is unchanged
+  and still drives whatever build files are there.
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20)
+
 ## [0.26.0] - 2026-08-08
 
 This release is mostly about the edit-build loop: `pcons --watch` rebuilds as you
