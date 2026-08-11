@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import logging
 import os
@@ -11,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,16 +19,17 @@ from click.core import ParameterSource
 
 from pcons import __version__
 from pcons._cli_click import (
-    ROUTED_TO_DEFAULT,
     DefaultCommand,
-    MergingCommand,
+    PconsContext,
     PconsGroup,
-    _namespace,
     build_options,
     common_options,
+    configure_logging,
     directory_option,
     generate_options,
     jobs_option,
+    load_declared_modules,
+    pass_pcons_context,
     watch_option,
 )
 from pcons.core.errors import PconsError
@@ -107,7 +108,7 @@ def _needs_generation(build_dir: Path, build_script: str | None = None) -> bool:
     if build_script:
         script = Path(build_script)
         if not script.exists():
-            return True  # Script not found; let cmd_generate handle the error
+            return True  # Script not found; let _generate report it
     else:
         script = find_script("pcons-build.py")
 
@@ -730,45 +731,35 @@ def run_make(
         return 1
 
 
-def cmd_default(args: argparse.Namespace) -> int:
-    """Default command (bare 'pcons'): generate, then build."""
-    load_user_modules(args)
+def _generate(
+    build_dir: Path,
+    *,
+    script: Path | None = None,
+    variables: dict[str, str] | None = None,
+    variant: str | None = None,
+    generator: list[str] | None = None,
+    reconfigure: bool = False,
+    fresh: bool = False,
+    no_cache: bool = False,
+    graph: str | None = None,
+    mermaid: str | None = None,
+) -> tuple[int, Project | None]:
+    """Run the build script, which writes the build files into *build_dir*.
 
-    # cmd_build generates on its own when the build files are stale, which is
-    # the right entry point for a watch: it regenerates only when needed.
-    if getattr(args, "watch", False):
-        return cmd_build(args)
+    Logging and user modules are the caller's business: this runs the script
+    and nothing else.
 
-    result, project = cmd_generate(args)
-    if result != 0:
-        return result
-
-    # Use the actual build directory from the Project
-    if project:
-        args.build_dir = str(project.build_dir)
-
-    return cmd_build(args)
-
-
-def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
-    """Run the generate phase: find and run pcons-build.py, which
-    generates build files in the build directory.
+    Args:
+        script: The build script, or None to look for pcons-build.py here.
+        graph: Where to write a DOT dependency graph, "-" for stdout.
+        mermaid: The same, in Mermaid.
 
     Returns:
-        Tuple of (exit_code, first registered Project or None).
+        Tuple of (exit code, first registered Project or None).
     """
-    setup_logging(args.verbose, args.debug)
-
-    build_dir = Path(args.build_dir)
-    script_path = getattr(args, "build_script", None)
-
-    variables, _ = parse_variables(getattr(args, "extra", []))
-
-    script: Path
-    if script_path:
-        script = Path(script_path)
+    if script is not None:
         if not script.exists():
-            logger.error("Build script not found: %s", script_path)
+            logger.error("Build script not found: %s", script)
             return 1, None
     else:
         found_script = find_script("pcons-build.py")
@@ -780,12 +771,6 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
 
     build_dir.mkdir(parents=True, exist_ok=True)
 
-    variant = getattr(args, "variant", None)
-    generator = getattr(args, "generator", None)
-    reconfigure = getattr(args, "reconfigure", False)
-    graph = getattr(args, "graph", None)
-    mermaid = getattr(args, "mermaid", None)
-
     extra_env: dict[str, str] = {}
     if graph:
         extra_env["PCONS_GRAPH"] = graph
@@ -795,13 +780,13 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
     exit_code, _projects = run_script(
         script,
         build_dir,
-        variables=variables,
+        variables=variables or {},
         variant=variant,
         generator=generator,
         reconfigure=reconfigure,
         extra_env=extra_env if extra_env else None,
-        persist=not getattr(args, "no_cache", False),
-        fresh=getattr(args, "fresh", False),
+        persist=not no_cache,
+        fresh=fresh,
     )
 
     if exit_code != 0:
@@ -810,34 +795,26 @@ def cmd_generate(args: argparse.Namespace) -> tuple[int, Project | None]:
     return 0, _projects[0] if _projects else None
 
 
-def _cmd_generate_wrapper(args: argparse.Namespace) -> int:
-    """'generate' subcommand handler: cmd_generate, exit code only."""
-    load_user_modules(args)
-    exit_code, _ = cmd_generate(args)
-    return exit_code
+def _watch(
+    *,
+    build: Callable[[], tuple[int, Path]],
+    script: Path | None,
+    targets: list[str] | None = None,
+    ninja: str | None = None,
+) -> int:
+    """Run *build*, then run it again whenever a watched file changes.
 
+    Each iteration is just another build: ninja's regen edge re-runs pcons when
+    the build description itself changed, so editing the build script needs no
+    special handling here.
 
-def cmd_build(args: argparse.Namespace) -> int:
-    """Build targets with the build tool matching the generated files
-    (ninja, make, or xcodebuild), regenerating them first if stale.
-
-    With --watch, build once and then keep rebuilding as sources change.
-    """
-    if getattr(args, "watch", False):
-        return _watch_build(args)
-    return _build_targets(args)
-
-
-def _watch_build(args: argparse.Namespace) -> int:
-    """Build, then rebuild whenever a watched file changes.
-
-    Each iteration is just another build: ninja's regen edge re-runs pcons
-    when the build description itself changed, so editing the build script
-    needs no special handling here.
+    Args:
+        build: Runs one build and reports where it ran. Which directory that
+            is settles on the first call, since the script may pick its own.
+        script: The build script, whose directory is the tree to watch.
     """
     from pcons import watch
 
-    setup_logging(args.verbose, args.debug)
     try:
         watch.ensure_available()
     except PconsError as e:
@@ -849,35 +826,32 @@ def _watch_build(args: argparse.Namespace) -> int:
     # retriggers the build that wrote it.
     outputs: set[Path] = set()
     manifest_mtime = 0.0
-    runner = getattr(args, "ninja", None)
+    settled_dir = Path.cwd()
 
-    def build() -> int:
-        nonlocal manifest_mtime
-        code = _build_targets(args)
-        build_dir = Path(args.build_dir).absolute()
+    def build_once() -> int:
+        nonlocal manifest_mtime, settled_dir
+        code, where = build()
+        settled_dir = build_dir = where.absolute()
 
         manifest = build_dir / "build.ninja"
         mtime = manifest.stat().st_mtime if manifest.exists() else 0.0
         if mtime != manifest_mtime:
             manifest_mtime = mtime
             outputs.clear()
-            outputs.update(ninja_outputs(build_dir, runner))
+            outputs.update(ninja_outputs(build_dir, ninja))
 
         if code == 0:
-            _, targets = parse_variables(getattr(args, "extra", []))
-            _warn_unconverged(unconverged_reasons(build_dir, targets, runner))
+            _warn_unconverged(unconverged_reasons(build_dir, targets, ninja))
         return code
 
     try:
-        watch.run_build(build)
+        watch.run_build(build_once)
     except KeyboardInterrupt:
         # Interrupted before the watch (and its handler) is up.
         return 0
 
-    # Read the build directory only now: the first build settles it, since
-    # the build script may choose a directory other than the requested one.
-    build_dir = Path(args.build_dir).absolute()
-    script = _find_build_script(args)
+    # Read the build directory only now: the first build settled it.
+    build_dir = settled_dir
     root = (script.parent if script else Path.cwd()).absolute()
 
     # An in-source build (-B .) has nothing to exclude by directory without
@@ -885,7 +859,7 @@ def _watch_build(args: argparse.Namespace) -> int:
     excluded_dirs = [build_dir] if build_dir != root else []
 
     return watch.watch_and_build(
-        build,
+        build_once,
         [root],
         excluded_dirs=excluded_dirs,
         excluded_paths=outputs,
@@ -907,50 +881,37 @@ def _warn_unconverged(reasons: list[str], limit: int = 5) -> None:
         logger.warning("    ... and %d more", len(reasons) - limit)
 
 
-def _find_build_script(args: argparse.Namespace) -> Path | None:
-    """Locate the build script named by --build-script, or in the cwd."""
-    script_arg = getattr(args, "build_script", None)
-    if script_arg:
-        return Path(script_arg)
-    return find_script("pcons-build.py")
+def _generators(chosen: tuple[str, ...]) -> list[str] | None:
+    """click's tuple as the list downstream tests for truthiness.
+
+    An empty selection has to become None, not [], because the code below asks
+    whether a generator was named rather than how many were.
+    """
+    return list(chosen) or None
 
 
-def _build_targets(args: argparse.Namespace) -> int:
-    """Run one build, regenerating build files first if they are stale."""
-    setup_logging(args.verbose, args.debug)
+def _resolve_build_script(script: Path | None) -> Path | None:
+    """The build script named on the command line, or the one in the cwd."""
+    return script if script is not None else find_script("pcons-build.py")
 
-    build_dir = Path(args.build_dir)
 
-    # Auto-generate if build files are missing or stale
-    build_script = getattr(args, "build_script", None)
-    if _needs_generation(build_dir, build_script=build_script):
-        script = _find_build_script(args)
-        if script is not None and script.exists():
-            logger.info("Build files missing or out of date, regenerating...")
-            load_user_modules(args)
-            result, project = cmd_generate(args)
-            if result != 0:
-                return result
-            if project:
-                args.build_dir = str(project.build_dir)
-                build_dir = Path(args.build_dir)
-
-    _, targets_list = parse_variables(getattr(args, "extra", []))
-    targets = targets_list or None
-
-    jobs = getattr(args, "jobs", None)
-    verbose = args.verbose
-    variant = getattr(args, "variant", None)
-    ninja_runner = getattr(args, "ninja", None)
-
-    # Detect which generator was used and run the matching build tool
+def _run_build_tool(
+    build_dir: Path,
+    *,
+    targets: list[str] | None = None,
+    jobs: int | None = None,
+    verbose: bool = False,
+    ninja: str | None = None,
+    variant: str | None = None,
+) -> int:
+    """Run whichever build tool matches the files already in *build_dir*."""
     ninja_file = build_dir / "build.ninja"
     makefile = build_dir / "Makefile"
     xcodeproj_files = list(build_dir.glob("*.xcodeproj"))
 
     if ninja_file.exists():
         return run_ninja(
-            build_dir, targets=targets, jobs=jobs, verbose=verbose, runner=ninja_runner
+            build_dir, targets=targets, jobs=jobs, verbose=verbose, runner=ninja
         )
     elif makefile.exists():
         return run_make(build_dir, targets=targets, jobs=jobs, verbose=verbose)
@@ -975,14 +936,50 @@ def _build_targets(args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_clean(args: argparse.Namespace) -> int:
-    """Clean build artifacts: 'ninja -t clean', or remove the whole
-    build directory with --all."""
-    setup_logging(args.verbose, args.debug)
+def _build(
+    build_dir: Path,
+    *,
+    regenerate: Callable[[], tuple[int, Project | None]],
+    script: Path | None = None,
+    targets: list[str] | None = None,
+    jobs: int | None = None,
+    verbose: bool = False,
+    ninja: str | None = None,
+    variant: str | None = None,
+) -> tuple[int, Path]:
+    """Run one build, regenerating first if the build files are stale.
 
-    build_dir = Path(args.build_dir)
+    The regeneration is passed in rather than described by more parameters:
+    what it needs is the whole of `_generate`'s signature, and the caller
+    already holds those values.
 
-    if args.all:
+    Returns:
+        Tuple of (exit code, the directory the build ran in). Not always the
+        one asked for: a regeneration may run a script that picks its own.
+    """
+    if _needs_generation(build_dir, build_script=str(script) if script else None):
+        found = _resolve_build_script(script)
+        if found is not None and found.exists():
+            logger.info("Build files missing or out of date, regenerating...")
+            code, project = regenerate()
+            if code != 0:
+                return code, build_dir
+            if project:
+                build_dir = project.build_dir
+
+    return _run_build_tool(
+        build_dir,
+        targets=targets,
+        jobs=jobs,
+        verbose=verbose,
+        ninja=ninja,
+        variant=variant,
+    ), build_dir
+
+
+def _clean(build_dir: Path, *, everything: bool, ninja: str | None) -> int:
+    """Clean build artifacts: 'ninja -t clean', or the whole directory."""
+    if everything:
         if build_dir.exists():
             logger.info("Removing build directory: %s", build_dir)
             shutil.rmtree(build_dir)
@@ -996,8 +993,7 @@ def cmd_clean(args: argparse.Namespace) -> int:
         logger.info("No build.ninja found, nothing to clean")
         return 0
 
-    ninja_runner = getattr(args, "ninja", None)
-    ninja_cmd = _find_ninja(ninja_runner)
+    ninja_cmd = _find_ninja(ninja)
     if ninja_cmd is None:
         logger.error("ninja not found in PATH")
         return 1
@@ -1018,31 +1014,21 @@ def cmd_clean(args: argparse.Namespace) -> int:
         return 1
 
 
-def cmd_cache(args: argparse.Namespace) -> int:
-    """Inspect or clear the per-build-dir cache (pcons_cache.json).
-
-    Reads the cache file directly; never runs the build script. The build
-    directory comes from -B / $PCONS_BUILD_DIR (default 'build').
-    """
+def _open_cache(build_dir: Path) -> BuildCache:
+    """The build directory's cache. Reads the file; never runs the script."""
     from pcons.core.cache import BuildCache
 
-    cache = BuildCache(Path(args.build_dir))
-    action = getattr(args, "cache_action", None) or "list"
+    return BuildCache(build_dir)
 
-    if action == "path":
-        print(cache.path)
-        return 0
 
-    if cache.path is None or not cache.path.exists():
-        print(f"No cache at {cache.path}")
-        return 0
+def _cache_path(build_dir: Path) -> int:
+    """Where the cache lives, whether or not it exists yet."""
+    print(_open_cache(build_dir).path)
+    return 0
 
-    if action == "clear":
-        cache.clear()
-        print(f"Cleared {cache.path}")
-        return 0
 
-    # list / show: print the user-facing settings, one per line.
+def _print_persisted_settings(cache: BuildCache) -> None:
+    """The user-facing settings, one per line."""
     cached_vars = cache.get("vars")
     if isinstance(cached_vars, dict):
         for key in sorted(cached_vars):
@@ -1054,35 +1040,49 @@ def cmd_cache(args: argparse.Namespace) -> int:
     if isinstance(generator, str):
         print(f"generator={generator}")
 
-    if action == "show":
-        source_dir = cache.get("source_dir")
-        if isinstance(source_dir, str):
-            print(f"# source_dir: {source_dir}")
-        print(f"# cache file: {cache.path}")
+
+def _cache_list(build_dir: Path) -> int:
+    cache = _open_cache(build_dir)
+    if cache.path is None or not cache.path.exists():
+        print(f"No cache at {cache.path}")
+        return 0
+    _print_persisted_settings(cache)
     return 0
 
 
-def cmd_info(args: argparse.Namespace) -> int:
-    """Show the build script's docstring; with --targets, run the script
-    and list all defined targets grouped by type."""
-    setup_logging(args.verbose, args.debug)
+def _cache_show(build_dir: Path) -> int:
+    cache = _open_cache(build_dir)
+    if cache.path is None or not cache.path.exists():
+        print(f"No cache at {cache.path}")
+        return 0
+    _print_persisted_settings(cache)
+    source_dir = cache.get("source_dir")
+    if isinstance(source_dir, str):
+        print(f"# source_dir: {source_dir}")
+    print(f"# cache file: {cache.path}")
+    return 0
 
-    script_path = getattr(args, "build_script", None)
 
-    if script_path:
-        script = Path(script_path)
-        if not script.exists():
-            logger.error("Build script not found: %s", script_path)
-            return 1
-    else:
-        found_script = find_script("pcons-build.py")
-        if found_script is None:
-            logger.error("No pcons-build.py found in current directory")
-            return 1
-        script = found_script
+def _cache_clear(build_dir: Path) -> int:
+    cache = _open_cache(build_dir)
+    if cache.path is None or not cache.path.exists():
+        print(f"No cache at {cache.path}")
+        return 0
+    cache.clear()
+    print(f"Cleared {cache.path}")
+    return 0
 
-    if getattr(args, "targets", False):
-        return _info_targets(args, script)
+
+def _info(script: Path | None) -> int:
+    """Show the build script's docstring, without running it."""
+    resolved = _resolve_build_script(script)
+    if script is not None and not script.exists():
+        logger.error("Build script not found: %s", script)
+        return 1
+    if resolved is None:
+        logger.error("No pcons-build.py found in current directory")
+        return 1
+    script = resolved
 
     import ast
 
@@ -1115,24 +1115,24 @@ def cmd_info(args: argparse.Namespace) -> int:
     return 0
 
 
-def _info_targets(args: argparse.Namespace, script: Path) -> int:
-    """List all targets defined by the build script."""
+def _info_targets(
+    build_dir: Path,
+    script: Path,
+    *,
+    variables: dict[str, str] | None = None,
+    variant: str | None = None,
+    generator: list[str] | None = None,
+    reconfigure: bool = False,
+) -> int:
+    """Run the build script and list every target it defines."""
     from pcons.core.node import AliasNode, FileNode
 
-    load_user_modules(args)
-
-    build_dir = Path(args.build_dir)
     build_dir.mkdir(parents=True, exist_ok=True)
-
-    variables, _ = parse_variables(getattr(args, "extra", []))
-    variant = getattr(args, "variant", None)
-    generator = getattr(args, "generator", None)
-    reconfigure = getattr(args, "reconfigure", False)
 
     exit_code, projects = run_script(
         script,
         build_dir,
-        variables=variables,
+        variables=variables or {},
         variant=variant,
         generator=generator,
         reconfigure=reconfigure,
@@ -1258,7 +1258,7 @@ def _find_c_sources(root: Path, build_dir: str) -> list[Path]:
     return sorted(p.relative_to(root) for p in sources)
 
 
-def cmd_init(args: argparse.Namespace) -> int:
+def _init(build_dir: Path, *, force: bool, lang: str) -> int:
     """Initialize a new pcons project.
 
     Writes a pcons-build.py with a program target for any C/C++ sources
@@ -1267,22 +1267,21 @@ def cmd_init(args: argparse.Namespace) -> int:
     """
     import re
 
-    setup_logging(args.verbose, args.debug)
-
     root = Path.cwd()
     build_py = root / "pcons-build.py"
 
-    if build_py.exists() and not args.force:
+    if build_py.exists() and not force:
         logger.error("pcons-build.py already exists (use --force to overwrite)")
         return 1
 
     name = re.sub(r"[^A-Za-z0-9_-]+", "_", root.name).strip("_") or "myproject"
 
-    sources = _find_c_sources(root, args.build_dir)
+    # str: _find_c_sources compares it against single path components.
+    sources = _find_c_sources(root, str(build_dir))
     scaffolded = None
     if not sources:
-        scaffolded = Path("src") / ("main.cpp" if args.lang == "cpp" else "main.c")
-        hello = _HELLO_CPP if args.lang == "cpp" else _HELLO_C
+        scaffolded = Path("src") / ("main.cpp" if lang == "cpp" else "main.c")
+        hello = _HELLO_CPP if lang == "cpp" else _HELLO_C
         (root / "src").mkdir(exist_ok=True)
         (root / scaffolded).write_text(hello.replace("@NAME@", name))
         logger.info("Created %s", scaffolded)
@@ -1343,7 +1342,7 @@ env.apply_preset("warnings")
         print(
             f"Created pcons-build.py with a program target for {n} source file{'s' if n > 1 else ''}"
         )
-    exe = Path(args.build_dir) / (name + (".exe" if os.name == "nt" else ""))
+    exe = build_dir / (name + (".exe" if os.name == "nt" else ""))
     run_cmd = str(exe) if os.name == "nt" else f"./{exe.as_posix()}"
     print()
     print("Next steps:")
@@ -1357,14 +1356,15 @@ env.apply_preset("warnings")
     return 0
 
 
-def load_user_modules(args: argparse.Namespace) -> None:
-    """Load user modules from search paths."""
+def _load_user_modules(modules_path: str | None) -> None:
+    """Load user add-on modules, from *modules_path* as well as the defaults."""
     from pcons import modules
 
     extra_paths: list[Path | str] | None = None
-    modules_path = getattr(args, "modules_path", None)
     if modules_path:
-        extra_paths = modules_path.split(os.pathsep)
+        # list() because load_modules declares list[Path | str], and list is
+        # invariant, so the list[str] that split() returns is not one.
+        extra_paths = list(modules_path.split(os.pathsep))
 
     modules.load_modules(extra_paths)
 
@@ -1391,18 +1391,6 @@ Docs:    https://pcons.readthedocs.io/
 """
 
 
-def _run_default(args: argparse.Namespace) -> int:
-    """The no-subcommand path: build the named targets, or generate and build.
-
-    A non-KEY=value argument with no build script to run is a target of an
-    existing build.ninja, not something to generate from.
-    """
-    _variables, remaining = parse_variables(args.extra)
-    if remaining and not find_script("pcons-build.py"):
-        return cmd_build(args)
-    return cmd_default(args)
-
-
 @click.group(
     cls=PconsGroup,
     invoke_without_command=True,
@@ -1417,18 +1405,26 @@ def _run_default(args: argparse.Namespace) -> int:
 @build_options
 @watch_option
 @jobs_option
-@click.pass_context
-def cli(ctx: click.Context, **kw: object) -> None:
+@pass_pcons_context
+def cli(ctx: PconsContext, **declared_but_unused: object) -> None:
+    # The group declares these so they can be spelled before a command name;
+    # each command reads them off this context. The group itself uses none.
+    #
     # A command name that resolved to nothing has already been routed to the
     # catch-all command, which is about to run. Only a command line naming no
-    # command at all gets it invoked from here.
-    if ctx.invoked_subcommand is None and not ctx.meta.get(ROUTED_TO_DEFAULT):
-        ctx.exit(_run_default(_namespace(ctx, None, **kw)))
+    # command at all gets it invoked from here, and forward() hands it the
+    # values parsed here rather than restating them.
+    if ctx.invoked_subcommand is None and not ctx.routed_to_default:
+        # forward() calls the callback, so the catch-all's own invoke does not
+        # run and what it sets up has to be set up here.
+        configure_logging(ctx)
+        load_declared_modules(cli_default, ctx)
+        ctx.exit(ctx.forward(cli_default))
 
 
 @cli.command(
     "info",
-    cls=MergingCommand,
+    loads_modules=True,
     short_help="Show build script info and available variables",
     help=(
         "Show build script info and available variables.\n\n"
@@ -1446,12 +1442,48 @@ def cli(ctx: click.Context, **kw: object) -> None:
     help="List all build targets (runs the build script)",
 )
 @click.argument("extra", nargs=-1)
-@click.pass_context
-def cli_info(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_info(_namespace(ctx, "info", **kw)))
+@pass_pcons_context
+def cli_info(
+    ctx: PconsContext,
+    build_dir: Path,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    build_script: str | None,
+    targets: bool,
+    extra: tuple[str, ...],
+    **declared_but_unused: object,
+) -> None:
+    """Show build script info and available variables."""
+    # --fresh comes with the options every generating command declares, and
+    # listing targets runs the script without persisting anything.
+    script = Path(build_script) if build_script else None
+
+    if not targets:
+        ctx.exit(_info(script))
+
+    resolved = _resolve_build_script(script)
+    if script is not None and not script.exists():
+        logger.error("Build script not found: %s", script)
+        ctx.exit(1)
+    if resolved is None:
+        logger.error("No pcons-build.py found in current directory")
+        ctx.exit(1)
+
+    variables, _ = parse_variables(list(extra))
+    ctx.exit(
+        _info_targets(
+            build_dir,
+            resolved,
+            variables=variables,
+            variant=variant,
+            generator=list(generator) or None,
+            reconfigure=reconfigure,
+        )
+    )
 
 
-@cli.command("init", cls=MergingCommand, short_help="Initialize a new pcons project")
+@cli.command("init", short_help="Initialize a new pcons project")
 @directory_option
 @common_options
 @click.option(
@@ -1463,14 +1495,21 @@ def cli_info(ctx: click.Context, **kw: object) -> None:
     default="cpp",
     help="Language for the starter program when no sources are found (default: cpp)",
 )
-@click.pass_context
-def cli_init(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_init(_namespace(ctx, "init", **kw)))
+@pass_pcons_context
+def cli_init(
+    ctx: PconsContext,
+    build_dir: Path,
+    force: bool,
+    lang: str,
+    **declared_but_unused: object,
+) -> None:
+    # No docstring, as in cli_clean.
+    ctx.exit(_init(build_dir, force=force, lang=lang))
 
 
 @cli.command(
     "generate",
-    cls=MergingCommand,
+    loads_modules=True,
     short_help="Generate build files from pcons-build.py",
     help=(
         "Generate build files from pcons-build.py.\n\n"
@@ -1508,14 +1547,41 @@ def cli_init(ctx: click.Context, **kw: object) -> None:
     help="Output dependency graph in Mermaid format (default: stdout)",
 )
 @click.argument("extra", nargs=-1)
-@click.pass_context
-def cli_generate(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(_cmd_generate_wrapper(_namespace(ctx, "generate", **kw)))
+@pass_pcons_context
+def cli_generate(
+    ctx: PconsContext,
+    build_dir: Path,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    fresh: bool,
+    build_script: str | None,
+    no_cache: bool,
+    graph: str | None,
+    mermaid: str | None,
+    extra: tuple[str, ...],
+    **declared_but_unused: object,
+) -> None:
+    """Generate build files from pcons-build.py."""
+    variables, _ = parse_variables(list(extra))
+    code, _project = _generate(
+        build_dir,
+        script=Path(build_script) if build_script else None,
+        variables=variables,
+        variant=variant,
+        generator=_generators(generator),
+        reconfigure=reconfigure,
+        fresh=fresh,
+        no_cache=no_cache,
+        graph=graph,
+        mermaid=mermaid,
+    )
+    ctx.exit(code)
 
 
 @cli.command(
     "build",
-    cls=MergingCommand,
+    loads_modules=True,
     short_help="Build targets (auto-generates if needed)",
     help=(
         "Build targets using the appropriate build tool. "
@@ -1530,37 +1596,139 @@ def cli_generate(ctx: click.Context, **kw: object) -> None:
 @watch_option
 @jobs_option
 @click.argument("extra", nargs=-1)
-@click.pass_context
-def cli_build(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_build(_namespace(ctx, "build", **kw)))
+@pass_pcons_context
+def cli_build(
+    ctx: PconsContext,
+    build_dir: Path,
+    verbose: bool,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    fresh: bool,
+    build_script: str | None,
+    ninja: str | None,
+    watch: bool,
+    jobs: int | None,
+    extra: tuple[str, ...],
+    **declared_but_unused: object,
+) -> None:
+    """Build targets, generating first if the build files are stale."""
+    script = Path(build_script) if build_script else None
+    variables, targets = parse_variables(list(extra))
+
+    def regenerate() -> tuple[int, Project | None]:
+        return _generate(
+            build_dir,
+            script=script,
+            variables=variables,
+            variant=variant,
+            generator=_generators(generator),
+            reconfigure=reconfigure,
+            fresh=fresh,
+        )
+
+    def build_once() -> tuple[int, Path]:
+        return _build(
+            build_dir,
+            regenerate=regenerate,
+            script=script,
+            targets=targets or None,
+            jobs=jobs,
+            verbose=verbose,
+            ninja=ninja,
+            variant=variant,
+        )
+
+    if watch:
+        ctx.exit(
+            _watch(
+                build=build_once,
+                script=_resolve_build_script(script),
+                targets=targets,
+                ninja=ninja,
+            )
+        )
+    ctx.exit(build_once()[0])
 
 
-@cli.command("clean", cls=MergingCommand, short_help="Clean build artifacts")
+@cli.command("clean", short_help="Clean build artifacts")
 @directory_option
 @common_options
 @build_options
 @click.option(
-    "-a", "--all", is_flag=True, default=False, help="Remove entire build directory"
+    "-a",
+    "--all",
+    "everything",
+    is_flag=True,
+    default=False,
+    help="Remove entire build directory",
 )
-@click.pass_context
-def cli_clean(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_clean(_namespace(ctx, "clean", **kw)))
+@pass_pcons_context
+def cli_clean(
+    ctx: PconsContext,
+    build_dir: Path,
+    ninja: str | None,
+    everything: bool,
+    **declared_but_unused: object,
+) -> None:
+    # No docstring: click would print it as this command's description, which
+    # `pcons clean --help` has never had. See the known issue.
+    ctx.exit(_clean(build_dir, everything=everything, ninja=ninja))
 
 
-@cli.command(
-    "cache", cls=MergingCommand, short_help="Inspect or clear the per-build-dir cache"
+@cli.group(
+    "cache",
+    invoke_without_command=True,
+    short_help="Inspect or clear the per-build-dir cache",
+    help=(
+        "Inspect or clear the per-build-dir cache (pcons_cache.json).\n\n"
+        "Reads the cache file directly; never runs the build script. The build "
+        "directory comes from -B / $PCONS_BUILD_DIR (default 'build'). "
+        "Without a subcommand, lists what is persisted."
+    ),
 )
 @directory_option
 @common_options
-@click.argument(
-    "cache_action",
-    required=False,
-    default="list",
-    type=click.Choice(["list", "show", "clear", "path"]),
-)
-@click.pass_context
-def cli_cache(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(cmd_cache(_namespace(ctx, "cache", **kw)))
+@pass_pcons_context
+def cli_cache(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
+    if ctx.invoked_subcommand is None:
+        ctx.exit(_cache_list(build_dir))
+
+
+@cli_cache.command("list", short_help="What is persisted")
+@directory_option
+@common_options
+@pass_pcons_context
+def cli_cache_list(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
+    """List the settings this build directory has persisted."""
+    ctx.exit(_cache_list(build_dir))
+
+
+@cli_cache.command("show", short_help="The whole cache")
+@directory_option
+@common_options
+@pass_pcons_context
+def cli_cache_show(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
+    """List the persisted settings, then where they came from and live."""
+    ctx.exit(_cache_show(build_dir))
+
+
+@cli_cache.command("clear", short_help="Discard it")
+@directory_option
+@common_options
+@pass_pcons_context
+def cli_cache_clear(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
+    """Discard the persisted settings."""
+    ctx.exit(_cache_clear(build_dir))
+
+
+@cli_cache.command("path", short_help="Where it lives")
+@directory_option
+@common_options
+@pass_pcons_context
+def cli_cache_path(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
+    """Print the cache file's path, whether or not it exists yet."""
+    ctx.exit(_cache_path(build_dir))
 
 
 @cli.command(
@@ -1572,8 +1740,8 @@ def cli_cache(ctx: click.Context, **kw: object) -> None:
 )
 @directory_option
 @click.argument("argv", nargs=-1, type=click.UNPROCESSED)
-@click.pass_context
-def cli_test(ctx: click.Context, argv: tuple[str, ...]) -> None:
+@pass_pcons_context
+def cli_test(ctx: PconsContext, argv: tuple[str, ...]) -> None:
     from pcons.test_runner import main as test_main
 
     # Options before the subcommand never reach the runner's parser, so a build
@@ -1592,7 +1760,7 @@ def cli_test(ctx: click.Context, argv: tuple[str, ...]) -> None:
     ctx.exit(test_main(forwarded + list(argv)))
 
 
-@cli.command("_default", cls=DefaultCommand, hidden=True)
+@cli.command("_default", cls=DefaultCommand, hidden=True, loads_modules=True)
 @directory_option
 @common_options
 @generate_options
@@ -1600,9 +1768,71 @@ def cli_test(ctx: click.Context, argv: tuple[str, ...]) -> None:
 @watch_option
 @jobs_option
 @click.argument("extra", nargs=-1)
-@click.pass_context
-def cli_default(ctx: click.Context, **kw: object) -> None:
-    ctx.exit(_run_default(_namespace(ctx, None, **kw)))
+@pass_pcons_context
+def cli_default(
+    ctx: PconsContext,
+    build_dir: Path,
+    verbose: bool,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    fresh: bool,
+    build_script: str | None,
+    ninja: str | None,
+    watch: bool,
+    jobs: int | None,
+    extra: tuple[str, ...],
+    **declared_but_unused: object,
+) -> None:
+    """The no-subcommand path: generate, then build."""
+    script = Path(build_script) if build_script else None
+    variables, targets = parse_variables(list(extra))
+
+    def regenerate() -> tuple[int, Project | None]:
+        return _generate(
+            build_dir,
+            script=script,
+            variables=variables,
+            variant=variant,
+            generator=_generators(generator),
+            reconfigure=reconfigure,
+            fresh=fresh,
+        )
+
+    def build_once(where: Path) -> tuple[int, Path]:
+        return _build(
+            where,
+            regenerate=regenerate,
+            script=script,
+            targets=targets or None,
+            jobs=jobs,
+            verbose=verbose,
+            ninja=ninja,
+            variant=variant,
+        )
+
+    # A non-KEY=value argument with no build script to run is a target of an
+    # existing build.ninja, not something to generate from.
+    if targets and not _resolve_build_script(script):
+        ctx.exit(build_once(build_dir)[0])
+
+    # _build generates on its own when the build files are stale, which is the
+    # right entry point for a watch: it regenerates only when needed.
+    if watch:
+        ctx.exit(
+            _watch(
+                build=lambda: build_once(build_dir),
+                script=_resolve_build_script(script),
+                targets=targets,
+                ninja=ninja,
+            )
+        )
+
+    code, project = regenerate()
+    if code != 0:
+        ctx.exit(code)
+    # The script may pick a build directory other than the one asked for.
+    ctx.exit(build_once(project.build_dir if project else build_dir)[0])
 
 
 def main() -> int:

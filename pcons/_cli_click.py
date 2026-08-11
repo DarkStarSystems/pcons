@@ -15,10 +15,11 @@ into, instead of two parsers repeating the same lists and drifting apart.
 
 from __future__ import annotations
 
-import argparse
 import os
 from collections.abc import Callable
-from typing import Any, TypeVar
+from functools import update_wrapper
+from pathlib import Path
+from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
 import click
 from click.core import ParameterSource
@@ -27,43 +28,171 @@ import pcons
 from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
 
 F = TypeVar("F", bound=Callable[..., Any])
-
-# Set on the group's context when an unresolvable command name was routed to the
-# catch-all command, so the group callback knows not to run it a second time.
-ROUTED_TO_DEFAULT = "pcons.routed_to_default"
-
-# Set on the group's context when argv held a `--`, which the group's parser
-# consumes before anything downstream can see it.
-SAW_DOUBLE_DASH = "pcons.saw_double_dash"
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
-class MergingCommand(click.Command):
-    """Let a subcommand inherit an option spelled before the command name.
+class PconsContext(click.Context):
+    """Every context in the pcons command tree, carrying what parsing learned.
+
+    Both facts are set and read on the group's own context, so they are
+    attributes rather than entries in the ``ctx.meta`` dictionary every nested
+    context shares. Every command class here declares this as its
+    ``context_class``, so a callback taking `PconsContext` gets one.
+    """
+
+    #: argv held a `--`, which the group's parser consumes before anything
+    #: downstream can see it. After one, a token starting with a dash is a
+    #: target to build, not an option.
+    saw_double_dash: bool = False
+
+    #: an unresolvable command name was routed to the catch-all command, so the
+    #: group callback knows not to run it a second time.
+    routed_to_default: bool = False
+
+
+def pass_pcons_context(f: Callable[Concatenate[PconsContext, P], R]) -> Callable[P, R]:
+    """`click.pass_context`, typed for the context every pcons command gets.
+
+    click types its own decorator against `click.Context`, so a callback
+    annotated with the subclass every command declares as its ``context_class``
+    is rejected there. Same wrapper, one type narrower.
+    """
+
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        return f(cast(PconsContext, click.get_current_context()), *args, **kwargs)
+
+    return update_wrapper(wrapper, f)
+
+
+def _adopt_options_spelled_earlier(command: click.Command, ctx: click.Context) -> None:
+    """Take an option's value from the command name it was spelled before.
 
     argparse applied a subparser's defaults unconditionally on top of what the
     top-level parser had already stored, so ``pcons -B out generate`` fell back
-    to ``build``. Here the parent value is taken unless the user spelled the
-    option after the subcommand, so the later spelling still wins.
+    to ``build``. Here the parent's value is taken unless the user spelled the
+    option after the command name, so the later spelling still wins.
 
     The test is "not spelled on the command line" rather than "still at its
     default": ``-B`` also reads ``PCONS_BUILD_DIR``, and a value click took
     from the environment must not beat a ``-B`` spelled before the command.
+
+    Reading only the immediate parent is enough however deep the nesting goes,
+    because a `MergingGroup` adopts into its own ``ctx.params`` before it
+    dispatches. By the time ``pcons -B out cache path`` reaches ``path``, the
+    ``cache`` context already carries ``out``, so the value arrives one level at
+    a time rather than needing a walk to the top.
+    """
+    for param in command.params:
+        name = param.name
+        if name is None:
+            continue
+        if ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE:
+            continue
+        # A command invoked on its own, as a test may do, has no group above it.
+        parent = ctx.parent
+        if parent is not None and name in parent.params:
+            ctx.params[name] = parent.params[name]
+
+
+def configure_logging(ctx: click.Context) -> None:
+    """Set logging up from the options every command shares, once they settle.
+
+    Read out of what the merge left in ``ctx.params``, so ``pcons -v generate``
+    and ``pcons generate -v`` configure the same way. A subgroup's verb runs
+    this after its group already did, and the deeper spelling wins because it
+    runs last.
+
+    A command declaring neither option is left alone. It has nothing to say
+    about logging, and configuring anyway would mean the level a command
+    without ``-v`` settles on beats one spelled before it, and that ``--debug``
+    is validated for a command that never reads it: `pcons test` hands its argv
+    to another program with its own logging.
+    """
+    params = ctx.params
+    if "verbose" not in params and "debug" not in params:
+        return
+
+    # Imported here because `pcons.cli` imports this module, not the reverse.
+    from pcons.cli import setup_logging
+
+    setup_logging(
+        bool(params.get("verbose", False)), cast("str | None", params.get("debug"))
+    )
+
+
+def load_declared_modules(command: click.Command, ctx: click.Context) -> None:
+    """Load add-on modules, for a command that says it wants them.
+
+    Only a command that runs the build script does. Loading executes each
+    module's ``register()``, and `pcons clean` has no reason to run a user's
+    code.
+    """
+    if not getattr(command, "loads_modules", False):
+        return
+
+    from pcons.cli import _load_user_modules
+
+    _load_user_modules(cast("str | None", ctx.params.get("modules_path")))
+
+
+class MergingCommand(click.Command):
+    """A command that inherits an option spelled before its name.
+
+    See `_adopt_options_spelled_earlier`.
     """
 
+    context_class = PconsContext
+
+    def __init__(self, *args: Any, loads_modules: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        #: run the user's add-on modules before the callback. For a command
+        #: that runs the build script, which is what a module extends.
+        self.loads_modules = loads_modules
+
     def invoke(self, ctx: click.Context) -> Any:
-        parent = ctx.parent
-        # A command invoked on its own, as a test may do, has no group above it.
-        if parent is not None:
-            for param in self.params:
-                name = param.name
-                if name is None or name not in parent.params:
-                    continue
-                if ctx.get_parameter_source(name) is not ParameterSource.COMMANDLINE:
-                    ctx.params[name] = parent.params[name]
+        _adopt_options_spelled_earlier(self, ctx)
+        configure_logging(ctx)
+        load_declared_modules(self, ctx)
         return super().invoke(ctx)
 
 
-class _GroupPathContext(click.Context):
+class MergingGroup(click.Group):
+    """A group that inherits, and so passes the inheritance on to its commands.
+
+    Without this a subcommand of a subgroup would read this group's untouched
+    default instead of what was spelled before the group's own name.
+
+    Not a subclass of `MergingCommand`: click's Group already derives from
+    Command, and crossing the two hierarchies buys nothing when the behaviour is
+    one shared function.
+    """
+
+    context_class = PconsContext
+
+    #: A subgroup's commands inherit too, without each restating it, and so
+    #: does a group nested under it: `type` is click's spelling for "this
+    #: class", and without it click would fall back to a plain `click.Group`
+    #: that inherits nothing.
+    command_class = MergingCommand
+    group_class = type
+
+    def __init__(self, *args: Any, loads_modules: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.loads_modules = loads_modules
+
+    def invoke(self, ctx: click.Context) -> Any:
+        _adopt_options_spelled_earlier(self, ctx)
+        configure_logging(ctx)
+        load_declared_modules(self, ctx)
+        return super().invoke(ctx)
+
+    def list_commands(self, ctx: click.Context) -> list[str]:
+        """Declaration order, as `PconsGroup` does, not click's alphabetical."""
+        return list(self.commands)
+
+
+class _GroupPathContext(PconsContext):
     """Report the group's command path as the command's own.
 
     The catch-all command is hidden and has no name a user can type, so its
@@ -95,6 +224,13 @@ class PconsGroup(click.Group):
 
     DEFAULT_COMMAND = "_default"
 
+    context_class = PconsContext
+
+    #: Every command inherits an option spelled before its name, so no command
+    #: has to ask for it. The catch-all overrides this with `DefaultCommand`.
+    command_class = MergingCommand
+    group_class = MergingGroup
+
     def list_commands(self, ctx: click.Context) -> list[str]:
         """Declaration order, which groups the commands by what they do."""
         return [name for name in self.commands if name != self.DEFAULT_COMMAND]
@@ -114,22 +250,25 @@ class PconsGroup(click.Group):
         """The catch-all command, which only `resolve_command` may reach."""
         return self.commands.get(self.DEFAULT_COMMAND)
 
+    # click types these hooks against the base context, and narrowing a
+    # parameter in an override is unsound in general, so the class this group
+    # builds its own context from is spelled out at each one.
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        # Recorded before click's parser eats the `--`: after one, a token
-        # starting with a dash is a target to build, not an option.
-        ctx.meta[SAW_DOUBLE_DASH] = "--" in args
+        # Recorded before click's parser eats the `--`.
+        cast(PconsContext, ctx).saw_double_dash = "--" in args
         return super().parse_args(ctx, args)
 
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
-        if args and args[0].startswith("-") and ctx.meta.get(SAW_DOUBLE_DASH):
+        pcons_ctx = cast(PconsContext, ctx)
+        if args and args[0].startswith("-") and pcons_ctx.saw_double_dash:
             # `pcons -- -foo` builds a target called -foo. No command name
             # starts with a dash, so this cannot capture one: `pcons -- build`
             # still runs the build command.
             default = self._catch_all()
             if default is not None:
-                ctx.meta[ROUTED_TO_DEFAULT] = True
+                pcons_ctx.routed_to_default = True
                 # The `--` goes back in. The group's parser consumed it, and
                 # the catch-all's own parser needs it to stop reading the rest
                 # as options, which is what keeps a plain typo an error.
@@ -149,10 +288,10 @@ class PconsGroup(click.Group):
                 raise
             # A None name keeps ctx.invoked_subcommand None, so the group
             # callback cannot tell this apart from a command line naming no
-            # command at all, hence the marker. `DefaultCommand` is what makes
+            # command at all, hence the flag. `DefaultCommand` is what makes
             # usage and errors read "pcons" rather than "pcons " or
             # "pcons _default".
-            ctx.meta[ROUTED_TO_DEFAULT] = True
+            pcons_ctx.routed_to_default = True
             return None, default, args
 
 
@@ -170,32 +309,6 @@ def _chdir(ctx: click.Context, param: click.Parameter, value: str | None) -> str
             click.echo(f"error: -C {value}: {e}", err=True)
             ctx.exit(1)
     return value
-
-
-def _namespace(
-    ctx: click.Context, command: str | None, **kw: Any
-) -> argparse.Namespace:
-    """Hand the existing cmd_* functions the Namespace they already take.
-
-    This is a boundary, not a pattern. The command implementations keep their
-    argparse signature, so the conversion touches the parser layer only.
-
-    Values spelled before the command name live on the parent context and are
-    picked up here, so a command sees the union of both sides. `MergingCommand`
-    has already decided which of the two wins for the options both carry.
-    """
-    params = dict(ctx.parent.params) if ctx.parent is not None else {}
-    params.update(kw)
-    params["command"] = command
-    params.setdefault("extra", [])
-    ns = argparse.Namespace(**params)
-    # click hands back tuples where argparse handed back lists, and downstream
-    # code tests `generator` for falsiness rather than for emptiness.
-    ns.extra = list(ns.extra)
-    generator = getattr(ns, "generator", None)
-    if generator is not None:
-        ns.generator = list(generator) or None
-    return ns
 
 
 def _generator_names() -> list[str]:
@@ -246,6 +359,9 @@ def common_options(f: F) -> F:
     f = click.option(
         "-B",
         "--build-dir",
+        # A Path, so no command has to convert it first. The metavar is spelled
+        # out because click.Path would otherwise print its own.
+        type=click.Path(path_type=Path),
         metavar="DIR",
         envvar="PCONS_BUILD_DIR",
         default="build",

@@ -81,6 +81,7 @@ command line. See [Persistent configuration
 cache](user-guide.md#persistent-configuration-cache).
 
 ```bash
+pcons cache          # same as `pcons cache list`
 pcons cache list     # what is persisted
 pcons cache show     # the whole cache
 pcons cache clear    # discard it

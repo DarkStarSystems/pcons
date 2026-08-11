@@ -3,18 +3,21 @@
 
 from __future__ import annotations
 
-import argparse
+import inspect
 import logging
 import os
 import shutil
 import subprocess
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
+import click
 import pytest
 from click.testing import CliRunner, Result
 
+import pcons.cli as cli_module
 from pcons import (
     Generator,
     MakefileGenerator,
@@ -22,19 +25,26 @@ from pcons import (
     MultiGenerator,
     NinjaGenerator,
 )
+from pcons._cli_click import MergingCommand, MergingGroup, PconsGroup
 from pcons.cli import (
+    _cache_clear,
+    _cache_list,
+    _cache_path,
+    _cache_show,
+    _clean,
     _find_ninja,
+    _load_user_modules,
     _needs_generation,
     _parse_pcons_vars,
     cli,
-    cli_cache,
+    cli_build,
+    cli_cache_path,
+    cli_clean,
     cli_default,
-    cmd_build,
-    cmd_cache,
-    cmd_clean,
-    cmd_default,
+    cli_generate,
+    cli_info,
+    cli_init,
     find_script,
-    load_user_modules,
     parse_variables,
     run_make,
     run_ninja,
@@ -65,14 +75,41 @@ def _has_c_compiler() -> bool:
 
 
 def _capture_command(
-    monkeypatch: pytest.MonkeyPatch, name: str
-) -> list[argparse.Namespace]:
-    """Stand in for a cmd_* entry point so a test can read what it was handed."""
-    seen: list[argparse.Namespace] = []
+    monkeypatch: pytest.MonkeyPatch, command: click.Command
+) -> list[dict[str, object]]:
+    """Stand in for a command's body so a test can read what the parser gave it.
 
-    def fake(args: argparse.Namespace) -> int:
-        seen.append(args)
+    click calls a command's callback with its parameters as keyword arguments,
+    so what lands here is exactly what the command would have worked from.
+    """
+    seen: list[dict[str, object]] = []
+
+    def fake(**kw: object) -> int:
+        seen.append(kw)
         return 0
+
+    monkeypatch.setattr(command, "callback", fake)
+    return seen
+
+
+def _capture_args(
+    monkeypatch: pytest.MonkeyPatch, name: str, result: object = 0
+) -> list[dict[str, object]]:
+    """Stand in for a work function so a test can read the arguments it got.
+
+    Arguments are bound through the real signature, so a value passed
+    positionally is recorded under its parameter's name. Asserting on
+    ``seen[0]["build_dir"]`` would otherwise pass or fail on how the caller
+    chose to spell the call rather than on what it sent.
+    """
+    real = getattr(cli_module, name)
+    seen: list[dict[str, object]] = []
+
+    def fake(*args: object, **kw: object) -> object:
+        bound = inspect.signature(real).bind(*args, **kw)
+        bound.apply_defaults()
+        seen.append(dict(bound.arguments))
+        return result
 
     monkeypatch.setattr(f"pcons.cli.{name}", fake)
     return seen
@@ -1107,15 +1144,16 @@ class TestCLIArgumentParsing:
         """A named target with nothing to generate from belongs to an existing
         build.ninja, so it is built rather than generated.
 
-        The target reaches the build as `extra`, which is where `_build_targets`
-        reads it from. There is no separate `targets` attribute.
+        Asserting that the generate never ran is the point: the target arrives
+        as `extra`, and reading it as something to generate from would run a
+        script that is not there.
         """
         monkeypatch.chdir(tmp_path)
-        ran_default = _capture_command(monkeypatch, "cmd_default")
-        seen = _capture_command(monkeypatch, "cmd_build")
+        generated = _capture_args(monkeypatch, "_generate", result=(0, None))
+        built = _capture_args(monkeypatch, "_build", result=(0, tmp_path))
         assert _invoke("hello").exit_code == 0
-        assert not ran_default
-        assert seen[0].extra == ["hello"]
+        assert not generated
+        assert built[0]["targets"] == ["hello"]
 
     def test_a_bare_dash_is_not_a_target(self) -> None:
         """A first token that looks like an option stays an error.
@@ -1654,14 +1692,11 @@ class TestCacheCommand:
         )
         return build_dir
 
-    def _args(self, build_dir: Path, action: str) -> argparse.Namespace:
-        return argparse.Namespace(build_dir=str(build_dir), cache_action=action)
-
     def test_cache_list(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
         build_dir = self._populate(tmp_path, monkeypatch)
-        assert cmd_cache(self._args(build_dir, "list")) == 0
+        assert _cache_list(build_dir) == 0
         out = capsys.readouterr().out
         assert "HELLO=42" in out
         assert "variant=debug" in out
@@ -1673,17 +1708,17 @@ class TestCacheCommand:
         from pcons.core.cache import CACHE_FILE
 
         build_dir = self._populate(tmp_path, monkeypatch)
-        assert cmd_cache(self._args(build_dir, "path")) == 0
+        assert _cache_path(build_dir) == 0
         assert str(build_dir / CACHE_FILE) in capsys.readouterr().out
 
     def test_cache_clear(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
         build_dir = self._populate(tmp_path, monkeypatch)
-        assert cmd_cache(self._args(build_dir, "clear")) == 0
+        assert _cache_clear(build_dir) == 0
         capsys.readouterr()
         # After clearing, list shows no settings.
-        assert cmd_cache(self._args(build_dir, "list")) == 0
+        assert _cache_list(build_dir) == 0
         assert capsys.readouterr().out.strip() == ""
 
     def test_cache_show_names_the_source_dir_and_the_file(
@@ -1696,24 +1731,195 @@ class TestCacheCommand:
         about. Nothing else prints either.
         """
         build_dir = self._populate(tmp_path, monkeypatch)
-        assert cmd_cache(self._args(build_dir, "show")) == 0
+        assert _cache_show(build_dir) == 0
         out = capsys.readouterr().out
         assert "HELLO=42" in out
         assert f"# source_dir: {tmp_path}" in out
         assert "# cache file:" in out
 
-    def test_cache_missing_reports_cleanly(self, tmp_path: Path, capsys) -> None:
-        assert cmd_cache(self._args(tmp_path / "nope", "list")) == 0
+    def test_cache_show_omits_a_source_dir_it_does_not_have(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A cache written before source_dir was recorded still shows what it
+        has, rather than printing a line naming nothing."""
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        cache = BuildCache(build_dir)
+        cache.set("variant", "debug")
+        cache.save()
+        assert _cache_show(build_dir) == 0
+        out = capsys.readouterr().out
+        assert "variant" in out
+        assert "# source_dir:" not in out
+        assert "# cache file:" in out
+
+    @pytest.mark.parametrize("verb", ["list", "show", "clear"])
+    def test_a_missing_cache_reports_cleanly(
+        self, tmp_path: Path, capsys, verb: str
+    ) -> None:
+        """`path` is the one verb that answers without a cache to read."""
+        work = {"list": _cache_list, "show": _cache_show, "clear": _cache_clear}[verb]
+        assert work(tmp_path / "nope") == 0
         assert "No cache" in capsys.readouterr().out
 
-    def test_action_and_build_dir_reach_the_command(self, tmp_path: Path) -> None:
-        """Every test above calls cmd_cache directly, so nothing else checks
-        that the CLI hands it the positional action and the build directory."""
+
+class TestNestingPassesOnTheMerge:
+    """The group declares what class its commands and subgroups are, so a
+    declaration does not have to remember `cls=`.
+
+    `pcons cache` is one level deep and would still work if a subgroup did not
+    pass the classes on. Two levels is where it shows: a plain `click.Group`
+    adopts nothing, and an option spelled before the outer name would be lost
+    without a word.
+    """
+
+    @staticmethod
+    def _tree() -> tuple[PconsGroup, list[str]]:
+        seen: list[str] = []
+
+        @click.group(cls=PconsGroup, invoke_without_command=True)
+        @click.option("-B", "--build-dir", default="build")
+        def root(**kw: object) -> None: ...
+
+        @root.group("outer", invoke_without_command=True)
+        @click.option("-B", "--build-dir", default="build")
+        def outer(**kw: object) -> None: ...
+
+        @outer.group("inner", invoke_without_command=True)
+        @click.option("-B", "--build-dir", default="build")
+        def inner(**kw: object) -> None: ...
+
+        @inner.command("verb")
+        @click.option("-B", "--build-dir", default="build")
+        def verb(build_dir: str) -> None:
+            seen.append(build_dir)
+
+        return root, seen
+
+    def test_every_level_is_a_merging_class(self) -> None:
+        root, _ = self._tree()
+        outer = root.commands["outer"]
+        assert isinstance(outer, MergingGroup)
+        inner = outer.commands["inner"]
+        assert isinstance(inner, MergingGroup)
+        assert isinstance(inner.commands["verb"], MergingCommand)
+
+    def test_a_value_spelled_at_the_top_reaches_the_deepest_verb(self) -> None:
+        root, seen = self._tree()
+        result = CliRunner().invoke(
+            root, ["-B", "out", "outer", "inner", "verb"], catch_exceptions=False
+        )
+        assert result.exit_code == 0, result.output
+        assert seen == ["out"]
+
+
+class TestCacheIsAGroup:
+    """`pcons cache` dispatches to a subcommand, not to a positional value.
+
+    The tests above call the work functions, so without these nothing checks
+    that a verb on the command line reaches the right one, nor that the build
+    directory survives the extra context a nested group introduces.
+    """
+
+    @staticmethod
+    def _path(*argv: str) -> str:
+        result = _invoke(*argv)
+        assert result.exit_code == 0, result.output
+        return result.stdout.strip()
+
+    def test_each_verb_reaches_its_own_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         from pcons.core.cache import CACHE_FILE
 
-        result = _invoke("-B", str(tmp_path), "cache", "path")
+        assert self._path("-B", str(tmp_path), "cache", "path") == str(
+            tmp_path / CACHE_FILE
+        )
+        for verb in ("list", "show", "clear"):
+            result = _invoke("-B", str(tmp_path), "cache", verb)
+            assert result.exit_code == 0
+            assert "No cache" in result.stdout
+
+    def test_no_verb_lists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bare `pcons cache` did this when the verb was an optional argument."""
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        bare = _invoke("-B", str(tmp_path), "cache")
+        listed = _invoke("-B", str(tmp_path), "cache", "list")
+        assert bare.exit_code == listed.exit_code == 0
+        assert bare.stdout == listed.stdout
+
+    def test_an_unknown_verb_is_a_usage_error(self, tmp_path: Path) -> None:
+        result = _invoke("-B", str(tmp_path), "cache", "bogus")
+        assert result.exit_code == 2
+        assert "bogus" in result.stderr
+
+    def test_the_help_names_every_verb(self) -> None:
+        result = _invoke("cache", "--help")
         assert result.exit_code == 0
-        assert result.stdout.strip() == str(tmp_path / CACHE_FILE)
+        # Declaration order, so read-only verbs come before the destructive one.
+        assert [
+            line.split()[0]
+            for line in result.stdout.partition("Commands:")[2].strip().splitlines()
+        ] == ["list", "show", "clear", "path"]
+
+    def test_a_build_dir_spelled_before_cache_reaches_the_verb(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The verb is two contexts below the group that owns -B.
+
+        A merge that only reads the immediate parent finds the `cache` group's
+        untouched default here, and the verb silently answers for `build/`.
+        """
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        from pcons.core.cache import CACHE_FILE
+
+        assert self._path("-B", str(tmp_path), "cache", "path") == str(
+            tmp_path / CACHE_FILE
+        )
+
+    def test_a_build_dir_spelled_after_cache_also_reaches_the_verb(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        from pcons.core.cache import CACHE_FILE
+
+        assert self._path("cache", "-B", str(tmp_path), "path") == str(
+            tmp_path / CACHE_FILE
+        )
+
+    def test_the_later_build_dir_wins(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        from pcons.core.cache import CACHE_FILE
+
+        later = tmp_path / "later"
+        assert self._path(
+            "-B", str(tmp_path / "earlier"), "cache", "-B", str(later), "path"
+        ) == str(later / CACHE_FILE)
+
+    def test_a_spelled_build_dir_beats_the_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The merge tests where a value came from, not whether it is a default.
+
+        $PCONS_BUILD_DIR reaches every level, so comparing values cannot tell
+        an inherited `-B` from an environment default two contexts down.
+        """
+        from pcons.core.cache import CACHE_FILE
+
+        monkeypatch.setenv("PCONS_BUILD_DIR", str(tmp_path / "from_env"))
+        spelled = tmp_path / "spelled"
+        assert self._path("-B", str(spelled), "cache", "path") == str(
+            spelled / CACHE_FILE
+        )
+        # With nothing spelled, the environment still decides.
+        assert self._path("cache", "path") == str(tmp_path / "from_env" / CACHE_FILE)
 
 
 class TestCacheCLI:
@@ -1780,24 +1986,24 @@ class TestGlobalOptionsBeforeTheCommand:
     def test_build_dir_before_the_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-B", "out", "generate").exit_code == 0
-        assert seen[0].build_dir == "out"
+        assert seen[0]["build_dir"] == Path("out")
 
     def test_build_dir_after_the_command_still_wins(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-B", "out", "generate", "-B", "late").exit_code == 0
-        assert seen[0].build_dir == "late"
+        assert seen[0]["build_dir"] == Path("late")
 
     def test_build_dir_defaults_when_given_nowhere(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("generate").exit_code == 0
-        assert seen[0].build_dir == "build"
+        assert seen[0]["build_dir"] == Path("build")
 
     def test_build_dir_from_the_environment_loses_to_the_command_line(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1805,28 +2011,28 @@ class TestGlobalOptionsBeforeTheCommand:
         """The subcommand's own value comes from the environment, not the
         command line, so it must not beat a -B spelled before the command."""
         monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-B", "out", "generate").exit_code == 0
-        assert seen[0].build_dir == "out"
+        assert seen[0]["build_dir"] == Path("out")
 
     def test_verbose_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-v", "generate").exit_code == 0
-        assert seen[0].verbose is True
+        assert seen[0]["verbose"] is True
 
     def test_variant_before_the_command(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        seen = _capture_command(monkeypatch, "cmd_build")
+        seen = _capture_command(monkeypatch, cli_build)
         assert _invoke("--variant", "release", "build").exit_code == 0
-        assert seen[0].variant == "release"
+        assert seen[0]["variant"] == "release"
 
     def test_command_only_options_are_unaffected(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "cmd_clean")
+        seen = _capture_args(monkeypatch, "_clean")
         assert _invoke("clean", "--all").exit_code == 0
-        assert seen[0].all is True
+        assert seen[0]["everything"] is True
         assert _invoke("clean").exit_code == 0
-        assert seen[1].all is False
+        assert seen[1]["everything"] is False
 
 
 class TestCommandDetection:
@@ -1845,29 +2051,33 @@ class TestCommandDetection:
         # -G was missing from that table, so `make` read as the first
         # positional, `generate` became a build target, and pcons generated
         # and then asked the build tool for a target named "generate".
-        ran_default = _capture_command(monkeypatch, "_run_default")
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-G", "make", "generate").exit_code == 0
         assert not ran_default
-        assert seen[0].command == "generate"
-        assert seen[0].generator == ["make"]
+        assert seen
+        assert seen[0]["generator"] == ("make",)
 
     def test_long_generator_before_the_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        ran_default = _capture_command(monkeypatch, "_run_default")
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("--generator", "make", "generate").exit_code == 0
         assert not ran_default
-        assert seen[0].command == "generate"
+        assert seen
 
     def test_option_value_that_names_a_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "cmd_build")
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_build)
+        # cli_build is also where the catch-all ends up, so the guard is what
+        # says `build` resolved as a command rather than as a target named
+        # "build" with "test" for a build directory.
         assert _invoke("-G", "make", "-B", "test", "build").exit_code == 0
-        assert seen[0].command == "build"
-        assert seen[0].build_dir == "test"
+        assert not ran_default
+        assert seen[0]["build_dir"] == Path("test")
 
 
 class TestDirectoryOption:
@@ -1964,27 +2174,27 @@ class TestDoubleDashEscape:
     def test_targets_survive_the_escape(
         self, monkeypatch: pytest.MonkeyPatch, argv: list[str], extra: list[str]
     ) -> None:
-        seen = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, cli_default)
         assert _invoke(*argv).exit_code == 0
-        assert seen[0].extra == extra
+        assert list(seen[0]["extra"]) == extra
 
     def test_escaped_options_are_not_applied(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, cli_default)
         assert _invoke("--", "--verbose", "-B", "out").exit_code == 0
-        assert seen[0].verbose is False
-        assert seen[0].build_dir == "build"
+        assert seen[0]["verbose"] is False
+        assert seen[0]["build_dir"] == Path("build")
 
     def test_a_command_name_is_still_a_command(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        ran_default = _capture_command(monkeypatch, "_run_default")
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("-B", "out", "--", "generate").exit_code == 0
         assert not ran_default
-        assert seen[0].command == "generate"
-        assert seen[0].build_dir == "out"
+        assert seen
+        assert seen[0]["build_dir"] == Path("out")
 
     def test_a_typo_without_the_escape_is_still_an_error(self) -> None:
         assert _invoke("hello", "--nope").exit_code == 2
@@ -2012,17 +2222,17 @@ class TestCatchAllNameIsNotReserved:
     def test_it_is_an_ordinary_target(
         self, monkeypatch: pytest.MonkeyPatch, argv: list[str], extra: list[str]
     ) -> None:
-        seen = _capture_command(monkeypatch, "_run_default")
+        seen = _capture_command(monkeypatch, cli_default)
         assert _invoke(*argv).exit_code == 0
-        assert seen[0].extra == extra
+        assert list(seen[0]["extra"]) == extra
 
     def test_a_real_command_still_resolves(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Only the catch-all's own name is refused, not every name."""
-        seen = _capture_command(monkeypatch, "_cmd_generate_wrapper")
+        seen = _capture_command(monkeypatch, cli_generate)
         assert _invoke("generate").exit_code == 0
-        assert seen[0].command == "generate"
+        assert seen
 
 
 class TestDoubleDashBeforeTheRunner:
@@ -2100,10 +2310,12 @@ class TestCommandInvokedWithoutTheGroup:
     def test_a_merging_command_has_no_parent_to_merge_from(
         self, tmp_path: Path
     ) -> None:
+        # A leaf of the cache group, so invoking it alone skips both the group
+        # it normally sits under and the one above that.
         from pcons.core.cache import CACHE_FILE
 
         result = CliRunner().invoke(
-            cli_cache, ["-B", str(tmp_path), "path"], catch_exceptions=False
+            cli_cache_path, ["-B", str(tmp_path)], catch_exceptions=False
         )
         assert result.exit_code == 0
         assert result.stdout.strip() == str(tmp_path / CACHE_FILE)
@@ -2165,10 +2377,10 @@ class TestProductionEntryPoint:
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
-        def interrupted(args: argparse.Namespace) -> int:
+        def interrupted(**kw: object) -> int:
             raise KeyboardInterrupt
 
-        monkeypatch.setattr("pcons.cli._cmd_generate_wrapper", interrupted)
+        monkeypatch.setattr(cli_generate, "callback", interrupted)
         code, out, err = _main(capsys, "generate")
         assert code == 130
         assert "Traceback" not in out + err
@@ -2500,23 +2712,13 @@ class TestCleanRunsTheBuildTool:
     missing build.ninja.
     """
 
-    @staticmethod
-    def _args(build_dir: Path, runner: str | None = None) -> argparse.Namespace:
-        return argparse.Namespace(
-            build_dir=str(build_dir),
-            verbose=False,
-            debug=None,
-            all=False,
-            ninja=runner,
-        )
-
     def test_clean_asks_ninja_to_clean(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         (tmp_path / "build.ninja").write_text("")
         TestBuildToolCommandLines._only(monkeypatch, "ninja", "/usr/bin/ninja")
         seen = TestBuildToolCommandLines._record(monkeypatch, returncode=5)
-        assert cmd_clean(self._args(tmp_path)) == 5
+        assert _clean(tmp_path, everything=False, ninja=None) == 5
         assert seen == [["/usr/bin/ninja", "-C", str(tmp_path), "-t", "clean"]]
 
     def test_clean_refuses_n2_rather_than_running_it(
@@ -2527,7 +2729,7 @@ class TestCleanRunsTheBuildTool:
         (tmp_path / "build.ninja").write_text("")
         TestBuildToolCommandLines._only(monkeypatch, "n2", "/opt/n2")
         seen = TestBuildToolCommandLines._record(monkeypatch)
-        assert cmd_clean(self._args(tmp_path, runner="n2")) == 1
+        assert _clean(tmp_path, everything=False, ninja="n2") == 1
         assert seen == []
 
     def test_clean_without_a_runner_is_an_error(
@@ -2536,7 +2738,7 @@ class TestCleanRunsTheBuildTool:
         (tmp_path / "build.ninja").write_text("")
         TestBuildToolCommandLines._only(monkeypatch, "nothing", "")
         seen = TestBuildToolCommandLines._record(monkeypatch)
-        assert cmd_clean(self._args(tmp_path)) == 1
+        assert _clean(tmp_path, everything=False, ninja=None) == 1
         assert seen == []
 
     def test_clean_all_succeeds_with_nothing_to_remove(
@@ -2606,6 +2808,117 @@ class TestGraphOptionsReachTheBuildScript:
         assert seen[0]["extra_env"] is None
 
 
+class TestLoggingIsSetUpFromTheMergedOptions:
+    """The merging invoke configures logging, so no command opens by doing it.
+
+    Two things go wrong if it configures for a command that declares neither
+    option. `pcons test` hands its argv to a separate program with its own
+    logging, so validating --debug there rejects a command line the CLI used
+    to accept. And a command with no -v of its own would settle a level that
+    beats one spelled before its name.
+    """
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[tuple[bool, str | None]]:
+        """Record every setup_logging call. _invoke restores the root logger
+        afterwards, so the level itself cannot be read once it returns."""
+        seen: list[tuple[bool, str | None]] = []
+        monkeypatch.setattr(
+            "pcons.cli.setup_logging",
+            lambda verbose, debug: seen.append((verbose, debug)),
+        )
+        return seen
+
+    def test_verbose_reaches_a_command_that_declares_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        _invoke("-v", "clean")
+        assert seen == [(True, None)]
+
+    def test_a_command_without_it_stays_quiet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = self._record(monkeypatch)
+        _invoke("clean")
+        assert seen == [(False, None)]
+
+    @pytest.mark.parametrize("argv", [["-v", "cache", "list"], ["cache", "-v", "list"]])
+    def test_either_spelling_around_a_subgroup(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        """The group configures, then the verb configures again from its own
+        merged values. Both must see the -v, wherever it was spelled."""
+        seen = self._record(monkeypatch)
+        _invoke(*argv)
+        assert seen == [(True, None), (True, None)]
+
+    def test_a_command_declaring_neither_option_is_left_alone(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _capture_test_runner(monkeypatch)
+        seen = self._record(monkeypatch)
+        _invoke("-v", "test", "--list")
+        assert seen == []
+
+    def test_debug_is_not_validated_for_the_runner(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons --debug bogus test` runs the runner, which owns everything
+        after `test`. Rejecting the subsystem name here would exit 1 with the
+        runner never seeing its argv."""
+        seen = _capture_test_runner(monkeypatch)
+        assert _invoke("--debug", "bogus", "test", "--list").exit_code == 0
+        assert seen == [["--list"]]
+
+
+class TestModulesAreLoadedWhereTheyAreDeclared:
+    """Loading runs each module's register(), so only a command that works
+    from the build script asks for it. `pcons clean` runs no user code."""
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+        seen: list[object] = []
+        monkeypatch.setattr(
+            "pcons.cli._load_user_modules", lambda path: seen.append(path)
+        )
+        return seen
+
+    @pytest.mark.parametrize("argv", [["generate"], ["build"], ["info"], ["hello"], []])
+    def test_a_command_that_reaches_the_build_script_loads_them(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        for command in (cli_generate, cli_build, cli_info, cli_default):
+            _capture_command(monkeypatch, command)
+        seen = self._record(monkeypatch)
+        _invoke(*argv)
+        # A bare `pcons` reaches the catch-all through forward(), which calls
+        # the callback rather than the command, so this covers a path the
+        # merging invoke never sees.
+        assert seen == [None]
+
+    @pytest.mark.parametrize(
+        "argv", [["clean"], ["init"], ["cache", "list"], ["cache"], ["test", "--list"]]
+    )
+    def test_a_command_that_does_not_leaves_them_alone(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        _capture_test_runner(monkeypatch)
+        for command in (cli_clean, cli_init):
+            _capture_command(monkeypatch, command)
+        seen = self._record(monkeypatch)
+        _invoke(*argv)
+        assert seen == []
+
+    def test_the_search_path_reaches_the_loader(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _capture_command(monkeypatch, cli_generate)
+        seen = self._record(monkeypatch)
+        _invoke("--modules-path", "one", "generate")
+        assert seen == ["one"]
+
+
 class TestModulesSearchPath:
     """--modules-path carries several directories, separated the way PATH is.
 
@@ -2630,14 +2943,14 @@ class TestModulesSearchPath:
     ) -> None:
         seen = self._record(monkeypatch)
         spec = os.pathsep.join(["one", "two"])
-        load_user_modules(argparse.Namespace(modules_path=spec))
+        _load_user_modules(spec)
         assert seen == [["one", "two"]]
 
     def test_no_search_path_loads_the_defaults(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         seen = self._record(monkeypatch)
-        load_user_modules(argparse.Namespace(modules_path=None))
+        _load_user_modules(None)
         assert seen == [None]
 
 
@@ -2653,15 +2966,13 @@ class TestBuildDirectoryChosenByTheScript:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         elsewhere = tmp_path / "elsewhere"
-        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
         monkeypatch.setattr(
-            "pcons.cli.cmd_generate",
-            lambda args: (0, SimpleNamespace(build_dir=elsewhere)),
+            "pcons.cli._generate",
+            lambda *a, **k: (0, SimpleNamespace(build_dir=elsewhere)),
         )
-        seen = _capture_command(monkeypatch, "cmd_build")
-        args = argparse.Namespace(build_dir=str(tmp_path / "asked"), watch=False)
-        assert cmd_default(args) == 0
-        assert seen[0].build_dir == str(elsewhere)
+        seen = _capture_args(monkeypatch, "_build", result=(0, elsewhere))
+        assert _invoke("-B", str(tmp_path / "asked")).exit_code == 0
+        assert seen[0]["build_dir"] == elsewhere
 
     def test_a_regenerated_build_runs_where_the_script_put_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -2671,10 +2982,9 @@ class TestBuildDirectoryChosenByTheScript:
         (elsewhere / "build.ninja").write_text("")
         (tmp_path / "pcons-build.py").write_text("")
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
         monkeypatch.setattr(
-            "pcons.cli.cmd_generate",
-            lambda args: (0, SimpleNamespace(build_dir=elsewhere)),
+            "pcons.cli._generate",
+            lambda *a, **k: (0, SimpleNamespace(build_dir=elsewhere)),
         )
         seen: list[Path] = []
 
@@ -2683,31 +2993,22 @@ class TestBuildDirectoryChosenByTheScript:
             return 0
 
         monkeypatch.setattr("pcons.cli.run_ninja", fake_run_ninja)
-        args = argparse.Namespace(
-            build_dir=str(tmp_path / "asked"),
-            verbose=False,
-            debug=None,
-            watch=False,
-            extra=[],
-        )
-        assert cmd_build(args) == 0
+        assert _invoke("-B", str(tmp_path / "asked"), "build").exit_code == 0
         assert seen == [elsewhere]
 
     def test_watch_generates_through_the_build_and_not_beside_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """A watch loop regenerates only when the build files are stale, which
-        is cmd_build's job. A separate generate here would run the script twice
-        on the first pass and once more on every later one."""
+        the build itself decides. A separate generate here would run the script
+        twice on the first pass and once more on every later one."""
 
-        def refuse(args: argparse.Namespace) -> tuple[int, object]:
+        def refuse(*a: object, **k: object) -> tuple[int, object]:
             raise AssertionError("generate ran beside the build")
 
-        monkeypatch.setattr("pcons.cli.load_user_modules", lambda args: None)
-        monkeypatch.setattr("pcons.cli.cmd_generate", refuse)
-        seen = _capture_command(monkeypatch, "cmd_build")
-        args = argparse.Namespace(build_dir=str(tmp_path), watch=True)
-        assert cmd_default(args) == 0
+        monkeypatch.setattr("pcons.cli._generate", refuse)
+        seen = _capture_args(monkeypatch, "_watch")
+        assert _invoke("-B", str(tmp_path), "--watch").exit_code == 0
         assert len(seen) == 1
 
 
@@ -2741,14 +3042,7 @@ class TestXcodeConfiguration:
 
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("pcons.cli.run_xcodebuild", fake_run_xcodebuild)
-        args = argparse.Namespace(
-            build_dir=str(build_dir),
-            verbose=False,
-            debug=None,
-            watch=False,
-            extra=[],
-        )
-        assert cmd_build(args) == 0
+        assert _invoke("-B", str(build_dir), "build").exit_code == 0
         assert seen == ["debug"]
 
     def test_an_explicit_variant_wins_over_the_cache(
@@ -2772,15 +3066,10 @@ class TestXcodeConfiguration:
 
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr("pcons.cli.run_xcodebuild", fake_run_xcodebuild)
-        args = argparse.Namespace(
-            build_dir=str(build_dir),
-            verbose=False,
-            debug=None,
-            watch=False,
-            extra=[],
-            variant="release",
+        assert (
+            _invoke("-B", str(build_dir), "--variant", "release", "build").exit_code
+            == 0
         )
-        assert cmd_build(args) == 0
         assert seen == ["release"]
 
 
@@ -2857,3 +3146,163 @@ class TestNamedBuildScriptErrors:
         result = _invoke("info", "--targets")
         assert result.exit_code == 3
         assert "Targets:" not in result.stdout
+
+    def test_info_targets_reports_a_missing_named_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--targets has to find the script itself, since it runs it rather
+        than reading its docstring. A -b that names nothing is reported by
+        name, not by falling back to the one in the directory."""
+        (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info", "--targets", "-b", "nope.py")
+        assert result.exit_code == 1
+        assert "Build script not found: nope.py" in result.stderr
+
+    def test_info_targets_reports_an_empty_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("info", "--targets")
+        assert result.exit_code == 1
+        assert "No pcons-build.py found" in result.stderr
+
+
+class TestWatchReachesTheWatcher:
+    """`pcons build --watch` builds once and then watches.
+
+    The catch-all has its own watch branch, so a `build` that dropped the
+    option would still work for a bare `pcons` and quietly build once here.
+    """
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+        seen: list[dict[str, object]] = []
+        monkeypatch.setattr(
+            "pcons.cli._watch",
+            lambda **kw: seen.append(kw) or 0,
+        )
+        return seen
+
+    def test_build_watch_hands_over_the_script_and_the_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\n")
+        monkeypatch.chdir(tmp_path)
+        seen = self._record(monkeypatch)
+        assert _invoke("build", "--watch", "hello").exit_code == 0
+        assert len(seen) == 1
+        assert seen[0]["script"] == script
+        assert seen[0]["targets"] == ["hello"]
+        assert callable(seen[0]["build"])
+
+    def test_without_the_flag_nothing_watches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        seen = self._record(monkeypatch)
+        _capture_args(monkeypatch, "_build", result=(0, tmp_path))
+        assert _invoke("build").exit_code == 0
+        assert seen == []
+
+
+class TestValuesReachTheWork:
+    """Options a command declares actually arrive where they are used.
+
+    A command that parses an option and then forgets to pass it on exits 0
+    having done the wrong work, which is the failure this whole layer exists to
+    prevent and the one no exit code reports.
+    """
+
+    def test_jobs_reaches_the_build_tool(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "build.ninja").write_text("")
+        seen: list[object] = []
+        monkeypatch.setattr("pcons.cli._needs_generation", lambda *a, **k: False)
+        monkeypatch.setattr(
+            "pcons.cli.run_ninja", lambda *a, **k: seen.append(k.get("jobs")) or 0
+        )
+        assert _invoke("-B", str(tmp_path), "build", "-j", "3").exit_code == 0
+        assert seen == [3]
+
+    def test_the_graph_option_reaches_the_generate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_args(monkeypatch, "_generate", result=(0, None))
+        assert _invoke("-B", str(tmp_path), "generate", "--graph=g.dot").exit_code == 0
+        assert seen[0]["graph"] == "g.dot"
+
+    def test_no_generator_is_none_rather_than_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """click hands back (), and everything downstream tests truthiness.
+
+        An empty list is falsy too, so this passes either way at the call site
+        and fails only where a generator spec is persisted or merged.
+        """
+        seen = _capture_args(monkeypatch, "_generate", result=(0, None))
+        assert _invoke("-B", str(tmp_path), "generate").exit_code == 0
+        assert seen[0]["generator"] is None
+
+    def test_a_named_generator_arrives_as_a_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_args(monkeypatch, "_generate", result=(0, None))
+        assert _invoke("-B", str(tmp_path), "-G", "make", "generate").exit_code == 0
+        assert seen[0]["generator"] == ["make"]
+
+
+def _walk(command: click.Command) -> Iterator[click.Command]:
+    """Every command in the tree, the groups themselves included.
+
+    A group's callback takes parameters like any other, and `cache` is a group.
+    Reads `commands` rather than `list_commands`, which hides the catch-all.
+    """
+    yield command
+    if isinstance(command, click.Group):
+        for sub in command.commands.values():
+            yield from _walk(sub)
+
+
+def _named_parameters(command: click.Command) -> set[str]:
+    """The callback's own parameters, excluding ctx and any **kw."""
+    callback = command.callback
+    assert callback is not None, command.name
+    params = inspect.signature(callback).parameters
+    return {
+        name
+        for name, p in params.items()
+        if name != "ctx" and p.kind is not p.VAR_KEYWORD
+    }
+
+
+class TestSignaturesMatchTheDecorators:
+    """Nothing else checks the decorators above a command against the
+    parameters below it.
+
+    click calls the callback with the option names as keyword arguments, so a
+    parameter spelled differently from the option that feeds it is a TypeError
+    the first time that command runs. Several commands are only reached by tests
+    that stub the work functions, so that can be a release away.
+
+    Only one direction is checkable. A command takes **kw for what it declares
+    and does not consume, and six do, so "every option has a parameter" cannot
+    fail for them. "Every parameter is a declared option" is the typo direction
+    and is the one that matters.
+    """
+
+    def test_every_named_parameter_is_an_option_the_command_declares(self) -> None:
+        for command in _walk(cli):
+            declared = {
+                p.name for p in command.params if p.expose_value and p.name is not None
+            }
+            assert _named_parameters(command) <= declared, command.name
+
+    def test_every_command_is_walked(self) -> None:
+        """The check above is silent about a command it never reaches."""
+        names = {command.name for command in _walk(cli)}
+        assert {"generate", "build", "clean", "cache", "list", "path", "_default"} <= (
+            names
+        )
