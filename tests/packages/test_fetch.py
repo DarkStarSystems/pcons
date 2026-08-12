@@ -231,6 +231,14 @@ class TestCLICommands:
         # Declaration order, as the argparse subparsers listed them.
         assert out.index("fetch") < out.index("list") < out.index("clean")
 
+    def test_short_help_alias(self, capsys) -> None:
+        assert _run("-h") == 0
+        assert "pcons-fetch" in capsys.readouterr().out
+
+    def test_subcommand_short_help_alias(self, capsys) -> None:
+        assert _run("clean", "-h") == 0
+        assert "--all" in capsys.readouterr().out
+
     def test_version(self, capsys) -> None:
         import pcons
 
