@@ -30,6 +30,7 @@ from pcons._cli_click import (
     jobs_option,
     load_declared_modules,
     pass_pcons_context,
+    run_cli,
     watch_option,
 )
 from pcons.core.errors import PconsError
@@ -1837,27 +1838,9 @@ def cli_default(
     ctx.exit(build_once(project.build_dir if project else build_dir)[0])
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     """Main entry point for the pcons CLI."""
-    try:
-        # windows_expand_args: with args=None on Windows, click applies
-        # expanduser, expandvars and glob to every token. pcons positionals are
-        # build variables and target names, not paths, and the expansion runs
-        # after the shell, so quoting cannot escape it: cmd would keep
-        # "CFLAGS=-DV=%FOO%" literal and click would then substitute it. Unix
-        # has no such rewrite, so leaving it on makes Windows strictly worse.
-        result = cli.main(
-            args=None,
-            prog_name="pcons",
-            standalone_mode=False,
-            windows_expand_args=False,
-        )
-    except click.ClickException as e:
-        e.show()
-        return e.exit_code
-    except click.exceptions.Abort:
-        return 130
-    return result if isinstance(result, int) else 0
+    return run_cli(cli, prog_name="pcons", argv=argv)
 
 
 if __name__ == "__main__":

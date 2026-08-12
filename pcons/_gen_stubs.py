@@ -32,6 +32,7 @@ from pathlib import Path
 
 import click
 
+from pcons._cli_click import run_cli
 from pcons.builders import register_builtin_builders
 from pcons.core.builder_registry import BuilderRegistry
 
@@ -598,18 +599,7 @@ def cli_gen_stubs(check: bool, to_stdout: bool) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    try:
-        result = cli_gen_stubs.main(
-            args=argv, prog_name="python -m pcons._gen_stubs", standalone_mode=False
-        )
-    # standalone_mode=False makes click return the code for ctx.exit() and for
-    # --help itself, and re-raise only these two.
-    except click.ClickException as e:
-        e.show()
-        return e.exit_code
-    except click.exceptions.Abort:
-        return 130
-    return int(result or 0)
+    return run_cli(cli_gen_stubs, prog_name="python -m pcons._gen_stubs", argv=argv)
 
 
 if __name__ == "__main__":

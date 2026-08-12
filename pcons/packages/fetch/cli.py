@@ -24,7 +24,7 @@ from typing import Any
 import click
 
 from pcons import __version__
-from pcons._cli_click import MergingGroup
+from pcons._cli_click import MergingGroup, run_cli
 from pcons.packages.description import PackageDescription
 
 logger = logging.getLogger("pcons-fetch")
@@ -740,16 +740,7 @@ def cmd_clean(deps_dir: str, remove_all: bool, verbose: bool, debug: bool) -> in
 
 def main(argv: list[str] | None = None) -> int:
     """Main entry point for pcons-fetch."""
-    try:
-        result = cli.main(args=argv, prog_name="pcons-fetch", standalone_mode=False)
-    # standalone_mode=False makes click return the code for ctx.exit() and for
-    # --help itself, and re-raise only these two.
-    except click.ClickException as e:
-        e.show()
-        return e.exit_code
-    except click.exceptions.Abort:
-        return 130
-    return int(result or 0)
+    return run_cli(cli, prog_name="pcons-fetch", argv=argv)
 
 
 if __name__ == "__main__":
