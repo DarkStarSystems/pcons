@@ -15,6 +15,7 @@ into, instead of two parsers repeating the same lists and drifting apart.
 
 from __future__ import annotations
 
+import io
 import os
 from collections.abc import Callable
 from functools import update_wrapper
@@ -25,7 +26,12 @@ import click
 from click.core import ParameterSource
 
 import pcons
-from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
+from pcons.core.debug import (
+    SUBSYSTEM_DESCRIPTIONS,
+    SubsystemListRequested,
+    UnknownSubsystemsError,
+    print_subsystems,
+)
 
 F = TypeVar("F", bound=Callable[..., Any])
 P = ParamSpec("P")
@@ -149,7 +155,9 @@ def configure_logging(ctx: click.Context) -> None:
 
     ``--debug`` names subsystems on `pcons` and is a plain flag on
     `pcons-fetch`, which has no subsystems of its own to name. A flag means
-    all of them.
+    all of them. What the spec asks for is rendered here rather than in
+    `init_debug`, so a bad one reaches the shell as a usage error rather than
+    as a SystemExit raised past the entry point's own error handling.
     """
     params = ctx.params
     if "verbose" not in params and "debug" not in params:
@@ -162,7 +170,16 @@ def configure_logging(ctx: click.Context) -> None:
     # Imported here because `pcons.cli` imports this module, not the reverse.
     from pcons.cli import setup_logging
 
-    setup_logging(bool(params.get("verbose", False)), cast("str | None", debug))
+    try:
+        setup_logging(bool(params.get("verbose", False)), cast("str | None", debug))
+    except SubsystemListRequested:
+        print_subsystems()
+        raise click.exceptions.Exit(0) from None
+    except UnknownSubsystemsError as e:
+        message = io.StringIO()
+        print(e, file=message)
+        print_subsystems(file=message)
+        raise click.UsageError(message.getvalue().rstrip("\n")) from None
 
 
 def load_declared_modules(command: click.Command, ctx: click.Context) -> None:
