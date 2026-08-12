@@ -130,8 +130,8 @@ script to find its verbs.
 click's conventions are pcons' conventions here:
 
 ```python
-raise click.ClickException("no device found")   # message, exit 1
-ctx.exit(3)                                     # exit code of your own
+raise click.ClickException("no device found")  # message, exit 1
+ctx.exit(3)  # exit code of your own
 ```
 
 with `ctx` from `@click.pass_context`. A returned value is ignored, exactly as
