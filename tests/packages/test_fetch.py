@@ -485,7 +485,7 @@ class TestFetchCliDispatch:
         assert calls == [
             (
                 "cmd_clean",
-                {"deps_dir": "D", "all": True, "verbose": False, "debug": False},
+                {"deps_dir": "D", "remove_all": True, "verbose": False, "debug": False},
             )
         ]
 

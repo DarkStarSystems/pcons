@@ -708,9 +708,15 @@ def cmd_list(deps_file: str, verbose: bool, debug: bool) -> int:
 @click.option(
     "-d", "--deps-dir", default=".deps", help="Dependencies directory (default: .deps)"
 )
-@click.option("-a", "--all", is_flag=True, help="Remove everything including sources")
+@click.option(
+    "-a",
+    "--all",
+    "remove_all",
+    is_flag=True,
+    help="Remove everything including sources",
+)
 @_verbosity
-def cmd_clean(deps_dir: str, all: bool, verbose: bool, debug: bool) -> int:
+def cmd_clean(deps_dir: str, remove_all: bool, verbose: bool, debug: bool) -> int:
     """Remove the build directory, or with --all the whole deps directory."""
     deps_path = Path(deps_dir)
 
@@ -718,7 +724,7 @@ def cmd_clean(deps_dir: str, all: bool, verbose: bool, debug: bool) -> int:
         logger.info("Dependencies directory does not exist: %s", deps_path)
         return 0
 
-    if all:
+    if remove_all:
         logger.info("Removing entire dependencies directory: %s", deps_path)
         shutil.rmtree(deps_path)
     else:
