@@ -128,7 +128,7 @@ jobs:
       - name: Install dependencies
         run: uv sync
       - name: Run example tests
-        run: uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
+        run: uv run pytest tests/test_examples.py -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
