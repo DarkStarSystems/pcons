@@ -229,6 +229,45 @@ class TestRcBlock:
         assert updated == content
 
 
+class TestLineEndings:
+    """An rc file keeps the endings it had, and scripts are written LF.
+
+    Text mode writes `os.linesep`, so on Windows editing an LF `.bashrc` would
+    return it entirely CRLF, and msys shells read the `\\r` as part of the
+    command.
+    """
+
+    def test_a_crlf_rc_file_stays_crlf(self, fake_home: Path) -> None:
+        rc = fake_home / ".bashrc"
+        rc.write_bytes(b"export FOO=1\r\n")
+        _invoke("completion", "install", "bash", "-y")
+        content = rc.read_bytes()
+        assert b"\r\n" in content
+        assert b"\n" not in content.replace(b"\r\n", b"")
+
+    def test_an_lf_rc_file_stays_lf(self, fake_home: Path) -> None:
+        rc = fake_home / ".bashrc"
+        rc.write_bytes(b"export FOO=1\n")
+        _invoke("completion", "install", "bash", "-y")
+        assert b"\r" not in rc.read_bytes()
+
+    def test_uninstall_keeps_the_endings_install_found(self, fake_home: Path) -> None:
+        rc = fake_home / ".zshrc"
+        rc.write_bytes(b"export FOO=1\r\n")
+        _invoke("completion", "install", "zsh", "-y")
+        _invoke("completion", "uninstall", "zsh")
+        assert rc.read_bytes() == b"export FOO=1\r\n"
+
+    @pytest.mark.parametrize("shell", SHELLS)
+    def test_the_script_is_written_lf(self, shell: str) -> None:
+        _invoke("completion", "install", shell, "-y")
+        assert b"\r" not in layout(shell).script.read_bytes()
+
+    def test_a_new_rc_file_is_written_lf(self, fake_home: Path) -> None:
+        _invoke("completion", "install", "bash", "-y")
+        assert b"\r" not in (fake_home / ".bashrc").read_bytes()
+
+
 class TestCompletionLayout:
     """Every shell gets a location, and only fish needs no startup file."""
 

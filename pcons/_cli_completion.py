@@ -129,6 +129,30 @@ def resolve_shell(shell: str | None) -> str:
     return name
 
 
+def read_lines(path: Path) -> tuple[str, str]:
+    """`path` with its newlines as ``\\n``, and the ending it actually uses.
+
+    Text mode would hide the difference on the way in and then rewrite every
+    line on the way out, in `os.linesep`: an LF `.bashrc` edited on Windows
+    comes back CRLF entirely, and msys shells read `\\r` as part of the command.
+    So endings are read raw and given back to `write_lines` to restore.
+    """
+    with path.open(encoding="utf-8", newline="") as f:
+        content = f.read()
+    eol = "\r\n" if "\r\n" in content else "\n"
+    return content.replace("\r\n", "\n"), eol
+
+
+def write_lines(path: Path, content: str, eol: str = "\n") -> None:
+    """Write `content`, which uses ``\\n``, with `eol` for every line ending.
+
+    LF by default, because the files this writes are read by shells that accept
+    it everywhere and by msys shells that break on CRLF.
+    """
+    with path.open("w", encoding="utf-8", newline="") as f:
+        f.write(content.replace("\n", eol))
+
+
 def _block(lines: tuple[str, ...]) -> str:
     return "\n".join([_BEGIN, *lines, _END]) + "\n"
 
@@ -200,15 +224,15 @@ def install(shell: str | None, *, assume_yes: bool) -> int:
         return 1
 
     target.script.parent.mkdir(parents=True, exist_ok=True)
-    target.script.write_text(script_for(target.shell), encoding="utf-8")
+    write_lines(target.script, script_for(target.shell))
     click.echo(f"{target.shell} completion installed in {target.script}.")
 
     if target.rc is not None:
-        content = target.rc.read_text(encoding="utf-8") if target.rc.is_file() else ""
+        content, eol = read_lines(target.rc) if target.rc.is_file() else ("", "\n")
         updated, changed = add_block(content, target.rc_lines)
         if changed:
             target.rc.parent.mkdir(parents=True, exist_ok=True)
-            target.rc.write_text(updated, encoding="utf-8")
+            write_lines(target.rc, updated, eol)
             click.echo(f"Wired up in {target.rc}.")
         else:
             click.echo(f"Already wired up in {target.rc}.")
@@ -228,10 +252,10 @@ def uninstall(shell: str | None) -> int:
         removed = True
 
     if target.rc is not None and target.rc.is_file():
-        content = target.rc.read_text(encoding="utf-8")
+        content, eol = read_lines(target.rc)
         updated, changed = remove_block(content)
         if changed:
-            target.rc.write_text(updated, encoding="utf-8")
+            write_lines(target.rc, updated, eol)
             click.echo(f"Removed the {PROG_NAME} lines from {target.rc}.")
             removed = True
 
