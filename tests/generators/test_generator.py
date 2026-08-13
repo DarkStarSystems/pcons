@@ -2,11 +2,15 @@
 """Tests for pcons.generators.generator."""
 
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator, Generator, MultiGenerator
+from tests.support import subprocess_env
 
 
 class MockGenerator(BaseGenerator):
@@ -148,6 +152,43 @@ class TestDeferredGenerate:
 
         assert exc_info.value.args[0] == 1
         assert "atexit failure" in capsys.readouterr().err
+
+
+class TestAtexitGenerationInASubprocess:
+    """The atexit hook only exists for ``python pcons-build.py``, and calling
+    ``_generate_pending`` in-process does not reproduce what the interpreter
+    does at shutdown. These tests run a real script in a real subprocess.
+
+    The hook is the whole point of the ``direct`` invocation, and until this
+    class existed nothing executed it: ``tests/test_examples.py`` reached the
+    same generation through ``run_script()``, which is the CLI's own function.
+    """
+
+    def _run(self, script: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [sys.executable, str(script)],
+            cwd=script.parent,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=subprocess_env(),
+        )
+
+    def test_direct_script_run_writes_build_files(self, tmp_path):
+        """A build script run directly must leave a usable build.ninja."""
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "project = Project('atexit_probe')\n"
+            "env = project.Environment(toolchain='c')\n"
+            "project.Program('hello', env, sources=['hello.c'])\n"
+        )
+
+        result = self._run(script)
+
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "build" / "build.ninja").exists(), result.stderr
 
 
 class TestMultiGenerator:
