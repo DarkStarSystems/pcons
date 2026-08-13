@@ -126,7 +126,7 @@ def _origin_of(func: Callable[..., Any]) -> str:
 
 def _record(command: click.Command, func: Callable[..., Any]) -> None:
     name = command.name
-    if name is None:  # click derives one from the function; belt and braces
+    if not name:
         raise PconsError("A declared CLI command must have a name")
     origin = _origin_of(func)
     declared_in = _declaring_module(func)

@@ -262,6 +262,25 @@ class TestConflicts:
         with pytest.raises(PconsError, match="flash"):
             pcons.cli_command("flash")(as_module("mine", lambda: None))
 
+    def test_a_module_re_declaring_after_a_script_ran_still_raises(self) -> None:
+        """Entering a script scope clears the duplicate tracking, but a module's
+        declarations outlive it: they are not what a re-exec re-declares. The
+        second one is still the same module declaring one name twice, and the
+        check that catches it is not the one the test above exercises."""
+        pcons.cli_command("flash")(as_module("mine", lambda: None))
+        with commands.script_scope():
+            pass
+
+        with pytest.raises(PconsError, match="flash"):
+            pcons.cli_command("flash")(as_module("mine", lambda: None))
+
+    def test_an_empty_name_is_refused(self) -> None:
+        """click fills a missing name in from the function, so the reachable
+        mistake is the empty spelling, not the absent one. Registering it would
+        put a command in the listing that no `pcons run` line can name."""
+        with pytest.raises(PconsError, match="must have a name"):
+            pcons.cli_command("")(lambda: None)
+
     def test_a_helper_and_the_script_body_clashing_raises_on_every_run(self) -> None:
         """The helper's decorator fires once and is then cached in sys.modules,
         while the body re-declares every run. Reported on the first run and

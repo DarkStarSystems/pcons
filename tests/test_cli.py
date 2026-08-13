@@ -1501,6 +1501,20 @@ class TestRunGroup:
         assert "pcons generate" in result.stdout
         assert not (tmp_path / "ran-marker").exists()
 
+    def test_an_empty_listing_prints_no_commands_section(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--help` takes the other path into `format_commands`, which must not
+        write an empty "Commands:" heading with nothing under it."""
+        self._project(tmp_path, monkeypatch)
+
+        result = _invoke("run", "--help")
+
+        assert result.exit_code == 0
+        assert "Commands:" not in result.stdout
+        assert "Options:" in result.stdout
+        assert not (tmp_path / "ran-marker").exists()
+
     @pytest.mark.parametrize(
         "argv",
         [
@@ -1800,6 +1814,134 @@ class TestRunGroup:
             "completion",
         ]
         assert short_help["run"] == "Run a command declared by the build script"
+
+
+class TestTheListingSurvivesAnUnexpectedCache:
+    """A build directory outlives a pcons upgrade, and the cache has no schema
+    version, so `_cached_rows` skips what it does not recognise rather than
+    raising. Nothing else writes that key, so these shapes come from a pcons
+    that wrote it differently, not from a user."""
+
+    @pytest.fixture
+    def listing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> Callable[[object], list[tuple[str, str]]]:
+        def read(entries: object) -> list[tuple[str, str]]:
+            monkeypatch.setattr(
+                cli_module, "_open_cache", lambda _dir: {"commands": entries}
+            )
+            group = cli_module.RunGroup("run")
+            return group._cached_rows(click.Context(group))
+
+        return read
+
+    def test_an_entry_that_is_not_a_dict_is_skipped(
+        self, listing: Callable[[object], list[tuple[str, str]]]
+    ) -> None:
+        assert listing(["not-a-dict", {"name": "flash", "help": "Flash."}]) == [
+            ("flash", "Flash.")
+        ]
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            pytest.param({"help": "no name at all"}, id="absent"),
+            pytest.param({"name": "", "help": "empty"}, id="empty"),
+            pytest.param({"name": 7, "help": "not a string"}, id="not-a-string"),
+        ],
+    )
+    def test_an_entry_without_a_usable_name_is_skipped(
+        self, entry: object, listing: Callable[[object], list[tuple[str, str]]]
+    ) -> None:
+        assert listing([entry, {"name": "flash", "help": "Flash."}]) == [
+            ("flash", "Flash.")
+        ]
+
+    def test_a_help_that_is_not_a_string_becomes_empty(
+        self, listing: Callable[[object], list[tuple[str, str]]]
+    ) -> None:
+        assert listing([{"name": "flash", "help": 7}]) == [("flash", "")]
+
+    def test_a_commands_key_that_is_not_a_list_lists_nothing(
+        self, listing: Callable[[object], list[tuple[str, str]]]
+    ) -> None:
+        assert listing({"flash": "Flash."}) == []
+
+
+class TestTheListingFallsBackWhenTheOptionIsMissing:
+    """`_build_dir` reads the group's own `-B`. These are the paths where that
+    option cannot answer: the whole point of not hard-coding "build" is that
+    `common_options` declares it with an envvar, so the fallbacks have to be
+    reached in the right order."""
+
+    def test_a_group_without_the_option_falls_back(self) -> None:
+        """`RunGroup` is constructed by the decorator, which applies
+        `common_options`. Built bare, it has no `-B` to ask."""
+        group = cli_module.RunGroup("run")
+        assert group._build_dir_option() is None
+
+        assert group._build_dir(click.Context(group)) == Path("build")
+
+    def test_an_option_with_no_envvar_and_no_default_falls_back(self) -> None:
+        group = cli_module.RunGroup(
+            "run",
+            params=[click.Option(["-B", "--build-dir"], "build_dir", default=None)],
+        )
+
+        assert group._build_dir(click.Context(group)) == Path("build")
+
+    def test_the_environment_is_read_before_the_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
+        group = cli_module.RunGroup(
+            "run",
+            params=[
+                click.Option(
+                    ["-B", "--build-dir"],
+                    "build_dir",
+                    default="from-default",
+                    envvar="PCONS_BUILD_DIR",
+                )
+            ],
+        )
+
+        assert group._build_dir(click.Context(group)) == Path("from-env")
+
+    def test_the_default_is_read_when_the_environment_is_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        group = cli_module.RunGroup(
+            "run",
+            params=[
+                click.Option(
+                    ["-B", "--build-dir"],
+                    "build_dir",
+                    default="from-default",
+                    envvar="PCONS_BUILD_DIR",
+                )
+            ],
+        )
+
+        assert group._build_dir(click.Context(group)) == Path("from-default")
+
+    def test_a_group_with_no_help_option_is_left_alone(self) -> None:
+        """`get_help_option` demotes the option click builds. A group built
+        without one has nothing to demote, and must not fail reaching for it."""
+        group = cli_module.RunGroup("run", add_help_option=False)
+
+        assert group.get_help_option(click.Context(group)) is None
+
+    def test_the_help_option_is_demoted(self) -> None:
+        """The other side of the same method, and the reason it exists: an eager
+        help would print the listing before `-B` had been parsed."""
+        group = cli_module.RunGroup("run")
+
+        option = group.get_help_option(click.Context(group))
+
+        assert option is not None
+        assert option.is_eager is False
 
 
 class TestRunCompletion:
