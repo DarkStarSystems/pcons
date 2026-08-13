@@ -114,6 +114,10 @@ uv add pcons
 pip install pcons
 ```
 
+Once installed, `pcons completion install` sets up tab completion for bash, zsh
+or fish. See the [command-line
+reference](https://pcons.readthedocs.io/en/latest/cli/#pcons-completion).
+
 ### Using the development version
 
 To try the latest development version straight from GitHub:

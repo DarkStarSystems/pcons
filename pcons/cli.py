@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import click
 from click.core import ParameterSource
 
-from pcons import __version__
+from pcons import __version__, _cli_completion
 from pcons._cli_click import (
     DefaultCommand,
     PconsContext,
@@ -1759,6 +1759,61 @@ def cli_test(ctx: PconsContext, argv: tuple[str, ...]) -> None:
     ):
         forwarded = ["-B", str(parent.params["build_dir"])]
     ctx.exit(test_main(forwarded + list(argv)))
+
+
+@cli.group(
+    "completion",
+    short_help="Set up tab completion for your shell",
+    help=(
+        "Set up tab completion for your shell.\n\n"
+        "The script is generated from the command tree, so it completes command "
+        "names, option names and the values of options that have a fixed set. "
+        "SHELL is bash, zsh or fish, and defaults to what $SHELL names."
+    ),
+)
+@directory_option
+def cli_completion() -> None:
+    pass
+
+
+@cli_completion.command("show", short_help="Print the completion script")
+@directory_option
+@click.argument("shell", type=click.Choice(_cli_completion.SHELLS), required=False)
+@pass_pcons_context
+def cli_completion_show(ctx: PconsContext, shell: str | None) -> None:
+    """Print the completion script on stdout, for the shell to evaluate.
+
+    Nothing outside the project is written, so this is the form to put in a
+    startup file yourself: eval "$(pcons completion show)".
+    """
+    ctx.exit(_cli_completion.emit(shell))
+
+
+@cli_completion.command("install", short_help="Write the script and wire it up")
+@directory_option
+@click.option(
+    "-y", "--yes", "assume_yes", is_flag=True, default=False, help="Do not ask first"
+)
+@click.argument("shell", type=click.Choice(_cli_completion.SHELLS), required=False)
+@pass_pcons_context
+def cli_completion_install(
+    ctx: PconsContext, shell: str | None, assume_yes: bool
+) -> None:
+    """Write the completion script where the shell reads it.
+
+    For bash and zsh a startup file gains a few lines, which are shown for
+    confirmation first. Both edits are undone by 'pcons completion uninstall'.
+    """
+    ctx.exit(_cli_completion.install(shell, assume_yes=assume_yes))
+
+
+@cli_completion.command("uninstall", short_help="Undo what install wrote")
+@directory_option
+@click.argument("shell", type=click.Choice(_cli_completion.SHELLS), required=False)
+@pass_pcons_context
+def cli_completion_uninstall(ctx: PconsContext, shell: str | None) -> None:
+    """Remove the completion script and the startup lines that read it."""
+    ctx.exit(_cli_completion.uninstall(shell))
 
 
 @cli.command("_default", cls=DefaultCommand, hidden=True, loads_modules=True)
