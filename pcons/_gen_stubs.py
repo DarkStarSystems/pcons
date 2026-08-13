@@ -24,13 +24,15 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
 import inspect
 import sys
 from collections.abc import Callable, Sequence
 from inspect import Parameter
 from pathlib import Path
 
+import click
+
+from pcons._cli_click import run_cli
 from pcons.builders import register_builtin_builders
 from pcons.core.builder_registry import BuilderRegistry
 
@@ -582,14 +584,22 @@ def write_or_check(mode: str) -> int:
     return rc
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__)
-    g = ap.add_mutually_exclusive_group()
-    g.add_argument("--check", action="store_true", help="Fail if file is stale")
-    g.add_argument("--print", action="store_true", help="Print to stdout")
-    args = ap.parse_args(argv)
-    mode = "check" if args.check else "print" if args.print else "write"
+@click.command(
+    "pcons._gen_stubs", context_settings={"help_option_names": ["-h", "--help"]}
+)
+@click.option("--check", is_flag=True, help="Fail if file is stale")
+# Named to_stdout because `print` as a parameter would shadow the builtin.
+@click.option("--print", "to_stdout", is_flag=True, help="Print to stdout")
+def cli_gen_stubs(check: bool, to_stdout: bool) -> int:
+    """Regenerate the typed-stub mixins, or check the committed ones."""
+    if check and to_stdout:
+        raise click.UsageError("--check and --print are mutually exclusive")
+    mode = "check" if check else "print" if to_stdout else "write"
     return write_or_check(mode)
+
+
+def main(argv: list[str] | None = None) -> int:
+    return run_cli(cli_gen_stubs, prog_name="python -m pcons._gen_stubs", argv=argv)
 
 
 if __name__ == "__main__":

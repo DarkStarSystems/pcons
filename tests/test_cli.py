@@ -1203,7 +1203,7 @@ class TestCLIArgumentParsing:
         assert "--jobs" in result.stdout
 
     def test_test_subcommand_dispatches_to_runner(self, tmp_path: Path) -> None:
-        """`pcons test` dispatches to pcons.test_runner without argparse."""
+        """`pcons test` hands its argv to pcons.test_runner, which owns them."""
         # Hand-build a manifest so the runner has something to operate on.
         import json as _json
 
@@ -1237,8 +1237,8 @@ class TestCLIArgumentParsing:
         as the value of --build-dir, once as the actual subcommand. Locating
         the dispatch point by scanning raw argv for the literal string
         "test" (sys.argv.index("test")) finds the option value first and
-        hands the runner a bogus leading "test" positional, which its
-        argparse rejects. The option's value must be consumed as a value
+        hands the runner a bogus leading "test" positional, which the
+        runner rejects. The option's value must be consumed as a value
         before the first remaining token is read as the command.
         """
         import json as _json
@@ -2867,6 +2867,45 @@ class TestLoggingIsSetUpFromTheMergedOptions:
         seen = _capture_test_runner(monkeypatch)
         assert _invoke("--debug", "bogus", "test", "--list").exit_code == 0
         assert seen == [["--list"]]
+
+
+class TestDebugSpecReachesTheShell:
+    """A bad --debug or PCONS_DEBUG comes out of the entry point, not past it.
+
+    init_debug used to print and raise SystemExit from inside the command
+    callback, so the code the shell saw came from neither `main` nor click.
+    """
+
+    def test_unknown_subsystem_is_a_usage_error(self) -> None:
+        result = _invoke("--debug", "bogus", "cache", "path")
+        assert result.exit_code == 2
+        assert "Unknown debug subsystem(s): bogus" in result.output
+        assert "configure" in result.output
+
+    def test_unknown_subsystem_names_only_the_unknown_ones(self) -> None:
+        result = _invoke("--debug", "resolve,bogus", "cache", "path")
+        assert result.exit_code == 2
+        assert "Unknown debug subsystem(s): bogus" in result.output
+
+    def test_help_lists_the_subsystems_and_exits_zero(self) -> None:
+        result = _invoke("--debug", "help", "cache", "path")
+        assert result.exit_code == 0
+        assert "Available debug subsystems" in result.output
+
+    def test_the_environment_variable_takes_the_same_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PCONS_DEBUG", "bogus")
+        result = _invoke("cache", "path")
+        assert result.exit_code == 2
+        assert "Unknown debug subsystem(s): bogus" in result.output
+
+    def test_main_returns_the_code_rather_than_exiting(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The point of the change: `main` produces it, so it can be read."""
+        monkeypatch.setenv("PCONS_DEBUG", "bogus")
+        assert cli_module.main(["cache", "path"]) == 2
 
 
 class TestModulesAreLoadedWhereTheyAreDeclared:

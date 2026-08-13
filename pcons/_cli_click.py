@@ -15,6 +15,7 @@ into, instead of two parsers repeating the same lists and drifting apart.
 
 from __future__ import annotations
 
+import io
 import os
 from collections.abc import Callable
 from functools import update_wrapper
@@ -25,7 +26,12 @@ import click
 from click.core import ParameterSource
 
 import pcons
-from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
+from pcons.core.debug import (
+    SUBSYSTEM_DESCRIPTIONS,
+    SubsystemListRequested,
+    UnknownSubsystemsError,
+    print_subsystems,
+)
 
 F = TypeVar("F", bound=Callable[..., Any])
 P = ParamSpec("P")
@@ -63,6 +69,44 @@ def pass_pcons_context(f: Callable[Concatenate[PconsContext, P], R]) -> Callable
         return f(cast(PconsContext, click.get_current_context()), *args, **kwargs)
 
     return update_wrapper(wrapper, f)
+
+
+def run_cli(
+    command: click.Command,
+    *,
+    prog_name: str,
+    argv: list[str] | None = None,
+    **kwargs: Any,
+) -> int:
+    """Run *command* and return the exit code, rather than exiting.
+
+    The four entry points all need this: `pcons` and `pcons-fetch` are console
+    scripts, `pcons test` is called in process by `pcons.cli`, and every one of
+    them has to turn what click raises into a number.
+
+    ``standalone_mode=False`` makes click return the code for ``ctx.exit()``
+    and for ``--help`` itself, and re-raise only the two caught here.
+
+    ``windows_expand_args`` is off: with ``argv=None`` on Windows click applies
+    expanduser, expandvars and glob to every token. None of these commands take
+    a pattern -- they take build variables, target names, label filters and
+    name regexes -- and the expansion runs after the shell, so quoting cannot
+    escape it.
+    """
+    try:
+        result = command.main(
+            args=argv,
+            prog_name=prog_name,
+            standalone_mode=False,
+            windows_expand_args=False,
+            **kwargs,
+        )
+    except click.ClickException as e:
+        e.show()
+        return e.exit_code
+    except click.exceptions.Abort:
+        return 130
+    return result if isinstance(result, int) else 0
 
 
 def _adopt_options_spelled_earlier(command: click.Command, ctx: click.Context) -> None:
@@ -108,17 +152,34 @@ def configure_logging(ctx: click.Context) -> None:
     without ``-v`` settles on beats one spelled before it, and that ``--debug``
     is validated for a command that never reads it: `pcons test` hands its argv
     to another program with its own logging.
+
+    ``--debug`` names subsystems on `pcons` and is a plain flag on
+    `pcons-fetch`, which has no subsystems of its own to name. A flag means
+    all of them. What the spec asks for is rendered here rather than in
+    `init_debug`, so a bad one reaches the shell as a usage error rather than
+    as a SystemExit raised past the entry point's own error handling.
     """
     params = ctx.params
     if "verbose" not in params and "debug" not in params:
         return
 
+    debug = params.get("debug")
+    if isinstance(debug, bool):
+        debug = "all" if debug else None
+
     # Imported here because `pcons.cli` imports this module, not the reverse.
     from pcons.cli import setup_logging
 
-    setup_logging(
-        bool(params.get("verbose", False)), cast("str | None", params.get("debug"))
-    )
+    try:
+        setup_logging(bool(params.get("verbose", False)), cast("str | None", debug))
+    except SubsystemListRequested:
+        print_subsystems()
+        raise click.exceptions.Exit(0) from None
+    except UnknownSubsystemsError as e:
+        message = io.StringIO()
+        print(e, file=message)
+        print_subsystems(file=message)
+        raise click.UsageError(message.getvalue().rstrip("\n")) from None
 
 
 def load_declared_modules(command: click.Command, ctx: click.Context) -> None:

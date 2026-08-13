@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import subprocess
 import sys
 import tarfile
@@ -15,29 +16,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pcons.packages.fetch import cli as fetch_cli
 from pcons.packages.fetch.cli import (
     download_source,
     fetch_package,
     generate_package_description,
     load_deps_file,
-    setup_logging,
 )
-
-
-class TestSetupLogging:
-    """Tests for setup_logging."""
-
-    def test_setup_logging_normal(self) -> None:
-        """Test normal logging setup."""
-        setup_logging(verbose=False, debug=False)
-
-    def test_setup_logging_verbose(self) -> None:
-        """Test verbose logging setup."""
-        setup_logging(verbose=True, debug=False)
-
-    def test_setup_logging_debug(self) -> None:
-        """Test debug logging setup."""
-        setup_logging(verbose=False, debug=True)
 
 
 class TestLoadDepsFile:
@@ -182,45 +167,92 @@ class TestGeneratePackageDescription:
         assert pkg.libraries == ["z"]
 
 
+def _record_handlers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, dict[str, Any]]]:
+    """Replace what each subcommand runs with a recorder, and return the log.
+
+    Each entry is the command's name and the arguments it was handed. The
+    callback is swapped rather than the module attribute, because that is the
+    one reference both the ordinary dispatch and the group's `ctx.invoke`
+    default path go through.
+    """
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def recorder(name: str) -> Any:
+        def record(**kwargs: Any) -> int:
+            calls.append((f"cmd_{name}", dict(kwargs)))
+            return 0
+
+        return record
+
+    for name in ("fetch", "list", "clean"):
+        monkeypatch.setattr(fetch_cli.cli.commands[name], "callback", recorder(name))
+    return calls
+
+
+def _run(*argv: str) -> int:
+    """Run pcons-fetch in this process and return its exit code.
+
+    `main()` rather than `CliRunner().invoke(cli, ...)`, which is what
+    tests/test_cli.py uses: there the click group is the unit under test, here
+    the entry point is. `pyproject.toml` wires `pcons-fetch` to this function,
+    and it is the wrapper that turns click's exceptions into the code the shell
+    sees. Going in through the group would leave that untested.
+
+    The commands configure logging with `basicConfig(force=True)`, which binds
+    a handler to whatever `sys.stderr` is at the time, here pytest's capture
+    buffer. The handlers are restored so that buffer does not swallow the log
+    output of every later test in the session, as `_invoke` does in
+    tests/test_cli.py.
+    """
+    handlers = logging.root.handlers[:]
+    level = logging.root.level
+    try:
+        return fetch_cli.main(list(argv))
+    finally:
+        logging.root.handlers[:] = handlers
+        logging.root.setLevel(level)
+
+
 class TestCLICommands:
-    """Tests for CLI commands."""
+    """Each subcommand end to end, running the real handler.
 
-    def test_help(self) -> None:
-        """Test pcons-fetch --help."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.packages.fetch.cli", "--help"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert "pcons-fetch" in result.stdout
+    In process rather than by subprocess: the assertions are the same and a
+    body only reached through `subprocess.run` is invisible to coverage, which
+    is how these bodies went unmeasured while looking tested.
+    `test_module_entry_point` below still pins the `python -m` path.
+    """
 
-    def test_version(self) -> None:
-        """Test pcons-fetch --version."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.packages.fetch.cli", "--version"],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        # Check version is present (don't hardcode specific version)
+    def test_help(self, capsys) -> None:
+        assert _run("--help") == 0
+        out = capsys.readouterr().out
+        assert "pcons-fetch" in out
+        # Declaration order, as the argparse subparsers listed them.
+        assert out.index("fetch") < out.index("list") < out.index("clean")
+
+    def test_short_help_alias(self, capsys) -> None:
+        assert _run("-h") == 0
+        assert "pcons-fetch" in capsys.readouterr().out
+
+    def test_subcommand_short_help_alias(self, capsys) -> None:
+        assert _run("clean", "-h") == 0
+        assert "--all" in capsys.readouterr().out
+
+    def test_version(self, capsys) -> None:
         import pcons
 
-        assert pcons.__version__ in result.stdout
+        assert _run("--version") == 0
+        assert pcons.__version__ in capsys.readouterr().out
 
-    def test_list_no_deps_file(self, tmp_path: Path) -> None:
-        """Test pcons-fetch list with no deps file."""
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.packages.fetch.cli", "list"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode != 0
-        assert "not found" in result.stderr
+    def test_list_no_deps_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        assert _run("list") == 1
+        assert "not found" in capsys.readouterr().err
 
-    def test_list_with_deps_file(self, tmp_path: Path) -> None:
-        """Test pcons-fetch list with a deps file."""
+    def test_list_with_deps_file(self, tmp_path: Path, capsys) -> None:
         deps_file = tmp_path / "deps.toml"
         deps_file.write_text(
             """\
@@ -236,112 +268,288 @@ build = "autotools"
 """
         )
 
-        result = subprocess.run(
-            [sys.executable, "-m", "pcons.packages.fetch.cli", "list", str(deps_file)],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
-        assert "zlib" in result.stdout
-        assert "1.2.13" in result.stdout
-        assert "openssl" in result.stdout
-        assert "cmake" in result.stdout
-        assert "autotools" in result.stdout
+        assert _run("list", str(deps_file)) == 0
+
+        out = capsys.readouterr().out
+        assert "zlib" in out
+        assert "1.2.13" in out
+        assert "openssl" in out
+        assert "cmake" in out
+        assert "autotools" in out
+
+    def test_list_empty_packages(self, tmp_path: Path, capsys) -> None:
+        deps_file = tmp_path / "deps.toml"
+        deps_file.write_text("[packages]\n")
+
+        assert _run("list", str(deps_file)) == 0
+        assert "No packages defined" in capsys.readouterr().out
+
+    def test_list_unparseable_deps_file(self, tmp_path: Path, capsys) -> None:
+        deps_file = tmp_path / "deps.toml"
+        deps_file.write_text("this is not toml [[[\n")
+
+        assert _run("list", str(deps_file)) == 1
+        assert "Failed to parse" in capsys.readouterr().err
 
     def test_clean_nonexistent_dir(self, tmp_path: Path) -> None:
-        """Test pcons-fetch clean with non-existent dir."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pcons.packages.fetch.cli",
-                "clean",
-                "--deps-dir",
-                str(tmp_path / "nonexistent"),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
+        missing = tmp_path / "nonexistent"
+        assert _run("clean", "--deps-dir", str(missing)) == 0
 
     def test_clean_build_dir(self, tmp_path: Path) -> None:
-        """Test pcons-fetch clean removes build dir."""
         deps_dir = tmp_path / ".deps"
         build_dir = deps_dir / "build"
         build_dir.mkdir(parents=True)
         (build_dir / "testfile").write_text("test")
 
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pcons.packages.fetch.cli",
-                "clean",
-                "--deps-dir",
-                str(deps_dir),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
+        assert _run("clean", "--deps-dir", str(deps_dir)) == 0
+
         assert not build_dir.exists()
         assert deps_dir.exists()  # Parent should still exist
 
+    def test_clean_leaves_a_deps_dir_with_no_build(self, tmp_path: Path) -> None:
+        deps_dir = tmp_path / ".deps"
+        (deps_dir / "src").mkdir(parents=True)
+
+        assert _run("clean", "--deps-dir", str(deps_dir)) == 0
+
+        assert (deps_dir / "src").exists()
+
     def test_clean_all(self, tmp_path: Path) -> None:
-        """Test pcons-fetch clean --all removes everything."""
         deps_dir = tmp_path / ".deps"
         deps_dir.mkdir()
         (deps_dir / "testfile").write_text("test")
 
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pcons.packages.fetch.cli",
-                "clean",
-                "--all",
-                "--deps-dir",
-                str(deps_dir),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0
+        assert _run("clean", "--all", "--deps-dir", str(deps_dir)) == 0
+
         assert not deps_dir.exists()
 
-    def test_fetch_no_deps_file(self, tmp_path: Path) -> None:
-        """Test pcons-fetch fetch with no deps file."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pcons.packages.fetch.cli",
-                "fetch",
-                str(tmp_path / "nonexistent.toml"),
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode != 0
+    def test_fetch_no_deps_file(self, tmp_path: Path, capsys) -> None:
+        assert _run("fetch", str(tmp_path / "nonexistent.toml")) == 1
+        assert "not found" in capsys.readouterr().err
 
-    def test_fetch_empty_packages(self, tmp_path: Path) -> None:
-        """Test pcons-fetch fetch with empty packages list."""
+    def test_fetch_empty_packages(self, tmp_path: Path, capsys) -> None:
         deps_file = tmp_path / "deps.toml"
         deps_file.write_text("[packages]\n")
 
+        # Should succeed with warning
+        assert _run("fetch", str(deps_file)) == 0
+        assert "No packages defined" in capsys.readouterr().err
+
+    def test_fetch_unparseable_deps_file(self, tmp_path: Path, capsys) -> None:
+        deps_file = tmp_path / "deps.toml"
+        deps_file.write_text("this is not toml [[[\n")
+
+        assert _run("fetch", str(deps_file)) == 1
+        assert "Failed to parse" in capsys.readouterr().err
+
+    def test_fetch_reports_the_packages_that_failed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        deps_file = tmp_path / "deps.toml"
+        deps_file.write_text(
+            '[packages.zlib]\nurl = "https://example.invalid/zlib.tar.gz"\n'
+        )
+        monkeypatch.setattr(fetch_cli, "fetch_package", lambda *a, **kw: False)
+
+        assert _run("fetch", str(deps_file)) == 1
+        assert "Failed to build packages: zlib" in capsys.readouterr().err
+
+    def test_fetch_reports_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        deps_file = tmp_path / "deps.toml"
+        deps_file.write_text(
+            '[packages.zlib]\nurl = "https://example.invalid/zlib.tar.gz"\n'
+        )
+        monkeypatch.setattr(fetch_cli, "fetch_package", lambda *a, **kw: True)
+
+        assert _run("-v", "fetch", str(deps_file)) == 0
+        assert "Successfully built all packages" in capsys.readouterr().err
+
+    def test_module_entry_point(self) -> None:
+        """The `python -m` path and the __main__ guard, which in-process misses."""
         result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "pcons.packages.fetch.cli",
-                "fetch",
-                str(deps_file),
-            ],
+            [sys.executable, "-m", "pcons.packages.fetch.cli", "--help"],
             capture_output=True,
             text=True,
         )
-        # Should succeed with warning
         assert result.returncode == 0
+        assert "pcons-fetch" in result.stdout
+
+    def test_unknown_option_is_a_usage_error(self, capsys) -> None:
+        assert _run("--nope") == 2
+        assert "--nope" in capsys.readouterr().err
+
+    def test_unknown_subcommand_is_a_usage_error(self, capsys) -> None:
+        assert _run("nosuchverb") == 2
+        assert "nosuchverb" in capsys.readouterr().err
+
+    def test_keyboard_interrupt_is_130(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ctrl-C reaches main() as click's Abort, not as a traceback."""
+
+        def interrupt(**kwargs: object) -> int:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(fetch_cli.cli.commands["list"], "callback", interrupt)
+        assert _run("list") == 130
+
+
+class TestFetchCliDispatch:
+    """What each argv spelling asks the handlers to do.
+
+    The subprocess tests above see only an exit code. These see the arguments,
+    which is what pins the defaults.
+    """
+
+    def test_no_args_with_deps_toml_runs_fetch(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bare `pcons-fetch` fetches deps.toml when there is one."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "deps.toml").write_text("[packages]\n")
+        calls = _record_handlers(monkeypatch)
+
+        assert _run() == 0
+
+        assert calls == [
+            (
+                "cmd_fetch",
+                {
+                    "deps_file": "deps.toml",
+                    "deps_dir": ".deps",
+                    "output_dir": ".",
+                    "verbose": False,
+                    "debug": False,
+                },
+            )
+        ]
+
+    def test_no_args_without_deps_toml_prints_help(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """With nothing to fetch, bare `pcons-fetch` is a help request."""
+        monkeypatch.chdir(tmp_path)
+        calls = _record_handlers(monkeypatch)
+
+        assert _run() == 0
+
+        assert calls == []
+        assert "usage" in capsys.readouterr().out.lower()
+
+    def test_fetch_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`fetch` with no positional still means deps.toml."""
+        calls = _record_handlers(monkeypatch)
+
+        assert _run("fetch") == 0
+
+        assert calls[0][1]["deps_file"] == "deps.toml"
+        assert calls[0][1]["deps_dir"] == ".deps"
+        assert calls[0][1]["output_dir"] == "."
+
+    def test_fetch_short_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """-d and -o are the short forms of --deps-dir and --output-dir."""
+        calls = _record_handlers(monkeypatch)
+
+        assert _run("fetch", "other.toml", "-d", "D", "-o", "O") == 0
+
+        assert calls == [
+            (
+                "cmd_fetch",
+                {
+                    "deps_file": "other.toml",
+                    "deps_dir": "D",
+                    "output_dir": "O",
+                    "verbose": False,
+                    "debug": False,
+                },
+            )
+        ]
+
+    def test_list_takes_a_deps_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run("list", "other.toml") == 0
+
+        assert calls == [
+            ("cmd_list", {"deps_file": "other.toml", "verbose": False, "debug": False})
+        ]
+
+    def test_clean_all_short_form(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run("clean", "-a", "-d", "D") == 0
+
+        assert calls == [
+            (
+                "cmd_clean",
+                {"deps_dir": "D", "remove_all": True, "verbose": False, "debug": False},
+            )
+        ]
+
+    def test_verbose_after_the_subcommand(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run("fetch", "-v") == 0
+
+        assert calls[0][1]["verbose"] is True
+
+    def test_verbose_before_the_subcommand(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run("-v", "fetch") == 0
+
+        assert calls[0][1]["verbose"] is True
+
+    def test_debug_before_the_subcommand(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = _record_handlers(monkeypatch)
+
+        assert _run("--debug", "list") == 0
+
+        assert calls[0][1]["debug"] is True
+
+
+class TestVerbosityConfiguresLogging:
+    """-v and --debug reach logging, which the command layer owns.
+
+    pcons-fetch has no setup_logging of its own: `MergingCommand` configures
+    it from the merged options, the path `pcons` itself takes.
+    """
+
+    def _level_while_running(self, monkeypatch: pytest.MonkeyPatch, *argv: str) -> int:
+        """The root level the command actually ran under.
+
+        Read inside the callback, not after `_run` returns: `_run` restores the
+        handlers and the level so a captured-stderr handler does not outlive
+        the test.
+        """
+        seen: list[int] = []
+
+        def record(**kwargs: Any) -> int:
+            seen.append(logging.getLogger().level)
+            return 0
+
+        monkeypatch.setattr(fetch_cli.cli.commands["list"], "callback", record)
+        assert _run(*argv) == 0
+        assert len(seen) == 1
+        return seen[0]
+
+    def test_quiet_is_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._level_while_running(monkeypatch, "list") == logging.WARNING
+
+    def test_verbose_is_info(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert self._level_while_running(monkeypatch, "-v", "list") == logging.INFO
+
+    def test_debug_is_debug(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        assert (
+            self._level_while_running(monkeypatch, "--debug", "list") == logging.DEBUG
+        )
 
 
 class TestDownloadSource:

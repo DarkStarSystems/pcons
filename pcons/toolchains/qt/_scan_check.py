@@ -18,6 +18,8 @@ exactly which file changed and to re-run pcons.
 
 from __future__ import annotations
 
+# argparse, not click: this runs under $qt.python, which the user may point
+# at an interpreter that has no pcons, and so no click, installed.
 import argparse
 import json
 import sys

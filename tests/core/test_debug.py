@@ -11,8 +11,11 @@ import pytest
 
 from pcons.core.debug import (
     SUBSYSTEMS,
+    SubsystemListRequested,
+    UnknownSubsystemsError,
     init_debug,
     is_enabled,
+    print_subsystems,
     reset_debug,
     trace,
     trace_value,
@@ -66,18 +69,28 @@ class TestInitDebug:
         assert is_enabled("subst")
 
     def test_init_debug_invalid_subsystem_errors(self):
-        """Test that invalid subsystem names cause an error with help."""
-        with pytest.raises(SystemExit):
+        """An unknown name is reported, naming only the ones that are unknown."""
+        with pytest.raises(UnknownSubsystemsError) as exc_info:
             init_debug("resolve,invalid_subsystem,subst")
+        assert exc_info.value.unknown == {"invalid_subsystem"}
+        assert "invalid_subsystem" in str(exc_info.value)
 
-    def test_init_debug_help(self, capsys):
-        """Test --debug=help prints subsystem list and exits."""
-        with pytest.raises(SystemExit) as exc_info:
+    def test_init_debug_help_is_a_request_not_an_exit(self):
+        """`help` asks the caller to list the subsystems, and enables none.
+
+        Raised rather than printed: the CLI decides where the listing goes and
+        what to exit with, and library callers are not exited out from under.
+        """
+        with pytest.raises(SubsystemListRequested):
             init_debug("help")
-        assert exc_info.value.code == 0
+
+    def test_print_subsystems_lists_every_name(self, capsys):
+        print_subsystems()
         output = capsys.readouterr().out
         assert "configure" in output
         assert "resolve" in output
+        assert "all" in output
+        assert "help" in output
 
     def test_init_debug_empty_string(self):
         """Test with empty string disables all subsystems."""

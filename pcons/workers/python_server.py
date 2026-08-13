@@ -13,6 +13,9 @@ inherited by every action it runs.
 
 from __future__ import annotations
 
+# argparse, not click: this runs under the interpreter passed to
+# Worker(python=...), which is the project's and need not have pcons, or
+# click, installed.
 import argparse
 import array
 import json

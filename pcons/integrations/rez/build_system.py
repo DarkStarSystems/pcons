@@ -66,6 +66,11 @@ class PconsBuildSystem(BuildSystem):
 
     @classmethod
     def bind_cli(cls, parser: Any, group: Any) -> None:
+        """Declare pcons's rez-build options on the parser rez hands us.
+
+        *parser* and *group* are rez's own argparse objects, so this stays
+        argparse whatever the rest of pcons's command lines are written in.
+        """
         group.add_argument(
             "--pcons-generator",
             default="ninja",

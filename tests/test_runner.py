@@ -771,6 +771,134 @@ class TestManifestLoading:
             load_manifest(path)
 
 
+class TestCLIParsing:
+    """Argv spellings the runner has to keep accepting.
+
+    The ctest-style flags overlap by prefix, and the generators write
+    ``--opt=value``, so both are pinned here rather than left to the parser.
+    """
+
+    def _labelled(self, tmp_path):
+        script = _make_exit_script(tmp_path, "ok.py", "import sys; sys.exit(0)")
+        return _make_manifest(
+            tmp_path,
+            [
+                {"name": "slow_a", "command": [str(script)], "labels": ["slow"]},
+                {"name": "fast_b", "command": [str(script)], "labels": ["fast"]},
+                {"name": "both_c", "command": [str(script)], "labels": ["slow", "gpu"]},
+            ],
+        )
+
+    def test_label_exclude_does_not_eat_the_include_flag(self, tmp_path, capsys):
+        """-LE is its own option, not -L followed by -E."""
+        manifest = self._labelled(tmp_path)
+
+        rc = main(
+            [
+                "--manifest",
+                str(manifest),
+                "-L",
+                "slow",
+                "-LE",
+                "gpu",
+                "--list",
+                "--no-color",
+            ]
+        )
+
+        assert rc == 0
+        printed = capsys.readouterr().out
+        assert "slow_a" in printed
+        assert "both_c" not in printed
+        assert "fast_b" not in printed
+
+    def test_label_value_attached_to_the_flag(self, tmp_path, capsys):
+        """-Lslow attaches its value; -LEslow reads as -L Eslow, not -LE slow.
+
+        Surprising, and unchanged: argparse resolved an attached value the
+        same way, so a user with -LEslow in a script keeps whatever they had.
+        Spell -LE with a space.
+        """
+        manifest = self._labelled(tmp_path)
+
+        assert (
+            main(["--manifest", str(manifest), "-Lslow", "--list", "--no-color"]) == 0
+        )
+        printed = capsys.readouterr().out
+        assert "slow_a" in printed
+        assert "both_c" in printed
+        assert "fast_b" not in printed
+
+        assert (
+            main(["--manifest", str(manifest), "-LEslow", "--list", "--no-color"]) == 0
+        )
+        assert "(0 tests)" in capsys.readouterr().out
+
+    def test_label_include_repeats(self, tmp_path, capsys):
+        manifest = self._labelled(tmp_path)
+
+        rc = main(
+            [
+                "--manifest",
+                str(manifest),
+                "-L",
+                "fast",
+                "-L",
+                "gpu",
+                "--list",
+                "--no-color",
+            ]
+        )
+
+        assert rc == 0
+        printed = capsys.readouterr().out
+        assert "fast_b" in printed
+        assert "both_c" in printed
+        assert "slow_a" not in printed
+
+    def test_manifest_with_an_equals_sign(self, tmp_path, monkeypatch, capsys):
+        """The spelling pcons/generators/makefile.py writes."""
+        _make_manifest(tmp_path, [])
+        monkeypatch.chdir(tmp_path)
+
+        assert main(["--manifest=tests.json", "--no-color"]) == 0
+        assert "no tests matched" in capsys.readouterr().out
+
+    def test_help_exits_zero(self, capsys):
+        assert main(["--help"]) == 0
+        assert "--stop-on-fail" in capsys.readouterr().out
+
+    def test_unknown_option_is_a_usage_error(self, capsys):
+        assert main(["--nope"]) == 2
+        assert "--nope" in capsys.readouterr().err
+
+    def test_keyboard_interrupt_is_130(self, tmp_path, monkeypatch):
+        """Ctrl-C reaches main() as click's Abort, not as a traceback."""
+
+        def interrupt(*args, **kwargs):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("pcons.test_runner.find_manifest", interrupt)
+        assert main(["--no-color"]) == 130
+
+    def test_build_dir_default_is_read_per_call(self, tmp_path, monkeypatch, capsys):
+        """$PCONS_BUILD_DIR is read when the command runs, not at import.
+
+        Two calls in one process, so a default frozen at decoration time
+        would make the second one agree with the first.
+        """
+        _make_manifest(tmp_path / "out", [])
+        monkeypatch.chdir(tmp_path)
+
+        monkeypatch.setenv("PCONS_BUILD_DIR", "nowhere")
+        assert main(["--no-color"]) == 2
+        assert "no tests.json found in nowhere" in capsys.readouterr().err
+
+        monkeypatch.setenv("PCONS_BUILD_DIR", "out")
+        assert main(["--no-color"]) == 0
+        assert "no tests matched" in capsys.readouterr().out
+
+
 # ----- Color helper --------------------------------------------------------
 
 

@@ -12,6 +12,9 @@ for proper ninja integration, or called directly from Python.
 
 from __future__ import annotations
 
+# argparse, not click: a build-edge subprocess, where click costs ~14ms of
+# import per invocation. The CLI here is internal, typed only by pcons's
+# own generators.
 import argparse
 import os
 import plistlib

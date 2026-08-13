@@ -35,6 +35,20 @@ SUBSYSTEM_DESCRIPTIONS: dict[str, str] = {
 SUBSYSTEMS = frozenset(set(SUBSYSTEM_DESCRIPTIONS.keys()) | {"all"})
 
 
+class UnknownSubsystemsError(ValueError):
+    """A debug spec named subsystems that do not exist."""
+
+    def __init__(self, unknown: set[str]) -> None:
+        self.unknown = frozenset(unknown)
+        super().__init__(
+            f"Unknown debug subsystem(s): {', '.join(sorted(self.unknown))}"
+        )
+
+
+class SubsystemListRequested(Exception):
+    """The spec was ``help``: list the subsystems rather than enabling any."""
+
+
 def print_subsystems(file: Any = None) -> None:
     """Print available debug subsystems and their descriptions."""
     import sys
@@ -59,6 +73,11 @@ def init_debug(debug_spec: str | None = None) -> None:
         init_debug("resolve,subst")  # Enable resolve and subst tracing
         init_debug("all")            # Enable all tracing
         init_debug()                 # Read from PCONS_DEBUG env var
+
+    Raises:
+        UnknownSubsystemsError: A name in the spec is not a subsystem.
+        SubsystemListRequested: The spec was "help". The caller decides how to
+            render `print_subsystems` and what to exit with.
     """
     global _enabled_subsystems, _initialized
 
@@ -71,22 +90,14 @@ def init_debug(debug_spec: str | None = None) -> None:
     parts = [p.strip().lower() for p in spec.split(",") if p.strip()]
 
     if "help" in parts:
-        print_subsystems()
-        raise SystemExit(0)
+        raise SubsystemListRequested
 
     if "all" in parts:
         _enabled_subsystems = set(SUBSYSTEMS - {"all"})
     else:
         unknown = set(parts) - SUBSYSTEMS
         if unknown:
-            import sys
-
-            print(
-                f"Unknown debug subsystem(s): {', '.join(sorted(unknown))}",
-                file=sys.stderr,
-            )
-            print_subsystems(file=sys.stderr)
-            raise SystemExit(1)
+            raise UnknownSubsystemsError(unknown)
         _enabled_subsystems = set(parts) & SUBSYSTEMS
 
     _initialized = True

@@ -2,15 +2,14 @@
 """Test runner for ``pcons test`` and ``ninja test``.
 
 Reads the JSON manifest written by the build (``<build_dir>/tests.json``)
-and executes each test as a subprocess. Pure stdlib — no test framework
-dependency. Invoked directly (``pcons test``, which searches up for the
-manifest) or from Ninja (``python -m pcons.test_runner --manifest=...``).
+and executes each test as a subprocess. No test framework dependency.
+Invoked directly (``pcons test``, which searches up for the manifest) or
+from Ninja (``python -m pcons.test_runner --manifest=...``).
 The runner contract is exit-code only: exit 0 means pass.
 """
 
 from __future__ import annotations
 
-import argparse
 import concurrent.futures
 import json
 import logging
@@ -20,9 +19,13 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import click
+
+from pcons._cli_click import run_cli
 
 logger = logging.getLogger("pcons.test")
 
@@ -128,8 +131,8 @@ def load_manifest(path: Path) -> tuple[dict, list[dict]]:
 def filter_tests(
     tests: list[dict],
     *,
-    include_labels: list[str],
-    exclude_labels: list[str],
+    include_labels: Sequence[str],
+    exclude_labels: Sequence[str],
     include_regex: str | None,
     exclude_regex: str | None,
 ) -> list[dict]:
@@ -819,102 +822,113 @@ def write_junit(path: Path, project_name: str, results: list[TestResult]) -> Non
 # ----- CLI -----------------------------------------------------------------
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="pcons test",
-        description="Run tests declared by project.Test() in pcons-build.py.",
-    )
-    parser.add_argument(
-        "--manifest",
-        type=Path,
-        help="Path to tests.json (default: searched upward from cwd)",
-    )
-    parser.add_argument(
-        "-B",
-        "--build-dir",
-        type=Path,
-        default=_env_build_dir(),
-        help=(
-            "Build directory holding tests.json "
-            "(default: $PCONS_BUILD_DIR, else searched upward from cwd)"
-        ),
-    )
-    parser.add_argument(
-        "-j",
-        "--jobs",
-        type=int,
-        default=os.cpu_count() or 1,
-        help="Number of parallel tests (default: CPU count)",
-    )
-    parser.add_argument(
-        "-L",
-        action="append",
-        default=[],
-        metavar="LABEL",
-        help="Only run tests whose labels contain LABEL (repeatable)",
-    )
-    parser.add_argument(
-        "-LE",
-        action="append",
-        default=[],
-        metavar="LABEL",
-        help="Skip tests whose labels contain LABEL (repeatable)",
-    )
-    parser.add_argument(
-        "-R",
-        metavar="REGEX",
-        help="Only run tests whose name matches REGEX",
-    )
-    parser.add_argument(
-        "-E",
-        metavar="REGEX",
-        help="Skip tests whose name matches REGEX",
-    )
-    parser.add_argument(
-        "--list",
-        action="store_true",
-        help="List tests that would run, without running them",
-    )
-    parser.add_argument(
-        "-V",
-        "--verbose",
-        action="store_true",
-        help="Show stdout/stderr for failed tests",
-    )
-    parser.add_argument(
-        "--junit",
-        type=Path,
-        metavar="FILE",
-        help="Write JUnit XML report to FILE",
-    )
-    parser.add_argument(
-        "--no-color",
-        action="store_true",
-        help="Disable ANSI color in output",
-    )
-    parser.add_argument(
-        "--stop-on-fail",
-        action="store_true",
-        help="Stop launching new tests after the first failure",
-    )
-    return parser
+def _default_jobs() -> int:
+    """One test per CPU, read when the command runs rather than at import."""
+    return os.cpu_count() or 1
 
 
-def main(argv: list[str] | None = None) -> int:
-    """Entry point for ``pcons test`` and ``python -m pcons.test_runner``."""
-    args = build_parser().parse_args(argv)
-
+@click.command(
+    "test",
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+@click.option(
+    "--manifest",
+    type=click.Path(path_type=Path),
+    help="Path to tests.json (default: searched upward from cwd)",
+)
+@click.option(
+    "-B",
+    "--build-dir",
+    type=click.Path(path_type=Path),
+    # Callables, so each run reads today's environment and CPU count. argparse
+    # evaluated these when the parser was built, which was also per run; a
+    # plain click default would freeze them at import.
+    default=_env_build_dir,
+    help=(
+        "Build directory holding tests.json "
+        "(default: $PCONS_BUILD_DIR, else searched upward from cwd)"
+    ),
+)
+@click.option(
+    "-j",
+    "--jobs",
+    type=int,
+    default=_default_jobs,
+    help="Number of parallel tests (default: CPU count)",
+)
+@click.option(
+    "-L",
+    "include_labels",
+    multiple=True,
+    metavar="LABEL",
+    help="Only run tests whose labels contain LABEL (repeatable)",
+)
+@click.option(
+    "-LE",
+    "exclude_labels",
+    multiple=True,
+    metavar="LABEL",
+    help="Skip tests whose labels contain LABEL (repeatable)",
+)
+@click.option(
+    "-R",
+    "include_regex",
+    metavar="REGEX",
+    help="Only run tests whose name matches REGEX",
+)
+@click.option(
+    "-E",
+    "exclude_regex",
+    metavar="REGEX",
+    help="Skip tests whose name matches REGEX",
+)
+@click.option(
+    "--list",
+    "list_only",
+    is_flag=True,
+    help="List tests that would run, without running them",
+)
+@click.option(
+    "-V", "--verbose", is_flag=True, help="Show stdout/stderr for failed tests"
+)
+@click.option(
+    "--junit",
+    type=click.Path(path_type=Path),
+    metavar="FILE",
+    help="Write JUnit XML report to FILE",
+)
+@click.option("--no-color", is_flag=True, help="Disable ANSI color in output")
+@click.option(
+    "--stop-on-fail",
+    is_flag=True,
+    help="Stop launching new tests after the first failure",
+)
+def cli_test(
+    manifest: Path | None,
+    build_dir: Path | None,
+    jobs: int,
+    include_labels: tuple[str, ...],
+    exclude_labels: tuple[str, ...],
+    include_regex: str | None,
+    exclude_regex: str | None,
+    list_only: bool,
+    verbose: bool,
+    junit: Path | None,
+    no_color: bool,
+    stop_on_fail: bool,
+) -> int:
+    """Run tests declared by project.Test() in pcons-build.py."""
     logging.basicConfig(
         level=logging.INFO,
         format="%(levelname)s: %(message)s",
     )
 
     # Locate manifest
-    manifest_path: Path | None = args.manifest
+    manifest_path: Path | None = manifest
     if manifest_path is None:
-        manifest_path = find_manifest(Path.cwd(), args.build_dir)
+        manifest_path = find_manifest(Path.cwd(), build_dir)
     if manifest_path is None or not manifest_path.is_file():
-        where = f" in {args.build_dir}" if args.build_dir else ""
+        where = f" in {build_dir}" if build_dir else ""
         sys.stderr.write(
             f"error: no tests.json found{where}. Run 'pcons generate' first, "
             "or pass --manifest=PATH.\n"
@@ -927,12 +941,13 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"error: failed to read {manifest_path}: {e}\n")
         return 2
 
-    color = (not args.no_color) and sys.stdout.isatty()
+    color = (not no_color) and sys.stdout.isatty()
     project_name = meta.get("project", "(unknown)")
     # The manifest is always written into the build directory, so its
     # parent is the canonical anchor for resolving relative program paths.
-    # The "build_dir" entry in the manifest is informational only.
-    build_dir = manifest_path.parent.resolve()
+    # The "build_dir" entry in the manifest is informational only. Not the
+    # -B above, which only says where to look for the manifest.
+    manifest_dir = manifest_path.parent.resolve()
 
     # Labels survive discovery expansion, so -L/-LE apply up front — a
     # label-excluded binary's cases are never enumerated. Name regexes
@@ -940,22 +955,22 @@ def main(argv: list[str] | None = None) -> int:
     # own name isn't one of the case names it expands into.
     label_filtered = filter_tests(
         tests,
-        include_labels=args.L,
-        exclude_labels=args.LE,
+        include_labels=include_labels,
+        exclude_labels=exclude_labels,
         include_regex=None,
         exclude_regex=None,
     )
     label_filtered = expand_filter_with_deps(label_filtered, tests)
 
-    if args.list:
+    if list_only:
         # --list shows manifest-level entries without running discovery
         # binaries; discover entries are annotated instead.
         listed = filter_tests(
             label_filtered,
             include_labels=[],
             exclude_labels=[],
-            include_regex=args.R,
-            exclude_regex=args.E,
+            include_regex=include_regex,
+            exclude_regex=exclude_regex,
         )
         print(f"Test project: {project_name} ({len(listed)} tests)")
         for t in listed:
@@ -966,14 +981,14 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # Expand discover entries into one test per case
-    tests, _expansion_map = expand_discovered_tests(label_filtered, build_dir)
+    tests, _expansion_map = expand_discovered_tests(label_filtered, manifest_dir)
 
     filtered = filter_tests(
         tests,
-        include_labels=args.L,
-        exclude_labels=args.LE,
-        include_regex=args.R,
-        exclude_regex=args.E,
+        include_labels=include_labels,
+        exclude_labels=exclude_labels,
+        include_regex=include_regex,
+        exclude_regex=exclude_regex,
     )
     filtered = expand_filter_with_deps(filtered, tests)
 
@@ -1009,9 +1024,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         results = run_all(
             filtered,
-            build_dir,
-            jobs=args.jobs,
-            stop_on_fail=args.stop_on_fail,
+            manifest_dir,
+            jobs=jobs,
+            stop_on_fail=stop_on_fail,
             on_start=on_start,
             on_finish=on_finish,
         )
@@ -1020,14 +1035,23 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"error: {e}\n")
         return 2
 
-    print_summary(project_name, results, color, args.verbose)
+    print_summary(project_name, results, color, verbose)
 
-    if args.junit:
-        write_junit(args.junit, project_name, results)
-        print(f"Wrote JUnit report: {args.junit}")
+    if junit:
+        write_junit(junit, project_name, results)
+        print(f"Wrote JUnit report: {junit}")
 
     any_failed = any(r.status in (FAIL, TIMEOUT, ERROR) for r in results)
     return 1 if any_failed else 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point for ``pcons test`` and ``python -m pcons.test_runner``.
+
+    Returns rather than exits: `pcons.cli` calls this in-process and turns the
+    code into its own exit.
+    """
+    return run_cli(cli_test, prog_name="pcons test", argv=argv)
 
 
 if __name__ == "__main__":

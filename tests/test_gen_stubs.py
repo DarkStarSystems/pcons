@@ -245,9 +245,30 @@ class TestMain:
         assert rc == 0
         assert "class _ProjectBuilders" in capsys.readouterr().out
 
-    def test_check_and_print_are_mutually_exclusive(self) -> None:
-        with pytest.raises(SystemExit):
-            _gen_stubs.main(["--check", "--print"])
+    def test_check_and_print_are_mutually_exclusive(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert _gen_stubs.main(["--check", "--print"]) == 2
+        assert "mutually exclusive" in capsys.readouterr().err
+
+    def test_help_exits_zero(self, capsys: pytest.CaptureFixture[str]) -> None:
+        assert _gen_stubs.main(["--help"]) == 0
+        assert "--check" in capsys.readouterr().out
+
+    def test_unknown_option_is_a_usage_error(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert _gen_stubs.main(["--nope"]) == 2
+        assert "--nope" in capsys.readouterr().err
+
+    def test_keyboard_interrupt_is_130(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ctrl-C reaches main() as click's Abort, not as a traceback."""
+
+        def interrupt(mode: str) -> int:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(_gen_stubs, "write_or_check", interrupt)
+        assert _gen_stubs.main([]) == 130
 
 
 # ---- UTF-8 round-trip (regression for the cp1252 mojibake on Windows CI) -----
