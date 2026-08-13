@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import fnmatch
 import functools
+import json
 import os
 import platform
 import re
@@ -25,6 +26,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+from tests.support import subprocess_env
 
 # Try to import tomllib (Python 3.11+) or tomli as fallback
 try:
@@ -852,49 +855,41 @@ def _run_generate(
     from pcons import Project
 
     Project._clear_tree()
-    if invocation == "direct":
-        from pcons.cli import run_script
 
-        build_script = work_dir / "pcons-build.py"
-        try:
-            exit_code, _projects = run_script(
-                build_script,
-                build_dir,
-                variables=variables,
-                generator=generator,
-                variant=variant,
-            )
-            if exit_code != 0:
-                variant_msg = f" (variant={variant})" if variant else ""
-                pytest.fail(f"pcons-build.py failed with code {exit_code}{variant_msg}")
-        except Exception as e:
-            variant_msg = f" (variant={variant})" if variant else ""
-            pytest.fail(f"pcons-build.py raised {type(e).__name__}: {e}{variant_msg}")
+    env = subprocess_env(
+        PCONS_BUILD_DIR=str(build_dir),
+        PCONS_GENERATOR=generator,
+    )
+    if variant:
+        env["PCONS_VARIANT"] = variant
+
+    if invocation == "direct":
+        cmd = [sys.executable, "pcons-build.py"]
+        # A directly-run script has no argv to read, so variables travel the
+        # way the CLI hands them to one: as PCONS_VARS.
+        if variables:
+            env["PCONS_VARS"] = json.dumps(variables)
+        what = "pcons-build.py"
     else:
         cmd = [sys.executable, "-m", "pcons"]
         if variables:
             cmd.extend([f"{k}={v}" for k, v in variables.items()])
-        env = {
-            **os.environ,
-            "PCONS_BUILD_DIR": str(build_dir),
-            "PCONS_GENERATOR": generator,
-        }
-        if variant:
-            env["PCONS_VARIANT"] = variant
-        timeout = test_config.get("timeout", 60)
-        result = subprocess.run(
-            cmd,
-            cwd=work_dir,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=env,
-        )
-        if result.returncode != 0:
-            print(f"pcons stdout:\n{result.stdout}")
-            print(f"pcons stderr:\n{result.stderr}")
-            variant_msg = f" (variant={variant})" if variant else ""
-            pytest.fail(f"pcons failed with code {result.returncode}{variant_msg}")
+        what = "pcons"
+
+    timeout = test_config.get("timeout", 60)
+    result = subprocess.run(
+        cmd,
+        cwd=work_dir,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env=env,
+    )
+    if result.returncode != 0:
+        print(f"{what} stdout:\n{result.stdout}")
+        print(f"{what} stderr:\n{result.stderr}")
+        variant_msg = f" (variant={variant})" if variant else ""
+        pytest.fail(f"{what} failed with code {result.returncode}{variant_msg}")
 
 
 _variable_expr = re.compile(r"\$\{([^}]+)\}")

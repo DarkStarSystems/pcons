@@ -142,6 +142,9 @@ known-first-party = ["pcons"]
 [tool.coverage.run]
 source = ["pcons"]
 branch = true
+# Tests run the real entry points as subprocesses (python pcons-build.py,
+# python -m pcons). Each writes its own data file, which pytest-cov combines.
+parallel = true
 omit = [
     # Generated TYPE_CHECKING-only stub mixins. Their class bodies live
     # under `if TYPE_CHECKING:`, so nothing executes at runtime; reporting
