@@ -2210,10 +2210,6 @@ class RunGroup(MergingGroup):
                     break
         return rows
 
-    def list_commands(self, ctx: click.Context) -> list[str]:
-        """Declaration order, script before modules. Never runs the script."""
-        return [name for name, _ in self.rows(ctx)]
-
     def format_commands(
         self, ctx: click.Context, formatter: click.HelpFormatter
     ) -> None:
