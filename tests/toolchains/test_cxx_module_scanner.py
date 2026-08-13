@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from pcons.toolchains._scan_cache import CACHE_FILE
 from pcons.toolchains.cxx_module_scanner import (
     CxxModuleScannerNotFound,
     StdModuleFlagSpec,
@@ -451,6 +452,217 @@ class TestScanTranslationUnitsOrder:
 
     def test_no_specs(self) -> None:
         assert scan_translation_units([], "unused", scanner_style="gcc") == []
+
+
+class TestGccScanReportsWhatItRead:
+    """The depfile GCC is already asked for is the cache invalidation key."""
+
+    @staticmethod
+    def _run_with_depfile(
+        monkeypatch: pytest.MonkeyPatch, depfile_text: str | None
+    ) -> tuple[dict | None, list[str]]:
+        class _Ok:
+            returncode = 0
+            stderr = ""
+
+        def _capture(cmd: list[str], *args: object, **kwargs: object) -> _Ok:
+            deps = next(a.split("=", 1)[1] for a in cmd if a.startswith("-fdeps-file="))
+            Path(deps).write_text("{}", encoding="utf-8")
+            depfile = cmd[cmd.index("-MF") + 1]
+            if depfile_text is None:
+                Path(depfile).unlink()
+            else:
+                Path(depfile).write_text(depfile_text, encoding="utf-8")
+            return _Ok()
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _capture
+        )
+        prereqs: list[str] = []
+        p1689 = run_scan_deps_gcc("g++", [], "/x/y.cppm", "y.o", prereqs_out=prereqs)
+        return p1689, prereqs
+
+    def test_the_depfile_prerequisites_come_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        p1689, prereqs = self._run_with_depfile(
+            monkeypatch, "y.o: /x/y.cppm /x/dep.hpp\n"
+        )
+        assert p1689 == {}
+        assert prereqs == ["/x/y.cppm", "/x/dep.hpp"]
+
+    def test_no_depfile_leaves_the_list_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scan still answers; the caller just must not cache it."""
+        p1689, prereqs = self._run_with_depfile(monkeypatch, None)
+        assert p1689 == {}
+        assert prereqs == []
+
+
+class TestScanTranslationUnitsCache:
+    """A TU whose prerequisites are untouched must not reach the compiler.
+
+    `ScanCache` is covered on its own in test_scan_cache.py; what is checked
+    here is the wiring: that a build_dir turns into a cache, that a hit skips
+    the scan, and that a result with nothing to invalidate against is not
+    stored.
+    """
+
+    @staticmethod
+    def _specs(tmp_path: Path, n: int) -> list[TuScanSpec]:
+        specs = []
+        for i in range(n):
+            src = tmp_path / f"tu{i}.cppm"
+            src.write_text(f"export module tu{i};\n")
+            specs.append(
+                TuScanSpec(
+                    src=src,
+                    obj_rel=f"tu{i}.o",
+                    compiler="g++",
+                    compile_flags=["-std=c++23"],
+                )
+            )
+        return specs
+
+    @staticmethod
+    def _counting_scanner(
+        monkeypatch: pytest.MonkeyPatch, *, prereqs: bool = True
+    ) -> list[str]:
+        """Stand in for the GCC runner, recording which sources it scanned."""
+        scanned: list[str] = []
+
+        def _scan(
+            compiler: str,
+            flags: list[str],
+            src: str,
+            obj: str,
+            prereqs_out: list[str] | None = None,
+        ) -> dict[str, object]:
+            scanned.append(src)
+            if prereqs_out is not None and prereqs:
+                prereqs_out.append(src)
+            return {"rules": [{"primary-output": obj}]}
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps_gcc", _scan
+        )
+        return scanned
+
+    def test_a_second_pass_reuses_the_stored_results(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scanned = self._counting_scanner(monkeypatch)
+        specs = self._specs(tmp_path, 3)
+
+        first = scan_translation_units(
+            specs, "unused", scanner_style="gcc", build_dir=tmp_path
+        )
+        assert len(scanned) == 3
+        assert (tmp_path / CACHE_FILE).exists()
+
+        scanned.clear()
+        second = scan_translation_units(
+            specs, "unused", scanner_style="gcc", build_dir=tmp_path
+        )
+
+        assert scanned == []
+        assert [r.p1689 for r in second] == [r.p1689 for r in first]
+        assert [r.spec.obj_rel for r in second] == [s.obj_rel for s in specs]
+
+    def test_a_touched_source_is_scanned_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scanned = self._counting_scanner(monkeypatch)
+        specs = self._specs(tmp_path, 2)
+        scan_translation_units(specs, "unused", scanner_style="gcc", build_dir=tmp_path)
+
+        scanned.clear()
+        stamp = specs[1].src.stat().st_mtime_ns + 1_000_000_000
+        os.utime(specs[1].src, ns=(stamp, stamp))
+
+        scan_translation_units(specs, "unused", scanner_style="gcc", build_dir=tmp_path)
+
+        assert scanned == [str(specs[1].src)]
+
+    def test_without_a_build_dir_nothing_is_kept(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scanned = self._counting_scanner(monkeypatch)
+        specs = self._specs(tmp_path, 2)
+
+        scan_translation_units(specs, "unused", scanner_style="gcc")
+        scan_translation_units(specs, "unused", scanner_style="gcc")
+
+        assert len(scanned) == 4
+        assert not (tmp_path / CACHE_FILE).exists()
+
+    def test_a_result_with_no_prerequisites_is_not_stored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing to invalidate against, so the answer is used but not kept."""
+        scanned = self._counting_scanner(monkeypatch, prereqs=False)
+        specs = self._specs(tmp_path, 2)
+
+        first = scan_translation_units(
+            specs, "unused", scanner_style="gcc", build_dir=tmp_path
+        )
+        assert all(r.p1689 is not None for r in first)
+
+        scanned.clear()
+        scan_translation_units(specs, "unused", scanner_style="gcc", build_dir=tmp_path)
+
+        assert len(scanned) == 2
+        assert not (tmp_path / CACHE_FILE).exists()
+
+    def test_the_msvc_style_does_not_cache_either(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scanned: list[str] = []
+
+        def _scan(compiler: str, flags: list[str], src: str) -> dict[str, object]:
+            scanned.append(src)
+            return {"rules": [{"primary-output": "x.obj"}]}
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps_msvc", _scan
+        )
+        specs = self._specs(tmp_path, 2)
+
+        scan_translation_units(
+            specs, "cl.exe", scanner_style="msvc", build_dir=tmp_path
+        )
+        scan_translation_units(
+            specs, "cl.exe", scanner_style="msvc", build_dir=tmp_path
+        )
+
+        assert len(scanned) == 4
+        assert not (tmp_path / CACHE_FILE).exists()
+
+    def test_only_the_gcc_style_caches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """clang-scan-deps and cl.exe do not report what they read."""
+        scanned: list[str] = []
+
+        def _scan(
+            scanner: str, compiler: str, flags: list[str], src: str, obj: str
+        ) -> dict[str, object]:
+            scanned.append(src)
+            return {"rules": [{"primary-output": obj}]}
+
+        monkeypatch.setattr("pcons.toolchains.cxx_module_scanner.run_scan_deps", _scan)
+        specs = self._specs(tmp_path, 2)
+
+        scan_translation_units(
+            specs, "clang-scan-deps", scanner_style="clang", build_dir=tmp_path
+        )
+        scan_translation_units(
+            specs, "clang-scan-deps", scanner_style="clang", build_dir=tmp_path
+        )
+
+        assert len(scanned) == 4
+        assert not (tmp_path / CACHE_FILE).exists()
 
 
 class TestGccScanDiscardsPreprocessedOutput:

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import pickle
 from pathlib import Path
 
 from pcons.toolchains._scan_cache import CACHE_FILE, ScanCache, parse_depfile
@@ -36,6 +37,14 @@ class TestParseDepfile:
 
     def test_no_prerequisites(self) -> None:
         assert parse_depfile("x.o:\n") == []
+
+    def test_a_backslash_that_escapes_nothing_stays(self) -> None:
+        """Only ` \\t#\\` are escapes; anything else is part of the path."""
+        assert parse_depfile("x.o: a\\b.hpp\n") == ["a\\b.hpp"]
+
+    def test_a_last_path_without_a_trailing_newline(self) -> None:
+        """Nothing guarantees the compiler ends the depfile with one."""
+        assert parse_depfile("x.o: a.cpp b.hpp") == ["a.cpp", "b.hpp"]
 
 
 class TestScanCache:
@@ -153,6 +162,54 @@ class TestScanCache:
         assert cache.get(key) is None
         cache.save()
         assert not (tmp_path / CACHE_FILE).exists()
+
+    def test_a_file_of_the_wrong_shape_is_a_miss(self, tmp_path: Path) -> None:
+        """Readable pickle, but not one this pcons wrote."""
+        src, _ = self._sources(tmp_path)
+        (tmp_path / CACHE_FILE).write_bytes(pickle.dumps(["entries", "please"]))
+
+        cache = ScanCache(tmp_path)
+        assert cache.get(ScanCache.key("g++", [], str(src))) is None
+
+    def test_an_entry_of_the_wrong_shape_is_a_miss(self, tmp_path: Path) -> None:
+        src, _ = self._sources(tmp_path)
+        key = ScanCache.key("g++", [], str(src))
+        (tmp_path / CACHE_FILE).write_bytes(
+            pickle.dumps({"entries": {key: {"prereqs": str(src), "stamps": []}}})
+        )
+
+        assert ScanCache(tmp_path).get(key) is None
+
+    def test_stamps_that_do_not_line_up_are_a_miss(self, tmp_path: Path) -> None:
+        """One stamp per prerequisite, or there is no telling which is which."""
+        src, header = self._sources(tmp_path)
+        key = ScanCache.key("g++", [], str(src))
+        (tmp_path / CACHE_FILE).write_bytes(
+            pickle.dumps(
+                {
+                    "entries": {
+                        key: {
+                            "p1689": {"rules": []},
+                            "prereqs": [str(src), str(header)],
+                            "stamps": [[src.stat().st_mtime_ns, src.stat().st_size]],
+                        }
+                    }
+                }
+            )
+        )
+
+        assert ScanCache(tmp_path).get(key) is None
+
+    def test_a_cache_that_cannot_be_written_is_a_warning(self, tmp_path: Path) -> None:
+        """A cache that cannot be written is a slow build, not a failed one."""
+        src, _ = self._sources(tmp_path)
+        (tmp_path / CACHE_FILE).mkdir()  # write_bytes onto a directory fails
+
+        cache = ScanCache(tmp_path)
+        cache.put(ScanCache.key("g++", [], str(src)), {"rules": []}, [str(src)])
+        cache.save()
+
+        assert (tmp_path / CACHE_FILE).is_dir()
 
     def test_relative_prerequisites_are_resolved(self, tmp_path: Path) -> None:
         """A depfile names paths as the compiler saw them, from its own cwd."""
