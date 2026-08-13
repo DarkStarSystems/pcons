@@ -688,6 +688,7 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
+    { name = "coverage" },
     { name = "hypothesis" },
     { name = "mypy" },
     { name = "pytest" },
@@ -704,6 +705,7 @@ watch = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "coverage" },
     { name = "hypothesis" },
     { name = "mypy" },
     { name = "pytest" },
@@ -715,6 +717,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "click", specifier = ">=8.4" },
+    { name = "coverage", marker = "extra == 'dev'", specifier = ">=7.10" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.100" },
     { name = "mkdocs", marker = "extra == 'docs'", specifier = ">=1.5" },
     { name = "mkdocs-material", marker = "extra == 'docs'", specifier = ">=9.0" },
@@ -732,6 +735,7 @@ provides-extras = ["dev", "docs", "watch"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "coverage", specifier = ">=7.10" },
     { name = "hypothesis", specifier = ">=6.100" },
     { name = "mypy", specifier = ">=1.0" },
     { name = "pytest", specifier = ">=8.0" },
