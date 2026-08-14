@@ -199,11 +199,12 @@ class Project(_ProjectBuilders):
             defined_at: Source location where project was created.
         """
         self.name = name
+        defined_at = defined_at or get_caller_location()
         if root_dir is None and Project.__top_level is None:
             root_dir = os.environ.get("PCONS_SOURCE_DIR")
         if root_dir is None:
             # Infer from the script that called Project()
-            caller = defined_at or get_caller_location()
+            caller = defined_at
             caller_file = Path(caller.filename)
             if caller_file.exists():
                 root_dir = str(caller_file.parent)
@@ -238,7 +239,7 @@ class Project(_ProjectBuilders):
         self._pending_stages: list[Path] = []
         # Directory -> node keys beneath it, for get_child_nodes().
         self._child_index = _ChildNodeIndex()
-        self.defined_at = defined_at or get_caller_location()
+        self.defined_at = defined_at
         self._subdir = None
         # Offset from the top-level project's root to this project's root.
         # Empty for the top-level project; node paths are relative to it.
@@ -304,12 +305,6 @@ class Project(_ProjectBuilders):
         Project.__current = self
         if Project.__top_level is None:
             Project.__top_level = self
-            # Build scripts need no explicit generate call: once a top-level
-            # project exists, pending generation runs at process exit (the
-            # CLI runs it earlier, right after the script).
-            from pcons.generators.generator import BaseGenerator
-
-            BaseGenerator._register_atexit()
 
     @staticmethod
     def current() -> Project:

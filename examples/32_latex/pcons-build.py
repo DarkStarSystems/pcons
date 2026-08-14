@@ -1,9 +1,4 @@
-#!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons"]
-# ///
 """Build script for a LaTeX project.
 
 Demonstrates building a PDF from LaTeX sources using latexmk.
@@ -22,15 +17,17 @@ import sys
 from pcons import Project
 from pcons.contrib.latex import find_latex_toolchain
 
-project = Project("latex_example")
-src_dir = project.root_dir / "src"
-build_dir = project.build_dir
-
+# Before the project, not after: a script that stops here describes no build,
+# and pcons expects a script that describes one to run it.
 try:
     toolchain = find_latex_toolchain()
 except RuntimeError as e:
     print(f"Skipping: {e}", file=sys.stderr)
     sys.exit(0)
+
+project = Project("latex_example")
+src_dir = project.root_dir / "src"
+build_dir = project.build_dir
 
 env = project.Environment(toolchain=toolchain)
 

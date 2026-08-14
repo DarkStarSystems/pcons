@@ -934,23 +934,6 @@ class TestCLICommands:
         assert result.exit_code == 0, f"generate failed: {result.output}"
         assert (tmp_path / "build" / "build.ninja").exists()
 
-    def test_auto_generate_without_generate_call(self, tmp_path: Path) -> None:
-        """A script with no generate call auto-generates, even run directly."""
-        (tmp_path / "pcons-build.py").write_text(
-            "from pcons import Project\nproject = Project('auto')\n"
-        )
-        # Subprocess: the generation this pins happens in an atexit hook, which
-        # only runs when the interpreter itself exits, and the script is run
-        # directly rather than through the CLI.
-        result = subprocess.run(
-            [sys.executable, "pcons-build.py"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0, result.stderr
-        assert (tmp_path / "build" / "build.ninja").exists()
-
     def test_no_auto_generate_on_script_crash(self, tmp_path: Path) -> None:
         """A crashed script must not generate build files at exit."""
         (tmp_path / "pcons-build.py").write_text(
@@ -958,8 +941,8 @@ class TestCLICommands:
             "project = Project('crash')\n"
             "raise RuntimeError('boom')\n"
         )
-        # Subprocess: same atexit path as the test above, and the traceback it
-        # asserts on is written by the interpreter, not by pcons.
+        # Subprocess: the traceback it asserts on is written by the
+        # interpreter, not by pcons.
         result = subprocess.run(
             [sys.executable, "pcons-build.py"],
             capture_output=True,
