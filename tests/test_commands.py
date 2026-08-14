@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +15,7 @@ from click.testing import CliRunner
 import pcons
 from pcons import commands
 from pcons.core.errors import PconsError
+from pcons.core.target import Target
 
 
 def as_module(name: str, func: Callable[..., Any]) -> Callable[..., Any]:
@@ -59,14 +60,18 @@ class TestDeclaring:
         assert commands.lookup("docs") is docs
 
     def test_a_user_command_is_plain_click(self) -> None:
-        """Not `MergingCommand`, so a user command owns its own options.
+        """Plain click below `_DeclaresDependencies`, so a command owns its options.
 
         `MergingCommand` adopts a same-named option from the group above and
         reads `--debug`/`--verbose` as pcons means them, so a command declaring
         a `--debug` of its own would have its value validated as pcons
         subsystems and its `--build-dir` silently replaced by the run group's.
         """
-        from pcons._cli_click import MergingCommand, MergingGroup
+        from pcons._cli_click import (
+            MergingCommand,
+            MergingGroup,
+            _DeclaresDependencies,
+        )
 
         @pcons.cli_command()
         def one() -> None:
@@ -76,10 +81,24 @@ class TestDeclaring:
         def two() -> None:
             """Two."""
 
-        assert type(one) is click.Command
-        assert type(two) is click.Group
         assert not isinstance(one, MergingCommand)
         assert not isinstance(two, MergingGroup)
+        assert type(one).__bases__ == (_DeclaresDependencies, click.Command)
+        assert type(two).__bases__ == (_DeclaresDependencies, click.Group)
+
+    def test_the_default_class_is_the_one_carrying_depends(self) -> None:
+        from pcons._cli_click import UserCommand, UserGroup
+
+        @pcons.cli_command()
+        def one() -> None:
+            """One."""
+
+        @pcons.cli_group()
+        def two() -> None:
+            """Two."""
+
+        assert isinstance(one, UserCommand)
+        assert isinstance(two, UserGroup)
 
     def test_cls_can_be_overridden(self) -> None:
         class Mine(click.Command):
@@ -469,6 +488,148 @@ class TestProjectSugar:
             "origin",
             "declared_in",
         ]
+
+
+class TestDeclaringDependencies:
+    """`depends`: targets to build before `pcons run <name>` dispatches.
+
+    Recording only. What reads it is `RunGroup`, covered in tests/test_cli.py.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _project(self, tmp_path: Path) -> Iterator[None]:
+        """`Target` reads the current project at construction."""
+        pcons.Project("app", root_dir=tmp_path)
+        yield
+
+    @staticmethod
+    def _target(name: str) -> Target:
+        return Target(name)
+
+    def test_a_declared_target_is_recorded(self) -> None:
+        firmware = self._target("firmware")
+
+        @pcons.cli_command()
+        def flash() -> None:
+            """Flash it."""
+
+        flash.depends(firmware)
+
+        assert flash.declared_dependencies() == [firmware]
+
+    def test_declaring_nothing_gives_an_empty_list(self) -> None:
+        @pcons.cli_command()
+        def flash() -> None:
+            """Flash it."""
+
+        assert flash.declared_dependencies() == []
+
+    def test_several_in_one_call_keep_their_order(self) -> None:
+        first, second = self._target("a"), self._target("b")
+
+        @pcons.cli_command()
+        def flash() -> None:
+            """Flash it."""
+
+        flash.depends(first, second)
+
+        assert flash.declared_dependencies() == [first, second]
+
+    def test_a_second_call_adds_rather_than_replaces(self) -> None:
+        first, second = self._target("a"), self._target("b")
+
+        @pcons.cli_command()
+        def flash() -> None:
+            """Flash it."""
+
+        flash.depends(first)
+        flash.depends(second)
+
+        assert flash.declared_dependencies() == [first, second]
+
+    def test_the_list_is_a_copy(self) -> None:
+        """Mutating what a caller was handed must not reach the command."""
+        firmware = self._target("firmware")
+
+        @pcons.cli_command()
+        def flash() -> None:
+            """Flash it."""
+
+        flash.depends(firmware)
+        flash.declared_dependencies().clear()
+
+        assert flash.declared_dependencies() == [firmware]
+
+    def test_a_group_declares_them_too(self) -> None:
+        firmware = self._target("firmware")
+
+        @pcons.cli_group()
+        def board() -> None:
+            """Board tasks."""
+
+        board.depends(firmware)
+
+        assert board.declared_dependencies() == [firmware]
+
+    def test_a_groups_verb_is_a_plain_click_command(self) -> None:
+        """A verb declares nothing of its own; the group's cover it.
+
+        Pinned so that giving verbs their own dependencies is a deliberate
+        change rather than an accident.
+        """
+
+        @pcons.cli_group()
+        def board() -> None:
+            """Board tasks."""
+
+        @board.command("flash")
+        def board_flash() -> None:
+            """Flash it."""
+
+        assert not hasattr(board_flash, "depends")
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            pytest.param("firmware", id="a-name"),
+            pytest.param(Path("build/firmware.elf"), id="a-path"),
+            pytest.param(None, id="none"),
+        ],
+    )
+    def test_anything_but_a_target_raises(self, bad: object) -> None:
+        """A Target and nothing else: a name or a path would need resolving
+        against a project this registry deliberately does not hold."""
+
+        @pcons.cli_command()
+        def flash() -> None:
+            """Flash it."""
+
+        with pytest.raises(PconsError, match="takes a Target"):
+            flash.depends(bad)  # type: ignore[arg-type]
+
+    def test_a_rejected_argument_records_nothing(self) -> None:
+        good = self._target("firmware")
+
+        @pcons.cli_command()
+        def flash() -> None:
+            """Flash it."""
+
+        with pytest.raises(PconsError):
+            flash.depends(good, "bad")  # type: ignore[arg-type]
+
+        assert flash.declared_dependencies() == []
+
+    def test_an_overridden_cls_simply_has_none(self) -> None:
+        """`cls=` is an escape hatch, not a supported way to get `depends`."""
+
+        class Mine(click.Command):
+            pass
+
+        @pcons.cli_command(cls=Mine)
+        def flash() -> None:
+            """Flash it."""
+
+        assert not hasattr(flash, "depends")
 
 
 def test_the_public_spelling_is_re_exported() -> None:

@@ -184,7 +184,8 @@ def cli_command(
     function below this one. The name defaults to click's derivation from the
     function name, which turns ``build_docs`` into ``build-docs``.
 
-    Plain click, deliberately: pcons' own `MergingCommand` adopts same-named
+    A `UserCommand` unless ``cls`` says otherwise, which is plain click plus
+    ``depends``. Never pcons' own `MergingCommand`, which adopts same-named
     options from the group above and reads ``--debug``/``-v`` as pcons means
     them, so a command declaring a ``--debug`` of its own would have its value
     validated as pcons subsystems, and its ``--build-dir`` silently replaced by
@@ -193,6 +194,11 @@ def cli_command(
     """
 
     def decorator(func: Callable[..., Any]) -> click.Command:
+        # Local: `_cli_click` imports pcons at module level, and pcons
+        # re-exports from here, so a module-level import would close a cycle.
+        from pcons._cli_click import UserCommand
+
+        attrs.setdefault("cls", UserCommand)
         command = click.command(name, **attrs)(func)
         _record(command, func)
         return command
@@ -208,9 +214,16 @@ def cli_group(
     Add verbs to it with click's own ``@mygroup.command()``. They belong to the
     group and never enter this registry, so they cannot collide with a
     top-level name.
+
+    A `UserGroup` unless ``cls`` says otherwise, which is the class carrying
+    ``depends``. A verb declares none of its own; the group's apply to all of
+    them.
     """
 
     def decorator(func: Callable[..., Any]) -> click.Group:
+        from pcons._cli_click import UserGroup
+
+        attrs.setdefault("cls", UserGroup)
         group = click.group(name, **attrs)(func)
         _record(group, func)
         return group
