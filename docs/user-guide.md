@@ -1641,8 +1641,9 @@ def flash(baud: int) -> None:
 
 The callback closes over the script's `project` and targets, so it knows the
 build directory and every output path without being told. It runs with the
-project resolved and writes no build files. Add-on modules can declare commands
-too, with `pcons.cli_command()`.
+project resolved, and builds nothing unless it declared a dependency with
+`flash.depends(firmware)`, in which case pcons builds that first. Add-on
+modules can declare commands too, with `pcons.cli_command()`.
 
 The whole of it is on its own page: [Commands of your own](user-commands.md).
 

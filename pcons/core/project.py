@@ -32,8 +32,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    import click
-
+    from pcons._cli_click import UserCommand, UserGroup
     from pcons.core._project_builder_stubs import _ProjectBuilders
     from pcons.core._toolchain_names import KnownToolchain
     from pcons.tools.toolchain import Toolchain
@@ -1390,7 +1389,7 @@ class Project(_ProjectBuilders):
 
     def cli_command(
         self, name: str | None = None, **attrs: Any
-    ) -> Callable[[Callable[..., Any]], click.Command]:
+    ) -> Callable[[Callable[..., Any]], UserCommand]:
         """Declare a CLI command, reachable as ``pcons run <name>``.
 
         Sugar for `pcons.cli_command`, which is the same registry. The entry
@@ -1402,7 +1401,7 @@ class Project(_ProjectBuilders):
 
     def cli_group(
         self, name: str | None = None, **attrs: Any
-    ) -> Callable[[Callable[..., Any]], click.Group]:
+    ) -> Callable[[Callable[..., Any]], UserGroup]:
         """Declare a CLI group, reachable as ``pcons run <name> <verb>``.
 
         Sugar for `pcons.cli_group`.

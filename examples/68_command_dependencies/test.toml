@@ -1,0 +1,33 @@
+# Test configuration for the command-dependencies example
+
+[test]
+description = "A declared command names the targets it needs, and `pcons run` builds them before dispatching"
+
+expected_outputs = [
+    "build/report${BINARY_EXT}",
+]
+
+[verify]
+# ${PCONS} is the pcons under test, as a shell command. A bare `pcons` would
+# depend on a console script being on PATH and on it being this checkout.
+commands = [
+    # Throw the whole build directory away, so nothing below can pass on an
+    # artifact the harness built above.
+    { run = "${PCONS} clean --all" },
+    # A command that declared nothing still starts no build, and so finds
+    # nothing: the old contract, unchanged.
+    { run = "${PCONS} run inspect-build", expect_stdout = "report exists: False" },
+    # A command that declared a dependency generates the build files, builds
+    # it, and runs -- from an empty build directory, in one invocation.
+    { run = "${PCONS} run publish", expect_stdout = "report: 3 findings" },
+    { run = "${PCONS} run inspect-build", expect_stdout = "report exists: True" },
+    # A group's dependency covers its verbs.
+    { run = "${PCONS} clean --all" },
+    { run = "${PCONS} run release notes", expect_stdout = "notes for report" },
+    { run = "${PCONS} run inspect-build", expect_stdout = "report exists: True" },
+]
+
+[skip]
+# xcode builds into build/Release and names its targets differently from the
+# paths a ninja or make invocation takes.
+generators = ["xcode"]

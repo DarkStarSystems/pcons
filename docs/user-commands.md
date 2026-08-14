@@ -84,19 +84,61 @@ By the time the callback runs:
   `target.output_nodes` and `project.build_dir` are populated;
 - `pcons.get_var()` and `pcons.get_variant()` answer as they do in the script
   body, because the command runs inside the script's live environment;
-- **no build files have been written and no build has run.** `pcons run` is not
-  a way to build.
+- **no build files have been written and no build has run**, unless the command
+  declared a dependency. `pcons run` is not a general way to build.
 
-A command that needs the program built should say so, by shelling out to a build
-or by telling the user:
+## Building first
+
+A command that needs an artifact on disk names the targets it needs:
 
 ```python
-from pathlib import Path
+firmware = project.Program("firmware", env, ["src/main.c"])
 
 
 @project.cli_command()
 def package() -> None:
     """Package the built program."""
+    image = Path(str(firmware.output_nodes[0].path))
+    ...
+
+
+package.depends(firmware)
+```
+
+`pcons run package` then writes the build files, builds `firmware`, and runs the
+command. If the build fails the command does not run, and `pcons run` exits with
+the build's own code. It all happens in one reading of the build script: the
+decision to generate is taken after the script has been read, once pcons knows
+what the command asked for.
+
+`depends` takes targets -- what `Program`, `StaticLibrary`, `Command` and the
+rest hand back -- and takes nothing else. A name or a path would have to be
+resolved against a project, and the command registry deliberately holds none.
+
+A group declares them for all its verbs at once; a verb declares none of its
+own:
+
+```python
+@project.cli_group()
+def release() -> None:
+    """Release tasks."""
+
+
+release.depends(firmware)
+```
+
+Since `pcons run` can build, it takes the flags that govern building: `-j` /
+`--jobs` and `--ninja`, as `pcons build` does. Spelled before the command name
+they configure the build, spelled after it they belong to the command.
+
+**Declaring a dependency is the opt-in.** A command that declares none writes no
+build files and starts no build, so it has to cope with an artifact that may not
+exist:
+
+```python
+@project.cli_command()
+def inspect_image() -> None:
+    """Report on the image, if there is one."""
     image = Path(str(firmware.output_nodes[0].path))
     if not image.exists():
         raise click.ClickException(f"{image} is not built yet. Run `pcons` first.")

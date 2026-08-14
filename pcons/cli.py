@@ -2435,7 +2435,9 @@ class RunGroup(MergingGroup):
 
     Names come from the build directory's cache, so listing and help never run
     the build script. Dispatch does run it, and hands the command its live
-    environment with the project resolved and no build files written.
+    environment with the project resolved. A command that declared a dependency
+    also gets the build files written and those targets built; one that
+    declared none gets neither.
 
     It lives here rather than in `_cli_click` because it has to run the build
     script, and `cli` imports `_cli_click`; the generic classes there stay
