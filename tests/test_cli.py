@@ -3729,3 +3729,39 @@ class TestSignaturesMatchTheDecorators:
         assert {"generate", "build", "clean", "cache", "list", "path", "_default"} <= (
             names
         )
+
+
+class TestACommandNameThatIsNotTheFirstArgument:
+    """click resolves a subcommand from argv[0] and a group stops parsing at
+    the first non-option, so anything a user may legitimately write before a
+    command name hid it: the name became a target and the command never ran.
+    """
+
+    def _resolved(self, *argv: str) -> tuple[str | None, list[str]]:
+        """(command name, what is left for it), or ("_default", ...)."""
+        ctx = cli.make_context("pcons", [])
+        _name, command, rest = cli.resolve_command(ctx, list(argv))
+        return (command.name if command is not None else None), rest
+
+    def test_a_variable_no_longer_hides_the_command(self):
+        assert self._resolved("FOO=bar", "generate") == ("generate", ["FOO=bar"])
+
+    def test_an_option_stopped_at_a_variable_does_not_hide_it_either(self):
+        """The group never parsed `--variant`: `FOO=bar` stopped it first."""
+        assert self._resolved("FOO=bar", "--variant", "debug", "generate") == (
+            "generate",
+            ["FOO=bar", "--variant", "debug"],
+        )
+
+    def test_a_target_is_still_a_target(self):
+        assert self._resolved("FOO=bar", "hello") == ("_default", ["FOO=bar", "hello"])
+
+    def test_an_option_value_is_not_a_command_name(self):
+        """`-C clean` names a directory; the command is still `generate`."""
+        assert self._resolved("FOO=bar", "-C", "clean", "generate") == (
+            "generate",
+            ["FOO=bar", "-C", "clean"],
+        )
+
+    def test_a_command_first_is_untouched(self):
+        assert self._resolved("generate", "FOO=bar") == ("generate", ["FOO=bar"])
