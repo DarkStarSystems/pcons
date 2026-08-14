@@ -249,6 +249,7 @@ def run_script(
     extra_env: dict[str, str] | None = None,
     persist: bool = True,
     fresh: bool = False,
+    generate: bool = True,
 ) -> tuple[int, list[Project]]:
     """Execute a Python build script in-process via exec(), so its Project
     objects are accessible through the global registry.
@@ -267,6 +268,10 @@ def run_script(
             the directory it regenerates; its argv is already self-contained.
         fresh: If True, discard the persisted cache before resolving settings,
             so the run starts clean (like cmake --fresh).
+        generate: If False, drop the script's deferred generate requests
+            instead of running them, so no build files are written. For
+            inspection commands (`pcons explain`) that need the project
+            graph but must leave the build directory alone.
 
     Returns:
         Tuple of (exit_code, list of registered Projects).
@@ -424,7 +429,10 @@ def run_script(
             from pcons.generators.generator import BaseGenerator
 
             top_level = Project.top_level()
-            BaseGenerator._generate_pending(top_level)
+            if generate:
+                BaseGenerator._generate_pending(top_level)
+            else:
+                BaseGenerator._clear_pending()
             if persist:
                 _warn_unread_cached_vars(cached_vars, cli_vars)
                 _persist_run_settings(
@@ -1213,6 +1221,75 @@ def _info_targets(
     return 0
 
 
+def _explain_targets(
+    build_dir: Path,
+    script: Path,
+    *,
+    target_names: list[str] | None = None,
+    variables: dict[str, str] | None = None,
+    variant: str | None = None,
+    generator: list[str] | None = None,
+    reconfigure: bool = False,
+    fresh: bool = False,
+    color: str = "auto",
+    width: int | None = None,
+) -> int:
+    """Run the build script and show how each target's commands are built.
+
+    Writes no build files and persists nothing: the script runs with its
+    deferred generation dropped, the project is resolved in-process, and the
+    report (see `pcons._cli_explain`) is printed: each target's concrete
+    commands and attributed requirements, then every environment's flag
+    provenance (``env.explain()``).
+    """
+    from pcons import _cli_explain
+
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    exit_code, projects = run_script(
+        script,
+        build_dir,
+        variables=variables or {},
+        variant=variant,
+        generator=generator,
+        reconfigure=reconfigure,
+        fresh=fresh,
+        persist=False,
+        generate=False,
+    )
+    if exit_code != 0:
+        return exit_code
+    if not projects:
+        logger.error("No Project created in build script")
+        return 1
+
+    project = projects[0]
+    if not project._resolved:
+        project.resolve()
+
+    targets = list(project.targets)
+    if target_names:
+        by_name = {t.name: t for t in targets}
+        missing = [n for n in target_names if n not in by_name]
+        if missing:
+            logger.error("No such target: %s", ", ".join(missing))
+            logger.error("Targets: %s", ", ".join(sorted(by_name)))
+            return 1
+        targets = [by_name[n] for n in target_names]
+
+    use_color = _cli_explain.resolve_color(color)
+    for line in _cli_explain.render_explanation(
+        project,
+        targets,
+        explicit_targets=bool(target_names),
+        color=use_color,
+        width=_cli_explain.resolve_width(width),
+    ):
+        click.echo(line, color=use_color)
+
+    return 0
+
+
 _SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".swift"}
 
 _HELLO_C = """\
@@ -1480,6 +1557,80 @@ def cli_info(
             variant=variant,
             generator=list(generator) or None,
             reconfigure=reconfigure,
+        )
+    )
+
+
+@cli.command(
+    "explain",
+    loads_modules=True,
+    short_help="Show each target's commands and where its flags came from",
+    help=(
+        "Show how each target's commands are constructed, then attribute "
+        "every flag and define to the preset, variant or toolchain that "
+        "set it.\n\n"
+        "Runs the build script but writes no build files and persists "
+        "nothing.\n\n"
+        "EXTRA is targets to explain and/or build variables (KEY=value); "
+        "with no targets, every target is explained."
+    ),
+)
+@directory_option
+@common_options
+@generate_options
+@click.option(
+    "--color",
+    type=click.Choice(["auto", "always", "never"]),
+    default="auto",
+    help="Colorize the report (auto: only on a terminal)",
+)
+@click.option(
+    "--width",
+    metavar="COLS",
+    type=int,
+    help=(
+        "Truncate command lines to COLS columns; 0 for unlimited "
+        "(default: terminal width, unlimited when piped)"
+    ),
+)
+@click.argument("extra", nargs=-1)
+@pass_pcons_context
+def cli_explain(
+    ctx: PconsContext,
+    build_dir: Path,
+    variant: str | None,
+    generator: tuple[str, ...],
+    reconfigure: bool,
+    fresh: bool,
+    build_script: str | None,
+    color: str,
+    width: int | None,
+    extra: tuple[str, ...],
+    **declared_but_unused: object,
+) -> None:
+    """Show how each target's commands are constructed."""
+    script = Path(build_script) if build_script else None
+    resolved = _resolve_build_script(script)
+    if script is not None and not script.exists():
+        logger.error("Build script not found: %s", script)
+        ctx.exit(1)
+    if resolved is None:
+        logger.error("No pcons-build.py found in current directory")
+        ctx.exit(1)
+
+    variables, target_names = parse_variables(list(extra))
+    ctx.exit(
+        _explain_targets(
+            build_dir,
+            resolved,
+            target_names=target_names or None,
+            variables=variables,
+            variant=variant,
+            generator=_generators(generator),
+            reconfigure=reconfigure,
+            fresh=fresh,
+            color=color,
+            width=width,
         )
     )
 

@@ -53,10 +53,14 @@ def _parse_cxx_standard(standard: int | str) -> int:
 def _cxx_set_standard(env: Environment, standard: int | str) -> None:
     """``env.cxx.set_standard(...)`` — select the C++ language standard."""
     n = _parse_cxx_standard(standard)
-    for toolchain in env.toolchains:
-        preset = toolchain.make_cxx_standard_preset(n)
-        if preset is not None:
-            env.apply(preset)
+    # Deduped like every set_*/apply_* fan-out: toolchains sharing the cxx
+    # tool (swift + llvm in C++-interop envs) realize identical presets, and
+    # without the guard both would apply, doubling -std=c++NN.
+    with env._dedup_fanout():
+        for toolchain in env.toolchains:
+            preset = toolchain.make_cxx_standard_preset(n)
+            if preset is not None:
+                env.apply(preset)
 
 
 # =============================================================================

@@ -19,13 +19,34 @@ from pcons.core.flags import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Iterable, Sequence
 
     from pcons.core.environment import Environment
     from pcons.core.subst import FlagToken
     from pcons.core.target import Target, UsageRequirements
 
 logger = logging.getLogger(__name__)
+
+
+def flag_units(
+    flags: Sequence[Any],
+    separated_arg_flags: frozenset[str],
+    passthrough_flags: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Flags as display/attribution units, spelled as strings.
+
+    A separated-arg flag and its argument (``-framework Foo``), or a
+    passthrough run (``-Xlinker -rpath -Xlinker /p``), is one unit — the
+    same grouping `merge_flags` dedups by, via the same parser. Repeated
+    flag tokens (three ``-framework``s) thus keep distinct identities,
+    one per argument.
+    """
+    from pcons.core.flags import parse_flags
+
+    return [
+        str(group)
+        for group in parse_flags(list(flags), separated_arg_flags, passthrough_flags)
+    ]
 
 
 @dataclass
@@ -57,41 +78,78 @@ class EffectiveRequirements:
     link_dirs: list[Path] = field(default_factory=list)
     separated_arg_flags: frozenset[str] = field(default_factory=frozenset)
     passthrough_flags: frozenset[str] = field(default_factory=frozenset)
+    #: Where each merged value came from: ``(field, str(value))`` ->
+    #: ``(owner, scope)``, e.g. ``("mylib", "public")``, ``("app", "private")``,
+    #: ``("env.cxx", "base")``. The first contributor wins, matching the
+    #: dedup below; values merged without an origin are not recorded.
+    origins: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
 
-    def merge(self, reqs: UsageRequirements) -> None:
+    def _record(
+        self, field_name: str, value: object, origin: tuple[str, str] | None
+    ) -> None:
+        if origin is not None:
+            self.origins.setdefault((field_name, str(value)), origin)
+
+    def merge(
+        self, reqs: UsageRequirements, origin: tuple[str, str] | None = None
+    ) -> None:
         """Merge in UsageRequirements: order-preserving dedup, with
         separated-arg flag pairs (``-framework Foo``) treated as units.
+
+        Args:
+            reqs: The requirements to merge in.
+            origin: ``(owner, scope)`` attributed to each value this merge
+                adds (values already present keep their first contributor).
         """
         for inc_dir in reqs.include_dirs:
             inc_path = Path(inc_dir) if isinstance(inc_dir, str) else inc_dir
             if inc_path not in self.includes:
                 self.includes.append(inc_path)
+                self._record("include_dirs", inc_path, origin)
         for sys_dir in reqs.system_include_dirs:
             sys_path = Path(sys_dir) if isinstance(sys_dir, str) else sys_dir
             if sys_path not in self.system_includes:
                 self.system_includes.append(sys_path)
+                self._record("system_include_dirs", sys_path, origin)
         for define in reqs.defines:
             if define not in self.defines:
                 self.defines.append(define)
+                self._record("defines", define, origin)
+        before = len(self.compile_flags)
         merge_flags(
             self.compile_flags,
             reqs.compile_flags,
             self.separated_arg_flags,
             self.passthrough_flags,
         )
+        for unit in flag_units(
+            self.compile_flags[before:],
+            self.separated_arg_flags,
+            self.passthrough_flags,
+        ):
+            self._record("compile_flags", unit, origin)
+        before = len(self.link_flags)
         merge_flags(
             self.link_flags,
             reqs.link_flags,
             self.separated_arg_flags,
             self.passthrough_flags,
         )
+        for unit in flag_units(
+            self.link_flags[before:],
+            self.separated_arg_flags,
+            self.passthrough_flags,
+        ):
+            self._record("link_flags", unit, origin)
         for lib in reqs.link_libs:
             if lib not in self.link_libs:
                 self.link_libs.append(lib)
+                self._record("link_libs", getattr(lib, "name", lib), origin)
         for lib_dir in reqs.link_dirs:
             dir_path = Path(lib_dir) if isinstance(lib_dir, str) else lib_dir
             if dir_path not in self.link_dirs:
                 self.link_dirs.append(dir_path)
+                self._record("link_dirs", dir_path, origin)
 
     def as_hashable_tuple(self) -> tuple:
         """Return a hashable representation for caching."""
@@ -117,16 +175,27 @@ class EffectiveRequirements:
             link_dirs=list(self.link_dirs),
             separated_arg_flags=self.separated_arg_flags,
             passthrough_flags=self.passthrough_flags,
+            origins=dict(self.origins),
         )
 
 
-def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None:
+def apply_requirements_to_env(
+    env: Environment, reqs: UsageRequirements, origin: str | None = None
+) -> None:
     """Apply usage requirements env-wide onto tool variables (``env.use()``).
 
     Compile requirements land on cc/cxx; link requirements on link, with
     the same merge semantics as :meth:`EffectiveRequirements.merge`. A
     ``Target`` in ``link_libs`` is an error here: linking a build target
     is per-target dependency information — use ``target.link(...)``.
+
+    Args:
+        env: The environment to apply to.
+        reqs: The requirements to apply.
+        origin: The contributing package's name. Recorded on the environment
+            so `compute_effective_requirements` (and thus ``pcons explain``)
+            attributes these values to the package, not to the tool variable
+            they landed on.
     """
     from pcons.core.target import Target as _Target
 
@@ -142,6 +211,19 @@ def apply_requirements_to_env(env: Environment, reqs: UsageRequirements) -> None
                 f"linking a build target is per-target information — use "
                 f"target.link({lib.name!r}) instead."
             )
+
+    if origin is not None:
+        # Only the compile-side fields: they are what the base layer of
+        # compute_effective_requirements reads back off the tool variables.
+        # Keys are spelled the way that layer looks them up (via Path).
+        use_origins = env._use_origins
+        for field_name, values in (
+            ("include_dirs", (str(Path(i)) for i in eff.includes)),
+            ("system_include_dirs", (str(Path(i)) for i in eff.system_includes)),
+            ("defines", eff.defines),
+        ):
+            for value in values:
+                use_origins.setdefault((field_name, value), (origin, "package"))
 
     def var(tool: Any, name: str) -> list[Any]:
         """The tool's list variable, created empty on first need."""
@@ -245,12 +327,21 @@ def compute_effective_requirements(
     if tool_name and env.has_tool(tool_name):
         tool_config = getattr(env, tool_name)
 
+        # A value env.use() placed here is the package's, not the tool's.
+        use_origins = env._use_origins
+
+        def base_origin(field_name: str, value: str) -> tuple[str, str]:
+            return use_origins.get((field_name, value), (f"env.{tool_name}", "base"))
+
         includes = getattr(tool_config, "includes", None)
         if includes:
             for inc in includes:
                 path = Path(inc) if isinstance(inc, str) else inc
                 if path not in result.includes:
                     result.includes.append(path)
+                    result._record(
+                        "include_dirs", path, base_origin("include_dirs", str(path))
+                    )
 
         system_includes = getattr(tool_config, "system_includes", None)
         if system_includes:
@@ -258,12 +349,18 @@ def compute_effective_requirements(
                 path = Path(inc) if isinstance(inc, str) else inc
                 if path not in result.system_includes:
                     result.system_includes.append(path)
+                    result._record(
+                        "system_include_dirs",
+                        path,
+                        base_origin("system_include_dirs", str(path)),
+                    )
 
         defines = getattr(tool_config, "defines", None)
         if defines:
             for define in defines:
                 if define not in result.defines:
                     result.defines.append(define)
+                    result._record("defines", define, base_origin("defines", define))
 
         # NOT env.<tool>.flags: in mixed-language targets the primary
         # tool's flags (e.g. cxx.flags with -std=c++20) would leak to all
@@ -273,19 +370,30 @@ def compute_effective_requirements(
 
     # Layer 2: Target's own requirements. Public is also available to the
     # target's own sources, not just consumers.
-    result.merge(_resolve_and_add_includes_for(target.private, target))
-    result.merge(_resolve_and_add_includes_for(target.public, target))
+    result.merge(
+        _resolve_and_add_includes_for(target.private, target),
+        origin=(target.name, "private"),
+    )
+    result.merge(
+        _resolve_and_add_includes_for(target.public, target),
+        origin=(target.name, "public"),
+    )
 
     # Layer 3: All dependencies' public requirements (transitive).
     for dep in target.transitive_dependencies():
-        result.merge(_resolve_and_add_includes_for(dep.public, dep))
+        result.merge(
+            _resolve_and_add_includes_for(dep.public, dep), origin=(dep.name, "public")
+        )
 
     # Layer 4: Implicit target deps from target.depends(other_target):
     # propagate public usage requirements to compile steps without adding
     # outputs to the linker's $in.
     if for_compilation:
         for dep in target._implicit_target_deps:
-            result.merge(_resolve_and_add_includes_for(dep.public, dep))
+            result.merge(
+                _resolve_and_add_includes_for(dep.public, dep),
+                origin=(dep.name, "public"),
+            )
 
     return result
 

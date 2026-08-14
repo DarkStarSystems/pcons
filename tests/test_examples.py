@@ -1464,3 +1464,72 @@ if not EXAMPLE_PARAMS:
     def test_no_examples() -> None:
         """Placeholder when no examples are found."""
         pytest.skip("No example projects found in examples/")
+
+
+def _invoke_explain(
+    example_dir: Path, build_dir: Path, toolchain: str | None = None
+) -> Any:
+    """Run `pcons explain` in-process, restoring the global state it touches.
+
+    -C chdirs the process and the commands rebind the root logger's
+    handlers; both must be undone or they leak into every later test.
+    """
+    import logging
+
+    from click.testing import CliRunner
+
+    from pcons.cli import cli
+
+    argv = [
+        "-C",
+        str(example_dir),
+        "-B",
+        str(build_dir),
+        "explain",
+        "--color",
+        "never",
+    ]
+    if toolchain:
+        argv.append(f"TOOLCHAIN={toolchain}")
+
+    cwd = os.getcwd()
+    handlers = logging.root.handlers[:]
+    level = logging.root.level
+    try:
+        return CliRunner().invoke(cli, argv, catch_exceptions=False)
+    finally:
+        os.chdir(cwd)
+        logging.root.handlers[:] = handlers
+        logging.root.setLevel(level)
+
+
+@pytest.mark.parametrize("example_dir", discover_examples(), ids=lambda p: p.name)
+def test_example_explain(example_dir: Path, tmp_path: Path) -> None:
+    """`pcons explain` runs clean on every runnable example.
+
+    In-process, unlike the end-to-end runs above, so the explain rendering
+    paths are exercised (and coverage-measured) across the whole example
+    corpus. Explain writes no build files, so the whole pass costs seconds.
+    """
+    config = load_test_config(example_dir)
+    reason = should_skip(config)
+    if reason:
+        pytest.skip(reason)
+
+    # Honor the example's toolchain request (e.g. the C++ modules examples
+    # need msvc on Windows; default detection would pick clang-cl), the way
+    # the end-to-end runs do — but one toolchain suffices for this pass.
+    toolchain = None
+    requested = get_requested_toolchains(config)
+    if requested != [None]:
+        current_platform = platform.system().lower()
+        available = [
+            t for t in requested if t and _toolchain_is_available(t, current_platform)
+        ]
+        if not available:
+            pytest.skip(f"No requested toolchain available: {requested}")
+        toolchain = available[0]
+
+    result = _invoke_explain(example_dir, tmp_path / "build", toolchain)
+    assert result.exit_code == 0, result.output
+    assert "## Explanation of Targets and Environments" in result.output

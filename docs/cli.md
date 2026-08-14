@@ -66,6 +66,57 @@ Show the build script's documentation and the variables it reads.
 |---|---|
 | `-t`, `--targets` | List every target (runs the build script) |
 
+### `pcons explain`
+
+Show how each target's commands are constructed, and where every piece came
+from. Each target section lists its concrete commands, its effective usage
+requirements with the target that contributed each one (`include_dirs`,
+`defines`, `link_libs`, ...), and the environment it builds with; each
+environment section attributes every flag and define to the preset, variant
+or toolchain that set it (the CLI face of `env.explain()`). Runs the build
+script but writes no build files and persists nothing.
+
+Commands are spelled exactly as the build runs them — from the build
+directory — so with `--width 0` they can be pasted into a shell there and
+re-run or hand-edited.
+
+Arguments are targets to explain and/or build variables (`KEY=value`); with
+no targets, every target is explained.
+
+| Option | |
+|---|---|
+| `--color {auto,always,never}` | Colorize the report (default `auto`: only on a terminal) |
+| `--width COLS` | Truncate command lines to COLS columns; `0` for unlimited (default: terminal width, unlimited when piped) |
+
+```console
+$ pcons explain simulator --variant debug
+## Explanation of Targets and Environments: ~/src/myproject
+Commands are shown as the build runs them, from the build directory (build).
+
+=== simulator  (program)  [env #1]  pcons-build.py:23
+  * build/obj.simulator/main.o  <-  main.c
+      /usr/bin/clang -Wall -O0 -g -I../include -MD -MF obj.simulator/main.o.d -c -o obj.simulator/main.o ../main.c
+  * build/simulator  <-  build/obj.simulator/main.o
+      /usr/bin/clang -o simulator obj.simulator/main.o -lm
+  requirements:
+    include_dirs:
+      include  <- math (public)
+    link_libs:
+      physics  <- simulator (private)
+      m        <- math (public)
+      math     <- physics (public)
+
+Environment #1  (toolchain: llvm)  pcons-build.py:8
+  cc.flags:
+    -Wall  <- warnings (feature)
+    -O0    <- debug (variant)
+    -g     <- debug (variant)
+```
+
+A node compiled with a per-source environment override, or a dependency
+built in a different environment, is annotated with that environment's
+label (`[env #2]`).
+
 ### `pcons init`
 
 Write a `pcons-build.py` for the current directory. It adopts any C or C++

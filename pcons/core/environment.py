@@ -108,6 +108,7 @@ class Environment(_EnvironmentStubs):
         "_created_nodes",
         "_applied_presets",
         "_applied_imperative",
+        "_use_origins",
         "_fanout_seen",
         "_name",
         "defined_at",
@@ -156,6 +157,11 @@ class Environment(_EnvironmentStubs):
         self._applied_presets: list[Preset] = []  # Presets applied, in order
         # Imperative escape-hatch presets that ran: (name, description)
         self._applied_imperative: list[tuple[str, str]] = []
+        # Values env.use() put on tool variables, attributed to their package:
+        # (field, value) -> (package name, "package"). Read by
+        # compute_effective_requirements so `pcons explain` names the package
+        # rather than the tool variable the value landed on.
+        self._use_origins: dict[tuple[str, str], tuple[str, str]] = {}
         # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
         self._fanout_seen: set[Any] | None = None
         self._name = name
@@ -481,6 +487,7 @@ class Environment(_EnvironmentStubs):
         # Copy applied presets (frozen dataclasses → shallow copy is safe)
         new_env._applied_presets = list(self._applied_presets)
         new_env._applied_imperative = list(self._applied_imperative)
+        new_env._use_origins = dict(self._use_origins)
 
         # Copy toolchain references (not cloned - they're shared)
         new_env._toolchain = self._toolchain
@@ -694,6 +701,10 @@ class Environment(_EnvironmentStubs):
             print(env.cc.explain())    # just the C compiler
         """
         from pcons.core.explain import explain as _explain
+        from pcons.core.flags import (
+            get_passthrough_flags_from_toolchains,
+            get_separated_arg_flags_from_toolchains,
+        )
 
         tools = self._get_tools()
         names = [tool] if tool is not None else list(tools.keys())
@@ -702,7 +713,13 @@ class Environment(_EnvironmentStubs):
             if name not in tools:
                 continue
             snapshot[name] = tools[name].as_dict()
-        return _explain(self._applied_presets, snapshot, self._applied_imperative)
+        return _explain(
+            self._applied_presets,
+            snapshot,
+            self._applied_imperative,
+            get_separated_arg_flags_from_toolchains(self.toolchains),
+            get_passthrough_flags_from_toolchains(self.toolchains),
+        )
 
     def _record_toolchain_baseline(
         self, toolchain: Toolchain, tool_names: list[str]
@@ -1126,7 +1143,7 @@ class Environment(_EnvironmentStubs):
             reqs = reqs.clone()
             reqs.make_includes_system()
 
-        apply_requirements_to_env(self, reqs)
+        apply_requirements_to_env(self, reqs, origin=getattr(package, "name", None))
 
     def _resolve_cwd(self, cwd: str | Path | None) -> Path | None:
         """Anchor a ``cwd=`` argument, which is relative to the project root.

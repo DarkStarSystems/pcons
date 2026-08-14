@@ -552,8 +552,9 @@ class NinjaGenerator(BaseGenerator):
             # have ($install.destdir and friends); it has to be applied to the
             # tokens, before quoting escapes the dollar it matches on.
             from pcons.core.subst import to_shell_command
+            from pcons.tools.tool import standalone_tool_tokens
 
-            tokens = self._get_standalone_tool_tokens(tool_name, command_var)
+            tokens = standalone_tool_tokens(tool_name, command_var)
             if tokens is not None:
                 if context_overrides:
                     tokens = apply_context_overrides(
@@ -1426,30 +1427,3 @@ class NinjaGenerator(BaseGenerator):
         rather than ones handed to a command.
         """
         return self._escape_ninja_value(token.replace("\\", "/"))
-
-    def _get_standalone_tool_tokens(
-        self, tool_name: str, command_var: str
-    ) -> list | None:
-        """Get a command template from a standalone tool (install/archive),
-        for nodes with no associated environment, as a token list (which may
-        contain SourcePath/TargetPath markers). None if unavailable.
-        """
-        if tool_name == "install":
-            from pcons.tools.install import InstallTool
-
-            tool = InstallTool()
-        elif tool_name == "archive":
-            from pcons.tools.archive import ArchiveTool
-
-            tool = ArchiveTool()
-        else:
-            return None
-
-        cmd_template = tool.default_vars().get(command_var)
-        if cmd_template is None:
-            return None
-
-        if isinstance(cmd_template, list):
-            return list(cmd_template)
-
-        return str(cmd_template).split() or None
