@@ -133,16 +133,6 @@ uv tool install git+https://github.com/DarkStarSystems/pcons
 pip install git+https://github.com/DarkStarSystems/pcons
 ```
 
-A build script's [PEP 723](https://peps.python.org/pep-0723/) header can also
-pin the development version, so `uv run pcons-build.py` uses it directly:
-
-```python
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons @ git+https://github.com/DarkStarSystems/pcons"]
-# ///
-```
-
 ## Verifying Release Signatures
 
 Release artifacts on the [GitHub Releases page](https://github.com/DarkStarSystems/pcons/releases) are signed with [Sigstore](https://www.sigstore.dev/) using short-lived certificates issued via GitHub Actions OIDC; transparency-log records are stored at [rekor.sigstore.dev](https://rekor.sigstore.dev). Each `.tar.gz` and `.whl` has a matching `.sigstore.json` bundle. To verify with [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/):

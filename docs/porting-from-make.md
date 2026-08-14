@@ -742,7 +742,7 @@ pcons generate --graph=deps.dot      # DOT format for Graphviz
 Unlike Make, you can debug the build script with standard Python tools:
 
 ```bash
-python -m pdb pcons-build.py         # Step through with debugger
+python -m pdb -m pcons generate      # Step through with debugger
 python -c "import pcons; ..."        # Test API interactively
 ```
 

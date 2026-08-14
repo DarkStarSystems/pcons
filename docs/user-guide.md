@@ -1751,8 +1751,7 @@ An environment value overrides the cache but is not written to it, so exporting
 one steers a run without changing what a later bare run reuses.
 
 The cache is tied to `$PCONS_BUILD_DIR`, which `pcons` always sets (and `-B`
-overrides). Running the script directly with `python pcons-build.py` uses no
-cache, so the same environment produces the same build either way.
+overrides).
 
 Inspect and reset:
 
@@ -2605,7 +2604,7 @@ For a complete example, see `examples/06_archive_install/pcons-build.py` which c
 
 ```bash
 cd examples/06_archive_install
-python pcons-build.py
+pcons generate
 ninja -f build/build.ninja          # Build the program
 ninja -f build/build.ninja install  # Create and install tarballs to ./Installers
 ```
