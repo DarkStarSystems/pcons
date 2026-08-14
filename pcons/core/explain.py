@@ -229,7 +229,10 @@ def format_node_command(
     if frame is not None and cwd is not None:
         import os
 
-        cd_to = os.path.relpath(Path(cwd), frame.build_dir).replace(os.sep, "/")
+        try:
+            cd_to = os.path.relpath(Path(cwd), frame.build_dir).replace(os.sep, "/")
+        except ValueError:  # Windows: different drives
+            cd_to = Path(cwd).as_posix()
         cd_prefix = ["cd", cd_to, "&&"]
         frame = frame.for_cwd(cwd)
 
