@@ -1347,13 +1347,19 @@ class NinjaGenerator(BaseGenerator):
                 )
             else:
                 s = str(token)
-                # $SRCDIR and $topdir both mean the project source root
-                srcdir = (
-                    "$topdir"
-                    if cwd is None or self._project_root is None
-                    else self._path_at(self._project_root, cwd)
-                )
-                s = s.replace("$SRCDIR", srcdir)
+                if "$SRCDIR" in s:
+                    # $SRCDIR and $topdir both mean the project source root.
+                    # The token is explicitly rooted, so it skips the path
+                    # relativization below — which would treat the literal
+                    # "$topdir" as a path component and root it a second
+                    # time ("-I$topdir/$topdir/...").
+                    srcdir = (
+                        "$topdir"
+                        if cwd is None or self._project_root is None
+                        else self._path_at(self._project_root, cwd)
+                    )
+                    result.append(s.replace("$SRCDIR", srcdir))
+                    continue
                 # A bare path flag takes its path as the next token
                 expect_path = s in self._path_flags
                 relativized = self._relativize_flag_with_path(s, cwd=cwd)
@@ -1391,11 +1397,34 @@ class NinjaGenerator(BaseGenerator):
         if self._is_build_dir_path(path):
             return "."
 
+        # A path inside the build dir is where the command already runs;
+        # $topdir would only route it out of the tree and back in.
+        rel_build = self._make_build_relative(path)
+        if rel_build is not None:
+            return rel_build
+
         rel = self._make_source_relative(path)
         if rel is not None:
             return f"$topdir/{rel}"
 
         return path
+
+    def _make_build_relative(self, path: Path | str) -> str | None:
+        """The path as seen from the build directory, or None if it isn't
+        inside it. Mirrors get_dep_path's treatment of build-dir files."""
+        path_obj = Path(path)
+        if path_obj.is_absolute():
+            if self._output_dir is None:
+                return None
+            try:
+                rel = path_obj.resolve().relative_to(self._output_dir)
+            except (OSError, ValueError):
+                return None
+            return str(rel).replace("\\", "/")
+        if not self._is_under_build_dir(path_obj):
+            return None
+        parts = path_obj.parts[len(self._build_dir_parts) :]
+        return "/".join(parts) if parts else "."
 
     def _escape_ninja_value(self, token: str) -> str:
         """Escape a token for a Ninja variable value, separators untouched.

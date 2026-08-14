@@ -445,8 +445,30 @@ def run_script(
 
     except SystemExit as e:
         exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
+        if not isinstance(e.code, int) and e.code is not None:
+            # CPython's top-level handler prints a non-int exit code to
+            # stderr; exec() bypasses it, so match it here.
+            print(e.code, file=sys.stderr)
         if exit_code != 0:
             _cancel_pending_generation()
+            return exit_code, pcons.get_registered_projects()
+        # sys.exit(0) ends the script successfully partway; a direct
+        # `python pcons-build.py` run would still generate via the atexit
+        # hook, so the CLI does the same. Left neither run nor cleared,
+        # the pending generation would fire at interpreter shutdown,
+        # after the finally block below has restored cwd and env.
+        from pcons import Project
+        from pcons.generators.generator import BaseGenerator
+
+        try:
+            top_level = Project.top_level()
+        except ValueError:
+            _cancel_pending_generation()
+        else:
+            if generate:
+                BaseGenerator._generate_pending(top_level)
+            else:
+                _cancel_pending_generation()
         return exit_code, pcons.get_registered_projects()
     except PconsError as e:
         # Expected configure/generate failures carry actionable messages;

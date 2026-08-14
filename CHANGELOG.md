@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   targets to narrow the report: `pcons explain hello --variant debug`.
   Optional color (`--color`, on by default on a terminal) and command-line
   truncation to the terminal width (`--width`).
+- **Defines accept `("NAME", "value")` pairs**, rendering as `NAME=value`
+  (a `None` value means the bare name).
 
 ### Changed
 
@@ -33,10 +35,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`env.cxx.set_standard()` applies the standard once in multi-toolchain
-  environments.** With toolchains sharing the cxx tool (Swift + LLVM in
-  C++-interop builds), each realized the same preset and both applied,
-  doubling `-std=c++NN` on every compile line.
+- **`raise SystemExit("message")` from a build script prints the message.**
+  The CLI now properly prints the message on stderr, as it does when
+  the script runs directly under python. Also `sys.exit(0)` now generates build
+  files before exiting, matching a direct run.
+- **Empty command arguments survive ninja generation.** An empty token
+  (`"--flag", ""`) was dropped from the command line; it is now quoted so the
+  program receives an empty string.
+- **`$SRCDIR` expands correctly inside path flags.** `-I$SRCDIR/dir` now 
+  correctly produces `-I../../dir` from a two-level build directory.
+- **Include paths under the build directory render build-relative.**
+  `-Ibuild/gen` doesn't get mangled.
+- **`env.cxx.set_standard()` applies the standard flags once in multi-toolchain
+  environments.** even with toolchains sharing the cxx tool (Swift + LLVM in
+  C++-interop builds).
 - **`--graph` and `--mermaid` write the graph.** : Regression fixed.
 - **`pcons generate --mermaid > deps.mmd` produces a file Mermaid accepts.** The
   `# Mermaid dependency graph` label above it was a DOT comment, not a Mermaid one.

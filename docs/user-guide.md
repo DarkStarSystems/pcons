@@ -414,6 +414,7 @@ env.cxx.includes.append("include")
 
 # Add preprocessor defines
 env.cxx.defines.append("VERSION=1")
+env.cxx.defines.append(("NAME", "value"))  # ("NAME", "value") means NAME=value
 ```
 
 Each environment has namespaced tool configurations:
