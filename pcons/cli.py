@@ -137,6 +137,34 @@ def parse_variables(args: list[str]) -> tuple[dict[str, str], list[str]]:
     return variables, remaining
 
 
+def _describes_a_build_already() -> bool:
+    """Whether the program that started this process has already described one.
+
+    A build script may hand over to the CLI from a ``__main__`` guard, but only
+    before it describes anything: the guard is reached with argv unparsed, so
+    everything above it read no build variables and no variant. A top-level
+    project already built by the file this interpreter was started on means the
+    description happened up there, on values that were not the user's.
+
+    Both halves are needed. A project on its own is what an embedder has when
+    it drives the CLI, and ``sys.argv[0]`` on its own says nothing about when
+    the guard was reached.
+    """
+    from pcons.core.project import Project
+
+    if not Project.has_current():
+        return False
+    program = sys.argv[0] if sys.argv else ""
+    if not program:
+        return False
+    try:
+        return Path(Project.top_level().defined_at.filename).resolve() == (
+            Path(program).resolve()
+        )
+    except (OSError, ValueError):  # pragma: no cover - unresolvable, not ours
+        return False
+
+
 def _cancel_pending_generation() -> None:
     """Drop pending auto-generation after a failed build script.
 
@@ -1502,6 +1530,27 @@ Docs:    https://pcons.readthedocs.io/
 @jobs_option
 @pass_pcons_context
 def cli(ctx: PconsContext, **declared_but_unused: object) -> None:
+    # Before any command: a script that described its build and only then
+    # called the CLI did so without a command line, so whatever it decided was
+    # decided on the wrong values. Checked here rather than where the script is
+    # run, so a command that skips generation refuses too.
+    if _describes_a_build_already():
+        logger.error(
+            "this build script described its build before handing over to "
+            "pcons.\n"
+            "Everything above the hand-over ran without the command line, so "
+            "build variables and the variant were still unset.\n"
+            "Put the entry point above the build description:\n"
+            "\n"
+            '    if __name__ == "__main__":\n'
+            "        import sys\n"
+            "\n"
+            "        import pcons.cli\n"
+            "\n"
+            "        sys.exit(pcons.cli.main())"
+        )
+        ctx.exit(1)
+
     # The group declares these so they can be spelled before a command name;
     # each command reads them off this context. The group itself uses none.
     #

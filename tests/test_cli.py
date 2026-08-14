@@ -3812,6 +3812,33 @@ class TestAScriptThatRunsItself:
         assert result.returncode == 0, result.stderr
         assert "FOO=bar VARIANT=debug" in result.stdout
 
+    def test_the_guard_below_the_description_is_refused(self, tmp_path):
+        """By then the description has already run on an unparsed command line."""
+        script = self._write(tmp_path, self.DESCRIBE + "\n" + self.GUARD)
+
+        result = self._run(script, "generate")
+
+        assert result.returncode != 0
+        assert "described its build before handing over" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_it_is_refused_even_when_nothing_would_be_generated(self, tmp_path):
+        """The refusal belongs to the CLI's entry, not to running the script.
+
+        `pcons build` skips generation when the build files are newer than the
+        script, and used to reach ninja without ever looking at the script it
+        had already run badly.
+        """
+        script = self._write(tmp_path, self.DESCRIBE + "\n" + self.GUARD)
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        (build_dir / "build.ninja").write_text("# newer than the script\n")
+
+        result = self._run(script, "build")
+
+        assert result.returncode != 0
+        assert "described its build before handing over" in result.stderr
+
     def test_a_main_guard_does_not_fire_under_pcons(self, tmp_path):
         """`pcons` is the program; the script it runs is not."""
         script = self._write(

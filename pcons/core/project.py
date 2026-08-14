@@ -307,6 +307,11 @@ class Project(_ProjectBuilders):
             Project.__top_level = self
 
     @staticmethod
+    def has_current() -> bool:
+        """Whether a project is currently active (for CLI or add_subdirectory)."""
+        return Project.__current is not None
+
+    @staticmethod
     def current() -> Project:
         if Project.__current is None:
             raise ValueError("no project is currently active")
