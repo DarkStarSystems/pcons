@@ -336,6 +336,18 @@ class TestCxxStandard:
         env.cxx.set_standard("c++23")
         assert "/std:c++latest" in env.cxx.flags
 
+    def test_applies_once_across_toolchains(self, test_project):  # noqa: F811
+        # Toolchains sharing the cxx tool (swift + llvm in C++-interop envs)
+        # realize identical standard presets; the fan-out dedup must apply
+        # just one, not double -std=c++20.
+        from pcons.toolchains.llvm import LlvmToolchain
+
+        env = _make_unix_env()
+        env._toolchain = GccToolchain()
+        env._additional_toolchains = [LlvmToolchain()]
+        env.cxx.set_standard("c++20")
+        assert env.cxx.flags.count("-std=c++20") == 1
+
     def test_accepts_int_str_and_prefixed(self, test_project):  # noqa: F811
         for value in (20, "20", "c++20"):
             env = _make_unix_env()
