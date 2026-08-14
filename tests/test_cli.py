@@ -830,9 +830,10 @@ class TestCLICommands:
         assert 'toolchain="c++"' in build_content
         # No explicit generate call needed: generation is automatic
         assert ".generate(" not in build_content
-        # PEP 723 metadata so `uv run pcons-build.py` works standalone
-        assert "# /// script" in build_content
-        assert '"pcons>=' in build_content
+        # A build script is run by pcons, so it carries neither a PEP 723
+        # header nor a shebang: nothing runs the file itself.
+        assert "# /// script" not in build_content
+        assert "#!" not in build_content
         # Project and program named after the directory
         assert f'Project("{tmp_path.name}")' in build_content
         assert '"src/main.cpp",' in build_content

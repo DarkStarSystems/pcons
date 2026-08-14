@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons"]
-# ///
 """Rust + C++ with cbindgen-generated FFI header.
 
 Like 43_rust_cxx_hybrid, but the C header is produced from the Rust

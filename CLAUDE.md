@@ -165,7 +165,7 @@ ssh tower1 '$env:PATH = "C:\Users\garyo\.local\bin;$env:PATH"; cd E:/src/pcons; 
 ## Code Conventions
 
 - **Python 3.11+** required
-- **uv-first workflow** with PEP723 front matter dependencies
+- **uv-first workflow**
 - **Type hints** everywhere (mypy strict mode)
 - **SPDX headers**: `# SPDX-License-Identifier: MIT` on all files
 - **Private attributes**: `_build_info`, `_tools`, `_vars`

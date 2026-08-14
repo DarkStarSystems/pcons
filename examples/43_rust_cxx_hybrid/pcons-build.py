@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons"]
-# ///
 """Rust + C++ hybrid: link a Rust staticlib into a C++ program.
 
 Demonstrates pcons.tools.cargo.CargoBuild — pcons treats `cargo build`

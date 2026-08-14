@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons"]
-# ///
 """Example: Creating a custom builder.
 
 This example demonstrates how to extend pcons with custom builders using

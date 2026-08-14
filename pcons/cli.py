@@ -1408,14 +1408,7 @@ def _init(build_dir: Path, *, force: bool, lang: str) -> int:
         target_lines.append('app.private.include_dirs.append("include")')
     target_block = "\n".join(target_lines)
 
-    from pcons import __version__
-
     build_template = f'''\
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons>={__version__}"]
-# ///
 """Build script for {name}.
 
 Run `pcons` to generate build files and build.
