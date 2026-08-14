@@ -2,6 +2,11 @@
 
 [test]
 description = "Build a Rust staticlib via cargo and link it into a C++ program"
+# Cargo's cold-registry fetch plus the native-static-libs probe can push
+# configure and build past the default limits on slow CI runners (Windows
+# especially), where this example is a marginal timeout otherwise.
+timeout = 240
+build_timeout = 300
 
 expected_outputs = [
     "build/hello_rust",

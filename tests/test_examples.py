@@ -273,6 +273,7 @@ _TEST_SECTION_KEYS = {
     "build_command",
     "variants",
     "timeout",
+    "build_timeout",
     "generator",
     "standalone_subdirs",
 }
@@ -926,7 +927,7 @@ def _check_standalone_subdirs(
             cwd=sub_work,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=test_config.get("build_timeout", 120),
         )
         if result.returncode != 0:
             print(f"Standalone stdout:\n{result.stdout}")
@@ -1099,6 +1100,7 @@ def run_example(
 
     # Check for custom build command or use appropriate build tool
     build_command = test_config.get("build_command")
+    build_timeout = test_config.get("build_timeout", 120)
 
     if build_command:
         # Custom build command (e.g., "make -C build")
@@ -1113,7 +1115,7 @@ def run_example(
             cwd=work_dir,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=build_timeout,
         )
 
         if result.returncode != 0:
@@ -1136,7 +1138,7 @@ def run_example(
                 cwd=work_dir,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=build_timeout,
             )
 
             if result.returncode != 0:
@@ -1159,7 +1161,7 @@ def run_example(
                 cwd=work_dir,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=build_timeout,
             )
 
             if result.returncode != 0:
