@@ -777,6 +777,11 @@ class TestNinjaSrcDir:
         # The build dir itself, and paths outside it, are unchanged
         assert gen._relativize_path_for_ninja("build") == "."
         assert gen._relativize_path_for_ninja("src/inc") == "$topdir/src/inc"
+        # Absolute spellings behave the same way
+        abs_inside = str(tmp_path / "build" / "gen" / "inc")
+        assert gen._relativize_path_for_ninja(abs_inside) == "gen/inc"
+        abs_outside = str(tmp_path.parent / "sdk" / "inc")
+        assert gen._make_build_relative(abs_outside) is None
 
     def test_restat_in_ninja_rule(self, tmp_path):
         """Command with restat=True generates restat = 1 in the ninja rule."""

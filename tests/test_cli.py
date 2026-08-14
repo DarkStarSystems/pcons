@@ -1018,6 +1018,34 @@ class TestCLICommands:
         assert _invoke("generate").exit_code == 0
         assert (tmp_path / "build" / "build.ninja").exists()
 
+    def test_sys_exit_zero_before_any_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """sys.exit(0) before a Project exists is a clean, quiet exit."""
+        (tmp_path / "pcons-build.py").write_text("import sys\nsys.exit(0)\n")
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        result = _invoke("generate")
+        assert result.exit_code == 0
+        assert "No Project" not in result.output
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_sys_exit_zero_under_explain_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A non-generating command (explain) honors sys.exit(0) without
+        writing build files."""
+        (tmp_path / "pcons-build.py").write_text(
+            "import sys\n"
+            "from pcons import Project\n"
+            "project = Project('early')\n"
+            "sys.exit(0)\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        assert _invoke("explain").exit_code == 0
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
     def test_pcons_init_force(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
