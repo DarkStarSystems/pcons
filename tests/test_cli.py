@@ -1097,6 +1097,294 @@ print("hello")
         assert not build_dir.exists()
 
 
+class TestExplainCommand:
+    """Tests for `pcons explain`."""
+
+    COMMAND_SCRIPT = """\
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment()
+env.Command(
+    target="out.txt",
+    source=["in.txt"],
+    command=["copytool", "--from", "$SOURCE", "--to", "$TARGET"],
+)
+"""
+
+    def _write_project(self, tmp_path: Path) -> None:
+        (tmp_path / "in.txt").write_text("data\n")
+        (tmp_path / "pcons-build.py").write_text(self.COMMAND_SCRIPT)
+
+    def test_shows_concrete_commands(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The resolved command is printed with real paths, markers expanded."""
+        self._write_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain")
+        assert result.exit_code == 0
+        assert "## Explanation of Targets and Environments" in result.stdout
+        assert "out.txt  <-  in.txt" in result.stdout
+        # The command is spelled as it runs from the build directory.
+        assert "copytool --from ../in.txt --to out.txt" in result.stdout
+
+    def test_width_truncates_command_lines(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--width cuts command lines, marking the cut with an ellipsis."""
+        self._write_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain", "--width", "20")
+        assert result.exit_code == 0
+        command_lines = [
+            line for line in result.stdout.splitlines() if "copytool" in line
+        ]
+        assert command_lines
+        assert all(len(line) <= 20 for line in command_lines)
+        assert any(line.endswith("...") for line in command_lines)
+
+    def test_color_always_emits_ansi(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--color always styles the report even when piped."""
+        self._write_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        assert "\x1b[" not in _invoke("explain").stdout
+        assert "\x1b[" in _invoke("explain", "--color", "always").stdout
+
+    def test_writes_no_build_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """explain is an inspection command: no build.ninja, no cache entry."""
+        self._write_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain")
+        assert result.exit_code == 0
+        assert not (tmp_path / "build" / "build.ninja").exists()
+        assert not (tmp_path / "build" / "pcons_cache.json").exists()
+
+    def test_unknown_target_lists_the_real_ones(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._write_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain", "nosuch")
+        assert result.exit_code == 1
+
+    def test_named_target_filters_the_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Naming targets narrows the report to just those."""
+        script = self.COMMAND_SCRIPT + (
+            "env.Command(\n"
+            '    target="other.txt",\n'
+            '    source=["in.txt"],\n'
+            '    command=["othertool", "$SOURCE", "$TARGET"],\n'
+            ")\n"
+        )
+        (tmp_path / "in.txt").write_text("data\n")
+        (tmp_path / "pcons-build.py").write_text(script)
+        monkeypatch.chdir(tmp_path)
+
+        all_result = _invoke("explain")
+        assert all_result.exit_code == 0
+        assert "othertool" in all_result.stdout
+
+        first = next(
+            line for line in all_result.stdout.splitlines() if "(command)" in line
+        )
+        # A target header reads `=== <name>  (<type>)  [env <label>]`.
+        target_name = first.split()[1]
+        one_result = _invoke("explain", target_name)
+        assert one_result.exit_code == 0
+        assert "copytool" in one_result.stdout
+        assert "othertool" not in one_result.stdout
+
+    def test_flag_provenance_names_the_preset(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a real toolchain, flags are attributed to variant and preset."""
+        if not _has_c_compiler():
+            pytest.skip("no C compiler found")
+
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        (tmp_path / "pcons-build.py").write_text(
+            """\
+from pcons import Project
+
+project = Project("hello")
+env = project.Environment(toolchain="c")
+env.set_variant("debug")
+env.apply_preset("warnings")
+project.Program("hello", env, sources=["hello.c"])
+"""
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain")
+        assert result.exit_code == 0
+        # The commands section shows the real compile line...
+        assert "hello.c" in result.stdout
+        # ...and the provenance section attributes flags to their presets.
+        assert "(variant)" in result.stdout
+        assert "warnings (feature)" in result.stdout
+
+    def test_requirements_attribute_their_contributor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Usage requirements name the target that contributed them."""
+        if not _has_c_compiler():
+            pytest.skip("no C compiler found")
+
+        (tmp_path / "include").mkdir()
+        (tmp_path / "include" / "lib.h").write_text("int lib(void);\n")
+        (tmp_path / "lib.c").write_text("int lib(void) { return 1; }\n")
+        (tmp_path / "main.c").write_text(
+            '#include "lib.h"\nint main(void) { return lib(); }\n'
+        )
+        (tmp_path / "pcons-build.py").write_text(
+            """\
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment(toolchain="c")
+mylib = project.StaticLibrary("mylib", env, sources=["lib.c"])
+mylib.public.include_dirs.append("include")
+mylib.public.defines.append("USE_MYLIB")
+app = project.Program("app", env, sources=["main.c"])
+app.link(mylib)
+"""
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain", "app")
+        assert result.exit_code == 0
+        assert "requirements:" in result.stdout
+        assert "<- mylib (public)" in result.stdout
+        assert "USE_MYLIB" in result.stdout
+
+    def test_sibling_sources_collapse_to_braces(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dependencies sharing a directory collapse shell-style."""
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "one.txt").write_text("1\n")
+        (tmp_path / "src" / "two.txt").write_text("2\n")
+        (tmp_path / "pcons-build.py").write_text(
+            """\
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment()
+env.Command(
+    target="out.txt",
+    source=["src/one.txt", "src/two.txt"],
+    command=["cat", "$SOURCES", "$TARGET"],
+)
+"""
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain")
+        assert result.exit_code == 0
+        assert "<-  src/{one.txt,two.txt}" in result.stdout
+        # The command itself stays literal, spelled from the build dir.
+        assert "cat ../src/one.txt ../src/two.txt out.txt" in result.stdout
+
+    def test_multi_target_commands_show_each_output(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Indexed ${TARGETS[n]} tokens render the actual outputs, not the
+        primary node repeated (env.Command stores them under all_targets)."""
+        (tmp_path / "in.txt").write_text("data\n")
+        (tmp_path / "pcons-build.py").write_text(
+            """\
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment()
+env.Command(
+    target=["a.out.txt", "b.out.txt"],
+    source=["in.txt"],
+    command=["gen", "--first", "${TARGETS[0]}", "--second", "${TARGETS[1]}", "$SOURCE"],
+)
+"""
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain")
+        assert result.exit_code == 0
+        assert "--first a.out.txt --second b.out.txt ../in.txt" in result.stdout
+
+    def test_cwd_commands_show_the_cd_and_cwd_frame(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An edge with cwd= is spelled from that directory, behind a cd,
+        matching what the generators emit."""
+        (tmp_path / "in.txt").write_text("data\n")
+        (tmp_path / "pcons-build.py").write_text(
+            """\
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment()
+env.Command(
+    target="out.txt",
+    source=["in.txt"],
+    command=["tool", "$SOURCE", "$TARGET"],
+    cwd=project.root_dir,
+)
+"""
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain")
+        assert result.exit_code == 0
+        assert "cd .. && tool in.txt" in result.stdout
+
+    def test_install_targets_show_their_commands(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Env-less nodes (standalone install tool) render via the same
+        fallback the generators use, not as an empty section."""
+        (tmp_path / "assets").mkdir()
+        (tmp_path / "assets" / "data.txt").write_text("data\n")
+        (tmp_path / "pcons-build.py").write_text(
+            """\
+from pcons import Project
+
+project = Project("demo")
+project.InstallDir(".", "assets", name="install-assets")
+"""
+        )
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain")
+        assert result.exit_code == 0
+        assert "install-assets" in result.stdout
+        assert "copytree" in result.stdout
+
+    def test_target_header_names_its_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Each target header carries its environment's label."""
+        self._write_project(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke("explain")
+        assert result.exit_code == 0
+        assert "[env #1]" in result.stdout
+        assert "Environment #1" in result.stdout
+        # Definition locations, relative to the project root.
+        assert "pcons-build.py:" in result.stdout
+
+
 class TestCLIArgumentParsing:
     """Tests for CLI argument parsing edge cases.
 

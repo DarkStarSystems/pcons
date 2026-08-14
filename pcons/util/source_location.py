@@ -8,6 +8,7 @@ clear error messages that point to the exact line in the build script.
 
 from __future__ import annotations
 
+import contextlib
 import inspect
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,6 +73,10 @@ def get_source_location(depth: int = 1) -> SourceLocation:
 #: This package's directory. Frames from inside it are pcons calling itself.
 _PCONS_ROOT = str(Path(__file__).resolve().parent.parent)
 
+#: Stdlib plumbing between a caller and pcons: `with env.override()` enters
+#: through contextlib's __enter__, which must not be reported as the caller.
+_SKIPPED_STDLIB_FILES = frozenset({str(Path(contextlib.__file__).resolve())})
+
 
 def get_caller_location() -> SourceLocation:
     """Capture where a build script called into pcons.
@@ -92,7 +97,11 @@ def get_caller_location() -> SourceLocation:
         first = frame
         while frame is not None:
             filename = frame.f_code.co_filename
-            if not str(Path(filename).resolve()).startswith(_PCONS_ROOT):
+            resolved = str(Path(filename).resolve())
+            if (
+                not resolved.startswith(_PCONS_ROOT)
+                and resolved not in _SKIPPED_STDLIB_FILES
+            ):
                 return _location_of(frame)
             frame = frame.f_back
         return _location_of(first) if first else SourceLocation("<unknown>", 0)

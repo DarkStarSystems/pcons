@@ -131,7 +131,9 @@ For quick Windows testing without CI, use the `tower1` Windows machine via SSH:
 rsync -avz --exclude='.git' --exclude='build' --exclude='.venv' \
   --exclude='__pycache__' --exclude='*.pyc' --exclude='.ruff_cache' \
   --exclude='.mypy_cache' --exclude='.pytest_cache' \
+  --exclude='compile_commands.json' \
   /Users/garyo/src/pcons/ tower1:/e/src/pcons/
+# (compile_commands.json symlinks dangle when build/ is excluded and make rsync exit 1)
 
 # First time: install dependencies and ninja
 ssh tower1 'cd E:/src/pcons; uv sync --all-extras'

@@ -162,6 +162,115 @@ class TestEffectiveRequirementsClone:
         assert Path("other") not in reqs.includes
 
 
+class TestRequirementOrigins:
+    """The merge records where each value came from, for `pcons explain`."""
+
+    def test_each_layer_is_attributed(self):
+        """Own private/public and transitive deps each name their contributor."""
+        project = Project("test")
+        env = project.Environment()
+
+        libA = Target("libA", target_type="static_library")
+        libA._env = env
+        libA.public.include_dirs.append(Path("libA/include"))
+        libA.public.defines.append("LIBA_API")
+        libA.public.link_libs.append("m")
+
+        libB = Target("libB", target_type="static_library")
+        libB._env = env
+        libB.public.link_libs.append(libA)
+
+        app = Target("app", target_type="program")
+        app._env = env
+        app.private.defines.append("BUILDING_APP")
+        app.private.link_libs.append(libB)
+
+        eff = compute_effective_requirements(app, env)
+
+        assert eff.origins[("defines", "BUILDING_APP")] == ("app", "private")
+        assert eff.origins[("defines", "LIBA_API")] == ("libA", "public")
+        assert eff.origins[("include_dirs", str(Path("libA/include")))] == (
+            "libA",
+            "public",
+        )
+        # A Target in link_libs is recorded under its name; a plain lib as-is.
+        assert eff.origins[("link_libs", "m")] == ("libA", "public")
+        assert eff.origins[("link_libs", "libA")] == ("libB", "public")
+
+    def test_separated_arg_flags_attribute_as_units(self):
+        """Repeated separated-arg flags keep one origin per (flag, arg) pair."""
+        eff = EffectiveRequirements(separated_arg_flags=frozenset({"-framework"}))
+        eff.merge(
+            UsageRequirements(link_flags=["-framework", "CoreA"]),
+            origin=("liba", "public"),
+        )
+        eff.merge(
+            UsageRequirements(link_flags=["-framework", "CoreB"]),
+            origin=("libb", "public"),
+        )
+
+        assert eff.origins[("link_flags", "-framework CoreA")] == ("liba", "public")
+        assert eff.origins[("link_flags", "-framework CoreB")] == ("libb", "public")
+
+    def test_first_contributor_wins(self):
+        """A deduplicated value keeps the origin that first supplied it."""
+        project = Project("test")
+        env = project.Environment()
+
+        libA = Target("libA", target_type="static_library")
+        libA._env = env
+        libA.public.defines.append("SHARED_DEF")
+
+        app = Target("app", target_type="program")
+        app._env = env
+        app.private.defines.append("SHARED_DEF")
+        app.private.link_libs.append(libA)
+
+        eff = compute_effective_requirements(app, env)
+
+        assert eff.defines.count("SHARED_DEF") == 1
+        assert eff.origins[("defines", "SHARED_DEF")] == ("app", "private")
+
+    def test_env_use_attributes_the_package(self):
+        """Values env.use() applied are attributed to the package by name."""
+        from pcons.tools.requirements import apply_requirements_to_env
+
+        project = Project("test")
+        env = project.Environment()
+        env.add_tool("cc")
+
+        apply_requirements_to_env(
+            env,
+            UsageRequirements(include_dirs=[Path("pkg/include")], defines=["PKG_API"]),
+            origin="fmt",
+        )
+
+        target = Target("app", target_type="program")
+        target._env = env
+        eff = compute_effective_requirements(target, env)
+
+        assert eff.origins[("defines", "PKG_API")] == ("fmt", "package")
+        assert eff.origins[("include_dirs", str(Path("pkg/include")))] == (
+            "fmt",
+            "package",
+        )
+
+    def test_merge_without_origin_records_nothing(self):
+        """env.use()-style merges carry no origin and leave no record."""
+        eff = EffectiveRequirements()
+        eff.merge(UsageRequirements(defines=["DEF"]))
+        assert eff.defines == ["DEF"]
+        assert eff.origins == {}
+
+    def test_clone_copies_origins(self):
+        eff = EffectiveRequirements()
+        eff.merge(UsageRequirements(defines=["DEF"]), origin=("lib", "public"))
+        clone = eff.clone()
+        assert clone.origins == eff.origins
+        clone.origins[("defines", "OTHER")] = ("x", "private")
+        assert ("defines", "OTHER") not in eff.origins
+
+
 class TestComputeEffectiveRequirements:
     def test_basic_computation(self):
         """Test basic effective requirements computation."""

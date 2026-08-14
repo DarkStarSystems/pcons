@@ -21,6 +21,32 @@ if TYPE_CHECKING:
     from pcons.core.toolconfig import ToolConfig
 
 
+def standalone_tool_tokens(tool_name: str, command_var: str) -> list | None:
+    """A command template from a standalone tool (install/archive), for
+    nodes with no associated environment. Returns a token list (which may
+    contain SourcePath/TargetPath markers), or None if unavailable.
+
+    Shared by the generators' fallback expansion and ``pcons explain``.
+    """
+    if tool_name == "install":
+        from pcons.tools.install import InstallTool
+
+        tool = InstallTool()
+    elif tool_name == "archive":
+        from pcons.tools.archive import ArchiveTool
+
+        tool = ArchiveTool()
+    else:
+        return None
+
+    cmd_template = tool.default_vars().get(command_var)
+    if cmd_template is None:
+        return None
+    if isinstance(cmd_template, list):
+        return list(cmd_template)
+    return [cmd_template]
+
+
 def resolve_env_cmd_override(env_var: str | None) -> str | None:
     """Resolve a conventional tool-selection env var (``CC``, ``CXX``, ...).
 

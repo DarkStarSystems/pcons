@@ -97,6 +97,45 @@ class TestAttribution:
         assert {r.tool for r in exp.rows} == {"cc"}
 
 
+class TestFlagUnits:
+    def test_separated_arg_pairs_attribute_as_one_row(self, test_project):
+        """A flag and its argument form one attributed row, so repeated flag
+        tokens (two -frameworks) keep distinct attributions."""
+        from pcons.core.explain import explain
+
+        preset_a = Preset(
+            name="liba",
+            category="feature",
+            contributions=(ToolContribution("cc", flags=("-framework", "CoreA")),),
+        )
+        preset_b = Preset(
+            name="libb",
+            category="feature",
+            contributions=(ToolContribution("cc", flags=("-framework", "CoreB")),),
+        )
+        tools = {
+            "cc": {"flags": ["-framework", "CoreA", "-framework", "CoreB"]},
+        }
+        exp = explain(
+            [preset_a, preset_b],
+            tools,
+            separated_arg_flags=frozenset({"-framework"}),
+        )
+        assert _src(exp, "cc", "-framework CoreA") == "liba"
+        assert _src(exp, "cc", "-framework CoreB") == "libb"
+
+
+class TestDefinedAt:
+    def test_override_env_is_attributed_to_the_call_site(self, test_project):
+        """`with env.override()` enters through contextlib; the clone's
+        defined_at must name this file, not contextlib.py."""
+        env = _make_env()
+        with env.override() as tuned:
+            pass
+        assert "contextlib" not in tuned.defined_at.filename
+        assert tuned.defined_at.filename.endswith("test_explain.py")
+
+
 class TestStr:
     def test_str_shows_origin(self, test_project):
         env = _make_env()

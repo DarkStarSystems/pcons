@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`pcons explain`** shows how each target's commands are constructed and
+  where every piece came from: the concrete command line for every built
+  file, the target's effective usage requirements with the target that
+  contributed each one (`m  <- math (public)`), the environment each target
+  builds with, and each environment's flag provenance attributed to the
+  preset, variant or toolchain that set it (`env.explain()`, from the
+  command line). Runs the build script but writes no build files. Name
+  targets to narrow the report: `pcons explain hello --variant debug`.
+  Optional color (`--color`, on by default on a terminal) and command-line
+  truncation to the terminal width (`--width`).
+
 ### Changed
 
 - **The CLI is driven by now [click](https://click.palletsprojects.com/).** Improved help output
@@ -20,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`env.cxx.set_standard()` applies the standard once in multi-toolchain
+  environments.** With toolchains sharing the cxx tool (Swift + LLVM in
+  C++-interop builds), each realized the same preset and both applied,
+  doubling `-std=c++NN` on every compile line.
 - **`--graph` and `--mermaid` write the graph.** : Regression fixed.
 - **`pcons generate --mermaid > deps.mmd` produces a file Mermaid accepts.** The
   `# Mermaid dependency graph` label above it was a DOT comment, not a Mermaid one.

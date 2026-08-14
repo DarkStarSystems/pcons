@@ -332,7 +332,9 @@ class MakefileGenerator(BaseGenerator):
 
         if env is None:
             # Standalone tools (install, archive) need no environment
-            cmd_template = self._get_standalone_tool_command(tool_name, command_var)
+            from pcons.tools.tool import standalone_tool_tokens
+
+            cmd_template = standalone_tool_tokens(tool_name, command_var)
             if cmd_template is None:
                 return f"@echo 'No environment for {node.path}'"
 
@@ -1009,32 +1011,3 @@ class MakefileGenerator(BaseGenerator):
         command = re.sub(r"\$\{TARGETS\[\d+\]\}", "$out", command)
 
         return command
-
-    def _get_standalone_tool_command(
-        self, tool_name: str, command_var: str
-    ) -> list | None:
-        """Get a command template from a standalone tool (install/archive),
-        for nodes with no associated environment. Returns a token list (may
-        include SourcePath/TargetPath markers), or None if unavailable.
-        """
-        if tool_name == "install":
-            from pcons.tools.install import InstallTool
-
-            tool = InstallTool()
-        elif tool_name == "archive":
-            from pcons.tools.archive import ArchiveTool
-
-            tool = ArchiveTool()
-        else:
-            return None
-
-        defaults = tool.default_vars()
-        cmd_template = defaults.get(command_var)
-        if cmd_template is None:
-            return None
-
-        # Return as list, preserving SourcePath/TargetPath markers
-        if isinstance(cmd_template, list):
-            return list(cmd_template)
-
-        return [cmd_template]
