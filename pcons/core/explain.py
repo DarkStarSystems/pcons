@@ -241,15 +241,30 @@ def format_node_command(
     sources = spell_nodes(build_info.get("sources") or [])
     node_vars = build_info.get("vars") or {}
     self_path = spell_nodes([node])[0]
-    # Multi-output edges store their outputs under one of two keys:
-    # all_output_nodes (toolchain builders) or all_targets (env.Command).
-    output_nodes = build_info.get("all_output_nodes")
-    output_list = (
-        list(output_nodes.values())
-        if output_nodes
-        else build_info.get("all_targets") or []
-    )
-    outputs = spell_nodes(output_list) if output_list else [self_path]
+
+    def output_paths() -> list[str]:
+        """The edge's outputs, in ``target_N`` order — from whichever key
+        this edge's builder used, with ninja's precedence: the ``outputs``
+        info dict (MSVC-style DLL + import lib), then ``all_targets``
+        (env.Command), then ``all_output_nodes``."""
+        outputs_info = build_info.get("outputs")
+        if isinstance(outputs_info, dict) and outputs_info:
+            paths = [
+                info["path"]
+                for info in outputs_info.values()
+                if isinstance(info, dict) and "path" in info
+            ]
+            if paths:
+                if frame is None:
+                    return [Path(p).as_posix() for p in paths]
+                return [frame.spell(p, built=True) for p in paths]
+        nodes_dict = build_info.get("all_output_nodes")
+        node_list = build_info.get("all_targets") or (
+            list(nodes_dict.values()) if nodes_dict else []
+        )
+        return spell_nodes(node_list) if node_list else [self_path]
+
+    outputs = output_paths()
     topdir = frame.topdir if frame is not None else "."
 
     if isinstance(command, str):
