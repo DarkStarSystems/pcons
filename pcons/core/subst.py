@@ -650,6 +650,17 @@ def _call_function(
         items = _expand_items(items, namespace, expanding, location)
         result: list[CommandToken] = []
         for item in items:
+            if isinstance(item, tuple):
+                # ("NAME", "VALUE") pairs, the natural spelling for -D
+                # defines; a None value means the bare name.
+                if len(item) != 2:
+                    raise SubstitutionError(
+                        f"prefix() items must be strings or (name, value) "
+                        f"pairs, got {item!r}",
+                        location,
+                    )
+                name, value = item
+                item = str(name) if value is None else f"{name}={value}"
             if isinstance(item, ProjectPath):
                 result.append(PathToken(prefix, item.path, "project"))
             elif isinstance(item, BuildPath):
@@ -871,7 +882,10 @@ def _quote_for_shell(
     but other arguments with spaces are quoted for shell execution.
     """
     if not s:
-        return "''" if shell not in ("cmd", "ninja") else '""' if shell == "cmd" else ""
+        # An empty argument has to reach the program as an empty string, so
+        # it must be quoted for every shell. Ninja hands the command to a
+        # shell (sh on Unix, cmd on Windows); "" is empty in both.
+        return '""' if shell in ("cmd", "ninja") else "''"
 
     if s in _SHELL_OPERATORS:
         return s

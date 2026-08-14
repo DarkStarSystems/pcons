@@ -723,6 +723,61 @@ class TestNinjaSrcDir:
         assert "--config=$topdir/my.cfg" in content
         assert "$SRCDIR" not in content
 
+    def test_srcdir_behind_path_flag(self, tmp_path):
+        """$SRCDIR inside a path flag ("-I$SRCDIR/inc") must not be rooted a
+        second time by path-flag relativization ("-I$topdir/$topdir/inc")."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="tool -I$SRCDIR/inc $SOURCE $TARGET",
+            name="inc_tool",
+        )
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert "-I$topdir/inc" in content
+        assert "$topdir/$topdir" not in content
+
+    def test_path_flag_inside_build_dir_is_bare(self, tmp_path):
+        """An include path under the build dir renders relative to the build
+        dir ("-Iassets"), matching how dep paths are rendered — not routed
+        out of the tree and back in ("-I$topdir/build/assets").
+
+        Path flags come from the toolchain, so this drives the relativizer
+        directly rather than requiring a compiler."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target="output.txt",
+            source="input.txt",
+            command="cp $SOURCE $TARGET",
+        )
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        gen._path_flags = frozenset({"-I"})
+
+        # Plain-string flag (pattern-based rewrite)
+        tokens = gen._relativize_command_tokens(["-Ibuild/assets"])
+        assert tokens == ["-Iassets"]
+        # PathToken route (usage requirements wrap includes in ProjectPath)
+        from pcons.core.subst import PathToken
+
+        token = PathToken("-I", "build/assets", "project")
+        assert token.relativize(gen._relativize_path_for_ninja) == "-Iassets"
+        # The build dir itself, and paths outside it, are unchanged
+        assert gen._relativize_path_for_ninja("build") == "."
+        assert gen._relativize_path_for_ninja("src/inc") == "$topdir/src/inc"
+
     def test_restat_in_ninja_rule(self, tmp_path):
         """Command with restat=True generates restat = 1 in the ninja rule."""
         project = Project("test", root_dir=tmp_path, build_dir="build")

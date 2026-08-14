@@ -254,6 +254,19 @@ class TestSubstFunctions:
         result = subst(["${prefix(iprefix, includes)}"], ns)
         assert result == []
 
+    def test_prefix_accepts_name_value_pairs(self):
+        """("NAME", "VALUE") tuples render as NAME=VALUE; a None value
+        means the bare name. The natural spelling for -D defines."""
+        ns = {"dprefix": "-D", "defines": [("NAME", "VALUE"), ("BARE", None), "X=1"]}
+        result = subst(["${prefix(dprefix, defines)}"], ns)
+        assert result == ["-DNAME=VALUE", "-DBARE", "-DX=1"]
+
+    def test_prefix_rejects_non_pair_tuple(self):
+        ns = {"dprefix": "-D", "defines": [("A", "B", "C")]}
+        with pytest.raises(SubstitutionError) as exc_info:
+            subst(["${prefix(dprefix, defines)}"], ns)
+        assert "(name, value)" in str(exc_info.value)
+
     def test_suffix_function(self):
         ns = {"files": ["main", "util"], "suffix": ".o"}
         result = subst(["${suffix(files, suffix)}"], ns)
@@ -475,9 +488,12 @@ class TestToShellCommand:
         assert result == "cmd1 ; cmd2"
 
     def test_empty_token_quoted(self):
-        tokens = ["echo", ""]
-        result = to_shell_command(tokens, shell="bash")
-        assert "''" in result
+        """An empty argument must survive as a quoted empty string in every
+        shell; dropping it shifts the program's argv (e.g. "--flag" "")."""
+        tokens = ["prog", "--flag", "", "x"]
+        assert to_shell_command(tokens, shell="bash") == "prog --flag '' x"
+        assert to_shell_command(tokens, shell="ninja") == 'prog --flag "" x'
+        assert to_shell_command(tokens, shell="cmd") == 'prog --flag "" x'
 
     def test_hash_token_quoted(self):
         """A token starting with '#' must be quoted: sh reads it as a comment.
