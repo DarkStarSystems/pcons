@@ -3731,6 +3731,26 @@ class TestSignaturesMatchTheDecorators:
         )
 
 
+class TestRunningAScriptMoreThanOnce:
+    """`run_script` runs more than once per process in watch mode."""
+
+    def test_a_second_run_starts_a_new_project_tree(self, tmp_path):
+        """Otherwise the second run's project is adopted by the first's.
+
+        The registry is cleared between runs but the tree behind it was not, so
+        `Project.top_level()` still named the project from the run before and
+        every path the new one derived was relative to it.
+        """
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\n\nproject = Project('twice')\n")
+
+        first, _ = run_script(script, tmp_path / "build")
+        second, projects = run_script(script, tmp_path / "build")
+
+        assert (first, second) == (0, 0)
+        assert projects[-1].is_top_level
+
+
 class TestACommandNameThatIsNotTheFirstArgument:
     """click resolves a subcommand from argv[0] and a group stops parsing at
     the first non-option, so anything a user may legitimately write before a

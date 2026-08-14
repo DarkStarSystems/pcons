@@ -374,8 +374,11 @@ def run_script(
         updated_keys.add(key)
         os.environ[key] = value
 
+    from pcons import Project
+
+    # Clear stuff
     pcons._clear_registered_projects()
-    # Clear cached CLI vars so they get re-read
+    Project._clear_tree()
     pcons.core.vars._clear_cli_vars()
 
     set_env_var("PCONS_BUILD_DIR", str(build_dir.absolute()))
@@ -425,7 +428,6 @@ def run_script(
 
         # Run any deferred generate requests registered by the script
         try:
-            from pcons import Project
             from pcons.generators.generator import BaseGenerator
 
             top_level = Project.top_level()
