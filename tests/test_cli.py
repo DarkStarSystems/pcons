@@ -13,6 +13,7 @@ import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import click
 import pytest
@@ -1995,6 +1996,490 @@ class TestRunGroup:
             "completion",
         ]
         assert short_help["run"] == "Run a command declared by the build script"
+
+
+DEPENDS_SCRIPT = """\
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment()
+hello = env.Command(
+    target="hello.txt", source="hello.in", command="cp $SOURCE $TARGET"
+)
+two = env.Command(
+    target="two.txt", source="hello.in", command="cp $SOURCE $TARGET"
+)
+
+
+@project.cli_command()
+def package():
+    "Package what was built."
+    from pathlib import Path
+
+    # Spelled from the build directory rather than off the node: a Command
+    # target's node path carries no build_dir prefix, unlike a Program's.
+    print("packaged=" + str((project.build_dir / "hello.txt").exists()))
+
+
+@project.cli_command()
+def peek():
+    "Look, but declare nothing."
+    print("peeked")
+
+
+package.depends(hello)
+"""
+
+
+def _record_builds(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
+    """Stand in for the build tool, so these tests need no ninja."""
+    calls: list[dict[str, Any]] = []
+
+    def fake(build_dir: Path, **kwargs: Any) -> int:
+        calls.append({"build_dir": build_dir, **kwargs})
+        return 0
+
+    monkeypatch.setattr(cli_module, "_run_build_tool", fake)
+    return calls
+
+
+class TestACommandThatDeclaresADependency:
+    """`depends` is the opt-in that lets `pcons run` build.
+
+    Without one, `pcons run` writes no build files and starts no build, which
+    is what every other test in this file still asserts. With one, the build
+    files are written by the run already in progress -- there is no second
+    script run -- and the declared targets are built before the callback.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_registries(self) -> Iterator[None]:
+        from pcons import commands, modules
+
+        commands.clear()
+        modules.clear_modules()
+        yield
+        commands.clear()
+        modules.clear_modules()
+
+    @staticmethod
+    def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "pcons-build.py").write_text(DEPENDS_SCRIPT)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_MODULES_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        return tmp_path
+
+    @staticmethod
+    def _generated(tmp_path: Path) -> None:
+        """Write the listing, so `run` can resolve a name from the cache."""
+        assert (
+            _invoke("generate", "--build-dir", str(tmp_path / "build")).exit_code == 0
+        )
+
+    def test_the_declared_target_is_built_before_the_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        calls = _record_builds(monkeypatch)
+
+        result = _invoke("run", "package")
+
+        assert result.exit_code == 0
+        assert len(calls) == 1
+        assert calls[0]["targets"] == ["hello.txt"]
+
+    def test_the_build_files_are_written_for_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The point of deferring the generate decision: no second script run,
+        and no need for a prior `pcons generate` either."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        (tmp_path / "build" / "build.ninja").unlink()
+        _record_builds(monkeypatch)
+
+        assert _invoke("run", "package").exit_code == 0
+
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_command_declaring_nothing_still_builds_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The half of the old contract that survives."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        (tmp_path / "build" / "build.ninja").unlink()
+        calls = _record_builds(monkeypatch)
+
+        result = _invoke("run", "peek")
+
+        assert result.exit_code == 0
+        assert "peeked" in result.stdout
+        assert calls == []
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_failing_build_does_not_run_the_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        monkeypatch.setattr(cli_module, "_run_build_tool", lambda *a, **kw: 7)
+
+        result = _invoke("run", "package")
+
+        assert result.exit_code == 7
+        assert "packaged=" not in result.stdout
+
+    def test_every_output_node_of_every_declared_target_is_asked_for(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = DEPENDS_SCRIPT.replace(
+            "package.depends(hello)", "package.depends(hello, two)"
+        )
+        self._project(tmp_path, monkeypatch)
+        (tmp_path / "pcons-build.py").write_text(script)
+        self._generated(tmp_path)
+        calls = _record_builds(monkeypatch)
+
+        assert _invoke("run", "package").exit_code == 0
+
+        assert calls[0]["targets"] == ["hello.txt", "two.txt"]
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            pytest.param(["run", "-j", "3", "--ninja", "n2", "package"], id="after"),
+            pytest.param(["-j", "3", "--ninja", "n2", "run", "package"], id="before"),
+        ],
+    )
+    def test_the_build_flags_reach_the_build_tool(
+        self, argv: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons run` can build, so it takes the flags that govern building,
+        on either side of its own name."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        calls = _record_builds(monkeypatch)
+
+        assert _invoke(*argv).exit_code == 0
+
+        assert calls[0]["jobs"] == 3
+        assert calls[0]["ninja"] == "n2"
+
+    def test_the_cache_is_not_rewritten_by_a_run_that_generated(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`persist=False` survives the contract change: `pcons run` may now
+        write build files, but it still leaves the build directory's settings
+        alone."""
+        from pcons.core.cache import BuildCache
+
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        before = dict(BuildCache(tmp_path / "build")._data)
+        _record_builds(monkeypatch)
+
+        assert _invoke("run", "package").exit_code == 0
+
+        assert dict(BuildCache(tmp_path / "build")._data) == before
+
+    def test_the_command_sees_the_artifact_it_declared(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The whole feature, against a real build tool: from an empty build
+        directory to a command that finds its artifact on disk."""
+        if shutil.which("ninja") is None:
+            pytest.skip("ninja not found")
+        self._project(tmp_path, monkeypatch)
+
+        result = _invoke("run", "package")
+
+        assert result.exit_code == 0, result.stderr
+        assert "packaged=True" in result.stdout
+
+
+SIBLING_SCRIPT = """\
+from pcons import Project
+
+device = Project("device")
+denv = device.Environment()
+image = denv.Command(
+    target="image.txt", source="hello.in", command="cp $SOURCE $TARGET"
+)
+
+host = Project("host", build_dir=f"{device.build_dir}-host")
+henv = host.Environment()
+tool = henv.Command(
+    target="tool.txt", source="hello.in", command="cp $SOURCE $TARGET"
+)
+
+
+@device.cli_command()
+def package():
+    "Package what was built."
+    print("packaged")
+
+
+package.depends(tool)
+"""
+
+
+class TestADependencyInASiblingProject:
+    """A build script may declare several top-level projects, and each has its
+    own build directory and its own build.ninja. A declared dependency is built
+    by the build tool of the project that owns it, not by the first one's.
+
+    The directory is each project's effective output directory, so it is
+    absolute and does not depend on where the build tool is started from."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_registries(self) -> Iterator[None]:
+        from pcons import commands, modules
+
+        commands.clear()
+        modules.clear_modules()
+        yield
+        commands.clear()
+        modules.clear_modules()
+
+    @staticmethod
+    def _project(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str = SIBLING_SCRIPT
+    ) -> None:
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "pcons-build.py").write_text(script)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_MODULES_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        assert (
+            _invoke("generate", "--build-dir", str(tmp_path / "build")).exit_code == 0
+        )
+
+    def test_the_sibling_s_own_build_dir_is_used(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        calls = _record_builds(monkeypatch)
+
+        assert _invoke("run", "package").exit_code == 0
+
+        assert len(calls) == 1
+        assert calls[0]["build_dir"] == tmp_path / "build-host"
+        assert calls[0]["targets"] == ["tool.txt"]
+
+    def test_each_project_is_built_by_its_own_build_tool(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two projects, two runs, in the order the dependencies were declared."""
+        self._project(
+            tmp_path,
+            monkeypatch,
+            SIBLING_SCRIPT.replace(
+                "package.depends(tool)", "package.depends(image, tool)"
+            ),
+        )
+        calls = _record_builds(monkeypatch)
+
+        assert _invoke("run", "package").exit_code == 0
+
+        assert [(c["build_dir"], c["targets"]) for c in calls] == [
+            (tmp_path / "build", ["image.txt"]),
+            (tmp_path / "build-host", ["tool.txt"]),
+        ]
+
+    def test_a_failing_sibling_build_does_not_run_the_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        monkeypatch.setattr(cli_module, "_run_build_tool", lambda *a, **kw: 3)
+
+        result = _invoke("run", "package")
+
+        assert result.exit_code == 3
+        assert "packaged" not in result.stdout
+
+    def test_the_siblings_artifact_is_on_disk_for_the_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Against a real build tool: the sibling's ninja is the one that runs."""
+        if shutil.which("ninja") is None:
+            pytest.skip("ninja not found")
+        self._project(
+            tmp_path,
+            monkeypatch,
+            SIBLING_SCRIPT.replace(
+                'print("packaged")',
+                'print("tool=" + str((host.build_dir / "tool.txt").exists()))',
+            ),
+        )
+
+        result = _invoke("run", "package")
+
+        assert result.exit_code == 0, result.stderr
+        assert "tool=True" in result.stdout
+
+
+class TestWhatDispatchDoesNotBuild:
+    """`pcons run` builds what a command declared, and only when the command is
+    actually going to run."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_registries(self) -> Iterator[None]:
+        from pcons import commands, modules
+
+        commands.clear()
+        modules.clear_modules()
+        yield
+        commands.clear()
+        modules.clear_modules()
+
+    @staticmethod
+    def _project(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str = DEPENDS_SCRIPT
+    ) -> None:
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "pcons-build.py").write_text(script)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_MODULES_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        assert (
+            _invoke("generate", "--build-dir", str(tmp_path / "build")).exit_code == 0
+        )
+
+    @pytest.mark.parametrize("flag", ["--help", "-h"])
+    def test_asking_for_a_commands_help_builds_nothing(
+        self, flag: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """click prints that help from inside the dispatch, so the build would
+        otherwise run before the user was told what the command does."""
+        self._project(tmp_path, monkeypatch)
+        calls = _record_builds(monkeypatch)
+
+        result = _invoke("run", "package", flag)
+
+        assert result.exit_code == 0
+        assert "Package what was built." in result.stdout
+        assert calls == []
+
+    def test_a_group_named_without_a_verb_builds_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = (
+            DEPENDS_SCRIPT
+            + """
+
+@project.cli_group()
+def release():
+    "Release tasks."
+
+
+@release.command("notes")
+def release_notes():
+    "Write the notes."
+    print("noted")
+
+
+release.depends(hello)
+"""
+        )
+        self._project(tmp_path, monkeypatch, script)
+        calls = _record_builds(monkeypatch)
+
+        result = _invoke("run", "release")
+
+        assert result.exit_code == 2
+        assert "Release tasks." in result.stderr
+        assert calls == []
+
+    def test_the_group_builds_once_a_verb_is_named(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other half: the help case must not swallow a real dispatch."""
+        script = (
+            DEPENDS_SCRIPT
+            + """
+
+@project.cli_group()
+def release():
+    "Release tasks."
+
+
+@release.command("notes")
+def release_notes():
+    "Write the notes."
+    print("noted")
+
+
+release.depends(hello)
+"""
+        )
+        self._project(tmp_path, monkeypatch, script)
+        calls = _record_builds(monkeypatch)
+
+        result = _invoke("run", "release", "notes")
+
+        assert result.exit_code == 0
+        assert "noted" in result.stdout
+        assert calls[0]["targets"] == ["hello.txt"]
+
+    def test_a_target_with_no_output_asks_the_build_tool_for_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An empty target list means "every default target" to ninja, so a
+        declared target that produces no output must not reach it at all."""
+        script = DEPENDS_SCRIPT.replace(
+            "package.depends(hello)",
+            "from pcons.core.target import Target\npackage.depends(Target('nothing'))",
+        )
+        self._project(tmp_path, monkeypatch, script)
+        calls = _record_builds(monkeypatch)
+
+        result = _invoke("run", "package")
+
+        assert result.exit_code == 0
+        assert calls == []
+
+
+class TestTheListingIsReadableAfterARunThatGenerated:
+    """`pcons run <name>` may write the build files itself. A listing it cannot
+    write is a listing the next bare `pcons run` cannot read."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_registries(self) -> Iterator[None]:
+        from pcons import commands, modules
+
+        commands.clear()
+        modules.clear_modules()
+        yield
+        commands.clear()
+        modules.clear_modules()
+
+    def test_a_bare_run_lists_what_the_generating_run_declared(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "pcons-build.py").write_text(DEPENDS_SCRIPT)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_MODULES_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        _record_builds(monkeypatch)
+
+        assert _invoke("run", "package").exit_code == 0
+
+        listing = _invoke("run")
+        assert "package" in listing.stdout
+        assert "No commands declared" not in listing.stdout
 
 
 class TestTheListingSurvivesAnUnexpectedCache:
