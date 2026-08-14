@@ -5,16 +5,13 @@ Discovers and runs all example projects in examples/.
 Each example is a self-contained project that serves as both
 a test and documentation for users.
 
-Tests both invocation methods:
-- Direct: python pcons-build.py
-- CLI: python -m pcons
+Examples are run through the CLI (python -m pcons).
 """
 
 from __future__ import annotations
 
 import fnmatch
 import functools
-import json
 import os
 import platform
 import re
@@ -836,7 +833,6 @@ def _patch_pyproject(work_dir: Path) -> None:
 def _run_generate(
     work_dir: Path,
     build_dir: Path,
-    invocation: str,
     generator: str,
     test_config: dict[str, Any],
     variant: str | None = None,
@@ -847,7 +843,6 @@ def _run_generate(
     Args:
         work_dir: Working directory (copied example).
         build_dir: Base build directory.
-        invocation: "direct" or "cli".
         generator: Generator name.
         test_config: Test configuration dict.
         variant: Optional variant name (e.g., "debug", "release").
@@ -864,18 +859,16 @@ def _run_generate(
     if variant:
         env["PCONS_VARIANT"] = variant
 
-    if invocation == "direct":
-        cmd = [sys.executable, "pcons-build.py"]
-        # A directly-run script has no argv to read, so variables travel the
-        # way the CLI hands them to one: as PCONS_VARS.
-        if variables:
-            env["PCONS_VARS"] = json.dumps(variables)
-        what = "pcons-build.py"
+    if test_config.get("build_command"):
+        # A bare "pcons" also runs the build tool (ninja); these examples
+        # build with something else, and the harness runs their build
+        # command itself afterwards.
+        cmd = [sys.executable, "-m", "pcons", "generate"]
     else:
         cmd = [sys.executable, "-m", "pcons"]
-        if variables:
-            cmd.extend([f"{k}={v}" for k, v in variables.items()])
-        what = "pcons"
+    if variables:
+        cmd.extend([f"{k}={v}" for k, v in variables.items()])
+    what = "pcons"
 
     timeout = test_config.get("timeout", 60)
     result = subprocess.run(
@@ -917,7 +910,7 @@ def _check_standalone_subdirs(
             f"standalone_subdirs lists '{subdir}', which has no pcons-build.py"
         )
         sub_build = sub_work / "build-standalone"
-        _run_generate(sub_work, sub_build, "direct", "ninja", test_config)
+        _run_generate(sub_work, sub_build, "ninja", test_config)
 
         assert (sub_build / "build.ninja").exists(), (
             f"'{subdir}' generated no build.ninja when built standalone"
@@ -977,7 +970,6 @@ def _substitute_variables(path: str) -> str:
 def run_example(
     example_dir: Path,
     tmp_path: Path,
-    invocation: str = "direct",
     generator: str = "ninja",
     toolchain: str | None = None,
 ) -> None:
@@ -986,9 +978,6 @@ def run_example(
     Args:
         example_dir: Path to the example directory
         tmp_path: Temporary directory for test isolation
-        invocation: How to invoke the build script:
-            - "direct": python pcons-build.py
-            - "cli": python -m pcons
         generator: Which generator to use:
             - "ninja": Generate build.ninja
             - "make": Generate Makefile
@@ -1009,20 +998,9 @@ def run_example(
     if generator in [g.lower() for g in skip_generators]:
         pytest.skip(f"Skipped for {generator} generator")
 
-    # CLI invocation requires ninja (pcons CLI runs ninja after generation)
-    # Skip CLI tests for examples that use custom build commands (e.g., make)
-    if invocation == "cli" and test_config.get("build_command"):
-        pytest.skip("CLI invocation requires ninja; this example uses custom build")
-
-    # CLI invocation with xcode generator runs xcodebuild automatically, which is macOS-only
-    if (
-        invocation == "cli"
-        and generator == "xcode"
-        and platform.system().lower() != "darwin"
-    ):
-        pytest.skip(
-            "CLI invocation with xcode generator requires xcodebuild (macOS only)"
-        )
+    # The xcode generator's build step requires xcodebuild.
+    if generator == "xcode" and platform.system().lower() != "darwin":
+        pytest.skip("The xcode generator's build step requires xcodebuild (macOS only)")
 
     # Copy example to temp directory (so we don't pollute the source tree).
     # Ignore transient artifacts a local run may have left behind: build output,
@@ -1084,7 +1062,6 @@ def run_example(
         _run_generate(
             work_dir,
             build_dir,
-            invocation,
             generator,
             test_config,
             variant,
@@ -1372,10 +1349,10 @@ def run_example(
                     f"got:\n{actual_content}"
                 )
 
-    # Run rebuild tests (only for "direct" invocation with ninja generator)
+    # Run rebuild tests (only for the ninja generator)
     # Rebuild tests rely on ninja's incremental build infrastructure
     rebuild_tests = config.get("rebuild", [])
-    if rebuild_tests and invocation == "direct" and generator == "ninja":
+    if rebuild_tests and generator == "ninja":
         skip_config = config.get("skip", {})
         # Check if rebuild tests should be skipped on Windows
         if sys.platform == "win32" and skip_config.get("rebuild_on_windows"):
@@ -1393,9 +1370,6 @@ def run_example(
 
 # Discover examples and create test parameters
 EXAMPLES = discover_examples()
-
-# Invocation methods to test
-INVOCATIONS = ["direct", "cli"]
 
 
 def build_example_params() -> list[pytest.ParameterSet]:
@@ -1416,22 +1390,20 @@ def build_example_params() -> list[pytest.ParameterSet]:
             else ()
         )
 
-        for invocation in INVOCATIONS:
-            for generator in GENERATORS:
-                for toolchain in requested_toolchains:
-                    test_id = f"{example_dir.name}-{invocation}-{generator}"
-                    if toolchain:
-                        test_id = f"{test_id}-{toolchain}"
-                    params.append(
-                        pytest.param(
-                            example_dir,
-                            invocation,
-                            generator,
-                            toolchain,
-                            id=test_id,
-                            marks=marks,
-                        )
+        for generator in GENERATORS:
+            for toolchain in requested_toolchains:
+                test_id = f"{example_dir.name}-{generator}"
+                if toolchain:
+                    test_id = f"{test_id}-{toolchain}"
+                params.append(
+                    pytest.param(
+                        example_dir,
+                        generator,
+                        toolchain,
+                        id=test_id,
+                        marks=marks,
                     )
+                )
 
     return params
 
@@ -1440,24 +1412,22 @@ EXAMPLE_PARAMS = build_example_params()
 
 
 @pytest.mark.parametrize(
-    ("example_dir", "invocation", "generator", "toolchain"),
+    ("example_dir", "generator", "toolchain"),
     EXAMPLE_PARAMS,
 )
 def test_example(
     example_dir: Path,
     tmp_path: Path,
-    invocation: str,
     generator: str,
     toolchain: str | None,
 ) -> None:
     """Run an example project end-to-end.
 
     Tests combinations of:
-    - Invocation methods: direct (python pcons-build.py), cli (python -m pcons)
     - Generators: ninja (build.ninja), make (Makefile), xcode
     - Toolchains: from each example's test configuration
     """
-    run_example(example_dir, tmp_path, invocation, generator, toolchain)
+    run_example(example_dir, tmp_path, generator, toolchain)
 
 
 # If no examples found, create a placeholder test
