@@ -421,7 +421,7 @@ def run_script(
         script_source = script_path.read_text()
         code = compile(script_source, str(script_path), "exec")
         namespace: dict[str, object] = {
-            "__name__": "__main__",
+            "__name__": pcons.core.invocation.RUN_NAME,
             "__file__": str(script_path),
         }
         exec(code, namespace)

@@ -19,6 +19,12 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+#: ``__name__`` for a build script pcons is running, whether it is the one
+#: named on the command line or a subproject pulled in by add_subdirectory.
+#: Not "__main__", which belongs to the program: a script that hands over to
+#: the CLI from a ``__main__`` guard would otherwise re-enter it forever.
+RUN_NAME = "__pcons__"
+
 _current: Invocation | None = None
 
 

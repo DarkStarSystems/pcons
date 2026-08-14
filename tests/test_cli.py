@@ -56,6 +56,7 @@ from pcons.cli import (
     main as cli_main,
 )
 from pcons.core.vars import _clear_cli_vars
+from tests.support import subprocess_env
 
 
 def _has_c_compiler() -> bool:
@@ -3749,6 +3750,121 @@ class TestRunningAScriptMoreThanOnce:
 
         assert (first, second) == (0, 0)
         assert projects[-1].is_top_level
+
+
+class TestAScriptThatRunsItself:
+    """A build script may hand over to the CLI from a ``__main__`` guard.
+
+    All of this is whole-process behaviour: the guard is only true when the
+    script is the program, and what pcons does about it happens in the exec
+    that follows. Nothing here reproduces in-process.
+    """
+
+    GUARD = (
+        'if __name__ == "__main__":\n'
+        "    import sys\n"
+        "\n"
+        "    import pcons.cli\n"
+        "\n"
+        "    sys.exit(pcons.cli.main())\n"
+    )
+    DESCRIBE = 'from pcons import Project\n\nproject = Project("selfrun")\n'
+
+    def _write(self, tmp_path: Path, body: str) -> Path:
+        script = tmp_path / "pcons-build.py"
+        script.write_text(body)
+        return script
+
+    def _run(
+        self, script: Path, *args: str, by_hand: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        argv = [str(script)] if by_hand else ["-m", "pcons"]
+        return subprocess.run(
+            [sys.executable, *argv, *args],
+            cwd=script.parent,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=subprocess_env(),
+        )
+
+    def test_the_guard_above_the_description_generates(self, tmp_path):
+        script = self._write(tmp_path, self.GUARD + "\n" + self.DESCRIBE)
+
+        result = self._run(script, "generate")
+
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "build" / "build.ninja").exists(), result.stderr
+
+    def test_the_command_line_reaches_a_script_that_runs_itself(self, tmp_path):
+        """The whole point of handing over: argv is parsed before the body."""
+        script = self._write(
+            tmp_path,
+            self.GUARD + "\n"
+            "from pcons import Project, get_var, get_variant\n"
+            "\n"
+            "print(f\"FOO={get_var('FOO', 'unset')} VARIANT={get_variant()}\")\n"
+            'project = Project("selfrun")\n',
+        )
+
+        result = self._run(script, "FOO=bar", "--variant", "debug", "generate")
+
+        assert result.returncode == 0, result.stderr
+        assert "FOO=bar VARIANT=debug" in result.stdout
+
+    def test_a_main_guard_does_not_fire_under_pcons(self, tmp_path):
+        """`pcons` is the program; the script it runs is not."""
+        script = self._write(
+            tmp_path,
+            self.DESCRIBE + "\n"
+            'if __name__ == "__main__":\n'
+            '    (project.root_dir / "fired").write_text("x")\n',
+        )
+
+        result = self._run(script, "generate", by_hand=False)
+
+        assert result.returncode == 0, result.stderr
+        assert not (tmp_path / "fired").exists()
+
+    def test_a_pcons_guard_fires_under_pcons(self, tmp_path):
+        """What a script uses to run its description when pcons is driving."""
+        script = self._write(
+            tmp_path,
+            "from pcons import Project\n"
+            "\n"
+            "def main():\n"
+            '    Project("selfrun")\n'
+            "\n"
+            '\nif __name__ == "__pcons__":\n'
+            "    main()\n",
+        )
+
+        result = self._run(script, "generate", by_hand=False)
+
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "build" / "build.ninja").exists(), result.stderr
+
+    def test_a_subproject_gets_the_same_name(self, tmp_path):
+        """add_subdirectory runs a script too, and a guard must mean one thing."""
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "pcons-build.py").write_text(
+            "from pathlib import Path\n"
+            "\n"
+            'Path(__file__).parent.joinpath("name.txt").write_text(__name__)\n'
+        )
+        script = self._write(
+            tmp_path,
+            "from pcons import Project, add_subdirectory\n"
+            "\n"
+            'project = Project("parent")\n'
+            'add_subdirectory("sub")\n',
+        )
+
+        result = self._run(script, "generate", by_hand=False)
+
+        assert result.returncode == 0, result.stderr
+        assert (sub / "name.txt").read_text() == "__pcons__"
 
 
 class TestACommandNameThatIsNotTheFirstArgument:
