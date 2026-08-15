@@ -106,6 +106,41 @@ def record(invocation: Invocation) -> None:
     _current = invocation
 
 
+def running_as_a_program(defined_at: Path) -> bool:
+    """Whether *defined_at* is the file this interpreter was started on.
+
+    True for ``python pcons-build.py`` and false for anything pcons ran: the
+    CLI records an invocation before it executes a build script, so the script
+    named on the command line and every one add_subdirectory pulls in are ruled
+    out by the recorded invocation alone.
+
+    An embedder's own driver run as ``python driver.py`` matches too. Nothing
+    at construction time separates it from a build script, and the cost is one
+    warning on a build that still works.
+    """
+    if _current is not None:
+        return False
+    program = sys.argv[0] if sys.argv else ""
+    if not program:
+        return False
+    try:
+        return defined_at.resolve() == Path(program).resolve()
+    except (OSError, ValueError):  # pragma: no cover - unresolvable, not ours
+        return False
+
+
+def program_name(path: Path) -> str:
+    """*path* spelled relative to the working directory when it can be.
+
+    A diagnostic naming the program should name it the way the user typed it,
+    and an absolute path is what a frame carries.
+    """
+    try:
+        return os.path.relpath(path)
+    except ValueError:  # pragma: no cover - another drive on Windows
+        return str(path)
+
+
 def clear() -> None:
     """Forget the recorded invocation (between CLI runs, and in tests)."""
     global _current

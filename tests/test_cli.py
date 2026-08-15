@@ -3753,11 +3753,13 @@ class TestRunningAScriptMoreThanOnce:
 
 
 class TestAScriptThatRunsItself:
-    """A build script may hand over to the CLI from a ``__main__`` guard.
+    """A build script may hand over to the CLI from a ``__main__`` guard, and
+    one that does not says so when it is run directly.
 
     All of this is whole-process behaviour: the guard is only true when the
-    script is the program, and what pcons does about it happens in the exec
-    that follows. Nothing here reproduces in-process.
+    script is the program, what pcons does about it happens in the exec that
+    follows, and what a direct run leaves behind is what an interpreter exit
+    did. Nothing here reproduces in-process.
     """
 
     GUARD = (
@@ -3892,6 +3894,90 @@ class TestAScriptThatRunsItself:
 
         assert result.returncode == 0, result.stderr
         assert (sub / "name.txt").read_text() == "__pcons__"
+
+    def test_a_direct_run_says_why_nothing_happened(self, tmp_path):
+        """Exit 0 is deliberate, not an oversight.
+
+        A direct run writes nothing, so it cannot produce a false green:
+        `python pcons-build.py && ninja -C build` fails at ninja whatever this
+        returns. The user's problem is not that something wrong succeeded, it
+        is having no idea why nothing happened, and the message fixes that.
+        """
+        script = self._write(tmp_path, self.DESCRIBE)
+
+        result = self._run(script)
+
+        assert result.returncode == 0, result.stderr
+        assert "this build script was run directly" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_pcons_running_the_script_says_nothing(self, tmp_path):
+        script = self._write(tmp_path, self.DESCRIBE)
+
+        result = self._run(script, "-b", "pcons-build.py", "generate", by_hand=False)
+
+        assert "this build script was run directly" not in result.stderr
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_only_the_top_level_project_is_told(self, tmp_path):
+        """add_subdirectory builds a project too, and one run is one message."""
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "pcons-build.py").write_text(
+            'from pcons import Project\n\nProject("sub")\n'
+        )
+        script = self._write(
+            tmp_path,
+            "from pcons import Project, add_subdirectory\n"
+            "\n"
+            'project = Project("parent")\n'
+            'add_subdirectory("sub")\n',
+        )
+
+        result = self._run(script)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stderr.count("this build script was run directly") == 1
+
+    def test_an_embedder_reached_through_an_entry_point_is_silent(self, tmp_path):
+        """A console script is the program; the project is built elsewhere."""
+        (tmp_path / "tool.py").write_text(
+            "from pcons import Project\n"
+            "\n"
+            "\n"
+            "def build():\n"
+            '    return Project("embedded")\n'
+        )
+        entry = tmp_path / "entry.py"
+        entry.write_text("import tool\n\ntool.build()\n")
+
+        result = self._run(entry)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    def test_an_embedder_running_its_own_driver_is_told_too(self, tmp_path):
+        """Accepted imprecision, written down here rather than found later.
+
+        Nothing at construction time tells `python driver.py` apart from
+        `python pcons-build.py`: both are the program, building a top-level
+        project with no CLI in the process. The warning is the whole cost:
+        the driver runs as it did, and its fix is an entry point.
+        """
+        driver = tmp_path / "driver.py"
+        driver.write_text(
+            "from pcons import Project\n"
+            "\n"
+            'project = Project("embedded")\n'
+            'print(f"ROOT={project.root_dir}")\n'
+        )
+
+        result = self._run(driver)
+
+        assert result.returncode == 0, result.stderr
+        assert "this build script was run directly" in result.stderr
+        assert f"ROOT={tmp_path}" in result.stdout
 
 
 class TestACommandNameThatIsNotTheFirstArgument:

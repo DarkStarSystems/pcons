@@ -289,8 +289,8 @@ leaves the watch running; only Ctrl-C ends the session, and that exits `0`.
 
 ## A build script that runs itself
 
-`pcons` runs the build script. Run one yourself and it describes a build and
-exits, writing nothing:
+`pcons` runs the build script. Run one yourself and it describes a build, says
+so, and exits, writing nothing:
 
 ```bash
 python pcons-build.py     # describes a build, writes no build files

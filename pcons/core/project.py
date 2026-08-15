@@ -22,6 +22,7 @@ from pcons.core.graph import (
     detect_cycles_in_targets,
     topological_sort_targets,
 )
+from pcons.core.invocation import program_name, running_as_a_program
 from pcons.core.node import AliasNode, DirNode, FileNode, Node, PathRole
 from pcons.core.paths import PathResolver
 from pcons.core.target import Target, split_qualified_name
@@ -304,6 +305,20 @@ class Project(_ProjectBuilders):
 
         Project.__current = self
         if Project.__top_level is None:
+            script = Path(defined_at.filename)
+            if running_as_a_program(script):
+                logger.warning(
+                    "this build script was run directly, so nothing was "
+                    "generated.\n"
+                    "Run it with pcons instead:\n"
+                    "\n"
+                    "    pcons -b %s\n"
+                    "\n"
+                    "or hand over to the CLI from the top of the script, see\n"
+                    "https://pcons.readthedocs.io/en/latest/cli/"
+                    "#a-build-script-that-runs-itself",
+                    program_name(script),
+                )
             Project.__top_level = self
 
     @staticmethod
