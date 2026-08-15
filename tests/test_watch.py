@@ -7,6 +7,7 @@ import importlib.util
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -433,13 +434,32 @@ class TestBuildDispatch:
             cli, "run_ninja", lambda *a, **k: order.append("build") or 0
         )
 
+        regenerated = SimpleNamespace(build_dir=tmp_path)
         assert (
             self._build(
-                tmp_path, regenerate=lambda: order.append("generate") or (0, None)
+                tmp_path,
+                regenerate=lambda: order.append("generate") or (0, regenerated),
             )
             == 0
         )
         assert order == ["generate", "build"]
+
+    def test_a_regeneration_that_describes_no_build_skips_it(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        from pcons import cli
+
+        (tmp_path / "pcons-build.py").write_text("")
+        (tmp_path / "build.ninja").write_text("")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(cli, "_needs_generation", lambda *a, **k: True)
+        order = []
+        monkeypatch.setattr(
+            cli, "run_ninja", lambda *a, **k: order.append("build") or 0
+        )
+
+        assert self._build(tmp_path, regenerate=lambda: (0, None)) == 0
+        assert order == []
 
     def test_a_failed_regeneration_stops_the_build(
         self, tmp_path: Path, monkeypatch

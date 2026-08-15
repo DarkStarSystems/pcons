@@ -1036,6 +1036,22 @@ def _run_build_tool(
         return 1
 
 
+def _no_build_described() -> int:
+    """The status for a script that ran cleanly and created no project.
+
+    A script may decide it has nothing to build: a missing optional toolchain,
+    an environment it is not meant to run in. It says so and exits 0, which is
+    not the failure that no build files usually means, so the build is skipped
+    rather than looked for and missed.
+
+    Said at a level the default shows. A build was asked for and none happened,
+    and a script that stops without a word of its own would otherwise leave
+    that as silence and a zero.
+    """
+    logger.warning("Build script described no build, nothing to do")
+    return 0
+
+
 def _build(
     build_dir: Path,
     *,
@@ -1064,8 +1080,9 @@ def _build(
             code, project = regenerate()
             if code != 0:
                 return code, build_dir
-            if project:
-                build_dir = project.build_dir
+            if project is None:
+                return _no_build_described(), build_dir
+            build_dir = project.build_dir
 
     return _run_build_tool(
         build_dir,
@@ -1808,7 +1825,7 @@ def cli_generate(
 ) -> None:
     """Generate build files from pcons-build.py."""
     variables, _ = parse_variables(list(extra))
-    code, _project = _generate(
+    code, project = _generate(
         build_dir,
         script=Path(build_script) if build_script else None,
         variables=variables,
@@ -1820,6 +1837,8 @@ def cli_generate(
         graph=graph,
         mermaid=mermaid,
     )
+    if code == 0 and project is None:
+        ctx.exit(_no_build_described())
     ctx.exit(code)
 
 
@@ -2132,8 +2151,10 @@ def cli_default(
     code, project = regenerate()
     if code != 0:
         ctx.exit(code)
+    if project is None:
+        ctx.exit(_no_build_described())
     # The script may pick a build directory other than the one asked for.
-    ctx.exit(build_once(project.build_dir if project else build_dir)[0])
+    ctx.exit(build_once(project.build_dir)[0])
 
 
 def main(argv: list[str] | None = None) -> int:

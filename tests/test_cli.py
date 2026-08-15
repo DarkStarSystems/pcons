@@ -1143,6 +1143,66 @@ print("hello")
         assert not build_dir.exists()
 
 
+class TestScriptThatDescribesNoBuild:
+    """A script may exit 0 having created no project, and that is not a failure.
+
+    An optional toolchain is missing, or the script is outside the environment
+    it is meant to run in: it says so and stops. No project means nothing
+    enqueued a generate, so there are no build files to run afterwards, and
+    looking for them and reporting them missing turns the script's clean stop
+    into an error it never signalled.
+    """
+
+    SKIP_SCRIPT = """\
+import sys
+from pathlib import Path
+
+(Path(__file__).parent / "runs").open("a").write("x")
+sys.exit(0)
+"""
+
+    def _write_script(self, tmp_path: Path) -> Path:
+        (tmp_path / "pcons-build.py").write_text(self.SKIP_SCRIPT)
+        return tmp_path / "runs"
+
+    @pytest.mark.parametrize("argv", [(), ("build",), ("generate",)])
+    def test_skipping_is_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: tuple[str, ...]
+    ) -> None:
+        self._write_script(tmp_path)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke(*argv)
+        assert result.exit_code == 0
+        assert "No build files found" not in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    @pytest.mark.parametrize("argv", [(), ("build",), ("generate",)])
+    def test_the_reason_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: tuple[str, ...]
+    ) -> None:
+        # Without -v: a script that stops without a word of its own would
+        # otherwise leave a build that did not happen as silence and a zero.
+        self._write_script(tmp_path)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        assert "described no build" in _invoke(*argv).stderr
+
+    def test_the_script_runs_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A bare `pcons` generates and then builds, and the build regenerates
+        # when the build files are missing -- which they always are here.
+        runs = self._write_script(tmp_path)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        assert _invoke().exit_code == 0
+        assert runs.read_text() == "x"
+
+
 class TestExplainCommand:
     """Tests for `pcons explain`."""
 
@@ -1481,7 +1541,9 @@ class TestCLIArgumentParsing:
         """
         (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
         monkeypatch.chdir(tmp_path)
-        _capture_args(monkeypatch, "_generate", result=(0, None))
+        _capture_args(
+            monkeypatch, "_generate", result=(0, SimpleNamespace(build_dir=tmp_path))
+        )
         built = _capture_args(monkeypatch, "_build", result=(0, tmp_path))
         assert _invoke("hello").exit_code == 0
         assert built[0]["targets"] == ["hello"]
