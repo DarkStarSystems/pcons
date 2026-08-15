@@ -9,6 +9,7 @@ import pytest
 from click.shell_completion import ShellComplete
 from click.testing import CliRunner, Result
 
+from pcons._cli_click import _debug_help
 from pcons._cli_completion import (
     COMPLETE_VAR,
     PROG_NAME,
@@ -18,6 +19,7 @@ from pcons._cli_completion import (
     remove_block,
 )
 from pcons.cli import cli
+from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
 
 
 @pytest.fixture(autouse=True)
@@ -355,3 +357,43 @@ class TestPathCompletion:
         # The shell completes the whole word itself, so the value is passed
         # through untouched rather than filtered.
         assert _completions(["-C"], "sub/dir") == ["sub/dir"]
+
+
+class TestValueCompletion:
+    """Options whose values pcons knows by name, rather than by type."""
+
+    def test_every_debug_subsystem(self) -> None:
+        names = _completions(["--debug"], "")
+        assert set(names) == set(SUBSYSTEM_DESCRIPTIONS) | {"all", "help"}
+
+    def test_a_debug_prefix_filters(self) -> None:
+        assert _completions(["--debug"], "re") == ["resolve"]
+
+    def test_a_debug_segment_keeps_what_was_typed_before_it(self) -> None:
+        assert _completions(["--debug"], "env,su") == ["env,subst"]
+
+    def test_a_debug_subsystem_carries_its_description(self) -> None:
+        complete = ShellComplete(cli, {}, PROG_NAME, COMPLETE_VAR)
+        offered = {i.value: i.help for i in complete.get_completions(["--debug"], "")}
+        assert offered["resolve"] == SUBSYSTEM_DESCRIPTIONS["resolve"]
+
+    def test_an_unknown_debug_subsystem_offers_nothing(self) -> None:
+        assert _completions(["--debug"], "nonsense") == []
+
+    def test_the_runner_names(self) -> None:
+        assert _completions(["--ninja"], "") == ["ninja", "n2"]
+        assert _completions(["--ninja"], "n2") == ["n2"]
+
+    def test_no_files_are_offered_for_a_runner(self) -> None:
+        assert "file" not in _completion_types(["--ninja"], "")
+
+    @pytest.mark.parametrize("command", ["build", "generate"])
+    def test_after_a_command_name_too(self, command: str) -> None:
+        assert "resolve" in _completions([command, "--debug"], "")
+
+    def test_the_help_text_still_names_every_accepted_value(self) -> None:
+        # The help and the completer read one list, so neither can drift.
+        assert (
+            _debug_help() == "Enable debug tracing for subsystems (comma-separated): "
+            "configure,resolve,generate,subst,env,deps,all,help"
+        )

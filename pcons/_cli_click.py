@@ -482,9 +482,52 @@ def _generator_help() -> str:
     return f"Generator to use ({names}). Repeatable. Default: ninja"
 
 
+#: What `--debug` accepts besides a subsystem name. `all` is in
+#: `debug.SUBSYSTEMS` and `help` is handled by `SubsystemListRequested`, so
+#: neither is in `SUBSYSTEM_DESCRIPTIONS` and both have to be spelled here, once,
+#: for the help text and the completion to stay in step.
+DEBUG_EXTRAS: dict[str, str] = {
+    "all": "Every subsystem",
+    "help": "List the subsystems and exit",
+}
+
+
 def _debug_help() -> str:
-    subsystems = ",".join(SUBSYSTEM_DESCRIPTIONS) + ",all,help"
+    subsystems = ",".join([*SUBSYSTEM_DESCRIPTIONS, *DEBUG_EXTRAS])
     return f"Enable debug tracing for subsystems (comma-separated): {subsystems}"
+
+
+def _complete_debug(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[CompletionItem]:
+    """Complete one subsystem of a comma-separated `--debug` spec.
+
+    The spec is a list in a single word, so what is completed is the segment
+    after the last comma and the segments already typed come back as a prefix.
+    That works here and not for `--modules-path` because these are `plain`
+    candidates, whose value the shell uses, rather than path directives, whose
+    value it ignores.
+    """
+    head, sep, tail = incomplete.rpartition(",")
+    return [
+        CompletionItem(head + sep + name, help=description)
+        for name, description in {**SUBSYSTEM_DESCRIPTIONS, **DEBUG_EXTRAS}.items()
+        if name.startswith(tail)
+    ]
+
+
+def _complete_runner(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[CompletionItem]:
+    """The ninja-compatible runners pcons knows by name.
+
+    Only the two names, with no file fallback: mixing a `file` directive in
+    would drop them, since the shell clears the candidates it has collected
+    before completing the word itself.
+    """
+    return [
+        CompletionItem(name) for name in ("ninja", "n2") if name.startswith(incomplete)
+    ]
 
 
 def complete_dir(
@@ -547,7 +590,12 @@ def common_options(f: F) -> F:
         default="build",
         help="Build directory (default: $PCONS_BUILD_DIR, or 'build')",
     )(f)
-    f = click.option("--debug", metavar="SUBSYSTEMS", help=_debug_help())(f)
+    f = click.option(
+        "--debug",
+        metavar="SUBSYSTEMS",
+        shell_complete=_complete_debug,
+        help=_debug_help(),
+    )(f)
     f = click.option(
         "--pdb",
         "pdb_",
@@ -614,6 +662,7 @@ def build_options(f: F) -> F:
     return click.option(
         "--ninja",
         metavar="PROG",
+        shell_complete=_complete_runner,
         help=(
             "Ninja-compatible runner to invoke (e.g., 'n2'). "
             "Defaults to the NINJA env var, then 'ninja'."
