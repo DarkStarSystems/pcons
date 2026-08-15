@@ -339,12 +339,37 @@ def _record_command_listing(cache: BuildCache, *, persist: bool) -> None:
         cache.update({"commands": _declared_command_listing()})
 
 
+def _buildable_names(project: Project) -> list[str]:
+    """Every name a build tool accepts for this project, as the tool sees it.
+
+    Output paths rendered from the build directory, which is the contract every
+    generator that runs there shares, plus the aliases and the ``all`` phony the
+    generators add. Not ``target.name``: a target that sets ``output_name`` or
+    ``output_prefix`` is spelled differently in the build file, so
+    ``examples/03_variants`` would offer ``variant_demo_debug`` for a build file
+    that only knows ``debug/variant_demo``.
+
+    Only shell completion reads this. It must never run the build script, so the
+    names are recorded when one does run.
+    """
+    from pcons.core.node import FileNode
+
+    resolver = project._path_resolver
+    names = {"all", *project.aliases}
+    for target in project.targets:
+        for node in target.output_nodes:
+            if isinstance(node, FileNode):
+                names.add(resolver.make_execution_relative(node.path))
+    return sorted(names)
+
+
 def _persist_run_settings(
     cache: BuildCache,
     variables: dict[str, str],
     variant: str | None,
     generator: str | None,
     source_dir: str,
+    targets: list[str] | None = None,
 ) -> None:
     """Persist the settings resolved for this run into the build-dir cache.
 
@@ -358,6 +383,11 @@ def _persist_run_settings(
     The declared-command listing is written separately, by the caller: it
     describes the build script rather than this run's argv, so it is recorded
     on every generating run and not only on a persisting one.
+
+    ``targets`` is ``None`` for a run that did not generate, which leaves any
+    recorded names alone. A run that only reads, `pcons info` among them, never
+    resolves the targets, so treating its empty result as an answer would wipe
+    what the last generate recorded.
     """
     updates: dict[str, object] = {"source_dir": source_dir}
     if variables:
@@ -366,6 +396,8 @@ def _persist_run_settings(
         updates["variant"] = variant
     if generator:
         updates["generator"] = generator
+    if targets is not None:
+        updates["targets"] = targets
     cache.update(updates)
 
 
@@ -602,6 +634,7 @@ def run_script(
                 if generate:
                     _record_command_listing(cache, persist=persist)
                 if persist:
+                    projects = pcons.get_registered_projects()
                     _warn_unread_cached_vars(cached_vars, cli_vars)
                     _persist_run_settings(
                         cache,
@@ -609,6 +642,13 @@ def run_script(
                         persist_variant,
                         persist_gen,
                         current_source,
+                        # The project this run registered, not `Project.top_level()`.
+                        # Nothing resets the tree between two runs in one process, so
+                        # a second script's Project nests under the first and the
+                        # top level answers for both.
+                        targets=_buildable_names(projects[0])
+                        if generate and projects
+                        else None,
                     )
 
             except SystemExit as e:

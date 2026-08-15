@@ -11,8 +11,10 @@ The cache is separate from :class:`pcons.configure.config.Configure`
 invalidation lifecycle.
 
 Reserved top-level keys used by pcons itself: ``vars`` (dict of build variables),
-``variant`` (str), ``generator`` (str), and ``source_dir`` (str, the source tree
-the cache was written for, used to detect a copied or moved build dir).
+``variant`` (str), ``generator`` (str), ``source_dir`` (str, the source tree
+the cache was written for, used to detect a copied or moved build dir), and
+``targets`` (list of str, the names the last generate left buildable, read only
+by shell completion, which must not run the build script to find them).
 """
 
 from __future__ import annotations

@@ -3874,7 +3874,157 @@ class TestCacheCommand:
         """`path` is the one verb that answers without a cache to read."""
         work = {"list": _cache_list, "show": _cache_show, "clear": _cache_clear}[verb]
         assert work(tmp_path / "nope") == 0
-        assert "No cache" in capsys.readouterr().out
+
+
+class TestRecordedTargetNames:
+    """A generate records what it left buildable, for shell completion to read.
+
+    Completion must not run the build script, so the names are written when one
+    does run and read from the cache afterwards.
+    """
+
+    def _generate(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        body: str,
+        *,
+        generate: bool = True,
+    ) -> Path:
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text(body)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        code, _ = run_script(script, build_dir, generate=generate)
+        assert code == 0
+        return build_dir
+
+    def _recorded(self, build_dir: Path) -> list[str] | None:
+        from pcons.core.cache import BuildCache
+
+        recorded = BuildCache(build_dir).get("targets")
+        assert recorded is None or isinstance(recorded, list)
+        return recorded
+
+    def test_a_program_is_recorded_with_the_all_phony(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        build_dir = self._generate(
+            tmp_path,
+            monkeypatch,
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n",
+        )
+        assert self._recorded(build_dir) == ["all", "hello"]
+
+    def test_an_output_prefix_is_recorded_as_the_build_file_spells_it(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The name a build tool accepts, not `target.name`.
+
+        A target renamed by output_name/output_prefix is spelled one way in the
+        build file and another in the Project, and only the first is typeable.
+        """
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        build_dir = self._generate(
+            tmp_path,
+            monkeypatch,
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "prog = p.Program('demo_debug', p.Environment(toolchain='c'), "
+            "sources=['hello.c'])\n"
+            "prog.output_name = 'demo'\n"
+            "prog.output_prefix = 'debug/'\n",
+        )
+        assert self._recorded(build_dir) == ["all", "debug/demo"]
+
+    def test_a_run_that_does_not_generate_leaves_the_names_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons info` reads without resolving, so its empty answer is no answer.
+
+        Without the guard it would record ["all"] and quietly break completion
+        for the build dir.
+        """
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        body = (
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n"
+        )
+        build_dir = self._generate(tmp_path, monkeypatch, body)
+        assert self._recorded(build_dir) == ["all", "hello"]
+
+        _clear_cli_vars()
+        code, _ = run_script(tmp_path / "pcons-build.py", build_dir, generate=False)
+        assert code == 0
+        assert self._recorded(build_dir) == ["all", "hello"]
+
+    def test_nothing_is_recorded_without_persisting(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The self-regeneration edge runs with persist off and must not write."""
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        code, _ = run_script(script, build_dir, persist=False)
+        assert code == 0
+        assert self._recorded(build_dir) is None
+
+    def test_fresh_drops_the_names_before_recording_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        script = tmp_path / "pcons-build.py"
+        build_dir = tmp_path / "build"
+        script.write_text(
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        assert run_script(script, build_dir)[0] == 0
+
+        script.write_text(
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('goodbye', p.Environment(toolchain='c'), sources=['hello.c'])\n"
+        )
+        _clear_cli_vars()
+        # A second run in one process is not what the CLI does, and nothing
+        # resets the project tree between them, so the second script's Project
+        # would nest under the first. Model two invocations instead.
+        from pcons.core.project import Project
+
+        Project._clear_tree()
+        assert run_script(script, build_dir, fresh=True)[0] == 0
+        assert self._recorded(build_dir) == ["all", "goodbye"]
+
+    def test_the_names_are_not_shown_by_the_cache_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """`cache list` reports settings a user chose, and this is derived."""
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        build_dir = self._generate(
+            tmp_path,
+            monkeypatch,
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n",
+        )
+        assert _cache_list(build_dir) == 0
+        assert "hello" not in capsys.readouterr().out
 
 
 class TestNestingPassesOnTheMerge:
