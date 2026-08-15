@@ -25,6 +25,7 @@ from pcons._cli_click import (
     MergingGroup,
     PconsContext,
     PconsGroup,
+    TargetsCommand,
     _adopt_options_spelled_earlier,
     build_options,
     common_options,
@@ -1854,6 +1855,7 @@ def cli_info(
 
 @cli.command(
     "explain",
+    cls=TargetsCommand,
     loads_modules=True,
     short_help="Show each target's commands and where its flags came from",
     help=(
@@ -2031,6 +2033,7 @@ def cli_generate(
 
 @cli.command(
     "build",
+    cls=TargetsCommand,
     loads_modules=True,
     short_help="Build targets (auto-generates if needed)",
     help=(

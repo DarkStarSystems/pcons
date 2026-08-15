@@ -4109,6 +4109,87 @@ class TestRecordedTargetNames:
         assert BuildCache(first).get("variants") == ["debug"]
         assert BuildCache(second).get("variants") == ["minsizerel"]
 
+    def test_the_help_lists_them(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons hello` builds a target, so `pcons -h` should name one."""
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        self._generate(
+            tmp_path,
+            monkeypatch,
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n",
+        )
+        monkeypatch.chdir(tmp_path)
+        for argv in (["-h"], ["--help"], ["build", "-h"], ["explain", "-h"]):
+            out = _invoke(*argv).stdout
+            assert "Targets:" in out, argv
+            assert "hello" in out, argv
+
+    def test_a_command_that_takes_no_target_does_not_list_them(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`info` and `generate` take build variables in EXTRA, not targets."""
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        self._generate(
+            tmp_path,
+            monkeypatch,
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n",
+        )
+        monkeypatch.chdir(tmp_path)
+        for command in ("info", "generate", "clean"):
+            assert "Targets:" not in _invoke(command, "-h").stdout, command
+
+    def test_the_help_is_unchanged_outside_a_generated_build_dir(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No section at all rather than an empty one, so `pcons -h` in any
+        other directory reads as it did before there was one to print."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        for argv in (["-h"], ["build", "-h"]):
+            assert "Targets:" not in _invoke(*argv).stdout, argv
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["-B", "out", "-h"],
+            ["build", "-B", "out", "-h"],
+            ["-B", "out", "build", "-h"],
+        ],
+        ids=["before-the-command", "after-the-command", "before-and-nested"],
+    )
+    def test_the_help_reads_the_build_dir_it_was_given(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        """-B is eager so it is read before --help, which is eager itself.
+
+        Without that, help formats out of a context where -B has not been
+        processed and lists the default build directory's targets.
+        """
+        from pcons.core.project import Project
+
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        body = (
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program({name!r}, p.Environment(toolchain='c'), sources=['hello.c'])\n"
+        )
+        self._generate(tmp_path, monkeypatch, body.format(name="defaulted"))
+        script = tmp_path / "pcons-build.py"
+        script.write_text(body.format(name="chosen"))
+        _clear_cli_vars()
+        Project._clear_tree()
+        assert run_script(script, tmp_path / "out")[0] == 0
+
+        monkeypatch.chdir(tmp_path)
+        out = _invoke(*argv).stdout
+        assert "chosen" in out
+        assert "defaulted" not in out
+
     def test_the_names_are_not_shown_by_the_cache_command(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:

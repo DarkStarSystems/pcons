@@ -403,6 +403,17 @@ class PconsGroup(click.Group):
         items.extend(complete_target(ctx, None, incomplete))
         return items
 
+    def format_options(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        """Options, then the commands click adds, then the targets.
+
+        `pcons hello` builds a target, so the names belong next to the command
+        names rather than only under `pcons build --help`.
+        """
+        super().format_options(ctx, formatter)
+        format_recorded_targets(ctx, formatter)
+
     # click types these hooks against the base context, and narrowing a
     # parameter in an override is unsound in general, so the class this group
     # builds its own context from is spelled out at each one.
@@ -586,20 +597,44 @@ def complete_file(
     return [CompletionItem(incomplete, type="file")]
 
 
+def _declared_build_dir(ctx: click.Context) -> str | Path | None:
+    """What ``-B`` would settle on with nothing parsed yet: env var, then default.
+
+    `--help` is eager, so it runs from inside `parse_args` and `ctx.params` is
+    still empty on the level it fires from. Reading the values off the option's
+    own declaration keeps its spelling in one place.
+    """
+    node: click.Context | None = ctx
+    while node is not None:
+        for param in node.command.params:
+            if param.name != "build_dir":
+                continue
+            envvar = param.envvar
+            if isinstance(envvar, str):
+                from_env = os.environ.get(envvar)
+                if from_env:
+                    return from_env
+            return param.get_default(node)
+        node = node.parent
+    return None
+
+
 def _cached_names(ctx: click.Context, key: str) -> list[str]:
     """The list the last generate left under `key`, for this build directory.
 
-    Never runs the build script. Completion fires on every keystroke and a
-    build script does configure checks, so these names are recorded when a
-    generate runs and only read back here.
+    Never runs the build script. Completion fires on every keystroke, `--help`
+    is meant to be instant, and a build script does configure checks. So these
+    names are recorded when a generate runs and only read back here.
 
-    Answers an empty list rather than raising, whatever it finds. stdout is the
-    candidate stream, so anything escaping from here is parsed by the shell as a
-    completion.
+    Answers an empty list rather than raising, whatever it finds. For completion
+    stdout is the candidate stream, so anything escaping from here is parsed by
+    the shell as a completion.
     """
     from pcons.core.cache import BuildCache
 
     build_dir = inherited_param(ctx, "build_dir")
+    if build_dir is None:
+        build_dir = _declared_build_dir(ctx)
     if build_dir is None:
         return []
     try:
@@ -637,6 +672,36 @@ def _complete_variant(
         for name in _cached_names(ctx, "variants")
         if name.startswith(incomplete)
     ]
+
+
+def format_recorded_targets(ctx: click.Context, formatter: click.HelpFormatter) -> None:
+    """List what the last generate left buildable, if anything.
+
+    Silent on a build directory that never generated, so help outside a pcons
+    project reads exactly as it did before there was a section to print. Same
+    source as the completion of the same names, and the same rule: never run the
+    build script to find them.
+    """
+    names = _cached_names(ctx, "targets")
+    if not names:
+        return
+    with formatter.section("Targets"):
+        formatter.write_dl([(name, "") for name in names])
+
+
+class TargetsCommand(MergingCommand):
+    """A command that lists the recorded targets in its help.
+
+    For the commands whose ``EXTRA`` accepts a target name. `pcons info` and
+    `pcons generate` take build variables there and would swallow one, so they
+    do not get this.
+    """
+
+    def format_options(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        super().format_options(ctx, formatter)
+        format_recorded_targets(ctx, formatter)
 
 
 def targets_argument(f: F) -> F:
@@ -677,6 +742,13 @@ def common_options(f: F) -> F:
         # out because click.Path would otherwise print its own.
         type=click.Path(path_type=Path),
         metavar="DIR",
+        # Eager so it is processed before `--help`, which is eager itself and
+        # would otherwise format the help out of a context where -B has not
+        # been read yet: `pcons -B out --help` would list the default build
+        # directory's targets. Among eager parameters click processes the one
+        # spelled first, so this only reorders -B against -C, and neither
+        # resolves anything at parse time.
+        is_eager=True,
         # Without this, click.Path's own completion offers files too, because
         # its file_okay defaults to True.
         shell_complete=complete_dir,
