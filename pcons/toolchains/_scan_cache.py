@@ -10,25 +10,30 @@ last run's answer still stands.
 Stamps are (mtime_ns, size), not content hashes. Hashing a TU's ~300
 prerequisites would cost more than the scan it saves, and a false miss only
 costs one scan.
+
+Stored as its own JSON file rather than in :class:`pcons.core.cache.BuildCache`,
+which is the store the CLI persists settings in and ``pcons cache show`` prints:
+a megabyte of scan results per build directory does not belong in either. What
+that store does own is the write discipline, which this one repeats -- JSON, and
+a temp file replaced into place, so an interrupted write cannot leave a file that
+the next run refuses to read.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
-import pickle
+import shutil
 import threading
+from functools import cache
 from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-CACHE_FILE = "pcons_scan_cache.pkl"
-
-#: What produced the stored answers. Part of every key, so a pcons whose scan
-#: command differs rescans instead of trusting the old one.
-RECIPE: str = "gcc-p1689r5-directives-only-1"
+CACHE_FILE = "pcons_scan_cache.json"
 
 
 def parse_depfile(text: str) -> list[str]:
@@ -77,6 +82,18 @@ def parse_depfile(text: str) -> list[str]:
     return prereqs
 
 
+@cache
+def compiler_binary(compiler: str) -> str | None:
+    """Where *compiler* resolves on PATH, or None if it does not resolve.
+
+    Stored alongside a scan's prerequisites, so an in-place compiler upgrade
+    invalidates the answers the old one gave. The command string cannot do
+    that: ``g++`` is ``g++`` before and after.
+    """
+    found = shutil.which(compiler)
+    return os.path.abspath(found) if found else None
+
+
 def _stamp(path: str) -> tuple[int, int] | None:
     """(mtime_ns, size), or None when the file is gone."""
     try:
@@ -105,26 +122,33 @@ class ScanCache:
         if not self._path.exists():
             return
         try:
-            with self._path.open("rb") as f:
-                data = pickle.load(f)
-        except (OSError, pickle.PickleError) as e:
+            with self._path.open(encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
             logger.warning("Unreadable scan cache %s: %s - rescanning", self._path, e)
             return
         if isinstance(data, dict) and isinstance(data.get("entries"), dict):
             self._entries = data["entries"]
 
     @staticmethod
-    def key(compiler: str, compile_flags: list[str], src: str) -> str:
-        """A different compiler or flag set is a different question.
+    def key(
+        recipe: str, compiler: str, compile_flags: list[str], src: str, obj: str
+    ) -> str:
+        """A different compiler, flag set or object file is a different question.
 
         Not a stale answer to the same one, so it gets its own entry rather
         than invalidating the old.
 
-        `RECIPE` covers what the caller cannot see: the flags the scan command
-        adds for itself. Bump it whenever that command changes, or an upgraded
-        pcons will reuse answers the old command produced.
+        *obj* is in there because the p1689 payload names it: one source built
+        into two objects with the same flags would otherwise share one entry,
+        and the second would be served the first's ``primary-output``.
+
+        *recipe* covers what the caller cannot see: the flags the scan command
+        adds for itself. It is the command with its per-TU parts elided, so a
+        pcons whose scan command changed asks a new question rather than
+        trusting an answer the old one produced.
         """
-        material = "\0".join([RECIPE, compiler, src, *compile_flags])
+        material = "\0".join([recipe, compiler, src, obj, *compile_flags])
         return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
     def get(self, key: str) -> dict[str, Any] | None:
@@ -145,18 +169,32 @@ class ScanCache:
         p1689 = entry.get("p1689")
         return p1689 if isinstance(p1689, dict) else None
 
-    def put(self, key: str, p1689: dict[str, Any], prereqs: list[str]) -> None:
+    def put(
+        self,
+        key: str,
+        p1689: dict[str, Any],
+        prereqs: list[str],
+        *,
+        scan_started_ns: int,
+    ) -> None:
         """Record a scan, with the files it read, for the next run.
 
         Prerequisites are stored absolute: a depfile writes them as the
         compiler saw them, relative to the directory the scan ran in, and a
         later run stats them from wherever pcons was started.
+
+        A prerequisite written since *scan_started_ns* is not recorded at all.
+        The compiler may have read it before that write, so its stamp now would
+        claim the scan saw an edit it did not: an entry that hits forever and
+        answers with the module graph from before the edit.
         """
         resolved = [os.path.abspath(p) for p in prereqs]
         stamps = [_stamp(p) for p in resolved]
         if any(s is None for s in stamps):
             # A prerequisite vanished between the scan and now. Storing it
             # would produce an entry that can never hit.
+            return
+        if any(s is not None and s[0] >= scan_started_ns for s in stamps):
             return
         with self._lock:
             self._entries[key] = {
@@ -167,18 +205,26 @@ class ScanCache:
             self._dirty = True
 
     def save(self) -> None:
-        """Write the cache out, once, at the end of a scan pass."""
+        """Write the cache out, once, at the end of a scan pass.
+
+        Through a temp file replaced into place: a scan pass interrupted
+        mid-write would otherwise leave a truncated file behind, and every
+        later run would have to reject it.
+        """
         if not self._dirty:
             return
+        tmp_path = self._path.with_name(self._path.name + ".tmp")
         try:
             self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_bytes(
-                pickle.dumps(
-                    {"entries": self._entries}, protocol=pickle.HIGHEST_PROTOCOL
-                )
-            )
+            with tmp_path.open("w", encoding="utf-8") as f:
+                json.dump({"entries": self._entries}, f)
+            os.replace(tmp_path, self._path)
         except OSError as e:
             # A cache that cannot be written is a slow build, not a failed one.
             logger.warning("Could not write scan cache %s: %s", self._path, e)
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         else:
             self._dirty = False

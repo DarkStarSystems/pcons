@@ -2,6 +2,9 @@
 
 [test]
 description = "Demonstrates multi-level subdirectories with C++20 named modules"
+# Several module passes in one configure, each with its own build directory:
+# run it twice and require ninja to find nothing to do.
+configure_twice = true
 
 expected_outputs = [
     "build/a/aa/libaa.a",

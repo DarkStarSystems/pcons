@@ -1767,9 +1767,14 @@ Inspect and reset:
 pcons cache list      # show persisted vars, variant, generator
 pcons cache show      # same, plus the cache file path and source dir
 pcons cache path      # print the cache file path
-pcons cache clear     # empty the cache
+pcons cache clear     # empty the cache, scan results included
 pcons generate --fresh PORT=y   # ignore the old cache, start clean
 ```
+
+A C++20 modules build keeps one more file there, `pcons_scan_cache.json`: the
+module dependency scans of the last configure, reused while nothing they read
+has changed. It is safe to delete at any time, at the cost of one rescan, and
+`pcons cache clear` deletes it along with the settings.
 
 Change settings through these commands, not by editing `pcons_cache.json`. The
 file is not a regeneration input, so a hand-edit is not picked up automatically,

@@ -1181,12 +1181,29 @@ def _cache_show(build_dir: Path) -> int:
 
 
 def _cache_clear(build_dir: Path) -> int:
+    """Discard everything this build directory remembers.
+
+    The persisted settings, and the C++ module scan results beside them: both
+    are answers from an earlier run, and asking for them to be forgotten means
+    both. Deleting the scan cache costs one rescan.
+    """
+    from pcons.toolchains._scan_cache import CACHE_FILE as SCAN_CACHE_FILE
+
     cache = _open_cache(build_dir)
-    if cache.path is None or not cache.path.exists():
+    cleared: list[Path] = []
+    if cache.path is not None and cache.path.exists():
+        cache.clear()
+        cleared.append(cache.path)
+    scan_cache = build_dir / SCAN_CACHE_FILE
+    if scan_cache.exists():
+        scan_cache.unlink()
+        cleared.append(scan_cache)
+
+    if not cleared:
         print(f"No cache at {cache.path}")
         return 0
-    cache.clear()
-    print(f"Cleared {cache.path}")
+    for path in cleared:
+        print(f"Cleared {path}")
     return 0
 
 

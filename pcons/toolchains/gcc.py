@@ -378,6 +378,7 @@ class GccToolchain(UnixToolchain):
         importing targets' link inputs. Requires GCC 15+ (which ships
         ``bits/std.cc`` as part of libstdc++).
         """
+        from pcons.toolchains._scan_cache import ScanCache
         from pcons.toolchains.cxx_module_scanner import (
             TuScanSpec,
             _write_text_if_changed,
@@ -438,11 +439,12 @@ class GccToolchain(UnixToolchain):
 
             specs.append(add_tu_spec(setup, src, obj_node, compile_flags, flag_spec))
 
+        scan_cache = ScanCache(setup.build_dir)
         results = scan_translation_units(
             specs,
             scanner=setup.compiler_cmd,
             scanner_style="gcc",
-            build_dir=setup.build_dir,
+            cache=scan_cache,
         )
 
         required_logical_names: set[str] = set()
@@ -474,9 +476,11 @@ class GccToolchain(UnixToolchain):
                     std_specs,
                     scanner=setup.compiler_cmd,
                     scanner_style="gcc",
-                    build_dir=setup.build_dir,
+                    cache=scan_cache,
                 )
             )
+
+        scan_cache.save()
 
         # Map every module provider to a BMI path under its key's directory,
         # then write a GCC module mapper file per key. Each compatibility

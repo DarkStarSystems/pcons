@@ -268,6 +268,7 @@ _TOP_LEVEL_KEYS = {"test", "skip", "toolchains", "verify", "rebuild"}
 _TEST_SECTION_KEYS = {
     "description",
     "build_command",
+    "configure_twice",
     "variants",
     "timeout",
     "build_timeout",
@@ -932,6 +933,56 @@ def _check_standalone_subdirs(
             )
 
 
+def _check_configure_twice(
+    work_dir: Path,
+    build_dir: Path,
+    generator: str,
+    test_config: dict[str, Any],
+    variants: list[str | None],
+    variables: dict[str, str],
+    variant_build_dirs: list[Path],
+) -> None:
+    """Configure again, and require the build to stay up to date.
+
+    Nothing changed between the two runs, so the second must reach the same
+    answers as the first and write the same build files. Whatever a configure
+    carries over from the last one -- the C++ module scan cache above all --
+    is exercised here rather than only in tests that stub the compiler out. A
+    stale answer, or a byte that differs, shows up as work for ninja to do.
+    """
+    ninja_cmd_base = _find_ninja()
+    if ninja_cmd_base is None:
+        pytest.skip("ninja not available")
+
+    for variant in variants:
+        _run_generate(
+            work_dir,
+            build_dir,
+            generator,
+            test_config,
+            variant,
+            variables=variables,
+        )
+
+    for vbd in variant_build_dirs:
+        result = subprocess.run(
+            [*ninja_cmd_base, "-C", str(vbd), "-n"],
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=test_config.get("build_timeout", 120),
+        )
+        if result.returncode != 0:
+            print(f"Ninja stdout:\n{result.stdout}")
+            print(f"Ninja stderr:\n{result.stderr}")
+            pytest.fail(f"ninja failed after a second configure ({result.returncode})")
+        if "no work to do" not in result.stdout:
+            pytest.fail(
+                "A second configure left work to do, so it did not reproduce "
+                f"the first one's build files:\n{result.stdout}"
+            )
+
+
 def _example_template_vars() -> dict[str, str]:
     """Platform-derived substitutions for ``${...}`` placeholders in test.toml."""
     from pcons.configure.platform import get_platform
@@ -1348,6 +1399,17 @@ def run_example(
                     f"Expected '{expect_content}' in {expect_file}, "
                     f"got:\n{actual_content}"
                 )
+
+    if test_config.get("configure_twice") and generator == "ninja":
+        _check_configure_twice(
+            work_dir,
+            build_dir,
+            generator,
+            test_config,
+            variants,
+            tc_vars,
+            variant_build_dirs,
+        )
 
     # Run rebuild tests (only for the ninja generator)
     # Rebuild tests rely on ninja's incremental build infrastructure
