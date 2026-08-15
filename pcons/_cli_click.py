@@ -573,28 +573,39 @@ def _complete_runner(
     ]
 
 
-def complete_dir(
+class UncheckedPath(click.Path):
+    """A path click completes but does not check.
+
+    `click.Path` does two jobs: it tells the shell whether to complete files or
+    directories, and it rejects a path of the wrong kind. An option that owns
+    its own error path wants the first without the second. `-C` on a file has
+    to stay `_chdir`'s exit 1 rather than become a UsageError's 2.
+
+    `file_okay=False` completes directories, `dir_okay=False` completes files,
+    the same way `click.Path` picks its directive. The item's value is ignored:
+    every shell click writes a script for turns the result into its own path
+    completion over the whole word (bash runs `compopt -o dirnames`).
+    """
+
+    def convert(
+        self,
+        value: str | os.PathLike[str],
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> str | bytes | os.PathLike[str]:
+        return self.coerce_path_result(value)
+
+
+def _complete_path_list(
     ctx: click.Context, param: click.Parameter | None, incomplete: str
 ) -> list[CompletionItem]:
-    """Hand the shell its own directory completion for this word.
+    """Hand the shell its own directory completion for a separated list.
 
-    A completer, not `type=click.Path(file_okay=False)`, because the type would
-    also start rejecting a file where a directory is wanted: `-C` on one has to
-    stay `_chdir`'s exit 1 rather than become a UsageError's 2.
-
-    The item's value is ignored. Every shell click writes a script for turns a
-    `dir` result into its own path completion over the whole word (bash runs
-    `compopt -o dirnames`), so a separated list like `--modules-path a:b`
-    completes only its first segment.
+    A completer, not a path type, because the value is several paths joined by
+    `os.pathsep` rather than one path. The shell completes the whole word, so
+    `--modules-path a:b` completes only its first segment.
     """
     return [CompletionItem(incomplete, type="dir")]
-
-
-def complete_file(
-    ctx: click.Context, param: click.Parameter | None, incomplete: str
-) -> list[CompletionItem]:
-    """Hand the shell its own file completion for this word. See `complete_dir`."""
-    return [CompletionItem(incomplete, type="file")]
 
 
 def _declared_build_dir(ctx: click.Context) -> str | Path | None:
@@ -718,8 +729,8 @@ def directory_option(f: F) -> F:
     return click.option(
         "-C",
         "--directory",
+        type=UncheckedPath(file_okay=False),
         metavar="DIR",
-        shell_complete=complete_dir,
         callback=_chdir,
         is_eager=True,
         expose_value=False,
@@ -732,7 +743,7 @@ def common_options(f: F) -> F:
     f = click.option(
         "--modules-path",
         metavar="PATHS",
-        shell_complete=complete_dir,
+        shell_complete=_complete_path_list,
         help="Additional paths to search for pcons modules (colon/semicolon-separated)",
     )(f)
     f = click.option(
@@ -740,7 +751,7 @@ def common_options(f: F) -> F:
         "--build-dir",
         # A Path, so no command has to convert it first. The metavar is spelled
         # out because click.Path would otherwise print its own.
-        type=click.Path(path_type=Path),
+        type=UncheckedPath(file_okay=False, path_type=Path),
         metavar="DIR",
         # Eager so it is processed before `--help`, which is eager itself and
         # would otherwise format the help out of a context where -B has not
@@ -749,9 +760,6 @@ def common_options(f: F) -> F:
         # spelled first, so this only reorders -B against -C, and neither
         # resolves anything at parse time.
         is_eager=True,
-        # Without this, click.Path's own completion offers files too, because
-        # its file_okay defaults to True.
-        shell_complete=complete_dir,
         envvar="PCONS_BUILD_DIR",
         default="build",
         help="Build directory (default: $PCONS_BUILD_DIR, or 'build')",
@@ -791,8 +799,8 @@ def generate_options(f: F) -> F:
     f = click.option(
         "-b",
         "--build-script",
+        type=UncheckedPath(dir_okay=False),
         metavar="FILE",
-        shell_complete=complete_file,
         help="Path to pcons-build.py script",
     )(f)
     f = click.option(

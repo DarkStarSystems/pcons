@@ -4574,6 +4574,26 @@ class TestDirectoryOption:
         assert result.exit_code == 1
         assert "error: -C" in result.output
 
+    def test_a_regular_file_before_the_command(self, tmp_path: Path) -> None:
+        """A file where a directory is wanted is _chdir's exit 1, not click's 2.
+
+        The option's type says it completes directories. It must not also start
+        rejecting them, which is what a plain `click.Path(file_okay=False)`
+        would do.
+        """
+        target = tmp_path / "file"
+        target.write_text("")
+        result = _invoke("-C", str(target), "generate")
+        assert result.exit_code == 1
+        assert "error: -C" in result.output
+
+    def test_a_regular_file_after_the_command(self, tmp_path: Path) -> None:
+        target = tmp_path / "file"
+        target.write_text("")
+        result = _invoke("generate", "-C", str(target))
+        assert result.exit_code == 1
+        assert "error: -C" in result.output
+
 
 class TestBuildDirForwardedToTheRunner:
     """`pcons test` owns its parser, so the CLI hands it the build dir."""
