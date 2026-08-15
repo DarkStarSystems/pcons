@@ -4093,6 +4093,66 @@ class TestAScriptThatRunsItself:
         assert f"ROOT={tmp_path}" in result.stdout
 
 
+class TestNoProgramToName:
+    """``sys.argv[0]`` is the empty string when nothing named a program: an
+    interpreter a host application embedded and started itself, and
+    ``python -c``. pcons cannot tell what program it is part of, so neither
+    the direct-run warning nor the hand-over refusal may fire.
+
+    Both checks compare a file against the program name, and an empty name is
+    not a path: ``Path("")`` is ``Path(".")``, which resolves to the working
+    directory. That is the one path an unnamed program would be taken for, so
+    it is the path each test below hands over.
+    """
+
+    DESCRIBE = 'from pcons import Project\n\nproject = Project("unnamed")\n'
+
+    def test_an_unnamed_program_is_no_script(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """running_as_a_program has nothing to compare against, so it says no.
+
+        Answering yes would warn an embedder about a direct run it never made.
+        """
+        from pcons.core.invocation import running_as_a_program
+
+        monkeypatch.setattr(sys, "argv", [""])
+        monkeypatch.chdir(tmp_path)
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.DESCRIBE)
+
+        assert running_as_a_program(script) is False
+        assert running_as_a_program(tmp_path) is False
+
+    def test_an_unnamed_program_is_refused_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The refusal needs to know which file the program is, and cannot.
+
+        An embedder builds a project of its own and then drives the CLI, which
+        is not a hand-over below a description. The project here is declared at
+        the working directory, so an unnamed program taken for it would refuse
+        a run that has to go through.
+        """
+        from pcons.core.project import Project
+        from pcons.util.source_location import SourceLocation
+
+        monkeypatch.setattr(sys, "argv", [""])
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(self.DESCRIBE)
+        Project(
+            "embedder",
+            root_dir=tmp_path,
+            defined_at=SourceLocation(str(tmp_path), 1),
+        )
+
+        result = _invoke("generate")
+
+        assert result.exit_code == 0, result.output
+        assert "before handing over to pcons" not in result.output
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+
 class TestACommandNameThatIsNotTheFirstArgument:
     """click resolves a subcommand from argv[0] and a group stops parsing at
     the first non-option, so anything a user may legitimately write before a
