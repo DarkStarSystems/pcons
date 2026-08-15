@@ -3977,6 +3977,37 @@ class TestAScriptThatRunsItself:
         assert result.returncode == 0, result.stderr
         assert (sub / "name.txt").read_text() == "__pcons__"
 
+    def test_a_standalone_subproject_composes_unchanged(self, tmp_path):
+        """The shape a subdirectory has when it is also buildable on its own.
+
+        Its hand-over is inert when a parent pulls it in, so the same file
+        serves both without the parent re-entering the CLI.
+        """
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "pcons-build.py").write_text(
+            self.GUARD + "\n"
+            "from pathlib import Path\n"
+            "\n"
+            "from pcons import Project\n"
+            "\n"
+            'project = Project("sub")\n'
+            'Path(__file__).parent.joinpath("ran.txt").write_text("once")\n'
+        )
+        script = self._write(
+            tmp_path,
+            "from pcons import Project, add_subdirectory\n"
+            "\n"
+            'project = Project("parent")\n'
+            'add_subdirectory("sub")\n',
+        )
+
+        result = self._run(script, "generate", by_hand=False)
+
+        assert result.returncode == 0, result.stderr
+        assert (sub / "ran.txt").read_text() == "once"
+        assert (tmp_path / "build" / "build.ninja").exists()
+
     def test_a_direct_run_says_why_nothing_happened(self, tmp_path):
         """Exit 0 is deliberate, not an oversight.
 

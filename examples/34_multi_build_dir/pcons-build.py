@@ -11,7 +11,7 @@ and places each in its own build directory:
 Usage:
   pcons --variant=debug     # generate + build in build/debug/
   pcons --variant=release   # generate + build in build/release/
-  VARIANT=debug python pcons-build.py   # direct invocation
+  VARIANT=debug pcons       # the variant from the environment
 
 Both variants can coexist on disk simultaneously (CMake-style workflow).
 This exercises multi-component build_dir paths (e.g. "build/release").
