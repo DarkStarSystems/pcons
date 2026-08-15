@@ -26,7 +26,6 @@ from pcons._cli_click import (
     PconsContext,
     PconsGroup,
     TargetsCommand,
-    UncheckedPath,
     _adopt_options_spelled_earlier,
     build_options,
     common_options,
@@ -1981,7 +1980,7 @@ def cli_init(
     "--graph",
     is_flag=False,
     flag_value="-",
-    type=UncheckedPath(dir_okay=False),
+    type=click.Path(dir_okay=False),
     metavar="[FILE]",
     help="Output dependency graph in DOT format (default: stdout)",
 )
@@ -1989,7 +1988,7 @@ def cli_init(
     "--mermaid",
     is_flag=False,
     flag_value="-",
-    type=UncheckedPath(dir_okay=False),
+    type=click.Path(dir_okay=False),
     metavar="[FILE]",
     help="Output dependency graph in Mermaid format (default: stdout)",
 )

@@ -751,7 +751,7 @@ def common_options(f: F) -> F:
         "--build-dir",
         # A Path, so no command has to convert it first. The metavar is spelled
         # out because click.Path would otherwise print its own.
-        type=UncheckedPath(file_okay=False, path_type=Path),
+        type=click.Path(file_okay=False, path_type=Path),
         metavar="DIR",
         # Eager so it is processed before `--help`, which is eager itself and
         # would otherwise format the help out of a context where -B has not
@@ -799,7 +799,7 @@ def generate_options(f: F) -> F:
     f = click.option(
         "-b",
         "--build-script",
-        type=UncheckedPath(dir_okay=False),
+        type=click.Path(dir_okay=False),
         metavar="FILE",
         help="Path to pcons-build.py script",
     )(f)

@@ -4595,6 +4595,60 @@ class TestDirectoryOption:
         assert "error: -C" in result.output
 
 
+class TestPathOfTheWrongKindIsRejected:
+    """An option naming a file rejects a directory, and the reverse.
+
+    Not `exists=True` anywhere: `-B` names a directory to create, `--graph`
+    names a file to write, and `-b` has its own not-found message. Only the
+    wrong *kind* is rejected, which is the case that used to end in a
+    traceback out of pathlib.
+    """
+
+    @pytest.fixture
+    def project(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\nProject('demo')\n"
+        )
+        (tmp_path / "a-file").write_text("")
+        (tmp_path / "a-dir").mkdir()
+        monkeypatch.chdir(tmp_path)
+        return tmp_path
+
+    def test_a_build_dir_that_is_a_file(self, project: Path) -> None:
+        result = _invoke("-B", "a-file", "generate")
+        assert result.exit_code == 2
+        assert "Invalid value for '-B'" in result.output
+        assert "Traceback" not in result.output
+
+    def test_a_build_script_that_is_a_directory(self, project: Path) -> None:
+        result = _invoke("generate", "-b", "a-dir")
+        assert result.exit_code == 2
+        assert "Invalid value for '-b'" in result.output
+        assert "Traceback" not in result.output
+
+    @pytest.mark.parametrize("option", ["--graph", "--mermaid"])
+    def test_a_graph_that_is_a_directory(self, project: Path, option: str) -> None:
+        result = _invoke("generate", option, "a-dir")
+        assert result.exit_code == 2
+        assert f"Invalid value for '{option}'" in result.output
+
+    def test_a_missing_build_script_keeps_pcons_own_message(
+        self, project: Path
+    ) -> None:
+        """click never looks, because `exists` is off, so the message that says
+        which script was meant survives."""
+        result = _invoke("generate", "-b", "nope.py")
+        assert result.exit_code == 1
+        assert "Build script not found: nope.py" in result.stderr
+
+    def test_a_build_dir_that_does_not_exist_yet_is_created(
+        self, project: Path
+    ) -> None:
+        assert _invoke("-B", "out", "generate").exit_code == 0
+        assert (project / "out").is_dir()
+
+
 class TestBuildDirForwardedToTheRunner:
     """`pcons test` owns its parser, so the CLI hands it the build dir."""
 
