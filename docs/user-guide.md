@@ -373,17 +373,16 @@ if __name__ == "__pcons__":
 
 `if __name__ == "__main__":` never fires under `pcons`. The one thing it is good for in a build script is [handing over to the CLI](cli.md#a-build-script-that-runs-itself). That is opt-in, and most scripts should not do it.
 
-For finer control you can run either step explicitly:
+For finer control you can resolve explicitly:
 
 ```python
 # ... define targets ...
 
-# Resolve all dependencies now (generators do this automatically if needed)
+# Resolve all dependencies now (generation does this automatically if needed)
 project.resolve()
-
-# Generate build files now, e.g. to run code after generation completes
-project.generate()
 ```
+
+`project.generate()` may also be called, but it asks for the build files rather than writing them: pcons writes what has been asked for once the script has finished, so the rest of the script still runs first.
 
 ### Project
 
@@ -3585,7 +3584,7 @@ Anything else — a data file your script reads directly — you declare:
 project.add_configure_dependency(project.root_dir / "plugins.def")
 ```
 
-The regen rule is omitted when the invocation can't be reconstructed (for example a build script executed in an unusual way). `project.generate()` still writes the build files; they just won't re-run pcons on their own.
+The regen rule is omitted when the invocation can't be reconstructed (for example a build script executed in an unusual way). The build files are still written; they just won't re-run pcons on their own.
 
 ### Staged Generation: Targets Discovered Mid-Build
 
