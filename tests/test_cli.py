@@ -3282,6 +3282,57 @@ class TestGraphOptionsReachTheBuildScript:
         assert seen[0]["extra_env"] is None
 
 
+class TestJobsReachesConfigure:
+    """-j caps configure's own parallel work, not just the build's.
+
+    Configure scans C++ module TUs one compiler per core. A user who asked
+    for two jobs asked for two compilers at a time, whichever phase runs them.
+    """
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+        seen: list[dict[str, object]] = []
+
+        def fake_run_script(
+            script: Path, build_dir: Path, **kw: object
+        ) -> tuple[int, list[object]]:
+            seen.append(kw)
+            return 0, []
+
+        monkeypatch.setattr("pcons.cli.run_script", fake_run_script)
+        return seen
+
+    @staticmethod
+    def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text("")
+
+    def test_it_becomes_an_environment_variable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        assert _invoke("generate", "-j", "3").exit_code == 0
+        assert seen[0]["extra_env"] == {"PCONS_JOBS": "3"}
+
+    def test_it_is_read_before_the_command_name_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        assert _invoke("-j", "3", "generate").exit_code == 0
+        assert seen[0]["extra_env"] == {"PCONS_JOBS": "3"}
+
+    def test_without_it_nothing_is_sent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        assert _invoke("generate").exit_code == 0
+        assert seen[0]["extra_env"] is None
+
+
 class TestLoggingIsSetUpFromTheMergedOptions:
     """The merging invoke configures logging, so no command opens by doing it.
 

@@ -590,8 +590,25 @@ def _scan_workers(count: int) -> int:
     preprocessing a whole translation unit, so oversubscribing costs memory and
     buys nothing. Threads rather than processes because every scan is a
     `subprocess.run` that releases the GIL for its whole duration.
+
+    ``-j`` caps it: a user who asked for four jobs asked for four compilers at
+    a time, and configure runs them just as the build does. The CLI passes the
+    value down as ``PCONS_JOBS``.
     """
-    return max(1, min(count, os.cpu_count() or 1))
+    limit = _requested_jobs() or os.cpu_count() or 1
+    return max(1, min(count, limit))
+
+
+def _requested_jobs() -> int | None:
+    """``-j`` as the CLI recorded it, or None when it said nothing usable."""
+    raw = os.environ.get("PCONS_JOBS")
+    if not raw:
+        return None
+    try:
+        jobs = int(raw)
+    except ValueError:
+        return None
+    return jobs if jobs > 0 else None
 
 
 def scan_translation_units(

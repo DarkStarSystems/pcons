@@ -23,6 +23,7 @@ from pcons.toolchains.cxx_module_scanner import (
     StdModuleFlagSpec,
     TuScanResult,
     TuScanSpec,
+    _scan_workers,
     bmi_key_for_flags,
     build_keyed_entries,
     build_module_map,
@@ -673,6 +674,44 @@ class TestScanTranslationUnitsCache:
 
         assert len(scanned) == 4
         assert not (tmp_path / CACHE_FILE).exists()
+
+
+class TestScanWorkers:
+    """How many compilers a scan pass keeps in flight."""
+
+    def test_one_per_core(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PCONS_JOBS", raising=False)
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.os.cpu_count", lambda: 4
+        )
+        assert _scan_workers(100) == 4
+
+    def test_never_more_than_there_is_to_scan(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_JOBS", raising=False)
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.os.cpu_count", lambda: 8
+        )
+        assert _scan_workers(2) == 2
+
+    def test_jobs_caps_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`pcons -j 2` means two compilers at once, configure included."""
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.os.cpu_count", lambda: 8
+        )
+        monkeypatch.setenv("PCONS_JOBS", "2")
+        assert _scan_workers(100) == 2
+
+    @pytest.mark.parametrize("value", ["", "0", "-1", "many"])
+    def test_a_jobs_value_that_says_nothing_usable_is_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.os.cpu_count", lambda: 4
+        )
+        monkeypatch.setenv("PCONS_JOBS", value)
+        assert _scan_workers(100) == 4
 
 
 @functools.lru_cache(maxsize=1)
