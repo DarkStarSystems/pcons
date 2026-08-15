@@ -512,6 +512,40 @@ class TestTargetCompletion:
         monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
         assert _completions(["build"], "") == []
 
+    def test_a_variant_completes_once_a_run_has_named_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.cli import run_script
+        from pcons.core.vars import _clear_cli_vars
+
+        root = tmp_path / "variants"
+        root.mkdir()
+        (root / "hello.c").write_text("int main(void) { return 0; }\n")
+        script = root / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "for v in ('debug', 'release'):\n"
+            "    e = p.Environment(toolchain='c')\n"
+            "    e.set_variant(v)\n"
+            "    prog = p.Program('demo_' + v, e, sources=['hello.c'])\n"
+            "    prog.output_prefix = v + '/'\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        assert run_script(script, root / "build")[0] == 0
+        monkeypatch.chdir(root)
+
+        assert _completions(["--variant"], "") == ["debug", "release"]
+        assert _completions(["--variant"], "d") == ["debug"]
+        assert _completions(["build", "--variant"], "") == ["debug", "release"]
+
+    def test_a_variant_offers_nothing_before_any_run_named_one(
+        self, project: Path
+    ) -> None:
+        """The fixture's script never calls set_variant, so there is nothing."""
+        assert _completions(["--variant"], "") == []
+
     def test_completing_does_not_run_the_build_script(self, project: Path) -> None:
         """A build script does configure checks, and completion fires per key."""
         marker = project / "ran"

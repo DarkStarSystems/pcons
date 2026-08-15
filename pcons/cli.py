@@ -371,6 +371,7 @@ def _persist_run_settings(
     generator: str | None,
     source_dir: str,
     targets: list[str] | None = None,
+    variants: set[str] | None = None,
 ) -> None:
     """Persist the settings resolved for this run into the build-dir cache.
 
@@ -389,6 +390,12 @@ def _persist_run_settings(
     recorded names alone. A run that only reads, `pcons info` among them, never
     resolves the targets, so treating its empty result as an answer would wipe
     what the last generate recorded.
+
+    ``variants`` accumulates instead of replacing, which is the one place it
+    differs from ``targets``. A script that branches on ``get_variant()`` names
+    only the variant this run asked for, so replacing would leave a build dir
+    completing whichever variant it was configured with last. ``--fresh`` is the
+    way back to an empty set.
     """
     updates: dict[str, object] = {"source_dir": source_dir}
     if variables:
@@ -399,6 +406,10 @@ def _persist_run_settings(
         updates["generator"] = generator
     if targets is not None:
         updates["targets"] = targets
+    if variants:
+        recorded = cache.get("variants")
+        recorded = recorded if isinstance(recorded, list) else []
+        updates["variants"] = sorted({*recorded, *variants} - {""})
     cache.update(updates)
 
 
@@ -650,6 +661,7 @@ def run_script(
                         targets=_buildable_names(projects[0])
                         if generate and projects
                         else None,
+                        variants=pcons.core.vars._seen_variant_names(),
                     )
 
             except SystemExit as e:

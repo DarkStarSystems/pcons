@@ -4011,6 +4011,104 @@ class TestRecordedTargetNames:
         assert run_script(script, build_dir, fresh=True)[0] == 0
         assert self._recorded(build_dir) == ["all", "goodbye"]
 
+    def test_a_variant_the_script_asked_for_is_recorded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.core.cache import BuildCache
+
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        build_dir = self._generate(
+            tmp_path,
+            monkeypatch,
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "for v in ('debug', 'release'):\n"
+            "    e = p.Environment(toolchain='c')\n"
+            "    e.set_variant(v)\n"
+            "    prog = p.Program('demo_' + v, e, sources=['hello.c'])\n"
+            "    prog.output_prefix = v + '/'\n",
+        )
+        assert BuildCache(build_dir).get("variants") == ["debug", "release"]
+
+    def test_variants_accumulate_across_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A script branching on get_variant() names only this run's variant.
+
+        Replacing rather than accumulating would leave the build dir completing
+        whichever variant it was last configured with.
+        """
+        from pcons.core.cache import BuildCache
+        from pcons.core.project import Project
+
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        script = tmp_path / "pcons-build.py"
+        build_dir = tmp_path / "build"
+        script.write_text(
+            "from pcons import Project, get_variant\n"
+            "p = Project('demo')\n"
+            "e = p.Environment(toolchain='c')\n"
+            "e.set_variant(get_variant())\n"
+            "p.Program('hello', e, sources=['hello.c'])\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        assert run_script(script, build_dir, variant="debug")[0] == 0
+        assert BuildCache(build_dir).get("variants") == ["debug"]
+
+        _clear_cli_vars()
+        Project._clear_tree()
+        assert run_script(script, build_dir, variant="release")[0] == 0
+        assert BuildCache(build_dir).get("variants") == ["debug", "release"]
+
+    def test_a_script_that_never_names_a_variant_records_none(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.core.cache import BuildCache
+
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        build_dir = self._generate(
+            tmp_path,
+            monkeypatch,
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n",
+        )
+        assert BuildCache(build_dir).get("variants") is None
+
+    def test_the_seen_variants_do_not_leak_between_runs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Two projects in one pytest process must record disjoint sets.
+
+        Without the reset in _clear_cli_vars the second project inherits the
+        first's variant names, and nothing else would notice.
+        """
+        from pcons.core.cache import BuildCache
+        from pcons.core.project import Project
+
+        def build(where: Path, variant: str) -> Path:
+            where.mkdir()
+            (where / "hello.c").write_text("int main(void) { return 0; }\n")
+            script = where / "pcons-build.py"
+            script.write_text(
+                "from pcons import Project\n"
+                "p = Project('demo')\n"
+                "e = p.Environment(toolchain='c')\n"
+                f"e.set_variant({variant!r})\n"
+                "p.Program('hello', e, sources=['hello.c'])\n"
+            )
+            monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+            _clear_cli_vars()
+            Project._clear_tree()
+            assert run_script(script, where / "build")[0] == 0
+            return where / "build"
+
+        first = build(tmp_path / "one", "debug")
+        second = build(tmp_path / "two", "minsizerel")
+        assert BuildCache(first).get("variants") == ["debug"]
+        assert BuildCache(second).get("variants") == ["minsizerel"]
+
     def test_the_names_are_not_shown_by_the_cache_command(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:

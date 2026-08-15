@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, cast
 from pcons.core.debug import trace, trace_value
 from pcons.core.subst import Namespace, subst, to_shell_command
 from pcons.core.toolconfig import ToolConfig
+from pcons.core.vars import _record_variant
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
@@ -850,6 +851,10 @@ class Environment(_EnvironmentStubs):
             env.set_variant("release", extra_flags=["-march=native"])
         """
         trace("env", "Setting variant: %s", name)
+        # Recorded whether or not a toolchain realizes it, because this is the
+        # only point at which a variant name is observable: `get_variant` takes
+        # a string and returns one. The CLI persists the names for completion.
+        _record_variant(name)
         if self.toolchains:
             with self._dedup_fanout():
                 for toolchain in self.toolchains:

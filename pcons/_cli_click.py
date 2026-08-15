@@ -586,17 +586,15 @@ def complete_file(
     return [CompletionItem(incomplete, type="file")]
 
 
-def complete_target(
-    ctx: click.Context, param: click.Parameter | None, incomplete: str
-) -> list[CompletionItem]:
-    """The target names the last generate left in this build directory's cache.
+def _cached_names(ctx: click.Context, key: str) -> list[str]:
+    """The list the last generate left under `key`, for this build directory.
 
     Never runs the build script. Completion fires on every keystroke and a
-    build script does configure checks, so the names are recorded when a
+    build script does configure checks, so these names are recorded when a
     generate runs and only read back here.
 
-    Answers nothing rather than raising, whatever it finds. stdout is the
-    candidate stream, so anything printed from here is parsed by the shell as a
+    Answers an empty list rather than raising, whatever it finds. stdout is the
+    candidate stream, so anything escaping from here is parsed by the shell as a
     completion.
     """
     from pcons.core.cache import BuildCache
@@ -605,15 +603,39 @@ def complete_target(
     if build_dir is None:
         return []
     try:
-        names = BuildCache(Path(build_dir)).get("targets")
+        names = BuildCache(Path(build_dir)).get(key)
     except OSError:
         return []
     if not isinstance(names, list):
         return []
+    return [name for name in names if isinstance(name, str)]
+
+
+def complete_target(
+    ctx: click.Context, param: click.Parameter | None, incomplete: str
+) -> list[CompletionItem]:
+    """The target names the last generate left in this build directory's cache."""
     return [
         CompletionItem(name)
-        for name in names
-        if isinstance(name, str) and name.startswith(incomplete)
+        for name in _cached_names(ctx, "targets")
+        if name.startswith(incomplete)
+    ]
+
+
+def _complete_variant(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[CompletionItem]:
+    """The variant names this build directory has been seen using.
+
+    Variants have no registry to read: what a build script accepts is only
+    knowable by running it. So these are the names earlier runs passed to
+    `env.set_variant`, accumulated. A script that branches on `get_variant()`
+    without calling it names nothing, and completes nothing.
+    """
+    return [
+        CompletionItem(name)
+        for name in _cached_names(ctx, "variants")
+        if name.startswith(incomplete)
     ]
 
 
@@ -722,7 +744,10 @@ def generate_options(f: F) -> F:
         help=_generator_help(),
     )(f)
     f = click.option(
-        "--variant", metavar="NAME", help="Build variant (debug, release, etc.)"
+        "--variant",
+        metavar="NAME",
+        shell_complete=_complete_variant,
+        help="Build variant (debug, release, etc.)",
     )(f)
     return f
 
