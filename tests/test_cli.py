@@ -2410,6 +2410,46 @@ class TestCommandDetection:
         assert not ran_default
         assert seen[0]["build_dir"] == Path("test")
 
+    def test_bundled_short_option_does_not_hide_its_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The scan skipped an option's value by matching the whole token, so
+        # `-vC` was not the `-C` that takes one: `test` read as the command
+        # and -C then chdir'd into `generate`.
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("CC=clang", "-vB", "test", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0]["build_dir"] == Path("test")
+        assert seen[0]["verbose"] is True
+
+    def test_a_flag_does_not_swallow_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("CC=clang", "-v", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0]["verbose"] is True
+
+    def test_attached_short_option_value_is_not_a_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("CC=clang", "-Btest", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0]["build_dir"] == Path("test")
+
+    def test_long_option_value_spelled_inline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("CC=clang", "--build-dir=test", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0]["build_dir"] == Path("test")
+
 
 class TestDirectoryOption:
     """-C DIR chdirs before anything else, on either side of the command."""
@@ -2526,6 +2566,18 @@ class TestDoubleDashEscape:
         assert not ran_default
         assert seen
         assert seen[0]["build_dir"] == Path("out")
+
+    def test_the_escape_protects_a_target_named_after_a_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The escape only reaches the scan for a command name spelled late,
+        # since click's own parser eats the `--` before that. Without it the
+        # scan read `clean` as the command and deleted the build directory.
+        ran_clean = _capture_command(monkeypatch, cli_clean)
+        seen = _capture_command(monkeypatch, cli_default)
+        assert _invoke("CC=clang", "--", "clean").exit_code == 0
+        assert not ran_clean
+        assert list(seen[0]["extra"]) == ["CC=clang", "clean"]
 
     def test_a_typo_without_the_escape_is_still_an_error(self) -> None:
         assert _invoke("hello", "--nope").exit_code == 2

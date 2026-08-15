@@ -275,6 +275,22 @@ class DefaultCommand(MergingCommand):
     context_class = _GroupPathContext
 
 
+def _consumes_next_token(token: str, takes_value: set[str]) -> bool:
+    """Whether *token* is an option whose value is the token after it.
+
+    A long option carries its value inline when it is spelled with an ``=``.
+    A short one may be bundled with flags before it, ``-vC build``, or carry
+    its value attached, ``-Cbuild``, so only a value-taking letter in last
+    place reaches for the next token.
+    """
+    if token.startswith("--"):
+        return "=" not in token and token in takes_value
+    for position, letter in enumerate(token[1:], start=1):
+        if f"-{letter}" in takes_value:
+            return position == len(token) - 1
+    return False
+
+
 class PconsGroup(click.Group):
     """Route an unknown command name to a hidden catch-all command.
 
@@ -332,7 +348,9 @@ class PconsGroup(click.Group):
 
         A token that is the value of an option is not a candidate, or
         ``pcons -C build generate`` would find the directory rather than the
-        command. Returns ``(None, None, args)`` when nothing names a command,
+        command. A bare ``--`` ends the scan: everything after it names a
+        target, so ``pcons FOO=bar -- clean`` builds ``clean`` rather than
+        running it. Returns ``(None, None, args)`` when nothing names a command,
         which leaves the caller's catch-all fallback in charge -- so
         ``pcons CC=clang hello`` still builds a target called ``hello``.
         """
@@ -347,8 +365,10 @@ class PconsGroup(click.Group):
             if skip:
                 skip = False
                 continue
+            if token == "--":
+                break
             if token.startswith("-"):
-                skip = token in takes_value
+                skip = _consumes_next_token(token, takes_value)
                 continue
             command = self.get_command(ctx, token)
             if command is not None:
