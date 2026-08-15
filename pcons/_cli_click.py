@@ -275,6 +275,22 @@ class DefaultCommand(MergingCommand):
     context_class = _GroupPathContext
 
 
+def _consumes_next_token(token: str, takes_value: set[str]) -> bool:
+    """Whether *token* is an option whose value is the token after it.
+
+    A long option carries its value inline when it is spelled with an ``=``.
+    A short one may be bundled with flags before it, ``-vC build``, or carry
+    its value attached, ``-Cbuild``, so only a value-taking letter in last
+    place reaches for the next token.
+    """
+    if token.startswith("--"):
+        return "=" not in token and token in takes_value
+    for position, letter in enumerate(token[1:], start=1):
+        if f"-{letter}" in takes_value:
+            return position == len(token) - 1
+    return False
+
+
 class PconsGroup(click.Group):
     """Route an unknown command name to a hidden catch-all command.
 
@@ -311,6 +327,54 @@ class PconsGroup(click.Group):
         """The catch-all command, which only `resolve_command` may reach."""
         return self.commands.get(self.DEFAULT_COMMAND)
 
+    def _resolve_command_anywhere(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        """Find a command name that is not the first argument.
+
+        click resolves a subcommand from the first argument and nothing else,
+        and a group stops parsing at the first thing that is not an option. So
+        ``pcons CC=clang generate`` took ``CC=clang`` for a command name, failed
+        to resolve it, and handed the whole line to the catch-all -- where
+        ``generate`` stopped being a command and became a target to build. Build
+        variables legitimately precede a command name, and once one of them has
+        stopped the parser the group's own options are sitting unparsed in front
+        of it too.
+
+        Everything except the command name comes back in the order it was
+        written. The command re-parses it: the options it shares with the group
+        are declared on it as well, and the variables land in its trailing
+        ``nargs=-1``.
+
+        A token that is the value of an option is not a candidate, or
+        ``pcons -C build generate`` would find the directory rather than the
+        command. A bare ``--`` ends the scan: everything after it names a
+        target, so ``pcons FOO=bar -- clean`` builds ``clean`` rather than
+        running it. Returns ``(None, None, args)`` when nothing names a command,
+        which leaves the caller's catch-all fallback in charge -- so
+        ``pcons CC=clang hello`` still builds a target called ``hello``.
+        """
+        takes_value = {
+            opt
+            for param in self.params
+            if isinstance(param, click.Option) and not param.is_flag
+            for opt in (*param.opts, *param.secondary_opts)
+        }
+        skip = False
+        for index, token in enumerate(args):
+            if skip:
+                skip = False
+                continue
+            if token == "--":
+                break
+            if token.startswith("-"):
+                skip = _consumes_next_token(token, takes_value)
+                continue
+            command = self.get_command(ctx, token)
+            if command is not None:
+                return token, command, [*args[:index], *args[index + 1 :]]
+        return None, None, args
+
     # click types these hooks against the base context, and narrowing a
     # parameter in an override is unsound in general, so the class this group
     # builds its own context from is spelled out at each one.
@@ -344,6 +408,9 @@ class PconsGroup(click.Group):
         except click.UsageError:
             if not args or args[0].startswith("-"):
                 raise
+            name, command, rest = self._resolve_command_anywhere(ctx, args)
+            if command is not None:
+                return name, command, rest
             default = self._catch_all()
             if default is None:
                 raise

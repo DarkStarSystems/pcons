@@ -22,6 +22,7 @@ from pcons.core.graph import (
     detect_cycles_in_targets,
     topological_sort_targets,
 )
+from pcons.core.invocation import program_name, running_as_a_program
 from pcons.core.node import AliasNode, DirNode, FileNode, Node, PathRole
 from pcons.core.paths import PathResolver
 from pcons.core.target import Target, split_qualified_name
@@ -199,11 +200,12 @@ class Project(_ProjectBuilders):
             defined_at: Source location where project was created.
         """
         self.name = name
+        defined_at = defined_at or get_caller_location()
         if root_dir is None and Project.__top_level is None:
             root_dir = os.environ.get("PCONS_SOURCE_DIR")
         if root_dir is None:
             # Infer from the script that called Project()
-            caller = defined_at or get_caller_location()
+            caller = defined_at
             caller_file = Path(caller.filename)
             if caller_file.exists():
                 root_dir = str(caller_file.parent)
@@ -238,7 +240,7 @@ class Project(_ProjectBuilders):
         self._pending_stages: list[Path] = []
         # Directory -> node keys beneath it, for get_child_nodes().
         self._child_index = _ChildNodeIndex()
-        self.defined_at = defined_at or get_caller_location()
+        self.defined_at = defined_at
         self._subdir = None
         # Offset from the top-level project's root to this project's root.
         # Empty for the top-level project; node paths are relative to it.
@@ -303,13 +305,26 @@ class Project(_ProjectBuilders):
 
         Project.__current = self
         if Project.__top_level is None:
+            script = Path(defined_at.filename)
+            if running_as_a_program(script):
+                logger.warning(
+                    "this build script was run directly, so nothing was "
+                    "generated.\n"
+                    "Run it with pcons instead:\n"
+                    "\n"
+                    "    pcons -b %s\n"
+                    "\n"
+                    "or hand over to the CLI from the top of the script, see\n"
+                    "https://pcons.readthedocs.io/en/latest/cli/"
+                    "#a-build-script-that-runs-itself",
+                    program_name(script),
+                )
             Project.__top_level = self
-            # Build scripts need no explicit generate call: once a top-level
-            # project exists, pending generation runs at process exit (the
-            # CLI runs it earlier, right after the script).
-            from pcons.generators.generator import BaseGenerator
 
-            BaseGenerator._register_atexit()
+    @staticmethod
+    def has_current() -> bool:
+        """Whether a project is currently active (for CLI or add_subdirectory)."""
+        return Project.__current is not None
 
     @staticmethod
     def current() -> Project:
@@ -1129,11 +1144,16 @@ class Project(_ProjectBuilders):
         self.__generated = True
 
     def generate(self) -> None:
-        """Generate build files (convenience method).
+        """Ask for build files (convenience method).
 
         Selects the appropriate generator (Ninja by default, overridable
-        via ``--generator`` CLI flag or ``PCONS_GENERATOR`` env var),
-        auto-resolves the project if needed, and writes the build files.
+        via ``--generator`` CLI flag or ``PCONS_GENERATOR`` env var) and
+        enqueues the generation rather than performing it. ``pcons`` runs
+        what is enqueued once the build script has finished, resolving the
+        project then, so a target created after this call is still built.
+
+        Creating a top-level project enqueues this already, so a script
+        need not call it at all.
 
         For advanced usage (e.g., disabling compile_commands.json),
         use ``Generator().generate(project)`` directly.

@@ -137,6 +137,73 @@ def parse_variables(args: list[str]) -> tuple[dict[str, str], list[str]]:
     return variables, remaining
 
 
+def _describes_a_build_already() -> bool:
+    """Whether the program that started this process has already described one.
+
+    A build script may hand over to the CLI from a ``__main__`` guard, but only
+    before it describes anything: the guard is reached with argv unparsed, so
+    everything above it read no build variables and no variant. A top-level
+    project already built by the file this interpreter was started on means the
+    description happened up there, on values that were not the user's.
+
+    Both halves are needed. A project on its own is what an embedder has when
+    it drives the CLI, and ``sys.argv[0]`` on its own says nothing about when
+    the guard was reached.
+    """
+    from pcons.core.project import Project
+
+    if not Project.has_current():
+        return False
+    program = sys.argv[0] if sys.argv else ""
+    if not program:
+        return False
+    try:
+        return Path(Project.top_level().defined_at.filename).resolve() == (
+            Path(program).resolve()
+        )
+    except (OSError, ValueError):  # pragma: no cover - unresolvable, not ours
+        return False
+
+
+def _read_variables_already() -> bool:
+    """Whether the program that started this process has already read a variable.
+
+    A build variable or the variant read above a hand-over to the CLI returned
+    a default, because no command line had been parsed yet. The read counts
+    only when the file that made it is the file this interpreter was started
+    on: a read from a script pcons itself is running has an invocation
+    recorded and is never noted in the first place.
+    """
+    from pcons.core.invocation import running_as_a_program
+    from pcons.core.vars import _read_site_outside_a_run
+
+    site = _read_site_outside_a_run()
+    if site is None:
+        return False
+    return running_as_a_program(Path(site))
+
+
+def _acted_before_handing_over() -> bool:
+    """Whether the program did pcons work above its hand-over to the CLI."""
+    return _describes_a_build_already() or _read_variables_already()
+
+
+_ACTED_BEFORE_HANDING_OVER = (
+    "this build script described its build or read a build variable before "
+    "handing over to pcons.\n"
+    "Everything above the hand-over ran without the command line, so build "
+    "variables and the variant were still unset.\n"
+    "Put the entry point above everything else:\n"
+    "\n"
+    '    if __name__ == "__main__":\n'
+    "        import sys\n"
+    "\n"
+    "        import pcons.cli\n"
+    "\n"
+    "        sys.exit(pcons.cli.main())"
+)
+
+
 def _cancel_pending_generation() -> None:
     """Drop pending auto-generation after a failed build script.
 
@@ -374,8 +441,11 @@ def run_script(
         updated_keys.add(key)
         os.environ[key] = value
 
+    from pcons import Project
+
+    # Clear stuff
     pcons._clear_registered_projects()
-    # Clear cached CLI vars so they get re-read
+    Project._clear_tree()
     pcons.core.vars._clear_cli_vars()
 
     set_env_var("PCONS_BUILD_DIR", str(build_dir.absolute()))
@@ -418,14 +488,13 @@ def run_script(
         script_source = script_path.read_text()
         code = compile(script_source, str(script_path), "exec")
         namespace: dict[str, object] = {
-            "__name__": "__main__",
+            "__name__": pcons.core.invocation.RUN_NAME,
             "__file__": str(script_path),
         }
         exec(code, namespace)
 
         # Run any deferred generate requests registered by the script
         try:
-            from pcons import Project
             from pcons.generators.generator import BaseGenerator
 
             top_level = Project.top_level()
@@ -967,6 +1036,22 @@ def _run_build_tool(
         return 1
 
 
+def _no_build_described() -> int:
+    """The status for a script that ran cleanly and created no project.
+
+    A script may decide it has nothing to build: a missing optional toolchain,
+    an environment it is not meant to run in. It says so and exits 0, which is
+    not the failure that no build files usually means, so the build is skipped
+    rather than looked for and missed.
+
+    Said at a level the default shows. A build was asked for and none happened,
+    and a script that stops without a word of its own would otherwise leave
+    that as silence and a zero.
+    """
+    logger.warning("Build script described no build, nothing to do")
+    return 0
+
+
 def _build(
     build_dir: Path,
     *,
@@ -995,8 +1080,9 @@ def _build(
             code, project = regenerate()
             if code != 0:
                 return code, build_dir
-            if project:
-                build_dir = project.build_dir
+            if project is None:
+                return _no_build_described(), build_dir
+            build_dir = project.build_dir
 
     return _run_build_tool(
         build_dir,
@@ -1408,14 +1494,7 @@ def _init(build_dir: Path, *, force: bool, lang: str) -> int:
         target_lines.append('app.private.include_dirs.append("include")')
     target_block = "\n".join(target_lines)
 
-    from pcons import __version__
-
     build_template = f'''\
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons>={__version__}"]
-# ///
 """Build script for {name}.
 
 Run `pcons` to generate build files and build.
@@ -1507,6 +1586,14 @@ Docs:    https://pcons.readthedocs.io/
 @jobs_option
 @pass_pcons_context
 def cli(ctx: PconsContext, **declared_but_unused: object) -> None:
+    # Before any command: a script that did pcons work and only then called the
+    # CLI did so without a command line, so whatever it decided was decided on
+    # the wrong values. Checked here rather than where the script is run, so a
+    # command that skips generation refuses too.
+    if _acted_before_handing_over():
+        logger.error(_ACTED_BEFORE_HANDING_OVER)
+        ctx.exit(1)
+
     # The group declares these so they can be spelled before a command name;
     # each command reads them off this context. The group itself uses none.
     #
@@ -1738,7 +1825,7 @@ def cli_generate(
 ) -> None:
     """Generate build files from pcons-build.py."""
     variables, _ = parse_variables(list(extra))
-    code, _project = _generate(
+    code, project = _generate(
         build_dir,
         script=Path(build_script) if build_script else None,
         variables=variables,
@@ -1750,6 +1837,8 @@ def cli_generate(
         graph=graph,
         mermaid=mermaid,
     )
+    if code == 0 and project is None:
+        ctx.exit(_no_build_described())
     ctx.exit(code)
 
 
@@ -2062,8 +2151,10 @@ def cli_default(
     code, project = regenerate()
     if code != 0:
         ctx.exit(code)
+    if project is None:
+        ctx.exit(_no_build_described())
     # The script may pick a build directory other than the one asked for.
-    ctx.exit(build_once(project.build_dir if project else build_dir)[0])
+    ctx.exit(build_once(project.build_dir)[0])
 
 
 def main(argv: list[str] | None = None) -> int:

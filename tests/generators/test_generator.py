@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.generators.generator."""
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -119,54 +118,21 @@ class TestDeferredGenerate:
         with pytest.raises(RuntimeError, match="generation failed"):
             BaseGenerator._generate_pending(project)
 
-    def test_generate_pending_forces_nonzero_exit_on_atexit_error(
-        self, tmp_path, capsys, monkeypatch
-    ):
-        """A real generation failure in the atexit hook must report the error
-        and force a nonzero exit. Python ignores exceptions raised at shutdown
-        and would otherwise exit 0, silently hiding the failure."""
 
-        class FailingGenerator(BaseGenerator):
-            def __init__(self) -> None:
-                super().__init__("failing")
+class TestARealScriptInASubprocess:
+    """What running a build script does is a property of a whole process, and
+    calling anything in-process does not reproduce it. These tests run a real
+    script in a real subprocess.
 
-            def _generate_impl(self, _project: Project, _output_dir: object) -> None:  # type: ignore[override]
-                raise RuntimeError("atexit failure")
-
-        gen = FailingGenerator()
-        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
-        gen.generate(project)
-
-        # os._exit would kill the test runner; sub a sentinel that records the
-        # code and stops control flow the way a real _exit would.
-        class _Exited(Exception):
-            pass
-
-        def fake_exit(code: int) -> None:
-            raise _Exited(code)
-
-        monkeypatch.setattr(os, "_exit", fake_exit)
-
-        with pytest.raises(_Exited) as exc_info:
-            BaseGenerator._generate_pending(project, _is_atexit=True)
-
-        assert exc_info.value.args[0] == 1
-        assert "atexit failure" in capsys.readouterr().err
-
-
-class TestAtexitGenerationInASubprocess:
-    """The atexit hook only exists for ``python pcons-build.py``, and calling
-    ``_generate_pending`` in-process does not reproduce what the interpreter
-    does at shutdown. These tests run a real script in a real subprocess.
-
-    The hook is the whole point of the ``direct`` invocation, and until this
-    class existed nothing executed it: ``tests/test_examples.py`` reached the
-    same generation through ``run_script()``, which is the CLI's own function.
+    This is the coverage that was missing for four months: ``tests/test_examples.py``
+    reached generation through ``run_script()``, which is the CLI's own
+    function, so nothing exercised what a whole process does.
     """
 
-    def _run(self, script: Path) -> subprocess.CompletedProcess[str]:
+    def _run(self, script: Path, *, by_hand: bool) -> subprocess.CompletedProcess[str]:
+        argv = [str(script)] if by_hand else ["-m", "pcons", "generate"]
         return subprocess.run(
-            [sys.executable, str(script)],
+            [sys.executable, *argv],
             cwd=script.parent,
             capture_output=True,
             text=True,
@@ -174,21 +140,48 @@ class TestAtexitGenerationInASubprocess:
             env=subprocess_env(),
         )
 
-    def test_direct_script_run_writes_build_files(self, tmp_path):
-        """A build script run directly must leave a usable build.ninja."""
+    def _script(self, tmp_path: Path, body: str = "") -> Path:
         (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
         script = tmp_path / "pcons-build.py"
         script.write_text(
             "from pcons import Project\n"
-            "project = Project('atexit_probe')\n"
+            "project = Project('probe')\n"
             "env = project.Environment(toolchain='c')\n"
-            "project.Program('hello', env, sources=['hello.c'])\n"
+            "project.Program('hello', env, sources=['hello.c'])\n" + body
         )
+        return script
 
-        result = self._run(script)
+    def test_pcons_writes_build_files(self, tmp_path):
+        """A build script run by pcons must leave a usable build.ninja."""
+        result = self._run(self._script(tmp_path), by_hand=False)
 
         assert result.returncode == 0, result.stderr
         assert (tmp_path / "build" / "build.ninja").exists(), result.stderr
+
+    def test_a_script_run_by_hand_builds_nothing(self, tmp_path):
+        """Generation used to happen at interpreter shutdown, so a script run
+        by hand still got build files. Nothing runs at shutdown now, so it
+        describes a build nobody asked for and exits."""
+        result = self._run(self._script(tmp_path), by_hand=True)
+
+        assert result.returncode == 0, result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_worker_pool_is_usable_from_a_build_script(self, tmp_path):
+        """The point of the whole exercise. Nothing reachable from configure
+        runs while the interpreter is tearing itself down any more, so a
+        ThreadPoolExecutor works; started from a shutdown handler it raises."""
+        script = self._script(
+            tmp_path,
+            body=(
+                "from concurrent.futures import ThreadPoolExecutor\n"
+                "with ThreadPoolExecutor(max_workers=1) as pool:\n"
+                "    assert pool.submit(int, '1').result() == 1\n"
+            ),
+        )
+        result = self._run(script, by_hand=False)
+
+        assert result.returncode == 0, result.stderr
 
 
 class TestMultiGenerator:

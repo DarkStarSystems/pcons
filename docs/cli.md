@@ -286,3 +286,48 @@ Read by a persistent worker and its client:
 `0` on success, non-zero otherwise: the build script failed, the build tool
 failed, or pcons couldn't parse the arguments. Under `--watch` a failed build
 leaves the watch running; only Ctrl-C ends the session, and that exits `0`.
+
+## A build script that runs itself
+
+`pcons` runs the build script. Run one yourself and it describes a build, says
+so, and exits, writing nothing:
+
+```bash
+python pcons-build.py     # describes a build, writes no build files
+```
+
+A script can opt in to being its own entry point. Put this above everything
+else in the file:
+
+```python
+if __name__ == "__main__":
+    import sys
+
+    import pcons.cli
+
+    sys.exit(pcons.cli.main())
+```
+
+`python pcons-build.py` then accepts what `pcons` accepts, parsed by the same
+code: `-B`, `-G`, `--variant`, `KEY=value`, `generate`, `build`, `clean`, all of
+it. The entry point *is* the CLI, so there is no second argument parser to keep
+at parity.
+
+It goes above everything, not near the top: above the first `Project()`, the
+first `get_var()` and the first `get_variant()`. The guard is reached with the
+command line still unparsed, so anything above it reads no build variables and
+no variant. Below any of them, pcons refuses rather than generate from values
+the user never chose:
+
+```
+this build script described its build or read a build variable before handing over to pcons.
+Everything above the hand-over ran without the command line, so build variables and the variant were still unset.
+Put the entry point above everything else:
+```
+
+The guard fires only when the script is the program. Under `pcons` a build
+script's `__name__` is `__pcons__`, so the block above is inert there and the
+CLI is entered once.
+
+Most scripts should not have this. `pcons` is how a build is run, and a plain
+script with no guard is the normal shape.

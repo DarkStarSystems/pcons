@@ -77,6 +77,23 @@ _PCONS_ROOT = str(Path(__file__).resolve().parent.parent)
 #: through contextlib's __enter__, which must not be reported as the caller.
 _SKIPPED_STDLIB_FILES = frozenset({str(Path(contextlib.__file__).resolve())})
 
+_is_skipped_file: dict[str, bool] = {}
+
+
+def _skipped(filename: str) -> bool:
+    """Whether *filename* is pcons's own source, or plumbing on the way in.
+
+    Memoised on the spelling the frame carries: resolving a path costs a
+    filesystem call, and the same handful of files answer the question over and
+    over, since every `get_var`, node and target walks the same pcons frames.
+    """
+    known = _is_skipped_file.get(filename)
+    if known is None:
+        resolved = str(Path(filename).resolve())
+        known = resolved.startswith(_PCONS_ROOT) or resolved in _SKIPPED_STDLIB_FILES
+        _is_skipped_file[filename] = known
+    return known
+
 
 def get_caller_location() -> SourceLocation:
     """Capture where a build script called into pcons.
@@ -96,12 +113,7 @@ def get_caller_location() -> SourceLocation:
         frame = frame.f_back if frame else None  # the caller of this function
         first = frame
         while frame is not None:
-            filename = frame.f_code.co_filename
-            resolved = str(Path(filename).resolve())
-            if (
-                not resolved.startswith(_PCONS_ROOT)
-                and resolved not in _SKIPPED_STDLIB_FILES
-            ):
+            if not _skipped(frame.f_code.co_filename):
                 return _location_of(frame)
             frame = frame.f_back
         return _location_of(first) if first else SourceLocation("<unknown>", 0)

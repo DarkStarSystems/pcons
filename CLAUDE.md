@@ -50,7 +50,7 @@ Pre-commit hooks run ruff check, ruff format, and ty (type checking) automatical
 3. **Generate** - Write Ninja/Make files
 4. *Build* - User runs `ninja` (pcons not involved)
 
-**Build scripts need no explicit generate call**: creating a top-level `Project` registers automatic generation, which runs when the script finishes (via the CLI or an atexit hook on direct runs) — it auto-resolves the project and writes Ninja files (default). `project.generate()` may still be called explicitly (e.g. to generate early, or in older scripts). Do NOT use `NinjaGenerator` directly; the `Generator()` factory is in `pcons/__init__.py`.
+**Build scripts need no explicit generate call**: creating a top-level `Project` registers automatic generation, which `pcons` runs once the script has finished — it auto-resolves the project and writes Ninja files (default). `project.generate()` may still be called explicitly (e.g. to select a generator, or in older scripts). A build script is run by `pcons`, never by hand: `python pcons-build.py` describes a build and exits without writing anything. The one exception is opt-in and belongs above everything else in the script; see "A build script that runs itself" in `docs/cli.md`. Under `pcons`, and under `add_subdirectory`, a build script's `__name__` is `__pcons__` (`RUN_NAME` in `pcons/core/invocation.py`), so a `__main__` guard never fires. Do NOT use `NinjaGenerator` directly; the `Generator()` factory is in `pcons/__init__.py`.
 
 **Target resolution is lazy**: `lib.output_nodes` is empty until `project.resolve()` is called (or `Generator().generate()` is called, which auto-resolves). This allows customizing `output_name` after target creation.
 
@@ -165,7 +165,7 @@ ssh tower1 '$env:PATH = "C:\Users\garyo\.local\bin;$env:PATH"; cd E:/src/pcons; 
 ## Code Conventions
 
 - **Python 3.11+** required
-- **uv-first workflow** with PEP723 front matter dependencies
+- **uv-first workflow**
 - **Type hints** everywhere (mypy strict mode)
 - **SPDX headers**: `# SPDX-License-Identifier: MIT` on all files
 - **Private attributes**: `_build_info`, `_tools`, `_vars`

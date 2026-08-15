@@ -3,6 +3,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import overload
 
+from pcons.core.invocation import RUN_NAME
 from pcons.core.project import Project
 
 
@@ -55,7 +56,7 @@ def add_subdirectory(
     project.add_configure_dependency(script)
 
     with project._enter_subdir(subdir):
-        module = runpy.run_path(str(script))
+        module = runpy.run_path(str(script), run_name=RUN_NAME)
         if pick is not None:
             return tuple(module[name] for name in pick)
         else:

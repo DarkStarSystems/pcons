@@ -1,8 +1,3 @@
-#!/usr/bin/env python3
-# /// script
-# requires-python = ">=3.11"
-# dependencies = ["pcons"]
-# ///
 """Example: Using Conan packages with pcons.
 
 This example demonstrates how to use ConanFinder to find Conan packages

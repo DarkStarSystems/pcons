@@ -3,7 +3,7 @@
 """Build script for libfoo - can be built standalone or as part of a parent.
 
 This demonstrates a subdir that works both:
-- Standalone: `cd libfoo && python pcons-build.py`
+- Standalone: `cd libfoo && pcons`
 - As subdir: called from parent pcons-build.py
 
 It also pulls in its own subdirectory, so libbar ends up one level down when

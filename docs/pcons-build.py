@@ -261,5 +261,5 @@ def main() -> None:
     print(f"Output will be at: {build_dir / 'index.html'}")
 
 
-if __name__ == "__main__":
+if __name__ == "__pcons__":
     main()

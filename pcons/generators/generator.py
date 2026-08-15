@@ -3,8 +3,15 @@
 
 Generators take a configured Project and produce build system files
 (e.g., Ninja, Makefiles, IDE project files). Generation is deferred:
-``generate()`` enqueues work that runs via ``_generate_pending()`` —
-called by the CLI, or by an atexit hook on direct script runs.
+``generate()`` enqueues work that runs via ``_generate_pending()``, which
+``pcons`` calls right after it has run the build script.
+
+Generation used to also run from an atexit hook, so that a script started as
+``python pcons-build.py`` produced build files without asking. That put the
+whole of configure — tool detection, compiler probes, dependency scanning —
+inside an interpreter shutdown callback, where a worker pool cannot be started
+and a library that registers a cleanup handler on import cannot even be
+imported.
 """
 
 from __future__ import annotations
@@ -80,12 +87,6 @@ class BaseGenerator:
     __pending = dict[int, list[Callable[[], None]]]()
     """Pending generate requests"""
 
-    __atexit_registered = False
-    """Whether the atexit handler has been registered"""
-
-    __excepthook_installed = False
-    """Whether the crash-cancellation excepthook has been installed"""
-
     def __init__(self, name: str) -> None:
         self._name = name
 
@@ -138,113 +139,38 @@ class BaseGenerator:
         if self._is_build_generator:
             project._mark_generated()
 
-        BaseGenerator._register_atexit()
-
-    @staticmethod
-    def _register_atexit() -> None:
-        """Install the atexit hook that runs pending generation (idempotent).
-
-        Also installs a sys.excepthook wrapper that cancels pending
-        generation on an unhandled exception — build files must not be
-        generated from a partially-executed script.
-        """
-        if BaseGenerator.__atexit_registered:
-            return
-        import atexit
-
-        atexit.register(BaseGenerator._generate_pending, _is_atexit=True)
-        BaseGenerator.__atexit_registered = True
-
-        if not BaseGenerator.__excepthook_installed:
-            import sys
-
-            prev_hook = sys.excepthook
-
-            def _cancel_pending_on_crash(exc_type, exc, tb):  # type: ignore[no-untyped-def]
-                BaseGenerator._clear_pending()
-                prev_hook(exc_type, exc, tb)
-
-            sys.excepthook = _cancel_pending_on_crash
-            BaseGenerator.__excepthook_installed = True
-
     @staticmethod
     def _clear_pending() -> None:
-        """Clear all pending generates and drop the atexit hook (for testing).
-
-        Both must go: a leftover hook would fire at interpreter shutdown
-        against an already-torn-down project tree.
-        """
+        """Drop every pending generate request, without running any (testing)."""
         BaseGenerator.__pending.clear()
-        if BaseGenerator.__atexit_registered:
-            import atexit
-
-            atexit.unregister(BaseGenerator._generate_pending)
-            BaseGenerator.__atexit_registered = False
 
     @staticmethod
-    def _generate_pending(
-        project: Project | None = None, *, _is_atexit: bool = False
-    ) -> None:
+    def _generate_pending(project: Project | None = None) -> None:
         """Execute and clear pending generate requests for a project.
 
         Defaults to the top-level project; safe to call when nothing is
-        pending. Called explicitly, errors propagate. From the atexit hook,
-        a missing top-level project is a silent no-op, but a real generation
-        error forces a nonzero process exit — Python ignores exceptions
-        raised at shutdown and would otherwise exit 0.
+        pending. Errors propagate: the caller is an entry point that knows how
+        to report them and what exit status to use.
         """
-        try:
-            if project is None:
-                from pcons.core.project import Project as _Project
+        if project is None:
+            from pcons.core.project import Project as _Project
 
-                try:
-                    project = _Project.top_level()
-                except ValueError:
-                    if _is_atexit:
-                        # Project tree already torn down; nothing to generate.
-                        return
-                    raise
+            project = _Project.top_level()
 
-            # Auxiliary generators (dot, mermaid, metadata, compile_commands)
-            # are additive: requesting one must not cancel the build
-            # generation. project.generate() is a no-op if a build generator
-            # already ran, and respects PCONS_GENERATOR / --generator.
-            project.generate()
+        # Auxiliary generators (dot, mermaid, metadata, compile_commands)
+        # are additive: requesting one must not cancel the build
+        # generation. project.generate() is a no-op if a build generator
+        # already ran, and respects PCONS_GENERATOR / --generator.
+        project.generate()
 
-            pending = BaseGenerator.__pending.pop(id(project), [])
-            for func in pending:
-                func()
+        pending = BaseGenerator.__pending.pop(id(project), [])
+        for func in pending:
+            func()
 
-            # --graph/--mermaid, once every generator has run: the graph then
-            # describes the project the build files were written from, and a
-            # bad destination cannot cost the user those build files.
-            project._output_graphs_if_requested()
-
-            if BaseGenerator.__atexit_registered:
-                # Nothing pending anymore; drop the atexit hook.
-                import atexit
-
-                atexit.unregister(BaseGenerator._generate_pending)
-                BaseGenerator.__atexit_registered = False
-        except Exception as e:
-            import sys
-            import traceback
-
-            if _is_atexit:
-                # Python ignores exceptions from atexit handlers (and
-                # sys.exit) and would exit 0; report and force nonzero.
-                import os
-
-                print(
-                    f"Error during generator execution at exit: {e}\n"
-                    "Traceback (most recent call last):",
-                    file=sys.stderr,
-                )
-                traceback.print_exc()
-                sys.stdout.flush()
-                sys.stderr.flush()
-                os._exit(1)
-            raise
+        # --graph/--mermaid, once every generator has run: the graph then
+        # describes the project the build files were written from, and a
+        # bad destination cannot cost the user those build files.
+        project._output_graphs_if_requested()
 
     @staticmethod
     def _collect_path_flags(project: Project) -> frozenset[str]:

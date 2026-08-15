@@ -56,6 +56,7 @@ from pcons.cli import (
     main as cli_main,
 )
 from pcons.core.vars import _clear_cli_vars
+from tests.support import subprocess_env
 
 
 def _has_c_compiler() -> bool:
@@ -830,9 +831,10 @@ class TestCLICommands:
         assert 'toolchain="c++"' in build_content
         # No explicit generate call needed: generation is automatic
         assert ".generate(" not in build_content
-        # PEP 723 metadata so `uv run pcons-build.py` works standalone
-        assert "# /// script" in build_content
-        assert '"pcons>=' in build_content
+        # A build script is run by pcons, so it carries neither a PEP 723
+        # header nor a shebang: nothing runs the file itself.
+        assert "# /// script" not in build_content
+        assert "#!" not in build_content
         # Project and program named after the directory
         assert f'Project("{tmp_path.name}")' in build_content
         assert '"src/main.cpp",' in build_content
@@ -934,23 +936,6 @@ class TestCLICommands:
         assert result.exit_code == 0, f"generate failed: {result.output}"
         assert (tmp_path / "build" / "build.ninja").exists()
 
-    def test_auto_generate_without_generate_call(self, tmp_path: Path) -> None:
-        """A script with no generate call auto-generates, even run directly."""
-        (tmp_path / "pcons-build.py").write_text(
-            "from pcons import Project\nproject = Project('auto')\n"
-        )
-        # Subprocess: the generation this pins happens in an atexit hook, which
-        # only runs when the interpreter itself exits, and the script is run
-        # directly rather than through the CLI.
-        result = subprocess.run(
-            [sys.executable, "pcons-build.py"],
-            capture_output=True,
-            text=True,
-            cwd=tmp_path,
-        )
-        assert result.returncode == 0, result.stderr
-        assert (tmp_path / "build" / "build.ninja").exists()
-
     def test_no_auto_generate_on_script_crash(self, tmp_path: Path) -> None:
         """A crashed script must not generate build files at exit."""
         (tmp_path / "pcons-build.py").write_text(
@@ -958,8 +943,8 @@ class TestCLICommands:
             "project = Project('crash')\n"
             "raise RuntimeError('boom')\n"
         )
-        # Subprocess: same atexit path as the test above, and the traceback it
-        # asserts on is written by the interpreter, not by pcons.
+        # Subprocess: the traceback it asserts on is written by the
+        # interpreter, not by pcons.
         result = subprocess.run(
             [sys.executable, "pcons-build.py"],
             capture_output=True,
@@ -1156,6 +1141,66 @@ print("hello")
         monkeypatch.chdir(tmp_path)
         assert _invoke("clean", "--all").exit_code == 0
         assert not build_dir.exists()
+
+
+class TestScriptThatDescribesNoBuild:
+    """A script may exit 0 having created no project, and that is not a failure.
+
+    An optional toolchain is missing, or the script is outside the environment
+    it is meant to run in: it says so and stops. No project means nothing
+    enqueued a generate, so there are no build files to run afterwards, and
+    looking for them and reporting them missing turns the script's clean stop
+    into an error it never signalled.
+    """
+
+    SKIP_SCRIPT = """\
+import sys
+from pathlib import Path
+
+(Path(__file__).parent / "runs").open("a").write("x")
+sys.exit(0)
+"""
+
+    def _write_script(self, tmp_path: Path) -> Path:
+        (tmp_path / "pcons-build.py").write_text(self.SKIP_SCRIPT)
+        return tmp_path / "runs"
+
+    @pytest.mark.parametrize("argv", [(), ("build",), ("generate",)])
+    def test_skipping_is_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: tuple[str, ...]
+    ) -> None:
+        self._write_script(tmp_path)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        result = _invoke(*argv)
+        assert result.exit_code == 0
+        assert "No build files found" not in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    @pytest.mark.parametrize("argv", [(), ("build",), ("generate",)])
+    def test_the_reason_is_reported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: tuple[str, ...]
+    ) -> None:
+        # Without -v: a script that stops without a word of its own would
+        # otherwise leave a build that did not happen as silence and a zero.
+        self._write_script(tmp_path)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        assert "described no build" in _invoke(*argv).stderr
+
+    def test_the_script_runs_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A bare `pcons` generates and then builds, and the build regenerates
+        # when the build files are missing -- which they always are here.
+        runs = self._write_script(tmp_path)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+
+        assert _invoke().exit_code == 0
+        assert runs.read_text() == "x"
 
 
 class TestExplainCommand:
@@ -1496,7 +1541,9 @@ class TestCLIArgumentParsing:
         """
         (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
         monkeypatch.chdir(tmp_path)
-        _capture_args(monkeypatch, "_generate", result=(0, None))
+        _capture_args(
+            monkeypatch, "_generate", result=(0, SimpleNamespace(build_dir=tmp_path))
+        )
         built = _capture_args(monkeypatch, "_build", result=(0, tmp_path))
         assert _invoke("hello").exit_code == 0
         assert built[0]["targets"] == ["hello"]
@@ -2425,6 +2472,46 @@ class TestCommandDetection:
         assert not ran_default
         assert seen[0]["build_dir"] == Path("test")
 
+    def test_bundled_short_option_does_not_hide_its_value(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The scan skipped an option's value by matching the whole token, so
+        # `-vC` was not the `-C` that takes one: `test` read as the command
+        # and -C then chdir'd into `generate`.
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("CC=clang", "-vB", "test", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0]["build_dir"] == Path("test")
+        assert seen[0]["verbose"] is True
+
+    def test_a_flag_does_not_swallow_the_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("CC=clang", "-v", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0]["verbose"] is True
+
+    def test_attached_short_option_value_is_not_a_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("CC=clang", "-Btest", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0]["build_dir"] == Path("test")
+
+    def test_long_option_value_spelled_inline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_default = _capture_command(monkeypatch, cli_default)
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("CC=clang", "--build-dir=test", "generate").exit_code == 0
+        assert not ran_default
+        assert seen[0]["build_dir"] == Path("test")
+
 
 class TestDirectoryOption:
     """-C DIR chdirs before anything else, on either side of the command."""
@@ -2541,6 +2628,18 @@ class TestDoubleDashEscape:
         assert not ran_default
         assert seen
         assert seen[0]["build_dir"] == Path("out")
+
+    def test_the_escape_protects_a_target_named_after_a_command(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The escape only reaches the scan for a command name spelled late,
+        # since click's own parser eats the `--` before that. Without it the
+        # scan read `clean` as the command and deleted the build directory.
+        ran_clean = _capture_command(monkeypatch, cli_clean)
+        seen = _capture_command(monkeypatch, cli_default)
+        assert _invoke("CC=clang", "--", "clean").exit_code == 0
+        assert not ran_clean
+        assert list(seen[0]["extra"]) == ["CC=clang", "clean"]
 
     def test_a_typo_without_the_escape_is_still_an_error(self) -> None:
         assert _invoke("hello", "--nope").exit_code == 2
@@ -3745,3 +3844,460 @@ class TestSignaturesMatchTheDecorators:
         assert {"generate", "build", "clean", "cache", "list", "path", "_default"} <= (
             names
         )
+
+
+class TestRunningAScriptMoreThanOnce:
+    """`run_script` runs more than once per process in watch mode."""
+
+    def test_a_second_run_starts_a_new_project_tree(self, tmp_path):
+        """Otherwise the second run's project is adopted by the first's.
+
+        The registry is cleared between runs but the tree behind it was not, so
+        `Project.top_level()` still named the project from the run before and
+        every path the new one derived was relative to it.
+        """
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\n\nproject = Project('twice')\n")
+
+        first, _ = run_script(script, tmp_path / "build")
+        second, projects = run_script(script, tmp_path / "build")
+
+        assert (first, second) == (0, 0)
+        assert projects[-1].is_top_level
+
+
+class TestAScriptThatRunsItself:
+    """A build script may hand over to the CLI from a ``__main__`` guard, and
+    one that does not says so when it is run directly.
+
+    All of this is whole-process behaviour: the guard is only true when the
+    script is the program, what pcons does about it happens in the exec that
+    follows, and what a direct run leaves behind is what an interpreter exit
+    did. Nothing here reproduces in-process.
+    """
+
+    GUARD = (
+        'if __name__ == "__main__":\n'
+        "    import sys\n"
+        "\n"
+        "    import pcons.cli\n"
+        "\n"
+        "    sys.exit(pcons.cli.main())\n"
+    )
+    DESCRIBE = 'from pcons import Project\n\nproject = Project("selfrun")\n'
+
+    def _write(self, tmp_path: Path, body: str) -> Path:
+        script = tmp_path / "pcons-build.py"
+        script.write_text(body)
+        return script
+
+    def _run(
+        self, script: Path, *args: str, by_hand: bool = True
+    ) -> subprocess.CompletedProcess[str]:
+        argv = [str(script)] if by_hand else ["-m", "pcons"]
+        return subprocess.run(
+            [sys.executable, *argv, *args],
+            cwd=script.parent,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=subprocess_env(),
+        )
+
+    def test_the_guard_above_the_description_generates(self, tmp_path):
+        script = self._write(tmp_path, self.GUARD + "\n" + self.DESCRIBE)
+
+        result = self._run(script, "generate")
+
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "build" / "build.ninja").exists(), result.stderr
+
+    def test_the_command_line_reaches_a_script_that_runs_itself(self, tmp_path):
+        """The whole point of handing over: argv is parsed before the body."""
+        script = self._write(
+            tmp_path,
+            self.GUARD + "\n"
+            "from pcons import Project, get_var, get_variant\n"
+            "\n"
+            "print(f\"FOO={get_var('FOO', 'unset')} VARIANT={get_variant()}\")\n"
+            'project = Project("selfrun")\n',
+        )
+
+        result = self._run(script, "FOO=bar", "--variant", "debug", "generate")
+
+        assert result.returncode == 0, result.stderr
+        assert "FOO=bar VARIANT=debug" in result.stdout
+
+    def test_the_guard_below_the_description_is_refused(self, tmp_path):
+        """By then the description has already run on an unparsed command line."""
+        script = self._write(tmp_path, self.DESCRIBE + "\n" + self.GUARD)
+
+        result = self._run(script, "generate")
+
+        assert result.returncode != 0
+        assert "before handing over to pcons" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_variable_read_above_the_guard_is_refused(self, tmp_path):
+        """The read returned its default: PCONS_VARS was not set yet."""
+        script = self._write(
+            tmp_path,
+            "from pcons import get_var\n"
+            "\n"
+            'debug = get_var("DEBUG", False)\n'
+            "\n" + self.GUARD + "\n" + self.DESCRIBE,
+        )
+
+        result = self._run(script, "DEBUG=1", "generate")
+
+        assert result.returncode != 0
+        assert "before handing over to pcons" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_variant_read_above_the_guard_is_refused(self, tmp_path):
+        """Same for the variant, which no PCONS_VARIANT had reached yet."""
+        script = self._write(
+            tmp_path,
+            "from pcons import get_variant\n"
+            "\n"
+            "variant = get_variant()\n"
+            "\n" + self.GUARD + "\n" + self.DESCRIBE,
+        )
+
+        result = self._run(script, "--variant", "debug", "generate")
+
+        assert result.returncode != 0
+        assert "before handing over to pcons" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_plain_script_reads_variables_freely(self, tmp_path):
+        """The normal shape, and what the refusal must never fire on."""
+        script = self._write(
+            tmp_path,
+            "from pcons import Project, get_var, get_variant\n"
+            "\n"
+            "print(f\"FOO={get_var('FOO', 'unset')} VARIANT={get_variant()}\")\n"
+            'project = Project("plain")\n',
+        )
+
+        result = self._run(
+            script, "FOO=bar", "--variant", "debug", "generate", by_hand=False
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "FOO=bar VARIANT=debug" in result.stdout
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_read_in_this_process_does_not_refuse_a_later_run(self, tmp_path):
+        """A read is the program's only when the program is the one that made it.
+
+        Anything embedding pcons reads variables from its own code, as this
+        file does here, and then drives the CLI. Nothing about that is a
+        hand-over, and a run started afterwards must not be refused.
+        """
+        from pcons import get_var
+
+        get_var("DEBUG", False)
+        script = self._write(tmp_path, self.DESCRIBE)
+
+        result = _invoke("-C", str(tmp_path), "generate")
+
+        assert result.exit_code == 0, result.output
+        assert script.exists()
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_the_docs_quote_the_refusal_verbatim(self):
+        """docs/cli.md shows the message; a rewording there is a wrong doc."""
+        docs = Path(__file__).resolve().parents[1] / "docs" / "cli.md"
+        section = docs.read_text().split("## A build script that runs itself")[1]
+        quoted = [
+            block
+            for block in section.split("```")
+            if block.lstrip().startswith("this build script")
+        ]
+
+        assert len(quoted) == 1
+        for line in quoted[0].strip().splitlines():
+            assert line in cli_module._ACTED_BEFORE_HANDING_OVER
+
+    def test_it_is_refused_even_when_nothing_would_be_generated(self, tmp_path):
+        """The refusal belongs to the CLI's entry, not to running the script.
+
+        `pcons build` skips generation when the build files are newer than the
+        script, and used to reach ninja without ever looking at the script it
+        had already run badly.
+        """
+        script = self._write(tmp_path, self.DESCRIBE + "\n" + self.GUARD)
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        (build_dir / "build.ninja").write_text("# newer than the script\n")
+
+        result = self._run(script, "build")
+
+        assert result.returncode != 0
+        assert "before handing over to pcons" in result.stderr
+
+    def test_a_main_guard_does_not_fire_under_pcons(self, tmp_path):
+        """`pcons` is the program; the script it runs is not."""
+        script = self._write(
+            tmp_path,
+            self.DESCRIBE + "\n"
+            'if __name__ == "__main__":\n'
+            '    (project.root_dir / "fired").write_text("x")\n',
+        )
+
+        result = self._run(script, "generate", by_hand=False)
+
+        assert result.returncode == 0, result.stderr
+        assert not (tmp_path / "fired").exists()
+
+    def test_a_pcons_guard_fires_under_pcons(self, tmp_path):
+        """What a script uses to run its description when pcons is driving."""
+        script = self._write(
+            tmp_path,
+            "from pcons import Project\n"
+            "\n"
+            "def main():\n"
+            '    Project("selfrun")\n'
+            "\n"
+            '\nif __name__ == "__pcons__":\n'
+            "    main()\n",
+        )
+
+        result = self._run(script, "generate", by_hand=False)
+
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "build" / "build.ninja").exists(), result.stderr
+
+    def test_a_subproject_gets_the_same_name(self, tmp_path):
+        """add_subdirectory runs a script too, and a guard must mean one thing."""
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "pcons-build.py").write_text(
+            "from pathlib import Path\n"
+            "\n"
+            'Path(__file__).parent.joinpath("name.txt").write_text(__name__)\n'
+        )
+        script = self._write(
+            tmp_path,
+            "from pcons import Project, add_subdirectory\n"
+            "\n"
+            'project = Project("parent")\n'
+            'add_subdirectory("sub")\n',
+        )
+
+        result = self._run(script, "generate", by_hand=False)
+
+        assert result.returncode == 0, result.stderr
+        assert (sub / "name.txt").read_text() == "__pcons__"
+
+    def test_a_standalone_subproject_composes_unchanged(self, tmp_path):
+        """The shape a subdirectory has when it is also buildable on its own.
+
+        Its hand-over is inert when a parent pulls it in, so the same file
+        serves both without the parent re-entering the CLI.
+        """
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "pcons-build.py").write_text(
+            self.GUARD + "\n"
+            "from pathlib import Path\n"
+            "\n"
+            "from pcons import Project\n"
+            "\n"
+            'project = Project("sub")\n'
+            'Path(__file__).parent.joinpath("ran.txt").write_text("once")\n'
+        )
+        script = self._write(
+            tmp_path,
+            "from pcons import Project, add_subdirectory\n"
+            "\n"
+            'project = Project("parent")\n'
+            'add_subdirectory("sub")\n',
+        )
+
+        result = self._run(script, "generate", by_hand=False)
+
+        assert result.returncode == 0, result.stderr
+        assert (sub / "ran.txt").read_text() == "once"
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_direct_run_says_why_nothing_happened(self, tmp_path):
+        """Exit 0 is deliberate, not an oversight.
+
+        A direct run writes nothing, so it cannot produce a false green:
+        `python pcons-build.py && ninja -C build` fails at ninja whatever this
+        returns. The user's problem is not that something wrong succeeded, it
+        is having no idea why nothing happened, and the message fixes that.
+        """
+        script = self._write(tmp_path, self.DESCRIBE)
+
+        result = self._run(script)
+
+        assert result.returncode == 0, result.stderr
+        assert "this build script was run directly" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_pcons_running_the_script_says_nothing(self, tmp_path):
+        script = self._write(tmp_path, self.DESCRIBE)
+
+        result = self._run(script, "-b", "pcons-build.py", "generate", by_hand=False)
+
+        assert "this build script was run directly" not in result.stderr
+        assert result.returncode == 0, result.stderr
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_only_the_top_level_project_is_told(self, tmp_path):
+        """add_subdirectory builds a project too, and one run is one message."""
+        sub = tmp_path / "sub"
+        sub.mkdir()
+        (sub / "pcons-build.py").write_text(
+            'from pcons import Project\n\nProject("sub")\n'
+        )
+        script = self._write(
+            tmp_path,
+            "from pcons import Project, add_subdirectory\n"
+            "\n"
+            'project = Project("parent")\n'
+            'add_subdirectory("sub")\n',
+        )
+
+        result = self._run(script)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stderr.count("this build script was run directly") == 1
+
+    def test_an_embedder_reached_through_an_entry_point_is_silent(self, tmp_path):
+        """A console script is the program; the project is built elsewhere."""
+        (tmp_path / "tool.py").write_text(
+            "from pcons import Project\n"
+            "\n"
+            "\n"
+            "def build():\n"
+            '    return Project("embedded")\n'
+        )
+        entry = tmp_path / "entry.py"
+        entry.write_text("import tool\n\ntool.build()\n")
+
+        result = self._run(entry)
+
+        assert result.returncode == 0, result.stderr
+        assert result.stderr == ""
+
+    def test_an_embedder_running_its_own_driver_is_told_too(self, tmp_path):
+        """Accepted imprecision, written down here rather than found later.
+
+        Nothing at construction time tells `python driver.py` apart from
+        `python pcons-build.py`: both are the program, building a top-level
+        project with no CLI in the process. The warning is the whole cost:
+        the driver runs as it did, and its fix is an entry point.
+        """
+        driver = tmp_path / "driver.py"
+        driver.write_text(
+            "from pcons import Project\n"
+            "\n"
+            'project = Project("embedded")\n'
+            'print(f"ROOT={project.root_dir}")\n'
+        )
+
+        result = self._run(driver)
+
+        assert result.returncode == 0, result.stderr
+        assert "this build script was run directly" in result.stderr
+        assert f"ROOT={tmp_path}" in result.stdout
+
+
+class TestNoProgramToName:
+    """``sys.argv[0]`` is the empty string when nothing named a program: an
+    interpreter a host application embedded and started itself, and
+    ``python -c``. pcons cannot tell what program it is part of, so neither
+    the direct-run warning nor the hand-over refusal may fire.
+
+    Both checks compare a file against the program name, and an empty name is
+    not a path: ``Path("")`` is ``Path(".")``, which resolves to the working
+    directory. That is the one path an unnamed program would be taken for, so
+    it is the path each test below hands over.
+    """
+
+    DESCRIBE = 'from pcons import Project\n\nproject = Project("unnamed")\n'
+
+    def test_an_unnamed_program_is_no_script(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """running_as_a_program has nothing to compare against, so it says no.
+
+        Answering yes would warn an embedder about a direct run it never made.
+        """
+        from pcons.core.invocation import running_as_a_program
+
+        monkeypatch.setattr(sys, "argv", [""])
+        monkeypatch.chdir(tmp_path)
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.DESCRIBE)
+
+        assert running_as_a_program(script) is False
+        assert running_as_a_program(tmp_path) is False
+
+    def test_an_unnamed_program_is_refused_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The refusal needs to know which file the program is, and cannot.
+
+        An embedder builds a project of its own and then drives the CLI, which
+        is not a hand-over below a description. The project here is declared at
+        the working directory, so an unnamed program taken for it would refuse
+        a run that has to go through.
+        """
+        from pcons.core.project import Project
+        from pcons.util.source_location import SourceLocation
+
+        monkeypatch.setattr(sys, "argv", [""])
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(self.DESCRIBE)
+        Project(
+            "embedder",
+            root_dir=tmp_path,
+            defined_at=SourceLocation(str(tmp_path), 1),
+        )
+
+        result = _invoke("generate")
+
+        assert result.exit_code == 0, result.output
+        assert "before handing over to pcons" not in result.output
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+
+class TestACommandNameThatIsNotTheFirstArgument:
+    """click resolves a subcommand from argv[0] and a group stops parsing at
+    the first non-option, so anything a user may legitimately write before a
+    command name hid it: the name became a target and the command never ran.
+    """
+
+    def _resolved(self, *argv: str) -> tuple[str | None, list[str]]:
+        """(command name, what is left for it), or ("_default", ...)."""
+        ctx = cli.make_context("pcons", [])
+        _name, command, rest = cli.resolve_command(ctx, list(argv))
+        return (command.name if command is not None else None), rest
+
+    def test_a_variable_no_longer_hides_the_command(self):
+        assert self._resolved("FOO=bar", "generate") == ("generate", ["FOO=bar"])
+
+    def test_an_option_stopped_at_a_variable_does_not_hide_it_either(self):
+        """The group never parsed `--variant`: `FOO=bar` stopped it first."""
+        assert self._resolved("FOO=bar", "--variant", "debug", "generate") == (
+            "generate",
+            ["FOO=bar", "--variant", "debug"],
+        )
+
+    def test_a_target_is_still_a_target(self):
+        assert self._resolved("FOO=bar", "hello") == ("_default", ["FOO=bar", "hello"])
+
+    def test_an_option_value_is_not_a_command_name(self):
+        """`-C clean` names a directory; the command is still `generate`."""
+        assert self._resolved("FOO=bar", "-C", "clean", "generate") == (
+            "generate",
+            ["FOO=bar", "-C", "clean"],
+        )
+
+    def test_a_command_first_is_untouched(self):
+        assert self._resolved("generate", "FOO=bar") == ("generate", ["FOO=bar"])

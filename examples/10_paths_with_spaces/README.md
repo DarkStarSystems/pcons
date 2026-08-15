@@ -22,10 +22,8 @@ Build systems must properly escape or quote these paths when generating:
 ## Building
 
 ```bash
-python pcons-build.py
-cd build
-ninja
-./my_program
+pcons
+./build/my_program
 ```
 
 ## Expected Output

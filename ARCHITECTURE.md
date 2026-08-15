@@ -81,7 +81,7 @@ A modern Python-based build system that generates Ninja (or other) build files.
 
 **Explicit over implicit.** Dependencies should be discoverable and traceable. When something rebuilds unexpectedly (or fails to rebuild), users should be able to understand why.
 
-**uv-first Python.** The project uses [uv](https://docs.astral.sh/uv/) for Python package management. All scripts support PEP 723 inline metadata, and the project uses `pyproject.toml` with `uv.lock` for reproducible development environments.
+**uv-first Python.** The project uses [uv](https://docs.astral.sh/uv/) for Python package management, with `pyproject.toml` and `uv.lock` for reproducible development environments.
 
 ---
 
@@ -144,6 +144,8 @@ pcons generate
 5. Run configure-time scanners if needed
 
 **Output:** In-memory Project with complete dependency graph
+
+Build scripts are executed under the name `__pcons__` (`RUN_NAME` in `pcons/core/invocation.py`), not `__main__`, which belongs to the program that started the process. The name is the same whether the script was named on the command line or pulled in by `add_subdirectory()`. The command-line reference, under "A build script that runs itself", covers the one case where a build script *is* the program.
 
 ```python
 # pcons-build.py - runs during generate phase

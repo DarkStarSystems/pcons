@@ -18,13 +18,13 @@ Structure:
 
 Usage:
   # Build everything from top level
-  python pcons-build.py && ninja -C build
+  pcons
 
   # Or build just libfoo standalone
-  cd libfoo && python pcons-build.py && ninja -C build
+  cd libfoo && pcons
 
   # Or build app (which pulls in libfoo)
-  cd app && python pcons-build.py && ninja -C build
+  cd app && pcons
 """
 
 from pathlib import Path

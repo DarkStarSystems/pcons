@@ -19,6 +19,12 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+#: ``__name__`` for a build script pcons is running, whether it is the one
+#: named on the command line or a subproject pulled in by add_subdirectory.
+#: Not "__main__", which belongs to the program: a script that hands over to
+#: the CLI from a ``__main__`` guard would otherwise re-enter it forever.
+RUN_NAME = "__pcons__"
+
 _current: Invocation | None = None
 
 
@@ -98,6 +104,51 @@ def record(invocation: Invocation) -> None:
     """Record how this run was invoked (called by the CLI)."""
     global _current
     _current = invocation
+
+
+def run_recorded() -> bool:
+    """Whether the CLI has recorded the run this code is part of.
+
+    True from just before a build script is executed until the process ends,
+    so it tells work pcons asked for apart from work a program did on its own
+    account. A read taken while it is false was taken with argv unparsed.
+    """
+    return _current is not None
+
+
+def running_as_a_program(defined_at: Path) -> bool:
+    """Whether *defined_at* is the file this interpreter was started on.
+
+    True for ``python pcons-build.py`` and false for anything pcons ran: the
+    CLI records an invocation before it executes a build script, so the script
+    named on the command line and every one add_subdirectory pulls in are ruled
+    out by the recorded invocation alone.
+
+    An embedder's own driver run as ``python driver.py`` matches too. Nothing
+    at construction time separates it from a build script, and the cost is one
+    warning on a build that still works.
+    """
+    if _current is not None:
+        return False
+    program = sys.argv[0] if sys.argv else ""
+    if not program:
+        return False
+    try:
+        return defined_at.resolve() == Path(program).resolve()
+    except (OSError, ValueError):  # pragma: no cover - unresolvable, not ours
+        return False
+
+
+def program_name(path: Path) -> str:
+    """*path* spelled relative to the working directory when it can be.
+
+    A diagnostic naming the program should name it the way the user typed it,
+    and an absolute path is what a frame carries.
+    """
+    try:
+        return os.path.relpath(path)
+    except ValueError:  # pragma: no cover - another drive on Windows
+        return str(path)
 
 
 def clear() -> None:

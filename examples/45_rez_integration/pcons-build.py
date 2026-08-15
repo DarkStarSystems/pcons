@@ -19,20 +19,22 @@ import sys
 from pcons import Project
 from pcons.integrations.rez import is_in_rez_resolve, rez_environment
 
+# Before the project, not after: a script that stops here describes no build,
+# and pcons expects a script that describes one to run it.
+if not is_in_rez_resolve():
+    print(
+        "Run this example inside a rez-env shell, e.g.:\n"
+        "    rez-env hello_lib -- uvx pcons"
+    )
+    sys.exit(0)
+
 project = Project("rez_demo")
 
 env = project.Environment(toolchain="c")
 env.cxx.flags.append("-std=c++17")
 env.link.cmd = env.cxx.cmd
 
-if is_in_rez_resolve():
-    rez_environment(env)
-else:
-    print(
-        "Run this example inside a rez-env shell, e.g.:\n"
-        "    rez-env hello_lib -- uvx pcons"
-    )
-    sys.exit(0)
+rez_environment(env)
 
 app = project.Program("rez_demo", env, sources=["src/main.cpp"])
 project.Default(app)

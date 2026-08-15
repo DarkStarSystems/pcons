@@ -362,19 +362,27 @@ Every pcons build script (`pcons-build.py`) follows three phases:
 2. **Describe** - Create targets and define their sources/dependencies
 3. **Generate** - Resolve dependencies and write build files
 
-Your script only describes the build — the resolve and generate steps run automatically when it finishes, whether invoked via the `pcons` CLI or run directly with Python. Ninja is the default generator; select another with `pcons -G make` (or the `PCONS_GENERATOR`/`GENERATOR` environment variables).
+Your script only describes the build — the resolve and generate steps run automatically once `pcons` has run it. Ninja is the default generator; select another with `pcons -G make` (or the `PCONS_GENERATOR`/`GENERATOR` environment variables).
 
-For finer control you can run either step explicitly:
+`pcons` is the program, and the build script it runs is not, so the script's `__name__` is `__pcons__` rather than `__main__`. A subdirectory script pulled in by `add_subdirectory()` gets the same name, so a guard means one thing wherever it is written:
+
+```python
+if __name__ == "__pcons__":
+    main()
+```
+
+`if __name__ == "__main__":` never fires under `pcons`. The one thing it is good for in a build script is [handing over to the CLI](cli.md#a-build-script-that-runs-itself). That is opt-in, and most scripts should not do it.
+
+For finer control you can resolve explicitly:
 
 ```python
 # ... define targets ...
 
-# Resolve all dependencies now (generators do this automatically if needed)
+# Resolve all dependencies now (generation does this automatically if needed)
 project.resolve()
-
-# Generate build files now, e.g. to run code after generation completes
-project.generate()
 ```
+
+`project.generate()` may also be called, but it asks for the build files rather than writing them: pcons writes what has been asked for once the script has finished, so the rest of the script still runs first.
 
 ### Project
 
@@ -1751,8 +1759,7 @@ An environment value overrides the cache but is not written to it, so exporting
 one steers a run without changing what a later bare run reuses.
 
 The cache is tied to `$PCONS_BUILD_DIR`, which `pcons` always sets (and `-B`
-overrides). Running the script directly with `python pcons-build.py` uses no
-cache, so the same environment produces the same build either way.
+overrides).
 
 Inspect and reset:
 
@@ -2605,7 +2612,7 @@ For a complete example, see `examples/06_archive_install/pcons-build.py` which c
 
 ```bash
 cd examples/06_archive_install
-python pcons-build.py
+pcons generate
 ninja -f build/build.ninja          # Build the program
 ninja -f build/build.ninja install  # Create and install tarballs to ./Installers
 ```
@@ -3577,7 +3584,7 @@ Anything else — a data file your script reads directly — you declare:
 project.add_configure_dependency(project.root_dir / "plugins.def")
 ```
 
-The regen rule is omitted when the invocation can't be reconstructed (for example a build script executed in an unusual way). `project.generate()` still writes the build files; they just won't re-run pcons on their own.
+The regen rule is omitted when the invocation can't be reconstructed (for example a build script executed in an unusual way). The build files are still written; they just won't re-run pcons on their own.
 
 ### Staged Generation: Targets Discovered Mid-Build
 
