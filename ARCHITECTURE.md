@@ -145,6 +145,8 @@ pcons generate
 
 **Output:** In-memory Project with complete dependency graph
 
+Build scripts are executed under the name `__pcons__` (`RUN_NAME` in `pcons/core/invocation.py`), not `__main__`, which belongs to the program that started the process. The name is the same whether the script was named on the command line or pulled in by `add_subdirectory()`. The command-line reference, under "A build script that runs itself", covers the one case where a build script *is* the program.
+
 ```python
 # pcons-build.py - runs during generate phase
 from pcons import Project, load_config

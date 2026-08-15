@@ -362,7 +362,16 @@ Every pcons build script (`pcons-build.py`) follows three phases:
 2. **Describe** - Create targets and define their sources/dependencies
 3. **Generate** - Resolve dependencies and write build files
 
-Your script only describes the build — the resolve and generate steps run automatically when it finishes, whether invoked via the `pcons` CLI or run directly with Python. Ninja is the default generator; select another with `pcons -G make` (or the `PCONS_GENERATOR`/`GENERATOR` environment variables).
+Your script only describes the build — the resolve and generate steps run automatically once `pcons` has run it. Ninja is the default generator; select another with `pcons -G make` (or the `PCONS_GENERATOR`/`GENERATOR` environment variables).
+
+`pcons` is the program, and the build script it runs is not, so the script's `__name__` is `__pcons__` rather than `__main__`. A subdirectory script pulled in by `add_subdirectory()` gets the same name, so a guard means one thing wherever it is written:
+
+```python
+if __name__ == "__pcons__":
+    main()
+```
+
+`if __name__ == "__main__":` never fires under `pcons`. The one thing it is good for in a build script is [handing over to the CLI](cli.md#a-build-script-that-runs-itself). That is opt-in, and most scripts should not do it.
 
 For finer control you can run either step explicitly:
 
