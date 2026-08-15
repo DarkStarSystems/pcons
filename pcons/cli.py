@@ -28,6 +28,7 @@ from pcons._cli_click import (
     _adopt_options_spelled_earlier,
     build_options,
     common_options,
+    complete_file,
     configure_logging,
     directory_option,
     generate_options,
@@ -1926,6 +1927,7 @@ def cli_init(
     is_flag=False,
     flag_value="-",
     metavar="[FILE]",
+    shell_complete=complete_file,
     help="Output dependency graph in DOT format (default: stdout)",
 )
 @click.option(
@@ -1933,6 +1935,7 @@ def cli_init(
     is_flag=False,
     flag_value="-",
     metavar="[FILE]",
+    shell_complete=complete_file,
     help="Output dependency graph in Mermaid format (default: stdout)",
 )
 @jobs_option

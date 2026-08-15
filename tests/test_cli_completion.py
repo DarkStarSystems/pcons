@@ -43,6 +43,18 @@ def _completions(args: list[str], incomplete: str) -> list[str]:
     return [item.value for item in complete.get_completions(args, incomplete)]
 
 
+def _completion_types(args: list[str], incomplete: str) -> list[str]:
+    """The kinds offered, rather than the values.
+
+    A path candidate is a directive rather than a name: click emits
+    ``CompletionItem(incomplete, type="dir")`` and every shell script turns
+    that into its own path completion, ignoring the value. So `_completions`
+    sees nothing for these and only the type says what happened.
+    """
+    complete = ShellComplete(cli, {}, PROG_NAME, COMPLETE_VAR)
+    return [item.type for item in complete.get_completions(args, incomplete)]
+
+
 class TestCompletionShow:
     """`pcons completion show` prints a script and writes nothing."""
 
@@ -308,3 +320,38 @@ class TestWhatCompletes:
 
     def test_the_completion_verbs(self) -> None:
         assert _completions(["completion"], "") == ["show", "install", "uninstall"]
+
+
+class TestPathCompletion:
+    """An option naming a path hands the shell its own path completion."""
+
+    @pytest.mark.parametrize(
+        ("args", "expected"),
+        [
+            (["-C"], "dir"),
+            (["--directory"], "dir"),
+            (["-B"], "dir"),
+            (["--build-dir"], "dir"),
+            (["--modules-path"], "dir"),
+            (["generate", "-b"], "file"),
+            (["generate", "--build-script"], "file"),
+            (["generate", "--graph"], "file"),
+            (["generate", "--mermaid"], "file"),
+        ],
+    )
+    def test_the_kind_offered(self, args: list[str], expected: str) -> None:
+        assert _completion_types(args, "") == [expected]
+
+    def test_a_build_dir_offers_no_files(self) -> None:
+        # click.Path's own completion would say "file" here, because its
+        # file_okay defaults to True.
+        assert "file" not in _completion_types(["-B"], "")
+
+    def test_after_a_command_name_too(self) -> None:
+        assert _completion_types(["build", "-C"], "") == ["dir"]
+        assert _completion_types(["build", "-B"], "") == ["dir"]
+
+    def test_a_partly_typed_path_is_still_a_directive(self) -> None:
+        # The shell completes the whole word itself, so the value is passed
+        # through untouched rather than filtered.
+        assert _completions(["-C"], "sub/dir") == ["sub/dir"]

@@ -24,6 +24,7 @@ from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
 import click
 from click.core import ParameterSource
+from click.shell_completion import CompletionItem
 
 import pcons
 from pcons.core.debug import (
@@ -486,12 +487,37 @@ def _debug_help() -> str:
     return f"Enable debug tracing for subsystems (comma-separated): {subsystems}"
 
 
+def complete_dir(
+    ctx: click.Context, param: click.Parameter | None, incomplete: str
+) -> list[CompletionItem]:
+    """Hand the shell its own directory completion for this word.
+
+    A completer, not `type=click.Path(file_okay=False)`, because the type would
+    also start rejecting a file where a directory is wanted: `-C` on one has to
+    stay `_chdir`'s exit 1 rather than become a UsageError's 2.
+
+    The item's value is ignored. Every shell click writes a script for turns a
+    `dir` result into its own path completion over the whole word (bash runs
+    `compopt -o dirnames`), so a separated list like `--modules-path a:b`
+    completes only its first segment.
+    """
+    return [CompletionItem(incomplete, type="dir")]
+
+
+def complete_file(
+    ctx: click.Context, param: click.Parameter | None, incomplete: str
+) -> list[CompletionItem]:
+    """Hand the shell its own file completion for this word. See `complete_dir`."""
+    return [CompletionItem(incomplete, type="file")]
+
+
 def directory_option(f: F) -> F:
     """-C DIR, applied before every other option on every command."""
     return click.option(
         "-C",
         "--directory",
         metavar="DIR",
+        shell_complete=complete_dir,
         callback=_chdir,
         is_eager=True,
         expose_value=False,
@@ -504,6 +530,7 @@ def common_options(f: F) -> F:
     f = click.option(
         "--modules-path",
         metavar="PATHS",
+        shell_complete=complete_dir,
         help="Additional paths to search for pcons modules (colon/semicolon-separated)",
     )(f)
     f = click.option(
@@ -513,6 +540,9 @@ def common_options(f: F) -> F:
         # out because click.Path would otherwise print its own.
         type=click.Path(path_type=Path),
         metavar="DIR",
+        # Without this, click.Path's own completion offers files too, because
+        # its file_okay defaults to True.
+        shell_complete=complete_dir,
         envvar="PCONS_BUILD_DIR",
         default="build",
         help="Build directory (default: $PCONS_BUILD_DIR, or 'build')",
@@ -545,7 +575,11 @@ def _enable_postmortem(ctx: click.Context, param: click.Parameter, value: bool) 
 def generate_options(f: F) -> F:
     """Options for commands that generate build files."""
     f = click.option(
-        "-b", "--build-script", metavar="FILE", help="Path to pcons-build.py script"
+        "-b",
+        "--build-script",
+        metavar="FILE",
+        shell_complete=complete_file,
+        help="Path to pcons-build.py script",
     )(f)
     f = click.option(
         "--fresh",
