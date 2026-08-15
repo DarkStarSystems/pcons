@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -397,3 +398,129 @@ class TestValueCompletion:
             _debug_help() == "Enable debug tracing for subsystems (comma-separated): "
             "configure,resolve,generate,subst,env,deps,all,help"
         )
+
+
+class TestTargetCompletion:
+    """Target names come from what the last generate recorded, not from a run.
+
+    The fixture generates a real project rather than hand-writing a cache: a
+    hand-written one would pass even if pcons recorded the wrong names.
+    """
+
+    @pytest.fixture
+    def project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> Iterator[Path]:
+        from pcons.cli import run_script
+        from pcons.core.vars import _clear_cli_vars
+
+        root = tmp_path / "project"
+        root.mkdir()
+        (root / "hello.c").write_text("int main(void) { return 0; }\n")
+        script = root / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('hello', p.Environment(toolchain='c'), sources=['hello.c'])\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        assert run_script(script, root / "build")[0] == 0
+        monkeypatch.chdir(root)
+        yield root
+
+    def test_after_a_command_name(self, project: Path) -> None:
+        assert _completions(["build"], "") == ["all", "hello"]
+
+    def test_a_prefix_filters(self, project: Path) -> None:
+        assert _completions(["build"], "hel") == ["hello"]
+
+    def test_explain_offers_them_too(self, project: Path) -> None:
+        assert _completions(["explain"], "") == ["all", "hello"]
+
+    def test_at_the_top_level(self, project: Path) -> None:
+        """`pcons hello` builds a target, so the group offers the names itself."""
+        assert _completions([], "hel") == ["hello"]
+
+    def test_the_command_names_survive_at_the_top_level(self, project: Path) -> None:
+        offered = _completions([], "")
+        assert "build" in offered
+        assert "hello" in offered
+
+    def test_an_option_prefix_offers_no_targets(self, project: Path) -> None:
+        offered = _completions([], "-")
+        assert "--verbose" in offered
+        assert "hello" not in offered
+
+    @pytest.mark.parametrize(
+        "args",
+        [["build"], ["-B", "out", "build"], ["build", "-B", "out"]],
+        ids=["default", "before-the-command", "after-the-command"],
+    )
+    def test_the_build_dir_is_resolved_however_it_was_spelled(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
+    ) -> None:
+        """`invoke` merges an option spelled before the command name, and
+        completion never calls it, so the completer has to do it itself."""
+        from pcons.cli import run_script
+        from pcons.core.project import Project
+        from pcons.core.vars import _clear_cli_vars
+
+        (project / "pcons-build.py").write_text(
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('elsewhere', p.Environment(toolchain='c'), sources=['hello.c'])\n"
+        )
+        _clear_cli_vars()
+        Project._clear_tree()
+        assert run_script(project / "pcons-build.py", project / "out")[0] == 0
+
+        wanted = "hello" if args == ["build"] else "elsewhere"
+        assert _completions(args, "") == ["all", wanted]
+
+    def test_the_build_dir_is_read_from_the_environment(
+        self, project: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PCONS_BUILD_DIR", "nowhere")
+        assert _completions(["build"], "") == []
+
+    def test_a_build_dir_that_never_generated_offers_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        monkeypatch.chdir(empty)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        assert _completions(["build"], "") == []
+        assert _completions([], "hel") == []
+
+    @pytest.mark.parametrize(
+        "content",
+        ["not json at all", '{"targets": "hello"}', '{"targets": [1, 2]}'],
+        ids=["corrupt", "not-a-list", "not-strings"],
+    )
+    def test_a_cache_it_cannot_use_offers_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str
+    ) -> None:
+        """stdout is the candidate stream, so a bad cache must be silent."""
+        from pcons.core.cache import CACHE_FILE
+
+        root = tmp_path / "broken"
+        (root / "build").mkdir(parents=True)
+        (root / "build" / CACHE_FILE).write_text(content)
+        monkeypatch.chdir(root)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        assert _completions(["build"], "") == []
+
+    def test_completing_does_not_run_the_build_script(self, project: Path) -> None:
+        """A build script does configure checks, and completion fires per key."""
+        marker = project / "ran"
+        (project / "pcons-build.py").write_text(
+            "from pathlib import Path\n"
+            "Path('ran').write_text('yes')\n"
+            "from pcons import Project\n"
+            "Project('demo')\n"
+        )
+        assert _completions(["build"], "") == ["all", "hello"]
+        assert _completions([], "hel") == ["hello"]
+        assert not marker.exists()

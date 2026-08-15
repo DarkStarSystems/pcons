@@ -36,6 +36,7 @@ from pcons._cli_click import (
     load_declared_modules,
     pass_pcons_context,
     run_cli,
+    targets_argument,
     watch_option,
 )
 from pcons.core.errors import PconsError
@@ -1871,7 +1872,7 @@ def cli_info(
         "(default: terminal width, unlimited when piped)"
     ),
 )
-@click.argument("extra", nargs=-1)
+@targets_argument
 @pass_pcons_context
 def cli_explain(
     ctx: PconsContext,
@@ -2032,7 +2033,7 @@ def cli_generate(
 @build_options
 @watch_option
 @jobs_option
-@click.argument("extra", nargs=-1)
+@targets_argument
 @pass_pcons_context
 def cli_build(
     ctx: PconsContext,
@@ -2595,7 +2596,7 @@ def cli_completion_uninstall(ctx: PconsContext, shell: str | None) -> None:
 @build_options
 @watch_option
 @jobs_option
-@click.argument("extra", nargs=-1)
+@targets_argument
 @pass_pcons_context
 def cli_default(
     ctx: PconsContext,

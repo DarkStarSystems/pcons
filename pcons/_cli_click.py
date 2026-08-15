@@ -140,6 +140,24 @@ def _adopt_options_spelled_earlier(command: click.Command, ctx: click.Context) -
             ctx.params[name] = parent.params[name]
 
 
+def inherited_param(ctx: click.Context, name: str) -> Any:
+    """The value `name` settles on once `_adopt_options_spelled_earlier` has run.
+
+    Same rule, read-only, for the callers that never get to see the merge.
+    Completion is the one: click builds its contexts through `parse_args` and
+    then answers, so `invoke` never runs and ``pcons -B out build <TAB>`` still
+    has this command's own default sitting in ``ctx.params``.
+
+    Change one of these two and change the other.
+    """
+    if ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE:
+        return ctx.params.get(name)
+    parent = ctx.parent
+    if parent is not None and name in parent.params:
+        return inherited_param(parent, name)
+    return ctx.params.get(name)
+
+
 def configure_logging(ctx: click.Context) -> None:
     """Set logging up from the options every command shares, once they settle.
 
@@ -371,6 +389,20 @@ class PconsGroup(click.Group):
                 return token, command, [*args[:index], *args[index + 1 :]]
         return None, None, args
 
+    def shell_complete(
+        self, ctx: click.Context, incomplete: str
+    ) -> list[CompletionItem]:
+        """Command names, then the targets the catch-all would have accepted.
+
+        `pcons hello` builds a target, so the group offers target names itself.
+        The command declaring the argument that carries them is the hidden
+        catch-all, which `get_command` refuses to resolve and `list_commands`
+        leaves out, so click's own walk of the tree never reaches it.
+        """
+        items = super().shell_complete(ctx, incomplete)
+        items.extend(complete_target(ctx, None, incomplete))
+        return items
+
     # click types these hooks against the base context, and narrowing a
     # parameter in an override is unsound in general, so the class this group
     # builds its own context from is spelled out at each one.
@@ -552,6 +584,46 @@ def complete_file(
 ) -> list[CompletionItem]:
     """Hand the shell its own file completion for this word. See `complete_dir`."""
     return [CompletionItem(incomplete, type="file")]
+
+
+def complete_target(
+    ctx: click.Context, param: click.Parameter | None, incomplete: str
+) -> list[CompletionItem]:
+    """The target names the last generate left in this build directory's cache.
+
+    Never runs the build script. Completion fires on every keystroke and a
+    build script does configure checks, so the names are recorded when a
+    generate runs and only read back here.
+
+    Answers nothing rather than raising, whatever it finds. stdout is the
+    candidate stream, so anything printed from here is parsed by the shell as a
+    completion.
+    """
+    from pcons.core.cache import BuildCache
+
+    build_dir = inherited_param(ctx, "build_dir")
+    if build_dir is None:
+        return []
+    try:
+        names = BuildCache(Path(build_dir)).get("targets")
+    except OSError:
+        return []
+    if not isinstance(names, list):
+        return []
+    return [
+        CompletionItem(name)
+        for name in names
+        if isinstance(name, str) and name.startswith(incomplete)
+    ]
+
+
+def targets_argument(f: F) -> F:
+    """EXTRA: targets to build, and/or KEY=value build variables.
+
+    Variable names are not completed. Only the build script knows them, and
+    running it is what completion must not do.
+    """
+    return click.argument("extra", nargs=-1, shell_complete=complete_target)(f)
 
 
 def directory_option(f: F) -> F:
