@@ -3821,8 +3821,90 @@ class TestAScriptThatRunsItself:
         result = self._run(script, "generate")
 
         assert result.returncode != 0
-        assert "described its build before handing over" in result.stderr
+        assert "before handing over to pcons" in result.stderr
         assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_variable_read_above_the_guard_is_refused(self, tmp_path):
+        """The read returned its default: PCONS_VARS was not set yet."""
+        script = self._write(
+            tmp_path,
+            "from pcons import get_var\n"
+            "\n"
+            'debug = get_var("DEBUG", False)\n'
+            "\n" + self.GUARD + "\n" + self.DESCRIBE,
+        )
+
+        result = self._run(script, "DEBUG=1", "generate")
+
+        assert result.returncode != 0
+        assert "before handing over to pcons" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_variant_read_above_the_guard_is_refused(self, tmp_path):
+        """Same for the variant, which no PCONS_VARIANT had reached yet."""
+        script = self._write(
+            tmp_path,
+            "from pcons import get_variant\n"
+            "\n"
+            "variant = get_variant()\n"
+            "\n" + self.GUARD + "\n" + self.DESCRIBE,
+        )
+
+        result = self._run(script, "--variant", "debug", "generate")
+
+        assert result.returncode != 0
+        assert "before handing over to pcons" in result.stderr
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_plain_script_reads_variables_freely(self, tmp_path):
+        """The normal shape, and what the refusal must never fire on."""
+        script = self._write(
+            tmp_path,
+            "from pcons import Project, get_var, get_variant\n"
+            "\n"
+            "print(f\"FOO={get_var('FOO', 'unset')} VARIANT={get_variant()}\")\n"
+            'project = Project("plain")\n',
+        )
+
+        result = self._run(
+            script, "FOO=bar", "--variant", "debug", "generate", by_hand=False
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert "FOO=bar VARIANT=debug" in result.stdout
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_read_in_this_process_does_not_refuse_a_later_run(self, tmp_path):
+        """A read is the program's only when the program is the one that made it.
+
+        Anything embedding pcons reads variables from its own code, as this
+        file does here, and then drives the CLI. Nothing about that is a
+        hand-over, and a run started afterwards must not be refused.
+        """
+        from pcons import get_var
+
+        get_var("DEBUG", False)
+        script = self._write(tmp_path, self.DESCRIBE)
+
+        result = _invoke("-C", str(tmp_path), "generate")
+
+        assert result.exit_code == 0, result.output
+        assert script.exists()
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_the_docs_quote_the_refusal_verbatim(self):
+        """docs/cli.md shows the message; a rewording there is a wrong doc."""
+        docs = Path(__file__).resolve().parents[1] / "docs" / "cli.md"
+        section = docs.read_text().split("## A build script that runs itself")[1]
+        quoted = [
+            block
+            for block in section.split("```")
+            if block.lstrip().startswith("this build script")
+        ]
+
+        assert len(quoted) == 1
+        for line in quoted[0].strip().splitlines():
+            assert line in cli_module._ACTED_BEFORE_HANDING_OVER
 
     def test_it_is_refused_even_when_nothing_would_be_generated(self, tmp_path):
         """The refusal belongs to the CLI's entry, not to running the script.
@@ -3839,7 +3921,7 @@ class TestAScriptThatRunsItself:
         result = self._run(script, "build")
 
         assert result.returncode != 0
-        assert "described its build before handing over" in result.stderr
+        assert "before handing over to pcons" in result.stderr
 
     def test_a_main_guard_does_not_fire_under_pcons(self, tmp_path):
         """`pcons` is the program; the script it runs is not."""

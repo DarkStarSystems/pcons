@@ -316,13 +316,13 @@ at parity.
 It goes above everything, not near the top: above the first `Project()`, the
 first `get_var()` and the first `get_variant()`. The guard is reached with the
 command line still unparsed, so anything above it reads no build variables and
-no variant. Below the build description, pcons refuses rather than generate from
-values the user never chose:
+no variant. Below any of them, pcons refuses rather than generate from values
+the user never chose:
 
 ```
-this build script described its build before handing over to pcons.
+this build script described its build or read a build variable before handing over to pcons.
 Everything above the hand-over ran without the command line, so build variables and the variant were still unset.
-Put the entry point above the build description:
+Put the entry point above everything else:
 ```
 
 The guard fires only when the script is the program. Under `pcons` a build

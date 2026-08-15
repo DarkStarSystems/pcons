@@ -9,11 +9,13 @@ from __future__ import annotations
 import builtins
 import json
 import os
+import sys
 from pathlib import Path, PurePath
 from typing import TypeAlias, overload
 
 from pcons.core.cache import reset_cache
 from pcons.core.errors import ConfigureError
+from pcons.core.invocation import run_recorded
 
 # Types get_var can convert a raw variable string into.
 VarValue: TypeAlias = bool | int | float | str | Path
@@ -31,11 +33,14 @@ _cli_vars: dict[str, object] | None = None
 # build script never reads (a typo like `pcons FEATRUE=on`).
 _accessed_vars: set[str] = set()
 
+_read_outside_a_run: str | None = None
+
 
 def _clear_cli_vars() -> None:
     """Clear cached CLI variables and the build-dir cache. Used for testing."""
-    global _cli_vars
+    global _cli_vars, _read_outside_a_run
     _cli_vars = None
+    _read_outside_a_run = None
     _accessed_vars.clear()
     reset_cache()
 
@@ -43,6 +48,21 @@ def _clear_cli_vars() -> None:
 def _accessed_var_names() -> set[str]:
     """Return the variable names get_var has been called with this run."""
     return set(_accessed_vars)
+
+
+def _read_site_outside_a_run() -> str | None:
+    """The file that first read a build variable with no pcons run recorded.
+
+    Such a read got a default: no command line had been parsed, so neither
+    PCONS_VARS nor PCONS_VARIANT was in the environment yet. That is what a
+    build script does above a ``__main__`` hand-over to the CLI, and the CLI
+    refuses the run when the file named here is the program it was started on.
+
+    Only the first read is kept: one is enough to refuse, and it holds the cost
+    to a single frame lookup per run. A read taken while pcons is running a
+    script is never recorded, so a script the CLI executes cannot arm this.
+    """
+    return _read_outside_a_run
 
 
 def _var_type_of(candidate: object) -> builtins.type[VarValue] | None:
@@ -274,7 +294,11 @@ def get_var(
         ConfigureError: The value cannot be converted, the type is unsupported,
             or a default and a type= were both given.
     """
+    global _read_outside_a_run
+
     _accessed_vars.add(name)
+    if _read_outside_a_run is None and not run_recorded():
+        _read_outside_a_run = sys._getframe(1).f_code.co_filename
 
     target = _resolve_var_type(name, default, type)
 
@@ -311,4 +335,8 @@ def get_variant(default: str = "release") -> str:
     Returns:
         The variant name.
     """
+    global _read_outside_a_run
+
+    if _read_outside_a_run is None and not run_recorded():
+        _read_outside_a_run = sys._getframe(1).f_code.co_filename
     return os.environ.get("PCONS_VARIANT") or os.environ.get("VARIANT") or default

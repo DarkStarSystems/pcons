@@ -106,6 +106,16 @@ def record(invocation: Invocation) -> None:
     _current = invocation
 
 
+def run_recorded() -> bool:
+    """Whether the CLI has recorded the run this code is part of.
+
+    True from just before a build script is executed until the process ends,
+    so it tells work pcons asked for apart from work a program did on its own
+    account. A read taken while it is false was taken with argv unparsed.
+    """
+    return _current is not None
+
+
 def running_as_a_program(defined_at: Path) -> bool:
     """Whether *defined_at* is the file this interpreter was started on.
 

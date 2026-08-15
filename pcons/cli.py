@@ -165,6 +165,45 @@ def _describes_a_build_already() -> bool:
         return False
 
 
+def _read_variables_already() -> bool:
+    """Whether the program that started this process has already read a variable.
+
+    A build variable or the variant read above a hand-over to the CLI returned
+    a default, because no command line had been parsed yet. The read counts
+    only when the file that made it is the file this interpreter was started
+    on: a read from a script pcons itself is running has an invocation
+    recorded and is never noted in the first place.
+    """
+    from pcons.core.invocation import running_as_a_program
+    from pcons.core.vars import _read_site_outside_a_run
+
+    site = _read_site_outside_a_run()
+    if site is None:
+        return False
+    return running_as_a_program(Path(site))
+
+
+def _acted_before_handing_over() -> bool:
+    """Whether the program did pcons work above its hand-over to the CLI."""
+    return _describes_a_build_already() or _read_variables_already()
+
+
+_ACTED_BEFORE_HANDING_OVER = (
+    "this build script described its build or read a build variable before "
+    "handing over to pcons.\n"
+    "Everything above the hand-over ran without the command line, so build "
+    "variables and the variant were still unset.\n"
+    "Put the entry point above everything else:\n"
+    "\n"
+    '    if __name__ == "__main__":\n'
+    "        import sys\n"
+    "\n"
+    "        import pcons.cli\n"
+    "\n"
+    "        sys.exit(pcons.cli.main())"
+)
+
+
 def _cancel_pending_generation() -> None:
     """Drop pending auto-generation after a failed build script.
 
@@ -1530,25 +1569,12 @@ Docs:    https://pcons.readthedocs.io/
 @jobs_option
 @pass_pcons_context
 def cli(ctx: PconsContext, **declared_but_unused: object) -> None:
-    # Before any command: a script that described its build and only then
-    # called the CLI did so without a command line, so whatever it decided was
-    # decided on the wrong values. Checked here rather than where the script is
-    # run, so a command that skips generation refuses too.
-    if _describes_a_build_already():
-        logger.error(
-            "this build script described its build before handing over to "
-            "pcons.\n"
-            "Everything above the hand-over ran without the command line, so "
-            "build variables and the variant were still unset.\n"
-            "Put the entry point above the build description:\n"
-            "\n"
-            '    if __name__ == "__main__":\n'
-            "        import sys\n"
-            "\n"
-            "        import pcons.cli\n"
-            "\n"
-            "        sys.exit(pcons.cli.main())"
-        )
+    # Before any command: a script that did pcons work and only then called the
+    # CLI did so without a command line, so whatever it decided was decided on
+    # the wrong values. Checked here rather than where the script is run, so a
+    # command that skips generation refuses too.
+    if _acted_before_handing_over():
+        logger.error(_ACTED_BEFORE_HANDING_OVER)
         ctx.exit(1)
 
     # The group declares these so they can be spelled before a command name;
