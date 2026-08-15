@@ -169,9 +169,9 @@ Write `pcons test -- -C DIR` to hand `-C` to the runner instead: the first
 
 ### `pcons completion`
 
-Set up tab completion for bash, zsh or fish. The script is generated from the
-command tree, so it completes command names, option names and the values of
-options with a fixed set, such as `-G`.
+Set up tab completion for bash, zsh or fish. It completes command names, option
+names, paths, target names and every option value pcons knows. The full list is
+below.
 
 ```bash
 pcons completion install          # write it and wire it up, for $SHELL
@@ -210,8 +210,49 @@ not.
 PowerShell is not supported: click, which generates the script, has no
 PowerShell completion class.
 
-Target names are not completed. `pcons hel<TAB>` would have to run the build
-script to know that `hello` exists.
+#### What completes
+
+| Typed | Offered |
+|---|---|
+| `pcons <TAB>` | command names, and the targets this build directory can build |
+| `pcons build <TAB>`, `pcons explain <TAB>` | target names |
+| `-C DIR`, `-B DIR`, `--modules-path` | directories |
+| `-b FILE`, `--graph`, `--mermaid` | files |
+| `--debug` | subsystem names, one comma-separated segment at a time |
+| `--variant` | the variants this build directory has been seen using |
+| `-G` | generator names |
+| `--ninja` | `ninja` and `n2` |
+| `--lang`, `pcons completion <shell>` | the values they accept |
+
+Target and variant names come from `pcons_cache.json`, written by the last
+`pcons generate` or `pcons build`. Completion never runs the build script: it
+fires on every keystroke, and a build script does configure checks. So:
+
+- a build directory that has never generated completes no target names
+- a target added since the last generate completes after the next one. A
+  regeneration triggered by `ninja` does not refresh them, only a `pcons` run
+- `KEY=value` build variables do not complete. Only the build script knows
+  which names it reads, and `pcons cache list` shows the ones in effect
+- `--variant` offers the names a build script passed to `env.set_variant`. A
+  script that branches on `get_variant()` without calling it names nothing, and
+  completes nothing
+- `pcons info <TAB>` and `pcons generate <TAB>` offer no targets, because their
+  `EXTRA` takes build variables rather than targets
+
+`-B DIR` is honoured while completing, on either side of the command name, so
+`pcons -B out build <TAB>` offers what `out/` can build. `PCONS_BUILD_DIR` works
+too.
+
+`--modules-path` takes a separated list and completes only its first segment.
+Every shell handles a directory result by completing the whole word itself, so
+there is no way to complete after the separator.
+
+### Targets in the help
+
+`pcons --help` lists the same names under `Targets:`, after the commands, and so
+do `pcons build --help` and `pcons explain --help`. They come from the same
+cache, with the same caveat: what the last generate recorded. Outside a
+generated build directory the section is absent rather than empty.
 
 ## Options
 
