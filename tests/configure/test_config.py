@@ -10,6 +10,16 @@ from pcons.configure.config import Configure, ProgramInfo, load_config
 
 
 class TestConfigure:
+    def test_default_build_dir_is_the_runs(self, tmp_path, monkeypatch):
+        """A bare Configure() caches where the build files go: it honours
+        PCONS_BUILD_DIR (set by the CLI from -B), like Project does. It used
+        to hardcode "build", so `pcons -B out` wrote pcons_config.json to a
+        directory the build never used."""
+        monkeypatch.setenv("PCONS_BUILD_DIR", str(tmp_path / "out"))
+        assert Configure().build_dir == tmp_path / "out"
+        monkeypatch.delenv("PCONS_BUILD_DIR")
+        assert Configure().build_dir == Path("build")
+
     def test_creation(self, tmp_path):
         config = Configure(build_dir=tmp_path)
         assert config.build_dir == tmp_path

@@ -9,15 +9,21 @@ output can be exercised without invoking a real scanner.
 
 from __future__ import annotations
 
+import functools
+import os
+import shutil
+import tempfile
 from pathlib import Path
 
 import pytest
 
+from pcons.toolchains._scan_cache import CACHE_FILE, ScanCache
 from pcons.toolchains.cxx_module_scanner import (
     CxxModuleScannerNotFound,
     StdModuleFlagSpec,
     TuScanResult,
     TuScanSpec,
+    _scan_workers,
     bmi_key_for_flags,
     build_keyed_entries,
     build_module_map,
@@ -25,7 +31,9 @@ from pcons.toolchains.cxx_module_scanner import (
     merge_scan_compile_flags,
     module_file_for,
     run_scan_deps,
+    run_scan_deps_gcc,
     run_scan_deps_msvc,
+    scan_translation_units,
     select_modules_scope,
     select_std_module_flags,
     wire_std_into_targets,
@@ -384,6 +392,499 @@ class TestScannerNotFound:
         )
         with pytest.raises(CxxModuleScannerNotFound, match="vcvars64"):
             run_scan_deps_msvc("cl.exe", ["/std:c++20"], "C:/x/y.cpp")
+
+
+class TestScanTranslationUnitsOrder:
+    """Results must line up with their specs however the scans finished.
+
+    `build_module_map` and the dyndep writer index results against specs, so a
+    pool that yielded completions instead of preserving input order would wire
+    a module to the wrong object file.
+    """
+
+    @staticmethod
+    def _specs(n: int) -> list[TuScanSpec]:
+        return [
+            TuScanSpec(
+                src=Path(f"/src/tu{i}.cppm"),
+                obj_rel=f"tu{i}.o",
+                compiler="g++",
+                compile_flags=[],
+            )
+            for i in range(n)
+        ]
+
+    def test_results_follow_spec_order(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The first spec sleeps longest, so completion order is reversed."""
+        import time
+
+        def _slow(
+            compiler: str,
+            flags: list[str],
+            src: str,
+            obj: str,
+            prereqs_out: list[str] | None = None,
+        ) -> dict[str, object]:
+            index = int(obj.removeprefix("tu").removesuffix(".o"))
+            time.sleep((8 - index) * 0.01)
+            return {"rules": [{"primary-output": obj}]}
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps_gcc", _slow
+        )
+        specs = self._specs(8)
+
+        results = scan_translation_units(specs, "unused", scanner_style="gcc")
+
+        assert [r.spec.obj_rel for r in results] == [s.obj_rel for s in specs]
+        # The payload has to travel with its own spec, not just be in the right
+        # slot: a swap of both together would pass the check above.
+        assert [(r.p1689 or {})["rules"][0]["primary-output"] for r in results] == [
+            s.obj_rel for s in specs
+        ]
+
+    def test_a_single_spec_takes_the_direct_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One TU is not worth a pool, and must still scan."""
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps_gcc",
+            lambda *a, **kw: {"rules": [{"primary-output": a[3]}]},
+        )
+        results = scan_translation_units(self._specs(1), "unused", scanner_style="gcc")
+        assert [r.spec.obj_rel for r in results] == ["tu0.o"]
+
+    def test_no_specs(self) -> None:
+        assert scan_translation_units([], "unused", scanner_style="gcc") == []
+
+
+class TestGccScanReportsWhatItRead:
+    """The depfile GCC is already asked for is the cache invalidation key."""
+
+    @staticmethod
+    def _run_with_depfile(
+        monkeypatch: pytest.MonkeyPatch, depfile_text: str | None
+    ) -> tuple[dict | None, list[str]]:
+        class _Ok:
+            returncode = 0
+            stderr = ""
+
+        def _capture(cmd: list[str], *args: object, **kwargs: object) -> _Ok:
+            deps = next(a.split("=", 1)[1] for a in cmd if a.startswith("-fdeps-file="))
+            Path(deps).write_text("{}", encoding="utf-8")
+            depfile = cmd[cmd.index("-MF") + 1]
+            if depfile_text is None:
+                Path(depfile).unlink()
+            else:
+                Path(depfile).write_text(depfile_text, encoding="utf-8")
+            return _Ok()
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _capture
+        )
+        prereqs: list[str] = []
+        p1689 = run_scan_deps_gcc("g++", [], "/x/y.cppm", "y.o", prereqs_out=prereqs)
+        return p1689, prereqs
+
+    def test_the_depfile_prerequisites_come_back(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        p1689, prereqs = self._run_with_depfile(
+            monkeypatch, "y.o: /x/y.cppm /x/dep.hpp\n"
+        )
+        assert p1689 == {}
+        assert prereqs == ["/x/y.cppm", "/x/dep.hpp"]
+
+    def test_no_depfile_leaves_the_list_empty(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The scan still answers; the caller just must not cache it."""
+        p1689, prereqs = self._run_with_depfile(monkeypatch, None)
+        assert p1689 == {}
+        assert prereqs == []
+
+
+class TestScanTranslationUnitsCache:
+    """A TU whose prerequisites are untouched must not reach the compiler.
+
+    `ScanCache` is covered on its own in test_scan_cache.py; what is checked
+    here is the wiring: that a hit skips the scan, that only the GCC style
+    consults the cache, and that a result with nothing to invalidate against
+    is not stored.
+    """
+
+    @staticmethod
+    def _pass(
+        specs: list[TuScanSpec],
+        scanner: str,
+        scanner_style: str,
+        cache_dir: Path | None,
+    ) -> list[TuScanResult]:
+        """One scan pass, over a cache loaded and saved the way a toolchain does."""
+        cache = ScanCache(cache_dir) if cache_dir is not None else None
+        results = scan_translation_units(
+            specs, scanner, scanner_style=scanner_style, cache=cache
+        )
+        if cache is not None:
+            cache.save()
+        return results
+
+    @staticmethod
+    def _specs(tmp_path: Path, n: int) -> list[TuScanSpec]:
+        specs = []
+        for i in range(n):
+            src = tmp_path / f"tu{i}.cppm"
+            src.write_text(f"export module tu{i};\n")
+            # Backdated: a prerequisite written in the same clock tick as the
+            # scan is one the cache refuses to record, and that tick is 15 ms
+            # wide on Windows.
+            aged = src.stat().st_mtime_ns - 5_000_000_000
+            os.utime(src, ns=(aged, aged))
+            specs.append(
+                TuScanSpec(
+                    src=src,
+                    obj_rel=f"tu{i}.o",
+                    compiler="g++",
+                    compile_flags=["-std=c++23"],
+                )
+            )
+        return specs
+
+    @staticmethod
+    def _counting_scanner(
+        monkeypatch: pytest.MonkeyPatch, *, prereqs: bool = True
+    ) -> list[str]:
+        """Stand in for the GCC runner, recording which sources it scanned."""
+        scanned: list[str] = []
+
+        def _scan(
+            compiler: str,
+            flags: list[str],
+            src: str,
+            obj: str,
+            prereqs_out: list[str] | None = None,
+        ) -> dict[str, object]:
+            scanned.append(src)
+            if prereqs_out is not None and prereqs:
+                prereqs_out.append(src)
+            return {"rules": [{"primary-output": obj}]}
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps_gcc", _scan
+        )
+        return scanned
+
+    def test_a_second_pass_reuses_the_stored_results(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scanned = self._counting_scanner(monkeypatch)
+        specs = self._specs(tmp_path, 3)
+
+        first = self._pass(specs, "unused", "gcc", tmp_path)
+        assert len(scanned) == 3
+        assert (tmp_path / CACHE_FILE).exists()
+
+        scanned.clear()
+        second = self._pass(specs, "unused", "gcc", tmp_path)
+
+        assert scanned == []
+        assert [r.p1689 for r in second] == [r.p1689 for r in first]
+        assert [r.spec.obj_rel for r in second] == [s.obj_rel for s in specs]
+
+    def test_a_touched_source_is_scanned_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scanned = self._counting_scanner(monkeypatch)
+        specs = self._specs(tmp_path, 2)
+        self._pass(specs, "unused", "gcc", tmp_path)
+
+        scanned.clear()
+        stamp = specs[1].src.stat().st_mtime_ns + 1_000_000_000
+        os.utime(specs[1].src, ns=(stamp, stamp))
+
+        self._pass(specs, "unused", "gcc", tmp_path)
+
+        assert scanned == [str(specs[1].src)]
+
+    def test_without_a_cache_nothing_is_kept(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scanned = self._counting_scanner(monkeypatch)
+        specs = self._specs(tmp_path, 2)
+
+        self._pass(specs, "unused", "gcc", None)
+        self._pass(specs, "unused", "gcc", None)
+
+        assert len(scanned) == 4
+        assert not (tmp_path / CACHE_FILE).exists()
+
+    def test_a_result_with_no_prerequisites_is_not_stored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Nothing to invalidate against, so the answer is used but not kept."""
+        scanned = self._counting_scanner(monkeypatch, prereqs=False)
+        specs = self._specs(tmp_path, 2)
+
+        first = self._pass(specs, "unused", "gcc", tmp_path)
+        assert all(r.p1689 is not None for r in first)
+
+        scanned.clear()
+        self._pass(specs, "unused", "gcc", tmp_path)
+
+        assert len(scanned) == 2
+        assert not (tmp_path / CACHE_FILE).exists()
+
+    def test_the_msvc_style_does_not_cache_either(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        scanned: list[str] = []
+
+        def _scan(compiler: str, flags: list[str], src: str) -> dict[str, object]:
+            scanned.append(src)
+            return {"rules": [{"primary-output": "x.obj"}]}
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.run_scan_deps_msvc", _scan
+        )
+        specs = self._specs(tmp_path, 2)
+
+        self._pass(specs, "cl.exe", "msvc", tmp_path)
+        self._pass(specs, "cl.exe", "msvc", tmp_path)
+
+        assert len(scanned) == 4
+        assert not (tmp_path / CACHE_FILE).exists()
+
+    def test_only_the_gcc_style_caches(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """clang-scan-deps and cl.exe do not report what they read."""
+        scanned: list[str] = []
+
+        def _scan(
+            scanner: str, compiler: str, flags: list[str], src: str, obj: str
+        ) -> dict[str, object]:
+            scanned.append(src)
+            return {"rules": [{"primary-output": obj}]}
+
+        monkeypatch.setattr("pcons.toolchains.cxx_module_scanner.run_scan_deps", _scan)
+        specs = self._specs(tmp_path, 2)
+
+        self._pass(specs, "clang-scan-deps", "clang", tmp_path)
+        self._pass(specs, "clang-scan-deps", "clang", tmp_path)
+
+        assert len(scanned) == 4
+        assert not (tmp_path / CACHE_FILE).exists()
+
+
+class TestScanWorkers:
+    """How many compilers a scan pass keeps in flight."""
+
+    def test_one_per_core(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PCONS_JOBS", raising=False)
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.os.cpu_count", lambda: 4
+        )
+        assert _scan_workers(100) == 4
+
+    def test_never_more_than_there_is_to_scan(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_JOBS", raising=False)
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.os.cpu_count", lambda: 8
+        )
+        assert _scan_workers(2) == 2
+
+    def test_jobs_caps_it(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`pcons -j 2` means two compilers at once, configure included."""
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.os.cpu_count", lambda: 8
+        )
+        monkeypatch.setenv("PCONS_JOBS", "2")
+        assert _scan_workers(100) == 2
+
+    @pytest.mark.parametrize("value", ["", "0", "-1", "many"])
+    def test_a_jobs_value_that_says_nothing_usable_is_ignored(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.os.cpu_count", lambda: 4
+        )
+        monkeypatch.setenv("PCONS_JOBS", value)
+        assert _scan_workers(100) == 4
+
+
+@functools.lru_cache(maxsize=1)
+def _gcc_scans_modules() -> bool:
+    """Whether the g++ on this host answers a p1689 scan."""
+    if shutil.which("g++") is None:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp) / "probe.cppm"
+        src.write_text("export module probe;\n", encoding="utf-8")
+        return run_scan_deps_gcc("g++", ["-std=c++20"], str(src), "probe.o") is not None
+
+
+@pytest.mark.skipif(
+    not _gcc_scans_modules(), reason="no g++ that answers a p1689 module scan"
+)
+class TestScanCacheAgainstARealCompiler:
+    """The cache decided against what a compiler really reported reading.
+
+    Everything else here stubs the runner out, so the depfile it invalidates
+    against is one the test wrote. These tests take GCC's own.
+    """
+
+    @staticmethod
+    def _project(tmp_path: Path, include: str) -> TuScanSpec:
+        (tmp_path / "dep.hpp").write_text("#pragma once\n", encoding="utf-8")
+        src = tmp_path / "m.cppm"
+        src.write_text(
+            f"module;\n{include}\nexport module m;\nexport int f();\n", encoding="utf-8"
+        )
+        for path in (tmp_path / "dep.hpp", src):
+            aged = path.stat().st_mtime_ns - 5_000_000_000
+            os.utime(path, ns=(aged, aged))
+        return TuScanSpec(
+            src=src, obj_rel="m.o", compiler="g++", compile_flags=["-std=c++20"]
+        )
+
+    @staticmethod
+    def _scan(spec: TuScanSpec, tmp_path: Path) -> list[TuScanResult]:
+        cache = ScanCache(tmp_path)
+        results = scan_translation_units(
+            [spec], "g++", scanner_style="gcc", cache=cache
+        )
+        cache.save()
+        return results
+
+    def test_a_second_pass_does_not_run_the_compiler(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        spec = self._project(tmp_path, '#include "dep.hpp"')
+        first = self._scan(spec, tmp_path)
+        assert first[0].logical_name == "m"
+
+        def _no_scanning(*args: object, **kwargs: object) -> object:
+            raise AssertionError("the compiler ran for a TU nothing touched")
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _no_scanning
+        )
+        second = self._scan(spec, tmp_path)
+
+        assert second[0].p1689 == first[0].p1689
+
+    def test_touching_a_header_the_compiler_read_rescans(self, tmp_path: Path) -> None:
+        spec = self._project(tmp_path, '#include "dep.hpp"')
+        self._scan(spec, tmp_path)
+
+        (tmp_path / "dep.hpp").write_text(
+            "#pragma once\nimport nothing_at_all;\n", encoding="utf-8"
+        )
+        again = self._scan(spec, tmp_path)
+
+        assert "nothing_at_all" in again[0].required_logical_names
+
+    def test_a_header_named_by_a_macro_is_still_a_prerequisite(
+        self, tmp_path: Path
+    ) -> None:
+        """`-fdirectives-only` skips macro expansion, but not in directives.
+
+        A computed `#include` still resolves, so the header it names lands in
+        the depfile and an edit to it still invalidates the entry. Left
+        untested, the scan would answer from a header it no longer matches.
+        """
+        spec = self._project(tmp_path, '#define WHICH "dep.hpp"\n#include WHICH')
+        self._scan(spec, tmp_path)
+
+        (tmp_path / "dep.hpp").write_text(
+            "#pragma once\nimport computed;\n", encoding="utf-8"
+        )
+        again = self._scan(spec, tmp_path)
+
+        assert "computed" in again[0].required_logical_names
+
+
+class TestGccScanDiscardsPreprocessedOutput:
+    """The GCC scan wants the p1689 JSON, not the preprocessed text.
+
+    `-E` writes the whole translation unit somewhere, and that somewhere used
+    to be a temp file nothing ever read: measured at 3.2 MB for one real C++26
+    source, to extract 91 bytes of JSON.
+    """
+
+    @staticmethod
+    def _captured_argv(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+        seen: list[list[str]] = []
+
+        class _Ok:
+            returncode = 0
+            stderr = ""
+
+        def _capture(cmd: list[str], *args: object, **kwargs: object) -> _Ok:
+            seen.append(list(cmd))
+            # The deps file is named in the command; write valid JSON there so
+            # the runner parses rather than warning.
+            deps = next(a.split("=", 1)[1] for a in cmd if a.startswith("-fdeps-file="))
+            Path(deps).write_text("{}", encoding="utf-8")
+            return _Ok()
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _capture
+        )
+        assert run_scan_deps_gcc("g++", ["-std=c++23"], "/x/y.cppm", "y.o") == {}
+        return seen[0]
+
+    def test_the_scan_skips_macro_expansion(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Only the module declarations are wanted, not an expanded TU."""
+        assert "-fdirectives-only" in self._captured_argv(monkeypatch)
+
+    def test_the_scan_does_not_touch_the_flags_it_was_given(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The BMI-compatibility invariant, guarded where it could break.
+
+        `bmi_key_for_flags` hashes a TU's compile flags, and the caller passes
+        the very same list here. Appending a scan-only flag to it in place
+        would change every BMI key and every compile line, so the module
+        interfaces on disk would no longer match what consumes them.
+        """
+        seen: list[list[str]] = []
+
+        class _Ok:
+            returncode = 0
+            stderr = ""
+
+        def _capture(cmd: list[str], *args: object, **kwargs: object) -> _Ok:
+            seen.append(list(cmd))
+            deps = next(a.split("=", 1)[1] for a in cmd if a.startswith("-fdeps-file="))
+            Path(deps).write_text("{}", encoding="utf-8")
+            return _Ok()
+
+        monkeypatch.setattr(
+            "pcons.toolchains.cxx_module_scanner.subprocess.run", _capture
+        )
+        flags = ["-std=c++23", "-fmodules-ts"]
+        run_scan_deps_gcc("g++", flags, "/x/y.cppm", "y.o")
+
+        assert flags == ["-std=c++23", "-fmodules-ts"]
+        assert "-fdirectives-only" in seen[0]
+
+    def test_output_goes_to_the_null_device(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        argv = self._captured_argv(monkeypatch)
+        assert argv[-2:] == ["-o", os.devnull]
+
+    def test_no_temp_file_is_created_for_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """os.devnull, not a literal: on Windows it is NUL, not /dev/null."""
+        argv = self._captured_argv(monkeypatch)
+        assert not any(a.endswith(".ii") for a in argv)
 
 
 class _FakeNode:

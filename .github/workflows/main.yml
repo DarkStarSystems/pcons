@@ -29,6 +29,27 @@ jobs:
       - name: Run ty typecheck
         run: uvx ty check pcons/ examples/
 
+  docs:
+    # Both docs builds are seconds each; a broken one otherwise surfaces
+    # only when someone reads readthedocs or runs `make docs`.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "latest"
+      - name: Install pandoc and ninja
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=5 -o Acquire::http::Timeout=20 \
+            pandoc ninja-build
+      - name: Build the dogfood demo page (pcons building its own docs)
+        run: uv run pcons -C docs
+      - name: Build the site (what ReadTheDocs publishes)
+        run: uv run --extra docs mkdocs build --strict
+
   test:
     needs: lint
     timeout-minutes: 10

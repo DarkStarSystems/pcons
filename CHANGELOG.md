@@ -32,9 +32,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime dependency.
 - **`pcons cache` is a group of `list`, `show`, `clear` and `path`.** `pcons cache
   --help` describes each one; bare `pcons cache` still lists.
+- **Toolchains load only when used.** `import pcons` drops from 66 ms to 41 ms:
+  toolchain modules import on first lookup, so a C build no longer pays for Qt,
+  CUDA, Swift and the rest. `from pcons.toolchains import GccToolchain` and
+  name-based lookup (`Environment(toolchain="gcc")`) work unchanged.
 
 ### Fixed
 
+- **A bare `Configure()` caches in the run's build directory.** It defaulted
+  to a literal `build/`, so `pcons -B out` wrote `pcons_config.json` to a
+  directory the build never used. It now honors `PCONS_BUILD_DIR` like
+  `Project` does; passing `build_dir=` explicitly is unchanged.
 - **`raise SystemExit("message")` from a build script prints the message.**
   The CLI now properly prints the message on stderr, as it does when
   the script runs directly under python. Also `sys.exit(0)` now generates build

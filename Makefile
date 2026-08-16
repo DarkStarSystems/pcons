@@ -80,7 +80,7 @@ clean:            ## Clean unused files.
 .PHONY: docs
 docs:             ## Build the single-page dogfood demo (pcons building its own front page). The real site is `make docs-site`.
 	@echo "building dogfood demo page (docs/pcons-build.py) ..."
-	cd docs && uv run python pcons-build.py && ninja -C build
+	uv run pcons -C docs
 	@open docs/build/index.html || xdg-open docs/build/index.html
 
 .PHONY: docs-site

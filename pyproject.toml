@@ -21,10 +21,7 @@ classifiers = [
 ]
 
 dependencies = [
-    # Bounded below 9: `pcons run` reads click's private `_protected_args` to
-    # see a command name before dispatching into a command that does not exist
-    # until the build script has run. click 9 may rename it.
-    "click>=8.4,<9",  # CLI parsing
+    "click>=8.4,<9",  # CLI parsing; <9: the CLI reads click internals click 9 removes
     "tomli>=2.0;python_version<'3.11'",  # TOML parsing (built-in in 3.11+)
     "tomli-w>=1.0",  # TOML writing
     "pbxproj>=3.0.0",  # Xcode project file manipulation
@@ -51,6 +48,7 @@ dev = [
 docs = [
     "mkdocs>=1.5",
     "mkdocs-material>=9.0",
+    "mkdocs-macros-plugin>=1.0",
 ]
 
 [project.scripts]
@@ -126,6 +124,9 @@ exclude = ["**/integrations/rez/**", "**/rez_packages/**"]
 [tool.ruff]
 target-version = "py311"
 line-length = 88
+# Never lint fenced code in docs: newer ruff versions check markdown by
+# default, and doc snippets are deliberately elliptical.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = [

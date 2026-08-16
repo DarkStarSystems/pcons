@@ -90,10 +90,25 @@ def _snapshot_registries() -> tuple[dict[str, Any], dict[str, Any]]:
 
 
 def _restore_registries(snapshot: tuple[dict[str, Any], dict[str, Any]]) -> None:
-    """Restore the global registries to a prior `_snapshot_registries()` result."""
+    """Restore the global registries to a prior `_snapshot_registries()` result.
+
+    With one exception: a builder that a *pcons* module registered during the
+    test survives. Toolchains import lazily and register their builders as an
+    import side effect (Qt's QtProgram, for example), and imports do not run
+    again — stripping such a registration would lose it for the rest of the
+    process, failing every later test that uses it. Only registrations made
+    by test code itself are dropped.
+    """
     builders, presets = snapshot
+    imported = {
+        name: reg
+        for name, reg in BuilderRegistry._builders.items()
+        if name not in builders
+        and getattr(reg.create_target, "__module__", "").startswith("pcons.")
+    }
     BuilderRegistry._builders.clear()
     BuilderRegistry._builders.update(builders)
+    BuilderRegistry._builders.update(imported)
     _PRESET_REGISTRY.clear()
     _PRESET_REGISTRY.update(presets)
 

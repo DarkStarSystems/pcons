@@ -2,6 +2,10 @@
 
 [test]
 description = "Demonstrates C++20 named modules with Ninja dyndep ordering"
+# Configure a second time and require ninja to find nothing to do: the module
+# scans the second run reuses from its cache must answer what the first run's
+# scans did.
+configure_twice = true
 
 expected_outputs = [
     "build/obj.hello/src/mod1.cppm.o",

@@ -200,6 +200,15 @@ class _FinderEntry:
     description: str = ""
 
 
+@dataclass(frozen=True)
+class _LazyEntry:
+    """A toolchain module not yet imported (see ToolchainRegistry.register_lazy)."""
+
+    module: str
+    category: str = "general"
+    description: str = ""
+
+
 class ToolchainRegistry:
     """Registry for toolchains that support auto-discovery.
 
@@ -221,6 +230,51 @@ class ToolchainRegistry:
     def __init__(self) -> None:
         self._toolchains: dict[str, ToolchainEntry] = {}
         self._finders: dict[str, _FinderEntry] = {}
+        self._lazy: dict[str, _LazyEntry] = {}
+        # Every register_lazy() declaration ever made, kept after
+        # materialization so the declarations stay checkable against what
+        # the modules actually register (see tests/toolchains).
+        self._lazy_declared: dict[str, _LazyEntry] = {}
+
+    def register_lazy(
+        self,
+        names: Sequence[str],
+        module: str,
+        *,
+        category: str = "general",
+        description: str = "",
+    ) -> None:
+        """Declare that importing *module* registers the given names.
+
+        The module is imported the first time one of the names is looked up,
+        or the first time its category is searched, and its own
+        ``register()``/``register_finder()`` calls take over from there.
+        This keeps `import pcons` from paying for every toolchain up front
+        while name-based lookup still finds them all.
+        """
+        entry = _LazyEntry(module=module, category=category, description=description)
+        for name in names:
+            self._lazy[name.lower()] = entry
+            self._lazy_declared[name.lower()] = entry
+
+    def lazy_declarations(self) -> dict[str, _LazyEntry]:
+        """All register_lazy() declarations, materialized or not."""
+        return dict(self._lazy_declared)
+
+    def _materialize(self, key: str) -> None:
+        """Import the module lazily declared for *key*, if any."""
+        entry = self._lazy.pop(key, None)
+        if entry is None:
+            return
+        import importlib
+
+        importlib.import_module(entry.module)
+
+    def _materialize_category(self, category: str) -> None:
+        """Import every lazily-declared module in *category*."""
+        for key, entry in list(self._lazy.items()):
+            if entry.category == category:
+                self._materialize(key)
 
     def register_finder(
         self,
@@ -255,6 +309,8 @@ class ToolchainRegistry:
         name is both a finder and an alias.
         """
         names: dict[str, str] = {}
+        for alias, lazy_entry in self._lazy.items():
+            names[alias] = lazy_entry.description
         for alias, tc_entry in self._toolchains.items():
             names[alias] = tc_entry.description
         for name, f_entry in self._finders.items():
@@ -295,6 +351,8 @@ class ToolchainRegistry:
 
     def _resolve_one(self, name: str) -> BaseToolchain:
         key = name.lower()
+        if key not in self._finders and key not in self._toolchains:
+            self._materialize(key)
 
         finder = self._finders.get(key)
         if finder is not None:
@@ -316,7 +374,7 @@ class ToolchainRegistry:
                 )
             return entry.create_toolchain()
 
-        known = ", ".join(sorted({*self._finders, *self._toolchains}))
+        known = ", ".join(sorted({*self._finders, *self._toolchains, *self._lazy}))
         raise ValueError(f"Unknown toolchain '{name}'. Known names: {known}")
 
     def register(
@@ -365,7 +423,10 @@ class ToolchainRegistry:
 
     def get(self, name: str) -> ToolchainEntry | None:
         """Get toolchain entry by name."""
-        return self._toolchains.get(name.lower())
+        key = name.lower()
+        if key not in self._toolchains:
+            self._materialize(key)
+        return self._toolchains.get(key)
 
     def find_available(
         self,
@@ -381,6 +442,8 @@ class ToolchainRegistry:
         Returns:
             A configured toolchain, or None if none available.
         """
+        self._materialize_category(category)
+
         # Collect unique entries in preference order
         entries_to_try: list[ToolchainEntry] = []
         seen_classes: set[type] = set()
@@ -417,6 +480,8 @@ class ToolchainRegistry:
         prefer: list[str] | None = None,
     ) -> list[str]:
         """Get the list of toolchain names that would be tried."""
+        self._materialize_category(category)
+
         tried: list[str] = []
         seen_classes: set[type] = set()
 
