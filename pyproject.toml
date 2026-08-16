@@ -21,7 +21,10 @@ classifiers = [
 ]
 
 dependencies = [
-    "click>=8.4",  # CLI parsing
+    # Bounded below 9: `pcons run` reads click's private `_protected_args` to
+    # see a command name before dispatching into a command that does not exist
+    # until the build script has run. click 9 may rename it.
+    "click>=8.4,<9",  # CLI parsing
     "tomli>=2.0;python_version<'3.11'",  # TOML parsing (built-in in 3.11+)
     "tomli-w>=1.0",  # TOML writing
     "pbxproj>=3.0.0",  # Xcode project file manipulation

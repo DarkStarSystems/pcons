@@ -2061,6 +2061,18 @@ def cli_cache_path(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
     ctx.exit(_cache_path(build_dir))
 
 
+def _protected_args(ctx: click.Context) -> list[str]:
+    """The command name click has parsed but not yet descended into.
+
+    click's own private attribute, read because a group whose commands only
+    exist once the build script has run has no public way to see the name
+    before dispatch. Read loudly: behind a `getattr` default, click renaming it
+    would turn `pcons run <cmd>` into a silent listing instead of a run.
+    `pyproject.toml` bounds click below 9 for the same reason.
+    """
+    return list(ctx._protected_args)
+
+
 class RunGroup(MergingGroup):
     """The commands a build script or an add-on module declared.
 
@@ -2242,7 +2254,7 @@ class RunGroup(MergingGroup):
         raises on a name two origins declare, into a stream that carries
         nothing but completion candidates.
         """
-        if getattr(ctx, "_protected_args", None):
+        if _protected_args(ctx):
             # A command name has already been typed. click would normally have
             # descended into it by now; it could not, because `get_command`
             # answers None without the script. Offering the *sibling* names here
@@ -2286,7 +2298,7 @@ class RunGroup(MergingGroup):
         # Not `load_declared_modules`: this group needs its modules on the help
         # and completion paths too, where no command is ever invoked.
         self._load_modules(ctx)
-        args = [*getattr(ctx, "_protected_args", []), *ctx.args]
+        args = [*_protected_args(ctx), *ctx.args]
         if not args:
             # Bare `pcons run` lists, and the listing comes from the cache, so
             # do not pay for a script run to print it.
