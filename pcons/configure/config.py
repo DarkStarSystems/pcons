@@ -71,15 +71,21 @@ class Configure:
     def __init__(
         self,
         *,
-        build_dir: Path | str = "build",
+        build_dir: Path | str | None = None,
         cache_file: str = "pcons_config.json",
     ) -> None:
         """Create a configure context.
 
         Args:
-            build_dir: Directory for build outputs.
+            build_dir: Directory for build outputs. Defaults to the build
+                directory of the run (``PCONS_BUILD_DIR``, set by the CLI
+                from ``-B``), falling back to ``build`` — the same default
+                a ``Project`` uses, so a bare ``Configure()`` caches where
+                the build files go.
             cache_file: Name of the cache file within build_dir.
         """
+        if build_dir is None:
+            build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
         self.platform = get_platform()
         self.build_dir = Path(build_dir)
         self._cache_file = cache_file

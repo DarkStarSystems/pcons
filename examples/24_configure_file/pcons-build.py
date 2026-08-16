@@ -18,7 +18,7 @@ env = project.Environment(toolchain="c")
 
 # Probe the configured compiler. Results are cached in the build dir,
 # so repeat runs answer from the cache without invoking the compiler.
-config = Configure(build_dir="build")
+config = Configure()
 checks = ToolChecks(config, env, "cc")
 
 have_stdint = checks.check_header("stdint.h").success  # everywhere

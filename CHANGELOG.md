@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A bare `Configure()` caches in the run's build directory.** It defaulted
+  to a literal `build/`, so `pcons -B out` wrote `pcons_config.json` to a
+  directory the build never used. It now honors `PCONS_BUILD_DIR` like
+  `Project` does; passing `build_dir=` explicitly is unchanged.
 - **`raise SystemExit("message")` from a build script prints the message.**
   The CLI now properly prints the message on stderr, as it does when
   the script runs directly under python. Also `sys.exit(0)` now generates build
