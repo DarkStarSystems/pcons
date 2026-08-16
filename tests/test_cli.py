@@ -1520,6 +1520,55 @@ class TestRunGroup:
         assert result.exit_code == 0
         assert "debug=uart0 build_dir=mine" in result.stdout
 
+    def test_a_build_script_spelled_before_run_is_honoured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons -b other.py run <cmd>` dispatches out of `other.py`."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        other = tmp_path / "other.py"
+        other.write_text(
+            "from pcons import Project, cli_command\n"
+            "project = Project('other')\n"
+            "@cli_command()\n"
+            "def only_here():\n"
+            '    "Only here."\n'
+            '    print("dispatched from other")\n'
+        )
+
+        result = _invoke("-b", str(other), "run", "only-here")
+
+        assert result.exit_code == 0
+        assert "dispatched from other" in result.stdout
+
+    def test_the_script_keeps_the_logging_it_configured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dispatch must not re-run `configure_logging` inside the script's
+        window: its `basicConfig(force=True)` would tear down whatever the
+        build script had just set up, right before the command runs."""
+        self._project(tmp_path, monkeypatch)
+        (tmp_path / "pcons-build.py").write_text(
+            RUN_SCRIPT
+            + "\n"
+            + "import logging\n"
+            + "_marker = logging.StreamHandler()\n"
+            + '_marker.set_name("script-marker")\n'
+            + "logging.getLogger().addHandler(_marker)\n"
+            + "\n"
+            + "@project.cli_command()\n"
+            + "def handlers():\n"
+            + '    "Report the root handlers."\n'
+            + "    names = [h.get_name() for h in logging.getLogger().handlers]\n"
+            + '    print("marker=" + str("script-marker" in names))\n'
+        )
+        self._generated(tmp_path)
+
+        result = _invoke("run", "handlers")
+
+        assert result.exit_code == 0
+        assert "marker=True" in result.stdout
+
     def test_the_command_sees_a_resolved_project(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

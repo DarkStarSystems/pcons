@@ -2306,6 +2306,17 @@ class RunGroup(MergingGroup):
             # names both so the user can tell which to rename.
             raise click.ClickException(str(e)) from e
 
+    def _dispatch_only(self, ctx: click.Context) -> Any:
+        """click's own dispatch, without `MergingGroup`'s prologue.
+
+        `invoke` below runs that prologue itself, before the build script is
+        read. Reaching `MergingGroup.invoke` here would run it a second time,
+        and on the dispatch path that second time lands *inside* the script's
+        window, where `configure_logging`'s ``basicConfig(force=True)`` would
+        tear down whatever logging the build script had just set up.
+        """
+        return click.Group.invoke(self, ctx)
+
     def invoke(self, ctx: click.Context) -> Any:
         """Dispatch inside the build script's environment.
 
@@ -2326,16 +2337,19 @@ class RunGroup(MergingGroup):
         if not args:
             # Bare `pcons run` lists, and the listing comes from the cache, so
             # do not pay for a script run to print it.
-            return super().invoke(ctx)
+            return self._dispatch_only(ctx)
 
-        script = _resolve_build_script(None)
+        spelled_script = self._spelled(ctx, "build_script")
+        script = _resolve_build_script(
+            Path(str(spelled_script)) if spelled_script is not None else None
+        )
         if script is None:
             # No script, so no window and no project: only a module's commands
             # can resolve, and a script's name is simply unknown.
-            return super().invoke(ctx)
+            return self._dispatch_only(ctx)
 
-        parent_invoke = super().invoke  # bound now: a bare super() in the lambda
-        dispatched: list[Any] = []  # would look for it in the closure
+        parent_invoke = self._dispatch_only  # bound now: a bare super() in the
+        dispatched: list[Any] = []  # lambda would look for it in the closure
 
         def dispatch() -> None:
             dispatched.append(parent_invoke(ctx))
