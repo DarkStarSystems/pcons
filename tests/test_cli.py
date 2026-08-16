@@ -667,6 +667,36 @@ class TestRunScriptEnvironment:
         assert exit_code == 0
         assert not (build_dir / CACHE_FILE).exists()
 
+    def test_a_resolve_error_is_not_reported_as_a_missing_project(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The `generate=False` path (`pcons explain`, `pcons run`) resolves the
+        project itself, and resolution raises ValueError of its own. Reporting
+        those as a missing Project hides the real error and its traceback."""
+        from pcons.core.project import Project
+
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        def boom(self: Project, *args: object, **kwargs: object) -> None:
+            raise ValueError("a resolution error of resolve's own")
+
+        monkeypatch.setattr(Project, "resolve", boom)
+
+        with caplog.at_level(logging.ERROR):
+            exit_code, _ = run_script(script, build_dir, generate=False, persist=False)
+
+        assert exit_code == 1
+        assert "No Project created" not in caplog.text
+        assert "a resolution error of resolve's own" in caplog.text
+
     def test_regen_command_carries_no_cache_flag(self, tmp_path: Path) -> None:
         """The self-regeneration argv ends with --no-cache so it never persists."""
         from pcons.core.invocation import Invocation

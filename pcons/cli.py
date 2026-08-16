@@ -548,31 +548,35 @@ def run_script(
                 exec(code, namespace)
 
                 # Run any deferred generate requests registered by the script
-                try:
-                    from pcons.generators.generator import BaseGenerator
+                from pcons.generators.generator import BaseGenerator
 
+                # Narrow: everything below raises ValueError of its own --
+                # resolution most of all -- and reporting any of them as a
+                # missing Project would hide the real error and its traceback.
+                try:
                     top_level = Project.top_level()
-                    if generate:
-                        BaseGenerator._generate_pending(top_level)
-                    else:
-                        _cancel_pending_generation()
-                        if not top_level._resolved:
-                            top_level.resolve()
-                    if persist:
-                        _warn_unread_cached_vars(cached_vars, cli_vars)
-                        _persist_run_settings(
-                            cache,
-                            persist_vars,
-                            persist_variant,
-                            persist_gen,
-                            current_source,
-                            # Only a generating run records the listing, so a
-                            # non-generating one cannot stale it.
-                            _declared_command_listing() if generate else None,
-                        )
                 except ValueError:
                     logger.error("No Project created in build script")
                     return 1, []
+
+                if generate:
+                    BaseGenerator._generate_pending(top_level)
+                else:
+                    _cancel_pending_generation()
+                    if not top_level._resolved:
+                        top_level.resolve()
+                if persist:
+                    _warn_unread_cached_vars(cached_vars, cli_vars)
+                    _persist_run_settings(
+                        cache,
+                        persist_vars,
+                        persist_variant,
+                        persist_gen,
+                        current_source,
+                        # Only a generating run records the listing, so a
+                        # non-generating one cannot stale it.
+                        _declared_command_listing() if generate else None,
+                    )
 
             except SystemExit as e:
                 exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
