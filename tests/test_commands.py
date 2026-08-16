@@ -161,9 +161,18 @@ class TestOrigins:
 
         assert commands.declared()["one"][0].origin == "module:mine"
 
-    def test_inside_a_scope_a_declaration_is_the_scripts(self) -> None:
+    def test_inside_a_scope_an_add_on_is_still_the_modules(self) -> None:
+        """A module loaded *during* a script run is the module's, not the
+        script's: attributed to the script it would be written into the
+        persisted listing and dropped on the next run's way in."""
         with commands.script_scope():
             pcons.cli_command("one")(as_module("mine", lambda: None))
+
+        assert commands.declared()["one"][0].origin == "module:mine"
+
+    def test_inside_a_scope_the_script_body_is_the_scripts(self) -> None:
+        with commands.script_scope():
+            pcons.cli_command("one")(as_script_body(lambda: None))
 
         assert commands.declared()["one"][0].origin == "script"
 

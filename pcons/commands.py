@@ -116,11 +116,14 @@ def _origin_of(func: Callable[..., Any]) -> str:
     imports an add-on as ``pcons.modules.<name>``, which is the name the user
     knows it by.
     """
-    if _script_depth > 0:
-        return SCRIPT_ORIGIN
     module = _declaring_module(func)
     if module.startswith(_MODULE_PREFIX):
-        module = module[len(_MODULE_PREFIX) :]
+        # Tested before the scope: a module loaded *during* a script run is
+        # still the module's, and attributing it to the script would put it in
+        # the persisted listing and drop it on the next run's way in.
+        return f"module:{module[len(_MODULE_PREFIX) :]}"
+    if _script_depth > 0:
+        return SCRIPT_ORIGIN
     return f"module:{module}"
 
 
