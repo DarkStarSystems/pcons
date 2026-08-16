@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -15,14 +15,6 @@ from click.testing import CliRunner
 import pcons
 from pcons import commands
 from pcons.core.errors import PconsError
-
-
-@pytest.fixture(autouse=True)
-def clean_registry() -> Iterator[None]:
-    """No declaration outlives its test."""
-    commands.clear()
-    yield
-    commands.clear()
 
 
 def as_module(name: str, func: Callable[..., Any]) -> Callable[..., Any]:

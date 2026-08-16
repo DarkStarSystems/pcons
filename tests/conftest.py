@@ -7,6 +7,8 @@ from typing import Any
 import pytest
 from hypothesis import settings
 
+from pcons import commands as user_commands
+from pcons import modules
 from pcons.core import invocation
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.cache import reset_cache
@@ -145,12 +147,19 @@ def clear_project_tree():
     The enabled debug subsystems go with them: they are process-wide, and a
     test that turns tracing on would otherwise put DEBUG lines in every later
     test's captured stderr.
+
+    The declared-command registry and the loaded add-on modules are
+    process-wide in the same way: a test that declares `pcons run` commands, or
+    loads a module that declares some, would otherwise leave them for whichever
+    test lists or dispatches next.
     """
     Project._clear_tree()
     BaseGenerator._clear_pending()
     invocation.clear()
     reset_cache()
     reset_debug()
+    user_commands.clear()
+    modules.clear_modules()
     registries = _snapshot_registries()
     yield
     _restore_registries(registries)
@@ -159,6 +168,8 @@ def clear_project_tree():
     invocation.clear()
     reset_cache()
     reset_debug()
+    user_commands.clear()
+    modules.clear_modules()
 
 
 @pytest.fixture(autouse=True)

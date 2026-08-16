@@ -1452,16 +1452,6 @@ def register():
 class TestRunGroup:
     """`pcons run <name>`: the commands a script or a module declared."""
 
-    @pytest.fixture(autouse=True)
-    def _clean_registries(self) -> Iterator[None]:
-        from pcons import commands, modules
-
-        commands.clear()
-        modules.clear_modules()
-        yield
-        commands.clear()
-        modules.clear_modules()
-
     @staticmethod
     def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         (tmp_path / "hello.in").write_text("hi")
@@ -2085,16 +2075,6 @@ class TestRunCompletion:
     `format_commands` sits in. Without the override these all come back empty.
     """
 
-    @pytest.fixture(autouse=True)
-    def _clean_registries(self) -> Iterator[None]:
-        from pcons import commands, modules
-
-        commands.clear()
-        modules.clear_modules()
-        yield
-        commands.clear()
-        modules.clear_modules()
-
     @staticmethod
     def _complete(incomplete: str = "", *before: str) -> list[tuple[str, str]]:
         """What the shell would be offered for `pcons run <before> <incomplete>`.
@@ -2310,16 +2290,6 @@ class TestNonPersistingRunsLeaveTheCacheAlone:
 
 class TestRunGroupWithModules:
     """A module's commands, which need no build script (decision 12)."""
-
-    @pytest.fixture(autouse=True)
-    def _clean_registries(self) -> Iterator[None]:
-        from pcons import commands, modules
-
-        commands.clear()
-        modules.clear_modules()
-        yield
-        commands.clear()
-        modules.clear_modules()
 
     @staticmethod
     def _modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> Path:
