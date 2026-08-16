@@ -7,6 +7,13 @@ from typing import Any
 import pytest
 from hypothesis import settings
 
+# The usage-requirement/target-option registries hold plain strings, so the
+# restore below cannot tell a pcons import side effect from a test's own
+# registration the way the builder restore does. Instead, import the one
+# pcons module that registers into them (install_name) BEFORE the first
+# snapshot, so it is in every baseline — the import will not run again, and
+# toolchains now import lazily, so nothing else forces it.
+import pcons.toolchains.unix  # noqa: E402, F401
 from pcons import commands as user_commands
 from pcons import modules
 from pcons.core import invocation
@@ -15,6 +22,7 @@ from pcons.core.cache import reset_cache
 from pcons.core.debug import reset_debug
 from pcons.core.preset import _PRESET_REGISTRY
 from pcons.core.project import Project
+from pcons.core.target import _KNOWN_TARGET_OPTIONS, _KNOWN_USAGE_REQUIREMENTS
 from pcons.generators.generator import BaseGenerator
 from pcons.toolchains.gcc import (
     GccArchiver,
@@ -80,16 +88,25 @@ int main(void) {
     return src_file
 
 
-def _snapshot_registries() -> tuple[dict[str, Any], dict[str, Any]]:
-    """Snapshot the mutable dicts backing the global BuilderRegistry and the
-    contributed-preset registry, so registrations made during a test can be
+_RegistrySnapshot = tuple[dict[str, Any], dict[str, Any], set[str], dict[str, str]]
+
+
+def _snapshot_registries() -> _RegistrySnapshot:
+    """Snapshot the mutable containers backing the process-global registries:
+    BuilderRegistry, the contributed-preset registry, and the usage-requirement
+    and target-option name sets. Registrations made during a test can then be
     undone afterwards. Copies the containers (not just rebinding names) so
-    later mutation of the live dicts doesn't affect the snapshot.
+    later mutation of the live containers doesn't affect the snapshot.
     """
-    return dict(BuilderRegistry._builders), dict(_PRESET_REGISTRY)
+    return (
+        dict(BuilderRegistry._builders),
+        dict(_PRESET_REGISTRY),
+        set(_KNOWN_USAGE_REQUIREMENTS),
+        dict(_KNOWN_TARGET_OPTIONS),
+    )
 
 
-def _restore_registries(snapshot: tuple[dict[str, Any], dict[str, Any]]) -> None:
+def _restore_registries(snapshot: _RegistrySnapshot) -> None:
     """Restore the global registries to a prior `_snapshot_registries()` result.
 
     With one exception: a builder that a *pcons* module registered during the
@@ -99,7 +116,7 @@ def _restore_registries(snapshot: tuple[dict[str, Any], dict[str, Any]]) -> None
     process, failing every later test that uses it. Only registrations made
     by test code itself are dropped.
     """
-    builders, presets = snapshot
+    builders, presets, usage_reqs, target_opts = snapshot
     imported = {
         name: reg
         for name, reg in BuilderRegistry._builders.items()
@@ -111,6 +128,10 @@ def _restore_registries(snapshot: tuple[dict[str, Any], dict[str, Any]]) -> None
     BuilderRegistry._builders.update(imported)
     _PRESET_REGISTRY.clear()
     _PRESET_REGISTRY.update(presets)
+    _KNOWN_USAGE_REQUIREMENTS.clear()
+    _KNOWN_USAGE_REQUIREMENTS.update(usage_reqs)
+    _KNOWN_TARGET_OPTIONS.clear()
+    _KNOWN_TARGET_OPTIONS.update(target_opts)
 
 
 @pytest.fixture(autouse=True)
@@ -154,10 +175,11 @@ def clear_pcons_env_vars(monkeypatch):
 def clear_project_tree():
     """Ensure global Project/generator/registry state is isolated per test.
 
-    Snapshots the BuilderRegistry and the contributed-preset registry before
+    Snapshots the process-global registries (see _snapshot_registries) before
     each test and restores them afterwards, so a test that registers a
-    builder or preset (directly, or as a side effect of a non-hermetic module
-    load) can't leak state into later tests.
+    builder, preset, usage requirement or target option (directly, or as a
+    side effect of a non-hermetic module load) can't leak state into later
+    tests.
 
     The enabled debug subsystems go with them: they are process-wide, and a
     test that turns tracing on would otherwise put DEBUG lines in every later
