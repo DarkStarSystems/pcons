@@ -4338,15 +4338,35 @@ class TestDoubleDashEscape:
         assert seen[0]["verbose"] is False
         assert seen[0]["build_dir"] == Path("build")
 
-    def test_a_command_name_is_still_a_command(
+    def test_a_command_name_after_the_escape_is_a_target(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        ran_default = _capture_command(monkeypatch, cli_default)
-        seen = _capture_command(monkeypatch, cli_generate)
+        """`--` means targets follow, even when the word is a command name.
+        It used to run the command, which made `pcons -v -- clean` delete
+        the build directory; to run a command, name it before any `--`."""
+        ran_generate = _capture_command(monkeypatch, cli_generate)
+        seen = _capture_command(monkeypatch, cli_default)
         assert _invoke("-B", "out", "--", "generate").exit_code == 0
-        assert not ran_default
+        assert not ran_generate
         assert seen
         assert seen[0]["build_dir"] == Path("out")
+        assert "generate" in seen[0]["extra"]
+
+    def test_the_escape_protects_the_destructive_commands(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ran_clean = _capture_command(monkeypatch, cli_clean)
+        seen = _capture_command(monkeypatch, cli_default)
+        assert _invoke("-v", "--", "clean").exit_code == 0
+        assert not ran_clean
+        assert seen and "clean" in seen[0]["extra"]
+
+    def test_a_command_named_before_the_escape_still_runs(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen = _capture_command(monkeypatch, cli_generate)
+        assert _invoke("generate", "--", "x").exit_code == 0
+        assert seen
 
     def test_the_escape_protects_a_target_named_after_a_command(
         self, monkeypatch: pytest.MonkeyPatch

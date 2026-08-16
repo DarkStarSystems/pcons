@@ -47,10 +47,10 @@ class PconsContext(click.Context):
     ``context_class``, so a callback taking `PconsContext` gets one.
     """
 
-    #: argv held a `--`, which the group's parser consumes before anything
-    #: downstream can see it. After one, a token starting with a dash is a
-    #: target to build, not an option.
-    saw_double_dash: bool = False
+    #: argv held a `--` before any command name, and the group's parser
+    #: consumes it before anything downstream can see it. Everything after
+    #: it names a target to build, never a command or an option.
+    targets_follow: bool = False
 
     #: an unresolvable command name was routed to the catch-all command, so the
     #: group callback knows not to run it a second time.
@@ -354,12 +354,7 @@ class PconsGroup(click.Group):
         which leaves the caller's catch-all fallback in charge -- so
         ``pcons CC=clang hello`` still builds a target called ``hello``.
         """
-        takes_value = {
-            opt
-            for param in self.params
-            if isinstance(param, click.Option) and not param.is_flag
-            for opt in (*param.opts, *param.secondary_opts)
-        }
+        takes_value = self._takes_value_set()
         skip = False
         for index, token in enumerate(args):
             if skip:
@@ -379,18 +374,45 @@ class PconsGroup(click.Group):
     # parameter in an override is unsound in general, so the class this group
     # builds its own context from is spelled out at each one.
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
-        # Recorded before click's parser eats the `--`.
-        cast(PconsContext, ctx).saw_double_dash = "--" in args
+        # Recorded before click's parser eats the `--`: does one come before
+        # the first positional token? Option values do not count as
+        # positionals, or `pcons -B out -- clean` would read `out` as one.
+        takes_value = self._takes_value_set()
+        targets_follow = False
+        skip = False
+        for token in args:
+            if skip:
+                skip = False
+                continue
+            if token == "--":
+                targets_follow = True
+                break
+            if token.startswith("-"):
+                skip = _consumes_next_token(token, takes_value)
+                continue
+            break  # a positional: any later `--` belongs to that command
+        cast(PconsContext, ctx).targets_follow = targets_follow
         return super().parse_args(ctx, args)
+
+    def _takes_value_set(self) -> set[str]:
+        """Spellings of the group's value-taking options."""
+        return {
+            opt
+            for param in self.params
+            if isinstance(param, click.Option) and not param.is_flag
+            for opt in (*param.opts, *param.secondary_opts)
+        }
 
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:
         pcons_ctx = cast(PconsContext, ctx)
-        if args and args[0].startswith("-") and pcons_ctx.saw_double_dash:
-            # `pcons -- -foo` builds a target called -foo. No command name
-            # starts with a dash, so this cannot capture one: `pcons -- build`
-            # still runs the build command.
+        if args and pcons_ctx.targets_follow:
+            # A `--` before any command name means targets follow: everything
+            # after it goes to the catch-all, so `pcons -- clean` builds a
+            # target called clean rather than running the clean command, the
+            # same reading `pcons FOO=bar -- clean` gets from the scan below.
+            # To run a command, name it before any `--`.
             default = self._catch_all()
             if default is not None:
                 pcons_ctx.routed_to_default = True

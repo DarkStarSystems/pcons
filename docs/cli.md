@@ -24,9 +24,9 @@ pcons -- -myapp           # build a target whose name starts with a dash
 ```
 
 `--` marks everything after it as a target or a build variable, never an
-option. A bare `-` is not a target unless written that way. A command name is
-not protected by it: `pcons -- build` still runs the `build` command, since no
-command name starts with a dash.
+option or a command: `pcons -- clean` builds a target named `clean`. To run
+a command, name it before any `--`; a command's own `--` (as in
+`pcons build -- clean`) belongs to that command.
 
 ### `pcons generate`
 

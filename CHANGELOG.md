@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in prose. `pcons -- generate` runs `generate` instead of failing, and abbreviated
   long options (`pcons --verbo`) are no longer silently accepted. click is now a
   runtime dependency.
+- **`--` always means targets follow.** `pcons -- clean` builds a target
+  named `clean`; it used to run the `clean` command (deleting the build
+  directory), while `pcons FOO=bar -- clean` built the target — the two now
+  agree. To run a command, name it before any `--`.
 - **`--pdb` (or `PCONS_PDB=1`) opens pdb postmortem when a build script
   crashes**, at the raise site in the script, after the normal error report.
 - **`pcons cache` is a group of `list`, `show`, `clear` and `path`.** `pcons cache
