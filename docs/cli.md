@@ -233,6 +233,7 @@ test runner, and `completion`, which reads nothing from the project:
 | `-B DIR`, `--build-dir DIR` | Build directory. Default: `$PCONS_BUILD_DIR`, else `build` |
 | `-v`, `--verbose` | Verbose output |
 | `--debug SUBSYSTEMS` | Trace named subsystems, comma-separated: `configure`, `resolve`, `generate`, `subst`, `env`, `deps`; or `all`, or `help` to list them |
+| `--pdb` | On a build-script crash, enter pdb postmortem at the raise site (also `PCONS_PDB=1`) |
 | `--modules-path PATHS` | Extra directories to search for pcons add-on modules, separated by `:` (`;` on Windows) |
 
 Accepted by the commands that run the build script, which are `pcons`,

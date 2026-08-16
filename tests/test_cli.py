@@ -806,6 +806,64 @@ def write_target_script(tmp_path: Path) -> Path:
     return script
 
 
+class TestPdbPostMortem:
+    """--pdb / PCONS_PDB=1: postmortem on a crashing build script.
+
+    The one capability direct runs used to provide; the CLI offers it
+    explicitly now. Off by default, and never for a clean exit."""
+
+    def _crashing_script(self, tmp_path: Path) -> Path:
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "project = Project('demo')\n"
+            "boom = {}['missing']\n"
+        )
+        return script
+
+    def test_off_by_default(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+        import pdb
+
+        called: list[object] = []
+        monkeypatch.setattr(pdb, "post_mortem", lambda tb=None: called.append(tb))
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        code, _ = run_script(self._crashing_script(tmp_path), tmp_path / "build")
+
+        assert code == 1
+        assert called == []
+
+    def test_env_var_enters_post_mortem_at_the_raise(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        import pdb
+
+        frames: list[str] = []
+
+        def fake_post_mortem(tb=None):
+            while tb.tb_next is not None:
+                tb = tb.tb_next
+            frames.append(Path(tb.tb_frame.f_code.co_filename).name)
+
+        monkeypatch.setattr(pdb, "post_mortem", fake_post_mortem)
+        monkeypatch.setenv("PCONS_PDB", "1")
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        code, _ = run_script(self._crashing_script(tmp_path), tmp_path / "build")
+
+        assert code == 1
+        # The innermost frame is the build script's own raise site, so the
+        # debugger opens where the user's code failed, not inside pcons.
+        assert frames == ["pcons-build.py"]
+
+    def test_the_flag_sets_the_env_var(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("PCONS_PDB", raising=False)
+        _invoke("--pdb", "info")
+        assert os.environ.get("PCONS_PDB") == "1"
+
+
 class TestRunScriptWithoutGenerating:
     """`generate=False`: the script runs and resolves, nothing is written.
 

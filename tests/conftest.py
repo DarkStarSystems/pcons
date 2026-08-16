@@ -165,6 +165,7 @@ def clear_pcons_env_vars(monkeypatch):
         "PCONS_VARIANT",
         "PCONS_GENERATOR",
         "PCONS_RECONFIGURE",
+        "PCONS_PDB",
         "VARIANT",
         "GENERATOR",
     ):

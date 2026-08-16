@@ -208,6 +208,25 @@ _ACTED_BEFORE_HANDING_OVER = (
 )
 
 
+def _maybe_postmortem(exc: BaseException) -> None:
+    """Drop into pdb postmortem on *exc* when --pdb / PCONS_PDB=1 asks for it.
+
+    The one capability direct runs used to provide was postmortem on a
+    crashing build script; the CLI is the only entry point now, so it offers
+    the same explicitly. No-op unless requested, and never for SystemExit or
+    click's control-flow exceptions, which the callers handle above.
+    """
+    if not os.environ.get("PCONS_PDB"):
+        return
+    import pdb
+
+    print(
+        "Entering pdb postmortem (--pdb). 'up'/'down' to walk the stack, 'q' to quit.",
+        file=sys.stderr,
+    )
+    pdb.post_mortem(exc.__traceback__)
+
+
 def _cancel_pending_generation() -> None:
     """Drop pending auto-generation after a failed build script.
 
@@ -620,11 +639,13 @@ def run_script(
                 # a Python traceback would only bury them.
                 logger.error("%s", e)
                 _cancel_pending_generation()
+                _maybe_postmortem(e)
                 return 1, []
             except Exception as e:
                 logger.error("Build script failed: %s", e)
                 traceback.print_exc()
                 _cancel_pending_generation()
+                _maybe_postmortem(e)
                 return 1, []
 
             # Outside every handler above, deliberately: click raises to signal

@@ -497,9 +497,27 @@ def common_options(f: F) -> F:
     )(f)
     f = click.option("--debug", metavar="SUBSYSTEMS", help=_debug_help())(f)
     f = click.option(
+        "--pdb",
+        "pdb_",
+        is_flag=True,
+        default=False,
+        expose_value=False,
+        callback=_enable_postmortem,
+        envvar="PCONS_PDB",
+        help="On a build-script crash, enter pdb postmortem at the raise",
+    )(f)
+    f = click.option(
         "-v", "--verbose", is_flag=True, default=False, help="Verbose output"
     )(f)
     return f
+
+
+def _enable_postmortem(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    """--pdb sets PCONS_PDB for the whole process: the crash handlers live in
+    run_script, and the flag may be spelled on either side of the command
+    name, so an environment variable is the one channel they all share."""
+    if value:
+        os.environ["PCONS_PDB"] = "1"
 
 
 def generate_options(f: F) -> F:
