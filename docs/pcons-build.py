@@ -9,20 +9,16 @@ its own documentation. It showcases:
 - Variable substitution in commands
 
 Usage:
-    python docs/pcons-build.py
-    ninja -C docs/build
+    pcons -C docs
 """
 
 from __future__ import annotations
 
-import subprocess
 import sys
-from pathlib import Path
 
 from pcons.core.builder import Builder, CommandBuilder
 from pcons.core.project import Project
-from pcons.core.subst import SourcePath, TargetPath
-from pcons.generators.ninja import NinjaGenerator
+from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.tools.tool import BaseTool
 
 # =============================================================================
@@ -167,99 +163,32 @@ class InsertFooterTool(BaseTool):
 
 
 # =============================================================================
-# Build Configuration
+# Build Description
 # =============================================================================
 
+project = Project("pcons-docs")
+env = project.Environment()
 
-def get_git_info() -> str:
-    """Get git version info for display purposes during build."""
-    try:
-        tag = subprocess.run(
-            ["git", "describe", "--tags", "--always"],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).parent.parent,
-        )
-        version = tag.stdout.strip() if tag.returncode == 0 else "dev"
+GitInfoTool().setup(env)
+PandocTool().setup(env)
+InsertFooterTool().setup(env)
 
-        date = subprocess.run(
-            ["git", "log", "-1", "--format=%cd", "--date=short"],
-            capture_output=True,
-            text=True,
-            cwd=Path(__file__).parent.parent,
-        )
-        date_str = date.stdout.strip() if date.returncode == 0 else "unknown"
+# Configure pandoc with our template. A PathToken keeps the flag relocatable:
+# the generator relativizes the path for the build file it writes.
+env.pandoc.template = PathToken(
+    prefix="--template=", path="template.html", path_type="project"
+)
+env.pandoc.metadata = ["--metadata=title:'pcons User Manual'"]
 
-        return f"pcons {version} | {date_str}"
-    except Exception:
-        return "pcons dev"
+# Target paths are relative to the build directory, sources to the project
+# root (this file's directory). Build files are generated automatically once
+# the script finishes.
 
+# Step 1: version info from git, at build time
+version = env.gitinfo.VersionFile("version.txt", [])  # no inputs: reads git
 
-def main() -> None:
-    # Directories
-    docs_dir = Path(__file__).parent
-    build_dir = docs_dir / "build"
-    template_file = docs_dir / "template.html"
+# Step 2: markdown to HTML, with a placeholder where the version goes
+page = env.pandoc.Html("index.tmp.html", "index.md")
 
-    # Create project
-    project = Project("pcons-docs", build_dir=build_dir)
-    env = project.Environment()
-
-    # Set up custom tools
-    gitinfo_tool = GitInfoTool()
-    gitinfo_tool.setup(env)
-
-    pandoc_tool = PandocTool()
-    pandoc_tool.setup(env)
-
-    footer_tool = InsertFooterTool()
-    footer_tool.setup(env)
-
-    # Configure pandoc with our template
-    env.pandoc.template = f"--template={template_file}"
-    env.pandoc.metadata = ["--metadata=title:'pcons User Manual'"]
-    # Note: We don't pass version-info to pandoc since we inject it separately
-
-    # ==========================================================================
-    # Build Rules
-    # ==========================================================================
-
-    # Step 1: Generate version info file
-    # This creates build/version.txt with git tag/sha and date
-    env.gitinfo.VersionFile(
-        build_dir / "version.txt",
-        [],  # No inputs - reads from git
-    )
-
-    # Step 2: Convert markdown to HTML (with placeholder for version)
-    env.pandoc.Html(
-        build_dir / "index.tmp.html",
-        docs_dir / "index.md",
-    )
-
-    # Step 3: Insert version info into the HTML footer
-    env.insertfooter.Insert(
-        build_dir / "index.html",
-        [build_dir / "index.tmp.html", build_dir / "version.txt"],
-    )
-
-    # ==========================================================================
-    # Generate Ninja Build File
-    # ==========================================================================
-
-    generator = NinjaGenerator()
-    generator.generate(project)
-
-    # Print status
-    git_info = get_git_info()
-    print(f"Generated {build_dir / 'build.ninja'}")
-    print(f"Version: {git_info}")
-    print()
-    print("To build the documentation:")
-    print(f"  ninja -C {build_dir}")
-    print()
-    print(f"Output will be at: {build_dir / 'index.html'}")
-
-
-if __name__ == "__pcons__":
-    main()
+# Step 3: inject the version info into the HTML footer
+env.insertfooter.Insert("index.html", [*page, *version])
