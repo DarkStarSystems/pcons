@@ -697,6 +697,33 @@ class TestRunScriptEnvironment:
         assert "No Project created" not in caplog.text
         assert "a resolution error of resolve's own" in caplog.text
 
+    def test_a_regen_refreshes_the_command_listing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ninja's self-regeneration passes persist=False. Without the listing
+        being written there too, a command added to the script would never be
+        listed again: build.ninja is newer than the script from then on."""
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        base = "from pcons import Project, cli_command\nproject = Project('demo')\n"
+        script.write_text(base)
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+        assert BuildCache(build_dir).get("commands") == []
+
+        script.write_text(
+            base + "@cli_command()\ndef flash():\n    'Flash it.'\n    pass\n"
+        )
+        assert run_script(script, build_dir, persist=False)[0] == 0
+
+        listed = BuildCache(build_dir).get("commands")
+        assert [entry["name"] for entry in listed] == ["flash"]
+
     def test_regen_command_carries_no_cache_flag(self, tmp_path: Path) -> None:
         """The self-regeneration argv ends with --no-cache so it never persists."""
         from pcons.core.invocation import Invocation

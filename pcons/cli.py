@@ -300,13 +300,31 @@ def _declared_command_listing() -> list[dict[str, str]]:
     ]
 
 
+def _record_command_listing(cache: BuildCache, *, persist: bool) -> None:
+    """Write what the build script declared into the build dir's listing.
+
+    Written on every *generating* run, not only a persisting one, so ninja's
+    self-regeneration edge refreshes it: that re-invoke passes ``--no-cache``,
+    and without this a command added to the script would never reach the
+    listing again, build.ninja being newer than the script from then on.
+
+    Including an empty list. Unlike the keys that fall back to a default when
+    absent, a name left in place would be listed forever after it was deleted
+    from the script.
+
+    A regen still never *creates* a cache, which is the other half of what
+    ``persist=False`` means, so an untouched build directory is left alone.
+    """
+    if persist or not cache.is_empty:
+        cache.update({"commands": _declared_command_listing()})
+
+
 def _persist_run_settings(
     cache: BuildCache,
     variables: dict[str, str],
     variant: str | None,
     generator: str | None,
     source_dir: str,
-    commands: list[dict[str, str]] | None = None,
 ) -> None:
     """Persist the settings resolved for this run into the build-dir cache.
 
@@ -317,11 +335,9 @@ def _persist_run_settings(
     ``source_dir`` is recorded so a later run can detect a cache that belongs to
     a different source tree (a copied or moved build dir) and refuse to apply it.
 
-    ``commands`` is the declared-command listing, written whenever it is given
-    and **including an empty list**: unlike the other keys, which fall back to a
-    default when absent, a stale name left in place would be listed forever after
-    it was deleted from the build script. None means "this run learned nothing
-    about them", which is a non-generating run.
+    The declared-command listing is written separately, by the caller: it
+    describes the build script rather than this run's argv, so it is recorded
+    on every generating run and not only on a persisting one.
     """
     updates: dict[str, object] = {"source_dir": source_dir}
     if variables:
@@ -330,8 +346,6 @@ def _persist_run_settings(
         updates["variant"] = variant
     if generator:
         updates["generator"] = generator
-    if commands is not None:
-        updates["commands"] = commands
     cache.update(updates)
 
 
@@ -565,6 +579,8 @@ def run_script(
                     _cancel_pending_generation()
                     if not top_level._resolved:
                         top_level.resolve()
+                if generate:
+                    _record_command_listing(cache, persist=persist)
                 if persist:
                     _warn_unread_cached_vars(cached_vars, cli_vars)
                     _persist_run_settings(
@@ -573,9 +589,6 @@ def run_script(
                         persist_variant,
                         persist_gen,
                         current_source,
-                        # Only a generating run records the listing, so a
-                        # non-generating one cannot stale it.
-                        _declared_command_listing() if generate else None,
                     )
 
             except SystemExit as e:
