@@ -180,14 +180,16 @@ def cli_command(
     Returns a real `click.Command`, so every click decorator applies to the
     function below this one. The name defaults to click's derivation from the
     function name, which turns ``build_docs`` into ``build-docs``.
+
+    Plain click, deliberately: pcons' own `MergingCommand` adopts same-named
+    options from the group above and reads ``--debug``/``-v`` as pcons means
+    them, so a command declaring a ``--debug`` of its own would have its value
+    validated as pcons subsystems, and its ``--build-dir`` silently replaced by
+    the run group's. A user command owns its options. `RunGroup.invoke` has
+    already merged and configured pcons' own by the time one runs.
     """
 
     def decorator(func: Callable[..., Any]) -> click.Command:
-        # Local: `_cli_click` imports pcons at module level, and pcons
-        # re-exports from here, so a module-level import would close a cycle.
-        from pcons._cli_click import MergingCommand
-
-        attrs.setdefault("cls", MergingCommand)
         command = click.command(name, **attrs)(func)
         _record(command, func)
         return command
@@ -206,9 +208,6 @@ def cli_group(
     """
 
     def decorator(func: Callable[..., Any]) -> click.Group:
-        from pcons._cli_click import MergingGroup
-
-        attrs.setdefault("cls", MergingGroup)
         group = click.group(name, **attrs)(func)
         _record(group, func)
         return group

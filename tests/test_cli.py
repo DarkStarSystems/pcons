@@ -1493,6 +1493,33 @@ class TestRunGroup:
         assert "baud=9600" in result.stdout
         assert not (tmp_path / "build" / "build.ninja").exists()
 
+    def test_a_command_owns_its_own_debug_and_build_dir_options(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A user command's options are its own, not pcons' meanings.
+
+        Under `MergingCommand` a `--debug` naming a serial port was validated
+        as pcons debug subsystems, and a `--build-dir` was silently replaced by
+        the run group's value.
+        """
+        self._project(tmp_path, monkeypatch)
+        (tmp_path / "pcons-build.py").write_text(
+            RUN_SCRIPT
+            + "\n"
+            + "@project.cli_command()\n"
+            + '@click.option("--debug", default="")\n'
+            + '@click.option("--build-dir", default="mine")\n'
+            + "def probe(debug, build_dir):\n"
+            + '    "Probe."\n'
+            + '    print(f"debug={debug} build_dir={build_dir}")\n'
+        )
+        self._generated(tmp_path)
+
+        result = _invoke("run", "probe", "--debug", "uart0")
+
+        assert result.exit_code == 0
+        assert "debug=uart0 build_dir=mine" in result.stdout
+
     def test_the_command_sees_a_resolved_project(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

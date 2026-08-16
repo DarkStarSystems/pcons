@@ -66,7 +66,14 @@ class TestDeclaring:
         assert isinstance(docs, click.Group)
         assert commands.lookup("docs") is docs
 
-    def test_default_class_merges_options_spelled_earlier(self) -> None:
+    def test_a_user_command_is_plain_click(self) -> None:
+        """Not `MergingCommand`, so a user command owns its own options.
+
+        `MergingCommand` adopts a same-named option from the group above and
+        reads `--debug`/`--verbose` as pcons means them, so a command declaring
+        a `--debug` of its own would have its value validated as pcons
+        subsystems and its `--build-dir` silently replaced by the run group's.
+        """
         from pcons._cli_click import MergingCommand, MergingGroup
 
         @pcons.cli_command()
@@ -77,8 +84,10 @@ class TestDeclaring:
         def two() -> None:
             """Two."""
 
-        assert isinstance(one, MergingCommand)
-        assert isinstance(two, MergingGroup)
+        assert type(one) is click.Command
+        assert type(two) is click.Group
+        assert not isinstance(one, MergingCommand)
+        assert not isinstance(two, MergingGroup)
 
     def test_cls_can_be_overridden(self) -> None:
         class Mine(click.Command):
