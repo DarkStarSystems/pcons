@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   runtime dependency.
 - **`pcons cache` is a group of `list`, `show`, `clear` and `path`.** `pcons cache
   --help` describes each one; bare `pcons cache` still lists.
+- **Toolchains load only when used.** `import pcons` drops from 66 ms to 41 ms:
+  toolchain modules import on first lookup, so a C build no longer pays for Qt,
+  CUDA, Swift and the rest. `from pcons.toolchains import GccToolchain` and
+  name-based lookup (`Environment(toolchain="gcc")`) work unchanged.
 
 ### Fixed
 

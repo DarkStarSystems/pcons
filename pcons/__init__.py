@@ -13,6 +13,34 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from pcons.core.project import Project
+    from pcons.toolchains import (
+        find_cuda_toolchain,
+        find_cython_toolchain,
+        find_emscripten_toolchain,
+        find_fortran_toolchain,
+        find_wasi_toolchain,
+    )
+
+# Toolchain finders beyond C/C++ resolve lazily (PEP 562): each one imports
+# its toolchain module, which `import pcons` should not pay for.
+_LAZY_TOOLCHAIN_FINDERS = frozenset(
+    {
+        "find_cuda_toolchain",
+        "find_cython_toolchain",
+        "find_emscripten_toolchain",
+        "find_fortran_toolchain",
+        "find_wasi_toolchain",
+    }
+)
+
+
+def __getattr__(name: str) -> object:
+    if name in _LAZY_TOOLCHAIN_FINDERS:
+        import pcons.toolchains
+
+        return getattr(pcons.toolchains, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 # Re-export commonly used classes for convenient imports
 from pcons.builders import register_builtin_builders  # noqa: E402
@@ -39,14 +67,7 @@ from pcons.generators.ninja import NinjaGenerator  # noqa: E402
 from pcons.generators.xcode import XcodeGenerator  # noqa: E402
 from pcons.packages.description import PackageDescription  # noqa: E402
 from pcons.packages.imported import ImportedTarget  # noqa: E402
-from pcons.toolchains import (
-    find_c_toolchain,
-    find_cuda_toolchain,
-    find_cython_toolchain,
-    find_emscripten_toolchain,
-    find_fortran_toolchain,
-    find_wasi_toolchain,
-)  # noqa: E402
+from pcons.toolchains import find_c_toolchain  # noqa: E402
 from pcons.tools.install import install_dir  # noqa: E402
 from pcons.util.add_subdirectory import add_subdirectory  # noqa: E402
 from pcons.workers import Worker  # noqa: E402
