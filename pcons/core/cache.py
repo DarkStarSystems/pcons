@@ -80,6 +80,16 @@ class BuildCache:
             f.write("\n")
         os.replace(tmp_path, cache_path)
 
+    @property
+    def is_empty(self) -> bool:
+        """Whether nothing has been cached for this build directory yet.
+
+        True for a build directory no run has written to, so a caller that must
+        refresh a key without ever *creating* a cache file can tell the two
+        apart.
+        """
+        return not self._data
+
     def get(self, key: str, default: Any = None) -> Any:
         """Return the cached value for ``key``, or ``default`` if absent."""
         return self._data.get(key, default)
@@ -102,9 +112,17 @@ class BuildCache:
             del self._data[key]
             self.save()
 
+    def discard(self) -> None:
+        """Forget the cached data without touching the file.
+
+        For a run that must read as though the cache were empty and still leave
+        the build directory as it found it.
+        """
+        self._data = {}
+
     def clear(self) -> None:
         """Drop all cached data and persist."""
-        self._data = {}
+        self.discard()
         self.save()
 
 

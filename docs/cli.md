@@ -141,6 +141,22 @@ pcons cache clear    # discard it
 pcons cache path     # where it lives
 ```
 
+### `pcons run`
+
+Run a command the build script or an add-on module declared. See [Commands of
+your own](user-commands.md).
+
+```bash
+pcons run                       # list what is available
+pcons run flash --baud 9600     # run one, with its own options
+pcons run docs list             # a group's verb
+```
+
+The listing comes from the build directory, so a newly declared command appears
+after the next generate. A command runs with the project resolved and writes no
+build files. Its options are its own: `pcons run` takes no `KEY=value`, and an
+option declared here reaches a command only if the command declares it too.
+
 ### `pcons test`
 
 Run the tests declared by `project.Test()`. This subcommand takes the test

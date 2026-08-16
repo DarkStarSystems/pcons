@@ -1,0 +1,31 @@
+# Test configuration for the user-commands example
+
+[test]
+description = "Commands declared by the build script, reachable as `pcons run <name>`: an option, a group with its own subcommands, and a command reading the resolved project"
+
+expected_outputs = [
+    "build/greeter${BINARY_EXT}",
+]
+
+[verify]
+# ${PCONS} is the pcons under test, as a shell command. A bare `pcons` would
+# depend on a console script being on PATH and on it being this checkout.
+commands = [
+    # The listing comes from the build directory, which the build above wrote.
+    { run = "${PCONS} run", expect_stdout = "greet" },
+    { run = "${PCONS} run", expect_stdout = "Documentation tasks." },
+    # A command with an option of its own, running what the build produced.
+    { run = "${PCONS} run greet --name pcons", expect_stdout = "Hello, pcons!" },
+    # The project is resolved, so a command can ask where a target's output went.
+    # Only the directory is checked: the separator and the suffix are the
+    # platform's, and expected_outputs above already pins the path itself.
+    { run = "${PCONS} run where", expect_stdout = "build_dir: build" },
+    # A group reaches its own subcommands, which pcons never sees.
+    { run = "${PCONS} run docs list", expect_stdout = "greeter.c" },
+    { run = "${PCONS} run docs count --unit files", expect_stdout = "1 files" },
+]
+
+[skip]
+# xcode builds into build/Release, so `where` reports a path the graph says and
+# the xcode build does not use.
+generators = ["xcode"]

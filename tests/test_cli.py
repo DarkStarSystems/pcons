@@ -4,12 +4,13 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -666,6 +667,63 @@ class TestRunScriptEnvironment:
         assert exit_code == 0
         assert not (build_dir / CACHE_FILE).exists()
 
+    def test_a_resolve_error_is_not_reported_as_a_missing_project(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The `generate=False` path (`pcons explain`, `pcons run`) resolves the
+        project itself, and resolution raises ValueError of its own. Reporting
+        those as a missing Project hides the real error and its traceback."""
+        from pcons.core.project import Project
+
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        def boom(self: Project, *args: object, **kwargs: object) -> None:
+            raise ValueError("a resolution error of resolve's own")
+
+        monkeypatch.setattr(Project, "resolve", boom)
+
+        with caplog.at_level(logging.ERROR):
+            exit_code, _ = run_script(script, build_dir, generate=False, persist=False)
+
+        assert exit_code == 1
+        assert "No Project created" not in caplog.text
+        assert "a resolution error of resolve's own" in caplog.text
+
+    def test_a_regen_refreshes_the_command_listing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ninja's self-regeneration passes persist=False. Without the listing
+        being written there too, a command added to the script would never be
+        listed again: build.ninja is newer than the script from then on."""
+        from pcons.core.cache import BuildCache
+
+        build_dir = tmp_path / "build"
+        script = tmp_path / "pcons-build.py"
+        base = "from pcons import Project, cli_command\nproject = Project('demo')\n"
+        script.write_text(base)
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+        assert BuildCache(build_dir).get("commands") == []
+
+        script.write_text(
+            base + "@cli_command()\ndef flash():\n    'Flash it.'\n    pass\n"
+        )
+        assert run_script(script, build_dir, persist=False)[0] == 0
+
+        listed = BuildCache(build_dir).get("commands")
+        assert [entry["name"] for entry in listed] == ["flash"]
+
     def test_regen_command_carries_no_cache_flag(self, tmp_path: Path) -> None:
         """The self-regeneration argv ends with --no-cache so it never persists."""
         from pcons.core.invocation import Invocation
@@ -727,6 +785,1580 @@ class TestRunScriptEnvironment:
         # make replaces ninja in the build slot; new spec has no aux.
         assert run_script(script, build_dir, generator="make")[0] == 0
         assert self._persisted_generator(build_dir) == "make"
+
+
+TARGET_SCRIPT = (
+    "from pcons import Project\n"
+    "project = Project('demo')\n"
+    "env = project.Environment()\n"
+    "hello = env.Command(\n"
+    "    target='hello.txt', source='hello.in', command='cp $SOURCE $TARGET'\n"
+    ")\n"
+    "project.Alias('all', hello)\n"
+)
+
+
+def write_target_script(tmp_path: Path) -> Path:
+    """A script with one real target, needing no toolchain to resolve."""
+    (tmp_path / "hello.in").write_text("hi")
+    script = tmp_path / "pcons-build.py"
+    script.write_text(TARGET_SCRIPT)
+    return script
+
+
+class TestRunScriptWithoutGenerating:
+    """`generate=False`: the script runs and resolves, nothing is written.
+
+    A user-declared command runs against a resolved project with no build
+    files (decision 3 of the feature), which is what this parameter is for.
+    """
+
+    def test_no_build_files_are_written(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = write_target_script(tmp_path)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        exit_code, projects = run_script(script, build_dir, generate=False)
+
+        assert exit_code == 0
+        assert len(projects) == 1
+        assert not (build_dir / "build.ninja").exists()
+
+    def test_the_project_comes_back_resolved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Resolution is what `output_nodes` needs, and it costs no build file."""
+        script = write_target_script(tmp_path)
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        _, projects = run_script(script, tmp_path / "build", generate=False)
+
+        project = projects[0]
+        assert project._resolved
+        assert project.get_target("hello").output_nodes
+
+    def test_the_pending_queue_is_emptied_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Skipping the generate call is not enough on its own.
+
+        A skipped call leaves the script's request queued, and the next caller
+        to drain the queue would write build files this run had promised not
+        to. This asserts on `BaseGenerator`'s private state rather than
+        pretending to be black-box; the observable half is the subprocess test
+        below.
+
+        Note what is *not* asserted: that `_generate_pending()` afterwards is a
+        no-op. It is not queue-only — it calls `project.generate()`
+        unconditionally, so calling it again writes build files whatever the
+        queue holds. The queue being empty is the whole of the claim.
+        """
+        from pcons.generators.generator import BaseGenerator
+
+        script = write_target_script(tmp_path)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir, generate=False)[0] == 0
+
+        # Name-mangled private class state, so read it out of the class dict
+        # rather than spelling the mangled attribute.
+        assert not vars(BaseGenerator)["_BaseGenerator__pending"]
+
+    def test_nothing_is_written_when_the_interpreter_exits(
+        self, tmp_path: Path
+    ) -> None:
+        """The observable version: a real process running a real script to exit.
+
+        The in-process test above reads private state; this one runs a script
+        to interpreter exit in its own process and looks at the build
+        directory.
+        """
+        (tmp_path / "hello.in").write_text("hi")
+        script = tmp_path / "pcons-build.py"
+        script.write_text(TARGET_SCRIPT)
+        build_dir = tmp_path / "build"
+        driver = tmp_path / "driver.py"
+        driver.write_text(
+            "from pathlib import Path\n"
+            "from pcons.cli import run_script\n"
+            "code, projects = run_script(\n"
+            "    Path('pcons-build.py'), Path('build'), generate=False\n"
+            ")\n"
+            "assert code == 0, code\n"
+            "assert projects\n"
+        )
+
+        env: dict[str, str] = dict(os.environ)
+        env["PYTHONPATH"] = str(Path(cli_module.__file__).parents[2])
+        env.pop("PCONS_BUILD_DIR", None)
+        result = subprocess.run(
+            [sys.executable, str(driver)],
+            cwd=tmp_path,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert not (build_dir / "build.ninja").exists(), sorted(
+            p.name for p in build_dir.iterdir()
+        )
+
+    def test_generating_is_still_the_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = write_target_script(tmp_path)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+        assert (build_dir / "build.ninja").exists()
+
+
+class TestRunScriptInsideCallback:
+    """`inside`: a callback holding the script's live environment.
+
+    The one thing this must get right is that its exceptions propagate
+    untouched. click signals success as well as failure by exception, so a
+    handler here would report a user command's normal exit as a failed build
+    script.
+    """
+
+    def test_called_once_with_the_environment_still_up(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "import pcons\n"
+            "project = Project('demo')\n"
+            "pcons.get_var('CC', 'default')\n"
+        )
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        seen: list[dict[str, str]] = []
+
+        def record() -> None:
+            import pcons
+
+            seen.append(
+                {
+                    "build_dir": os.environ["PCONS_BUILD_DIR"],
+                    "vars": os.environ["PCONS_VARS"],
+                    "cwd": os.getcwd(),
+                    "cc": pcons.get_var("CC", "default"),
+                }
+            )
+
+        exit_code, _ = run_script(
+            script,
+            build_dir,
+            variables={"CC": "clang"},
+            generate=False,
+            inside=record,
+        )
+
+        assert exit_code == 0
+        assert len(seen) == 1
+        assert seen[0]["build_dir"] == str(build_dir.absolute())
+        assert json.loads(seen[0]["vars"]) == {"CC": "clang"}
+        assert Path(seen[0]["cwd"]).resolve() == script.parent.resolve()
+        assert seen[0]["cc"] == "clang"
+
+    def test_called_after_the_script_has_settled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The callback sees a resolved project, not a half-built one."""
+        script = write_target_script(tmp_path)
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        resolved: list[bool] = []
+
+        def check() -> None:
+            from pcons.core.project import Project
+
+            resolved.append(Project.top_level()._resolved)
+
+        run_script(script, tmp_path / "build", generate=False, inside=check)
+
+        assert resolved == [True]
+
+    @pytest.mark.parametrize(
+        ("raiser", "expected", "exit_code"),
+        [
+            # click.exceptions.Exit derives from RuntimeError, so the expected
+            # type is pinned exactly: a wide tuple here would be satisfied by
+            # any of these four and could not tell them apart.
+            pytest.param(
+                lambda: (_ for _ in ()).throw(click.exceptions.Exit(0)),
+                click.exceptions.Exit,
+                0,
+                id="exit-0",
+            ),
+            pytest.param(
+                lambda: (_ for _ in ()).throw(click.exceptions.Exit(3)),
+                click.exceptions.Exit,
+                3,
+                id="exit-3",
+            ),
+            pytest.param(
+                lambda: (_ for _ in ()).throw(click.ClickException("no device")),
+                click.ClickException,
+                None,
+                id="click-exception",
+            ),
+            pytest.param(
+                lambda: (_ for _ in ()).throw(RuntimeError("boom")),
+                RuntimeError,
+                None,
+                id="runtime-error",
+            ),
+        ],
+    )
+    def test_an_exception_from_the_callback_propagates_untouched(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        raiser: Callable[[], None],
+        expected: type[BaseException],
+        exit_code: int | None,
+    ) -> None:
+        """No handler, and no `(1, [])` return: click's own exceptions are how a
+        user command reports both success and failure."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        with pytest.raises(expected) as excinfo:
+            run_script(script, tmp_path / "build", generate=False, inside=raiser)
+
+        assert type(excinfo.value) is expected
+        if exit_code is not None:
+            raised = excinfo.value
+            assert isinstance(raised, click.exceptions.Exit)
+            assert raised.exit_code == exit_code
+
+    def test_the_environment_is_restored_when_the_callback_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+
+        monkeypatch.setenv("PCONS_BUILD_DIR", "original-build")
+        _clear_cli_vars()
+        before = os.getcwd()
+
+        def boom() -> None:
+            raise click.ClickException("no device")
+
+        with pytest.raises(click.ClickException):
+            run_script(script, tmp_path / "build", generate=False, inside=boom)
+
+        assert os.environ["PCONS_BUILD_DIR"] == "original-build"
+        assert os.getcwd() == before
+
+    def test_not_called_when_the_script_fails(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A command must not run against a project that never finished."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text("raise RuntimeError('bad script')\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        calls: list[int] = []
+
+        exit_code, _ = run_script(
+            script,
+            tmp_path / "build",
+            generate=False,
+            inside=lambda: calls.append(1),
+        )
+
+        assert exit_code == 1
+        assert calls == []
+
+    def test_not_called_when_the_script_creates_no_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text("x = 1\n")
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        calls: list[int] = []
+
+        exit_code, _ = run_script(
+            script,
+            tmp_path / "build",
+            generate=False,
+            inside=lambda: calls.append(1),
+        )
+
+        assert exit_code == 1
+        assert calls == []
+
+
+class TestScriptCommandsAreScoped:
+    """`run_script` attributes what the script declares to the script."""
+
+    def test_declarations_are_script_origin_and_replaced_each_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons import commands
+
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "project = Project('demo')\n"
+            "@project.cli_command()\n"
+            "def flash():\n"
+            "    'Flash it.'\n"
+        )
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        commands.clear()
+        try:
+            assert run_script(script, tmp_path / "build", generate=False)[0] == 0
+            assert [e.origin for e in commands.declared()["flash"]] == ["script"]
+
+            # A second run replaces rather than duplicating: declaring the same
+            # name twice in one origin is an error, so a leaked scope would fail.
+            assert run_script(script, tmp_path / "build", generate=False)[0] == 0
+            assert len(commands.declared()["flash"]) == 1
+        finally:
+            commands.clear()
+
+
+class TestHelperDeclaredCommandsSurviveARerun:
+    """`--watch` re-runs the build script in one process, and the listing is
+    written from the registry, so anything the registry loses is deleted from
+    the build directory too."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self) -> Iterator[None]:
+        from pcons import commands
+
+        commands.clear()
+        yield
+        commands.clear()
+
+    @staticmethod
+    def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "tasks.py").write_text(
+            "import pcons\n\n\n"
+            "@pcons.cli_command()\n"
+            "def from_helper():\n"
+            '    "Declared by an imported module."\n'
+        )
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\n"
+            "import tasks  # noqa: F401\n"
+            "project = Project('demo')\n"
+            "env = project.Environment()\n"
+            "env.Command(target='hello.txt', source='hello.in',\n"
+            "            command='cp $SOURCE $TARGET')\n"
+            "\n"
+            "@project.cli_command()\n"
+            "def from_body():\n"
+            '    "Declared by the script body."\n'
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        return tmp_path
+
+    def test_a_second_run_keeps_both(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The helper is already in `sys.modules` the second time, so its
+        decorator never fires again."""
+        from pcons import commands
+
+        self._project(tmp_path, monkeypatch)
+        sys.path.insert(0, str(tmp_path))
+        try:
+            for _ in range(3):
+                assert (
+                    run_script(tmp_path / "pcons-build.py", tmp_path / "build")[0] == 0
+                )
+                assert set(commands.declared()) == {"from-helper", "from-body"}
+        finally:
+            sys.path.remove(str(tmp_path))
+            sys.modules.pop("tasks", None)
+
+    def test_the_persisted_listing_keeps_both(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What the user actually sees: `pcons run` after a re-run."""
+        from pcons.core.cache import BuildCache
+
+        self._project(tmp_path, monkeypatch)
+        sys.path.insert(0, str(tmp_path))
+        try:
+            for _ in range(2):
+                assert (
+                    run_script(tmp_path / "pcons-build.py", tmp_path / "build")[0] == 0
+                )
+        finally:
+            sys.path.remove(str(tmp_path))
+            sys.modules.pop("tasks", None)
+
+        listing = BuildCache(tmp_path / "build").get("commands")
+        assert isinstance(listing, list)
+        assert {entry["name"] for entry in listing} == {"from-helper", "from-body"}
+
+
+class TestPersistedCommandListing:
+    """Generating records what the script declared, so `pcons run` can list it
+    without paying for a script run (decision 7 of the feature)."""
+
+    SCRIPT = (
+        "from pcons import Project\n"
+        "project = Project('demo')\n"
+        "\n"
+        "@project.cli_command()\n"
+        "def flash():\n"
+        "    'Flash the board.'\n"
+        "\n"
+        "@project.cli_group()\n"
+        "def docs():\n"
+        "    'Documentation tasks.'\n"
+        "\n"
+        "@docs.command()\n"
+        "def build():\n"
+        "    'Build them.'\n"
+    )
+
+    @staticmethod
+    def _listing(build_dir: Path) -> object:
+        from pcons.core.cache import BuildCache
+
+        return BuildCache(build_dir).get("commands")
+
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self) -> Iterator[None]:
+        from pcons import commands
+
+        commands.clear()
+        yield
+        commands.clear()
+
+    def test_names_and_short_help_in_declaration_order(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+
+        # A group is listed by its own name and help; its verbs are not cached,
+        # which is why `pcons run docs --help` has to run the script.
+        assert self._listing(build_dir) == [
+            {"name": "flash", "help": "Flash the board."},
+            {"name": "docs", "help": "Documentation tasks."},
+        ]
+
+    def test_a_deleted_command_disappears(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The one the unconditional write exists for. Skip the write when the
+        list is empty and a deleted name is listed forever."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir)[0] == 0
+
+        assert self._listing(build_dir) == []
+
+    def test_a_script_declaring_nothing_writes_an_empty_list(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        script = tmp_path / "pcons-build.py"
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+
+        assert self._listing(build_dir) == []
+
+    def test_a_module_declared_command_is_not_recorded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Module commands come from the filesystem at startup; caching them
+        would list them twice where the module exists."""
+        from pcons import commands
+
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        def from_a_module() -> None:
+            """Deploy it."""
+
+        from_a_module.__module__ = "pcons.modules.deploy"
+        commands.cli_command("deploy")(from_a_module)
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+
+        listing = self._listing(build_dir)
+        assert isinstance(listing, list)
+        assert [entry["name"] for entry in listing] == ["flash", "docs"]
+
+    def test_a_non_generating_run_leaves_the_listing_alone(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons run` must not become a writer of the thing it reads."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir)[0] == 0
+        before = self._listing(build_dir)
+
+        script.write_text("from pcons import Project\nProject('demo')\n")
+        assert run_script(script, build_dir, generate=False)[0] == 0
+
+        assert self._listing(build_dir) == before
+
+    def test_nothing_is_written_without_a_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """persist=False is the regen re-invoke, which writes no cache at all."""
+        script = tmp_path / "pcons-build.py"
+        script.write_text(self.SCRIPT)
+        build_dir = tmp_path / "build"
+
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+
+        assert run_script(script, build_dir, persist=False)[0] == 0
+
+        assert self._listing(build_dir) is None
+
+
+RUN_SCRIPT = """\
+import click
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment()
+hello = env.Command(target="hello.txt", source="hello.in", command="cp $SOURCE $TARGET")
+
+(project.root_dir / "ran-marker").write_text("ran")
+
+
+@project.cli_command()
+@click.option("--baud", default=115200, type=int)
+def flash(baud):
+    "Flash the board."
+    import os
+
+    import pcons
+
+    print(f"baud={baud}")
+    # Which build directory the dispatch actually ran against.
+    print("build_dir=" + os.environ["PCONS_BUILD_DIR"])
+    print("cc=" + pcons.get_var("CC", "none"))
+    print("outputs=" + ",".join(str(n.path) for n in project.get_target("hello").output_nodes))
+
+
+@project.cli_group()
+def docs():
+    "Documentation tasks."
+
+
+@docs.command("list")
+def docs_list():
+    "List the docs."
+    print("listed the docs")
+
+
+@project.cli_command()
+def boom():
+    "Fail on purpose."
+    raise click.ClickException("no device")
+
+
+@project.cli_command()
+@click.pass_context
+def bail(ctx):
+    "Exit with 3."
+    ctx.exit(3)
+"""
+
+MODULE_COMMAND = """\
+'''An add-on that declares a command.'''
+import pcons
+
+__pcons_module__ = {"name": "deploy", "version": "1.0"}
+
+
+def register():
+    @pcons.cli_command()
+    def deploy():
+        "Deploy it."
+        from pcons.core.project import Project
+
+        try:
+            resolved = Project.top_level()._resolved
+        except ValueError:
+            resolved = None
+        print(f"deployed project_resolved={resolved}")
+"""
+
+
+class TestRunGroup:
+    """`pcons run <name>`: the commands a script or a module declared."""
+
+    @staticmethod
+    def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "pcons-build.py").write_text(RUN_SCRIPT)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_MODULES_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        return tmp_path
+
+    @staticmethod
+    def _generated(tmp_path: Path, *argv: str) -> Path:
+        """Generate once, so the listing exists, then forget it ever ran."""
+        assert _invoke("generate", *argv).exit_code == 0
+        (tmp_path / "ran-marker").unlink()
+        return tmp_path
+
+    def test_a_command_runs_and_writes_no_build_files(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        (tmp_path / "build" / "build.ninja").unlink()
+
+        result = _invoke("run", "flash", "--baud", "9600")
+
+        assert result.exit_code == 0
+        assert "baud=9600" in result.stdout
+        assert not (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_command_owns_its_own_debug_and_build_dir_options(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A user command's options are its own, not pcons' meanings.
+
+        Under `MergingCommand` a `--debug` naming a serial port was validated
+        as pcons debug subsystems, and a `--build-dir` was silently replaced by
+        the run group's value.
+        """
+        self._project(tmp_path, monkeypatch)
+        (tmp_path / "pcons-build.py").write_text(
+            RUN_SCRIPT
+            + "\n"
+            + "@project.cli_command()\n"
+            + '@click.option("--debug", default="")\n'
+            + '@click.option("--build-dir", default="mine")\n'
+            + "def probe(debug, build_dir):\n"
+            + '    "Probe."\n'
+            + '    print(f"debug={debug} build_dir={build_dir}")\n'
+        )
+        self._generated(tmp_path)
+
+        result = _invoke("run", "probe", "--debug", "uart0")
+
+        assert result.exit_code == 0
+        assert "debug=uart0 build_dir=mine" in result.stdout
+
+    def test_a_build_script_spelled_before_run_is_honoured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons -b other.py run <cmd>` dispatches out of `other.py`."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        other = tmp_path / "other.py"
+        other.write_text(
+            "from pcons import Project, cli_command\n"
+            "project = Project('other')\n"
+            "@cli_command()\n"
+            "def only_here():\n"
+            '    "Only here."\n'
+            '    print("dispatched from other")\n'
+        )
+
+        result = _invoke("-b", str(other), "run", "only-here")
+
+        assert result.exit_code == 0
+        assert "dispatched from other" in result.stdout
+
+    def test_the_script_keeps_the_logging_it_configured(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Dispatch must not re-run `configure_logging` inside the script's
+        window: its `basicConfig(force=True)` would tear down whatever the
+        build script had just set up, right before the command runs."""
+        self._project(tmp_path, monkeypatch)
+        (tmp_path / "pcons-build.py").write_text(
+            RUN_SCRIPT
+            + "\n"
+            + "import logging\n"
+            + "_marker = logging.StreamHandler()\n"
+            + '_marker.set_name("script-marker")\n'
+            + "logging.getLogger().addHandler(_marker)\n"
+            + "\n"
+            + "@project.cli_command()\n"
+            + "def handlers():\n"
+            + '    "Report the root handlers."\n'
+            + "    names = [h.get_name() for h in logging.getLogger().handlers]\n"
+            + '    print("marker=" + str("script-marker" in names))\n'
+        )
+        self._generated(tmp_path)
+
+        result = _invoke("run", "handlers")
+
+        assert result.exit_code == 0
+        assert "marker=True" in result.stdout
+
+    def test_the_command_sees_a_resolved_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run", "flash")
+
+        assert result.exit_code == 0
+        assert "outputs=hello.txt" in result.stdout
+
+    def test_the_command_sees_the_live_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons run` declares no KEY=value of its own (decision 11), so the
+        variables come from the environment or the cache."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        monkeypatch.setenv("PCONS_VARS", json.dumps({"CC": "clang"}))
+        _clear_cli_vars()
+
+        result = _invoke("run", "flash")
+
+        assert result.exit_code == 0
+        assert "cc=clang" in result.stdout
+
+    def test_bare_run_lists_without_running_the_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run")
+
+        assert result.exit_code == 0
+        assert "flash" in result.stdout
+        assert "Flash the board." in result.stdout
+        assert "docs" in result.stdout
+        assert not (tmp_path / "ran-marker").exists()
+
+    def test_run_help_lists_without_running_the_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run", "--help")
+
+        assert result.exit_code == 0
+        assert "flash" in result.stdout
+        assert "Flash the board." in result.stdout
+        assert not (tmp_path / "ran-marker").exists()
+
+    def test_an_empty_listing_says_what_to_do(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The build dir has never generated, so it knows of no commands."""
+        self._project(tmp_path, monkeypatch)
+
+        result = _invoke("run")
+
+        assert result.exit_code == 0
+        assert "pcons generate" in result.stdout
+        assert not (tmp_path / "ran-marker").exists()
+
+    def test_an_empty_listing_prints_no_commands_section(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--help` takes the other path into `format_commands`, which must not
+        write an empty "Commands:" heading with nothing under it."""
+        self._project(tmp_path, monkeypatch)
+
+        result = _invoke("run", "--help")
+
+        assert result.exit_code == 0
+        assert "Commands:" not in result.stdout
+        assert "Options:" in result.stdout
+        assert not (tmp_path / "ran-marker").exists()
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            pytest.param(["-B", "out", "run", "--help"], id="before"),
+            pytest.param(["run", "-B", "out", "--help"], id="after"),
+            # -B is eager and --help is not, so the listing reads the spelled
+            # value however the two were ordered.
+            pytest.param(["run", "--help", "-B", "out"], id="after-help"),
+        ],
+    )
+    def test_the_build_dir_is_read_either_side_of_the_name(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path, "-B", "out")
+        assert (tmp_path / "out" / "pcons_cache.json").exists()
+
+        result = _invoke(*argv)
+
+        assert result.exit_code == 0
+        assert "Flash the board." in result.stdout
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            # The later spelling wins, as it does for every other option.
+            pytest.param(
+                ["-B", "other", "run", "-B", "out", "--help"], id="both-sides"
+            ),
+            # An option that takes a value swallows the next token; the -B after
+            # one is still the group's.
+            pytest.param(
+                ["run", "--debug", "ninja", "-B", "out", "--help"], id="after-a-value"
+            ),
+            pytest.param(
+                ["run", "--modules-path", "nowhere", "-B", "out", "--help"],
+                id="after-modules-path",
+            ),
+        ],
+    )
+    def test_the_listing_reads_the_build_dir_click_would(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        """Help and dispatch must not disagree about which build dir is in play."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path, "-B", "out")
+        (tmp_path / "other").mkdir()
+
+        result = _invoke(*argv)
+
+        assert result.exit_code == 0
+        assert "Flash the board." in result.stdout
+
+    def test_modules_path_after_the_name_reaches_the_listing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Same eager-`--help` problem as -B, and the same fix: it is eager too."""
+        self._project(tmp_path, monkeypatch)
+        module_dir = tmp_path / "mods"
+        module_dir.mkdir()
+        (module_dir / "deploy.py").write_text(
+            "import pcons\n\n\ndef register():\n"
+            "    @pcons.cli_command()\n"
+            "    def deploy():\n"
+            '        "Deploy it."\n'
+        )
+
+        result = _invoke("run", "--modules-path", str(module_dir), "--help")
+
+        assert result.exit_code == 0
+        assert "Deploy it." in result.stdout
+
+    def test_a_spelled_build_dir_beats_the_environment_for_both(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`_adopt_options_spelled_earlier` is explicit that a value click took
+        from the environment must not beat a `-B` spelled before the command.
+        The listing and the dispatch have to reach the same answer, or `pcons
+        run` lists one build directory and runs against another."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path, "-B", "out")
+        (tmp_path / "elsewhere").mkdir()
+        monkeypatch.setenv("PCONS_BUILD_DIR", "elsewhere")
+        _clear_cli_vars()
+
+        listing = _invoke("-B", "out", "run", "--help")
+        dispatch = _invoke("-B", "out", "run", "flash")
+
+        assert listing.exit_code == 0
+        assert "Flash the board." in listing.stdout
+        assert dispatch.exit_code == 0
+        assert f"build_dir={tmp_path / 'out'}" in dispatch.stdout
+
+    def test_the_build_dir_default_honours_the_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fallback comes from the parameter, which carries the envvar; a
+        literal "build" here would ignore PCONS_BUILD_DIR."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path, "-B", "out")
+        monkeypatch.setenv("PCONS_BUILD_DIR", "out")
+
+        result = _invoke("run", "--help")
+
+        assert result.exit_code == 0
+        assert "Flash the board." in result.stdout
+
+    def test_a_commands_own_help_shows_its_own_options(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """This one does run the script: only the script knows the options."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run", "flash", "--help")
+
+        assert result.exit_code == 0
+        assert "--baud" in result.stdout
+        assert (tmp_path / "ran-marker").exists()
+
+    def test_a_group_reaches_its_subcommand(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run", "docs", "list")
+
+        assert result.exit_code == 0
+        assert "listed the docs" in result.stdout
+
+    def test_a_group_lists_its_own_verbs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run", "docs", "--help")
+
+        assert result.exit_code == 0
+        assert "list" in result.stdout
+        assert "List the docs." in result.stdout
+
+    def test_an_unknown_name_is_no_such_command(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`run` is not a second catch-all: an unknown name is not a target."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run", "nosuchthing")
+
+        assert result.exit_code == 2
+        assert "No such command 'nosuchthing'." in result.stderr
+        assert "target" not in result.stderr
+
+    def test_a_click_exception_reports_cleanly(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """What step 02's restructure buys, asserted from the CLI."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run", "boom")
+
+        assert result.exit_code == 1
+        assert "Error: no device" in result.stderr
+        assert "Build script failed" not in result.stderr
+        assert "Traceback" not in result.stderr
+
+    def test_ctx_exit_sets_the_exit_code(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke("run", "bail")
+
+        assert result.exit_code == 3
+        assert "Build script failed" not in result.stderr
+
+    def test_a_failing_script_reports_itself(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(
+            RUN_SCRIPT + "\nraise RuntimeError('bad script')\n"
+        )
+
+        result = _invoke("run", "flash")
+
+        assert result.exit_code == 1
+        assert "bad script" in result.stderr
+        assert "No such command" not in result.stderr
+
+    def test_a_script_that_exits_early_is_not_a_silent_success(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`sys.exit(0)` makes run_script report success without ever reaching
+        the command, so exiting 0 here would say the command ran when it did
+        not."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(
+            RUN_SCRIPT + "\nimport sys\nsys.exit(0)\n"
+        )
+
+        result = _invoke("run", "flash")
+
+        assert result.exit_code != 0
+        assert "exited before the command could run" in result.stderr
+        assert "baud=" not in result.stdout
+
+    @pytest.mark.parametrize(
+        ("argv", "wanted"),
+        [
+            pytest.param(["run", "-v", "flash"], "Running", id="verbose-after"),
+            pytest.param(["-v", "run", "flash"], "Running", id="verbose-before"),
+            pytest.param(
+                ["run", "--debug", "all", "flash"], "DEBUG:", id="debug-after"
+            ),
+        ],
+    )
+    def test_verbose_and_debug_reach_the_script_run(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        argv: list[str],
+        wanted: str,
+    ) -> None:
+        """The script is the only part of `pcons run` that logs, and the group
+        callback runs too late to configure logging for it."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+
+        result = _invoke(*argv)
+
+        assert result.exit_code == 0
+        assert wanted in result.stderr
+
+    def test_the_subcommands_return_value_comes_back(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """click hands a group's return value to a result callback; dropping it
+        would quietly break one."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(
+            RUN_SCRIPT + "\n@project.cli_command()\ndef answer():\n"
+            '    "Return something."\n'
+            "    return 42\n"
+        )
+        assert _invoke("generate").exit_code == 0
+
+        from pcons.cli import cli
+
+        seen: list[object] = []
+        runner = CliRunner()
+        with runner.isolation():
+            ctx = cli.make_context("pcons", ["run", "answer"])
+            with ctx:
+                seen.append(cli.invoke(ctx))
+
+        assert seen == [42]
+
+    def test_the_top_level_help_gains_exactly_one_line(self) -> None:
+        """`run` joins the list and changes nothing else about it.
+
+        Pinning the whole Commands block, not just that the names appear:
+        a present-only check would pass if a command were reordered, renamed,
+        or given a different short help.
+        """
+        result = _invoke("--help")
+
+        assert result.exit_code == 0
+        commands_block = result.stdout.split("Commands:\n", 1)[1]
+        listed = []
+        short_help = {}
+        for line in commands_block.splitlines():
+            if not line.strip():
+                break  # the epilog follows the block
+            name, _, described = line.strip().partition(" ")
+            listed.append(name)
+            short_help[name] = described.strip()
+
+        assert listed == [
+            "info",
+            "explain",
+            "init",
+            "generate",
+            "build",
+            "clean",
+            "cache",
+            "run",
+            "test",
+            "completion",
+        ]
+        assert short_help["run"] == "Run a command declared by the build script"
+
+
+class TestTheListingSurvivesAnUnexpectedCache:
+    """A build directory outlives a pcons upgrade, and the cache has no schema
+    version, so `_cached_rows` skips what it does not recognise rather than
+    raising. Nothing else writes that key, so these shapes come from a pcons
+    that wrote it differently, not from a user."""
+
+    @pytest.fixture
+    def listing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> Callable[[object], list[tuple[str, str]]]:
+        def read(entries: object) -> list[tuple[str, str]]:
+            monkeypatch.setattr(
+                cli_module, "_open_cache", lambda _dir: {"commands": entries}
+            )
+            group = cli_module.RunGroup("run")
+            return group._cached_rows(click.Context(group))
+
+        return read
+
+    def test_an_entry_that_is_not_a_dict_is_skipped(
+        self, listing: Callable[[object], list[tuple[str, str]]]
+    ) -> None:
+        assert listing(["not-a-dict", {"name": "flash", "help": "Flash."}]) == [
+            ("flash", "Flash.")
+        ]
+
+    @pytest.mark.parametrize(
+        "entry",
+        [
+            pytest.param({"help": "no name at all"}, id="absent"),
+            pytest.param({"name": "", "help": "empty"}, id="empty"),
+            pytest.param({"name": 7, "help": "not a string"}, id="not-a-string"),
+        ],
+    )
+    def test_an_entry_without_a_usable_name_is_skipped(
+        self, entry: object, listing: Callable[[object], list[tuple[str, str]]]
+    ) -> None:
+        assert listing([entry, {"name": "flash", "help": "Flash."}]) == [
+            ("flash", "Flash.")
+        ]
+
+    def test_a_help_that_is_not_a_string_becomes_empty(
+        self, listing: Callable[[object], list[tuple[str, str]]]
+    ) -> None:
+        assert listing([{"name": "flash", "help": 7}]) == [("flash", "")]
+
+    def test_a_commands_key_that_is_not_a_list_lists_nothing(
+        self, listing: Callable[[object], list[tuple[str, str]]]
+    ) -> None:
+        assert listing({"flash": "Flash."}) == []
+
+
+class TestTheListingFallsBackWhenTheOptionIsMissing:
+    """`_build_dir` reads the group's own `-B`. These are the paths where that
+    option cannot answer: the whole point of not hard-coding "build" is that
+    `common_options` declares it with an envvar, so the fallbacks have to be
+    reached in the right order."""
+
+    def test_a_group_without_the_option_falls_back(self) -> None:
+        """`RunGroup` is constructed by the decorator, which applies
+        `common_options`. Built bare, it has no `-B` to ask."""
+        group = cli_module.RunGroup("run")
+        assert group._build_dir_option() is None
+
+        assert group._build_dir(click.Context(group)) == Path("build")
+
+    def test_an_option_with_no_envvar_and_no_default_falls_back(self) -> None:
+        group = cli_module.RunGroup(
+            "run",
+            params=[click.Option(["-B", "--build-dir"], "build_dir", default=None)],
+        )
+
+        assert group._build_dir(click.Context(group)) == Path("build")
+
+    def test_the_environment_is_read_before_the_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("PCONS_BUILD_DIR", "from-env")
+        group = cli_module.RunGroup(
+            "run",
+            params=[
+                click.Option(
+                    ["-B", "--build-dir"],
+                    "build_dir",
+                    default="from-default",
+                    envvar="PCONS_BUILD_DIR",
+                )
+            ],
+        )
+
+        assert group._build_dir(click.Context(group)) == Path("from-env")
+
+    def test_the_default_is_read_when_the_environment_is_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        group = cli_module.RunGroup(
+            "run",
+            params=[
+                click.Option(
+                    ["-B", "--build-dir"],
+                    "build_dir",
+                    default="from-default",
+                    envvar="PCONS_BUILD_DIR",
+                )
+            ],
+        )
+
+        assert group._build_dir(click.Context(group)) == Path("from-default")
+
+    def test_a_group_with_no_help_option_is_left_alone(self) -> None:
+        """`get_help_option` demotes the option click builds. A group built
+        without one has nothing to demote, and must not fail reaching for it."""
+        group = cli_module.RunGroup("run", add_help_option=False)
+
+        assert group.get_help_option(click.Context(group)) is None
+
+    def test_the_help_option_is_demoted(self) -> None:
+        """The other side of the same method, and the reason it exists: an eager
+        help would print the listing before `-B` had been parsed."""
+        group = cli_module.RunGroup("run")
+
+        option = group.get_help_option(click.Context(group))
+
+        assert option is not None
+        assert option.is_eager is False
+
+
+class TestRunCompletion:
+    """`pcons run <TAB>`, which completion is already wired for.
+
+    Completion goes through `shell_complete`, and click's own version drops
+    every name whose `get_command` answers None -- the same trap
+    `format_commands` sits in. Without the override these all come back empty.
+    """
+
+    @staticmethod
+    def _complete(incomplete: str = "", *before: str) -> list[tuple[str, str]]:
+        """What the shell would be offered for `pcons run <before> <incomplete>`.
+
+        Driven through `ShellComplete.get_completions`, which is the real entry
+        point: it resolves the context the way the protocol does, so the group's
+        options are parsed and a command name already typed reaches
+        `ctx._protected_args`. Building a `Context` by hand skips both and
+        cannot see either.
+        """
+        from click.shell_completion import ShellComplete
+
+        from pcons.cli import cli
+
+        completer = ShellComplete(cli, {}, "pcons", "_PCONS_COMPLETE")
+        return [
+            (item.value, item.help or "")
+            for item in completer.get_completions(["run", *before], incomplete)
+        ]
+
+    def test_the_declared_names_complete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+
+        offered = self._complete()
+
+        assert ("flash", "Flash the board.") in offered
+        assert ("docs", "Documentation tasks.") in offered
+
+    def test_an_incomplete_name_filters(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+
+        names = [name for name, _ in self._complete("fl")]
+
+        assert "flash" in names
+        assert "docs" not in names
+
+    def test_the_groups_own_options_still_complete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The tail of the override. Drop it and `-B` stops completing."""
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+
+        names = [name for name, _ in self._complete("-")]
+
+        assert "--build-dir" in names
+
+    def test_a_build_dir_that_never_generated_offers_no_names(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        TestRunGroup._project(tmp_path, monkeypatch)
+
+        assert self._complete() == []
+
+    def test_completing_does_not_run_the_build_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Completion fires on a keystroke; a build script does configure work."""
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+
+        assert self._complete()
+
+        assert not (tmp_path / "ran-marker").exists()
+
+    def test_nothing_is_offered_once_a_name_has_been_typed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`pcons run docs <TAB>` must not offer `docs`'s siblings.
+
+        click would have descended into the resolved command by now; it cannot,
+        because `get_command` answers None without the script. Re-offering the
+        top-level names there is worse than offering nothing.
+        """
+        from pcons import commands
+
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path)
+        # Generating ran the script in this process, so the registry holds the
+        # real commands and click would descend into them properly. A shell
+        # completing in a fresh process has none of that, which is the case
+        # that went wrong.
+        commands.clear()
+
+        assert self._complete("", "docs") == []
+        assert self._complete("", "flash") == []
+
+    def test_the_build_dir_is_read_during_completion(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`-B` has to have been parsed, which only the real context resolution
+        does."""
+        TestRunGroup._project(tmp_path, monkeypatch)
+        TestRunGroup._generated(tmp_path, "-B", "out")
+
+        assert self._complete() == []  # nothing in the default build dir
+
+        names = [name for name, _ in self._complete("", "-B", "out")]
+
+        assert "flash" in names
+
+    def test_completion_does_not_run_add_on_modules(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Loading a module execs it and runs `register()`.
+
+        Anything it prints would land ahead of click's completion protocol and
+        be read as candidates, and one that is slow or exits would break every
+        TAB. The cached listing is what completion answers from, so no module
+        is loaded at all -- including one that would clash on a name, which
+        click's own version would have raised over mid-stream.
+        """
+        from pcons import commands, modules
+        from pcons.core.errors import PconsError
+
+        module_dir = tmp_path / "mods"
+        module_dir.mkdir()
+        for name in ("one", "two"):
+            (module_dir / f"{name}.py").write_text(
+                "import pcons\n\n\ndef register():\n"
+                "    print('noise from " + name + "')\n"
+                "    @pcons.cli_command('deploy')\n"
+                f"    def deploy_{name}():\n"
+                f'        "Deploy from {name}."\n'
+            )
+        monkeypatch.setenv("PCONS_MODULES_PATH", str(module_dir))
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+
+        offered = self._complete()
+
+        assert offered == []
+        assert commands.declared() == {}
+        # The clash is still an error once something does load them.
+        modules.load_modules([module_dir])
+        with pytest.raises(PconsError):
+            commands.lookup("deploy")
+
+
+class TestNonPersistingRunsLeaveTheCacheAlone:
+    """`pcons run` is documented to change nothing in the build directory."""
+
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self) -> Iterator[None]:
+        from pcons import commands
+
+        commands.clear()
+        yield
+        commands.clear()
+
+    @staticmethod
+    def _generated_then_moved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """Generate in tree A, copy it to B, and stand in B as a fresh process."""
+        from pcons.core.project import Project
+
+        source = tmp_path / "a"
+        source.mkdir()
+        (source / "hello.in").write_text("hi")
+        (source / "pcons-build.py").write_text(RUN_SCRIPT)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(source)
+        _clear_cli_vars()
+        assert _invoke("generate", "CC=clang").exit_code == 0
+
+        moved = tmp_path / "b"
+        shutil.copytree(source, moved)
+        # A real second `pcons` starts with a clean project tree; run_script
+        # does not reset it, the process boundary does.
+        Project._clear_tree()
+        monkeypatch.chdir(moved)
+        _clear_cli_vars()
+        return moved
+
+    def test_a_moved_build_dir_keeps_its_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A cache written for another source tree is ignored for this run --
+        but ignoring it must not mean deleting it, which is what a run that
+        persists nothing would otherwise do on someone else's behalf."""
+        from pcons.core.cache import BuildCache
+
+        moved = self._generated_then_moved(tmp_path, monkeypatch)
+        before = (moved / "build" / "pcons_cache.json").read_text()
+
+        assert _invoke("run", "flash").exit_code == 0
+
+        assert (moved / "build" / "pcons_cache.json").read_text() == before
+        cache = BuildCache(moved / "build")
+        assert cache.get("vars") == {"CC": "clang"}
+        assert cache.get("commands")
+
+    def test_a_generating_run_still_resets_a_moved_cache(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The other half: fresh semantics still apply where they should."""
+        from pcons.core.cache import BuildCache
+
+        moved = self._generated_then_moved(tmp_path, monkeypatch)
+
+        assert _invoke("generate").exit_code == 0
+
+        cache = BuildCache(moved / "build")
+        assert cache.get("vars") is None
+        assert cache.get("source_dir") == str(moved)
+
+
+class TestRunGroupWithModules:
+    """A module's commands, which need no build script (decision 12)."""
+
+    @staticmethod
+    def _modules(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, body: str) -> Path:
+        module_dir = tmp_path / "mods"
+        module_dir.mkdir()
+        (module_dir / "deploy.py").write_text(body)
+        monkeypatch.setenv("PCONS_MODULES_PATH", str(module_dir))
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        return module_dir
+
+    def test_a_module_command_runs_with_no_build_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No script means no window and no project, and it still runs."""
+        self._modules(tmp_path, monkeypatch, MODULE_COMMAND)
+        assert not (tmp_path / "pcons-build.py").exists()
+
+        result = _invoke("run", "deploy")
+
+        assert result.exit_code == 0
+        assert "deployed project_resolved=None" in result.stdout
+
+    def test_a_module_command_is_listed_with_no_build_script(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._modules(tmp_path, monkeypatch, MODULE_COMMAND)
+
+        result = _invoke("run")
+
+        assert result.exit_code == 0
+        assert "deploy" in result.stdout
+        assert "Deploy it." in result.stdout
+
+    def test_with_a_script_a_module_command_sees_the_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With a script it runs inside the window like any other command."""
+        self._modules(tmp_path, monkeypatch, MODULE_COMMAND)
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "pcons-build.py").write_text(RUN_SCRIPT)
+
+        result = _invoke("run", "deploy")
+
+        assert result.exit_code == 0
+        assert "deployed project_resolved=True" in result.stdout
+
+    def test_a_name_two_origins_declare_runs_neither(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reported on use, naming both, so a third-party module cannot fail a
+        build script that never mentions it (decision 8)."""
+        self._modules(
+            tmp_path, monkeypatch, MODULE_COMMAND.replace("def deploy(", "def flash(")
+        )
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "pcons-build.py").write_text(RUN_SCRIPT)
+        assert _invoke("generate").exit_code == 0
+
+        clash = _invoke("run", "flash")
+
+        assert clash.exit_code == 1
+        assert "module:deploy" in clash.stderr
+        assert "script" in clash.stderr
+
+        # Every other name still works, and generating is unaffected.
+        assert _invoke("run", "docs", "list").exit_code == 0
+        assert _invoke("generate").exit_code == 0
 
 
 class TestDirectoryArg:

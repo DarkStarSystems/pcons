@@ -12,16 +12,20 @@ import sys
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 from click.core import ParameterSource
+from click.shell_completion import CompletionItem
 
 from pcons import __version__, _cli_completion
+from pcons import commands as user_commands
 from pcons._cli_click import (
     DefaultCommand,
+    MergingGroup,
     PconsContext,
     PconsGroup,
+    _adopt_options_spelled_earlier,
     build_options,
     common_options,
     configure_logging,
@@ -280,6 +284,41 @@ def _warn_unread_cached_vars(
         )
 
 
+def _declared_command_listing() -> list[dict[str, str]]:
+    """What the build script declared, for `pcons run` to list without running it.
+
+    Script-origin only: a module's commands are known from the filesystem at
+    startup, and caching them would list them twice on a machine that has the
+    module and once, staler, on one that does not. Declaration order, like
+    `PconsGroup.list_commands`.
+    """
+    return [
+        {"name": name, "help": entry.command.get_short_help_str()}
+        for name, entries in user_commands.declared().items()
+        for entry in entries
+        if entry.origin == user_commands.SCRIPT_ORIGIN
+    ]
+
+
+def _record_command_listing(cache: BuildCache, *, persist: bool) -> None:
+    """Write what the build script declared into the build dir's listing.
+
+    Written on every *generating* run, not only a persisting one, so ninja's
+    self-regeneration edge refreshes it: that re-invoke passes ``--no-cache``,
+    and without this a command added to the script would never reach the
+    listing again, build.ninja being newer than the script from then on.
+
+    Including an empty list. Unlike the keys that fall back to a default when
+    absent, a name left in place would be listed forever after it was deleted
+    from the script.
+
+    A regen still never *creates* a cache, which is the other half of what
+    ``persist=False`` means, so an untouched build directory is left alone.
+    """
+    if persist or not cache.is_empty:
+        cache.update({"commands": _declared_command_listing()})
+
+
 def _persist_run_settings(
     cache: BuildCache,
     variables: dict[str, str],
@@ -295,6 +334,10 @@ def _persist_run_settings(
 
     ``source_dir`` is recorded so a later run can detect a cache that belongs to
     a different source tree (a copied or moved build dir) and refuse to apply it.
+
+    The declared-command listing is written separately, by the caller: it
+    describes the build script rather than this run's argv, so it is recorded
+    on every generating run and not only on a persisting one.
     """
     updates: dict[str, object] = {"source_dir": source_dir}
     if variables:
@@ -317,6 +360,7 @@ def run_script(
     persist: bool = True,
     fresh: bool = False,
     generate: bool = True,
+    inside: Callable[[], None] | None = None,
 ) -> tuple[int, list[Project]]:
     """Execute a Python build script in-process via exec(), so its Project
     objects are accessible through the global registry.
@@ -336,9 +380,14 @@ def run_script(
         fresh: If True, discard the persisted cache before resolving settings,
             so the run starts clean (like cmake --fresh).
         generate: If False, drop the script's deferred generate requests
-            instead of running them, so no build files are written. For
-            inspection commands (`pcons explain`) that need the project
-            graph but must leave the build directory alone.
+            instead of running them, and resolve the top-level project so the
+            graph is usable without writing any build files. For inspection
+            commands (`pcons explain`) and user-declared commands, which need
+            the project graph but must leave the build directory alone.
+        inside: Called once after the script has run and settled, with the
+            script's environment still up: PCONS_* variables set, sys.path and
+            the cwd still the script's. Its exceptions propagate untouched,
+            since click signals both success and failure by exception.
 
     Returns:
         Tuple of (exit_code, list of registered Projects).
@@ -381,7 +430,22 @@ def run_script(
         # Discard any persisted settings before resolving, so this run starts
         # from a clean cache (like cmake --fresh). The subsequent reads then see
         # nothing, and only this run's own settings get persisted below.
-        cache.clear()
+        #
+        # A run that persists nothing must not mutate the build directory
+        # either: `pcons run` is documented to leave it alone, and it reaches
+        # here whenever the cache was written for another source tree. Writing
+        # the emptied cache out would destroy that directory's vars, variant,
+        # generator and command listing on behalf of a command that only meant
+        # to read.
+        #
+        # So `--fresh --no-cache` together no longer empty the file, only this
+        # run's view of it. The two ask for opposite things and "do not touch
+        # the cache" is the safer half to honour; --no-cache is internal, and
+        # the regen re-invoke that uses it never passes --fresh.
+        if persist:
+            cache.clear()
+        else:
+            cache.discard()
     cli_vars = dict(variables or {})
     # An inherited PCONS_VARS (exported by the user) overrides the cache but loses
     # to this run's own KEY=value args; like any environment value it is not
@@ -482,74 +546,94 @@ def run_script(
     old_path = sys.path.copy()
 
     try:
-        os.chdir(script_path.parent)
-        sys.path.insert(0, str(script_path.parent))
+        # Commands the script declares belong to this run of it, and the
+        # previous run's are dropped on the way in.
+        with user_commands.script_scope():
+            try:
+                os.chdir(script_path.parent)
+                sys.path.insert(0, str(script_path.parent))
 
-        script_source = script_path.read_text()
-        code = compile(script_source, str(script_path), "exec")
-        namespace: dict[str, object] = {
-            "__name__": pcons.core.invocation.RUN_NAME,
-            "__file__": str(script_path),
-        }
-        exec(code, namespace)
+                script_source = script_path.read_text()
+                code = compile(script_source, str(script_path), "exec")
+                namespace: dict[str, object] = {
+                    "__name__": pcons.core.invocation.RUN_NAME,
+                    "__file__": str(script_path),
+                }
+                exec(code, namespace)
 
-        # Run any deferred generate requests registered by the script
-        try:
-            from pcons.generators.generator import BaseGenerator
+                # Run any deferred generate requests registered by the script
+                from pcons.generators.generator import BaseGenerator
 
-            top_level = Project.top_level()
-            if generate:
-                BaseGenerator._generate_pending(top_level)
-            else:
-                BaseGenerator._clear_pending()
-            if persist:
-                _warn_unread_cached_vars(cached_vars, cli_vars)
-                _persist_run_settings(
-                    cache, persist_vars, persist_variant, persist_gen, current_source
-                )
-            return 0, pcons.get_registered_projects()
-        except ValueError:
-            logger.error("No Project created in build script")
-            return 1, []
+                # Narrow: everything below raises ValueError of its own --
+                # resolution most of all -- and reporting any of them as a
+                # missing Project would hide the real error and its traceback.
+                try:
+                    top_level = Project.top_level()
+                except ValueError:
+                    logger.error("No Project created in build script")
+                    return 1, []
 
-    except SystemExit as e:
-        exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
-        if not isinstance(e.code, int) and e.code is not None:
-            # CPython's top-level handler prints a non-int exit code to
-            # stderr; exec() bypasses it, so match it here.
-            print(e.code, file=sys.stderr)
-        if exit_code != 0:
-            _cancel_pending_generation()
-            return exit_code, pcons.get_registered_projects()
-        # sys.exit(0) ends the script successfully partway; a direct
-        # `python pcons-build.py` run would still generate via the atexit
-        # hook, so the CLI does the same. Left neither run nor cleared,
-        # the pending generation would fire at interpreter shutdown,
-        # after the finally block below has restored cwd and env.
-        from pcons import Project
-        from pcons.generators.generator import BaseGenerator
+                if generate:
+                    BaseGenerator._generate_pending(top_level)
+                else:
+                    _cancel_pending_generation()
+                    if not top_level._resolved:
+                        top_level.resolve()
+                if generate:
+                    _record_command_listing(cache, persist=persist)
+                if persist:
+                    _warn_unread_cached_vars(cached_vars, cli_vars)
+                    _persist_run_settings(
+                        cache,
+                        persist_vars,
+                        persist_variant,
+                        persist_gen,
+                        current_source,
+                    )
 
-        try:
-            top_level = Project.top_level()
-        except ValueError:
-            _cancel_pending_generation()
-        else:
-            if generate:
-                BaseGenerator._generate_pending(top_level)
-            else:
+            except SystemExit as e:
+                exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
+                if not isinstance(e.code, int) and e.code is not None:
+                    # CPython's top-level handler prints a non-int exit code to
+                    # stderr; exec() bypasses it, so match it here.
+                    print(e.code, file=sys.stderr)
+                if exit_code != 0:
+                    _cancel_pending_generation()
+                    return exit_code, pcons.get_registered_projects()
+                # sys.exit(0) ends the script successfully partway: the
+                # generation it asked for still belongs to this run, and the
+                # finally block below is about to restore cwd and env.
+                from pcons.generators.generator import BaseGenerator
+
+                try:
+                    top_level = Project.top_level()
+                except ValueError:
+                    _cancel_pending_generation()
+                else:
+                    if generate:
+                        BaseGenerator._generate_pending(top_level)
+                    else:
+                        _cancel_pending_generation()
+                return exit_code, pcons.get_registered_projects()
+            except PconsError as e:
+                # Expected configure/generate failures carry actionable messages;
+                # a Python traceback would only bury them.
+                logger.error("%s", e)
                 _cancel_pending_generation()
-        return exit_code, pcons.get_registered_projects()
-    except PconsError as e:
-        # Expected configure/generate failures carry actionable messages;
-        # a Python traceback would only bury them.
-        logger.error("%s", e)
-        _cancel_pending_generation()
-        return 1, []
-    except Exception as e:
-        logger.error("Build script failed: %s", e)
-        traceback.print_exc()
-        _cancel_pending_generation()
-        return 1, []
+                return 1, []
+            except Exception as e:
+                logger.error("Build script failed: %s", e)
+                traceback.print_exc()
+                _cancel_pending_generation()
+                return 1, []
+
+            # Outside every handler above, deliberately: click raises to signal
+            # success as well as failure (`ctx.exit(0)` raises
+            # `click.exceptions.Exit`, a RuntimeError), so catching here would
+            # report a user command's normal exit as a failed build script.
+            if inside is not None:
+                inside()
+            return 0, pcons.get_registered_projects()
     finally:
         os.chdir(old_cwd)
         sys.path[:] = old_path
@@ -2019,6 +2103,341 @@ def cli_cache_clear(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
 def cli_cache_path(ctx: PconsContext, build_dir: Path, **kw: object) -> None:
     """Print the cache file's path, whether or not it exists yet."""
     ctx.exit(_cache_path(build_dir))
+
+
+def _protected_args(ctx: click.Context) -> list[str]:
+    """The command name click has parsed but not yet descended into.
+
+    click's own private attribute, read because a group whose commands only
+    exist once the build script has run has no public way to see the name
+    before dispatch. Read loudly: behind a `getattr` default, click renaming it
+    would turn `pcons run <cmd>` into a silent listing instead of a run.
+    `pyproject.toml` bounds click below 9 for the same reason.
+    """
+    return list(ctx._protected_args)
+
+
+class RunGroup(MergingGroup):
+    """The commands a build script or an add-on module declared.
+
+    Names come from the build directory's cache, so listing and help never run
+    the build script. Dispatch does run it, and hands the command its live
+    environment with the project resolved and no build files written.
+
+    It lives here rather than in `_cli_click` because it has to run the build
+    script, and `cli` imports `_cli_click`; the generic classes there stay
+    generic.
+    """
+
+    @staticmethod
+    def _on_the_command_line(ctx: click.Context, name: str) -> object | None:
+        """A value this context parsed from the command line, and only that.
+
+        Not the default, and **not the environment**: `common_options` gives
+        `-B` an envvar, and `_adopt_options_spelled_earlier`
+        (`pcons/_cli_click.py`) is explicit that a value click took from the
+        environment must not beat a `-B` spelled before the command. Accepting
+        it here would make the listing and the dispatch read different build
+        directories under `PCONS_BUILD_DIR=x pcons -B out run`.
+        """
+        if name in ctx.params and (
+            ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE
+        ):
+            return ctx.params[name]
+        return None
+
+    @classmethod
+    def _spelled(cls, ctx: click.Context, name: str) -> object | None:
+        """A value the user spelled, on either side of the command name.
+
+        After the name wins, which is what `_adopt_options_spelled_earlier`
+        promises: "spelled on both sides, the later one wins". Reading the
+        parent first would let `pcons -B other run -B out --help` list `other`
+        while dispatching out of `out`. Neither side counts the environment;
+        the caller falls back to it once nothing was spelled at all.
+
+        The parent is still needed for the help path: `_adopt_options_spelled_earlier`
+        runs after `parse_args`, and `--help` exits from inside it, so a value
+        spelled before this group's name never reaches `ctx.params` here.
+        """
+        here = cls._on_the_command_line(ctx, name)
+        if here is not None:
+            return here
+        parent = ctx.parent
+        return None if parent is None else cls._on_the_command_line(parent, name)
+
+    def _build_dir_option(self) -> click.Parameter | None:
+        return next((p for p in self.params if p.name == "build_dir"), None)
+
+    #: What the listing needs before `--help` can print it.
+    _LISTING_OPTIONS = ("build_dir", "modules_path")
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        """Make the options the listing reads eager, so help sees their values.
+
+        `pcons run -B out --help` must list `out`'s commands, and
+        `pcons run --modules-path mods --help` the modules'. click processes
+        eager parameters first, so with an eager help option the callback prints
+        the listing before either value has reached `ctx.params`. Promoting
+        these two and demoting help (see `get_help_option`) fixes the order
+        whichever way round the user spelled them.
+
+        Only this group's own copies are touched: `common_options` builds a
+        fresh `Option` per command.
+        """
+        super().__init__(*args, **kwargs)
+        for param in self.params:
+            if param.name in self._LISTING_OPTIONS:
+                param.is_eager = True
+
+    def get_help_option(self, ctx: click.Context) -> click.Option | None:
+        """click's own help option, demoted so the listing's options beat it.
+
+        Overriding rather than declaring one keeps `help_option_names` from the
+        context settings, so `run` answers to `-h` and `--help` like every other
+        command. click caches the object, so this runs once.
+        """
+        option = super().get_help_option(ctx)
+        if option is not None:
+            option.is_eager = False
+        return option
+
+    def _build_dir(self, ctx: click.Context) -> Path:
+        """Which build directory to read the listing from.
+
+        The fallback is the parameter's own default rather than a literal
+        "build": `common_options` declares it with an envvar, and a literal here
+        would silently ignore PCONS_BUILD_DIR.
+        """
+        spelled = self._spelled(ctx, "build_dir")
+        if spelled is not None:
+            return Path(str(spelled))
+        option = self._build_dir_option()
+        if option is not None:
+            from_env = option.resolve_envvar_value(ctx)
+            if from_env:
+                return Path(str(from_env))
+            default = option.get_default(ctx)
+            if default is not None:
+                return Path(str(default))
+        return Path("build")
+
+    def _load_modules(self, ctx: click.Context) -> None:
+        """Add-on commands are invisible until their modules are imported.
+
+        Listing and dispatch both need this, and both can be reached without a
+        callback having run first. `load_modules` skips what it already has.
+        """
+        modules_path = self._spelled(ctx, "modules_path")
+        _load_user_modules(modules_path if isinstance(modules_path, str) else None)
+
+    def _cached_rows(self, ctx: click.Context) -> list[tuple[str, str]]:
+        """(name, short help) for the script's commands, as generate left them.
+
+        The cache has no schema version and a build directory outlives a pcons
+        upgrade, so an entry that is not shaped as expected is skipped rather
+        than raised over.
+        """
+        raw = _open_cache(self._build_dir(ctx)).get("commands")
+        if not isinstance(raw, list):
+            return []
+        rows: list[tuple[str, str]] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            name = entry.get("name")
+            if not isinstance(name, str) or not name:
+                continue
+            help_text = entry.get("help")
+            rows.append((name, help_text if isinstance(help_text, str) else ""))
+        return rows
+
+    def rows(self, ctx: click.Context) -> list[tuple[str, str]]:
+        """Everything on offer: the script's cached names, then the modules'."""
+        self._load_modules(ctx)
+        rows = self._cached_rows(ctx)
+        listed = {name for name, _ in rows}
+        for name, entries in user_commands.declared().items():
+            if name in listed:
+                continue
+            for entry in entries:
+                if entry.origin != user_commands.SCRIPT_ORIGIN:
+                    rows.append((name, entry.command.get_short_help_str()))
+                    break
+        return rows
+
+    def format_commands(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        """Format the listing from the cache, not from resolved commands.
+
+        click's own version asks `get_command` for each name and drops whatever
+        answers None, which every script-declared command does until the script
+        has run. Formatting must not run it, so the help text comes from the
+        cache with the name.
+        """
+        rows = self.rows(ctx)
+        if not rows:
+            return
+        with formatter.section("Commands"):
+            formatter.write_dl(rows)
+
+    def shell_complete(
+        self, ctx: click.Context, incomplete: str
+    ) -> list[CompletionItem]:
+        """Complete from the cached listing, not from resolved commands.
+
+        click's own version drops every name whose `get_command` answers None,
+        exactly as `format_commands` did, so a script-declared command would
+        complete to nothing until the script had run -- and completion must not
+        run it. The names and their help come from the cache instead.
+
+        The tail is `Command.shell_complete`, this group's own options.
+        `click.Group.shell_complete` is the method being replaced: calling it
+        would put the dropped names back through `get_command`, which also
+        raises on a name two origins declare, into a stream that carries
+        nothing but completion candidates.
+
+        Add-on modules are deliberately *not* loaded here. Loading execs every
+        module on the path and runs its `register()`, so anything one prints
+        lands ahead of click's completion protocol and is parsed as candidates,
+        and a slow or exiting `register()` breaks every TAB. That is what the
+        `loads_modules` gate exists to prevent, and the cache already holds the
+        names, so completion reads them from there.
+        """
+        if _protected_args(ctx):
+            # A command name has already been typed. click would normally have
+            # descended into it by now; it could not, because `get_command`
+            # answers None without the script. Offering the *sibling* names here
+            # would be worse than offering nothing.
+            return []
+        items = [
+            CompletionItem(name, help=help_text)
+            for name, help_text in self._cached_rows(ctx)
+            if name.startswith(incomplete)
+        ]
+        items.extend(super(click.Group, self).shell_complete(ctx, incomplete))
+        return items
+
+    def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
+        """The declared command, or None so click reports "No such command".
+
+        Only meaningful once the script has run, which `invoke` guarantees for
+        the dispatch path. Help and completion go through `rows` instead.
+        """
+        self._load_modules(ctx)
+        try:
+            return user_commands.lookup(cmd_name)
+        except PconsError as e:
+            # A name two origins both declare. Neither runs, and the message
+            # names both so the user can tell which to rename.
+            raise click.ClickException(str(e)) from e
+
+    def _dispatch_only(self, ctx: click.Context) -> Any:
+        """click's own dispatch, without `MergingGroup`'s prologue.
+
+        `invoke` below runs that prologue itself, before the build script is
+        read. Reaching `MergingGroup.invoke` here would run it a second time,
+        and on the dispatch path that second time lands *inside* the script's
+        window, where `configure_logging`'s ``basicConfig(force=True)`` would
+        tear down whatever logging the build script had just set up.
+        """
+        return click.Group.invoke(self, ctx)
+
+    def invoke(self, ctx: click.Context) -> Any:
+        """Dispatch inside the build script's environment.
+
+        `click.Group.invoke` resolves the name *and* invokes the command, both
+        inside itself, so wrapping it once puts the lookup and the user's
+        callback inside the live environment.
+        """
+        # `MergingGroup.invoke` would do the first two, but only the bare path
+        # reaches it: dispatch goes through the script's window instead. Both
+        # have to happen before the script is read, or -v and --debug say
+        # nothing about the one thing this command does.
+        _adopt_options_spelled_earlier(self, ctx)
+        configure_logging(ctx)
+        # Not `load_declared_modules`: this group needs its modules on the help
+        # and completion paths too, where no command is ever invoked.
+        self._load_modules(ctx)
+        args = [*_protected_args(ctx), *ctx.args]
+        if not args:
+            # Bare `pcons run` lists, and the listing comes from the cache, so
+            # do not pay for a script run to print it.
+            return self._dispatch_only(ctx)
+
+        spelled_script = self._spelled(ctx, "build_script")
+        script = _resolve_build_script(
+            Path(str(spelled_script)) if spelled_script is not None else None
+        )
+        if script is None:
+            # No script, so no window and no project: only a module's commands
+            # can resolve, and a script's name is simply unknown.
+            return self._dispatch_only(ctx)
+
+        parent_invoke = self._dispatch_only  # bound now: a bare super() in the
+        dispatched: list[Any] = []  # lambda would look for it in the closure
+
+        def dispatch() -> None:
+            dispatched.append(parent_invoke(ctx))
+
+        exit_code, _projects = run_script(
+            script,
+            self._build_dir(ctx),
+            generate=False,
+            persist=False,
+            inside=dispatch,
+        )
+        if exit_code != 0:
+            # The script itself failed; it has already said why.
+            ctx.exit(exit_code)
+        if not dispatched:
+            # The script ended itself, cleanly enough that run_script reported
+            # success -- `sys.exit(0)` reaches here. Saying nothing would exit 0
+            # having run no command at all.
+            raise click.ClickException(
+                f"{script} exited before the command could run, "
+                "so nothing was dispatched."
+            )
+        return dispatched[0]
+
+
+@cli.group(
+    "run",
+    cls=RunGroup,
+    invoke_without_command=True,
+    short_help="Run a command declared by the build script",
+    help=(
+        "Run a command declared by the build script or an add-on module.\n\n"
+        "A command runs with the build script's environment live and its "
+        "project resolved, and writes no build files. Without a command name, "
+        "lists what is available; that listing comes from the build directory, "
+        "so a newly declared command appears after the next generate."
+    ),
+)
+@directory_option
+@common_options
+@pass_pcons_context
+def cli_run(ctx: PconsContext, **kw: object) -> None:
+    # A subcommand has already been resolved by RunGroup.invoke by the time this
+    # runs for it; only a bare `pcons run` gets the listing. Logging is set up
+    # there rather than here, since here is already inside the script's window.
+    if ctx.invoked_subcommand is not None:
+        return
+    group = ctx.command
+    assert isinstance(group, RunGroup)
+    rows = group.rows(ctx)
+    if not rows:
+        print(
+            "No commands declared. A build script declares one with "
+            "@project.cli_command(); the listing comes from the build "
+            "directory, so run `pcons generate` first."
+        )
+        ctx.exit(0)
+    width = max(len(name) for name, _ in rows)
+    for name, help_text in rows:
+        print(f"  {name.ljust(width)}  {help_text}".rstrip())
+    ctx.exit(0)
 
 
 @cli.command(
