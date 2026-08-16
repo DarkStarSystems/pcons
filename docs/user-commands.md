@@ -66,8 +66,11 @@ cache, so listing never runs the build script. Two consequences:
 ## Completion
 
 With completion installed -- `source <(_PCONS_COMPLETE=zsh_source pcons)`, or `bash_source` for
-bash -- `pcons run <TAB>` offers the declared names with their help. Like the listing, it comes from
-the build directory's cache and never runs the build script.
+bash -- `pcons run <TAB>` offers the script's declared names with their help. It comes from the
+build directory's cache and runs nothing: not the build script, and not an add-on module's
+`register()` either. So an add-on's commands are listed by `pcons run` but are not offered on TAB.
+Loading a module means executing it, and anything it printed would land in the middle of the
+completion protocol and be read back as candidate names.
 
 What it cannot offer is a command's own options (`pcons run flash --<TAB>`) or a group's verbs
 (`pcons run docs <TAB>`): both need the real command object, which only the build script has, and

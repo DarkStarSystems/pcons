@@ -2153,12 +2153,18 @@ class TestRunCompletion:
 
         assert "flash" in names
 
-    def test_a_name_two_origins_declare_does_not_break_completion(
+    def test_completion_does_not_run_add_on_modules(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """click's version asks `get_command`, which raises on a clash, and the
-        message lands in a stream that carries only candidates."""
-        from pcons import commands
+        """Loading a module execs it and runs `register()`.
+
+        Anything it prints would land ahead of click's completion protocol and
+        be read as candidates, and one that is slow or exits would break every
+        TAB. The cached listing is what completion answers from, so no module
+        is loaded at all -- including one that would clash on a name, which
+        click's own version would have raised over mid-stream.
+        """
+        from pcons import commands, modules
         from pcons.core.errors import PconsError
 
         module_dir = tmp_path / "mods"
@@ -2166,6 +2172,7 @@ class TestRunCompletion:
         for name in ("one", "two"):
             (module_dir / f"{name}.py").write_text(
                 "import pcons\n\n\ndef register():\n"
+                "    print('noise from " + name + "')\n"
                 "    @pcons.cli_command('deploy')\n"
                 f"    def deploy_{name}():\n"
                 f'        "Deploy from {name}."\n'
@@ -2177,8 +2184,10 @@ class TestRunCompletion:
 
         offered = self._complete()
 
-        assert [name for name, _ in offered] == ["deploy"]
-        # And the clash is still an error when the name is actually used.
+        assert offered == []
+        assert commands.declared() == {}
+        # The clash is still an error once something does load them.
+        modules.load_modules([module_dir])
         with pytest.raises(PconsError):
             commands.lookup("deploy")
 

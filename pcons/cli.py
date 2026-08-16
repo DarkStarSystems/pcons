@@ -2270,6 +2270,13 @@ class RunGroup(MergingGroup):
         would put the dropped names back through `get_command`, which also
         raises on a name two origins declare, into a stream that carries
         nothing but completion candidates.
+
+        Add-on modules are deliberately *not* loaded here. Loading execs every
+        module on the path and runs its `register()`, so anything one prints
+        lands ahead of click's completion protocol and is parsed as candidates,
+        and a slow or exiting `register()` breaks every TAB. That is what the
+        `loads_modules` gate exists to prevent, and the cache already holds the
+        names, so completion reads them from there.
         """
         if _protected_args(ctx):
             # A command name has already been typed. click would normally have
@@ -2279,7 +2286,7 @@ class RunGroup(MergingGroup):
             return []
         items = [
             CompletionItem(name, help=help_text)
-            for name, help_text in self.rows(ctx)
+            for name, help_text in self._cached_rows(ctx)
             if name.startswith(incomplete)
         ]
         items.extend(super(click.Group, self).shell_complete(ctx, incomplete))
