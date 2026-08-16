@@ -2114,6 +2114,35 @@ class TestCacheCommand:
         assert _cache_list(build_dir) == 0
         assert capsys.readouterr().out.strip() == ""
 
+    def test_cache_clear_discards_the_scan_cache_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """Both files are answers from an earlier run, so both go."""
+        from pcons.toolchains._scan_cache import CACHE_FILE as SCAN_CACHE_FILE
+
+        build_dir = self._populate(tmp_path, monkeypatch)
+        scan_cache = build_dir / SCAN_CACHE_FILE
+        scan_cache.write_text('{"entries": {}}', encoding="utf-8")
+
+        assert _cache_clear(build_dir) == 0
+        assert not scan_cache.exists()
+        assert str(scan_cache) in capsys.readouterr().out
+
+    def test_cache_clear_discards_a_scan_cache_left_on_its_own(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        """A build dir can hold scan results and no persisted settings."""
+        from pcons.toolchains._scan_cache import CACHE_FILE as SCAN_CACHE_FILE
+
+        build_dir = tmp_path / "build"
+        build_dir.mkdir()
+        scan_cache = build_dir / SCAN_CACHE_FILE
+        scan_cache.write_text('{"entries": {}}', encoding="utf-8")
+
+        assert _cache_clear(build_dir) == 0
+        assert not scan_cache.exists()
+        assert "No cache" not in capsys.readouterr().out
+
     def test_cache_show_names_the_source_dir_and_the_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
@@ -3245,6 +3274,57 @@ class TestGraphOptionsReachTheBuildScript:
         assert seen[0]["extra_env"] == {"PCONS_GRAPH": "-"}
 
     def test_neither_option_sends_no_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        assert _invoke("generate").exit_code == 0
+        assert seen[0]["extra_env"] is None
+
+
+class TestJobsReachesConfigure:
+    """-j caps configure's own parallel work, not just the build's.
+
+    Configure scans C++ module TUs one compiler per core. A user who asked
+    for two jobs asked for two compilers at a time, whichever phase runs them.
+    """
+
+    @staticmethod
+    def _record(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+        seen: list[dict[str, object]] = []
+
+        def fake_run_script(
+            script: Path, build_dir: Path, **kw: object
+        ) -> tuple[int, list[object]]:
+            seen.append(kw)
+            return 0, []
+
+        monkeypatch.setattr("pcons.cli.run_script", fake_run_script)
+        return seen
+
+    @staticmethod
+    def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text("")
+
+    def test_it_becomes_an_environment_variable(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        assert _invoke("generate", "-j", "3").exit_code == 0
+        assert seen[0]["extra_env"] == {"PCONS_JOBS": "3"}
+
+    def test_it_is_read_before_the_command_name_too(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project(tmp_path, monkeypatch)
+        seen = self._record(monkeypatch)
+        assert _invoke("-j", "3", "generate").exit_code == 0
+        assert seen[0]["extra_env"] == {"PCONS_JOBS": "3"}
+
+    def test_without_it_nothing_is_sent(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         self._project(tmp_path, monkeypatch)

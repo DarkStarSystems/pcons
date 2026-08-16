@@ -843,6 +843,7 @@ def _generate(
     no_cache: bool = False,
     graph: str | None = None,
     mermaid: str | None = None,
+    jobs: int | None = None,
 ) -> tuple[int, Project | None]:
     """Run the build script, which writes the build files into *build_dir*.
 
@@ -853,6 +854,9 @@ def _generate(
         script: The build script, or None to look for pcons-build.py here.
         graph: Where to write a DOT dependency graph, "-" for stdout.
         mermaid: The same, in Mermaid.
+        jobs: How many subprocesses configure may run at once. Configure has
+            its own parallel work (C++ module scanning), and a user who capped
+            the build's jobs meant to cap that too.
 
     Returns:
         Tuple of (exit code, first registered Project or None).
@@ -876,6 +880,8 @@ def _generate(
         extra_env["PCONS_GRAPH"] = graph
     if mermaid:
         extra_env["PCONS_MERMAID"] = mermaid
+    if jobs:
+        extra_env["PCONS_JOBS"] = str(jobs)
 
     exit_code, _projects = run_script(
         script,
@@ -1181,12 +1187,29 @@ def _cache_show(build_dir: Path) -> int:
 
 
 def _cache_clear(build_dir: Path) -> int:
+    """Discard everything this build directory remembers.
+
+    The persisted settings, and the C++ module scan results beside them: both
+    are answers from an earlier run, and asking for them to be forgotten means
+    both. Deleting the scan cache costs one rescan.
+    """
+    from pcons.toolchains._scan_cache import CACHE_FILE as SCAN_CACHE_FILE
+
     cache = _open_cache(build_dir)
-    if cache.path is None or not cache.path.exists():
+    cleared: list[Path] = []
+    if cache.path is not None and cache.path.exists():
+        cache.clear()
+        cleared.append(cache.path)
+    scan_cache = build_dir / SCAN_CACHE_FILE
+    if scan_cache.exists():
+        scan_cache.unlink()
+        cleared.append(scan_cache)
+
+    if not cleared:
         print(f"No cache at {cache.path}")
         return 0
-    cache.clear()
-    print(f"Cleared {cache.path}")
+    for path in cleared:
+        print(f"Cleared {path}")
     return 0
 
 
@@ -1807,6 +1830,7 @@ def cli_init(
     metavar="[FILE]",
     help="Output dependency graph in Mermaid format (default: stdout)",
 )
+@jobs_option
 @click.argument("extra", nargs=-1)
 @pass_pcons_context
 def cli_generate(
@@ -1820,6 +1844,7 @@ def cli_generate(
     no_cache: bool,
     graph: str | None,
     mermaid: str | None,
+    jobs: int | None,
     extra: tuple[str, ...],
     **declared_but_unused: object,
 ) -> None:
@@ -1836,6 +1861,7 @@ def cli_generate(
         no_cache=no_cache,
         graph=graph,
         mermaid=mermaid,
+        jobs=jobs,
     )
     if code == 0 and project is None:
         ctx.exit(_no_build_described())
@@ -1888,6 +1914,7 @@ def cli_build(
             generator=_generators(generator),
             reconfigure=reconfigure,
             fresh=fresh,
+            jobs=jobs,
         )
 
     def build_once() -> tuple[int, Path]:
@@ -2122,6 +2149,7 @@ def cli_default(
             generator=_generators(generator),
             reconfigure=reconfigure,
             fresh=fresh,
+            jobs=jobs,
         )
 
     def build_once(where: Path) -> tuple[int, Path]:

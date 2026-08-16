@@ -52,12 +52,18 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import subprocess
 import sys
 import tempfile
+import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from pcons.toolchains._scan_cache import ScanCache, compiler_binary, parse_depfile
 
 logger = logging.getLogger(__name__)
 
@@ -205,11 +211,68 @@ def run_scan_deps_msvc(
         Path(tmp_path).unlink(missing_ok=True)
 
 
+def gcc_scan_command(
+    compiler: str,
+    compile_flags: list[str],
+    src: str,
+    obj: str,
+    deps_json: str,
+    depfile: str,
+) -> list[str]:
+    """The argv that scans one TU with GCC.
+
+    ``-fdirectives-only`` is here because only the module declarations are
+    wanted, so the preprocessor does not have to expand every macro in the
+    translation unit. Worth 32% of the scan on a real C++26 project, and it
+    cannot change the build: this flag is on the scan command only, never on a
+    compile line, so no BMI is produced with it and no BMI-compatibility key
+    sees it (`bmi_key_for_flags` hashes a TU's compile flags).
+
+    ``-o os.devnull`` because the scan wants the p1689 JSON, not the
+    preprocessed text, and ``-E`` writes megabytes of it per TU: 3.2 MB to
+    extract 91 bytes on a real C++26 source. ``os.devnull`` rather than a
+    literal, since this runner is used on Windows too, where it is NUL.
+    """
+    return [
+        compiler,
+        *compile_flags,
+        "-E",
+        "-x",
+        "c++",
+        src,
+        "-MT",
+        obj,
+        "-MD",
+        "-MF",
+        depfile,
+        "-fmodules",
+        f"-fdeps-file={deps_json}",
+        f"-fdeps-target={obj}",
+        "-fdeps-format=p1689r5",
+        "-fdirectives-only",
+        "-o",
+        os.devnull,
+    ]
+
+
+@lru_cache(maxsize=1)
+def gcc_scan_recipe() -> str:
+    """What the scan command is, with everything per-TU left out.
+
+    The scan cache keys on this, so a pcons that scans differently asks a new
+    question instead of trusting an answer the old command produced. Derived
+    from the command itself rather than a hand-maintained constant: a flag
+    added above cannot be forgotten here.
+    """
+    return "\0".join(gcc_scan_command("", [], "", "", "", ""))
+
+
 def run_scan_deps_gcc(
     compiler: str,
     compile_flags: list[str],
     src: str,
     obj: str,
+    prereqs_out: list[str] | None = None,
 ) -> dict[str, Any] | None:
     """Run GCC p1689 scan and return parsed JSON.
 
@@ -218,6 +281,10 @@ def run_scan_deps_gcc(
         compile_flags: List of compiler flags (e.g. ["-std=c++23"]).
         src: Absolute path to the source file.
         obj: Object file path relative to the build directory.
+        prereqs_out: When given, extended with every file the scan read. GCC
+            writes them because the command already asks for a depfile, and
+            they are exactly what decides whether a cached result is still
+            good. Left alone on a failed scan.
 
     Returns:
         Parsed P1689R5 JSON dict, or None on failure.
@@ -226,29 +293,9 @@ def run_scan_deps_gcc(
         deps_json = f_deps.name
     with tempfile.NamedTemporaryFile(suffix=".d", delete=False) as f_depfile:
         depfile = f_depfile.name
-    with tempfile.NamedTemporaryFile(suffix=".ii", delete=False) as f_pp:
-        preprocessed = f_pp.name
 
     try:
-        cmd = [compiler]
-        cmd += compile_flags
-        cmd += [
-            "-E",
-            "-x",
-            "c++",
-            src,
-            "-MT",
-            obj,
-            "-MD",
-            "-MF",
-            depfile,
-            "-fmodules",
-            f"-fdeps-file={deps_json}",
-            f"-fdeps-target={obj}",
-            "-fdeps-format=p1689r5",
-            "-o",
-            preprocessed,
-        ]
+        cmd = gcc_scan_command(compiler, compile_flags, src, obj, deps_json, depfile)
 
         result = subprocess.run(
             cmd,
@@ -263,7 +310,7 @@ def run_scan_deps_gcc(
             return None
 
         try:
-            return json.loads(Path(deps_json).read_text(encoding="utf-8"))
+            p1689 = json.loads(Path(deps_json).read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             print(
                 f"Warning: could not parse GCC p1689 output for {src}: {e}",
@@ -276,6 +323,17 @@ def run_scan_deps_gcc(
                 file=sys.stderr,
             )
             return None
+
+        if prereqs_out is not None:
+            try:
+                prereqs_out.extend(
+                    parse_depfile(Path(depfile).read_text(encoding="utf-8"))
+                )
+            except OSError as e:
+                # No depfile means no way to tell when this result goes stale,
+                # so the caller must not cache it. An empty list says that.
+                logger.debug("No depfile for %s: %s", src, e)
+        return p1689
     except FileNotFoundError as e:
         raise CxxModuleScannerNotFound(
             f"GCC compiler '{compiler}' not found on PATH.\n"
@@ -288,7 +346,6 @@ def run_scan_deps_gcc(
     finally:
         Path(deps_json).unlink(missing_ok=True)
         Path(depfile).unlink(missing_ok=True)
-        Path(preprocessed).unlink(missing_ok=True)
 
 
 # =============================================================================
@@ -465,14 +522,100 @@ def select_modules_scope(
     )
 
 
-# TODO(scan-cache): cache TuScanResults across configure runs
-# (content-addressed by source content, scanner/compiler versions, and
-# normalized flags). Scans are currently O(TUs) per configure, which
-# dominates configure latency on large module-heavy projects.
+def _scan_one(
+    spec: TuScanSpec,
+    scanner: str,
+    scanner_style: str,
+    cache: ScanCache | None = None,
+) -> TuScanResult:
+    """Scan one TU with the runner its style names.
+
+    With a *cache*, a TU whose every prerequisite is untouched since the last
+    run skips the compiler entirely. Only the GCC runner participates: it is
+    the one that reports what it read.
+    """
+    if scanner_style == "msvc":
+        p1689 = run_scan_deps_msvc(spec.compiler, spec.compile_flags, str(spec.src))
+    elif scanner_style == "gcc":
+        key = (
+            None
+            if cache is None
+            else ScanCache.key(
+                gcc_scan_recipe(),
+                spec.compiler,
+                spec.compile_flags,
+                str(spec.src),
+                spec.obj_rel,
+            )
+        )
+        if cache is not None and key is not None:
+            hit = cache.get(key)
+            if hit is not None:
+                return TuScanResult(spec=spec, p1689=hit)
+
+        prereqs: list[str] = []
+        started_ns = time.time_ns()
+        p1689 = run_scan_deps_gcc(
+            spec.compiler,
+            spec.compile_flags,
+            str(spec.src),
+            spec.obj_rel,
+            prereqs_out=prereqs,
+        )
+        # No prerequisites means nothing to invalidate against, so the result
+        # is used but not stored.
+        if cache is not None and key is not None and p1689 is not None and prereqs:
+            binary = compiler_binary(spec.compiler)
+            cache.put(
+                key,
+                p1689,
+                [*prereqs, binary] if binary else prereqs,
+                scan_started_ns=started_ns,
+            )
+    else:
+        p1689 = run_scan_deps(
+            scanner,
+            spec.compiler,
+            spec.compile_flags,
+            str(spec.src),
+            spec.obj_rel,
+        )
+    return TuScanResult(spec=spec, p1689=p1689)
+
+
+def _scan_workers(count: int) -> int:
+    """How many scans to have in flight.
+
+    One per core, not the pool default of cores + 4: each scan is a compiler
+    preprocessing a whole translation unit, so oversubscribing costs memory and
+    buys nothing. Threads rather than processes because every scan is a
+    `subprocess.run` that releases the GIL for its whole duration.
+
+    ``-j`` caps it: a user who asked for four jobs asked for four compilers at
+    a time, and configure runs them just as the build does. The CLI passes the
+    value down as ``PCONS_JOBS``.
+    """
+    limit = _requested_jobs() or os.cpu_count() or 1
+    return max(1, min(count, limit))
+
+
+def _requested_jobs() -> int | None:
+    """``-j`` as the CLI recorded it, or None when it said nothing usable."""
+    raw = os.environ.get("PCONS_JOBS")
+    if not raw:
+        return None
+    try:
+        jobs = int(raw)
+    except ValueError:
+        return None
+    return jobs if jobs > 0 else None
+
+
 def scan_translation_units(
     specs: list[TuScanSpec],
     scanner: str,
     scanner_style: str = "clang",
+    cache: ScanCache | None = None,
 ) -> list[TuScanResult]:
     """Run the scanner on each TU and return parsed results.
 
@@ -480,32 +623,27 @@ def scan_translation_units(
         specs: Per-TU scan inputs.
         scanner: Path to clang-scan-deps (clang style) or cl.exe (msvc style).
         scanner_style: "clang" or "msvc".
+        cache: Where results are kept between runs, and where this pass adds
+            its own. Without one every TU is rescanned. Only the GCC style
+            uses it: it is the one whose runner reports the files it read.
+            The caller owns it, so several passes share one load and one save.
 
     Returns:
         One TuScanResult per spec, in order. result.p1689 is None if scanning
         that TU failed (a warning is written to stderr by the runner).
     """
-    results: list[TuScanResult] = []
-    for spec in specs:
-        if scanner_style == "msvc":
-            p1689 = run_scan_deps_msvc(spec.compiler, spec.compile_flags, str(spec.src))
-        elif scanner_style == "gcc":
-            p1689 = run_scan_deps_gcc(
-                spec.compiler,
-                spec.compile_flags,
-                str(spec.src),
-                spec.obj_rel,
-            )
-        else:
-            p1689 = run_scan_deps(
-                scanner,
-                spec.compiler,
-                spec.compile_flags,
-                str(spec.src),
-                spec.obj_rel,
-            )
-        results.append(TuScanResult(spec=spec, p1689=p1689))
-    return results
+    if scanner_style != "gcc":
+        cache = None
+
+    if len(specs) < 2:
+        return [_scan_one(spec, scanner, scanner_style, cache) for spec in specs]
+
+    with ThreadPoolExecutor(max_workers=_scan_workers(len(specs))) as pool:
+        # map preserves input order, which build_module_map and the dyndep
+        # writer both rely on. as_completed would not.
+        return list(
+            pool.map(lambda s: _scan_one(s, scanner, scanner_style, cache), specs)
+        )
 
 
 def build_module_map(
