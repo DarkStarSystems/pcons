@@ -398,9 +398,22 @@ class PconsGroup(click.Group):
         The command declaring the argument that carries them is the hidden
         catch-all, which `get_command` refuses to resolve and `list_commands`
         leaves out, so click's own walk of the tree never reaches it.
+
+        After a `--`, everything names a target, so neither the options nor the
+        command names are offered: `resolve_command` routes the rest to the
+        catch-all, and completing a word pcons will hand to the build tool
+        verbatim would only propose one it never parses. click drops the option
+        half itself in `_resolve_incomplete`, but that only picks which object
+        answers: `click.Command.shell_complete` decides from the incomplete
+        string alone and never sees the `--`. A command falls through to its
+        `EXTRA` argument before reaching that, which is why only the group
+        needs this.
         """
+        targets = complete_target(ctx, None, incomplete)
+        if cast(PconsContext, ctx).targets_follow:
+            return targets
         items = super().shell_complete(ctx, incomplete)
-        items.extend(complete_target(ctx, None, incomplete))
+        items.extend(targets)
         return items
 
     def format_options(

@@ -558,3 +558,65 @@ class TestTargetCompletion:
         assert _completions(["build"], "") == ["all", "hello"]
         assert _completions([], "hel") == ["hello"]
         assert not marker.exists()
+
+
+class TestCompletionAfterADoubleDash:
+    """After `--` every word names a target, so only target names are offered.
+
+    `resolve_command` routes the rest to the catch-all, which hands it to the
+    build tool, so offering an option or a command name there completes a word
+    pcons will never parse as one.
+    """
+
+    @pytest.fixture
+    def project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> Iterator[Path]:
+        from pcons.cli import run_script
+        from pcons.core.vars import _clear_cli_vars
+
+        root = tmp_path / "project"
+        root.mkdir()
+        (root / "hello.c").write_text("int main(void) { return 0; }\n")
+        script = root / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "e = p.Environment(toolchain='c')\n"
+            "p.Program('hello', e, sources=['hello.c'])\n"
+            "dashed = p.Program('dashed', e, sources=['hello.c'])\n"
+            "dashed.output_name = '-dash-target'\n"
+        )
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        _clear_cli_vars()
+        assert run_script(script, root / "build")[0] == 0
+        monkeypatch.chdir(root)
+        yield root
+
+    def test_an_option_is_not_offered(self, project: Path) -> None:
+        assert _completions(["--"], "--ver") == []
+
+    def test_without_the_double_dash_it_still_is(self, project: Path) -> None:
+        assert _completions([], "--ver") == ["--version", "--verbose"]
+
+    def test_a_command_name_is_not_offered(self, project: Path) -> None:
+        """`pcons -- build` builds a target called build, it runs no command."""
+        offered = _completions(["--"], "")
+        assert "build" not in offered
+        assert "hello" in offered
+
+    def test_without_the_double_dash_a_command_name_is(self, project: Path) -> None:
+        assert "build" in _completions([], "")
+
+    def test_a_target_whose_name_starts_with_a_dash_is_offered(
+        self, project: Path
+    ) -> None:
+        """The case `--` exists for, so it must survive the option refusal."""
+        assert _completions(["--"], "-") == ["-dash-target"]
+
+    def test_a_command_after_a_double_dash_was_already_right(
+        self, project: Path
+    ) -> None:
+        """A command falls through to its EXTRA argument before reaching the
+        option list, so only the group ever had this wrong."""
+        assert _completions(["build", "--"], "--ver") == []
