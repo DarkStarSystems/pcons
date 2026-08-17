@@ -565,26 +565,6 @@ def _list_paths(incomplete: str, *, files: bool, dirs: bool) -> list[CompletionI
     return items
 
 
-def _complete_path(
-    ctx: click.Context, param: click.Parameter, incomplete: str
-) -> list[CompletionItem]:
-    """Directories or files, whichever the option's own type accepts.
-
-    Without a `-C` this defers to that type, which returns the directive that
-    hands the whole job to the shell: it completes a path better than this can,
-    descending as you type and expanding a `~`.
-
-    After a `-C` the shell would answer out of its own directory, and the
-    option is read from the one pcons moved to, so the entries are listed here
-    instead. That costs the descent, since none of the three scripts asks for
-    `nospace`, but the names offered are the ones that will be used.
-    """
-    kind = param.type
-    if not isinstance(kind, click.Path) or not _chdir_applied(ctx):
-        return kind.shell_complete(ctx, param, incomplete)
-    return _list_paths(incomplete, files=kind.file_okay, dirs=kind.dir_okay)
-
-
 def _generator_names() -> list[str]:
     """The registered generator names, in registration order.
 
@@ -653,18 +633,35 @@ def _complete_runner(
     ]
 
 
-class UncheckedPath(click.Path):
+class PconsPath(click.Path):
+    """A path completed from the directory the option is read from.
+
+    `click.Path` answers with a directive rather than with names, and every
+    shell click writes a script for resolves that against its own directory
+    (bash runs `compopt -o dirnames`). After a `-C` that is the wrong one, so
+    the entries are listed here instead. It costs what the shell does better,
+    descending as you type and expanding a `~`, which is why nothing changes
+    without a `-C`.
+
+    Every path option on the pcons command line takes this type, so which of
+    the two answers is right is decided once rather than per option.
+    """
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> list[CompletionItem]:
+        if not _chdir_applied(ctx):
+            return super().shell_complete(ctx, param, incomplete)
+        return _list_paths(incomplete, files=self.file_okay, dirs=self.dir_okay)
+
+
+class UncheckedPath(PconsPath):
     """A path click completes but does not check.
 
     `click.Path` does two jobs: it tells the shell whether to complete files or
     directories, and it rejects a path of the wrong kind. An option that owns
     its own error path wants the first without the second. `-C` on a file has
     to stay `_chdir`'s exit 1 rather than become a UsageError's 2.
-
-    `file_okay=False` completes directories, `dir_okay=False` completes files,
-    the same way `click.Path` picks its directive. The item's value is ignored:
-    every shell click writes a script for turns the result into its own path
-    completion over the whole word (bash runs `compopt -o dirnames`).
     """
 
     def convert(
@@ -676,21 +673,23 @@ class UncheckedPath(click.Path):
         return self.coerce_path_result(value)
 
 
-def _complete_path_list(
-    ctx: click.Context, param: click.Parameter | None, incomplete: str
-) -> list[CompletionItem]:
-    """Hand the shell its own directory completion for a separated list.
+class PconsDirectoryList(click.ParamType):
+    """Directories joined by `os.pathsep`, completed one segment at a time.
 
-    A completer, not a path type, because the value is several paths joined by
-    `os.pathsep` rather than one path. The shell completes the whole word, so
-    `--modules-path a:b` completes only its first segment.
-
-    After a `-C` the shell would answer out of the wrong directory, so the
-    entries are listed here, as they are for the options that name one path.
+    Not a `PconsPath`: the value is several paths rather than one, so none of
+    what `click.Path` converts or checks applies to it. Only the completion is
+    shared, and a shell completes the whole word, so `--modules-path a:b`
+    completes only its first segment.
     """
-    if _chdir_applied(ctx):
-        return _list_paths(incomplete, files=False, dirs=True)
-    return [CompletionItem(incomplete, type="dir")]
+
+    name = "paths"
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> list[CompletionItem]:
+        if _chdir_applied(ctx):
+            return _list_paths(incomplete, files=False, dirs=True)
+        return [CompletionItem(incomplete, type="dir")]
 
 
 def _declared_build_dir(ctx: click.Context) -> str | Path | None:
@@ -815,7 +814,6 @@ def directory_option(f: F) -> F:
         "-C",
         "--directory",
         type=UncheckedPath(file_okay=False),
-        shell_complete=_complete_path,
         metavar="DIR",
         callback=_chdir,
         is_eager=True,
@@ -828,8 +826,7 @@ def common_options(f: F) -> F:
     """The options every command accepts, on both sides of the command name."""
     f = click.option(
         "--modules-path",
-        metavar="PATHS",
-        shell_complete=_complete_path_list,
+        type=PconsDirectoryList(),
         help="Additional paths to search for pcons modules (colon/semicolon-separated)",
     )(f)
     f = click.option(
@@ -837,8 +834,7 @@ def common_options(f: F) -> F:
         "--build-dir",
         # A Path, so no command has to convert it first. The metavar is spelled
         # out because click.Path would otherwise print its own.
-        type=click.Path(file_okay=False, path_type=Path),
-        shell_complete=_complete_path,
+        type=PconsPath(file_okay=False, path_type=Path),
         metavar="DIR",
         # Eager so it is processed before `--help`, which is eager itself and
         # would otherwise format the help out of a context where -B has not
@@ -886,8 +882,7 @@ def generate_options(f: F) -> F:
     f = click.option(
         "-b",
         "--build-script",
-        type=click.Path(dir_okay=False),
-        shell_complete=_complete_path,
+        type=PconsPath(dir_okay=False),
         metavar="FILE",
         help="Path to pcons-build.py script",
     )(f)
