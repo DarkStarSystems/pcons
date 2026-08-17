@@ -93,8 +93,12 @@ def adapt_path_for_windows(path: str, gcc_toolchain: bool = False) -> str:
         if path.endswith(".so"):  # Didn't match lib prefix
             path = path[:-3] + ".dll"
 
-    # Add .exe to executables (paths in build/ without extension)
-    if "\\build\\" in path or path.startswith("build\\"):
+    # Add .exe to executables: extensionless files under a build directory.
+    # "build" or any "build-*" variant — a sibling project's directory
+    # (66_multi_project's build-host) holds executables just the same.
+    import re
+
+    if re.search(r"(^|\\)build[^\\]*\\", path):
         parts = path.rsplit("\\", 1)
         if len(parts) == 2 and "." not in parts[1]:
             path = path + ".exe"

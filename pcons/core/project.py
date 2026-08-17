@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.environment import Environment as Env
+from pcons.core.errors import PconsError
 from pcons.core.graph import (
     collect_all_nodes,
     detect_cycles_in_targets,
@@ -170,12 +171,18 @@ class Project(_ProjectBuilders):
 
     __current: Project | None = None
     __top_level: Project | None = None
+    # Projects whose _enter_subdir context is active, innermost last. A
+    # Project created while this is non-empty becomes a subproject of the
+    # innermost entry; created while it is empty with a top-level project
+    # already present, it is an error.
+    __parent_stack: list[Project] = []
 
     @staticmethod
     def _clear_tree() -> None:
         """Clear the project tree (for testing purposes)."""
         Project.__current = None
         Project.__top_level = None
+        Project.__parent_stack.clear()
 
     def __init__(
         self,
@@ -196,8 +203,10 @@ class Project(_ProjectBuilders):
                 the calling script, then the current working directory.
             build_dir: Directory for build outputs. Defaults to the
                 PCONS_BUILD_DIR environment variable if set (the CLI
-                sets this automatically), otherwise "build".
-                Using it from a sub-project is not currently supported and will be ignored.
+                sets this automatically), otherwise "build". That default
+                belongs to the first project: an independent sibling
+                project must pass its own. A sub-project's build_dir is
+                derived from its parent's, and passing one is ignored.
             config: Cached configuration from configure phase.
             defined_at: Source location where project was created.
         """
@@ -250,13 +259,8 @@ class Project(_ProjectBuilders):
         self._children: list[Project] = []
         self.__generated = False
 
-        # Auto-register with global registry (for CLI access)
-        from pcons import _register_project
-
-        _register_project(self)
-
-        if Project.__current is not None:
-            self._parent = Project.__current
+        if Project.__parent_stack:
+            self._parent = Project.__parent_stack[-1]
         else:
             self._parent = None
 
@@ -275,7 +279,7 @@ class Project(_ProjectBuilders):
             # written to build standalone reads the right directories when it
             # is embedded. The offset from the top-level root is recorded
             # separately; node paths are anchored there (see _offset).
-            top = Project.top_level()
+            top = self._parent.top
             try:
                 self._offset = self.root_dir.relative_to(top.root_dir)
             except ValueError as exc:
@@ -286,7 +290,24 @@ class Project(_ProjectBuilders):
                 ) from exc
             self.build_dir = top.build_dir / self._offset
         else:
+            first = Project.__top_level
             if build_dir is None:
+                if first is not None:
+                    # An independent sibling. The -B / PCONS_BUILD_DIR
+                    # default can only serve one project, and it serves
+                    # the first; a sibling names its own build directory.
+                    default = os.environ.get("PCONS_BUILD_DIR", "build")
+                    raise PconsError(
+                        f"project {name!r} needs an explicit build_dir: "
+                        f"the default ({default!r}) is reserved for the "
+                        f"first project, {first.name!r} "
+                        f"({first.defined_at}).\n"
+                        "Each top-level project owns its own build "
+                        "directory; pass build_dir= to the later ones. To "
+                        "build a subdirectory as part of an existing "
+                        "project instead, use add_subdirectory().",
+                        location=defined_at,
+                    )
                 build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
             if not self.root_dir.is_absolute():
                 raise ValueError(
@@ -300,10 +321,34 @@ class Project(_ProjectBuilders):
                     pass  # Out-of-tree build — keep absolute
             self.build_dir = bd
 
-        # Anchored at the top-level project, which is where node paths are
-        # rooted; `path_resolver` narrows it to this project's directory.
-        top = Project.top_level() if self._parent else self
+            if first is not None:
+                mine = self._effective_output_dir()
+                for other in Project._top_level_projects():
+                    # normcase: on case-insensitive filesystems, two
+                    # spellings of one directory still collide.
+                    if os.path.normcase(str(other._effective_output_dir())) == (
+                        os.path.normcase(str(mine))
+                    ):
+                        raise PconsError(
+                            f"projects {other.name!r} ({other.defined_at}) "
+                            f"and {name!r} would share the build directory "
+                            f"{mine}.\n"
+                            "Each top-level project owns its own build "
+                            "directory; pass a distinct build_dir=.",
+                            location=defined_at,
+                        )
+
+        # Anchored at the top of this project's tree, which is where node
+        # paths are rooted; `path_resolver` narrows it to this project's
+        # directory.
+        top = self.top
         self._path_resolver = PathResolver(top.root_dir, top.build_dir)
+
+        # Register with the global registry (the CLI's iteration source).
+        # After validation, to ensure we only register valid projects.
+        from pcons import _register_project
+
+        _register_project(self)
 
         Project.__current = self
         if Project.__top_level is None:
@@ -322,6 +367,26 @@ class Project(_ProjectBuilders):
                     program_name(script),
                 )
             Project.__top_level = self
+
+    def _effective_output_dir(self) -> Path:
+        """Where this project's build outputs land, as a normalized path.
+
+        Pure path arithmetic (no filesystem access); used to detect two
+        top-level projects claiming the same build directory.
+        """
+        bd = (
+            self.build_dir
+            if self.build_dir.is_absolute()
+            else (self.root_dir / self.build_dir)
+        )
+        return Path(os.path.normpath(bd))
+
+    @staticmethod
+    def _top_level_projects() -> list[Project]:
+        """Every registered top-level project, in creation order."""
+        from pcons import get_registered_projects
+
+        return [p for p in get_registered_projects() if p.is_top_level]
 
     @staticmethod
     def has_current() -> bool:
@@ -342,7 +407,15 @@ class Project(_ProjectBuilders):
 
     @property
     def is_top_level(self) -> bool:
-        return self == Project.top_level()
+        return self._parent is None
+
+    @property
+    def top(self) -> Project:
+        """The top-level project of this project's tree."""
+        project = self
+        while project._parent is not None:
+            project = project._parent
+        return project
 
     @property
     def parent(self) -> Project:
@@ -375,12 +448,32 @@ class Project(_ProjectBuilders):
     def _enter_subdir(self, subdir: str | Path) -> Generator[None, None, None]:
         """Context manager for entering a subdirectory in the project."""
         old_subdir = self._subdir
+        old_current = Project.__current
         self._subdir = subdir if old_subdir is None else f"{old_subdir}/{subdir}"
+        # The entered project is the context: the subdirectory script's
+        # Project.current() must mean this tree even when another sibling
+        # was created more recently.
+        Project.__current = self
+        Project.__parent_stack.append(self)
         try:
             yield
         finally:
+            Project.__parent_stack.pop()
             self._subdir = old_subdir
-            Project.__current = self
+            Project.__current = old_current
+
+    def add_subdirectory(
+        self, subdir: str | Path, pick: list[str] | None = None
+    ) -> Any:
+        """Run *subdir*'s pcons-build.py as part of this project.
+
+        This is the :func:`pcons.add_subdirectory` variant, for scripts
+        with several top-level projects where "the current project" is
+        ambiguous.
+        """
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        return add_subdirectory(subdir, pick, project=self)
 
     @property
     def config(self) -> Any:
@@ -446,7 +539,7 @@ class Project(_ProjectBuilders):
         generators resolve them against — not at this project's own root,
         which for a subproject would drop the subproject directory.
         """
-        top_root = Project.top_level().root_dir if self._parent else self.root_dir
+        top_root = self.top.root_dir
         if path.is_absolute():
             try:
                 return path.relative_to(top_root)
@@ -637,6 +730,34 @@ class Project(_ProjectBuilders):
 
         return alias
 
+    def _iter_tree(self) -> Generator[Project, None, None]:
+        """This project and every descendant, depth-first in creation order."""
+        yield self
+        for child in self._children:
+            yield from child._iter_tree()
+
+    @property
+    def tree_aliases(self) -> dict[str, list[Node]]:
+        """Every alias declared in this project's tree, name → its nodes.
+
+        An alias is a user-level grouping, so one name declared at several
+        levels of the tree is one group: the union of every declaration's
+        targets, in tree order. This is what the generated build files
+        expose as the alias; :attr:`aliases` stays this project's own
+        declarations.
+        """
+        merged: dict[str, list[Node]] = {}
+        seen: dict[str, set[int]] = {}
+        for project in self._iter_tree():
+            for name, alias in project._aliases.items():
+                nodes = merged.setdefault(name, [])
+                ids = seen.setdefault(name, set())
+                for node in alias.targets:
+                    if id(node) not in ids:
+                        ids.add(id(node))
+                        nodes.append(node)
+        return merged
+
     def Default(self, *targets: Target | Node | str) -> None:
         """Set default targets for building.
 
@@ -700,16 +821,23 @@ class Project(_ProjectBuilders):
     def _resolve_default_name(self, name: str) -> list[Target]:
         """Resolve a Default() string argument to one or more targets.
 
-        Tries `name` as an alias first (an alias may wrap several targets),
-        then as a plain target name.
+        Tries `name` as an alias first (an alias may wrap several targets;
+        every declaration in the tree counts — an alias is one group
+        wherever its pieces were declared), then as a plain target name.
         """
-        alias = self._aliases.get(name)
-        if alias is not None:
-            resolved: list[Target] = list(alias._target_refs)
-            for node in alias._nodes:
-                target = self._find_target_for_node(node)
-                if target is not None and target not in resolved:
-                    resolved.append(target)
+        declarations = [
+            p._aliases[name] for p in self._iter_tree() if name in p._aliases
+        ]
+        if declarations:
+            resolved: list[Target] = []
+            for alias in declarations:
+                for target_ref in alias._target_refs:
+                    if target_ref not in resolved:
+                        resolved.append(target_ref)
+                for node in alias._nodes:
+                    target = self._find_target_for_node(node)
+                    if target is not None and target not in resolved:
+                        resolved.append(target)
             if not resolved:
                 raise ValueError(
                     f"Default(): alias '{name}' does not resolve to any "
@@ -725,7 +853,7 @@ class Project(_ProjectBuilders):
         raise KeyError(
             f"Default(): '{name}' is not a known alias or target in "
             f"project '{self.name}'. Tried aliases "
-            f"{sorted(self._aliases)!r} and targets "
+            f"{sorted(self.tree_aliases)!r} and targets "
             f"{sorted(t.name for t in self.targets)!r}."
         )
 
@@ -812,7 +940,7 @@ class Project(_ProjectBuilders):
         The path may name a file the build itself produces — that is how
         staged generation works; see :meth:`generated_input`.
         """
-        top = self.top_level()
+        top = self.top
         if isinstance(path, FileNode):
             resolved = path.path
         else:
@@ -824,7 +952,7 @@ class Project(_ProjectBuilders):
     def configure_dependencies(self) -> list[Path]:
         """Files the generated build files depend on (see
         :meth:`add_configure_dependency`)."""
-        return list(self.top_level()._configure_deps)
+        return list(self.top._configure_deps)
 
     def generated_input(self, path: Path | str) -> Path | None:
         """A build-time-generated file the build description wants to read.
@@ -847,7 +975,7 @@ class Project(_ProjectBuilders):
                 for name in manifest.read_text().split():
                     project.SharedLibrary(name, env, sources=[f"{name}.c"])
         """
-        top = self.top_level()
+        top = self.top
         self.add_configure_dependency(path)
 
         candidate = Path(path)
@@ -902,7 +1030,7 @@ class Project(_ProjectBuilders):
 
         from pcons.core import invocation
 
-        top = self.top_level()
+        top = self.top
         root = top.root_dir.resolve()
         pcons_dir = Path(__file__).resolve().parent.parent
 
@@ -930,7 +1058,7 @@ class Project(_ProjectBuilders):
         A staged input that no edge produces can never appear, so the build
         would silently stay incomplete forever. Raise instead.
         """
-        top = self.top_level()
+        top = self.top
         if not top._pending_stages:
             return
 
@@ -1002,7 +1130,7 @@ class Project(_ProjectBuilders):
                     if source.builder is None:
                         p = source.path
                         if not p.is_absolute():
-                            p = Project.top_level().root_dir / p
+                            p = self.top.root_dir / p
                         if not p.exists():
                             errors.append(
                                 MissingSourceError(str(p), target_name=target.name)
@@ -1087,17 +1215,31 @@ class Project(_ProjectBuilders):
         if not self._resolved:
             self.resolve()
 
+        def per_project(path_str: str) -> str:
+            """One requested file can only serve one project: the first
+            keeps the requested name, each later sibling gets the name
+            suffixed with its own ("deps.dot" -> "deps-host.dot").
+            Stdout needs no such split; the graphs just follow each other.
+            """
+            if path_str == "-":
+                return path_str
+            top_levels = Project._top_level_projects()
+            if not top_levels or top_levels[0] is self.top:
+                return path_str
+            path = Path(path_str)
+            return str(path.with_name(f"{path.stem}-{self.top.name}{path.suffix}"))
+
         graph_path = os.environ.get("PCONS_GRAPH")
         if graph_path:
             from pcons.generators.dot import DotGenerator
 
-            self._output_graph(DotGenerator, graph_path, "DOT")
+            self._output_graph(DotGenerator, per_project(graph_path), "DOT")
 
         mermaid_path = os.environ.get("PCONS_MERMAID")
         if mermaid_path:
             from pcons.generators.mermaid import MermaidGenerator
 
-            self._output_graph(MermaidGenerator, mermaid_path, "Mermaid")
+            self._output_graph(MermaidGenerator, per_project(mermaid_path), "Mermaid")
 
     def _output_graph(
         self,

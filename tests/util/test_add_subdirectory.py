@@ -41,7 +41,6 @@ class TestAddSubdirectory:
         self, test_project: Project
     ) -> None:
         """Scripts in subdirs see the same Project via Project.current()."""
-        Project("root", root_dir=test_project.root_dir)
         script = (
             "from pcons.core.project import Project\n"
             "found = Project.current() is not None\n"

@@ -146,16 +146,21 @@ class BaseGenerator:
 
     @staticmethod
     def _generate_pending(project: Project | None = None) -> None:
-        """Execute and clear pending generate requests for a project.
+        """Execute and clear pending generate requests.
 
-        Defaults to the top-level project; safe to call when nothing is
-        pending. Errors propagate: the caller is an entry point that knows how
-        to report them and what exit status to use.
+        For one project when named, otherwise for every registered
+        top-level project in creation order (= script order); safe to call
+        when nothing is pending. Errors propagate: the caller is an entry
+        point that knows how to report them and what exit status to use. A
+        failure stops the run there; earlier projects keep their complete
+        build files.
         """
         if project is None:
             from pcons.core.project import Project as _Project
 
-            project = _Project.top_level()
+            for top in _Project._top_level_projects():
+                BaseGenerator._generate_pending(top)
+            return
 
         # Auxiliary generators (dot, mermaid, metadata, compile_commands)
         # are additive: requesting one must not cancel the build

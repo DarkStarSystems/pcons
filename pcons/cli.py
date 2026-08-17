@@ -414,6 +414,34 @@ def _persist_run_settings(
     cache.update(updates)
 
 
+def _persist_run_settings_to_projects(
+    projects: list[Project],
+    cli_build_dir: Path,
+    variables: dict[str, str],
+    variant: str | None,
+    generator: str | None,
+    source_dir: str,
+) -> None:
+    """Persist this run's settings into each sibling project's build directory.
+
+    The CLI's cache lives in the -B directory, which belongs to the first
+    project; a later ``pcons -B <sibling's dir>`` must see the same
+    settings, not defaults.
+    """
+    from pcons.core.cache import BuildCache
+
+    cli_dir = os.path.normcase(os.path.normpath(cli_build_dir.absolute()))
+    for project in projects:
+        project_dir = project._effective_output_dir()
+        if os.path.normcase(str(project_dir)) == cli_dir:
+            continue
+        cache = BuildCache(project_dir)
+        _persist_run_settings(cache, variables, variant, generator, source_dir)
+        # The declared-command listing too: `pcons -B <this dir> run` reads
+        # it from here, and must list the same commands the primary does.
+        _record_command_listing(cache, persist=True)
+
+
 def run_script(
     script_path: Path,
     build_dir: Path,
@@ -629,21 +657,19 @@ def run_script(
                 # Run any deferred generate requests registered by the script
                 from pcons.generators.generator import BaseGenerator
 
-                # Narrow: everything below raises ValueError of its own --
-                # resolution most of all -- and reporting any of them as a
-                # missing Project would hide the real error and its traceback.
-                try:
-                    top_level = Project.top_level()
-                except ValueError:
+                top_levels = Project._top_level_projects()
+                if not top_levels:
                     logger.error("No Project created in build script")
                     return 1, []
 
                 if generate:
-                    BaseGenerator._generate_pending(top_level)
+                    for top_level in top_levels:
+                        BaseGenerator._generate_pending(top_level)
                 else:
                     _cancel_pending_generation()
-                    if not top_level._resolved:
-                        top_level.resolve()
+                    for top_level in top_levels:
+                        if not top_level._resolved:
+                            top_level.resolve()
                 if generate:
                     _record_command_listing(cache, persist=persist)
                 if persist:
@@ -664,6 +690,15 @@ def run_script(
                         else None,
                         variants=pcons.core.vars._seen_variant_names(),
                     )
+                    if generate:
+                        _persist_run_settings_to_projects(
+                            top_levels,
+                            build_dir,
+                            persist_vars,
+                            persist_variant,
+                            persist_gen,
+                            current_source,
+                        )
 
             except SystemExit as e:
                 exit_code = e.code if isinstance(e.code, int) else (1 if e.code else 0)
@@ -679,15 +714,12 @@ def run_script(
                 # finally block below is about to restore cwd and env.
                 from pcons.generators.generator import BaseGenerator
 
-                try:
-                    top_level = Project.top_level()
-                except ValueError:
-                    _cancel_pending_generation()
-                else:
-                    if generate:
+                top_levels = Project._top_level_projects()
+                if generate and top_levels:
+                    for top_level in top_levels:
                         BaseGenerator._generate_pending(top_level)
-                    else:
-                        _cancel_pending_generation()
+                else:
+                    _cancel_pending_generation()
                 return exit_code, pcons.get_registered_projects()
             except PconsError as e:
                 # Expected configure/generate failures carry actionable messages;
@@ -1004,7 +1036,7 @@ def _generate(
     graph: str | None = None,
     mermaid: str | None = None,
     jobs: int | None = None,
-) -> tuple[int, Project | None]:
+) -> tuple[int, list[Project]]:
     """Run the build script, which writes the build files into *build_dir*.
 
     Logging and user modules are the caller's business: this runs the script
@@ -1019,18 +1051,19 @@ def _generate(
             the build's jobs meant to cap that too.
 
     Returns:
-        Tuple of (exit code, first registered Project or None).
+        Tuple of (exit code, the top-level projects the script created, in
+        creation order — empty on failure or when it created none).
     """
     if script is not None:
         if not script.exists():
             logger.error("Build script not found: %s", script)
-            return 1, None
+            return 1, []
     else:
         found_script = find_script("pcons-build.py")
         if found_script is None:
             logger.error("No pcons-build.py found in current directory")
             logger.info("Create a pcons-build.py file or run 'pcons init'")
-            return 1, None
+            return 1, []
         script = found_script
 
     build_dir.mkdir(parents=True, exist_ok=True)
@@ -1056,14 +1089,14 @@ def _generate(
     )
 
     if exit_code != 0:
-        return exit_code, None
+        return exit_code, []
 
-    return 0, _projects[0] if _projects else None
+    return 0, [p for p in _projects if p.is_top_level]
 
 
 def _watch(
     *,
-    build: Callable[[], tuple[int, Path]],
+    build: Callable[[], tuple[int, list[Path]]],
     script: Path | None,
     targets: list[str] | None = None,
     ninja: str | None = None,
@@ -1075,8 +1108,9 @@ def _watch(
     special handling here.
 
     Args:
-        build: Runs one build and reports where it ran. Which directory that
-            is settles on the first call, since the script may pick its own.
+        build: Runs one build and reports where it ran — several directories
+            when the script describes several projects. Which those are
+            settles on the first call, since the script picks its own.
         script: The build script, whose directory is the tree to watch.
     """
     from pcons import watch
@@ -1087,27 +1121,28 @@ def _watch(
         logger.error("%s", e)
         return 1
 
-    # What ninja knows how to build. Refreshed whenever the manifest changes and
+    # What ninja knows how to build. Refreshed whenever a manifest changes and
     # consulted live by the watch, so an output landing in the source tree never
     # retriggers the build that wrote it.
-    outputs: set[Path] = set()
-    manifest_mtime = 0.0
-    settled_dir = Path.cwd()
+    outputs: dict[Path, set[Path]] = {}
+    manifest_mtimes: dict[Path, float] = {}
+    settled_dirs: list[Path] = [Path.cwd()]
 
     def build_once() -> int:
-        nonlocal manifest_mtime, settled_dir
-        code, where = build()
-        settled_dir = build_dir = where.absolute()
+        nonlocal settled_dirs
+        code, wheres = build()
+        settled_dirs = [where.absolute() for where in wheres]
 
-        manifest = build_dir / "build.ninja"
-        mtime = manifest.stat().st_mtime if manifest.exists() else 0.0
-        if mtime != manifest_mtime:
-            manifest_mtime = mtime
-            outputs.clear()
-            outputs.update(ninja_outputs(build_dir, ninja))
+        for build_dir in settled_dirs:
+            manifest = build_dir / "build.ninja"
+            mtime = manifest.stat().st_mtime if manifest.exists() else 0.0
+            if mtime != manifest_mtimes.get(build_dir):
+                manifest_mtimes[build_dir] = mtime
+                outputs[build_dir] = ninja_outputs(build_dir, ninja)
 
         if code == 0:
-            _warn_unconverged(unconverged_reasons(build_dir, targets, ninja))
+            for build_dir in settled_dirs:
+                _warn_unconverged(unconverged_reasons(build_dir, targets, ninja))
         return code
 
     try:
@@ -1116,19 +1151,18 @@ def _watch(
         # Interrupted before the watch (and its handler) is up.
         return 0
 
-    # Read the build directory only now: the first build settled it.
-    build_dir = settled_dir
+    # Read the build directories only now: the first build settled them.
     root = (script.parent if script else Path.cwd()).absolute()
 
     # An in-source build (-B .) has nothing to exclude by directory without
     # excluding the project; there the output list carries it alone.
-    excluded_dirs = [build_dir] if build_dir != root else []
+    excluded_dirs = [d for d in settled_dirs if d != root]
 
     return watch.watch_and_build(
         build_once,
         [root],
         excluded_dirs=excluded_dirs,
-        excluded_paths=outputs,
+        excluded_paths=set().union(*outputs.values()) if outputs else set(),
     )
 
 
@@ -1218,46 +1252,167 @@ def _no_build_described() -> int:
     return 0
 
 
+#: Ninja targets which every pcons manifest defines, so a request for one goes to
+#: every sibling project rather than being looked up in any of them.
+_TARGETS_IN_EVERY_PROJECT = frozenset({"all", "test-build"})
+
+
+def _route_targets(
+    projects: list[Project], targets: list[str] | None
+) -> list[tuple[Project, list[str] | None]] | None:
+    """Assign each named target to the top-level project that owns it.
+
+    Returns the build plan as (project, its targets) pairs in script order.
+    With no targets named, every project builds its defaults. A name owned
+    by several siblings must be qualified (``project::target``); an unknown
+    or still-ambiguous name logs an error and returns None.
+    """
+    if not targets:
+        return [(p, None) for p in projects]
+    if len(projects) == 1:
+        # Pass through: ninja may know names pcons doesn't (file paths).
+        return [(projects[0], targets)]
+
+    from pcons.core.target import split_qualified_name
+
+    def owns_target(p: Project, token: str) -> bool:
+        try:
+            return p.get_target(token, raise_if_missing=False) is not None
+        except KeyError:
+            return True  # duplicate name inside this project: it owns it
+
+    routed: dict[int, list[str]] = {id(p): [] for p in projects}
+    for token in targets:
+        if token in _TARGETS_IN_EVERY_PROJECT:
+            for p in projects:
+                routed[id(p)].append(token)
+            continue
+
+        prefix, base = split_qualified_name(token)
+        if prefix is not None:
+            named = next((p for p in projects if p.name == prefix), None)
+            if named is not None:
+                # Ninja knows the plain name, not the qualified spelling.
+                routed[id(named)].append(base)
+                continue
+            # Not a sibling's name: fall through and look the whole token
+            # up as an in-tree qualified name (subproject::target).
+
+        # An alias is a user-level grouping, so one name declared by
+        # several projects (at any level of their trees) means all of
+        # them: build each project's group.
+        alias_owners = [p for p in projects if token in p.tree_aliases]
+        if alias_owners:
+            confusable = [
+                p for p in projects if p not in alias_owners and owns_target(p, token)
+            ]
+            if confusable:
+                names = ", ".join(
+                    f"{p.name}::{token}" for p in (*alias_owners, *confusable)
+                )
+                logger.error(
+                    "'%s' is an alias in one project and a target in "
+                    "another; qualify it: %s",
+                    token,
+                    names,
+                )
+                return None
+            for p in alias_owners:
+                routed[id(p)].append(token)
+            continue
+
+        owners = [p for p in projects if owns_target(p, token)]
+        if not owners:
+            searched = ", ".join(p.name for p in projects)
+            logger.error(
+                "no project owns a target named '%s' (searched: %s)",
+                token,
+                searched,
+            )
+            return None
+        if len(owners) > 1:
+            names = ", ".join(f"{p.name}::{token}" for p in owners)
+            logger.error(
+                "target '%s' exists in several projects; qualify it: %s",
+                token,
+                names,
+            )
+            return None
+        routed[id(owners[0])].append(base if prefix is not None else token)
+
+    return [(p, routed[id(p)]) for p in projects if routed[id(p)]]
+
+
 def _build(
     build_dir: Path,
     *,
-    regenerate: Callable[[], tuple[int, Project | None]],
+    regenerate: Callable[[], tuple[int, list[Project]]],
+    projects: list[Project] | None = None,
     script: Path | None = None,
     targets: list[str] | None = None,
     jobs: int | None = None,
     verbose: bool = False,
     ninja: str | None = None,
     variant: str | None = None,
-) -> tuple[int, Path]:
+) -> tuple[int, list[Path]]:
     """Run one build, regenerating first if the build files are stale.
 
     The regeneration is passed in rather than described by more parameters:
     what it needs is the whole of `_generate`'s signature, and the caller
-    already holds those values.
+    already holds those values. *projects* is the result of the caller's
+    most recent generation, if it ran one; a regeneration here replaces it.
+    Without either, the build runs in *build_dir* alone.
+
+    One project builds in its directory; several top-level projects build
+    serialized, in script order, each named target routed to the project
+    that owns it. A failure stops the run there.
 
     Returns:
-        Tuple of (exit code, the directory the build ran in). Not always the
-        one asked for: a regeneration may run a script that picks its own.
+        Tuple of (exit code, the directories built, in order). Not always
+        the one asked for: a regeneration may run a script that picks its
+        own.
     """
     if _needs_generation(build_dir, build_script=str(script) if script else None):
         found = _resolve_build_script(script)
         if found is not None and found.exists():
             logger.info("Build files missing or out of date, regenerating...")
-            code, project = regenerate()
+            code, projects = regenerate()
             if code != 0:
-                return code, build_dir
-            if project is None:
-                return _no_build_described(), build_dir
-            build_dir = project.build_dir
+                return code, [build_dir]
+            if not projects:
+                return _no_build_described(), [build_dir]
 
-    return _run_build_tool(
-        build_dir,
-        targets=targets,
-        jobs=jobs,
-        verbose=verbose,
-        ninja=ninja,
-        variant=variant,
-    ), build_dir
+    if not projects:
+        # No regeneration ran: build the requested directory. With sibling
+        # projects, -B scopes the build to the one owning that directory.
+        return _run_build_tool(
+            build_dir,
+            targets=targets,
+            jobs=jobs,
+            verbose=verbose,
+            ninja=ninja,
+            variant=variant,
+        ), [build_dir]
+
+    plan = _route_targets(projects, targets)
+    if plan is None:
+        return 1, [build_dir]
+
+    built: list[Path] = []
+    for project, project_targets in plan:
+        where = project._effective_output_dir()
+        built.append(where)
+        code = _run_build_tool(
+            where,
+            targets=project_targets,
+            jobs=jobs,
+            verbose=verbose,
+            ninja=ninja,
+            variant=variant,
+        )
+        if code != 0:
+            return code, built
+    return 0, built
 
 
 def _clean(build_dir: Path, *, everything: bool, ninja: str | None) -> int:
@@ -1443,14 +1598,15 @@ def _info_targets(
         logger.error("No Project created in build script")
         return 1
 
-    project = projects[0]
+    top_levels = [p for p in projects if p.is_top_level]
+    # With sibling projects, a bare name no longer says which build it is.
+    qualify = len(top_levels) > 1
 
-    aliases = project.aliases
-    if aliases:
-        print("Aliases:")
-        for name, alias_node in aliases.items():
+    alias_lines: list[str] = []
+    for project in top_levels:
+        for name, alias_nodes in project.tree_aliases.items():
             dep_names: list[str] = []
-            for node in alias_node.targets:
+            for node in alias_nodes:
                 if isinstance(node, FileNode):
                     dep_names.append(node.path.name)
                 elif isinstance(node, AliasNode):
@@ -1458,7 +1614,12 @@ def _info_targets(
                 else:
                     dep_names.append(str(node))
             deps_str = ", ".join(dep_names) if dep_names else ""
-            print(f"  {name:30s} -> {deps_str}")
+            shown = f"{project.name}::{name}" if qualify else name
+            alias_lines.append(f"  {shown:30s} -> {deps_str}")
+    if alias_lines:
+        print("Aliases:")
+        for line in alias_lines:
+            print(line)
         print()
 
     by_type: dict[str, list[tuple[str, str]]] = {}
@@ -1473,22 +1634,24 @@ def _info_targets(
         "installer",
     ]
 
-    for target in project.targets:
-        ttype = target.target_type
-        type_name = ttype if ttype else "other"
-        outputs = ""
-        if target.output_nodes:
-            paths = []
-            for n in target.output_nodes:
-                if isinstance(n, FileNode):
-                    try:
-                        paths.append(str(n.path.relative_to(project.build_dir)))
-                    except ValueError:
-                        paths.append(str(n.path))
-            if paths:
-                outputs = ", ".join(paths)
-        entry = (target.name, outputs)
-        by_type.setdefault(type_name, []).append(entry)
+    for project in top_levels:
+        for target in project.targets:
+            ttype = target.target_type
+            type_name = ttype if ttype else "other"
+            outputs = ""
+            if target.output_nodes:
+                paths = []
+                for n in target.output_nodes:
+                    if isinstance(n, FileNode):
+                        try:
+                            paths.append(str(n.path.relative_to(project.build_dir)))
+                        except ValueError:
+                            paths.append(str(n.path))
+                if paths:
+                    outputs = ", ".join(paths)
+            shown = target.qualified_name if qualify else target.name
+            entry = (shown, outputs)
+            by_type.setdefault(type_name, []).append(entry)
 
     def print_entries(label: str, entries: list[tuple[str, str]]) -> None:
         print(f"  [{label}]")
@@ -1554,29 +1717,57 @@ def _explain_targets(
         logger.error("No Project created in build script")
         return 1
 
-    project = projects[0]
-    if not project._resolved:
-        project.resolve()
+    top_levels = [p for p in projects if p.is_top_level]
+    for project in top_levels:
+        if not project._resolved:
+            project.resolve()
 
-    targets = list(project.targets)
     if target_names:
-        by_name = {t.name: t for t in targets}
-        missing = [n for n in target_names if n not in by_name]
+        per_project: dict[int, list] = {id(p): [] for p in top_levels}
+        missing: list[str] = []
+        for name in target_names:
+            owners = []
+            for p in top_levels:
+                try:
+                    target = p.get_target(name, raise_if_missing=False)
+                except KeyError as e:  # duplicate name inside one project
+                    logger.error("%s", e)
+                    return 1
+                if target is not None:
+                    owners.append((p, target))
+            if not owners:
+                missing.append(name)
+            elif len(owners) > 1:
+                qualified = ", ".join(f"{p.name}::{name}" for p, _ in owners)
+                logger.error(
+                    "target '%s' exists in several projects; qualify it: %s",
+                    name,
+                    qualified,
+                )
+                return 1
+            else:
+                p, target = owners[0]
+                per_project[id(p)].append(target)
         if missing:
+            known = sorted({t.name for p in top_levels for t in p.targets})
             logger.error("No such target: %s", ", ".join(missing))
-            logger.error("Targets: %s", ", ".join(sorted(by_name)))
+            logger.error("Targets: %s", ", ".join(known))
             return 1
-        targets = [by_name[n] for n in target_names]
+        selections = [(p, per_project[id(p)]) for p in top_levels if per_project[id(p)]]
+    else:
+        selections = [(p, list(p.targets)) for p in top_levels]
 
     use_color = _cli_explain.resolve_color(color)
-    for line in _cli_explain.render_explanation(
-        project,
-        targets,
-        explicit_targets=bool(target_names),
-        color=use_color,
-        width=_cli_explain.resolve_width(width),
-    ):
-        click.echo(line, color=use_color)
+    for project, targets in selections:
+        for line in _cli_explain.render_explanation(
+            project,
+            targets,
+            explicit_targets=bool(target_names),
+            color=use_color,
+            width=_cli_explain.resolve_width(width),
+            show_project=len(top_levels) > 1,
+        ):
+            click.echo(line, color=use_color)
 
     return 0
 
@@ -2013,7 +2204,7 @@ def cli_generate(
 ) -> None:
     """Generate build files from pcons-build.py."""
     variables, _ = parse_variables(list(extra))
-    code, project = _generate(
+    code, projects = _generate(
         build_dir,
         script=Path(build_script) if build_script else None,
         variables=variables,
@@ -2026,7 +2217,7 @@ def cli_generate(
         mermaid=mermaid,
         jobs=jobs,
     )
-    if code == 0 and project is None:
+    if code == 0 and not projects:
         ctx.exit(_no_build_described())
     ctx.exit(code)
 
@@ -2069,8 +2260,13 @@ def cli_build(
     script = Path(build_script) if build_script else None
     variables, targets = parse_variables(list(extra))
 
-    def regenerate() -> tuple[int, Project | None]:
-        return _generate(
+    # The projects from the last regeneration. A watch iteration whose build
+    # files are fresh skips regeneration, and without these it would fall
+    # back to the -B directory and quietly stop building the other siblings.
+    known_projects: list[Project] = []
+
+    def regenerate() -> tuple[int, list[Project]]:
+        code, projects = _generate(
             build_dir,
             script=script,
             variables=variables,
@@ -2080,11 +2276,15 @@ def cli_build(
             fresh=fresh,
             jobs=jobs,
         )
+        if code == 0:
+            known_projects[:] = projects
+        return code, projects
 
-    def build_once() -> tuple[int, Path]:
+    def build_once() -> tuple[int, list[Path]]:
         return _build(
             build_dir,
             regenerate=regenerate,
+            projects=list(known_projects) or None,
             script=script,
             targets=targets or None,
             jobs=jobs,
@@ -2639,8 +2839,12 @@ def cli_default(
 
     variables, targets = parse_variables(list(extra))
 
-    def regenerate() -> tuple[int, Project | None]:
-        return _generate(
+    # The projects from the last regeneration; see cli_build for why a
+    # watch needs them remembered across iterations.
+    known_projects: list[Project] = []
+
+    def regenerate() -> tuple[int, list[Project]]:
+        code, regenerated = _generate(
             build_dir,
             script=script,
             variables=variables,
@@ -2650,38 +2854,52 @@ def cli_default(
             fresh=fresh,
             jobs=jobs,
         )
-
-    def build_once(where: Path) -> tuple[int, Path]:
-        return _build(
-            where,
-            regenerate=regenerate,
-            script=script,
-            targets=targets or None,
-            jobs=jobs,
-            verbose=verbose,
-            ninja=ninja,
-            variant=variant,
-        )
+        if code == 0:
+            known_projects[:] = regenerated
+        return code, regenerated
 
     # _build generates on its own when the build files are stale, which is the
     # right entry point for a watch: it regenerates only when needed.
     if watch:
         ctx.exit(
             _watch(
-                build=lambda: build_once(build_dir),
+                build=lambda: _build(
+                    build_dir,
+                    regenerate=regenerate,
+                    projects=list(known_projects) or None,
+                    script=script,
+                    targets=targets or None,
+                    jobs=jobs,
+                    verbose=verbose,
+                    ninja=ninja,
+                    variant=variant,
+                ),
                 script=_resolve_build_script(script),
                 targets=targets,
                 ninja=ninja,
             )
         )
 
-    code, project = regenerate()
+    code, projects = regenerate()
     if code != 0:
         ctx.exit(code)
-    if project is None:
+    if not projects:
         ctx.exit(_no_build_described())
-    # The script may pick a build directory other than the one asked for.
-    ctx.exit(build_once(project.build_dir)[0])
+    # Build in the projects' own directories, which the script chooses;
+    # they need not match the -B request.
+    ctx.exit(
+        _build(
+            build_dir,
+            regenerate=regenerate,
+            projects=projects,
+            script=script,
+            targets=targets or None,
+            jobs=jobs,
+            verbose=verbose,
+            ninja=ninja,
+            variant=variant,
+        )[0]
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

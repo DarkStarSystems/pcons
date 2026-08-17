@@ -71,6 +71,7 @@ class ProgramBuilder:
             name,
             target_type="program",
             defined_at=defined_at or get_caller_location(),
+            project=project,
         )
         target._env = env
         target._builder_name = "Program"
@@ -122,6 +123,7 @@ class StaticLibraryBuilder:
             name,
             target_type="static_library",
             defined_at=defined_at or get_caller_location(),
+            project=project,
         )
         target._env = env
         target._builder_name = "StaticLibrary"
@@ -173,6 +175,7 @@ class SharedLibraryBuilder:
             name,
             target_type="shared_library",
             defined_at=defined_at or get_caller_location(),
+            project=project,
         )
         target._env = env
         target._builder_name = "SharedLibrary"
@@ -224,6 +227,7 @@ class ObjectLibraryBuilder:
             name,
             target_type="object",
             defined_at=defined_at or get_caller_location(),
+            project=project,
         )
         target._env = env
         target._builder_name = "ObjectLibrary"
@@ -262,6 +266,7 @@ class HeaderOnlyLibraryBuilder:
             name,
             target_type="interface",
             defined_at=defined_at or get_caller_location(),
+            project=project,
         )
         target._builder_name = "HeaderOnlyLibrary"
 

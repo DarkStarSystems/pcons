@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from pcons.core.errors import PconsError
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
@@ -37,7 +38,8 @@ class TestProjectCreation:
         assert Project.top_level() is project1
         assert project1.is_top_level
 
-        project2 = Project("project2")
+        with project1._enter_subdir("sub"):
+            project2 = Project("project2")
         assert Project.top_level() is project1
         assert not project2.is_top_level
         assert project2 in project1._children
@@ -185,6 +187,201 @@ class TestSubproject:
         ):
             with test_project._enter_subdir("child"):
                 Project("child", build_dir="ignored_build", root_dir=tmp_path / "child")
+
+
+class TestTreeAliases:
+    """An alias is one group across the whole project tree."""
+
+    def _tree(self, tmp_path):
+        top = Project("top", root_dir=tmp_path)
+        top_target = Target("toplib")
+        top_target.output_nodes.append(FileNode("build/libtop.a"))
+        with top._enter_subdir("sub"):
+            child = Project("sub", root_dir=tmp_path / "sub")
+            sub_target = Target("sublib")
+            sub_target.output_nodes.append(FileNode("build/sub/libsub.a"))
+        return top, child, top_target, sub_target
+
+    def test_same_name_merges_across_the_tree(self, tmp_path):
+        top, child, top_target, sub_target = self._tree(tmp_path)
+        top.Alias("libs", top_target)
+        child.Alias("libs", sub_target)
+
+        merged = top.tree_aliases["libs"]
+        assert top_target.output_nodes[0] in merged
+        assert sub_target.output_nodes[0] in merged
+        # Own declarations stay separate.
+        assert len(top.aliases["libs"].targets) == 1
+
+    def test_a_subproject_only_alias_is_visible_at_the_top(self, tmp_path):
+        top, child, _top_target, sub_target = self._tree(tmp_path)
+        child.Alias("docs", sub_target)
+
+        assert "docs" in top.tree_aliases
+        assert "docs" not in top.aliases
+
+    def test_default_resolves_a_subproject_alias(self, tmp_path):
+        top, child, _top_target, sub_target = self._tree(tmp_path)
+        child.Alias("docs", sub_target)
+
+        top.Default("docs")
+        assert sub_target in top.default_targets
+
+
+class TestSiblingProjects:
+    """A second top-level Project is an independent sibling, never a merge."""
+
+    def test_a_second_project_without_a_build_dir_raises(self):
+        Project("first")
+        with pytest.raises(PconsError, match="needs an explicit build_dir"):
+            Project("second")
+
+    def test_the_error_names_both_projects(self):
+        Project("firmware")
+        with pytest.raises(PconsError) as exc_info:
+            Project("updater")
+        message = str(exc_info.value)
+        assert "'firmware'" in message
+        assert "'updater'" in message
+        assert "add_subdirectory" in message
+
+    def test_a_distinct_build_dir_makes_a_sibling(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+
+        assert first.is_top_level and second.is_top_level
+        assert second._parent is None
+        assert second not in first._children
+        assert Project.current() is second
+        assert Project.top_level() is first  # the run's default anchor
+        assert first.build_dir == Path("build-a")
+        assert second.build_dir == Path("build-b")
+
+    def test_siblings_keep_separate_node_namespaces(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+
+        node1 = first.node("src/main.c")
+        node2 = second.node("src/main.c")
+        assert node1 is not node2
+
+    def test_a_shared_build_dir_raises(self, tmp_path):
+        Project("first", root_dir=tmp_path, build_dir="out")
+        with pytest.raises(PconsError, match="share the build directory"):
+            Project("second", root_dir=tmp_path, build_dir="out")
+
+    def test_a_shared_build_dir_is_compared_effectively(self, tmp_path):
+        """The same directory spelled differently still collides."""
+        Project("first", root_dir=tmp_path, build_dir="out")
+        with pytest.raises(PconsError, match="share the build directory"):
+            Project(
+                "second", root_dir=tmp_path, build_dir=tmp_path / "sub" / ".." / "out"
+            )
+
+    def test_the_failed_project_is_not_registered(self):
+        from pcons import get_registered_projects
+
+        first = Project("first")
+        with pytest.raises(PconsError):
+            Project("second")
+        assert get_registered_projects() == [first]
+
+    def test_a_bare_project_after_a_subdirectory_still_raises(self):
+        first = Project("first")
+        with first._enter_subdir("sub"):
+            Project("child")
+        with pytest.raises(PconsError, match="needs an explicit build_dir"):
+            Project("second")
+
+    def test_a_fresh_tree_accepts_a_new_project(self):
+        Project("first")
+        Project._clear_tree()
+        project = Project("second")
+        assert Project.top_level() is project
+
+    def test_targets_bind_to_their_own_sibling(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+
+        t1 = Target("app", project=first)
+        t2 = Target("app", project=second)  # same name, different project: fine
+        assert t1.project is first
+        assert t2.project is second
+        assert first.get_target("app") is t1
+        assert second.get_target("app") is t2
+
+    def test_linking_across_siblings_raises(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        lib = Target("common", project=first)
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+        app = Target("app", project=second)
+
+        with pytest.raises(PconsError, match="build independently"):
+            app.link(lib)
+
+    def test_depending_across_siblings_raises(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        tool = Target("tool", project=first)
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+        app = Target("app", project=second)
+
+        with pytest.raises(PconsError, match="build independently"):
+            app.depends(tool)
+
+    def test_each_sibling_may_embed_the_same_subdirectory(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+
+        with first._enter_subdir("lib"):
+            lib1 = Project("lib", root_dir=tmp_path / "lib")
+        with second._enter_subdir("lib"):
+            lib2 = Project("lib", root_dir=tmp_path / "lib")
+
+        assert lib1._parent is first
+        assert lib2._parent is second
+        assert lib1.build_dir == Path("build-a") / "lib"
+        assert lib2.build_dir == Path("build-b") / "lib"
+
+
+class TestExplicitBinding:
+    """Targets attach to the project they were made through, not the
+    most recently created one."""
+
+    def _tree(self):
+        top = Project("top")
+        with top._enter_subdir("sub"):
+            child = Project("child")
+        return top, child
+
+    def test_target_binds_to_the_project_passed(self):
+        top, child = self._tree()
+        # Project.current() is back to top, but the explicit project wins.
+        target = Target("t", project=child)
+        assert target.project is child
+        assert top.get_target("t") is target  # lookup is recursive
+
+    def test_builder_factory_binds_to_its_project(self):
+        _top, child = self._tree()
+        target = child.HeaderOnlyLibrary("hdrs")
+        assert target.project is child
+
+    def test_bare_target_still_binds_to_the_current_project(self):
+        top, _child = self._tree()
+        target = Target("t")
+        assert target.project is top
+
+    def test_top_walks_to_the_tree_root(self):
+        top = Project("top")
+        with top._enter_subdir("a"):
+            child = Project("a")
+            with child._enter_subdir("b"):
+                grandchild = Project("b")
+        assert top.top is top
+        assert child.top is top
+        assert grandchild.top is top
+        assert top.is_top_level
+        assert not child.is_top_level
+        assert not grandchild.is_top_level
 
 
 class TestProjectAliases:

@@ -93,7 +93,7 @@ class MakefileGenerator(BaseGenerator):
 
     def _write_phony_declaration(self, f: TextIO, project: Project) -> None:
         """Write .PHONY declaration for all phony targets."""
-        phony_targets = ["all", "clean", *project.aliases]
+        phony_targets = ["all", "clean", *project.tree_aliases]
         if any(t.target_type == "test" for t in project.targets):
             phony_targets.extend(["test", "test-build"])
         f.write("# Phony targets\n")
@@ -532,14 +532,15 @@ class MakefileGenerator(BaseGenerator):
         return command
 
     def _write_aliases(self, f: TextIO, project: Project) -> None:
-        """Write alias targets."""
-        if not project.aliases:
+        """Write alias targets, merged across the project tree."""
+        aliases = project.tree_aliases
+        if not aliases:
             return
 
         f.write("# Aliases\n")
-        for name, alias in project.aliases.items():
+        for name, nodes in aliases.items():
             targets = " ".join(
-                self._node_path(t) for t in alias.targets if isinstance(t, FileNode)
+                self._node_path(t) for t in nodes if isinstance(t, FileNode)
             )
             if targets:
                 f.write(f"{name}: {targets}\n")

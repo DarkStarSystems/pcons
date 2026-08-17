@@ -23,6 +23,11 @@ pcons CC=clang myapp      # set a build variable, then build
 pcons -- -myapp           # build a target whose name starts with a dash
 ```
 
+A script with [several top-level projects](user-guide.md#multiple-projects-in-one-script)
+builds them all, in script order. A named target is built in the project
+that owns it; a name several projects own must be qualified, as
+`project::target`.
+
 `--` marks everything after it as a target or a build variable, never an
 option or a command: `pcons -- clean` builds a target named `clean`. To run
 a command, name it before any `--`; a command's own `--` (as in
@@ -42,7 +47,9 @@ Generate build files without building.
 Build with the tool that matches the generated files (ninja, make or
 xcodebuild), regenerating them first if they're stale. Unlike a bare `pcons`,
 this needs no `pcons-build.py`: with nothing to regenerate from, it builds
-whatever files are already there. Unusual corner case but OK.
+whatever files are already there. Unusual corner case but OK. With several
+top-level projects and nothing to regenerate, it builds the `-B` directory
+alone; a bare `pcons` builds them all.
 
 | Option | |
 |---|---|

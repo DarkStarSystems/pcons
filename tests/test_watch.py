@@ -315,7 +315,7 @@ class TestCliWiring:
         # directory the build script actually chose.
         assert (
             cli._watch(
-                build=lambda: (0, build_dir), script=script, targets=[], ninja=None
+                build=lambda: (0, [build_dir]), script=script, targets=[], ninja=None
             )
             == 0
         )
@@ -375,7 +375,7 @@ class TestBuildDispatch:
         """One build, with nothing to regenerate unless a test says otherwise."""
         from pcons import cli
 
-        overrides.setdefault("regenerate", lambda: (0, None))
+        overrides.setdefault("regenerate", lambda: (0, []))
         code, _where = cli._build(build_dir, **overrides)
         return code
 
@@ -434,11 +434,13 @@ class TestBuildDispatch:
             cli, "run_ninja", lambda *a, **k: order.append("build") or 0
         )
 
-        regenerated = SimpleNamespace(build_dir=tmp_path)
+        regenerated = SimpleNamespace(
+            build_dir=tmp_path, _effective_output_dir=lambda: tmp_path
+        )
         assert (
             self._build(
                 tmp_path,
-                regenerate=lambda: order.append("generate") or (0, regenerated),
+                regenerate=lambda: order.append("generate") or (0, [regenerated]),
             )
             == 0
         )
@@ -458,7 +460,7 @@ class TestBuildDispatch:
             cli, "run_ninja", lambda *a, **k: order.append("build") or 0
         )
 
-        assert self._build(tmp_path, regenerate=lambda: (0, None)) == 0
+        assert self._build(tmp_path, regenerate=lambda: (0, [])) == 0
         assert order == []
 
     def test_a_failed_regeneration_stops_the_build(
@@ -473,7 +475,7 @@ class TestBuildDispatch:
             cli, "run_ninja", lambda *a, **k: pytest.fail("should not build")
         )
 
-        assert self._build(tmp_path, regenerate=lambda: (1, None)) == 1
+        assert self._build(tmp_path, regenerate=lambda: (1, [])) == 1
 
     def test_no_build_files_is_an_error(self, tmp_path: Path, monkeypatch) -> None:
 

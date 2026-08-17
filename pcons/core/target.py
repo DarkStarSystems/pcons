@@ -484,8 +484,14 @@ class Target:
         target_type: str | None = None,
         builder: Builder | None = None,
         defined_at: SourceLocation | None = None,
+        project: Project | None = None,
     ) -> None:
-        """Create a target. Toolchains define their own target_type strings."""
+        """Create a target. Toolchains define their own target_type strings.
+
+        ``project`` is the owning project; builder factories pass the project
+        they were reached through. Without it, the most recently created
+        project owns the target (fine in a single-project script).
+        """
         _validate_target_name(name)
         self.name = name
         self.builder = builder
@@ -526,9 +532,10 @@ class Target:
         # (add_sources(..., env=...)), keyed by source node path.
         self._source_envs: dict[Path, Environment] = {}
 
-        from pcons.core.project import Project
+        if project is None:
+            from pcons.core.project import Project
 
-        project = Project.current()
+            project = Project.current()
 
         self.__project = project
         # Where this target's paths sit relative to the top-level root, which
@@ -596,17 +603,13 @@ class Target:
         there rather than at the owning project's own directories (which
         already include that offset).
         """
-        from pcons.core.project import Project
-
-        top = Project.top_level()
+        top = self.__project.top
         return top.build_dir / self._subdir if self._subdir.parts else top.build_dir
 
     @property
     def source_dir(self) -> Path:
         """This target's source directory."""
-        from pcons.core.project import Project
-
-        top = Project.top_level()
+        top = self.__project.top
         return top.root_dir / self._subdir if self._subdir.parts else top.root_dir
 
     @property
@@ -625,8 +628,33 @@ class Target:
             raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
         if item is self:
             raise ValueError(f"Target '{self.name}' cannot link itself.")
+        if isinstance(item, Target):
+            self._check_same_tree(item, "link")
         # Invalidate cached requirements
         self._collected_requirements = None
+
+    def _check_same_tree(self, other: Target, verb: str) -> None:
+        """Refuse an edge to a target in another top-level project.
+
+        Sibling projects build independently, with separate build directories and
+        separate build files, so raise an error if user tries to connect them.
+        Imported targets are exempt: they
+        describe something outside every build.
+        """
+        if getattr(other, "is_imported", False):
+            return
+        if other.project.top is self.project.top:
+            return
+        from pcons.core.errors import PconsError
+
+        raise PconsError(
+            f"target '{self.name}' (project "
+            f"{self.project.top.name!r}) cannot {verb} '{other.name}' from "
+            f"project {other.project.top.name!r}: sibling projects build "
+            "independently, with no edges between their build files.\n"
+            "Build it in this project too (e.g. add_subdirectory() the "
+            "same directory from both), or make the two one project."
+        )
 
     def link(self, *libs: Target | str) -> Target:
         """Add PUBLIC link dependencies (fluent API).
@@ -780,6 +808,7 @@ class Target:
             if isinstance(item, Target):
                 if item is self:
                     raise ValueError(f"Target '{self.name}' cannot depend on itself.")
+                self._check_same_tree(item, "depend on")
                 target_list = (
                     self._implicit_target_deps
                     if propagate

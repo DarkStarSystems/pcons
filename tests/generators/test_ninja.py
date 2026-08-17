@@ -135,6 +135,33 @@ class TestNinjaAliases:
         assert "build libs: phony" in content
         assert "build/libmy.a" in content
 
+    def test_subproject_aliases_reach_the_manifest(self, tmp_path):
+        """An alias is one group wherever declared: a subproject's alias
+        lands in the tree's build.ninja, merged with any same-named one."""
+        project = Project("test", root_dir=tmp_path, build_dir=".")
+        top_target = Target("toplib")
+        top_target.output_nodes.append(FileNode("build/libtop.a"))
+        project.Alias("libs", top_target)
+
+        with project._enter_subdir("sub"):
+            child = Project("child", root_dir=tmp_path / "sub")
+            sub_target = Target("sublib")
+            sub_target.output_nodes.append(FileNode("build/sub/libsub.a"))
+            child.Alias("libs", sub_target)
+            child.Alias("docs", sub_target)
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = normalize_path((tmp_path / "build.ninja").read_text())
+        libs_line = next(
+            line for line in content.splitlines() if line.startswith("build libs:")
+        )
+        assert "build/libtop.a" in libs_line
+        assert "build/sub/libsub.a" in libs_line
+        assert "build docs: phony" in content
+
 
 class TestNinjaDefaults:
     def test_writes_defaults(self, tmp_path):

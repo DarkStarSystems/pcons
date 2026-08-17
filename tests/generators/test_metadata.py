@@ -126,7 +126,8 @@ class TestMetadataGenerator:
     def test_child_projects_in_projects_list(self, tmp_path):
         """Child projects appear in the projects list with a parent reference."""
         parent = Project("parent", root_dir=tmp_path, build_dir="build")
-        Project("child", root_dir=tmp_path / "sub")
+        with parent._enter_subdir("sub"):
+            Project("child", root_dir=tmp_path / "sub")
 
         MetadataGenerator().generate(parent)
         BaseGenerator._generate_pending(parent)
@@ -143,9 +144,10 @@ class TestMetadataGenerator:
         papp = Target("papp", target_type="program")
         papp.output_nodes.append(FileNode("build/papp"))
 
-        child = Project("child", root_dir=tmp_path / "sub")
-        capp = Target("capp", target_type="program")
-        capp.output_nodes.append(FileNode("build/capp"))
+        with parent._enter_subdir("sub"):
+            child = Project("child", root_dir=tmp_path / "sub")
+            capp = Target("capp", target_type="program")
+            capp.output_nodes.append(FileNode("build/capp"))
         assert capp.project is child  # registered to the child project
 
         MetadataGenerator().generate(parent)
@@ -164,10 +166,12 @@ class TestMetadataGenerator:
     def test_grandchild_project_in_projects_list(self, tmp_path):
         """Nested grandchildren get their own project entry with targets."""
         parent = Project("parent", root_dir=tmp_path, build_dir="build")
-        Project("child", root_dir=tmp_path / "sub")
-        grandchild = Project("grandchild", root_dir=tmp_path / "sub" / "deep")
-        gapp = Target("gapp", target_type="program")
-        gapp.output_nodes.append(FileNode("build/gapp"))
+        with parent._enter_subdir("sub"):
+            child = Project("child", root_dir=tmp_path / "sub")
+            with child._enter_subdir("deep"):
+                grandchild = Project("grandchild", root_dir=tmp_path / "sub" / "deep")
+                gapp = Target("gapp", target_type="program")
+                gapp.output_nodes.append(FileNode("build/gapp"))
         assert gapp.project is grandchild
 
         MetadataGenerator().generate(parent)
