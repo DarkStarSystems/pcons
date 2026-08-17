@@ -6193,6 +6193,16 @@ class TestRouteTargets:
         assert _route_targets([alpha, beta], ["docs"]) is None
         assert "alias in one project and a target in another" in caplog.text
 
+    def test_a_subproject_alias_routes_to_its_sibling(self, tmp_path) -> None:
+        from pcons.cli import _route_targets
+        from pcons.core.project import Project
+
+        alpha, beta = self._siblings(tmp_path)
+        with beta._enter_subdir("sub"):
+            child = Project("sub", root_dir=tmp_path / "sub")
+            child.Alias("docs")
+        assert _route_targets([alpha, beta], ["docs"]) == [(beta, ["docs"])]
+
     def test_a_single_project_passes_names_through(self, tmp_path) -> None:
         """Ninja may know names pcons doesn't, e.g. raw file paths."""
         from pcons.cli import _route_targets

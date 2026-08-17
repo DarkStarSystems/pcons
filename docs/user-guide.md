@@ -2037,9 +2037,11 @@ One `pcons` run generates and builds both, in script order. The rules:
   `pcons device::app` builds one project's target. `pcons` with no targets
   builds every project; `pcons -B build-host build` selects just that project's build dir and targets.
 - **Aliases group across projects.** An alias is a user-level grouping, so
-  one name declared by several projects means all of them: `pcons docs`
-  builds each project's `docs` alias. A name that is an alias in one
-  project and a plain target in another must be qualified.
+  one name declared in several places means all of them: `pcons docs`
+  builds every project's `docs` alias, and within a tree, declarations in
+  subprojects merge into one group (`ninja docs` builds them all). A name
+  that is an alias in one project and a plain target in another must be
+  qualified.
 - **Directory-scoped commands act on one directory.** `clean` and `test`
   never run the build script, so they see only the `-B` directory
   (default: the first project's); scope them with `pcons -B build-host test`.

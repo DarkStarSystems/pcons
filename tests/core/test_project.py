@@ -189,6 +189,45 @@ class TestSubproject:
                 Project("child", build_dir="ignored_build", root_dir=tmp_path / "child")
 
 
+class TestTreeAliases:
+    """An alias is one group across the whole project tree."""
+
+    def _tree(self, tmp_path):
+        top = Project("top", root_dir=tmp_path)
+        top_target = Target("toplib")
+        top_target.output_nodes.append(FileNode("build/libtop.a"))
+        with top._enter_subdir("sub"):
+            child = Project("sub", root_dir=tmp_path / "sub")
+            sub_target = Target("sublib")
+            sub_target.output_nodes.append(FileNode("build/sub/libsub.a"))
+        return top, child, top_target, sub_target
+
+    def test_same_name_merges_across_the_tree(self, tmp_path):
+        top, child, top_target, sub_target = self._tree(tmp_path)
+        top.Alias("libs", top_target)
+        child.Alias("libs", sub_target)
+
+        merged = top.tree_aliases["libs"]
+        assert top_target.output_nodes[0] in merged
+        assert sub_target.output_nodes[0] in merged
+        # Own declarations stay separate.
+        assert len(top.aliases["libs"].targets) == 1
+
+    def test_a_subproject_only_alias_is_visible_at_the_top(self, tmp_path):
+        top, child, _top_target, sub_target = self._tree(tmp_path)
+        child.Alias("docs", sub_target)
+
+        assert "docs" in top.tree_aliases
+        assert "docs" not in top.aliases
+
+    def test_default_resolves_a_subproject_alias(self, tmp_path):
+        top, child, _top_target, sub_target = self._tree(tmp_path)
+        child.Alias("docs", sub_target)
+
+        top.Default("docs")
+        assert sub_target in top.default_targets
+
+
 class TestSiblingProjects:
     """A second top-level Project is an independent sibling, never a merge."""
 

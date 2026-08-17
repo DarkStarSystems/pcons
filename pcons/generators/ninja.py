@@ -895,14 +895,15 @@ class NinjaGenerator(BaseGenerator):
         return self._escape_path(path)
 
     def _write_aliases(self, f: TextIO, project: Project) -> None:
-        """Write phony rules for aliases."""
-        if not project.aliases:
+        """Write phony rules for aliases, merged across the project tree."""
+        aliases = project.tree_aliases
+        if not aliases:
             return
 
         f.write("# Aliases\n")
-        for name, alias in project.aliases.items():
+        for name, nodes in aliases.items():
             targets = " ".join(
-                self._output_ref(t) for t in alias.targets if isinstance(t, FileNode)
+                self._output_ref(t) for t in nodes if isinstance(t, FileNode)
             )
             if targets:
                 f.write(f"build {name}: phony {targets}\n")

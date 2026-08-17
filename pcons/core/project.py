@@ -730,6 +730,34 @@ class Project(_ProjectBuilders):
 
         return alias
 
+    def _iter_tree(self) -> Generator[Project, None, None]:
+        """This project and every descendant, depth-first in creation order."""
+        yield self
+        for child in self._children:
+            yield from child._iter_tree()
+
+    @property
+    def tree_aliases(self) -> dict[str, list[Node]]:
+        """Every alias declared in this project's tree, name → its nodes.
+
+        An alias is a user-level grouping, so one name declared at several
+        levels of the tree is one group: the union of every declaration's
+        targets, in tree order. This is what the generated build files
+        expose as the alias; :attr:`aliases` stays this project's own
+        declarations.
+        """
+        merged: dict[str, list[Node]] = {}
+        seen: dict[str, set[int]] = {}
+        for project in self._iter_tree():
+            for name, alias in project._aliases.items():
+                nodes = merged.setdefault(name, [])
+                ids = seen.setdefault(name, set())
+                for node in alias.targets:
+                    if id(node) not in ids:
+                        ids.add(id(node))
+                        nodes.append(node)
+        return merged
+
     def Default(self, *targets: Target | Node | str) -> None:
         """Set default targets for building.
 
@@ -793,16 +821,23 @@ class Project(_ProjectBuilders):
     def _resolve_default_name(self, name: str) -> list[Target]:
         """Resolve a Default() string argument to one or more targets.
 
-        Tries `name` as an alias first (an alias may wrap several targets),
-        then as a plain target name.
+        Tries `name` as an alias first (an alias may wrap several targets;
+        every declaration in the tree counts — an alias is one group
+        wherever its pieces were declared), then as a plain target name.
         """
-        alias = self._aliases.get(name)
-        if alias is not None:
-            resolved: list[Target] = list(alias._target_refs)
-            for node in alias._nodes:
-                target = self._find_target_for_node(node)
-                if target is not None and target not in resolved:
-                    resolved.append(target)
+        declarations = [
+            p._aliases[name] for p in self._iter_tree() if name in p._aliases
+        ]
+        if declarations:
+            resolved: list[Target] = []
+            for alias in declarations:
+                for target_ref in alias._target_refs:
+                    if target_ref not in resolved:
+                        resolved.append(target_ref)
+                for node in alias._nodes:
+                    target = self._find_target_for_node(node)
+                    if target is not None and target not in resolved:
+                        resolved.append(target)
             if not resolved:
                 raise ValueError(
                     f"Default(): alias '{name}' does not resolve to any "
@@ -818,7 +853,7 @@ class Project(_ProjectBuilders):
         raise KeyError(
             f"Default(): '{name}' is not a known alias or target in "
             f"project '{self.name}'. Tried aliases "
-            f"{sorted(self._aliases)!r} and targets "
+            f"{sorted(self.tree_aliases)!r} and targets "
             f"{sorted(t.name for t in self.targets)!r}."
         )
 

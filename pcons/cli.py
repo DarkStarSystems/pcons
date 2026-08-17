@@ -1244,8 +1244,9 @@ def _route_targets(
             # up as an in-tree qualified name (subproject::target).
 
         # An alias is a user-level grouping, so one name declared by
-        # several projects means all of them: build each project's group.
-        alias_owners = [p for p in projects if token in p.aliases]
+        # several projects (at any level of their trees) means all of
+        # them: build each project's group.
+        alias_owners = [p for p in projects if token in p.tree_aliases]
         if alias_owners:
             confusable = [
                 p for p in projects if p not in alias_owners and owns_target(p, token)
@@ -1548,9 +1549,9 @@ def _info_targets(
 
     alias_lines: list[str] = []
     for project in top_levels:
-        for name, alias_node in project.aliases.items():
+        for name, alias_nodes in project.tree_aliases.items():
             dep_names: list[str] = []
-            for node in alias_node.targets:
+            for node in alias_nodes:
                 if isinstance(node, FileNode):
                     dep_names.append(node.path.name)
                 elif isinstance(node, AliasNode):
