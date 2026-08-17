@@ -1987,7 +1987,8 @@ Two things are worth knowing:
 - The subdirectory must live under the top-level project. Pointing
   `add_subdirectory()` at a sibling checkout elsewhere on disk is an error.
 - `add_subdirectory()` is the only way to nest: a second bare `Project()`
-  call in one script is an error, not another project.
+  call is an independent sibling. See
+  [Multiple projects in one script](#multiple-projects-in-one-script).
 - Only the environment needs the `is_top_level` branch, because a standalone
   build has no parent to take a toolchain from. `default_environment` searches
   enclosing projects, so a library nested several levels down still finds it.
@@ -2002,6 +2003,51 @@ standalone_subdirs = ["libfoo", "libfoo/libbar"]
 
 See `examples/13_subdirs` for a worked example, including a library nested two
 levels down.
+
+### Multiple projects in one script
+
+Some builds contain more than one project: firmware plus the host
+tools that flash it, an application plus its installer, two
+configurations of one source tree, or a monorepo with several
+independent sub-projects. Each `Project()` created outside
+`add_subdirectory()` is an independent top-level project, with its own
+build directory, environments, node namespace, defaults and build files:
+
+```python
+device = Project("device")                      # the default build dir
+denv = device.Environment(toolchain="c")
+denv.cc.defines.append("DEVICE_BUILD")
+device.Program("app", denv, sources=["src/main.c"])
+
+host = Project("host", build_dir=f"{device.build_dir}-host")  # its own build dir
+henv = host.Environment(toolchain="c")
+host.Program("app", henv, sources=["src/main.c"])
+```
+
+One `pcons` run generates and builds both, in script order. The rules:
+
+- **Each project owns a build directory.** The `-B`/`PCONS_BUILD_DIR` default
+  gets assigned to the first project; every later sibling must pass `build_dir=`,
+  and two projects claiming the same directory is an error.
+- **Targets belong to the project that made them.** `device.Program(...)`
+  binds to `device`. Bare `Target()` and
+  `Environment()` calls bind to the most recently created project, so
+  in a multi-project script, create things through the project or an env.
+- **Names can be qualified to avoid collisions.** `pcons app` is ambiguous above;
+  `pcons device::app` builds one project's target. `pcons` with no targets
+  builds every project; `pcons -B build-host build` selects just that project's build dir and targets.
+- **Subdirectories anchor explicitly.** `device.add_subdirectory("lib")`
+  (or `add_subdirectory("lib", project=device)`) parents into that project.
+  Both siblings may embed the *same* directory: each inclusion re-runs the
+  script in its project's tree, so the library compiles per project, with
+  that project's flags.
+- The root `compile_commands.json` symlink points at the first project's
+  database; the others stay in their build directories.
+- **One Ninja/Makefile per project**: Each project keeps its own
+`build.ninja` or `Makefile`, so to build manually, you'd need individual `ninja -C`
+calls.
+
+See `examples/66_multi_project` for a worked example.
 
 ### Multi-Platform Builds
 

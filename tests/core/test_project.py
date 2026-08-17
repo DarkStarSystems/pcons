@@ -189,12 +189,12 @@ class TestSubproject:
                 Project("child", build_dir="ignored_build", root_dir=tmp_path / "child")
 
 
-class TestSecondTopLevelProject:
-    """A second Project outside add_subdirectory is an error, not a merge."""
+class TestSiblingProjects:
+    """A second top-level Project is an independent sibling, never a merge."""
 
-    def test_a_second_project_raises(self):
+    def test_a_second_project_without_a_build_dir_raises(self):
         Project("first")
-        with pytest.raises(PconsError, match="second Project"):
+        with pytest.raises(PconsError, match="needs an explicit build_dir"):
             Project("second")
 
     def test_the_error_names_both_projects(self):
@@ -206,10 +206,38 @@ class TestSecondTopLevelProject:
         assert "'updater'" in message
         assert "add_subdirectory" in message
 
-    def test_a_distinct_build_dir_does_not_help(self, tmp_path):
-        Project("first", root_dir=tmp_path, build_dir="build-a")
-        with pytest.raises(PconsError, match="second Project"):
-            Project("second", root_dir=tmp_path, build_dir="build-b")
+    def test_a_distinct_build_dir_makes_a_sibling(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+
+        assert first.is_top_level and second.is_top_level
+        assert second._parent is None
+        assert second not in first._children
+        assert Project.current() is second
+        assert Project.top_level() is first  # the run's default anchor
+        assert first.build_dir == Path("build-a")
+        assert second.build_dir == Path("build-b")
+
+    def test_siblings_keep_separate_node_namespaces(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+
+        node1 = first.node("src/main.c")
+        node2 = second.node("src/main.c")
+        assert node1 is not node2
+
+    def test_a_shared_build_dir_raises(self, tmp_path):
+        Project("first", root_dir=tmp_path, build_dir="out")
+        with pytest.raises(PconsError, match="share the build directory"):
+            Project("second", root_dir=tmp_path, build_dir="out")
+
+    def test_a_shared_build_dir_is_compared_effectively(self, tmp_path):
+        """The same directory spelled differently still collides."""
+        Project("first", root_dir=tmp_path, build_dir="out")
+        with pytest.raises(PconsError, match="share the build directory"):
+            Project(
+                "second", root_dir=tmp_path, build_dir=tmp_path / "sub" / ".." / "out"
+            )
 
     def test_the_failed_project_is_not_registered(self):
         from pcons import get_registered_projects
@@ -219,11 +247,11 @@ class TestSecondTopLevelProject:
             Project("second")
         assert get_registered_projects() == [first]
 
-    def test_a_project_after_a_subdirectory_still_raises(self):
+    def test_a_bare_project_after_a_subdirectory_still_raises(self):
         first = Project("first")
         with first._enter_subdir("sub"):
             Project("child")
-        with pytest.raises(PconsError, match="second Project"):
+        with pytest.raises(PconsError, match="needs an explicit build_dir"):
             Project("second")
 
     def test_a_fresh_tree_accepts_a_new_project(self):
@@ -231,6 +259,49 @@ class TestSecondTopLevelProject:
         Project._clear_tree()
         project = Project("second")
         assert Project.top_level() is project
+
+    def test_targets_bind_to_their_own_sibling(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+
+        t1 = Target("app", project=first)
+        t2 = Target("app", project=second)  # same name, different project: fine
+        assert t1.project is first
+        assert t2.project is second
+        assert first.get_target("app") is t1
+        assert second.get_target("app") is t2
+
+    def test_linking_across_siblings_raises(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        lib = Target("common", project=first)
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+        app = Target("app", project=second)
+
+        with pytest.raises(PconsError, match="build independently"):
+            app.link(lib)
+
+    def test_depending_across_siblings_raises(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        tool = Target("tool", project=first)
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+        app = Target("app", project=second)
+
+        with pytest.raises(PconsError, match="build independently"):
+            app.depends(tool)
+
+    def test_each_sibling_may_embed_the_same_subdirectory(self, tmp_path):
+        first = Project("first", root_dir=tmp_path, build_dir="build-a")
+        second = Project("second", root_dir=tmp_path, build_dir="build-b")
+
+        with first._enter_subdir("lib"):
+            lib1 = Project("lib", root_dir=tmp_path / "lib")
+        with second._enter_subdir("lib"):
+            lib2 = Project("lib", root_dir=tmp_path / "lib")
+
+        assert lib1._parent is first
+        assert lib2._parent is second
+        assert lib1.build_dir == Path("build-a") / "lib"
+        assert lib2.build_dir == Path("build-b") / "lib"
 
 
 class TestExplicitBinding:

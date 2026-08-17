@@ -203,27 +203,15 @@ class Project(_ProjectBuilders):
                 the calling script, then the current working directory.
             build_dir: Directory for build outputs. Defaults to the
                 PCONS_BUILD_DIR environment variable if set (the CLI
-                sets this automatically), otherwise "build".
-                Using it from a sub-project is not currently supported and will be ignored.
+                sets this automatically), otherwise "build". That default
+                belongs to the first project: an independent sibling
+                project must pass its own. A sub-project's build_dir is
+                derived from its parent's, and passing one is ignored.
             config: Cached configuration from configure phase.
             defined_at: Source location where project was created.
         """
         self.name = name
         defined_at = defined_at or get_caller_location()
-        if Project.__current is not None and not Project.__parent_stack:
-            top = Project.top_level()
-            raise PconsError(
-                f"a second Project ({name!r}) was created, but this run "
-                f"already describes project {top.name!r} "
-                f"({top.defined_at}).\n"
-                "A build script describes one project. To build a "
-                "subdirectory as part of it, use add_subdirectory(); "
-                "several independent projects in one script aren't "
-                "supported yet.\n"
-                "(Earlier pcons versions silently folded the second "
-                "project into the first, producing wrong build files.)",
-                location=defined_at,
-            )
         if root_dir is None and Project.__top_level is None:
             root_dir = os.environ.get("PCONS_SOURCE_DIR")
         if root_dir is None:
@@ -271,11 +259,6 @@ class Project(_ProjectBuilders):
         self._children: list[Project] = []
         self.__generated = False
 
-        # Auto-register with global registry (for CLI access)
-        from pcons import _register_project
-
-        _register_project(self)
-
         if Project.__parent_stack:
             self._parent = Project.__parent_stack[-1]
         else:
@@ -307,7 +290,23 @@ class Project(_ProjectBuilders):
                 ) from exc
             self.build_dir = top.build_dir / self._offset
         else:
+            first = Project.__top_level
             if build_dir is None:
+                if first is not None:
+                    # An independent sibling. The -B / PCONS_BUILD_DIR
+                    # default can only serve one project, and it serves
+                    # the first; a sibling names its own build directory.
+                    default = os.environ.get("PCONS_BUILD_DIR", "build")
+                    raise PconsError(
+                        f"project {name!r} needs an explicit build_dir: "
+                        f"the default ({default!r}) belongs to project "
+                        f"{first.name!r} ({first.defined_at}).\n"
+                        "Each top-level project owns its own build "
+                        "directory; pass build_dir= to the later ones. To "
+                        "build a subdirectory as part of an existing "
+                        "project instead, use add_subdirectory().",
+                        location=defined_at,
+                    )
                 build_dir = os.environ.get("PCONS_BUILD_DIR", "build")
             if not self.root_dir.is_absolute():
                 raise ValueError(
@@ -321,11 +320,30 @@ class Project(_ProjectBuilders):
                     pass  # Out-of-tree build — keep absolute
             self.build_dir = bd
 
+            if first is not None:
+                mine = self._effective_output_dir()
+                for other in Project._top_level_projects():
+                    if other._effective_output_dir() == mine:
+                        raise PconsError(
+                            f"projects {other.name!r} ({other.defined_at}) "
+                            f"and {name!r} would share the build directory "
+                            f"{mine}.\n"
+                            "Each top-level project owns its own build "
+                            "directory; pass a distinct build_dir=.",
+                            location=defined_at,
+                        )
+
         # Anchored at the top of this project's tree, which is where node
         # paths are rooted; `path_resolver` narrows it to this project's
         # directory.
         top = self.top
         self._path_resolver = PathResolver(top.root_dir, top.build_dir)
+
+        # Register with the global registry (the CLI's iteration source).
+        # After validation, so a rejected project is never registered.
+        from pcons import _register_project
+
+        _register_project(self)
 
         Project.__current = self
         if Project.__top_level is None:
@@ -344,6 +362,26 @@ class Project(_ProjectBuilders):
                     program_name(script),
                 )
             Project.__top_level = self
+
+    def _effective_output_dir(self) -> Path:
+        """Where this project's build outputs land, as a normalized path.
+
+        Pure path arithmetic (no filesystem access); used to detect two
+        top-level projects claiming the same build directory.
+        """
+        bd = (
+            self.build_dir
+            if self.build_dir.is_absolute()
+            else (self.root_dir / self.build_dir)
+        )
+        return Path(os.path.normpath(bd))
+
+    @staticmethod
+    def _top_level_projects() -> list[Project]:
+        """Every registered top-level project, in creation order."""
+        from pcons import get_registered_projects
+
+        return [p for p in get_registered_projects() if p.is_top_level]
 
     @staticmethod
     def has_current() -> bool:
@@ -405,14 +443,32 @@ class Project(_ProjectBuilders):
     def _enter_subdir(self, subdir: str | Path) -> Generator[None, None, None]:
         """Context manager for entering a subdirectory in the project."""
         old_subdir = self._subdir
+        old_current = Project.__current
         self._subdir = subdir if old_subdir is None else f"{old_subdir}/{subdir}"
+        # The entered project is the context: the subdirectory script's
+        # Project.current() must mean this tree even when another sibling
+        # was created more recently.
+        Project.__current = self
         Project.__parent_stack.append(self)
         try:
             yield
         finally:
             Project.__parent_stack.pop()
             self._subdir = old_subdir
-            Project.__current = self
+            Project.__current = old_current
+
+    def add_subdirectory(
+        self, subdir: str | Path, pick: list[str] | None = None
+    ) -> Any:
+        """Run *subdir*'s pcons-build.py as part of this project.
+
+        The method spelling of :func:`pcons.add_subdirectory`, for scripts
+        with several top-level projects where "the current project" is
+        ambiguous.
+        """
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        return add_subdirectory(subdir, pick, project=self)
 
     @property
     def config(self) -> Any:

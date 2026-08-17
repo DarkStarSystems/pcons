@@ -72,6 +72,29 @@ class CompileCommandsGenerator(BaseGenerator):
         root_dir = project.root_dir
         link_path = root_dir / "compile_commands.json"
 
+        # With sibling projects sharing one root, the first one owns the
+        # root link; later siblings would otherwise silently repoint it on
+        # every generation.
+        from pcons.core.project import Project as _Project
+
+        first_with_root = next(
+            (
+                p
+                for p in _Project._top_level_projects()
+                if p.root_dir == project.top.root_dir
+            ),
+            None,
+        )
+        if first_with_root is not None and first_with_root is not project.top:
+            logger.debug(
+                "root compile_commands.json symlink belongs to project %r; "
+                "skipping it for %r (%s has the full database)",
+                first_with_root.name,
+                project.name,
+                output_file,
+            )
+            return
+
         # If build_dir is the project root, the file is already there. Compare
         # the directories — never resolve() the link itself, which can race
         # (EINVAL) with a concurrent generate() swapping it.

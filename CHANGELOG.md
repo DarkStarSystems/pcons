@@ -21,6 +21,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truncation to the terminal width (`--width`).
 - **Defines accept `("NAME", "value")` pairs**, rendering as `NAME=value`
   (a `None` value means the bare name).
+  **Multiple top-level projects in one build script.** Each
+  `Project()` created outside `add_subdirectory()` is an independent
+  sibling with its own build directory, node namespace and build
+  files; one `pcons` run generates and builds them all, in script
+  order. Targets bind to the project that made them, shared names
+  qualified as `project::target`. Multiple siblings may embed the same
+  subdirectory (compiled per project), and persisted settings reach
+  every project's build directory. The first project gets the
+  `-B`/`PCONS_BUILD_DIR` default; later siblings must pass
+  `build_dir=`, and two projects claiming one directory is an error.
+  See "Multiple projects in one script" in the user guide and
+  `examples/66_multi_project`.
 
 ### Changed
 
@@ -30,12 +42,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in prose. `pcons -- generate` runs `generate` instead of failing, and abbreviated
   long options (`pcons --verbo`) are no longer silently accepted. click is now a
   runtime dependency.
-- **A second top-level `Project()` in one script is now an error.** It used
-  to be silently adopted as a child of the first project, with its
-  `build_dir` argument discarded — producing wrong build files that looked
-  fine. The error names both projects and suggests `add_subdirectory()`.
-  Subprojects created via `add_subdirectory()` are unchanged. (First step
-  toward supporting several independent projects in one script.)
 - **`--` always means targets follow.** `pcons -- clean` builds a target
   named `clean`; it used to run the `clean` command (deleting the build
   directory), while `pcons FOO=bar -- clean` built the target — the two now

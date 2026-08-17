@@ -628,8 +628,33 @@ class Target:
             raise RuntimeError(f"Cannot modify target '{self.name}' after resolve(). ")
         if item is self:
             raise ValueError(f"Target '{self.name}' cannot link itself.")
+        if isinstance(item, Target):
+            self._check_same_tree(item, "link")
         # Invalidate cached requirements
         self._collected_requirements = None
+
+    def _check_same_tree(self, other: Target, verb: str) -> None:
+        """Refuse an edge to a target in another top-level project.
+
+        Sibling projects build independently — separate build directories,
+        separate build files — so an edge between them would name a path the
+        other build never produces there. Imported targets are exempt: they
+        describe something outside every build.
+        """
+        if getattr(other, "is_imported", False):
+            return
+        if other.project.top is self.project.top:
+            return
+        from pcons.core.errors import PconsError
+
+        raise PconsError(
+            f"target '{self.name}' (project "
+            f"{self.project.top.name!r}) cannot {verb} '{other.name}' from "
+            f"project {other.project.top.name!r}: sibling projects build "
+            "independently, with no edges between their build files.\n"
+            "Build it in this project too (e.g. add_subdirectory() the "
+            "same directory from both), or make the two one project."
+        )
 
     def link(self, *libs: Target | str) -> Target:
         """Add PUBLIC link dependencies (fluent API).
@@ -783,6 +808,7 @@ class Target:
             if isinstance(item, Target):
                 if item is self:
                     raise ValueError(f"Target '{self.name}' cannot depend on itself.")
+                self._check_same_tree(item, "depend on")
                 target_list = (
                     self._implicit_target_deps
                     if propagate

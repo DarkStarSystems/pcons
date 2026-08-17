@@ -5240,13 +5240,13 @@ class TestBuildDirectoryChosenByTheScript:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         elsewhere = tmp_path / "elsewhere"
-        monkeypatch.setattr(
-            "pcons.cli._generate",
-            lambda *a, **k: (0, SimpleNamespace(build_dir=elsewhere)),
+        proj = SimpleNamespace(
+            build_dir=elsewhere, _effective_output_dir=lambda: elsewhere
         )
-        seen = _capture_args(monkeypatch, "_build", result=(0, elsewhere))
+        monkeypatch.setattr("pcons.cli._generate", lambda *a, **k: (0, [proj]))
+        seen = _capture_args(monkeypatch, "_build", result=(0, [elsewhere]))
         assert _invoke("-B", str(tmp_path / "asked")).exit_code == 0
-        assert seen[0]["build_dir"] == elsewhere
+        assert seen[0]["projects"] == [proj]
 
     def test_a_regenerated_build_runs_where_the_script_put_it(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -5256,10 +5256,10 @@ class TestBuildDirectoryChosenByTheScript:
         (elsewhere / "build.ninja").write_text("")
         (tmp_path / "pcons-build.py").write_text("")
         monkeypatch.chdir(tmp_path)
-        monkeypatch.setattr(
-            "pcons.cli._generate",
-            lambda *a, **k: (0, SimpleNamespace(build_dir=elsewhere)),
+        proj = SimpleNamespace(
+            build_dir=elsewhere, _effective_output_dir=lambda: elsewhere
         )
+        monkeypatch.setattr("pcons.cli._generate", lambda *a, **k: (0, [proj]))
         seen: list[Path] = []
 
         def fake_run_ninja(build_dir: Path, **kw: object) -> int:
@@ -6091,3 +6091,113 @@ class TestACommandNameThatIsNotTheFirstArgument:
 
     def test_a_command_first_is_untouched(self):
         assert self._resolved("generate", "FOO=bar") == ("generate", ["FOO=bar"])
+
+
+class TestRouteTargets:
+    """Named targets are routed to the sibling project that owns them."""
+
+    def _siblings(self, tmp_path):
+        from pcons.core.project import Project
+
+        alpha = Project("alpha", root_dir=tmp_path, build_dir="build-a")
+        beta = Project("beta", root_dir=tmp_path, build_dir="build-b")
+        return alpha, beta
+
+    def test_no_targets_builds_every_project(self, tmp_path) -> None:
+        from pcons.cli import _route_targets
+
+        alpha, beta = self._siblings(tmp_path)
+        assert _route_targets([alpha, beta], None) == [(alpha, None), (beta, None)]
+
+    def test_a_unique_name_goes_to_its_owner(self, tmp_path) -> None:
+        from pcons.cli import _route_targets
+        from pcons.core.target import Target
+
+        alpha, beta = self._siblings(tmp_path)
+        Target("tool", project=beta)
+        assert _route_targets([alpha, beta], ["tool"]) == [(beta, ["tool"])]
+
+    def test_an_ambiguous_name_is_an_error(self, tmp_path, caplog) -> None:
+        from pcons.cli import _route_targets
+        from pcons.core.target import Target
+
+        alpha, beta = self._siblings(tmp_path)
+        Target("app", project=alpha)
+        Target("app", project=beta)
+        assert _route_targets([alpha, beta], ["app"]) is None
+        assert "alpha::app" in caplog.text
+        assert "beta::app" in caplog.text
+
+    def test_a_qualified_name_settles_it(self, tmp_path) -> None:
+        from pcons.cli import _route_targets
+        from pcons.core.target import Target
+
+        alpha, beta = self._siblings(tmp_path)
+        Target("app", project=alpha)
+        Target("app", project=beta)
+        assert _route_targets([alpha, beta], ["beta::app"]) == [(beta, ["app"])]
+
+    def test_an_unknown_name_is_an_error(self, tmp_path, caplog) -> None:
+        from pcons.cli import _route_targets
+
+        alpha, beta = self._siblings(tmp_path)
+        assert _route_targets([alpha, beta], ["nope"]) is None
+        assert "no project owns a target named 'nope'" in caplog.text
+
+    def test_all_goes_to_every_project(self, tmp_path) -> None:
+        from pcons.cli import _route_targets
+
+        alpha, beta = self._siblings(tmp_path)
+        assert _route_targets([alpha, beta], ["all"]) == [
+            (alpha, ["all"]),
+            (beta, ["all"]),
+        ]
+
+    def test_a_single_project_passes_names_through(self, tmp_path) -> None:
+        """Ninja may know names pcons doesn't, e.g. raw file paths."""
+        from pcons.cli import _route_targets
+        from pcons.core.project import Project
+
+        only = Project("only", root_dir=tmp_path)
+        assert _route_targets([only], ["whatever/path.o"]) == [
+            (only, ["whatever/path.o"])
+        ]
+
+
+class TestMultiProjectCli:
+    """One run generates every sibling project's build files."""
+
+    TWO_PROJECTS = (
+        "from pcons import Project\n"
+        "a = Project('alpha')\n"
+        "b = Project('beta', build_dir='build-beta')\n"
+    )
+
+    def test_generate_writes_both_projects(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(self.TWO_PROJECTS)
+        assert _invoke("generate").exit_code == 0
+        assert (tmp_path / "build" / "build.ninja").exists()
+        assert (tmp_path / "build-beta" / "build.ninja").exists()
+
+    def test_settings_are_mirrored_to_each_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(self.TWO_PROJECTS)
+        assert _invoke("generate", "FOO=1").exit_code == 0
+        cached = json.loads((tmp_path / "build-beta" / "pcons_cache.json").read_text())
+        assert cached["vars"] == {"FOO": "1"}
+
+    def test_a_second_project_without_a_build_dir_fails_the_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\na = Project('alpha')\nb = Project('beta')\n"
+        )
+        result = _invoke("generate")
+        assert result.exit_code == 1
+        assert "needs an explicit build_dir" in result.stderr

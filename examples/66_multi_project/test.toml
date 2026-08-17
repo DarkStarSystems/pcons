@@ -1,0 +1,31 @@
+# Test configuration for the multi_project example
+
+[test]
+description = "Two independent top-level projects built in one pcons run"
+
+# One run writes both projects' build files and builds both. Each project
+# owns its build directory; the shared common/ subdirectory is compiled
+# once per project, with that project's flags.
+expected_outputs = [
+    "build/build.ninja",
+    "build/common/obj.common/common/common.c.o",
+    "build/common/libcommon.a",
+    "build/obj.app/src/main.c.o",
+    "build/app",
+    "build-host/build.ninja",
+    "build-host/common/obj.common/common/common.c.o",
+    "build-host/common/libcommon.a",
+    "build-host/obj.app/src/main.c.o",
+    "build-host/app",
+]
+
+[verify]
+# The same source, built two ways: only the define differs.
+commands = [
+    { run = "./build/app", expect_stdout = "device checksum=" },
+    { run = "./build-host/app", expect_stdout = "host checksum=" },
+]
+
+[skip]
+# The xcode generator builds to different paths.
+generators = ["xcode"]
