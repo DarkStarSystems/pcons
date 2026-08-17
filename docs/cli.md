@@ -247,6 +247,14 @@ so neither an option nor a command name would be parsed as one.
 `pcons -B out build <TAB>` offers what `out/` can build. `PCONS_BUILD_DIR` works
 too.
 
+`-C DIR` is applied while completing, as it is while running, so what follows it
+completes from there: `pcons -C ../other -B <TAB>` offers `../other`'s
+subdirectories, not the current directory's. pcons lists those names itself,
+because a shell resolves a path against its own directory and no answer pcons
+can return changes that. Only after a `-C`, and only for the options that name a
+path. It costs what the shell does better: completing `sub/` leaves the cursor
+past a space rather than inside the directory, and a `~` is not expanded.
+
 `--modules-path` takes a separated list and completes only its first segment.
 Every shell handles a directory result by completing the whole word itself, so
 there is no way to complete after the separator.

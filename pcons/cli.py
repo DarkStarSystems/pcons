@@ -27,6 +27,7 @@ from pcons._cli_click import (
     PconsGroup,
     TargetsCommand,
     _adopt_options_spelled_earlier,
+    _complete_path,
     build_options,
     common_options,
     configure_logging,
@@ -1981,6 +1982,7 @@ def cli_init(
     is_flag=False,
     flag_value="-",
     type=click.Path(dir_okay=False),
+    shell_complete=_complete_path,
     metavar="[FILE]",
     help="Output dependency graph in DOT format (default: stdout)",
 )
@@ -1989,6 +1991,7 @@ def cli_init(
     is_flag=False,
     flag_value="-",
     type=click.Path(dir_okay=False),
+    shell_complete=_complete_path,
     metavar="[FILE]",
     help="Output dependency graph in Mermaid format (default: stdout)",
 )

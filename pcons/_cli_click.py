@@ -57,6 +57,11 @@ class PconsContext(click.Context):
     #: group callback knows not to run it a second time.
     routed_to_default: bool = False
 
+    #: a `-C` on this command line has already changed directory, so a path
+    #: option spelled after it is read from there and not from the directory
+    #: the shell is sitting in.
+    chdir_applied: bool = False
+
 
 def pass_pcons_context(f: Callable[Concatenate[PconsContext, P], R]) -> Callable[P, R]:
     """`click.pass_context`, typed for the context every pcons command gets.
@@ -515,7 +520,69 @@ def _chdir(ctx: click.Context, param: click.Parameter, value: str | None) -> str
         except OSError as e:
             click.echo(f"error: -C {value}: {e}", err=True)
             ctx.exit(1)
+        cast(PconsContext, ctx).chdir_applied = True
     return value
+
+
+def _chdir_applied(ctx: click.Context) -> bool:
+    """Whether a `-C` anywhere on this command line has already been applied.
+
+    `-C` is declared on every command, so the one that moved may sit on the
+    group while the option being completed sits on a subcommand.
+    """
+    node: click.Context | None = ctx
+    while node is not None:
+        if getattr(node, "chdir_applied", False):
+            return True
+        node = node.parent
+    return False
+
+
+def _list_paths(incomplete: str, *, files: bool, dirs: bool) -> list[CompletionItem]:
+    """The entries under *incomplete*'s directory that could continue it.
+
+    Read relative to the process, which a `-C` has already moved. Hidden
+    entries are left out unless the user has typed the leading dot, the rule
+    every shell applies to its own path completion.
+    """
+    head, tail = os.path.split(incomplete)
+    try:
+        entries = sorted(Path(head or ".").iterdir())
+    except OSError:
+        return []
+
+    items = []
+    for entry in entries:
+        if not entry.name.startswith(tail):
+            continue
+        if entry.name.startswith(".") and not tail.startswith("."):
+            continue
+        is_dir = entry.is_dir()
+        if not (dirs if is_dir else files):
+            continue
+        value = os.path.join(head, entry.name) if head else entry.name
+        items.append(CompletionItem(value + os.sep if is_dir else value))
+    return items
+
+
+def _complete_path(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[CompletionItem]:
+    """Directories or files, whichever the option's own type accepts.
+
+    Without a `-C` this defers to that type, which returns the directive that
+    hands the whole job to the shell: it completes a path better than this can,
+    descending as you type and expanding a `~`.
+
+    After a `-C` the shell would answer out of its own directory, and the
+    option is read from the one pcons moved to, so the entries are listed here
+    instead. That costs the descent, since none of the three scripts asks for
+    `nospace`, but the names offered are the ones that will be used.
+    """
+    kind = param.type
+    if not isinstance(kind, click.Path) or not _chdir_applied(ctx):
+        return kind.shell_complete(ctx, param, incomplete)
+    return _list_paths(incomplete, files=kind.file_okay, dirs=kind.dir_okay)
 
 
 def _generator_names() -> list[str]:
@@ -617,7 +684,12 @@ def _complete_path_list(
     A completer, not a path type, because the value is several paths joined by
     `os.pathsep` rather than one path. The shell completes the whole word, so
     `--modules-path a:b` completes only its first segment.
+
+    After a `-C` the shell would answer out of the wrong directory, so the
+    entries are listed here, as they are for the options that name one path.
     """
+    if _chdir_applied(ctx):
+        return _list_paths(incomplete, files=False, dirs=True)
     return [CompletionItem(incomplete, type="dir")]
 
 
@@ -743,6 +815,7 @@ def directory_option(f: F) -> F:
         "-C",
         "--directory",
         type=UncheckedPath(file_okay=False),
+        shell_complete=_complete_path,
         metavar="DIR",
         callback=_chdir,
         is_eager=True,
@@ -765,6 +838,7 @@ def common_options(f: F) -> F:
         # A Path, so no command has to convert it first. The metavar is spelled
         # out because click.Path would otherwise print its own.
         type=click.Path(file_okay=False, path_type=Path),
+        shell_complete=_complete_path,
         metavar="DIR",
         # Eager so it is processed before `--help`, which is eager itself and
         # would otherwise format the help out of a context where -B has not
@@ -813,6 +887,7 @@ def generate_options(f: F) -> F:
         "-b",
         "--build-script",
         type=click.Path(dir_okay=False),
+        shell_complete=_complete_path,
         metavar="FILE",
         help="Path to pcons-build.py script",
     )(f)

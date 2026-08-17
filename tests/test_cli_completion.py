@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -358,6 +359,62 @@ class TestPathCompletion:
         # The shell completes the whole word itself, so the value is passed
         # through untouched rather than filtered.
         assert _completions(["-C"], "sub/dir") == ["sub/dir"]
+
+
+class TestPathCompletionAfterADirectoryOption:
+    """A `-C` moves the directory a later path option is read from.
+
+    The shell would answer out of its own, so pcons lists the entries itself.
+    `-C` is applied while completing, exactly as it is while running: click
+    calls an eager callback under resilient parsing too.
+    """
+
+    @pytest.fixture
+    def tree(self, tmp_path: Path) -> Iterator[str]:
+        elsewhere = tmp_path / "elsewhere"
+        (elsewhere / "sub").mkdir(parents=True)
+        (elsewhere / "hidden_marker").mkdir()
+        (elsewhere / ".dotted").mkdir()
+        (elsewhere / "note.txt").write_text("")
+        (tmp_path / "shell_cwd_only").mkdir()
+
+        origin = Path.cwd()
+        os.chdir(tmp_path)
+        try:
+            yield str(elsewhere)
+        finally:
+            os.chdir(origin)
+
+    def test_the_directories_under_it(self, tree: str) -> None:
+        assert _completions(["-C", tree, "-B"], "") == [
+            "hidden_marker" + os.sep,
+            "sub" + os.sep,
+        ]
+
+    def test_not_the_ones_the_shell_would_have_offered(self, tree: str) -> None:
+        assert "shell_cwd_only" + os.sep not in _completions(["-C", tree, "-B"], "")
+
+    def test_a_name_rather_than_a_directive(self, tree: str) -> None:
+        assert _completion_types(["-C", tree, "-B"], "") == ["plain", "plain"]
+
+    def test_a_file_option_offers_the_files(self, tree: str) -> None:
+        assert _completions(["-C", tree, "generate", "--graph"], "") == ["note.txt"]
+
+    def test_a_prefix_filters(self, tree: str) -> None:
+        assert _completions(["-C", tree, "-B"], "s") == ["sub" + os.sep]
+
+    def test_a_dotted_entry_needs_the_dot_typed(self, tree: str) -> None:
+        assert _completions(["-C", tree, "-B"], "") == [
+            "hidden_marker" + os.sep,
+            "sub" + os.sep,
+        ]
+        assert _completions(["-C", tree, "-B"], ".") == [".dotted" + os.sep]
+
+    def test_the_separated_list_too(self, tree: str) -> None:
+        assert _completions(["-C", tree, "--modules-path"], "s") == ["sub" + os.sep]
+
+    def test_a_missing_directory_offers_nothing(self, tree: str) -> None:
+        assert _completions(["-C", tree, "-B"], "no_such_dir/") == []
 
 
 class TestValueCompletion:
