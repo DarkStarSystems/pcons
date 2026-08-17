@@ -240,20 +240,23 @@ fires on every keystroke, and a build script does configure checks. So:
 - `pcons info <TAB>` and `pcons generate <TAB>` offer no targets, because their
   `EXTRA` takes build variables rather than targets
 
-After a `--`, only target names are offered. Everything past it names a target,
-so neither an option nor a command name would be parsed as one.
+After a `--`, only target names are offered. Everything past it names a target.
+pcons parses no option and no command name there, so offering either would be
+wrong.
 
 `-B DIR` is honoured while completing, on either side of the command name, so
 `pcons -B out build <TAB>` offers what `out/` can build. `PCONS_BUILD_DIR` works
 too.
 
-`-C DIR` is applied while completing, as it is while running, so what follows it
-completes from there: `pcons -C ../other -B <TAB>` offers `../other`'s
-subdirectories, not the current directory's. pcons lists those names itself,
-because a shell resolves a path against its own directory and no answer pcons
-can return changes that. Only after a `-C`, and only for the options that name a
-path. It costs what the shell does better: completing `sub/` leaves the cursor
-past a space rather than inside the directory, and a `~` is not expanded.
+`-C DIR` is applied while completing, as it is while running. So what follows it
+completes from there. `pcons -C ../other -B <TAB>` offers the subdirectories of
+`../other`, not those of the current directory.
+
+pcons lists those names itself. A shell always resolves a path against its own
+directory, and no answer pcons returns can change that. This applies only after
+a `-C`, and only to the options that name a path. It costs what the shell does
+better. Completing `sub/` leaves the cursor after a space, not inside the
+directory, and a `~` is not expanded.
 
 `--modules-path` takes a separated list and completes only its first segment.
 Every shell handles a directory result by completing the whole word itself, so
