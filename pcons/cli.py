@@ -25,6 +25,8 @@ from pcons._cli_click import (
     MergingGroup,
     PconsContext,
     PconsGroup,
+    PconsPath,
+    TargetsCommand,
     _adopt_options_spelled_earlier,
     build_options,
     common_options,
@@ -35,6 +37,7 @@ from pcons._cli_click import (
     load_declared_modules,
     pass_pcons_context,
     run_cli,
+    targets_argument,
     watch_option,
 )
 from pcons.core.errors import PconsError
@@ -338,12 +341,38 @@ def _record_command_listing(cache: BuildCache, *, persist: bool) -> None:
         cache.update({"commands": _declared_command_listing()})
 
 
+def _buildable_names(project: Project) -> list[str]:
+    """Every name a build tool accepts for this project, as the tool sees it.
+
+    Output paths rendered from the build directory, which is the contract every
+    generator that runs there shares, plus the aliases and the ``all`` phony the
+    generators add. Not ``target.name``: a target that sets ``output_name`` or
+    ``output_prefix`` is spelled differently in the build file, so
+    ``examples/03_variants`` would offer ``variant_demo_debug`` for a build file
+    that only knows ``debug/variant_demo``.
+
+    Only shell completion reads this. It must never run the build script, so the
+    names are recorded when one does run.
+    """
+    from pcons.core.node import FileNode
+
+    resolver = project._path_resolver
+    names = {"all", *project.tree_aliases}
+    for target in project.targets:
+        for node in target.output_nodes:
+            if isinstance(node, FileNode):
+                names.add(resolver.make_execution_relative(node.path))
+    return sorted(names)
+
+
 def _persist_run_settings(
     cache: BuildCache,
     variables: dict[str, str],
     variant: str | None,
     generator: str | None,
     source_dir: str,
+    targets: list[str] | None = None,
+    variants: set[str] | None = None,
 ) -> None:
     """Persist the settings resolved for this run into the build-dir cache.
 
@@ -357,6 +386,17 @@ def _persist_run_settings(
     The declared-command listing is written separately, by the caller: it
     describes the build script rather than this run's argv, so it is recorded
     on every generating run and not only on a persisting one.
+
+    ``targets`` is ``None`` for a run that did not generate, which leaves any
+    recorded names alone. A run that only reads, `pcons info` among them, never
+    resolves the targets, so treating its empty result as an answer would wipe
+    what the last generate recorded.
+
+    ``variants`` accumulates instead of replacing, which is the one place it
+    differs from ``targets``. A script that branches on ``get_variant()`` names
+    only the variant this run asked for, so replacing would leave a build dir
+    completing whichever variant it was configured with last. ``--fresh`` is the
+    way back to an empty set.
     """
     updates: dict[str, object] = {"source_dir": source_dir}
     if variables:
@@ -365,6 +405,12 @@ def _persist_run_settings(
         updates["variant"] = variant
     if generator:
         updates["generator"] = generator
+    if targets is not None:
+        updates["targets"] = targets
+    if variants:
+        recorded = cache.get("variants")
+        recorded = recorded if isinstance(recorded, list) else []
+        updates["variants"] = sorted({*recorded, *variants} - {""})
     cache.update(updates)
 
 
@@ -375,12 +421,15 @@ def _persist_run_settings_to_projects(
     variant: str | None,
     generator: str | None,
     source_dir: str,
+    variants: set[str] | None = None,
 ) -> None:
     """Persist this run's settings into each sibling project's build directory.
 
     The CLI's cache lives in the -B directory, which belongs to the first
     project; a later ``pcons -B <sibling's dir>`` must see the same
-    settings, not defaults.
+    settings, not defaults. The recorded target names are each project's
+    own — relative to its build directory, so completion under
+    ``-B <sibling's dir>`` offers what that directory can build.
     """
     from pcons.core.cache import BuildCache
 
@@ -390,7 +439,15 @@ def _persist_run_settings_to_projects(
         if os.path.normcase(str(project_dir)) == cli_dir:
             continue
         cache = BuildCache(project_dir)
-        _persist_run_settings(cache, variables, variant, generator, source_dir)
+        _persist_run_settings(
+            cache,
+            variables,
+            variant,
+            generator,
+            source_dir,
+            targets=_buildable_names(project),
+            variants=variants,
+        )
         # The declared-command listing too: `pcons -B <this dir> run` reads
         # it from here, and must list the same commands the primary does.
         _record_command_listing(cache, persist=True)
@@ -634,6 +691,16 @@ def run_script(
                         persist_variant,
                         persist_gen,
                         current_source,
+                        # Union over the sibling projects: bare
+                        # `pcons <TAB>` routes a target to whichever
+                        # sibling owns it, so the primary cache offers
+                        # every project's names.
+                        targets=sorted(
+                            {n for p in top_levels for n in _buildable_names(p)}
+                        )
+                        if generate
+                        else None,
+                        variants=pcons.core.vars._seen_variant_names(),
                     )
                     if generate:
                         _persist_run_settings_to_projects(
@@ -643,6 +710,7 @@ def run_script(
                             persist_variant,
                             persist_gen,
                             current_source,
+                            variants=pcons.core.vars._seen_variant_names(),
                         )
 
             except SystemExit as e:
@@ -1991,6 +2059,7 @@ def cli_info(
 
 @cli.command(
     "explain",
+    cls=TargetsCommand,
     loads_modules=True,
     short_help="Show each target's commands and where its flags came from",
     help=(
@@ -2021,7 +2090,7 @@ def cli_info(
         "(default: terminal width, unlimited when piped)"
     ),
 )
-@click.argument("extra", nargs=-1)
+@targets_argument
 @pass_pcons_context
 def cli_explain(
     ctx: PconsContext,
@@ -2116,6 +2185,7 @@ def cli_init(
     "--graph",
     is_flag=False,
     flag_value="-",
+    type=PconsPath(dir_okay=False),
     metavar="[FILE]",
     help="Output dependency graph in DOT format (default: stdout)",
 )
@@ -2123,6 +2193,7 @@ def cli_init(
     "--mermaid",
     is_flag=False,
     flag_value="-",
+    type=PconsPath(dir_okay=False),
     metavar="[FILE]",
     help="Output dependency graph in Mermaid format (default: stdout)",
 )
@@ -2166,6 +2237,7 @@ def cli_generate(
 
 @cli.command(
     "build",
+    cls=TargetsCommand,
     loads_modules=True,
     short_help="Build targets (auto-generates if needed)",
     help=(
@@ -2180,7 +2252,7 @@ def cli_generate(
 @build_options
 @watch_option
 @jobs_option
-@click.argument("extra", nargs=-1)
+@targets_argument
 @pass_pcons_context
 def cli_build(
     ctx: PconsContext,
@@ -2752,7 +2824,7 @@ def cli_completion_uninstall(ctx: PconsContext, shell: str | None) -> None:
 @build_options
 @watch_option
 @jobs_option
-@click.argument("extra", nargs=-1)
+@targets_argument
 @pass_pcons_context
 def cli_default(
     ctx: PconsContext,

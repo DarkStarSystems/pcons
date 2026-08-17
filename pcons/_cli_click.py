@@ -24,6 +24,7 @@ from typing import Any, Concatenate, ParamSpec, TypeVar, cast
 
 import click
 from click.core import ParameterSource
+from click.shell_completion import CompletionItem
 
 import pcons
 from pcons.core.debug import (
@@ -55,6 +56,11 @@ class PconsContext(click.Context):
     #: an unresolvable command name was routed to the catch-all command, so the
     #: group callback knows not to run it a second time.
     routed_to_default: bool = False
+
+    #: a `-C` on this command line has already changed directory, so a path
+    #: option spelled after it is read from there and not from the directory
+    #: the shell is sitting in.
+    chdir_applied: bool = False
 
 
 def pass_pcons_context(f: Callable[Concatenate[PconsContext, P], R]) -> Callable[P, R]:
@@ -137,6 +143,24 @@ def _adopt_options_spelled_earlier(command: click.Command, ctx: click.Context) -
         parent = ctx.parent
         if parent is not None and name in parent.params:
             ctx.params[name] = parent.params[name]
+
+
+def inherited_param(ctx: click.Context, name: str) -> Any:
+    """The value `name` settles on once `_adopt_options_spelled_earlier` has run.
+
+    Same rule, read-only, for the callers that never get to see the merge.
+    Completion is the one: click builds its contexts through `parse_args` and
+    then answers, so `invoke` never runs and ``pcons -B out build <TAB>`` still
+    has this command's own default sitting in ``ctx.params``.
+
+    Change one of these two and change the other.
+    """
+    if ctx.get_parameter_source(name) is ParameterSource.COMMANDLINE:
+        return ctx.params.get(name)
+    parent = ctx.parent
+    if parent is not None and name in parent.params:
+        return inherited_param(parent, name)
+    return ctx.params.get(name)
 
 
 def configure_logging(ctx: click.Context) -> None:
@@ -370,6 +394,44 @@ class PconsGroup(click.Group):
                 return token, command, [*args[:index], *args[index + 1 :]]
         return None, None, args
 
+    def shell_complete(
+        self, ctx: click.Context, incomplete: str
+    ) -> list[CompletionItem]:
+        """Command names, then the targets the catch-all would have accepted.
+
+        `pcons hello` builds a target, so the group offers target names itself.
+        The command declaring the argument that carries them is the hidden
+        catch-all, which `get_command` refuses to resolve and `list_commands`
+        leaves out, so click's own walk of the tree never reaches it.
+
+        After a `--`, everything names a target, so neither the options nor the
+        command names are offered: `resolve_command` routes the rest to the
+        catch-all, and completing a word pcons will hand to the build tool
+        verbatim would only propose one it never parses. click drops the option
+        half itself in `_resolve_incomplete`, but that only picks which object
+        answers: `click.Command.shell_complete` decides from the incomplete
+        string alone and never sees the `--`. A command falls through to its
+        `EXTRA` argument before reaching that, which is why only the group
+        needs this.
+        """
+        targets = complete_target(ctx, None, incomplete)
+        if cast(PconsContext, ctx).targets_follow:
+            return targets
+        items = super().shell_complete(ctx, incomplete)
+        items.extend(targets)
+        return items
+
+    def format_options(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        """Options, then the commands click adds, then the targets.
+
+        `pcons hello` builds a target, so the names belong next to the command
+        names rather than only under `pcons build --help`.
+        """
+        super().format_options(ctx, formatter)
+        format_recorded_targets(ctx, formatter)
+
     # click types these hooks against the base context, and narrowing a
     # parameter in an override is unsound in general, so the class this group
     # builds its own context from is spelled out at each one.
@@ -458,7 +520,49 @@ def _chdir(ctx: click.Context, param: click.Parameter, value: str | None) -> str
         except OSError as e:
             click.echo(f"error: -C {value}: {e}", err=True)
             ctx.exit(1)
+        cast(PconsContext, ctx).chdir_applied = True
     return value
+
+
+def _chdir_applied(ctx: click.Context) -> bool:
+    """Whether a `-C` anywhere on this command line has already been applied.
+
+    `-C` is declared on every command, so the one that moved may sit on the
+    group while the option being completed sits on a subcommand.
+    """
+    node: click.Context | None = ctx
+    while node is not None:
+        if getattr(node, "chdir_applied", False):
+            return True
+        node = node.parent
+    return False
+
+
+def _list_paths(incomplete: str, *, files: bool, dirs: bool) -> list[CompletionItem]:
+    """The entries under *incomplete*'s directory that could continue it.
+
+    Read relative to the process, which a `-C` has already moved. Hidden
+    entries are left out unless the user has typed the leading dot, the rule
+    every shell applies to its own path completion.
+    """
+    head, tail = os.path.split(incomplete)
+    try:
+        entries = sorted(Path(head or ".").iterdir())
+    except OSError:
+        return []
+
+    items = []
+    for entry in entries:
+        if not entry.name.startswith(tail):
+            continue
+        if entry.name.startswith(".") and not tail.startswith("."):
+            continue
+        is_dir = entry.is_dir()
+        if not (dirs if is_dir else files):
+            continue
+        value = os.path.join(head, entry.name) if head else entry.name
+        items.append(CompletionItem(value + os.sep if is_dir else value))
+    return items
 
 
 def _generator_names() -> list[str]:
@@ -481,9 +585,230 @@ def _generator_help() -> str:
     return f"Generator to use ({names}). Repeatable. Default: ninja"
 
 
+#: What `--debug` accepts besides a subsystem name. `all` is in
+#: `debug.SUBSYSTEMS` and `help` is handled by `SubsystemListRequested`, so
+#: neither is in `SUBSYSTEM_DESCRIPTIONS` and both have to be spelled here, once,
+#: for the help text and the completion to stay in step.
+DEBUG_EXTRAS: dict[str, str] = {
+    "all": "Every subsystem",
+    "help": "List the subsystems and exit",
+}
+
+
 def _debug_help() -> str:
-    subsystems = ",".join(SUBSYSTEM_DESCRIPTIONS) + ",all,help"
+    subsystems = ",".join([*SUBSYSTEM_DESCRIPTIONS, *DEBUG_EXTRAS])
     return f"Enable debug tracing for subsystems (comma-separated): {subsystems}"
+
+
+def _complete_debug(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[CompletionItem]:
+    """Complete one subsystem of a comma-separated `--debug` spec.
+
+    The spec is a list in a single word, so what is completed is the segment
+    after the last comma and the segments already typed come back as a prefix.
+    That works here and not for `--modules-path` because these are `plain`
+    candidates, whose value the shell uses, rather than path directives, whose
+    value it ignores.
+    """
+    head, sep, tail = incomplete.rpartition(",")
+    return [
+        CompletionItem(head + sep + name, help=description)
+        for name, description in {**SUBSYSTEM_DESCRIPTIONS, **DEBUG_EXTRAS}.items()
+        if name.startswith(tail)
+    ]
+
+
+def _complete_runner(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[CompletionItem]:
+    """The ninja-compatible runners pcons knows by name.
+
+    Only the two names, with no file fallback: mixing a `file` directive in
+    would drop them, since the shell clears the candidates it has collected
+    before completing the word itself.
+    """
+    return [
+        CompletionItem(name) for name in ("ninja", "n2") if name.startswith(incomplete)
+    ]
+
+
+class PconsPath(click.Path):
+    """A path completed from the directory the option is read from.
+
+    `click.Path` does two jobs, and this changes both.
+
+    It answers a completion with a directive rather than with names, and every
+    shell click writes a script for resolves that against its own directory
+    (bash runs `compopt -o dirnames`). After a `-C` that is the wrong one, so
+    the entries are listed here instead. It costs what the shell does better,
+    descending as you type and expanding a `~`, which is why nothing changes
+    without a `-C`.
+
+    It also rejects a path of the wrong kind. ``check=False`` keeps the
+    completion and drops that, for an option that owns its own error path:
+    `-C` on a file has to stay `_chdir`'s exit 1 rather than become a
+    UsageError's 2.
+
+    Every path option on the pcons command line takes this type, so both
+    answers are decided once rather than per option.
+    """
+
+    def __init__(self, *args: Any, check: bool = True, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.check = check
+
+    def convert(
+        self,
+        value: str | os.PathLike[str],
+        param: click.Parameter | None,
+        ctx: click.Context | None,
+    ) -> str | bytes | os.PathLike[str]:
+        if not self.check:
+            return self.coerce_path_result(value)
+        return super().convert(value, param, ctx)
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> list[CompletionItem]:
+        if not _chdir_applied(ctx):
+            return super().shell_complete(ctx, param, incomplete)
+        return _list_paths(incomplete, files=self.file_okay, dirs=self.dir_okay)
+
+
+class PconsDirectoryList(click.ParamType):
+    """Directories joined by `os.pathsep`, completed one segment at a time.
+
+    Not a `PconsPath`: the value is several paths rather than one, so none of
+    what `click.Path` converts or checks applies to it. Only the completion is
+    shared, and a shell completes the whole word, so `--modules-path a:b`
+    completes only its first segment.
+    """
+
+    name = "paths"
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> list[CompletionItem]:
+        if _chdir_applied(ctx):
+            return _list_paths(incomplete, files=False, dirs=True)
+        return [CompletionItem(incomplete, type="dir")]
+
+
+def _declared_build_dir(ctx: click.Context) -> str | Path | None:
+    """What ``-B`` would settle on with nothing parsed yet: env var, then default.
+
+    `--help` is eager, so it runs from inside `parse_args` and `ctx.params` is
+    still empty on the level it fires from. Reading the values off the option's
+    own declaration keeps its spelling in one place.
+    """
+    node: click.Context | None = ctx
+    while node is not None:
+        for param in node.command.params:
+            if param.name != "build_dir":
+                continue
+            envvar = param.envvar
+            if isinstance(envvar, str):
+                from_env = os.environ.get(envvar)
+                if from_env:
+                    return from_env
+            return param.get_default(node)
+        node = node.parent
+    return None
+
+
+def _cached_names(ctx: click.Context, key: str) -> list[str]:
+    """The list the last generate left under `key`, for this build directory.
+
+    Never runs the build script. Completion fires on every keystroke, `--help`
+    is meant to be instant, and a build script does configure checks. So these
+    names are recorded when a generate runs and only read back here.
+
+    Answers an empty list rather than raising, whatever it finds. For completion
+    stdout is the candidate stream, so anything escaping from here is parsed by
+    the shell as a completion.
+    """
+    from pcons.core.cache import BuildCache
+
+    build_dir = inherited_param(ctx, "build_dir")
+    if build_dir is None:
+        build_dir = _declared_build_dir(ctx)
+    if build_dir is None:
+        return []
+    try:
+        names = BuildCache(Path(build_dir)).get(key)
+    except OSError:
+        return []
+    if not isinstance(names, list):
+        return []
+    return [name for name in names if isinstance(name, str)]
+
+
+def complete_target(
+    ctx: click.Context, param: click.Parameter | None, incomplete: str
+) -> list[CompletionItem]:
+    """The target names the last generate left in this build directory's cache."""
+    return [
+        CompletionItem(name)
+        for name in _cached_names(ctx, "targets")
+        if name.startswith(incomplete)
+    ]
+
+
+def _complete_variant(
+    ctx: click.Context, param: click.Parameter, incomplete: str
+) -> list[CompletionItem]:
+    """The variant names this build directory has been seen using.
+
+    Variants have no registry to read: what a build script accepts is only
+    knowable by running it. So these are the names earlier runs passed to
+    `env.set_variant`, accumulated. A script that branches on `get_variant()`
+    without calling it names nothing, and completes nothing.
+    """
+    return [
+        CompletionItem(name)
+        for name in _cached_names(ctx, "variants")
+        if name.startswith(incomplete)
+    ]
+
+
+def format_recorded_targets(ctx: click.Context, formatter: click.HelpFormatter) -> None:
+    """List what the last generate left buildable, if anything.
+
+    Silent on a build directory that never generated, so help outside a pcons
+    project reads exactly as it did before there was a section to print. Same
+    source as the completion of the same names, and the same rule: never run the
+    build script to find them.
+    """
+    names = _cached_names(ctx, "targets")
+    if not names:
+        return
+    with formatter.section("Targets"):
+        formatter.write_dl([(name, "") for name in names])
+
+
+class TargetsCommand(MergingCommand):
+    """A command that lists the recorded targets in its help.
+
+    For the commands whose ``EXTRA`` accepts a target name. `pcons info` and
+    `pcons generate` take build variables there and would swallow one, so they
+    do not get this.
+    """
+
+    def format_options(
+        self, ctx: click.Context, formatter: click.HelpFormatter
+    ) -> None:
+        super().format_options(ctx, formatter)
+        format_recorded_targets(ctx, formatter)
+
+
+def targets_argument(f: F) -> F:
+    """EXTRA: targets to build, and/or KEY=value build variables.
+
+    Variable names are not completed. Only the build script knows them, and
+    running it is what completion must not do.
+    """
+    return click.argument("extra", nargs=-1, shell_complete=complete_target)(f)
 
 
 def directory_option(f: F) -> F:
@@ -491,6 +816,7 @@ def directory_option(f: F) -> F:
     return click.option(
         "-C",
         "--directory",
+        type=PconsPath(file_okay=False, check=False),
         metavar="DIR",
         callback=_chdir,
         is_eager=True,
@@ -503,7 +829,7 @@ def common_options(f: F) -> F:
     """The options every command accepts, on both sides of the command name."""
     f = click.option(
         "--modules-path",
-        metavar="PATHS",
+        type=PconsDirectoryList(),
         help="Additional paths to search for pcons modules (colon/semicolon-separated)",
     )(f)
     f = click.option(
@@ -511,13 +837,25 @@ def common_options(f: F) -> F:
         "--build-dir",
         # A Path, so no command has to convert it first. The metavar is spelled
         # out because click.Path would otherwise print its own.
-        type=click.Path(path_type=Path),
+        type=PconsPath(file_okay=False, path_type=Path),
         metavar="DIR",
+        # Eager so it is processed before `--help`, which is eager itself and
+        # would otherwise format the help out of a context where -B has not
+        # been read yet: `pcons -B out --help` would list the default build
+        # directory's targets. Among eager parameters click processes the one
+        # spelled first, so this only reorders -B against -C, and neither
+        # resolves anything at parse time.
+        is_eager=True,
         envvar="PCONS_BUILD_DIR",
         default="build",
         help="Build directory (default: $PCONS_BUILD_DIR, or 'build')",
     )(f)
-    f = click.option("--debug", metavar="SUBSYSTEMS", help=_debug_help())(f)
+    f = click.option(
+        "--debug",
+        metavar="SUBSYSTEMS",
+        shell_complete=_complete_debug,
+        help=_debug_help(),
+    )(f)
     f = click.option(
         "--pdb",
         "pdb_",
@@ -545,7 +883,11 @@ def _enable_postmortem(ctx: click.Context, param: click.Parameter, value: bool) 
 def generate_options(f: F) -> F:
     """Options for commands that generate build files."""
     f = click.option(
-        "-b", "--build-script", metavar="FILE", help="Path to pcons-build.py script"
+        "-b",
+        "--build-script",
+        type=PconsPath(dir_okay=False),
+        metavar="FILE",
+        help="Path to pcons-build.py script",
     )(f)
     f = click.option(
         "--fresh",
@@ -568,7 +910,10 @@ def generate_options(f: F) -> F:
         help=_generator_help(),
     )(f)
     f = click.option(
-        "--variant", metavar="NAME", help="Build variant (debug, release, etc.)"
+        "--variant",
+        metavar="NAME",
+        shell_complete=_complete_variant,
+        help="Build variant (debug, release, etc.)",
     )(f)
     return f
 
@@ -580,6 +925,7 @@ def build_options(f: F) -> F:
     return click.option(
         "--ninja",
         metavar="PROG",
+        shell_complete=_complete_runner,
         help=(
             "Ninja-compatible runner to invoke (e.g., 'n2'). "
             "Defaults to the NINJA env var, then 'ninja'."

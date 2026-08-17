@@ -35,6 +35,10 @@ _accessed_vars: set[str] = set()
 
 _read_outside_a_run: str | None = None
 
+# Names passed to Environment.set_variant this run, so the CLI can record which
+# variants a build dir has been seen using and complete them.
+_seen_variants: set[str] = set()
+
 
 def _clear_cli_vars() -> None:
     """Clear cached CLI variables and the build-dir cache. Used for testing."""
@@ -42,6 +46,7 @@ def _clear_cli_vars() -> None:
     _cli_vars = None
     _read_outside_a_run = None
     _accessed_vars.clear()
+    _seen_variants.clear()
     reset_cache()
 
 
@@ -63,6 +68,22 @@ def _read_site_outside_a_run() -> str | None:
     script is never recorded, so a script the CLI executes cannot arm this.
     """
     return _read_outside_a_run
+
+
+def _seen_variant_names() -> set[str]:
+    """Return the variant names set_variant has been called with this run.
+
+    Variants have no registry: `get_variant` takes a string and returns one, so
+    the only variant a build script makes observable is one it names to
+    `set_variant`. A script that branches on `get_variant()` instead is opaque,
+    and its variants do not complete.
+    """
+    return set(_seen_variants)
+
+
+def _record_variant(name: str) -> None:
+    """Note that the build script asked for variant `name`."""
+    _seen_variants.add(name)
 
 
 def _var_type_of(candidate: object) -> builtins.type[VarValue] | None:
