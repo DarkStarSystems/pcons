@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, overload
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.environment import Environment as Env
+from pcons.core.errors import PconsError
 from pcons.core.graph import (
     collect_all_nodes,
     detect_cycles_in_targets,
@@ -170,12 +171,17 @@ class Project(_ProjectBuilders):
 
     __current: Project | None = None
     __top_level: Project | None = None
+    # How many _enter_subdir contexts are active. A Project created while
+    # this is nonzero is a subproject of the current project; created at
+    # zero with a top-level project already present, it is an error.
+    __subdir_depth: int = 0
 
     @staticmethod
     def _clear_tree() -> None:
         """Clear the project tree (for testing purposes)."""
         Project.__current = None
         Project.__top_level = None
+        Project.__subdir_depth = 0
 
     def __init__(
         self,
@@ -203,6 +209,20 @@ class Project(_ProjectBuilders):
         """
         self.name = name
         defined_at = defined_at or get_caller_location()
+        if Project.__current is not None and Project.__subdir_depth == 0:
+            top = Project.top_level()
+            raise PconsError(
+                f"a second Project ({name!r}) was created, but this run "
+                f"already describes project {top.name!r} "
+                f"({top.defined_at}).\n"
+                "A build script describes one project. To build a "
+                "subdirectory as part of it, use add_subdirectory(); "
+                "several independent projects in one script aren't "
+                "supported yet.\n"
+                "(Earlier pcons versions silently folded the second "
+                "project into the first, producing wrong build files.)",
+                location=defined_at,
+            )
         if root_dir is None and Project.__top_level is None:
             root_dir = os.environ.get("PCONS_SOURCE_DIR")
         if root_dir is None:
@@ -376,9 +396,11 @@ class Project(_ProjectBuilders):
         """Context manager for entering a subdirectory in the project."""
         old_subdir = self._subdir
         self._subdir = subdir if old_subdir is None else f"{old_subdir}/{subdir}"
+        Project.__subdir_depth += 1
         try:
             yield
         finally:
+            Project.__subdir_depth -= 1
             self._subdir = old_subdir
             Project.__current = self
 

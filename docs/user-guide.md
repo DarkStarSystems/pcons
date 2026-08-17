@@ -1986,6 +1986,8 @@ Two things are worth knowing:
 
 - The subdirectory must live under the top-level project. Pointing
   `add_subdirectory()` at a sibling checkout elsewhere on disk is an error.
+- `add_subdirectory()` is the only way to nest: a second bare `Project()`
+  call in one script is an error, not another project.
 - Only the environment needs the `is_top_level` branch, because a standalone
   build has no parent to take a toolchain from. `default_environment` searches
   enclosing projects, so a library nested several levels down still finds it.

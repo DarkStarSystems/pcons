@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from pcons.core.errors import PconsError
 from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
@@ -37,7 +38,8 @@ class TestProjectCreation:
         assert Project.top_level() is project1
         assert project1.is_top_level
 
-        project2 = Project("project2")
+        with project1._enter_subdir("sub"):
+            project2 = Project("project2")
         assert Project.top_level() is project1
         assert not project2.is_top_level
         assert project2 in project1._children
@@ -185,6 +187,50 @@ class TestSubproject:
         ):
             with test_project._enter_subdir("child"):
                 Project("child", build_dir="ignored_build", root_dir=tmp_path / "child")
+
+
+class TestSecondTopLevelProject:
+    """A second Project outside add_subdirectory is an error, not a merge."""
+
+    def test_a_second_project_raises(self):
+        Project("first")
+        with pytest.raises(PconsError, match="second Project"):
+            Project("second")
+
+    def test_the_error_names_both_projects(self):
+        Project("firmware")
+        with pytest.raises(PconsError) as exc_info:
+            Project("updater")
+        message = str(exc_info.value)
+        assert "'firmware'" in message
+        assert "'updater'" in message
+        assert "add_subdirectory" in message
+
+    def test_a_distinct_build_dir_does_not_help(self, tmp_path):
+        Project("first", root_dir=tmp_path, build_dir="build-a")
+        with pytest.raises(PconsError, match="second Project"):
+            Project("second", root_dir=tmp_path, build_dir="build-b")
+
+    def test_the_failed_project_is_not_registered(self):
+        from pcons import get_registered_projects
+
+        first = Project("first")
+        with pytest.raises(PconsError):
+            Project("second")
+        assert get_registered_projects() == [first]
+
+    def test_a_project_after_a_subdirectory_still_raises(self):
+        first = Project("first")
+        with first._enter_subdir("sub"):
+            Project("child")
+        with pytest.raises(PconsError, match="second Project"):
+            Project("second")
+
+    def test_a_fresh_tree_accepts_a_new_project(self):
+        Project("first")
+        Project._clear_tree()
+        project = Project("second")
+        assert Project.top_level() is project
 
 
 class TestProjectAliases:

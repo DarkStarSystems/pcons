@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in prose. `pcons -- generate` runs `generate` instead of failing, and abbreviated
   long options (`pcons --verbo`) are no longer silently accepted. click is now a
   runtime dependency.
+- **A second top-level `Project()` in one script is now an error.** It used
+  to be silently adopted as a child of the first project, with its
+  `build_dir` argument discarded — producing wrong build files that looked
+  fine. The error names both projects and suggests `add_subdirectory()`.
+  Subprojects created via `add_subdirectory()` are unchanged. (First step
+  toward supporting several independent projects in one script.)
 - **`--` always means targets follow.** `pcons -- clean` builds a target
   named `clean`; it used to run the `clean` command (deleting the build
   directory), while `pcons FOO=bar -- clean` built the target — the two now

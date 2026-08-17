@@ -797,9 +797,7 @@ class TestChecksUseTheEnvironment:
 
         assert plain != defined  # not served from the first answer's cache entry
 
-    def test_relative_include_dirs_resolve_against_the_project_root(
-        self, tmp_path, test_project
-    ):  # noqa: F811
+    def test_relative_include_dirs_resolve_against_the_project_root(self, tmp_path):  # noqa: F811
         """Probes compile in a temp dir, so a project-relative -I would
         otherwise point nowhere."""
         from pcons.core.project import Project

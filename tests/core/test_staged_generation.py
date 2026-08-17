@@ -39,7 +39,8 @@ class TestConfigureDependencies:
     def test_subproject_dependency_lands_on_top_level(self, tmp_path):
         top = Project("top", root_dir=tmp_path)
         (tmp_path / "sub").mkdir()
-        sub = Project("sub", root_dir=tmp_path / "sub")
+        with top._enter_subdir("sub"):
+            sub = Project("sub", root_dir=tmp_path / "sub")
 
         sub.add_configure_dependency(tmp_path / "sub" / "data.txt")
 

@@ -7,6 +7,8 @@ from typing import Any
 import pytest
 from hypothesis import settings
 
+import pcons
+
 # The usage-requirement/target-option registries hold plain strings, so the
 # restore below cannot tell a pcons import side effect from a test's own
 # registration the way the builder restore does. Instead, import the one
@@ -192,6 +194,7 @@ def clear_project_tree():
     test lists or dispatches next.
     """
     Project._clear_tree()
+    pcons._clear_registered_projects()
     BaseGenerator._clear_pending()
     invocation.clear()
     reset_cache()
@@ -202,6 +205,7 @@ def clear_project_tree():
     yield
     _restore_registries(registries)
     Project._clear_tree()
+    pcons._clear_registered_projects()
     BaseGenerator._clear_pending()
     invocation.clear()
     reset_cache()
