@@ -636,33 +636,27 @@ def _complete_runner(
 class PconsPath(click.Path):
     """A path completed from the directory the option is read from.
 
-    `click.Path` answers with a directive rather than with names, and every
+    `click.Path` does two jobs, and this changes both.
+
+    It answers a completion with a directive rather than with names, and every
     shell click writes a script for resolves that against its own directory
     (bash runs `compopt -o dirnames`). After a `-C` that is the wrong one, so
     the entries are listed here instead. It costs what the shell does better,
     descending as you type and expanding a `~`, which is why nothing changes
     without a `-C`.
 
-    Every path option on the pcons command line takes this type, so which of
-    the two answers is right is decided once rather than per option.
+    It also rejects a path of the wrong kind. ``check=False`` keeps the
+    completion and drops that, for an option that owns its own error path:
+    `-C` on a file has to stay `_chdir`'s exit 1 rather than become a
+    UsageError's 2.
+
+    Every path option on the pcons command line takes this type, so both
+    answers are decided once rather than per option.
     """
 
-    def shell_complete(
-        self, ctx: click.Context, param: click.Parameter, incomplete: str
-    ) -> list[CompletionItem]:
-        if not _chdir_applied(ctx):
-            return super().shell_complete(ctx, param, incomplete)
-        return _list_paths(incomplete, files=self.file_okay, dirs=self.dir_okay)
-
-
-class UncheckedPath(PconsPath):
-    """A path click completes but does not check.
-
-    `click.Path` does two jobs: it tells the shell whether to complete files or
-    directories, and it rejects a path of the wrong kind. An option that owns
-    its own error path wants the first without the second. `-C` on a file has
-    to stay `_chdir`'s exit 1 rather than become a UsageError's 2.
-    """
+    def __init__(self, *args: Any, check: bool = True, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.check = check
 
     def convert(
         self,
@@ -670,7 +664,16 @@ class UncheckedPath(PconsPath):
         param: click.Parameter | None,
         ctx: click.Context | None,
     ) -> str | bytes | os.PathLike[str]:
-        return self.coerce_path_result(value)
+        if not self.check:
+            return self.coerce_path_result(value)
+        return super().convert(value, param, ctx)
+
+    def shell_complete(
+        self, ctx: click.Context, param: click.Parameter, incomplete: str
+    ) -> list[CompletionItem]:
+        if not _chdir_applied(ctx):
+            return super().shell_complete(ctx, param, incomplete)
+        return _list_paths(incomplete, files=self.file_okay, dirs=self.dir_okay)
 
 
 class PconsDirectoryList(click.ParamType):
@@ -813,7 +816,7 @@ def directory_option(f: F) -> F:
     return click.option(
         "-C",
         "--directory",
-        type=UncheckedPath(file_okay=False),
+        type=PconsPath(file_okay=False, check=False),
         metavar="DIR",
         callback=_chdir,
         is_eager=True,
