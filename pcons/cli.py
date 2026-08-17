@@ -357,7 +357,7 @@ def _buildable_names(project: Project) -> list[str]:
     from pcons.core.node import FileNode
 
     resolver = project._path_resolver
-    names = {"all", *project.aliases}
+    names = {"all", *project.tree_aliases}
     for target in project.targets:
         for node in target.output_nodes:
             if isinstance(node, FileNode):
@@ -421,12 +421,15 @@ def _persist_run_settings_to_projects(
     variant: str | None,
     generator: str | None,
     source_dir: str,
+    variants: set[str] | None = None,
 ) -> None:
     """Persist this run's settings into each sibling project's build directory.
 
     The CLI's cache lives in the -B directory, which belongs to the first
     project; a later ``pcons -B <sibling's dir>`` must see the same
-    settings, not defaults.
+    settings, not defaults. The recorded target names are each project's
+    own — relative to its build directory, so completion under
+    ``-B <sibling's dir>`` offers what that directory can build.
     """
     from pcons.core.cache import BuildCache
 
@@ -436,7 +439,15 @@ def _persist_run_settings_to_projects(
         if os.path.normcase(str(project_dir)) == cli_dir:
             continue
         cache = BuildCache(project_dir)
-        _persist_run_settings(cache, variables, variant, generator, source_dir)
+        _persist_run_settings(
+            cache,
+            variables,
+            variant,
+            generator,
+            source_dir,
+            targets=_buildable_names(project),
+            variants=variants,
+        )
         # The declared-command listing too: `pcons -B <this dir> run` reads
         # it from here, and must list the same commands the primary does.
         _record_command_listing(cache, persist=True)
@@ -673,7 +684,6 @@ def run_script(
                 if generate:
                     _record_command_listing(cache, persist=persist)
                 if persist:
-                    projects = pcons.get_registered_projects()
                     _warn_unread_cached_vars(cached_vars, cli_vars)
                     _persist_run_settings(
                         cache,
@@ -681,12 +691,14 @@ def run_script(
                         persist_variant,
                         persist_gen,
                         current_source,
-                        # The project this run registered, not `Project.top_level()`.
-                        # Nothing resets the tree between two runs in one process, so
-                        # a second script's Project nests under the first and the
-                        # top level answers for both.
-                        targets=_buildable_names(projects[0])
-                        if generate and projects
+                        # Union over the sibling projects: bare
+                        # `pcons <TAB>` routes a target to whichever
+                        # sibling owns it, so the primary cache offers
+                        # every project's names.
+                        targets=sorted(
+                            {n for p in top_levels for n in _buildable_names(p)}
+                        )
+                        if generate
                         else None,
                         variants=pcons.core.vars._seen_variant_names(),
                     )
@@ -698,6 +710,7 @@ def run_script(
                             persist_variant,
                             persist_gen,
                             current_source,
+                            variants=pcons.core.vars._seen_variant_names(),
                         )
 
             except SystemExit as e:

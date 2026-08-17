@@ -6711,6 +6711,38 @@ class TestMultiProjectCli:
         assert (tmp_path / "deps.dot").exists()
         assert (tmp_path / "deps-beta.dot").exists()
 
+    TWO_PROJECTS_WITH_ALIASES = (
+        "from pcons import Project\n"
+        "a = Project('alpha')\n"
+        "a.Alias('alpha_docs')\n"
+        "b = Project('beta', build_dir='build-beta')\n"
+        "b.Alias('beta_docs')\n"
+    )
+
+    def test_recorded_targets_cover_every_sibling(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Bare `pcons <TAB>` routes across projects, so the primary cache
+        offers the union of their buildable names."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(self.TWO_PROJECTS_WITH_ALIASES)
+        assert _invoke("generate").exit_code == 0
+        cached = json.loads((tmp_path / "build" / "pcons_cache.json").read_text())
+        assert "alpha_docs" in cached["targets"]
+        assert "beta_docs" in cached["targets"]
+
+    def test_a_sibling_cache_records_its_own_targets(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Names are spelled relative to a build directory, so each sibling
+        records the names its own directory can build."""
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(self.TWO_PROJECTS_WITH_ALIASES)
+        assert _invoke("generate").exit_code == 0
+        cached = json.loads((tmp_path / "build-beta" / "pcons_cache.json").read_text())
+        assert "beta_docs" in cached["targets"]
+        assert "alpha_docs" not in cached["targets"]
+
     def test_a_second_project_without_a_build_dir_fails_the_run(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
