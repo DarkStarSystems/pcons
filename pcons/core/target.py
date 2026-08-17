@@ -636,9 +636,9 @@ class Target:
     def _check_same_tree(self, other: Target, verb: str) -> None:
         """Refuse an edge to a target in another top-level project.
 
-        Sibling projects build independently — separate build directories,
-        separate build files — so an edge between them would name a path the
-        other build never produces there. Imported targets are exempt: they
+        Sibling projects build independently, with separate build directories and
+        separate build files, so raise an error if user tries to connect them.
+        Imported targets are exempt: they
         describe something outside every build.
         """
         if getattr(other, "is_imported", False):

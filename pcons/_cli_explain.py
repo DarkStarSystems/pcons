@@ -225,6 +225,7 @@ def render_explanation(
     explicit_targets: bool,
     color: bool,
     width: int,
+    show_project: bool = False,
 ) -> Iterator[str]:
     """The whole report, line by line.
 
@@ -235,6 +236,9 @@ def render_explanation(
             "commands with no target" section, which belongs to none of them.
         color: Emit ANSI styling (and the fancier glyphs that go with it).
         width: Truncate command lines to this many columns; 0 for unlimited.
+        show_project: Name the project in the section header and qualify
+            target names. Set when several projects share one report, where
+            the sections would otherwise be told apart only by build dir.
     """
     from pcons.core.explain import (
         CommandFrame,
@@ -282,7 +286,8 @@ def render_explanation(
         if root.is_relative_to(home)
         else root.as_posix()
     )
-    yield style.title(f"## Explanation of Targets and Environments: {where}")
+    subject = f"project {project.name!r} at {where}" if show_project else where
+    yield style.title(f"## Explanation of Targets and Environments: {subject}")
     yield style.dim(
         f"Commands are shown as the build runs them, from the build "
         f"directory ({Path(project.build_dir).as_posix()})."
@@ -351,7 +356,8 @@ def render_explanation(
     for target in targets:
         target_env = target._env
         detail = f"({target.target_type})" if target.target_type else ""
-        header = target_header(target.name or "?", detail, target_env)
+        title = (target.qualified_name if show_project else target.name) or "?"
+        header = target_header(title, detail, target_env)
         location = defined_at(target)
         if location is not None:
             header += f"  {style.dim(location)}"

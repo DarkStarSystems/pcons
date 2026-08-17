@@ -340,7 +340,7 @@ class Project(_ProjectBuilders):
         self._path_resolver = PathResolver(top.root_dir, top.build_dir)
 
         # Register with the global registry (the CLI's iteration source).
-        # After validation, so a rejected project is never registered.
+        # After validation, to ensure we only register valid projects.
         from pcons import _register_project
 
         _register_project(self)
@@ -462,7 +462,7 @@ class Project(_ProjectBuilders):
     ) -> Any:
         """Run *subdir*'s pcons-build.py as part of this project.
 
-        The method spelling of :func:`pcons.add_subdirectory`, for scripts
+        This is the :func:`pcons.add_subdirectory` variant, for scripts
         with several top-level projects where "the current project" is
         ambiguous.
         """

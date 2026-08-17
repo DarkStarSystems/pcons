@@ -1195,7 +1195,7 @@ def _no_build_described() -> int:
     return 0
 
 
-#: Ninja targets every pcons manifest defines, so a request for one goes to
+#: Ninja targets which every pcons manifest defines, so a request for one goes to
 #: every sibling project rather than being looked up in any of them.
 _TARGETS_IN_EVERY_PROJECT = frozenset({"all", "test-build"})
 
@@ -1299,7 +1299,7 @@ def _build(
                 return _no_build_described(), [build_dir]
 
     if not projects:
-        # No regeneration ran: build the directory asked for. With sibling
+        # No regeneration ran: build the requested directory. With sibling
         # projects, -B scopes the build to the one owning that directory.
         return _run_build_tool(
             build_dir,
@@ -1681,6 +1681,7 @@ def _explain_targets(
             explicit_targets=bool(target_names),
             color=use_color,
             width=_cli_explain.resolve_width(width),
+            show_project=len(top_levels) > 1,
         ):
             click.echo(line, color=use_color)
 
@@ -2779,7 +2780,8 @@ def cli_default(
         ctx.exit(code)
     if not projects:
         ctx.exit(_no_build_described())
-    # The script settles the build directories, not the one asked for.
+    # Build in the projects' own directories, which the script chooses;
+    # they need not match the -B request.
     ctx.exit(
         _build(
             build_dir,
