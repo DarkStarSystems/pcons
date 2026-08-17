@@ -23,6 +23,7 @@ from pcons._cli_completion import (
 )
 from pcons.cli import cli
 from pcons.core.debug import SUBSYSTEM_DESCRIPTIONS
+from tests.support import EXE_SUFFIX
 
 
 @pytest.fixture(autouse=True)
@@ -488,27 +489,27 @@ class TestTargetCompletion:
         yield root
 
     def test_after_a_command_name(self, project: Path) -> None:
-        assert _completions(["build"], "") == ["all", "hello"]
+        assert _completions(["build"], "") == ["all", f"hello{EXE_SUFFIX}"]
 
     def test_a_prefix_filters(self, project: Path) -> None:
-        assert _completions(["build"], "hel") == ["hello"]
+        assert _completions(["build"], "hel") == [f"hello{EXE_SUFFIX}"]
 
     def test_explain_offers_them_too(self, project: Path) -> None:
-        assert _completions(["explain"], "") == ["all", "hello"]
+        assert _completions(["explain"], "") == ["all", f"hello{EXE_SUFFIX}"]
 
     def test_at_the_top_level(self, project: Path) -> None:
         """`pcons hello` builds a target, so the group offers the names itself."""
-        assert _completions([], "hel") == ["hello"]
+        assert _completions([], "hel") == [f"hello{EXE_SUFFIX}"]
 
     def test_the_command_names_survive_at_the_top_level(self, project: Path) -> None:
         offered = _completions([], "")
         assert "build" in offered
-        assert "hello" in offered
+        assert f"hello{EXE_SUFFIX}" in offered
 
     def test_an_option_prefix_offers_no_targets(self, project: Path) -> None:
         offered = _completions([], "-")
         assert "--verbose" in offered
-        assert "hello" not in offered
+        assert f"hello{EXE_SUFFIX}" not in offered
 
     @pytest.mark.parametrize(
         "args",
@@ -534,7 +535,7 @@ class TestTargetCompletion:
         assert run_script(project / "pcons-build.py", project / "out")[0] == 0
 
         wanted = "hello" if args == ["build"] else "elsewhere"
-        assert _completions(args, "") == ["all", wanted]
+        assert _completions(args, "") == ["all", f"{wanted}{EXE_SUFFIX}"]
 
     def test_the_build_dir_is_read_from_the_environment(
         self, project: Path, monkeypatch: pytest.MonkeyPatch
@@ -613,8 +614,8 @@ class TestTargetCompletion:
             "from pcons import Project\n"
             "Project('demo')\n"
         )
-        assert _completions(["build"], "") == ["all", "hello"]
-        assert _completions([], "hel") == ["hello"]
+        assert _completions(["build"], "") == ["all", f"hello{EXE_SUFFIX}"]
+        assert _completions([], "hel") == [f"hello{EXE_SUFFIX}"]
         assert not marker.exists()
 
 
@@ -661,7 +662,7 @@ class TestCompletionAfterADoubleDash:
         """`pcons -- build` builds a target called build, it runs no command."""
         offered = _completions(["--"], "")
         assert "build" not in offered
-        assert "hello" in offered
+        assert f"hello{EXE_SUFFIX}" in offered
 
     def test_without_the_double_dash_a_command_name_is(self, project: Path) -> None:
         assert "build" in _completions([], "")
@@ -670,7 +671,7 @@ class TestCompletionAfterADoubleDash:
         self, project: Path
     ) -> None:
         """The case `--` exists for, so it must survive the option refusal."""
-        assert _completions(["--"], "-") == ["-dash-target"]
+        assert _completions(["--"], "-") == [f"-dash-target{EXE_SUFFIX}"]
 
     def test_a_command_after_a_double_dash_was_already_right(
         self, project: Path

@@ -4,10 +4,14 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT = REPO_ROOT / "pyproject.toml"
+
+EXE_SUFFIX = ".exe" if sys.platform == "win32" else ""
+"""What a Program's output is called, for a test asserting a build tool name."""
 
 
 def subprocess_env(**overrides: str) -> dict[str, str]:
