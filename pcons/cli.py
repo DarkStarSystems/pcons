@@ -384,14 +384,16 @@ def _persist_run_settings_to_projects(
     """
     from pcons.core.cache import BuildCache
 
-    cli_dir = Path(os.path.normpath(cli_build_dir.absolute()))
+    cli_dir = os.path.normcase(os.path.normpath(cli_build_dir.absolute()))
     for project in projects:
         project_dir = project._effective_output_dir()
-        if project_dir == cli_dir:
+        if os.path.normcase(str(project_dir)) == cli_dir:
             continue
-        _persist_run_settings(
-            BuildCache(project_dir), variables, variant, generator, source_dir
-        )
+        cache = BuildCache(project_dir)
+        _persist_run_settings(cache, variables, variant, generator, source_dir)
+        # The declared-command listing too: `pcons -B <this dir> run` reads
+        # it from here, and must list the same commands the primary does.
+        _record_command_listing(cache, persist=True)
 
 
 def run_script(
@@ -1218,24 +1220,52 @@ def _route_targets(
 
     from pcons.core.target import split_qualified_name
 
+    def owns_target(p: Project, token: str) -> bool:
+        try:
+            return p.get_target(token, raise_if_missing=False) is not None
+        except KeyError:
+            return True  # duplicate name inside this project: it owns it
+
     routed: dict[int, list[str]] = {id(p): [] for p in projects}
     for token in targets:
         if token in _TARGETS_IN_EVERY_PROJECT:
             for p in projects:
                 routed[id(p)].append(token)
             continue
+
         prefix, base = split_qualified_name(token)
-        owners: list[Project] = []
-        for p in projects:
-            if prefix is not None and prefix == p.name:
-                owners = [p]
-                break
-            try:
-                found = p.get_target(token, raise_if_missing=False) is not None
-            except KeyError:
-                found = True  # ambiguous inside this project: it owns it
-            if found or token in p.aliases:
-                owners.append(p)
+        if prefix is not None:
+            named = next((p for p in projects if p.name == prefix), None)
+            if named is not None:
+                # Ninja knows the plain name, not the qualified spelling.
+                routed[id(named)].append(base)
+                continue
+            # Not a sibling's name: fall through and look the whole token
+            # up as an in-tree qualified name (subproject::target).
+
+        # An alias is a user-level grouping, so one name declared by
+        # several projects means all of them: build each project's group.
+        alias_owners = [p for p in projects if token in p.aliases]
+        if alias_owners:
+            confusable = [
+                p for p in projects if p not in alias_owners and owns_target(p, token)
+            ]
+            if confusable:
+                names = ", ".join(
+                    f"{p.name}::{token}" for p in (*alias_owners, *confusable)
+                )
+                logger.error(
+                    "'%s' is an alias in one project and a target in "
+                    "another; qualify it: %s",
+                    token,
+                    names,
+                )
+                return None
+            for p in alias_owners:
+                routed[id(p)].append(token)
+            continue
+
+        owners = [p for p in projects if owns_target(p, token)]
         if not owners:
             searched = ", ".join(p.name for p in projects)
             logger.error(
@@ -1252,7 +1282,6 @@ def _route_targets(
                 names,
             )
             return None
-        # Ninja knows the plain name, not the qualified spelling.
         routed[id(owners[0])].append(base if prefix is not None else token)
 
     return [(p, routed[id(p)]) for p in projects if routed[id(p)]]
@@ -1274,8 +1303,9 @@ def _build(
 
     The regeneration is passed in rather than described by more parameters:
     what it needs is the whole of `_generate`'s signature, and the caller
-    already holds those values. A caller that already regenerated passes the
-    resulting *projects* instead.
+    already holds those values. *projects* is the result of the caller's
+    most recent generation, if it ran one; a regeneration here replaces it.
+    Without either, the build runs in *build_dir* alone.
 
     One project builds in its directory; several top-level projects build
     serialized, in script order, each named target routed to the project
@@ -1286,9 +1316,7 @@ def _build(
         the one asked for: a regeneration may run a script that picks its
         own.
     """
-    if projects is None and _needs_generation(
-        build_dir, build_script=str(script) if script else None
-    ):
+    if _needs_generation(build_dir, build_script=str(script) if script else None):
         found = _resolve_build_script(script)
         if found is not None and found.exists():
             logger.info("Build files missing or out of date, regenerating...")
@@ -2172,8 +2200,13 @@ def cli_build(
     script = Path(build_script) if build_script else None
     variables, targets = parse_variables(list(extra))
 
+    # The projects from the last regeneration. A watch iteration whose build
+    # files are fresh skips regeneration, and without these it would fall
+    # back to the -B directory and quietly stop building the other siblings.
+    known_projects: list[Project] = []
+
     def regenerate() -> tuple[int, list[Project]]:
-        return _generate(
+        code, projects = _generate(
             build_dir,
             script=script,
             variables=variables,
@@ -2183,11 +2216,15 @@ def cli_build(
             fresh=fresh,
             jobs=jobs,
         )
+        if code == 0:
+            known_projects[:] = projects
+        return code, projects
 
     def build_once() -> tuple[int, list[Path]]:
         return _build(
             build_dir,
             regenerate=regenerate,
+            projects=list(known_projects) or None,
             script=script,
             targets=targets or None,
             jobs=jobs,
@@ -2742,8 +2779,12 @@ def cli_default(
 
     variables, targets = parse_variables(list(extra))
 
+    # The projects from the last regeneration; see cli_build for why a
+    # watch needs them remembered across iterations.
+    known_projects: list[Project] = []
+
     def regenerate() -> tuple[int, list[Project]]:
-        return _generate(
+        code, regenerated = _generate(
             build_dir,
             script=script,
             variables=variables,
@@ -2753,6 +2794,9 @@ def cli_default(
             fresh=fresh,
             jobs=jobs,
         )
+        if code == 0:
+            known_projects[:] = regenerated
+        return code, regenerated
 
     # _build generates on its own when the build files are stale, which is the
     # right entry point for a watch: it regenerates only when needed.
@@ -2762,6 +2806,7 @@ def cli_default(
                 build=lambda: _build(
                     build_dir,
                     regenerate=regenerate,
+                    projects=list(known_projects) or None,
                     script=script,
                     targets=targets or None,
                     jobs=jobs,

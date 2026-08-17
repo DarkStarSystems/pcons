@@ -299,8 +299,9 @@ class Project(_ProjectBuilders):
                     default = os.environ.get("PCONS_BUILD_DIR", "build")
                     raise PconsError(
                         f"project {name!r} needs an explicit build_dir: "
-                        f"the default ({default!r}) belongs to project "
-                        f"{first.name!r} ({first.defined_at}).\n"
+                        f"the default ({default!r}) is reserved for the "
+                        f"first project, {first.name!r} "
+                        f"({first.defined_at}).\n"
                         "Each top-level project owns its own build "
                         "directory; pass build_dir= to the later ones. To "
                         "build a subdirectory as part of an existing "
@@ -323,7 +324,11 @@ class Project(_ProjectBuilders):
             if first is not None:
                 mine = self._effective_output_dir()
                 for other in Project._top_level_projects():
-                    if other._effective_output_dir() == mine:
+                    # normcase: on case-insensitive filesystems, two
+                    # spellings of one directory still collide.
+                    if os.path.normcase(str(other._effective_output_dir())) == (
+                        os.path.normcase(str(mine))
+                    ):
                         raise PconsError(
                             f"projects {other.name!r} ({other.defined_at}) "
                             f"and {name!r} would share the build directory "
@@ -1175,17 +1180,31 @@ class Project(_ProjectBuilders):
         if not self._resolved:
             self.resolve()
 
+        def per_project(path_str: str) -> str:
+            """One requested file can only serve one project: the first
+            keeps the requested name, each later sibling gets the name
+            suffixed with its own ("deps.dot" -> "deps-host.dot").
+            Stdout needs no such split; the graphs just follow each other.
+            """
+            if path_str == "-":
+                return path_str
+            top_levels = Project._top_level_projects()
+            if not top_levels or top_levels[0] is self.top:
+                return path_str
+            path = Path(path_str)
+            return str(path.with_name(f"{path.stem}-{self.top.name}{path.suffix}"))
+
         graph_path = os.environ.get("PCONS_GRAPH")
         if graph_path:
             from pcons.generators.dot import DotGenerator
 
-            self._output_graph(DotGenerator, graph_path, "DOT")
+            self._output_graph(DotGenerator, per_project(graph_path), "DOT")
 
         mermaid_path = os.environ.get("PCONS_MERMAID")
         if mermaid_path:
             from pcons.generators.mermaid import MermaidGenerator
 
-            self._output_graph(MermaidGenerator, mermaid_path, "Mermaid")
+            self._output_graph(MermaidGenerator, per_project(mermaid_path), "Mermaid")
 
     def _output_graph(
         self,

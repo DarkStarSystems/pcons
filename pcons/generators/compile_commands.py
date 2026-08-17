@@ -88,7 +88,7 @@ class CompileCommandsGenerator(BaseGenerator):
         if first_with_root is not None and first_with_root is not project.top:
             logger.debug(
                 "root compile_commands.json symlink belongs to project %r; "
-                "skipping it for %r (%s has the full database)",
+                "skipping it for %r, whose database stays at %s",
                 first_with_root.name,
                 project.name,
                 output_file,

@@ -3232,9 +3232,18 @@ class TestCLIArgumentParsing:
         (tmp_path / "pcons-build.py").write_text("from pcons import Project\n")
         monkeypatch.chdir(tmp_path)
         _capture_args(
-            monkeypatch, "_generate", result=(0, SimpleNamespace(build_dir=tmp_path))
+            monkeypatch,
+            "_generate",
+            result=(
+                0,
+                [
+                    SimpleNamespace(
+                        build_dir=tmp_path, _effective_output_dir=lambda: tmp_path
+                    )
+                ],
+            ),
         )
-        built = _capture_args(monkeypatch, "_build", result=(0, tmp_path))
+        built = _capture_args(monkeypatch, "_build", result=(0, [tmp_path]))
         assert _invoke("hello").exit_code == 0
         assert built[0]["targets"] == ["hello"]
 
@@ -6153,6 +6162,37 @@ class TestRouteTargets:
             (beta, ["all"]),
         ]
 
+    def test_an_alias_in_several_projects_goes_to_each(self, tmp_path) -> None:
+        """An alias is a user-level grouping: one name, every declarer."""
+        from pcons.cli import _route_targets
+
+        alpha, beta = self._siblings(tmp_path)
+        alpha.Alias("docs")
+        beta.Alias("docs")
+        assert _route_targets([alpha, beta], ["docs"]) == [
+            (alpha, ["docs"]),
+            (beta, ["docs"]),
+        ]
+
+    def test_an_alias_declared_once_goes_to_its_project_only(self, tmp_path) -> None:
+        from pcons.cli import _route_targets
+
+        alpha, beta = self._siblings(tmp_path)
+        beta.Alias("docs")
+        assert _route_targets([alpha, beta], ["docs"]) == [(beta, ["docs"])]
+
+    def test_an_alias_that_is_a_target_elsewhere_is_an_error(
+        self, tmp_path, caplog
+    ) -> None:
+        from pcons.cli import _route_targets
+        from pcons.core.target import Target
+
+        alpha, beta = self._siblings(tmp_path)
+        alpha.Alias("docs")
+        Target("docs", project=beta)
+        assert _route_targets([alpha, beta], ["docs"]) is None
+        assert "alias in one project and a target in another" in caplog.text
+
     def test_a_single_project_passes_names_through(self, tmp_path) -> None:
         """Ninja may know names pcons doesn't, e.g. raw file paths."""
         from pcons.cli import _route_targets
@@ -6190,6 +6230,45 @@ class TestMultiProjectCli:
         assert _invoke("generate", "FOO=1").exit_code == 0
         cached = json.loads((tmp_path / "build-beta" / "pcons_cache.json").read_text())
         assert cached["vars"] == {"FOO": "1"}
+
+    def test_fresh_build_files_still_build_every_known_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A watch iteration with fresh files must not shrink to -B only."""
+        import pcons.cli as cli
+
+        monkeypatch.setattr(cli, "_needs_generation", lambda *a, **k: False)
+        dirs = [tmp_path / "build-a", tmp_path / "build-b"]
+        for d in dirs:
+            d.mkdir()
+            (d / "build.ninja").write_text("")
+        ran: list[Path] = []
+        monkeypatch.setattr(
+            cli, "run_ninja", lambda build_dir, **k: ran.append(build_dir) or 0
+        )
+        projects = [SimpleNamespace(_effective_output_dir=lambda d=d: d) for d in dirs]
+        code, built = cli._build(dirs[0], regenerate=lambda: (0, []), projects=projects)
+        assert code == 0
+        assert ran == dirs
+        assert built == dirs
+
+    def test_the_command_listing_is_mirrored_to_each_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(self.TWO_PROJECTS)
+        assert _invoke("generate").exit_code == 0
+        cached = json.loads((tmp_path / "build-beta" / "pcons_cache.json").read_text())
+        assert "commands" in cached
+
+    def test_graph_files_are_written_per_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "pcons-build.py").write_text(self.TWO_PROJECTS)
+        assert _invoke("generate", "--graph", "deps.dot").exit_code == 0
+        assert (tmp_path / "deps.dot").exists()
+        assert (tmp_path / "deps-beta.dot").exists()
 
     def test_a_second_project_without_a_build_dir_fails_the_run(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
