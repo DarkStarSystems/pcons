@@ -7,11 +7,12 @@ import os
 from collections.abc import Iterator
 from pathlib import Path
 
+import click
 import pytest
 from click.shell_completion import ShellComplete
 from click.testing import CliRunner, Result
 
-from pcons._cli_click import _debug_help
+from pcons._cli_click import _cached_names, _debug_help, _declared_build_dir
 from pcons._cli_completion import (
     COMPLETE_VAR,
     PROG_NAME,
@@ -677,3 +678,45 @@ class TestCompletionAfterADoubleDash:
         """A command falls through to its EXTRA argument before reaching the
         option list, so only the group ever had this wrong."""
         assert _completions(["build", "--"], "--ver") == []
+
+
+class TestTheBuildDirBehindTheNames:
+    """Where `_cached_names` looks, when nothing has parsed a `-B` yet.
+
+    `--help` is eager and fires from inside `parse_args`, so the level it runs
+    on has an empty `ctx.params`. `_declared_build_dir` reads the option's own
+    declaration instead. It answers for a context whatever the command tree
+    around that context looks like, and `_cached_names` never raises whatever
+    it gets back, because for completion stdout is the candidate stream.
+    """
+
+    @staticmethod
+    def _without_a_build_dir() -> click.Command:
+        command = cli.commands["completion"]
+        assert all(param.name != "build_dir" for param in command.params)
+        return command
+
+    def test_a_command_of_its_own_answers_from_the_group_above_it(self) -> None:
+        parent = click.Context(cli)
+        child = click.Context(self._without_a_build_dir(), parent=parent)
+        assert _declared_build_dir(child) == "build"
+
+    def test_nothing_declaring_one_answers_nothing(self) -> None:
+        assert _declared_build_dir(click.Context(self._without_a_build_dir())) is None
+
+    def test_no_build_dir_at_all_names_nothing(self) -> None:
+        ctx = click.Context(self._without_a_build_dir())
+        assert _cached_names(ctx, "targets") == []
+
+    def test_an_unreadable_cache_names_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whatever the cache does, the shell must not be handed a traceback."""
+
+        def refuse(build_dir: Path) -> None:
+            raise OSError("cache unreadable")
+
+        monkeypatch.setattr("pcons.core.cache.BuildCache", refuse)
+        ctx = click.Context(cli)
+        ctx.params["build_dir"] = tmp_path
+        assert _cached_names(ctx, "targets") == []

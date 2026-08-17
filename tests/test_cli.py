@@ -4190,6 +4190,34 @@ class TestRecordedTargetNames:
         assert "chosen" in out
         assert "defaulted" not in out
 
+    def test_the_help_reads_the_build_dir_from_the_environment(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PCONS_BUILD_DIR names it too, and no -B is in argv to carry it.
+
+        `--help` is eager and fires from inside `parse_args`, so the level it
+        runs on has an empty `ctx.params`. The env var is read off the option's
+        own declaration instead.
+        """
+        from pcons.core.project import Project
+
+        (tmp_path / "hello.c").write_text("int main(void) { return 0; }\n")
+        script = tmp_path / "pcons-build.py"
+        script.write_text(
+            "from pcons import Project\n"
+            "p = Project('demo')\n"
+            "p.Program('chosen', p.Environment(toolchain='c'), sources=['hello.c'])\n"
+        )
+        _clear_cli_vars()
+        Project._clear_tree()
+        assert run_script(script, tmp_path / "out")[0] == 0
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("PCONS_BUILD_DIR", str(tmp_path / "out"))
+        out = _invoke("-h").stdout
+        assert "Targets:" in out
+        assert "chosen" in out
+
     def test_the_names_are_not_shown_by_the_cache_command(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
     ) -> None:
