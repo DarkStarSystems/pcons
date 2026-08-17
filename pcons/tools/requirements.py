@@ -270,7 +270,7 @@ def _resolve_and_add_includes_for(
     """Resolve include directories in requirements and return a new UsageRequirements."""
     result = reqs.clone()
 
-    top = owner.project.top_level()
+    top = owner.project.top
     build_parts = () if top.build_dir.is_absolute() else top.build_dir.parts
 
     def _update_include(inc: str | Path) -> Path:

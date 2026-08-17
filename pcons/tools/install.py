@@ -211,6 +211,7 @@ def _with_mode(data: dict[str, str], mode: int | None) -> dict[str, str]:
 
 
 def _make_install_target(
+    project: Project,
     target_name: str,
     builder_name: str,
     builder_data: dict[str, str],
@@ -223,6 +224,7 @@ def _make_install_target(
         target_name,
         target_type="interface",
         defined_at=defined_at,
+        project=project,
     )
     install_target._builder_name = builder_name
     install_target._builder_data = builder_data
@@ -623,6 +625,7 @@ class InstallBuilder:
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
         return _make_install_target(
+            project,
             target_name,
             "Install",
             _with_mode({"dest_dir": str(dest_dir)}, mode),
@@ -688,6 +691,7 @@ class InstallAsBuilder:
         dest = _apply_install_prefix(project, dest, no_prefix)
 
         return _make_install_target(
+            project,
             target_name,
             "InstallAs",
             _with_mode({"dest": str(dest)}, mode),
@@ -737,6 +741,7 @@ class InstallDirBuilder:
         dest_dir = _apply_install_prefix(project, dest_dir, no_prefix)
 
         return _make_install_target(
+            project,
             target_name,
             "InstallDir",
             {"dest_dir": str(dest_dir)},

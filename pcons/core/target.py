@@ -484,8 +484,14 @@ class Target:
         target_type: str | None = None,
         builder: Builder | None = None,
         defined_at: SourceLocation | None = None,
+        project: Project | None = None,
     ) -> None:
-        """Create a target. Toolchains define their own target_type strings."""
+        """Create a target. Toolchains define their own target_type strings.
+
+        ``project`` is the owning project; builder factories pass the project
+        they were reached through. Without it, the most recently created
+        project owns the target (fine in a single-project script).
+        """
         _validate_target_name(name)
         self.name = name
         self.builder = builder
@@ -526,9 +532,10 @@ class Target:
         # (add_sources(..., env=...)), keyed by source node path.
         self._source_envs: dict[Path, Environment] = {}
 
-        from pcons.core.project import Project
+        if project is None:
+            from pcons.core.project import Project
 
-        project = Project.current()
+            project = Project.current()
 
         self.__project = project
         # Where this target's paths sit relative to the top-level root, which
@@ -596,17 +603,13 @@ class Target:
         there rather than at the owning project's own directories (which
         already include that offset).
         """
-        from pcons.core.project import Project
-
-        top = Project.top_level()
+        top = self.__project.top
         return top.build_dir / self._subdir if self._subdir.parts else top.build_dir
 
     @property
     def source_dir(self) -> Path:
         """This target's source directory."""
-        from pcons.core.project import Project
-
-        top = Project.top_level()
+        top = self.__project.top
         return top.root_dir / self._subdir if self._subdir.parts else top.root_dir
 
     @property

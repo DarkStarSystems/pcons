@@ -233,6 +233,47 @@ class TestSecondTopLevelProject:
         assert Project.top_level() is project
 
 
+class TestExplicitBinding:
+    """Targets attach to the project they were made through, not the
+    most recently created one."""
+
+    def _tree(self):
+        top = Project("top")
+        with top._enter_subdir("sub"):
+            child = Project("child")
+        return top, child
+
+    def test_target_binds_to_the_project_passed(self):
+        top, child = self._tree()
+        # Project.current() is back to top, but the explicit project wins.
+        target = Target("t", project=child)
+        assert target.project is child
+        assert top.get_target("t") is target  # lookup is recursive
+
+    def test_builder_factory_binds_to_its_project(self):
+        _top, child = self._tree()
+        target = child.HeaderOnlyLibrary("hdrs")
+        assert target.project is child
+
+    def test_bare_target_still_binds_to_the_current_project(self):
+        top, _child = self._tree()
+        target = Target("t")
+        assert target.project is top
+
+    def test_top_walks_to_the_tree_root(self):
+        top = Project("top")
+        with top._enter_subdir("a"):
+            child = Project("a")
+            with child._enter_subdir("b"):
+                grandchild = Project("b")
+        assert top.top is top
+        assert child.top is top
+        assert grandchild.top is top
+        assert top.is_top_level
+        assert not child.is_top_level
+        assert not grandchild.is_top_level
+
+
 class TestProjectAliases:
     def test_create_alias(self):
         project = Project("myproject")

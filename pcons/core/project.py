@@ -171,17 +171,18 @@ class Project(_ProjectBuilders):
 
     __current: Project | None = None
     __top_level: Project | None = None
-    # How many _enter_subdir contexts are active. A Project created while
-    # this is nonzero is a subproject of the current project; created at
-    # zero with a top-level project already present, it is an error.
-    __subdir_depth: int = 0
+    # Projects whose _enter_subdir context is active, innermost last. A
+    # Project created while this is non-empty becomes a subproject of the
+    # innermost entry; created while it is empty with a top-level project
+    # already present, it is an error.
+    __parent_stack: list[Project] = []
 
     @staticmethod
     def _clear_tree() -> None:
         """Clear the project tree (for testing purposes)."""
         Project.__current = None
         Project.__top_level = None
-        Project.__subdir_depth = 0
+        Project.__parent_stack.clear()
 
     def __init__(
         self,
@@ -209,7 +210,7 @@ class Project(_ProjectBuilders):
         """
         self.name = name
         defined_at = defined_at or get_caller_location()
-        if Project.__current is not None and Project.__subdir_depth == 0:
+        if Project.__current is not None and not Project.__parent_stack:
             top = Project.top_level()
             raise PconsError(
                 f"a second Project ({name!r}) was created, but this run "
@@ -275,8 +276,8 @@ class Project(_ProjectBuilders):
 
         _register_project(self)
 
-        if Project.__current is not None:
-            self._parent = Project.__current
+        if Project.__parent_stack:
+            self._parent = Project.__parent_stack[-1]
         else:
             self._parent = None
 
@@ -295,7 +296,7 @@ class Project(_ProjectBuilders):
             # written to build standalone reads the right directories when it
             # is embedded. The offset from the top-level root is recorded
             # separately; node paths are anchored there (see _offset).
-            top = Project.top_level()
+            top = self._parent.top
             try:
                 self._offset = self.root_dir.relative_to(top.root_dir)
             except ValueError as exc:
@@ -320,9 +321,10 @@ class Project(_ProjectBuilders):
                     pass  # Out-of-tree build — keep absolute
             self.build_dir = bd
 
-        # Anchored at the top-level project, which is where node paths are
-        # rooted; `path_resolver` narrows it to this project's directory.
-        top = Project.top_level() if self._parent else self
+        # Anchored at the top of this project's tree, which is where node
+        # paths are rooted; `path_resolver` narrows it to this project's
+        # directory.
+        top = self.top
         self._path_resolver = PathResolver(top.root_dir, top.build_dir)
 
         Project.__current = self
@@ -362,7 +364,15 @@ class Project(_ProjectBuilders):
 
     @property
     def is_top_level(self) -> bool:
-        return self == Project.top_level()
+        return self._parent is None
+
+    @property
+    def top(self) -> Project:
+        """The top-level project of this project's tree."""
+        project = self
+        while project._parent is not None:
+            project = project._parent
+        return project
 
     @property
     def parent(self) -> Project:
@@ -396,11 +406,11 @@ class Project(_ProjectBuilders):
         """Context manager for entering a subdirectory in the project."""
         old_subdir = self._subdir
         self._subdir = subdir if old_subdir is None else f"{old_subdir}/{subdir}"
-        Project.__subdir_depth += 1
+        Project.__parent_stack.append(self)
         try:
             yield
         finally:
-            Project.__subdir_depth -= 1
+            Project.__parent_stack.pop()
             self._subdir = old_subdir
             Project.__current = self
 
@@ -468,7 +478,7 @@ class Project(_ProjectBuilders):
         generators resolve them against — not at this project's own root,
         which for a subproject would drop the subproject directory.
         """
-        top_root = Project.top_level().root_dir if self._parent else self.root_dir
+        top_root = self.top.root_dir
         if path.is_absolute():
             try:
                 return path.relative_to(top_root)
@@ -834,7 +844,7 @@ class Project(_ProjectBuilders):
         The path may name a file the build itself produces — that is how
         staged generation works; see :meth:`generated_input`.
         """
-        top = self.top_level()
+        top = self.top
         if isinstance(path, FileNode):
             resolved = path.path
         else:
@@ -846,7 +856,7 @@ class Project(_ProjectBuilders):
     def configure_dependencies(self) -> list[Path]:
         """Files the generated build files depend on (see
         :meth:`add_configure_dependency`)."""
-        return list(self.top_level()._configure_deps)
+        return list(self.top._configure_deps)
 
     def generated_input(self, path: Path | str) -> Path | None:
         """A build-time-generated file the build description wants to read.
@@ -869,7 +879,7 @@ class Project(_ProjectBuilders):
                 for name in manifest.read_text().split():
                     project.SharedLibrary(name, env, sources=[f"{name}.c"])
         """
-        top = self.top_level()
+        top = self.top
         self.add_configure_dependency(path)
 
         candidate = Path(path)
@@ -924,7 +934,7 @@ class Project(_ProjectBuilders):
 
         from pcons.core import invocation
 
-        top = self.top_level()
+        top = self.top
         root = top.root_dir.resolve()
         pcons_dir = Path(__file__).resolve().parent.parent
 
@@ -952,7 +962,7 @@ class Project(_ProjectBuilders):
         A staged input that no edge produces can never appear, so the build
         would silently stay incomplete forever. Raise instead.
         """
-        top = self.top_level()
+        top = self.top
         if not top._pending_stages:
             return
 
@@ -1024,7 +1034,7 @@ class Project(_ProjectBuilders):
                     if source.builder is None:
                         p = source.path
                         if not p.is_absolute():
-                            p = Project.top_level().root_dir / p
+                            p = self.top.root_dir / p
                         if not p.exists():
                             errors.append(
                                 MissingSourceError(str(p), target_name=target.name)
