@@ -48,6 +48,10 @@ class Invocation:
     variables: dict[str, str] = field(default_factory=dict)
     variant: str | None = None
     generators: list[str] = field(default_factory=list)
+    #: A verbatim regen command from a driver (write_build_files's
+    #: regen_command=). Used as-is: only the driver knows how it is
+    #: re-invoked, and it owns the command's relocatability.
+    command_override: list[str] | None = None
 
     def command(self, *, root_dir: Path, run_dir: Path) -> list[str] | None:
         """The argv that re-runs pcons, to be executed from *run_dir*.
@@ -56,6 +60,8 @@ class Invocation:
         both Ninja and Make run recipes) so generated build files stay
         relocatable. Returns None when the script can't be found.
         """
+        if self.command_override is not None:
+            return list(self.command_override)
         script = self.script if self.script.is_absolute() else root_dir / self.script
         if not script.is_file():
             return None
@@ -106,6 +112,11 @@ def record(invocation: Invocation) -> None:
     _current = invocation
 
 
+def recorded() -> Invocation | None:
+    """The recorded invocation only — never one inferred from argv."""
+    return _current
+
+
 def run_recorded() -> bool:
     """Whether the CLI has recorded the run this code is part of.
 
@@ -153,8 +164,23 @@ def program_name(path: Path) -> str:
 
 def clear() -> None:
     """Forget the recorded invocation (between CLI runs, and in tests)."""
-    global _current
+    global _current, _inference_suppressed
     _current = None
+    _inference_suppressed = False
+
+
+_inference_suppressed = False
+
+
+def suppress_inference() -> None:
+    """Never infer an invocation from ``sys.argv`` in this process.
+
+    Called by ``write_build_files()`` when no regen command was given: for
+    an embedded driver, ``sys.argv[0]`` is the driver, and a regen rule
+    built from it would re-run a program that was never a build script.
+    """
+    global _inference_suppressed
+    _inference_suppressed = True
 
 
 def current() -> Invocation | None:
@@ -165,6 +191,8 @@ def current() -> Invocation | None:
     """
     if _current is not None:
         return _current
+    if _inference_suppressed:
+        return None
 
     script = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
     if script is None or script.suffix != ".py" or not script.is_file():

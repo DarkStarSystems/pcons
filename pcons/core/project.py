@@ -112,6 +112,46 @@ def _in_virtualenv(path: Path, root: Path) -> bool:
     return False
 
 
+#: The pending "this build script was run directly" notice: (armed, script).
+#: Deferred to interpreter exit because at construction time an embedded
+#: driver is indistinguishable from a build script, and a driver that goes
+#: on to call write_build_files() deserves no warning. The exit hook only
+#: prints — it is not the generation-at-exit hook that issue #84 removed.
+_direct_run_notice: dict[str, Any] = {"armed": False, "script": None, "hook": False}
+
+
+def _schedule_direct_run_notice(script: Path) -> None:
+    _direct_run_notice["armed"] = True
+    _direct_run_notice["script"] = script
+    if not _direct_run_notice["hook"]:
+        _direct_run_notice["hook"] = True
+        import atexit
+
+        atexit.register(_emit_direct_run_notice)
+
+
+def _cancel_direct_run_notice() -> None:
+    _direct_run_notice["armed"] = False
+
+
+def _emit_direct_run_notice() -> None:
+    if not _direct_run_notice["armed"]:
+        return
+    _direct_run_notice["armed"] = False
+    logger.warning(
+        "this build script was run directly, so nothing was "
+        "generated.\n"
+        "Run it with pcons instead:\n"
+        "\n"
+        "    pcons -b %s\n"
+        "\n"
+        "or hand over to the CLI from the top of the script, see\n"
+        "https://pcons.readthedocs.io/en/latest/cli/"
+        "#a-build-script-that-runs-itself",
+        program_name(_direct_run_notice["script"]),
+    )
+
+
 class Project(_ProjectBuilders):
     """Top-level container for a pcons build.
 
@@ -183,6 +223,7 @@ class Project(_ProjectBuilders):
         Project.__current = None
         Project.__top_level = None
         Project.__parent_stack.clear()
+        _cancel_direct_run_notice()
 
     def __init__(
         self,
@@ -354,18 +395,7 @@ class Project(_ProjectBuilders):
         if Project.__top_level is None:
             script = Path(defined_at.filename)
             if running_as_a_program(script):
-                logger.warning(
-                    "this build script was run directly, so nothing was "
-                    "generated.\n"
-                    "Run it with pcons instead:\n"
-                    "\n"
-                    "    pcons -b %s\n"
-                    "\n"
-                    "or hand over to the CLI from the top of the script, see\n"
-                    "https://pcons.readthedocs.io/en/latest/cli/"
-                    "#a-build-script-that-runs-itself",
-                    program_name(script),
-                )
+                _schedule_direct_run_notice(script)
             Project.__top_level = self
 
     def _effective_output_dir(self) -> Path:
@@ -461,6 +491,57 @@ class Project(_ProjectBuilders):
             Project.__parent_stack.pop()
             self._subdir = old_subdir
             Project.__current = old_current
+
+    def write_build_files(self, *, regen_command: Sequence[str] | None = None) -> None:
+        """Write this project's build files, here and now.
+
+        The public drain for embedded use: a program that describes a build
+        and calls this gets its build.ninja (or whatever generators were
+        selected) immediately, resolved as needed, with no CLI involved.
+        Under ``pcons`` it is what happens anyway, so calling it there is
+        harmless. With several top-level projects, call it on each.
+
+        Args:
+            regen_command: argv for the generated build files'
+                self-regeneration rule, used verbatim (the caller owns its
+                relocatability — it runs from the build directory). Without
+                it, files written from an embedded run get no regen rule:
+                ``sys.argv`` names the embedder's program, and re-running
+                that as a build step is never right.
+
+        Raises:
+            ValueError: ``regen_command`` was passed under a run that
+                already owns the regen rule (the CLI), or twice with
+                different commands.
+        """
+        from pcons.core import invocation
+        from pcons.generators.generator import BaseGenerator
+
+        if regen_command is not None:
+            wanted = [str(part) for part in regen_command]
+            recorded = invocation.recorded()
+            if recorded is None:
+                invocation.record(
+                    invocation.Invocation(
+                        script=Path(self.defined_at.filename),
+                        command_override=wanted,
+                    )
+                )
+            elif recorded.command_override != wanted:
+                raise ValueError(
+                    "write_build_files(regen_command=...): this run already "
+                    "owns the regen rule"
+                    + (
+                        " (a different regen_command was recorded earlier)"
+                        if recorded.command_override is not None
+                        else " (the build script is running under pcons)"
+                    )
+                )
+        elif not invocation.run_recorded():
+            invocation.suppress_inference()
+
+        _cancel_direct_run_notice()
+        BaseGenerator._generate_pending(self)
 
     def add_subdirectory(
         self, subdir: str | Path, pick: list[str] | None = None

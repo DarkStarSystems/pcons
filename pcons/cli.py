@@ -666,8 +666,6 @@ def run_script(
                 exec(code, namespace)
 
                 # Run any deferred generate requests registered by the script
-                from pcons.generators.generator import BaseGenerator
-
                 top_levels = Project._top_level_projects()
                 if not top_levels:
                     logger.error("No Project created in build script")
@@ -675,7 +673,7 @@ def run_script(
 
                 if generate:
                     for top_level in top_levels:
-                        BaseGenerator._generate_pending(top_level)
+                        top_level.write_build_files()
                 else:
                     _cancel_pending_generation()
                     for top_level in top_levels:
@@ -725,12 +723,10 @@ def run_script(
                 # sys.exit(0) ends the script successfully partway: the
                 # generation it asked for still belongs to this run, and the
                 # finally block below is about to restore cwd and env.
-                from pcons.generators.generator import BaseGenerator
-
                 top_levels = Project._top_level_projects()
                 if generate and top_levels:
                     for top_level in top_levels:
-                        BaseGenerator._generate_pending(top_level)
+                        top_level.write_build_files()
                 else:
                     _cancel_pending_generation()
                 return exit_code, pcons.get_registered_projects()

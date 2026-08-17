@@ -34,6 +34,7 @@ nav:
   - Qt: qt.md
   - Command line: cli.md
   - Commands of your own: user-commands.md
+  - Using pcons as a library: library.md
   - Presets: presets.md
   - Porting from CMake: porting-from-cmake.md
   - Porting from Make: porting-from-make.md

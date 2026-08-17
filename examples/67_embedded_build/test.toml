@@ -1,0 +1,28 @@
+# Test configuration for the embedded_build example
+
+[test]
+description = "pcons as a library: an embedded build step and a custom CLI driver"
+
+# The harness builds pcons-build.py the normal way; driver.py then runs in
+# [verify], exercising write_build_files() and run_script() end to end.
+expected_outputs = [
+    "build/build.ninja",
+    "build/hello",
+]
+
+[verify]
+commands = [
+    { run = "python3 driver.py", expect_stdout = "" },
+    { run = "./build-embed/hello-embed", expect_stdout = "hello from pcons" },
+    { run = "./build/hello", expect_stdout = "hello from pcons" },
+]
+
+commands_windows = [
+    { run = "python driver.py", expect_stdout = "" },
+    { run = "build-embed\\hello-embed.exe", expect_stdout = "hello from pcons" },
+    { run = "build\\hello.exe", expect_stdout = "hello from pcons" },
+]
+
+[skip]
+# driver.py drives ninja itself.
+generators = ["make", "xcode"]

@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   truncation to the terminal width (`--width`).
 - **Defines accept `("NAME", "value")` pairs**, rendering as `NAME=value`
   (a `None` value means the bare name).
+- **`project.write_build_files()`: pcons as a library.** A program that
+  describes a build in-process gets its build files written immediately —
+  no CLI, no deferred generation. Files written this way carry no
+  self-regeneration rule unless the driver passes `regen_command=[...]`
+  (inferring one from `sys.argv` would name the embedder's program), and
+  the "run directly" notice stays silent for a run that generated its
+  files. `pcons.cli.run_script()` is the documented entry point for
+  custom CLIs. See "Using pcons as a library" in the docs and
+  `examples/67_embedded_build`.
   **Multiple top-level projects in one build script.** Each
   `Project()` created outside `add_subdirectory()` is an independent
   sibling with its own build directory, node namespace and build

@@ -86,3 +86,4 @@ uvx pcons
 | [`64_persistent_worker`](https://github.com/DarkStarSystems/pcons/tree/main/examples/64_persistent_worker) | An action run in a persistent worker: the worker holds the expensive setup, each action gets a fresh forked child, and the build works the same when no worker can be reached |
 | [`65_user_commands`](https://github.com/DarkStarSystems/pcons/tree/main/examples/65_user_commands) | Commands declared by the build script, reachable as `pcons run <name>`: an option, a group with its own subcommands, and a command reading the resolved project |
 | [`66_multi_project`](https://github.com/DarkStarSystems/pcons/tree/main/examples/66_multi_project) | Two independent top-level projects built in one pcons run |
+| [`67_embedded_build`](https://github.com/DarkStarSystems/pcons/tree/main/examples/67_embedded_build) | pcons as a library: an embedded build step and a custom CLI driver |
