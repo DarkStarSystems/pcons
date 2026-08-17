@@ -215,6 +215,7 @@ PowerShell completion class.
 | Typed | Offered |
 |---|---|
 | `pcons <TAB>` | command names, and the targets this build directory can build |
+| `pcons -- <TAB>` | target names only |
 | `pcons build <TAB>`, `pcons explain <TAB>` | target names |
 | `-C DIR`, `-B DIR`, `--modules-path` | directories |
 | `-b FILE`, `--graph`, `--mermaid` | files |
@@ -238,6 +239,9 @@ fires on every keystroke, and a build script does configure checks. So:
   completes nothing
 - `pcons info <TAB>` and `pcons generate <TAB>` offer no targets, because their
   `EXTRA` takes build variables rather than targets
+
+After a `--`, only target names are offered. Everything past it names a target,
+so neither an option nor a command name would be parsed as one.
 
 `-B DIR` is honoured while completing, on either side of the command name, so
 `pcons -B out build <TAB>` offers what `out/` can build. `PCONS_BUILD_DIR` works
