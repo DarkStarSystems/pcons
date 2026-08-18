@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-08-18
+
 ### Added
 
 - **`pcons explain`** shows how each target's commands are constructed and
@@ -19,6 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   targets to narrow the report: `pcons explain hello --variant debug`.
   Optional color (`--color`, on by default on a terminal) and command-line
   truncation to the terminal width (`--width`).
+- **Commands of your own: `pcons run`.** A build script or an add-on
+  module declares commands with `@cli_command()` / `@cli_group()`;
+  `pcons run` lists them, `pcons run <name>` runs one with the project
+  resolved and the command's own click options. See "Commands of your
+  own" in the docs and `examples/65_user_commands`. (#81)
+- **A command builds what it needs.** `command.depends(target...)`
+  makes `pcons run <name>` write the build files and build those
+  targets first — across sibling projects — running the command only if
+  the build succeeded. `pcons run` takes `-j` and `--ninja`; a command
+  that declares nothing keeps the old behavior: no build files, no
+  build. (#95)
+- **Tab completion completes nearly everything**: command names, paths
+  for the path-taking options, `--debug` subsystems one comma-segment
+  at a time, `--variant` values this build directory has used, and
+  target names — recorded at generate time, so completion never runs
+  the build script. `pcons --help` gains a `Targets:` section from the
+  same source. (#91)
 - **Defines accept `("NAME", "value")` pairs**, rendering as `NAME=value`
   (a `None` value means the bare name).
 - **`project.write_build_files()`: pcons as a library.** A program that
@@ -30,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files. `pcons.cli.run_script()` is the documented entry point for
   custom CLIs. See "Using pcons as a library" in the docs and
   `examples/67_embedded_build`.
-  **Multiple top-level projects in one build script.** Each
+- **Multiple top-level projects in one build script.** Each
   `Project()` created outside `add_subdirectory()` is an independent
   sibling with its own build directory, node namespace and build
   files; one `pcons` run generates and builds them all, in script
@@ -66,6 +85,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crashes**, at the raise site in the script, after the normal error report.
 - **`pcons cache` is a group of `list`, `show`, `clear` and `path`.** `pcons cache
   --help` describes each one; bare `pcons cache` still lists.
+- **C++ module scanning is cached.** Configure re-scans a source only
+  when it or its flags changed, cutting configure time on module-heavy
+  projects. (#83)
 - **Toolchains load only when used.** `import pcons` drops from 66 ms to 41 ms:
   toolchain modules import on first lookup, so a C build no longer pays for Qt,
   CUDA, Swift and the rest. `from pcons.toolchains import GccToolchain` and
@@ -1663,7 +1685,8 @@ see **Changed** below for each one and what to write instead.
 
 Initial public release with Ninja generator, GCC/LLVM/MSVC toolchains, and Conan integration.
 
-[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/DarkStarSystems/pcons/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/DarkStarSystems/pcons/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/DarkStarSystems/pcons/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/DarkStarSystems/pcons/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/DarkStarSystems/pcons/compare/v0.23.1...v0.24.0
