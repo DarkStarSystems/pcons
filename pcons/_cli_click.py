@@ -20,7 +20,7 @@ import os
 from collections.abc import Callable
 from functools import update_wrapper
 from pathlib import Path
-from typing import Any, Concatenate, ParamSpec, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
 
 import click
 from click.core import ParameterSource
@@ -33,6 +33,10 @@ from pcons.core.debug import (
     UnknownSubsystemsError,
     print_subsystems,
 )
+from pcons.core.errors import PconsError
+
+if TYPE_CHECKING:
+    from pcons.core.target import Target
 
 F = TypeVar("F", bound=Callable[..., Any])
 P = ParamSpec("P")
@@ -275,6 +279,58 @@ class MergingGroup(click.Group):
     def list_commands(self, ctx: click.Context) -> list[str]:
         """Declaration order, as `PconsGroup` does, not click's alphabetical."""
         return list(self.commands)
+
+
+class _DeclaresDependencies:
+    """Targets to build before the command runs.
+
+    A mixin rather than a second copy: the three members are identical on the
+    command and the group, and `UserGroup` derives from click's `Group`, not
+    from `UserCommand`, so there is nowhere else to put them.
+    """
+
+    name: str | None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._declared_dependencies: list[Target] = []
+
+    def depends(self, *targets: Target) -> None:
+        """Build *targets* before this command runs.
+
+        ``pcons run <name>`` generates the build files, builds these, and runs
+        the command only if that build succeeded. Without a declared
+        dependency it builds nothing.
+        """
+        from pcons.core.target import Target as _Target
+
+        for target in targets:
+            if not isinstance(target, _Target):
+                raise PconsError(
+                    f"{self.name}.depends() takes a Target, not {type(target).__name__}"
+                )
+        self._declared_dependencies.extend(targets)
+
+    def declared_dependencies(self) -> list[Target]:
+        """What `depends` recorded, in declaration order."""
+        return list(self._declared_dependencies)
+
+
+class UserCommand(_DeclaresDependencies, click.Command):
+    """A command a build script or an add-on module declared.
+
+    Plain click below the mixin, never `MergingCommand`: a user command owns its
+    options, and `RunGroup.invoke` has already merged and configured pcons' own
+    by the time one runs.
+    """
+
+
+class UserGroup(_DeclaresDependencies, click.Group):
+    """The group form of `UserCommand`.
+
+    Verbs added with click's own ``@group.command()`` are plain click commands
+    and declare no dependencies; the group's own apply to every verb.
+    """
 
 
 class _GroupPathContext(PconsContext):

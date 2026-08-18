@@ -28,12 +28,15 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
 from pcons.core.errors import PconsError
 from pcons.core.invocation import RUN_NAME
+
+if TYPE_CHECKING:
+    from pcons._cli_click import UserCommand, UserGroup
 
 SCRIPT_ORIGIN = "script"
 _MODULE_PREFIX = "pcons.modules."
@@ -177,43 +180,60 @@ def _record(command: click.Command, func: Callable[..., Any]) -> None:
 
 def cli_command(
     name: str | None = None, **attrs: Any
-) -> Callable[[Callable[..., Any]], click.Command]:
+) -> Callable[[Callable[..., Any]], UserCommand]:
     """Declare a command, reachable as ``pcons run <name>``.
 
-    Returns a real `click.Command`, so every click decorator applies to the
-    function below this one. The name defaults to click's derivation from the
-    function name, which turns ``build_docs`` into ``build-docs``.
+    Returns a `UserCommand`, a real `click.Command`, so every click decorator
+    applies to the function below this one and ``depends`` is available on the
+    result. The name defaults to click's derivation from the function name,
+    which turns ``build_docs`` into ``build-docs``.
 
-    Plain click, deliberately: pcons' own `MergingCommand` adopts same-named
-    options from the group above and reads ``--debug``/``-v`` as pcons means
-    them, so a command declaring a ``--debug`` of its own would have its value
-    validated as pcons subsystems, and its ``--build-dir`` silently replaced by
-    the run group's. A user command owns its options. `RunGroup.invoke` has
-    already merged and configured pcons' own by the time one runs.
+    Plain click below ``depends``, never pcons' own `MergingCommand`, which
+    adopts same-named options from the group above and reads ``--debug``/``-v``
+    as pcons means them, so a command declaring a ``--debug`` of its own would
+    have its value validated as pcons subsystems, and its ``--build-dir``
+    silently replaced by the run group's. A user command owns its options.
+    `RunGroup.invoke` has already merged and configured pcons' own by the time
+    one runs.
+
+    Passing ``cls`` replaces that class, and the annotation here no longer
+    describes what comes back.
     """
 
-    def decorator(func: Callable[..., Any]) -> click.Command:
+    def decorator(func: Callable[..., Any]) -> UserCommand:
+        # Local: `_cli_click` imports pcons at module level, and pcons
+        # re-exports from here, so a module-level import would close a cycle.
+        from pcons._cli_click import UserCommand
+
+        attrs.setdefault("cls", UserCommand)
         command = click.command(name, **attrs)(func)
         _record(command, func)
-        return command
+        return cast("UserCommand", command)
 
     return decorator
 
 
 def cli_group(
     name: str | None = None, **attrs: Any
-) -> Callable[[Callable[..., Any]], click.Group]:
+) -> Callable[[Callable[..., Any]], UserGroup]:
     """Declare a group of commands, reachable as ``pcons run <name> <verb>``.
 
     Add verbs to it with click's own ``@mygroup.command()``. They belong to the
     group and never enter this registry, so they cannot collide with a
     top-level name.
+
+    A verb declares no dependencies of its own; the group's apply to all of
+    them. Passing ``cls`` replaces the class, and the annotation here no longer
+    describes what comes back.
     """
 
-    def decorator(func: Callable[..., Any]) -> click.Group:
+    def decorator(func: Callable[..., Any]) -> UserGroup:
+        from pcons._cli_click import UserGroup
+
+        attrs.setdefault("cls", UserGroup)
         group = click.group(name, **attrs)(func)
         _record(group, func)
-        return group
+        return cast("UserGroup", group)
 
     return decorator
 

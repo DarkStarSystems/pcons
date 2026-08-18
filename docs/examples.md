@@ -87,3 +87,4 @@ uvx pcons
 | [`65_user_commands`](https://github.com/DarkStarSystems/pcons/tree/main/examples/65_user_commands) | Commands declared by the build script, reachable as `pcons run <name>`: an option, a group with its own subcommands, and a command reading the resolved project |
 | [`66_multi_project`](https://github.com/DarkStarSystems/pcons/tree/main/examples/66_multi_project) | Two independent top-level projects built in one pcons run |
 | [`67_embedded_build`](https://github.com/DarkStarSystems/pcons/tree/main/examples/67_embedded_build) | pcons as a library: an embedded build step and a custom CLI driver |
+| [`68_command_dependencies`](https://github.com/DarkStarSystems/pcons/tree/main/examples/68_command_dependencies) | A declared command names the targets it needs, and `pcons run` builds them before dispatching |

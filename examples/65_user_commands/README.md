@@ -16,7 +16,7 @@ def greet(name: str) -> None:
 ```
 
 ```console
-$ pcons                          # build first, since `pcons run` never builds
+$ pcons                          # build first: `greet` declares no dependency
 $ pcons run
   greet       Run the program this build produced.
   where       Print where the artifacts landed.
@@ -39,9 +39,10 @@ Error: nonesuch-flasher is not on PATH
 
 ## What the example shows
 
-- **`greet`** takes a click option and runs the program this build produced. A
-  command may build or run things, but it has to say so: `pcons run` writes no
-  build files and starts no build.
+- **`greet`** takes a click option and runs the program this build produced. It
+  declares no dependency, so `pcons run` writes no build files and starts no
+  build, and `greet` has to cope with a program that is not there yet. See
+  `examples/68_command_dependencies` for the other choice.
 - **`where`** reads `project.build_dir` and a target's `output_nodes`. The
   project is **resolved** by the time a command runs, which is what makes output
   paths available without checking the filesystem.

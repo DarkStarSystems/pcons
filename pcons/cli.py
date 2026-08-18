@@ -12,7 +12,7 @@ import sys
 import traceback
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 from click.core import ParameterSource
@@ -28,6 +28,7 @@ from pcons._cli_click import (
     PconsPath,
     TargetsCommand,
     _adopt_options_spelled_earlier,
+    _DeclaresDependencies,
     build_options,
     common_options,
     configure_logging,
@@ -45,6 +46,7 @@ from pcons.core.errors import PconsError
 if TYPE_CHECKING:
     from pcons.core.cache import BuildCache
     from pcons.core.project import Project
+    from pcons.core.target import Target
 
 # Set up logging
 logger = logging.getLogger("pcons")
@@ -322,7 +324,7 @@ def _declared_command_listing() -> list[dict[str, str]]:
     ]
 
 
-def _record_command_listing(cache: BuildCache, *, persist: bool) -> None:
+def _record_command_listing(cache: BuildCache, *, may_create: bool) -> None:
     """Write what the build script declared into the build dir's listing.
 
     Written on every *generating* run, not only a persisting one, so ninja's
@@ -334,10 +336,13 @@ def _record_command_listing(cache: BuildCache, *, persist: bool) -> None:
     absent, a name left in place would be listed forever after it was deleted
     from the script.
 
-    A regen still never *creates* a cache, which is the other half of what
-    ``persist=False`` means, so an untouched build directory is left alone.
+    *may_create* is what keeps a run that writes nothing else from leaving a
+    cache behind, so ninja's regen re-invoke never creates one. `pcons run` says
+    True even though it persists nothing: it generated because a command asked
+    it to, and a listing it cannot write is one the next bare `pcons run` cannot
+    read back.
     """
-    if persist or not cache.is_empty:
+    if may_create or not cache.is_empty:
         cache.update({"commands": _declared_command_listing()})
 
 
@@ -450,7 +455,7 @@ def _persist_run_settings_to_projects(
         )
         # The declared-command listing too: `pcons -B <this dir> run` reads
         # it from here, and must list the same commands the primary does.
-        _record_command_listing(cache, persist=True)
+        _record_command_listing(cache, may_create=True)
 
 
 def run_script(
@@ -463,7 +468,7 @@ def run_script(
     extra_env: dict[str, str] | None = None,
     persist: bool = True,
     fresh: bool = False,
-    generate: bool = True,
+    generate: bool | Callable[[], bool] = True,
     inside: Callable[[], None] | None = None,
 ) -> tuple[int, list[Project]]:
     """Execute a Python build script in-process via exec(), so its Project
@@ -488,6 +493,11 @@ def run_script(
             graph is usable without writing any build files. For inspection
             commands (`pcons explain`) and user-declared commands, which need
             the project graph but must leave the build directory alone.
+            A callable defers the decision: it is called once, after the script
+            body has run, and its answer is used. That is what lets `pcons run`
+            ask a question only the script can answer -- whether the command
+            being dispatched declared a target to build -- without a second run
+            of the script.
         inside: Called once after the script has run and settled, with the
             script's environment still up: PCONS_* variables set, sys.path and
             the cwd still the script's. Its exceptions propagate untouched,
@@ -500,6 +510,18 @@ def run_script(
     import pcons.core.cache
     import pcons.core.invocation
     import pcons.core.vars
+
+    decided: list[bool] = []
+
+    def wants_generate() -> bool:
+        """Answered once, and only after the script body has run.
+
+        A callable *generate* may need what the script declared, and every
+        caller of this sits past the point where those exist.
+        """
+        if not decided:
+            decided.append(generate() if callable(generate) else generate)
+        return decided[0]
 
     # Absolute from here on, so the script sees the same __file__ however
     # pcons was started. CPython does this for a script's __file__ too (3.9+),
@@ -671,7 +693,7 @@ def run_script(
                     logger.error("No Project created in build script")
                     return 1, []
 
-                if generate:
+                if wants_generate():
                     for top_level in top_levels:
                         top_level.write_build_files()
                 else:
@@ -679,8 +701,10 @@ def run_script(
                     for top_level in top_levels:
                         if not top_level._resolved:
                             top_level.resolve()
-                if generate:
-                    _record_command_listing(cache, persist=persist)
+                if wants_generate():
+                    _record_command_listing(
+                        cache, may_create=persist or callable(generate)
+                    )
                 if persist:
                     _warn_unread_cached_vars(cached_vars, cli_vars)
                     _persist_run_settings(
@@ -696,11 +720,11 @@ def run_script(
                         targets=sorted(
                             {n for p in top_levels for n in _buildable_names(p)}
                         )
-                        if generate
+                        if wants_generate()
                         else None,
                         variants=pcons.core.vars._seen_variant_names(),
                     )
-                    if generate:
+                    if wants_generate():
                         _persist_run_settings_to_projects(
                             top_levels,
                             build_dir,
@@ -724,7 +748,7 @@ def run_script(
                 # generation it asked for still belongs to this run, and the
                 # finally block below is about to restore cwd and env.
                 top_levels = Project._top_level_projects()
-                if generate and top_levels:
+                if top_levels and wants_generate():
                     for top_level in top_levels:
                         top_level.write_build_files()
                 else:
@@ -2411,7 +2435,9 @@ class RunGroup(MergingGroup):
 
     Names come from the build directory's cache, so listing and help never run
     the build script. Dispatch does run it, and hands the command its live
-    environment with the project resolved and no build files written.
+    environment with the project resolved. A command that declared a dependency
+    also gets the build files written and those targets built; one that
+    declared none gets neither.
 
     It lives here rather than in `_cli_click` because it has to run the build
     script, and `cli` imports `_cli_click`; the generic classes there stay
@@ -2633,6 +2659,77 @@ class RunGroup(MergingGroup):
         """
         return click.Group.invoke(self, ctx)
 
+    def _declared_by(self, ctx: click.Context, name: str) -> list[Target]:
+        """What the command called *name* declared, or nothing.
+
+        Answers only once the script has run, which is why both callers below
+        sit inside the window. A name that resolves to no command, or to one
+        that cannot declare, is not this method's problem: click reports the
+        unknown name in its own way once dispatch reaches it.
+        """
+        try:
+            command = self.get_command(ctx, name)
+        except click.ClickException:
+            return []
+        if not isinstance(command, _DeclaresDependencies):
+            return []
+        return command.declared_dependencies()
+
+    @staticmethod
+    def _build_tool_names(targets: list[Target]) -> list[str]:
+        """Target outputs, spelled as the build tool running in the build dir
+        sees them.
+
+        Each target's own project answers, not the top-level one: a build script
+        may declare several, and only the target's own knows its root.
+        """
+        return [
+            target.project._path_resolver.make_execution_relative(node.path)
+            for target in targets
+            for node in target.output_nodes
+        ]
+
+    def _only_prints_help(self, ctx: click.Context, args: list[str]) -> bool:
+        """Whether dispatching *args* can only print a help screen.
+
+        click prints that help from inside the dispatch this class wraps, so a
+        build started beforehand is a build the user never asked for: `pcons run
+        publish --help` would compile the program and then explain the command.
+        """
+        try:
+            command = self.get_command(ctx, args[0])
+        except click.ClickException:
+            return False
+        if command is None:
+            return False
+        tail = args[1:]
+        if not tail:
+            return isinstance(command, click.Group) and command.no_args_is_help
+        return any(arg in set(command.get_help_option_names(ctx)) for arg in tail)
+
+    @staticmethod
+    def _by_build_dir(targets: list[Target]) -> list[tuple[Path, list[Target]]]:
+        """The targets grouped by the build directory that builds them.
+
+        A build script may declare several top-level projects, each with its own
+        build directory and its own build.ninja, so a command naming a sibling's
+        target needs that sibling's build tool run, not the first project's.
+
+        Keyed on `project.top`: a sub-project writes into its parent's build
+        directory, so grouping on the project itself would run one build per
+        subdirectory. Declaration order is kept, so a failure names the first
+        thing the user asked for.
+
+        `_effective_output_dir` and not `build_dir`, which is stored relative to
+        its own project's root: two siblings rooted in different directories
+        both spell it "build" and would collide into one group.
+        """
+        groups: dict[Path, list[Target]] = {}
+        for target in targets:
+            where = target.project.top._effective_output_dir()
+            groups.setdefault(where, []).append(target)
+        return list(groups.items())
+
     def invoke(self, ctx: click.Context) -> Any:
         """Dispatch inside the build script's environment.
 
@@ -2666,14 +2763,43 @@ class RunGroup(MergingGroup):
 
         parent_invoke = self._dispatch_only  # bound now: a bare super() in the
         dispatched: list[Any] = []  # lambda would look for it in the closure
+        wanted: list[Target] = []
+
+        def wants_generation() -> bool:
+            """Whether to write build files at all, asked once the script has run.
+
+            A command that declared nothing gets what `pcons run` has always
+            given it: a resolved project, no build files, no build.
+            """
+            if self._only_prints_help(ctx, args):
+                return False
+            wanted.extend(self._declared_by(ctx, args[0]))
+            return bool(wanted)
 
         def dispatch() -> None:
+            for build_dir, group in self._by_build_dir(wanted):
+                names = self._build_tool_names(group)
+                if not names:
+                    # Nothing to ask for: an imported target has no output of
+                    # its own, and an empty list means "every default target".
+                    continue
+                code = _run_build_tool(
+                    build_dir,
+                    targets=names,
+                    jobs=cast("int | None", ctx.params.get("jobs")),
+                    verbose=bool(ctx.params.get("verbose", False)),
+                    ninja=cast("str | None", ctx.params.get("ninja")),
+                )
+                if code != 0:
+                    # Outside every handler in run_script, so this code is the
+                    # one the shell sees.
+                    ctx.exit(code)
             dispatched.append(parent_invoke(ctx))
 
         exit_code, _projects = run_script(
             script,
             self._build_dir(ctx),
-            generate=False,
+            generate=wants_generation,
             persist=False,
             inside=dispatch,
         )
@@ -2699,13 +2825,17 @@ class RunGroup(MergingGroup):
     help=(
         "Run a command declared by the build script or an add-on module.\n\n"
         "A command runs with the build script's environment live and its "
-        "project resolved, and writes no build files. Without a command name, "
-        "lists what is available; that listing comes from the build directory, "
-        "so a newly declared command appears after the next generate."
+        "project resolved. It builds nothing unless it declared a dependency, "
+        "in which case the build files are written and those targets built "
+        "first. Without a command name, lists what is available; that listing "
+        "comes from the build directory, so a newly declared command appears "
+        "after the next generate."
     ),
 )
 @directory_option
 @common_options
+@build_options
+@jobs_option
 @pass_pcons_context
 def cli_run(ctx: PconsContext, **kw: object) -> None:
     # A subcommand has already been resolved by RunGroup.invoke by the time this

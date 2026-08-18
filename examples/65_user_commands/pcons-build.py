@@ -15,9 +15,9 @@ project pcons just described:
 
 A command runs after the script has been read and the project resolved, so it
 can ask the project anything -- target names, output paths, the build
-directory. It writes no build files and starts no build: `pcons run` is not a
-way to build, and a command that needs the program built says so, as `greet`
-does below.
+directory. It builds nothing unless it declares a dependency, which none here
+does -- see `examples/68_command_dependencies` for that. So `greet` below has
+to cope with a program that is not built yet.
 
 The decorators return real click objects, so `click.option`, `click.argument`
 and `click.Choice` are all available. click is part of pcons' public surface
@@ -54,9 +54,9 @@ def greet(name: str) -> None:
     """Run the program this build produced."""
     program = greeter_path()
     if not program.exists():
+        # What a command that declares no dependency has to do. The other
+        # choice is `greet.depends(greeter)`, which builds it instead.
         raise click.ClickException(f"{program} is not built yet. Run `pcons` first.")
-    # A command may build, but it has to say so. Nothing in `pcons run` starts a
-    # build on its own.
     result = subprocess.run([str(program), name], check=False)
     if result.returncode != 0:
         raise click.ClickException(f"{program} exited {result.returncode}")
