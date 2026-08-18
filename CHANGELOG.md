@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Two targets resolving to one output file is now an error.** Node
+  deduplication used to merge them silently: the second target's inputs
+  piled onto the first's build edge, so an archive could hold two
+  environments' objects with no warning (#96). The error names both
+  targets and suggests a distinct `output_name`/`output_prefix` (an
+  environment-keyed one when their environments differ) or sibling
+  projects.
 - **The CLI is driven by now [click](https://click.palletsprojects.com/).** Improved help output
   and error messages now: commands get their own section, each option
   prints its metavar once, and `-C/--directory` is listed rather than mentioned only

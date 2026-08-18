@@ -3,6 +3,11 @@
 [test]
 description = "The simplest pcons build: one C file, one program"
 
+# First example per CI worker: it pays the cold MSVC-discovery cost on
+# Windows (~19s on a good runner), and slow runners have blown the default
+# 60s. The budget is for the cold start, not the build.
+timeout = 180
+
 # Files that should exist after the build
 # Object files are in obj.<target>/ subdirectories
 # Paths are Unix-style; automatically adapted for Windows (.o -> .obj, adds .exe)

@@ -1132,6 +1132,44 @@ class Project(_ProjectBuilders):
                 continue
             top.add_configure_dependency(path)
 
+    def _check_output_collisions(self) -> None:
+        """One producer per output file, over the whole project tree.
+
+        Node deduplication maps a path to one node, so two targets
+        resolving to the same output would otherwise merge silently: the
+        second's inputs pile onto the first's build edge, and an archive
+        ends up holding both environments' objects with no warning
+        (issue #96). Raise at the collision instead, naming both targets.
+        """
+        producers: dict[int, Target] = {}
+        for target in self.targets:
+            for node in target.output_nodes:
+                other = producers.get(id(node))
+                if other is None:
+                    producers[id(node)] = target
+                    continue
+                if other is target:
+                    continue
+                env_names = {
+                    env.name
+                    for env in (other._env, target._env)
+                    if env is not None and env.name
+                }
+                envs = ""
+                if len(env_names) == 2:
+                    envs = (
+                        " They build in different environments, so an "
+                        "environment-keyed output_prefix (e.g. "
+                        'f"{env.name}/") would keep them apart.'
+                    )
+                raise PconsError(
+                    f"targets {other.qualified_name!r} and "
+                    f"{target.qualified_name!r} both build "
+                    f"{node.path}.\n"
+                    "Each output file must have one producer: give one target a "
+                    f"distinct output_name or output_prefix, or split into multiple projects.{envs}"
+                )
+
     def _check_pending_stages(self) -> None:
         """Verify every skipped staged input is something the build produces.
 
@@ -1267,6 +1305,7 @@ class Project(_ProjectBuilders):
 
         self._register_implicit_configure_deps()
         self._check_pending_stages()
+        self._check_output_collisions()
 
         errors = self.validate()
         if errors:
