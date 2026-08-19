@@ -6,8 +6,9 @@ This exercises pcons's standard-library module support across toolchains:
   - On MSVC, pcons synthesizes a build node for
     `%VCToolsInstallDir%/modules/std.ixx` and links the resulting `.obj`.
   - On clang/libc++, pcons consults `libc++.modules.json` (queried via
-    `clang++ -stdlib=libc++ -print-file-name=c++/libc++.modules.json`),
-    locates `std.cppm`, builds it, and links the resulting `.o`.
+    `clang++ -stdlib=libc++ -print-file-name=libc++.modules.json`, with the
+    older `c++/libc++.modules.json` layout as a fallback), locates
+    `std.cppm`, builds it, and links the resulting `.o`.
   - On GCC/libstdc++ (>= 15), pcons probes `#include <bits/std.cc>` via
     `-E -x c++ - -H`, compiles the discovered source with `-fmodules`,
     and links the resulting `.o`. GCC writes `gcm.cache/std.gcm` next to

@@ -610,6 +610,38 @@ class TestLibcxxModulesManifest:
             for cmd in captured["cmd"]
         )
 
+    def test_finds_modern_layout_when_legacy_path_missing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        # Arch Linux (and other modern LLVM ≥ 19 installs) drop the manifest
+        # straight into the library dir as `/usr/lib/libc++.modules.json` with
+        # no `c++/` prefix. Querying the legacy `c++/libc++.modules.json`
+        # echoes the query unchanged (not found), but the bare name resolves.
+        # pcons must fall through to the working layout. Regression test for
+        # issue #98.
+        from pcons.toolchains.llvm import _find_libcxx_modules_manifest
+
+        manifest = tmp_path / "libc++.modules.json"
+        manifest.write_text("{}", encoding="utf-8")
+
+        def _fake_run(cmd: list[str], **_kw: object) -> object:
+            query = next(
+                c.split("=", 1)[1] for c in cmd if c.startswith("-print-file-name=")
+            )
+
+            class _Result:
+                returncode = 0
+                # Modern bare name resolves; legacy c++/-prefixed name echoes.
+                stdout = (
+                    f"{manifest}\n" if query == "libc++.modules.json" else f"{query}\n"
+                )
+                stderr = ""
+
+            return _Result()
+
+        monkeypatch.setattr("pcons.toolchains.llvm.subprocess.run", _fake_run)
+        assert _find_libcxx_modules_manifest("clang++", ["-std=c++23"]) == manifest
+
     def test_returns_none_when_compiler_echoes_query(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -798,3 +830,44 @@ class TestLlvmConfigure:
         config = Configure(build_dir=tmp_path)
         config.find_program = lambda *a, **k: None  # type: ignore[method-assign]
         assert cls().configure(config) is None
+
+
+class TestStdlibQueryFlags:
+    """The manifest lookup and its error report the same -stdlib flags."""
+
+    def test_defaults_to_libcxx(self):
+        from pcons.toolchains.llvm import _stdlib_query_flags
+
+        assert _stdlib_query_flags(["-std=c++23", "-O2"]) == ["-stdlib=libc++"]
+
+    def test_the_users_choice_wins(self):
+        from pcons.toolchains.llvm import _stdlib_query_flags
+
+        flags = ["-std=c++23", "-stdlib=libc++", "-O2"]
+        assert _stdlib_query_flags(flags) == ["-stdlib=libc++"]
+        # A vendored spelling passes through untouched.
+        assert _stdlib_query_flags(["-stdlib=platform"]) == ["-stdlib=platform"]
+
+    def test_lookup_queries_with_the_users_flags(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from pcons.toolchains.llvm import _find_libcxx_modules_manifest
+
+        captured: list[list[str]] = []
+
+        def _fake_run(cmd: list[str], **_kw: object) -> object:
+            captured.append(list(cmd))
+
+            class _Result:
+                returncode = 1
+                stdout = ""
+                stderr = ""
+
+            return _Result()
+
+        monkeypatch.setattr("pcons.toolchains.llvm.subprocess.run", _fake_run)
+        _find_libcxx_modules_manifest("clang++", ["-stdlib=platform"])
+
+        assert captured
+        assert all("-stdlib=platform" in cmd for cmd in captured)
+        assert all("-stdlib=libc++" not in cmd for cmd in captured)

@@ -41,6 +41,29 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# File names we ask `clang -print-file-name` to resolve, in priority order.
+# The bare name is the modern layout (LLVM ≥ 19, e.g. Homebrew, Debian/Ubuntu,
+# and Arch, which drop the manifest straight into the library dir like
+# `/usr/lib/libc++.modules.json`). The `c++/`-prefixed name is the older layout
+# kept for backward compatibility. Single source of truth so the lookup and the
+# not-found error message can't drift apart.
+_LIBCXX_MANIFEST_NAMES = (
+    "libc++.modules.json",
+    "c++/libc++.modules.json",
+)
+
+
+def _stdlib_query_flags(base_flags: list[str]) -> list[str]:
+    """The -stdlib flags the manifest lookup queries with.
+
+    The user's own when they chose one, else `-stdlib=libc++` — the library
+    that ships the manifest. Shared by the lookup and its not-found error,
+    so the reproduction commands the error prints are the ones actually run.
+    """
+    user_stdlib_flags = [f for f in base_flags if f.startswith("-stdlib=")]
+    return user_stdlib_flags or ["-stdlib=libc++"]
+
+
 def _find_libcxx_modules_manifest(
     compiler_cmd: str, base_flags: list[str]
 ) -> Path | None:
@@ -49,23 +72,15 @@ def _find_libcxx_modules_manifest(
     libc++ ships a JSON manifest that points at `std.cppm` /
     `std.compat.cppm` and the system include directories required to
     compile them. We let the compiler tell us where it is — works for any
-    libc++ install (Homebrew, apt, vendored).
+    libc++ install (Homebrew, apt, Arch, vendored). We try both the modern
+    and legacy manifest layouts (see `_LIBCXX_MANIFEST_NAMES`).
 
     Returns the manifest path if found, or None if the toolchain doesn't
     ship one (Apple Clang ≤ 21 is the most common case; users need
     Homebrew LLVM there).
     """
-    cmd = [compiler_cmd]
-    user_stdlib_flags = [f for f in base_flags if f.startswith("-stdlib=")]
-    if user_stdlib_flags:
-        cmd.extend(user_stdlib_flags)
-    else:
-        cmd.append("-stdlib=libc++")
-    candidates = (
-        "libc++.modules.json",
-        "c++/libc++.modules.json",
-    )
-    for candidate in candidates:
+    cmd = [compiler_cmd, *_stdlib_query_flags(base_flags)]
+    for candidate in _LIBCXX_MANIFEST_NAMES:
         cmd_copy = list(cmd)
         cmd_copy.append(f"-print-file-name={candidate}")
         try:
@@ -594,11 +609,16 @@ class LlvmToolchain(UnixToolchain):
 
         manifest = _find_libcxx_modules_manifest(compiler_cmd, base_flags)
         if manifest is None:
+            stdlib_flags = " ".join(_stdlib_query_flags(base_flags))
+            tried = "\n".join(
+                f"    {compiler_cmd} {stdlib_flags} -print-file-name={name}"
+                for name in _LIBCXX_MANIFEST_NAMES
+            )
             raise RuntimeError(
                 "`import std;` was used, but pcons could not locate libc++'s "
-                "C++ standard-library module manifest. Tried\n"
-                f"    {compiler_cmd} -stdlib=libc++ "
-                "-print-file-name=c++/libc++.modules.json\n"
+                "C++ standard-library module manifest. Tried both the modern "
+                "and legacy layouts:\n"
+                f"{tried}\n"
                 "and got no usable path. On macOS, install Homebrew LLVM "
                 "(`brew install llvm`) — Apple Clang doesn't ship the std "
                 "module yet. On Linux, install a recent libc++ that includes "
