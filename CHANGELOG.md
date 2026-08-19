@@ -15,14 +15,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path-carrying flag.
 - **The `lto` preset does proper LTO under clang-cl.** `clang-cl` now realizes `lto` as `-flto`
   bitcode, which lld-link optimizes natively.
+  **A discovered doctest or Catch2 case with a comma in its name now
+  runs.** Names now reach the frameworks with their special characters
+  escaped (doctest: `,`; Catch2: `, [ ] ~ *` and backslash). (#97)
 - **`import std;` diagnostics no longer imply the legacy manifest layout is
   the only one supported.** When libc++'s module manifest can't be found,
   the error now lists *both* file names pcons queries
   (`libc++.modules.json` — the modern LLVM ≥ 19 layout used by Arch,
   Debian/Ubuntu and Homebrew — and the older `c++/libc++.modules.json`),
-  instead of only the `c++/`-prefixed one. The lookup already tried both;
-  the message and the `32_cxx_import_std` example doc had lagged behind and
-  suggested pcons couldn't find Arch's `/usr/lib/libc++.modules.json`. (#98)
+  instead of only the `c++/`-prefixed one. (#98)
 
 ## [0.27.0] - 2026-08-18
 

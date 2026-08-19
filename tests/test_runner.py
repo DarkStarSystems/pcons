@@ -645,6 +645,41 @@ class TestDiscoverParsers:
         assert names == ["first case", "second case"]
         assert cases[0][1] == ["--test-case=first case"]
 
+    def test_doctest_comma_in_name_is_escaped(self, tmp_path):
+        """doctest splits --test-case on commas; an unescaped one selects
+        nothing and the empty run reads as a pass (#97)."""
+        lister = _make_lister(
+            tmp_path,
+            "fake_doctest.py",
+            "[doctest] listing all test case names\n"
+            "===\n"
+            "a gadget says gadget, and names no superclass\n"
+            "===\n",
+        )
+        cases = _discover_doctest(str(lister), tmp_path, dict(os.environ))
+        assert cases == [
+            (
+                "a gadget says gadget, and names no superclass",
+                ["--test-case=a gadget says gadget\\, and names no superclass"],
+            )
+        ]
+
+    def test_catch2_special_characters_are_escaped(self, tmp_path):
+        """Catch2's test spec owns , [ ] ~ * and backslash; a name using
+        any of them must reach the spec parser escaped (#97's shape)."""
+        lister = _make_lister(
+            tmp_path,
+            "fake_catch.py",
+            "commas, and [tags] and *stars*\n",
+        )
+        cases = _discover_catch2(str(lister), tmp_path, dict(os.environ))
+        assert cases == [
+            (
+                "commas, and [tags] and *stars*",
+                ["commas\\, and \\[tags\\] and \\*stars\\*"],
+            )
+        ]
+
     def test_catch2_parser_skips_hidden(self, tmp_path):
         lister = _make_lister(
             tmp_path,

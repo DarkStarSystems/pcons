@@ -261,7 +261,12 @@ def _discover_doctest(
             continue
         if line.startswith("="):
             continue
-        cases.append((line, [f"--test-case={line}"]))
+        # doctest splits --test-case on commas, so a comma in a case name
+        # becomes several patterns, none matches, doctest runs nothing and
+        # exits 0 — a false pass (#97). doctest's splitter honors \, and
+        # its matcher gives the backslash no other meaning.
+        escaped = line.replace(",", "\\,")
+        cases.append((line, [f"--test-case={escaped}"]))
     return cases
 
 
@@ -292,8 +297,14 @@ def _discover_catch2(
         line = raw.rstrip()
         if not line or line.startswith("~"):
             continue
-        # Catch2 takes a single positional test-name argument.
-        cases.append((line, [line]))
+        # Catch2 takes a single positional test-name argument, parsed as a
+        # test spec: commas separate patterns, `[` opens a tag expression,
+        # `*` wildcards, a leading `~` excludes. Any character can be
+        # backslash-escaped, so escape everything the spec grammar owns —
+        # otherwise a name containing one selects nothing and the empty run
+        # passes (see #97).
+        escaped = re.sub(r"([\\,\[\]~*])", r"\\\1", line)
+        cases.append((line, [escaped]))
     return cases
 
 
