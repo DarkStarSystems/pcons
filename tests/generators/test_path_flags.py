@@ -117,3 +117,37 @@ class TestPathFlagRelativization:
             _generate(project, tmp_path)
 
         assert "not relocatable" not in caplog.text
+
+
+class TestAuxiliaryInputRelativization:
+    """A source-tree .manifest reaches the linker from the build directory."""
+
+    def test_source_tree_manifest_renders_execution_relative(self, tmp_path):
+        from pcons.toolchains.msvc import (
+            MsvcCompiler,
+            MsvcCxxCompiler,
+            MsvcLinker,
+            MsvcToolchain,
+        )
+
+        toolchain = MsvcToolchain()
+        toolchain._tools = {
+            "cc": MsvcCompiler(),
+            "cxx": MsvcCxxCompiler(),
+            "link": MsvcLinker(),
+        }
+
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.c").write_text("int main(void){return 0;}\n")
+        (tmp_path / "windows").mkdir()
+        (tmp_path / "windows" / "app.manifest").write_text("<assembly/>\n")
+
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=toolchain)
+        app = project.Program("app", env, sources=["src/main.c"])
+        app.add_sources(["windows/app.manifest"])
+
+        content = _generate(project, tmp_path)
+
+        assert "/MANIFESTINPUT:$topdir/windows/app.manifest" in content
+        assert "/MANIFESTINPUT:windows" not in content

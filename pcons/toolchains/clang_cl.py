@@ -240,6 +240,18 @@ class ClangClToolchain(MsvcCompatibleToolchain):
 
     ENV_COMPILER_FAMILY = "clang-cl"
 
+    # MSVC's /GL emits its proprietary IL, which clang-cl warns about and
+    # ignores — so the shared realization would silently build without LTO.
+    # clang-cl spells it the clang way: -flto bitcode objects, which
+    # lld-link recognizes and link-time-optimizes on its own; /LTCG is
+    # accepted there but unneeded.
+    FEATURE_PRESETS: dict[str, dict[str, list[str]]] = {
+        **MsvcCompatibleToolchain.FEATURE_PRESETS,
+        "lto": {
+            "compile_flags": ["-flto"],
+        },
+    }
+
     TOOL_NAMES = ("cc", "cxx", "lib", "link", "rc", "ml")
 
     #: Driver flags that hand the token after them to a sub-tool. Consecutive

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A source-tree `.manifest` or `.def` linker input now works.** Its path
+  reached the linker incorrectly; `/MANIFESTINPUT:` and
+  `/DEF:` are now rewritten execution-relative like every other
+  path-carrying flag.
+- **The `lto` preset does proper LTO under clang-cl.** `clang-cl` now realizes `lto` as `-flto`
+  bitcode, which lld-link optimizes natively.
+
 ## [0.27.0] - 2026-08-18
 
 ### Added

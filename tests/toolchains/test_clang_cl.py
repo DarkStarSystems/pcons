@@ -227,3 +227,27 @@ class TestClangClAuxiliaryInputHandler:
         handler = tc.get_auxiliary_input_handler(".MANIFEST")
         assert handler is not None
         assert handler.suffix == ".manifest"
+
+
+class TestClangClLtoPreset:
+    """clang-cl LTO is -flto bitcode, not MSVC's /GL (which it ignores)."""
+
+    def test_lto_is_realized_the_clang_way(self):
+        from pcons.toolchains.clang_cl import ClangClToolchain
+        from pcons.toolchains.msvc import MsvcToolchain
+
+        assert ClangClToolchain.FEATURE_PRESETS["lto"] == {
+            "compile_flags": ["-flto"],
+        }
+        # MSVC keeps its own spelling.
+        assert MsvcToolchain.FEATURE_PRESETS["lto"]["compile_flags"] == ["/GL"]
+
+    def test_other_presets_stay_shared(self):
+        from pcons.toolchains._msvc_compat import MsvcCompatibleToolchain
+        from pcons.toolchains.clang_cl import ClangClToolchain
+
+        base = MsvcCompatibleToolchain.FEATURE_PRESETS
+        ours = ClangClToolchain.FEATURE_PRESETS
+        assert {k: v for k, v in ours.items() if k != "lto"} == {
+            k: v for k, v in base.items() if k != "lto"
+        }

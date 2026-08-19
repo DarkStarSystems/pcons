@@ -151,6 +151,12 @@ class MsvcCompatibleToolchain(BaseToolchain):
             "/LIBPATH:",
             "/external:I",
             "-imsvc",  # clang-cl's spelling of /external:I
+            # Auxiliary linker inputs (get_auxiliary_input_handler): their
+            # $file is a node path, which for a source-tree .manifest or
+            # .def needs the same execution-relative rewrite as any other
+            # path-carrying flag.
+            "/MANIFESTINPUT:",
+            "/DEF:",
         ]
     )
 
