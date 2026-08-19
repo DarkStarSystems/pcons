@@ -157,6 +157,56 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: windows-examples
 
+  test-fedora:
+    name: "test everything (fedora, newest clang/libc++)"
+    # RPM distros (Fedora, RHEL, openSUSE) are popular and ship a very
+    # recent LLVM plus the /usr/lib64 libc++ module-manifest layout that
+    # differs from Debian/Ubuntu's /usr/lib. `fedora:latest` intentionally
+    # tracks the newest release so this job is our canary for toolchain
+    # changes we'd otherwise only discover from a bug report (e.g. #98).
+    # Runs the same broad selection as the `test` job. Gates the release
+    # like every platform job: we never publish over a red CI.
+    needs: lint
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install toolchain and build tools
+        # git + tar are needed before actions/checkout can run inside the
+        # container. clang/libcxx-devel bring the newest std-module manifest;
+        # gcc, make, cmake and ninja round out the toolchains the examples
+        # exercise (cmake/make are also what the conan example builds fmt with).
+        run: |
+          dnf -y install \
+            git tar which findutils \
+            clang libcxx libcxx-devel libcxxabi libcxxabi-devel lld \
+            gcc gcc-c++ make cmake ninja-build \
+            python3 python3-devel
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "latest"
+      - name: Show toolchain versions
+        run: |
+          clang++ --version
+          gcc --version | head -1
+          cmake --version | head -1
+          ninja --version
+      - name: Install dependencies
+        run: uv sync
+      - name: Run full test suite
+        # Same selection as the non-Windows `test` job: everything except the
+        # Windows-only msvcup example and the Swift examples (no swiftc here;
+        # they run in test-swift). Qt/wasm/rez examples skip themselves when
+        # their tools are absent.
+        run: uv run pytest -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello and not 46_swift and not 47_swift and not 48_swift and not 49_swift"
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: fedora
+
   test-swift:
     name: "test swift examples"
     needs: lint
@@ -444,7 +494,11 @@ jobs:
 
   release:
     name: Create Release & Publish
-    needs: [test, test-examples-windows, test-wasm, test-msvcup, test-cxx-modules, test-rez]
+    # Every test job gates the release: we never publish over a red CI,
+    # whatever the platform — a rolling :latest canary included; if one
+    # breaks for upstream reasons, fixing or consciously skipping it is
+    # part of cutting the release.
+    needs: [docs, test, test-examples-windows, test-fedora, test-swift, test-qt, test-wasm, test-msvcup, test-cxx-modules, test-rez]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
