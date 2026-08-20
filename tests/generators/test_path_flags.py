@@ -151,3 +151,38 @@ class TestAuxiliaryInputRelativization:
 
         assert "/MANIFESTINPUT:$topdir/windows/app.manifest" in content
         assert "/MANIFESTINPUT:windows" not in content
+
+    def test_generated_manifest_stays_build_dir_local(self, tmp_path):
+        """An env.Command-generated manifest lives in the build dir; its
+        flag must say so, not $topdir (see 20_windows_manifest)."""
+        from pcons.toolchains.msvc import (
+            MsvcCompiler,
+            MsvcCxxCompiler,
+            MsvcLinker,
+            MsvcToolchain,
+        )
+
+        toolchain = MsvcToolchain()
+        toolchain._tools = {
+            "cc": MsvcCompiler(),
+            "cxx": MsvcCxxCompiler(),
+            "link": MsvcLinker(),
+        }
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "main.c").write_text("int main(void){return 0;}\n")
+
+        project = Project("p", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=toolchain)
+        manifest = env.Command(
+            target="app.manifest",
+            source=None,
+            command=["python", "-c", "pass"],
+            name="gen_manifest",
+        )
+        app = project.Program("app", env, sources=["src/main.c"])
+        app.add_sources([manifest])
+
+        content = _generate(project, tmp_path)
+
+        assert "/MANIFESTINPUT:app.manifest" in content
+        assert "/MANIFESTINPUT:$topdir" not in content

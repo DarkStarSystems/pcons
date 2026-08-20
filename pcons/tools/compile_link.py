@@ -266,7 +266,15 @@ class CompileLinkFactory:
 
                 aux_handler = self._get_auxiliary_input_handler(source.path, source_env)
                 if aux_handler is not None:
-                    flag = aux_handler.flag_template.replace("$file", str(source.path))
+                    file_path = source.path
+                    if (
+                        getattr(source, "_build_info", None) is not None
+                        or source.builder is not None
+                    ):
+                        # A generated auxiliary input (env.Command output)
+                        # should be stored as build-relative
+                        file_path = target.project.top.build_dir / file_path
+                    flag = aux_handler.flag_template.replace("$file", str(file_path))
                     auxiliary_inputs.append((source, flag, aux_handler))
                     trace("resolve", "    %s -> auxiliary input", source.path)
                     continue
