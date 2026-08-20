@@ -36,6 +36,7 @@ from pcons.toolchains.cxx_module_scanner import (
     scan_translation_units,
     select_modules_scope,
     select_std_module_flags,
+    setup_module_pass,
     wire_std_into_targets,
     write_dyndep,
     write_dyndep_entries,
@@ -359,6 +360,72 @@ class TestSelectModulesScope:
         assert m_pairs == []
         assert len(c_pairs) == 1
         assert c_pairs[0][1] is m_obj
+
+
+class _RecordingProject:
+    """Stand-in project that records add_configure_dependency() calls."""
+
+    def __init__(self, build_dir: Path) -> None:
+        self.build_dir = build_dir
+        self.configure_deps: list[Path] = []
+
+    def add_configure_dependency(self, path: Path) -> None:
+        self.configure_deps.append(path)
+
+
+class TestSetupModulePassConfigureDeps:
+    """Every scanned source must join the generated build files' regen edge.
+
+    The dyndep file is written once, at configure time, from what each TU
+    imports. A TU that gains an `import` and is built without reconfiguring
+    gets an empty dyndep entry, so ninja is free to compile it before the
+    module it imports and it reads whatever BMI the last build left behind.
+    """
+
+    def test_module_and_plain_sources_are_registered(self, tmp_path: Path) -> None:
+        env = _FakeEnv(modules=False)
+        project = _RecordingProject(tmp_path)
+        setup = setup_module_pass(
+            project,
+            {
+                "cxx_module": [(Path("/src/MyMod.cppm"), _FakeObj(env))],
+                "cxx": [(Path("/src/main.cpp"), _FakeObj(env))],
+            },
+            "g++",
+        )
+        assert setup is not None
+        assert project.configure_deps == [
+            Path("/src/MyMod.cppm"),
+            Path("/src/main.cpp"),
+        ]
+
+    def test_sources_outside_the_scope_are_not_registered(self, tmp_path: Path) -> None:
+        env_modules = _FakeEnv(modules=True)
+        env_plain = _FakeEnv(modules=False)
+        project = _RecordingProject(tmp_path)
+        setup = setup_module_pass(
+            project,
+            {
+                "cxx": [
+                    (Path("/m.cpp"), _FakeObj(env_modules)),
+                    (Path("/p.cpp"), _FakeObj(env_plain)),
+                ]
+            },
+            "g++",
+        )
+        assert setup is not None
+        assert project.configure_deps == [Path("/m.cpp")]
+
+    def test_nothing_is_registered_without_a_modules_pass(self, tmp_path: Path) -> None:
+        env = _FakeEnv(modules=False)
+        project = _RecordingProject(tmp_path)
+        assert (
+            setup_module_pass(
+                project, {"cxx": [(Path("/src/main.cpp"), _FakeObj(env))]}, "g++"
+            )
+            is None
+        )
+        assert project.configure_deps == []
 
 
 class TestScannerNotFound:

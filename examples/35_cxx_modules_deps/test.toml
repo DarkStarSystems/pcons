@@ -55,6 +55,44 @@ expect_rebuild = [
 description = "No rebuild when nothing changed"
 expect_no_work = true
 
+# The dyndep file is written at configure time out of what every TU imports, so
+# a source whose import list changes has to re-run pcons before the next build.
+# Without that, main.cpp.o carries an empty dyndep entry, ninja is free to
+# compile it before the module it imports, and it reads the BMI the previous
+# build left on disk.
+[[rebuild]]
+description = "main.cpp dropping its imports regenerates the build files"
+write."src/main.cpp" = """
+// SPDX-License-Identifier: MIT
+int main() { return 0; }
+"""
+expect_rebuild = ["build.ninja", "obj.hello/src/main.cpp.o", "hello"]
+run = "./build/hello"
+
+[[rebuild]]
+description = "main.cpp gaining an import is compiled against the new module BMI"
+write."src/MyHeader.hpp" = """
+#pragma once
+
+inline int get_answer() {
+    return 7;
+}
+"""
+write."src/main.cpp" = """
+// SPDX-License-Identifier: MIT
+import Mod1;
+
+int main() { return mod1::answer() == 7 ? 0 : 1; }
+"""
+expect_rebuild = [
+    "build.ninja",
+    "obj.hello/src/mod1.cppm.o",
+    "obj.hello/src/main.cpp.o",
+    "hello",
+]
+run = "./build/hello"
+expect_returncode = 0
+
 [skip]
 # Named modules: MSVC scans natively (cl.exe), GCC via g++, clang via
 # clang-scan-deps. Gate per toolchain so an MSVC-only Windows host still runs.
