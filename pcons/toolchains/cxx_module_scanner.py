@@ -824,10 +824,18 @@ def setup_module_pass(
 
     Returns None when no environment participates. The compiler command and
     base flags come from the first participating object's environment.
+
+    Every selected source becomes a configure dependency: the dyndep file is
+    written once, here, from what each TU imports, so a source that gains or
+    loses an ``import`` has to re-run pcons before the next build or ninja
+    schedules it against a dyndep that no longer describes it.
     """
     cxx_module_pairs, cxx_pairs = select_modules_scope(source_obj_by_language)
     if not cxx_module_pairs and not cxx_pairs:
         return None
+
+    for src, _obj in cxx_module_pairs + cxx_pairs:
+        project.add_configure_dependency(src)
 
     build_dir = project.build_dir
     moddir = "cxx_modules"

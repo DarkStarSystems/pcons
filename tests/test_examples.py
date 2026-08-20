@@ -166,11 +166,19 @@ def run_rebuild_test(
     Args:
         work_dir: Example directory
         build_dir: Build output directory
-        rebuild_config: Dict with keys like 'description', 'touch', 'expect_rebuild',
-                       'expect_no_rebuild', 'expect_no_work'
+        rebuild_config: Dict with keys like 'description', 'touch', 'write',
+                       'expect_rebuild', 'expect_no_rebuild', 'expect_no_work',
+                       'run', 'expect_stdout', 'expect_returncode'
         toolchain: Optional toolchain name (used for platform path adaptation)
     """
     description = rebuild_config.get("description", "unnamed rebuild test")
+
+    # 0. Rewrite sources if 'write' specified
+    for rel, content in rebuild_config.get("write", {}).items():
+        target = work_dir / rel
+        if not target.exists():
+            pytest.fail(f"Rebuild test '{description}': write target not found: {rel}")
+        target.write_text(content, encoding="utf-8")
 
     # 1. Touch file if 'touch' specified
     touch_file = rebuild_config.get("touch")
@@ -246,6 +254,39 @@ def run_rebuild_test(
                 f"but it was in rebuilt targets: {rebuilt_targets}"
             )
 
+    # 5. Run a command against what the rebuild produced
+    run_cmd = rebuild_config.get("run")
+    if run_cmd:
+        run_cmd = _substitute_variables(run_cmd)
+        if IS_WINDOWS:
+            run_cmd = adapt_command_for_windows(run_cmd)
+        first = run_cmd.split()[0]
+        cmd_path = work_dir / first
+        if cmd_path.exists():
+            run_cmd = str(cmd_path) + run_cmd[len(first) :]
+        run = subprocess.run(
+            run_cmd,
+            shell=True,
+            cwd=work_dir,
+            capture_output=True,
+            text=True,
+            timeout=rebuild_config.get("timeout", 30),
+        )
+        expected_code = rebuild_config.get("expect_returncode", 0)
+        if run.returncode != expected_code:
+            print(f"Command stdout:\n{run.stdout}")
+            print(f"Command stderr:\n{run.stderr}")
+            pytest.fail(
+                f"Rebuild test '{description}': '{run_cmd}' returned "
+                f"{run.returncode}, expected {expected_code}"
+            )
+        expect_stdout = rebuild_config.get("expect_stdout")
+        if expect_stdout is not None and expect_stdout not in run.stdout:
+            pytest.fail(
+                f"Rebuild test '{description}': expected '{expect_stdout}' in "
+                f"stdout, got:\n{run.stdout}"
+            )
+
 
 def discover_examples() -> list[Path]:
     """Discover all example directories that have a pcons-build.py and test.toml."""
@@ -316,9 +357,14 @@ _VERIFY_COMMAND_KEYS = {
 _REBUILD_ENTRY_KEYS = {
     "description",
     "touch",
+    "write",
     "expect_no_work",
     "expect_rebuild",
     "expect_no_rebuild",
+    "run",
+    "expect_returncode",
+    "expect_stdout",
+    "timeout",
 }
 
 _PLATFORM_SUFFIXES = ("windows", "darwin", "linux")
