@@ -20,7 +20,15 @@ import os
 from collections.abc import Callable
 from functools import update_wrapper
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Concatenate, ParamSpec, TypeVar, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Concatenate,
+    ParamSpec,
+    TypeVar,
+    cast,
+    overload,
+)
 
 import click
 from click.core import ParameterSource
@@ -339,6 +347,40 @@ class UserGroup(_DeclaresDependencies, click.Group):
 
     command_class = UserCommand
     group_class = type
+
+    @overload
+    def command(self, __func: Callable[..., Any]) -> UserCommand: ...
+
+    @overload
+    def command(
+        self, *args: Any, **kwargs: Any
+    ) -> Callable[[Callable[..., Any]], UserCommand]: ...
+
+    def command(self, *args: Any, **kwargs: Any) -> Any:
+        """click's own, narrowed to what `command_class` actually builds.
+
+        `command_class` is read at call time, so click's annotation can only
+        promise a `click.Command` and a caller loses `depends`. Passing ``cls``
+        replaces the class, and this annotation no longer describes what comes
+        back.
+        """
+        return super().command(*args, **kwargs)
+
+    @overload
+    def group(self, __func: Callable[..., Any]) -> UserGroup: ...
+
+    @overload
+    def group(
+        self, *args: Any, **kwargs: Any
+    ) -> Callable[[Callable[..., Any]], UserGroup]: ...
+
+    def group(self, *args: Any, **kwargs: Any) -> Any:
+        """click's own, narrowed the way `command` above is.
+
+        `group_class` is `type`, so a subgroup is whatever class this one is.
+        `UserGroup` is what that promises.
+        """
+        return super().group(*args, **kwargs)
 
 
 class _GroupPathContext(PconsContext):
