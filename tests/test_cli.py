@@ -2251,6 +2251,12 @@ def release_net_push():
     print("pushed")
 
 
+@project.cli_group(invoke_without_command=True)
+def solo():
+    "Run with or without a verb."
+    print("solo")
+
+
 @project.cli_group()
 def plain():
     "A group declaring nothing."
@@ -2267,6 +2273,7 @@ release_notes.depends(two)
 release_net.depends(two, three)
 release_net_push.depends(hello)
 plain_only.depends(two)
+solo.depends(three)
 """
 
 
@@ -2387,6 +2394,28 @@ class TestAGroupVerbThatDeclaresADependency:
         assert result.exit_code != 0
         assert "nosuchverb" in result.stderr
         assert calls[0]["targets"] == ["hello.txt"]
+
+    def test_a_group_with_only_its_own_options_builds_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """click has no verb to descend into, so it fails with "Missing
+        command". Building first would be a build nobody asked for."""
+        result, calls = self._run(tmp_path, monkeypatch, "release", "--draft")
+
+        assert result.exit_code == 2
+        assert "Missing command" in result.stderr
+        assert calls == []
+
+    def test_a_group_that_runs_without_a_verb_still_builds(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`invoke_without_command=True` turns `no_args_is_help` off, so the
+        group's own callback runs and its targets are what it needs."""
+        result, calls = self._run(tmp_path, monkeypatch, "solo")
+
+        assert result.exit_code == 0, result.stderr
+        assert "solo" in result.stdout
+        assert calls[0]["targets"] == ["three.txt"]
 
     def test_a_verbs_help_screen_builds_nothing(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

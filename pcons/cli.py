@@ -2731,23 +2731,27 @@ class RunGroup(MergingGroup):
             for node in target.output_nodes
         ]
 
-    def _only_prints_help(self, ctx: click.Context, args: list[str]) -> bool:
-        """Whether dispatching *args* can only print a help screen.
+    def _runs_no_command(self, ctx: click.Context, args: list[str]) -> bool:
+        """Whether dispatching *args* can only print help or fail.
 
-        click prints that help from inside the dispatch this class wraps, so a
-        build started beforehand is a build the user never asked for: `pcons run
+        click does both from inside the dispatch this class wraps, so a build
+        started beforehand is a build the user never asked for: `pcons run
         publish --help` would compile the program and then explain the command.
+
+        A group followed by nothing but its own options is the same case. click
+        has no verb to descend into, so it either prints the group's help or
+        fails with "Missing command", and `pcons run release --draft` must not
+        build first either.
         """
-        try:
-            command = self.get_command(ctx, args[0])
-        except click.ClickException:
-            return False
+        command = self._resolved(ctx, args[0])
         if command is None:
             return False
         tail = args[1:]
-        if not tail:
-            return isinstance(command, click.Group) and command.no_args_is_help
-        return any(arg in set(command.get_help_option_names(ctx)) for arg in tail)
+        if any(arg in set(command.get_help_option_names(ctx)) for arg in tail):
+            return True
+        if not isinstance(command, click.Group) or not command.no_args_is_help:
+            return False
+        return _next_positional(command, tail)[0] is None
 
     @staticmethod
     def _by_build_dir(targets: list[Target]) -> list[tuple[Path, list[Target]]]:
@@ -2813,7 +2817,7 @@ class RunGroup(MergingGroup):
             A command that declared nothing gets what `pcons run` has always
             given it: a resolved project, no build files, no build.
             """
-            if self._only_prints_help(ctx, args):
+            if self._runs_no_command(ctx, args):
                 return False
             wanted.extend(self._declared_along(ctx, args))
             return bool(wanted)
