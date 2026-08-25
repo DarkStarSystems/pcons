@@ -328,9 +328,17 @@ class UserCommand(_DeclaresDependencies, click.Command):
 class UserGroup(_DeclaresDependencies, click.Group):
     """The group form of `UserCommand`.
 
-    Verbs added with click's own ``@group.command()`` are plain click commands
-    and declare no dependencies; the group's own apply to every verb.
+    A verb added with click's own ``@group.command()`` is a `UserCommand` and
+    declares dependencies of its own. The group's apply to every verb on top of
+    those, so running one verb builds the group's targets and then the verb's.
+
+    Plain `UserCommand`, never `MergingCommand`, for the reason `UserCommand`
+    itself is. `type` is click's spelling for "this class", so a subgroup is a
+    `UserGroup` too and the rule holds at any depth.
     """
+
+    command_class = UserCommand
+    group_class = type
 
 
 class _GroupPathContext(PconsContext):

@@ -571,18 +571,74 @@ class TestDeclaringDependencies:
 
         assert board.declared_dependencies() == [firmware]
 
-    def test_a_groups_verb_is_a_plain_click_command(self) -> None:
-        """A verb declares nothing of its own; the group's cover it.
+    def test_a_groups_verb_declares_its_own(self) -> None:
+        from pcons._cli_click import UserCommand
 
-        Pinned so that giving verbs their own dependencies is a deliberate
-        change rather than an accident.
-        """
+        firmware = self._target("firmware")
 
         @pcons.cli_group()
         def board() -> None:
             """Board tasks."""
 
         @board.command("flash")
+        def board_flash() -> None:
+            """Flash it."""
+
+        assert isinstance(board_flash, UserCommand)
+        board_flash.depends(firmware)
+
+        assert board_flash.declared_dependencies() == [firmware]
+
+    def test_a_verbs_list_is_its_own(self) -> None:
+        """The group's targets are unioned in at dispatch, not copied here."""
+        firmware = self._target("firmware")
+
+        @pcons.cli_group()
+        def board() -> None:
+            """Board tasks."""
+
+        @board.command("flash")
+        def board_flash() -> None:
+            """Flash it."""
+
+        board.depends(firmware)
+
+        assert board_flash.declared_dependencies() == []
+
+    def test_a_subgroup_and_its_verbs_declare_too(self) -> None:
+        from pcons._cli_click import UserCommand, UserGroup
+
+        firmware = self._target("firmware")
+
+        @pcons.cli_group()
+        def board() -> None:
+            """Board tasks."""
+
+        @board.group("net")
+        def board_net() -> None:
+            """Network tasks."""
+
+        @board_net.command("scan")
+        def board_net_scan() -> None:
+            """Scan."""
+
+        assert isinstance(board_net, UserGroup)
+        assert isinstance(board_net_scan, UserCommand)
+        board_net_scan.depends(firmware)
+
+        assert board_net_scan.declared_dependencies() == [firmware]
+
+    def test_a_verbs_overridden_cls_simply_has_none(self) -> None:
+        """An explicit `cls` wins over `command_class`, as it does at top level."""
+
+        class Mine(click.Command):
+            pass
+
+        @pcons.cli_group()
+        def board() -> None:
+            """Board tasks."""
+
+        @board.command("flash", cls=Mine)
         def board_flash() -> None:
             """Flash it."""
 
