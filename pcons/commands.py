@@ -222,9 +222,9 @@ def cli_group(
     group and never enter this registry, so they cannot collide with a
     top-level name.
 
-    A verb declares no dependencies of its own; the group's apply to all of
-    them. Passing ``cls`` replaces the class, and the annotation here no longer
-    describes what comes back.
+    A verb is a `UserCommand` and declares dependencies of its own. The
+    group's apply to every verb on top of those. Passing ``cls`` replaces the
+    class, and the annotation here no longer describes what comes back.
     """
 
     def decorator(func: Callable[..., Any]) -> UserGroup:

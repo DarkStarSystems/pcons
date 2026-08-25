@@ -107,7 +107,8 @@ what the command asked for.
     `depends` takes targets, i.e. `Program`, `StaticLibrary`, `Command` results, not paths or strings. A string or a path would have to be
     resolved against a project.
 
-A group can use `depends` to declare dependencies for all its grouped commands:
+A group can use `depends` too, and what it declares is built before any of its
+verbs:
 
 ```python
 @project.cli_group()
@@ -147,6 +148,30 @@ The commands belong to the group, so they never collide with a top-level command
 name. One consequence of the cached listing: only the
 group's own name and help are cached, so `pcons run docs --help` has to run the build
 script to find its verbs.
+
+A verb declares its own dependencies, and the group's apply to every verb:
+
+```python
+@project.cli_group()
+def release() -> None:
+    """Release tasks."""
+
+
+release.depends(firmware)
+
+
+@release.command("notes")
+def release_notes() -> None:
+    """Write the release notes."""
+    ...
+
+
+release_notes.depends(changelog)
+```
+
+`pcons run release notes` builds `firmware`, because the group asked for it, then
+`changelog`, because the verb did. A target both name is built once. A subgroup
+added with `@release.group()` works the same way, at any depth.
 
 ## Failing
 

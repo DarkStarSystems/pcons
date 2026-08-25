@@ -21,9 +21,10 @@ commands = [
     # it, and runs -- from an empty build directory, in one invocation.
     { run = "${PCONS} run publish", expect_stdout = "report: 3 findings" },
     { run = "${PCONS} run inspect-build", expect_stdout = "report exists: True" },
-    # A group's dependency covers its verbs.
+    # A group's dependency covers its verbs, and the verb adds its own: the
+    # notes file is the verb's, the report is the group's.
     { run = "${PCONS} clean --all" },
-    { run = "${PCONS} run release notes", expect_stdout = "notes for report" },
+    { run = "${PCONS} run release notes", expect_stdout = "notes say: draft" },
     { run = "${PCONS} run inspect-build", expect_stdout = "report exists: True" },
 ]
 

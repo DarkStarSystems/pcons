@@ -35,9 +35,10 @@ One invocation wrote the build files, built `report`, and ran the command.
 - **`inspect-build`** declares nothing, so it starts no build and writes no
   build files. That is still the default, and it has to cope with an artifact
   that may not be there.
-- **`release`** is a group that declares a dependency. A verb declares none of
-  its own, so the group's cover all of them: `pcons run release notes` builds
-  the report too.
+- **`release`** is a group that declares a dependency, and **`release notes`**
+  is a verb that declares one of its own. `pcons run release notes` builds the
+  report because the group asked for it, and the notes file because the verb
+  did. A subgroup works the same way, at any depth.
 
 ## Two things worth knowing
 

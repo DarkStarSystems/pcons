@@ -15,9 +15,13 @@ already declared, and takes nothing else -- no names, no paths.
 Declaring it is the opt-in. `inspect` below declares nothing and behaves as it
 always has: no build files written, no build started, and it has to cope with
 an artifact that may not exist yet.
+
+A group declares too, and so does each of its verbs. The group's targets are
+built before any verb of it, the verb's own on top.
 """
 
 import subprocess
+import sys
 from pathlib import Path
 
 from pcons import Project
@@ -27,9 +31,20 @@ env = project.Environment(toolchain="c")
 
 report = project.Program("report", env, ["src/report.c"])
 
+python = sys.executable.replace("\\", "/")
+notes_file = env.Command(
+    target="notes.txt",
+    source=["src/write-notes.py"],
+    command=f"{python} $SOURCE $TARGET",
+)
+
 
 def report_path() -> Path:
     return Path(str(report.output_nodes[0].path))
+
+
+def notes_path() -> Path:
+    return project.build_dir / "notes.txt"
 
 
 @project.cli_command()
@@ -59,9 +74,11 @@ def release() -> None:
 release.depends(report)
 
 
-# A verb declares no dependencies of its own; the group's cover every verb, so
-# `pcons run release notes` builds the report too.
 @release.command("notes")
 def release_notes() -> None:
     """Write the notes that go with a release."""
     print(f"notes for {report_path().name}")
+    print(f"notes say: {notes_path().read_text().strip()}")
+
+
+release_notes.depends(notes_file)
