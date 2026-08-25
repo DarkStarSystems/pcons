@@ -2203,6 +2203,203 @@ class TestACommandThatDeclaresADependency:
         assert "packaged=True" in result.stdout
 
 
+GROUP_DEPENDS_SCRIPT = """\
+import click
+
+from pcons import Project
+
+project = Project("demo")
+env = project.Environment()
+hello = env.Command(
+    target="hello.txt", source="hello.in", command="cp $SOURCE $TARGET"
+)
+two = env.Command(
+    target="two.txt", source="hello.in", command="cp $SOURCE $TARGET"
+)
+three = env.Command(
+    target="three.txt", source="hello.in", command="cp $SOURCE $TARGET"
+)
+
+
+@project.cli_group()
+@click.option("-m", "--mode", default="plain")
+@click.option("--draft", is_flag=True)
+def release(mode, draft):
+    "Release tasks."
+
+
+@release.command("notes")
+def release_notes():
+    "Write the notes."
+    print("notes")
+
+
+@release.command("bare")
+def release_bare():
+    "Declare nothing of my own."
+    print("bare")
+
+
+@release.group("net")
+def release_net():
+    "Network tasks."
+
+
+@release_net.command("push")
+def release_net_push():
+    "Push."
+    print("pushed")
+
+
+@project.cli_group()
+def plain():
+    "A group declaring nothing."
+
+
+@plain.command("only")
+def plain_only():
+    "Only the verb declares."
+    print("only")
+
+
+release.depends(hello)
+release_notes.depends(two)
+release_net.depends(two, three)
+release_net_push.depends(hello)
+plain_only.depends(two)
+"""
+
+
+class TestAGroupVerbThatDeclaresADependency:
+    """`pcons run <group> <verb>` collects along the whole path.
+
+    A verb's dependencies add to its group's; the group's list means "before
+    any verb of mine". Reading only the first name would silently drop what a
+    verb declared, which is worse than not letting it declare at all.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean_registries(self) -> Iterator[None]:
+        from pcons import commands, modules
+
+        commands.clear()
+        modules.clear_modules()
+        yield
+        commands.clear()
+        modules.clear_modules()
+
+    @staticmethod
+    def _project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        (tmp_path / "hello.in").write_text("hi")
+        (tmp_path / "pcons-build.py").write_text(GROUP_DEPENDS_SCRIPT)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_MODULES_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)
+        _clear_cli_vars()
+        return tmp_path
+
+    @staticmethod
+    def _generated(tmp_path: Path) -> None:
+        assert (
+            _invoke("generate", "--build-dir", str(tmp_path / "build")).exit_code == 0
+        )
+
+    def _run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *argv: str
+    ) -> tuple[Any, list[dict[str, Any]]]:
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        calls = _record_builds(monkeypatch)
+        return _invoke("run", *argv), calls
+
+    def test_the_groups_targets_come_first_then_the_verbs(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result, calls = self._run(tmp_path, monkeypatch, "release", "notes")
+
+        assert result.exit_code == 0, result.stderr
+        assert "notes" in result.stdout
+        assert calls[0]["targets"] == ["hello.txt", "two.txt"]
+
+    def test_every_level_contributes_and_a_repeat_is_asked_for_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`push` declares the group's `hello` again; it is built once."""
+        result, calls = self._run(tmp_path, monkeypatch, "release", "net", "push")
+
+        assert result.exit_code == 0, result.stderr
+        assert calls[0]["targets"] == ["hello.txt", "two.txt", "three.txt"]
+
+    def test_a_verb_alone_is_enough_to_generate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Its group declares nothing, so before this the run wrote no build
+        files at all."""
+        self._project(tmp_path, monkeypatch)
+        self._generated(tmp_path)
+        (tmp_path / "build" / "build.ninja").unlink()
+        calls = _record_builds(monkeypatch)
+
+        result = _invoke("run", "plain", "only")
+
+        assert result.exit_code == 0, result.stderr
+        assert calls[0]["targets"] == ["two.txt"]
+        assert (tmp_path / "build" / "build.ninja").exists()
+
+    def test_a_verb_declaring_nothing_still_gets_the_groups(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        result, calls = self._run(tmp_path, monkeypatch, "release", "bare")
+
+        assert result.exit_code == 0, result.stderr
+        assert calls[0]["targets"] == ["hello.txt"]
+
+    @pytest.mark.parametrize(
+        "before",
+        [
+            pytest.param(["-m", "draft"], id="a-value-taking-short-option"),
+            pytest.param(["--mode", "draft"], id="a-value-taking-long-option"),
+            pytest.param(["--mode=draft"], id="a-value-spelled-with-equals"),
+            pytest.param(["--draft"], id="a-flag"),
+            pytest.param(["--"], id="an-end-of-options"),
+        ],
+    )
+    def test_the_verb_is_found_past_the_groups_own_options(
+        self,
+        before: list[str],
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`-m draft notes` must read `notes` as the verb, not `draft`."""
+        result, calls = self._run(tmp_path, monkeypatch, "release", *before, "notes")
+
+        assert result.exit_code == 0, result.stderr
+        assert calls[0]["targets"] == ["hello.txt", "two.txt"]
+
+    def test_an_unknown_verb_leaves_the_group_intact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The walk ends at the name that resolves to nothing, and click reports
+        it once dispatch gets there."""
+        result, calls = self._run(tmp_path, monkeypatch, "release", "nosuchverb")
+
+        assert result.exit_code != 0
+        assert "nosuchverb" in result.stderr
+        assert calls[0]["targets"] == ["hello.txt"]
+
+    def test_a_verbs_help_screen_builds_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The walk now reaches past the first name, so pin that the help guard
+        still comes first."""
+        result, calls = self._run(tmp_path, monkeypatch, "release", "notes", "--help")
+
+        assert result.exit_code == 0, result.stderr
+        assert "Write the notes." in result.stdout
+        assert calls == []
+
+
 SIBLING_SCRIPT = """\
 from pcons import Project
 

@@ -363,6 +363,16 @@ class DefaultCommand(MergingCommand):
     context_class = _GroupPathContext
 
 
+def value_taking_options(command: click.Command) -> set[str]:
+    """Spellings of *command*'s options whose value is a separate token."""
+    return {
+        opt
+        for param in command.params
+        if isinstance(param, click.Option) and not param.is_flag
+        for opt in (*param.opts, *param.secondary_opts)
+    }
+
+
 def _consumes_next_token(token: str, takes_value: set[str]) -> bool:
     """Whether *token* is an option whose value is the token after it.
 
@@ -522,12 +532,7 @@ class PconsGroup(click.Group):
 
     def _takes_value_set(self) -> set[str]:
         """Spellings of the group's value-taking options."""
-        return {
-            opt
-            for param in self.params
-            if isinstance(param, click.Option) and not param.is_flag
-            for opt in (*param.opts, *param.secondary_opts)
-        }
+        return value_taking_options(self)
 
     def resolve_command(
         self, ctx: click.Context, args: list[str]

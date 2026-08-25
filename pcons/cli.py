@@ -28,6 +28,7 @@ from pcons._cli_click import (
     PconsPath,
     TargetsCommand,
     _adopt_options_spelled_earlier,
+    _consumes_next_token,
     _DeclaresDependencies,
     build_options,
     common_options,
@@ -39,6 +40,7 @@ from pcons._cli_click import (
     pass_pcons_context,
     run_cli,
     targets_argument,
+    value_taking_options,
     watch_option,
 )
 from pcons.core.errors import PconsError
@@ -2419,6 +2421,32 @@ def _protected_args(ctx: click.Context) -> list[str]:
     return list(ctx._protected_args)
 
 
+def _next_positional(
+    command: click.Command, args: list[str]
+) -> tuple[str | None, list[str]]:
+    """The first token of *args* naming a subcommand of *command*, and the rest.
+
+    Option values are skipped, or ``pcons run release -m draft notes`` would
+    read ``draft`` as the verb. A ``--`` ends the option scan without being a
+    candidate itself: click's parser consumes it and takes the token after it as
+    the subcommand name. `PconsGroup` reads a ``--`` as "targets follow" instead,
+    which it may because it has a catch-all command to route them to.
+    """
+    takes_value = value_taking_options(command)
+    skip = False
+    for index, token in enumerate(args):
+        if skip:
+            skip = False
+            continue
+        if token == "--":
+            continue
+        if token.startswith("-"):
+            skip = _consumes_next_token(token, takes_value)
+            continue
+        return token, args[index + 1 :]
+    return None, []
+
+
 class RunGroup(MergingGroup):
     """The commands a build script or an add-on module declared.
 
@@ -2648,21 +2676,46 @@ class RunGroup(MergingGroup):
         """
         return click.Group.invoke(self, ctx)
 
-    def _declared_by(self, ctx: click.Context, name: str) -> list[Target]:
-        """What the command called *name* declared, or nothing.
+    def _resolved(self, ctx: click.Context, name: str) -> click.Command | None:
+        """The top-level command called *name*, or None.
 
-        Answers only once the script has run, which is why both callers below
-        sit inside the window. A name that resolves to no command, or to one
-        that cannot declare, is not this method's problem: click reports the
-        unknown name in its own way once dispatch reaches it.
+        Only this first lookup can raise: `get_command` refuses a name two
+        origins declare. A subgroup's is click's own and answers None instead.
         """
         try:
-            command = self.get_command(ctx, name)
+            return self.get_command(ctx, name)
         except click.ClickException:
-            return []
-        if not isinstance(command, _DeclaresDependencies):
-            return []
-        return command.declared_dependencies()
+            return None
+
+    def _declared_along(self, ctx: click.Context, args: list[str]) -> list[Target]:
+        """What every command named by *args* declared, outermost first.
+
+        A verb's dependencies add to its group's rather than replacing them: a
+        group's list means "before any verb of mine", and a verb names what
+        only it needs. Deduplicated, so a target both declare is asked for once.
+
+        Answers only once the script has run, which is why the caller sits
+        inside the window. A name that resolves to no command, or to one that
+        cannot declare, ends the walk: click reports the unknown name in its own
+        way once dispatch reaches it.
+        """
+        wanted: list[Target] = []
+        seen: set[Target] = set()
+        command = self._resolved(ctx, args[0])
+        rest = args[1:]
+        while command is not None:
+            if isinstance(command, _DeclaresDependencies):
+                for target in command.declared_dependencies():
+                    if target not in seen:
+                        seen.add(target)
+                        wanted.append(target)
+            if not isinstance(command, click.Group):
+                break
+            name, rest = _next_positional(command, rest)
+            if name is None:
+                break
+            command = command.get_command(ctx, name)
+        return wanted
 
     @staticmethod
     def _build_tool_names(targets: list[Target]) -> list[str]:
@@ -2762,7 +2815,7 @@ class RunGroup(MergingGroup):
             """
             if self._only_prints_help(ctx, args):
                 return False
-            wanted.extend(self._declared_by(ctx, args[0]))
+            wanted.extend(self._declared_along(ctx, args))
             return bool(wanted)
 
         def dispatch() -> None:
