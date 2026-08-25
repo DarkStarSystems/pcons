@@ -2508,10 +2508,6 @@ pcons cache clear     # empty the cache
 pcons generate --fresh PORT=y   # ignore the old cache, start clean
 ```
 
-(`pcons cache clear` also removes `pcons_scan_cache.json`, the module scan
-cache an older pcons may have left in the build directory; nothing writes it
-anymore.)
-
 Change settings through these commands, not by editing `pcons_cache.json`. The
 file is not a regeneration input, so a hand-edit is not picked up automatically,
 and the self-regeneration command pins the values it was generated with, so a

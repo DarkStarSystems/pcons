@@ -77,7 +77,6 @@ IGNORED_NAMES = frozenset(
         ".ninja_lock",
         "pcons_cache.json",
         "pcons_config.json",
-        "pcons_scan_cache.json",
     }
 )
 

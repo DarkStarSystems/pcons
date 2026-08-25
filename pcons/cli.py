@@ -1535,24 +1535,12 @@ def _cache_show(build_dir: Path) -> int:
 
 
 def _cache_clear(build_dir: Path) -> int:
-    """Discard everything this build directory remembers.
-
-    The persisted settings, plus the module scan cache an older pcons may
-    have left beside them — nothing writes pcons_scan_cache.json anymore
-    (per-TU scan edges keep their answers in ninja's own logs), so clearing
-    is the one place that still knows the name.
-    """
-    SCAN_CACHE_FILE = "pcons_scan_cache.json"
-
+    """Discard the persisted settings this build directory remembers."""
     cache = _open_cache(build_dir)
     cleared: list[Path] = []
     if cache.path is not None and cache.path.exists():
         cache.clear()
         cleared.append(cache.path)
-    scan_cache = build_dir / SCAN_CACHE_FILE
-    if scan_cache.exists():
-        scan_cache.unlink()
-        cleared.append(scan_cache)
 
     if not cleared:
         print(f"No cache at {cache.path}")
