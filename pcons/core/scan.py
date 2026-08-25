@@ -288,17 +288,26 @@ class Scanner:
 
 @dataclass
 class ScanScope:
-    """One (scanner, target) scope the wiring pass created."""
+    """One (scanner, target) scope the wiring pass created.
+
+    A *pass-through* scope has no edges of its own — every governed edge it
+    found was already claimed by another scope (a module interface shared
+    through the object cache, say). It carries no files and no collate;
+    what it carries is ``forwards``: the owning scopes whose artifacts this
+    target's outputs physically contain, so a dependent that only declares
+    *this* target still imports the right exports.
+    """
 
     scanner: Scanner
     target: Target
-    manifest_rel: str
-    dyndep_rel: str
-    exports_rel: str
-    collate_node: FileNode
-    exports_node: FileNode
+    manifest_rel: str | None
+    dyndep_rel: str | None
+    exports_rel: str | None
+    collate_node: FileNode | None
+    exports_node: FileNode | None
     governed: list[FileNode]
     info_nodes: list[FileNode] = field(default_factory=list)
+    forwards: list[ScanScope] = field(default_factory=list)
 
 
 def _rule_ident(name: str) -> str:
@@ -406,9 +415,22 @@ class ScannerResolver:
                 )
         edges = own_edges
         if not edges:
-            # Every governed edge belongs to another scope; there is nothing
-            # of this target's own to scan, and its shared objects are
-            # already ordered by their owners' dyndep files.
+            # Every governed edge belongs to another scope: nothing of this
+            # target's own to scan, and its shared objects are already
+            # ordered by their owners' dyndep files. Record a pass-through
+            # scope anyway — a dependent that declares only *this* target
+            # must still reach the owners' exports through it.
+            project._scan_scopes[key] = ScanScope(
+                scanner=scanner,
+                target=target,
+                manifest_rel=None,
+                dyndep_rel=None,
+                exports_rel=None,
+                collate_node=None,
+                exports_node=None,
+                governed=[],
+                forwards=owner_scopes,
+            )
             return
 
         scope_id = self._scope_id(scanner, target)
@@ -438,15 +460,25 @@ class ScannerResolver:
             )
 
         # --- imports: exports of scanned dependency scopes, plus the
-        # owners of any shared edges ------------------------------------
-        import_scopes = [
+        # owners of any shared edges — expanded through pass-through
+        # scopes' forwards, so a dependency that only *contains* another
+        # scope's artifacts still delivers that scope's exports here.
+        candidates = [
             scope
             for dep in target.transitive_dependencies()
             if (scope := project._scan_scopes.get((scanner.name, dep.qualified_name)))
         ]
-        for owner in owner_scopes:
-            if owner not in import_scopes:
-                import_scopes.append(owner)
+        candidates.extend(owner_scopes)
+        import_scopes: list[ScanScope] = []
+        seen_scopes: set[int] = set()
+        while candidates:
+            scope = candidates.pop(0)
+            if id(scope) in seen_scopes:
+                continue
+            seen_scopes.add(id(scope))
+            candidates.extend(scope.forwards)
+            if scope.exports_node is not None:
+                import_scopes.append(scope)
 
         # --- manifest (configure-written; static facts only) -------------
         # Imported here, not at module level: `python -m pcons.core.collate`
@@ -469,7 +501,9 @@ class ScannerResolver:
             "dyndep": dyndep_rel,
             "exports_out": exports_rel,
             "link_args_file": link_args_rel,
-            "imports": [s.exports_rel for s in import_scopes],
+            "imports": [
+                s.exports_rel for s in import_scopes if s.exports_rel is not None
+            ],
             "provide_template": scanner.provide_template,
             "on_unresolved": scanner.on_unresolved,
             "edge_args": (
@@ -506,7 +540,7 @@ class ScannerResolver:
         collate_inputs: list[FileNode] = [
             *info_nodes,
             manifest_node,
-            *[s.exports_node for s in import_scopes],
+            *[s.exports_node for s in import_scopes if s.exports_node is not None],
         ]
         collate_node.add_inputs(collate_inputs)
 
@@ -607,6 +641,7 @@ class ScannerResolver:
             exports_node=exports_node,
             governed=[g for g, _ in edges],
             info_nodes=info_nodes,
+            forwards=owner_scopes,
         )
         project._scan_scopes[key] = scope_record
         for governed, _ in edges:
@@ -688,7 +723,13 @@ class ScannerResolver:
             if isinstance(dep, FileNode) and dep is not info_node
         ]
         if inherited:
-            info_node.order_after(inherited)
+            if scanner.scan_depfile or scanner.scan_deps_style == "msvc":
+                info_node.order_after(inherited)
+            else:
+                # No dep tracking on the scan: nothing takes over from
+                # order-only, so a regenerated input must dirty the scan
+                # itself (the same rule the compiles follow).
+                info_node.depends(inherited)
 
         tokens = [_tokenize_one(t) for t in scanner.scan_command]
         info_node._build_info = {

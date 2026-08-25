@@ -285,8 +285,31 @@ class TestScanEdge:
         project.resolve()
 
         scan_node = project.node(Path("build/packs/a.pack.scaninfo.json"))
-        deps = node_paths(scan_node.order_only_deps)
-        assert "build/gen.h" in deps
+        # This scanner declares no dep tracking, so the inherited dep is
+        # implicit: a regenerated header must dirty the scan itself. With a
+        # scan depfile it would be order-only instead (see the next test).
+        assert "build/gen.h" in node_paths(scan_node.implicit_deps)
+
+    def test_inherited_deps_are_order_only_with_a_scan_depfile(
+        self, tmp_path, monkeypatch
+    ):
+        project = make_project(tmp_path, monkeypatch)
+        env = project.Environment()
+        (tmp_path / "gen.py").write_text("# generator stub\n")
+        gen = env.Command(
+            target="gen.h",
+            source="gen.py",
+            command="python $SOURCE $TARGET",
+            name="gen_h",
+        )
+        a = pack(env, "a")
+        a.depends(gen)
+        make_scanner(scan_depfile=".d").attach(a)
+        project.resolve()
+
+        scan_node = project.node(Path("build/packs/a.pack.scaninfo.json"))
+        assert "build/gen.h" in node_paths(scan_node.order_only_deps)
+        assert "build/gen.h" not in node_paths(scan_node.implicit_deps)
 
 
 class TestCollateEdge:
@@ -627,7 +650,12 @@ class TestSharedEdgeOwnership:
         )
         assert "scan/scene-refs/t.a.exports.json" in manifest["imports"]
 
-    def test_a_target_with_only_shared_edges_gets_no_scope(self, tmp_path, monkeypatch):
+    def test_a_target_with_only_shared_edges_becomes_a_pass_through(
+        self, tmp_path, monkeypatch
+    ):
+        """The scope must still exist — a dependent that declares only this
+        target reaches the owner's exports through it (review finding: a
+        second library listing a shared interface broke its consumers)."""
         from types import SimpleNamespace
 
         from pcons.core.scan import ScannerResolver
@@ -650,8 +678,53 @@ class TestSharedEdgeOwnership:
 
         ScannerResolver(project).run(project.targets)
 
-        assert ("scene-refs", "t::a") in project._scan_scopes
-        assert ("scene-refs", "t::b") not in project._scan_scopes
+        owner = project._scan_scopes[("scene-refs", "t::a")]
+        passthrough = project._scan_scopes[("scene-refs", "t::b")]
+        assert passthrough.governed == []
+        assert passthrough.exports_node is None
+        assert passthrough.forwards == [owner]
+
+    def test_a_dependent_of_a_pass_through_imports_the_owner(
+        self, tmp_path, monkeypatch
+    ):
+        """consumer -> two -> (interface shared with one): consumer's
+        manifest imports one's exports though it never declares one — the
+        library it links physically contains one's artifact."""
+        import json
+        from types import SimpleNamespace
+
+        from pcons.core.scan import ScannerResolver
+        from pcons.core.target import Target
+
+        project = make_project(tmp_path, monkeypatch)
+        env = SimpleNamespace(register_node=lambda _n: None)
+        shared_src = FileNode(tmp_path / "shared.scene")
+        shared = FileNode("build/obj.shared/shared.pack")
+        shared._build_info = {"env": env, "sources": [shared_src]}
+
+        def make_target(name, nodes):
+            t = Target(name, target_type="static_library", project=project)
+            t._env = env  # type: ignore[assignment]
+            t.intermediate_nodes.extend(nodes)
+            project._targets.append(t)
+            return t
+
+        one = make_target("one", [shared])
+        two = make_target("two", [shared])
+        consumer_src = FileNode(tmp_path / "c.scene")
+        consumer_edge = FileNode("build/obj.consumer/c.pack")
+        consumer_edge._build_info = {"env": env, "sources": [consumer_src]}
+        consumer = make_target("consumer", [consumer_edge])
+        consumer.add_dependency(two)
+
+        scanner = make_scanner()
+        scanner.attach(one, two, consumer)
+        ScannerResolver(project).run(project.targets)
+
+        manifest = json.loads(
+            (tmp_path / "build/scan/scene-refs/t.consumer.manifest.json").read_text()
+        )
+        assert manifest["imports"] == ["scan/scene-refs/t.one.exports.json"]
 
 
 class TestScannerErrors:

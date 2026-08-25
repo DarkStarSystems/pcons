@@ -143,7 +143,7 @@ class ModuleScope:
 def collect_module_scopes(
     project: Any,
     source_obj_by_language: dict[str, list[tuple[Path, Any]]],
-    toolchain: Any = None,
+    toolchain: Any,
 ) -> list[ModuleScope]:
     """Group the scanned TUs by owning target, in declaration order.
 
@@ -158,8 +158,6 @@ def collect_module_scopes(
     """
 
     def _uses_toolchain(obj_node: Any) -> bool:
-        if toolchain is None:
-            return True
         bi = getattr(obj_node, "_build_info", None)
         env = bi.get("env") if bi else None
         return env is not None and any(
@@ -182,14 +180,27 @@ def collect_module_scopes(
     claimed: set[int] = set()
     for target in project.targets:
         pairs: list[tuple[Path, Any, bool]] = []
+        shared_only = None
         for node in target.intermediate_nodes:
             entry = by_obj.get(id(node))
-            if entry is not None and id(node) not in claimed:
+            if entry is None:
+                continue
+            if id(node) not in claimed:
                 claimed.add(id(node))
                 pairs.append(entry)
+            else:
+                shared_only = entry
         if pairs:
             env = getattr(pairs[0][1], "_build_info", {}).get("env")
             scopes.append(ModuleScope(target=target, env=env, pairs=pairs))
+        elif shared_only is not None:
+            # Every module TU this target compiles is owned by an earlier
+            # target (the object cache shares the node). Emit an empty
+            # scope so the scanner still attaches: the core wiring records
+            # a pass-through, and dependents of *this* target reach the
+            # owner's exports through it.
+            env = getattr(shared_only[1], "_build_info", {}).get("env")
+            scopes.append(ModuleScope(target=target, env=env, pairs=[]))
     return scopes
 
 
