@@ -1281,7 +1281,11 @@ class Environment(_EnvironmentStubs):
                    ``["valgrind", "-q"]``, a persistent-worker client. Unlike
                    a launcher on a tool namespace (``env.cc.launcher``), which
                    follows every edge that tool runs, this one applies to this
-                   command alone. See :mod:`pcons.core.launcher`.
+                   command alone. To set an environment variable for this
+                   command only, put an environment wrapper such as
+                   ``["env", "V=value"]`` here; assigning ``os.environ`` in
+                   the build script changes the whole pcons process and every
+                   command it launches. See :mod:`pcons.core.launcher`.
             worker: A :class:`pcons.workers.Worker` to run this command in,
                    for an action that costs more to start than to run.
                    Renders to a launcher, so the generated build file still
