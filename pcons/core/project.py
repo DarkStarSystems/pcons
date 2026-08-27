@@ -859,6 +859,9 @@ class Project(_ProjectBuilders):
         """Set default targets for building.
 
         These are built when 'ninja' is run with no arguments.
+        Once called, it replaces the implicit default of all programs and
+        libraries; only targets passed to ``Default()`` are then built by
+        default.
 
         Args:
             *targets: Targets, output Nodes, or alias/target names to build
