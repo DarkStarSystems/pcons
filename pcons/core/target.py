@@ -841,16 +841,25 @@ class Target:
 
         return self
 
-    def _apply_extra_implicit_deps(self) -> None:
+    def _apply_extra_implicit_deps(self, dest: Target | None = None) -> None:
         """Apply file-level implicit deps to build nodes (propagated deps on
-        all nodes, output-only deps on output nodes)."""
-        all_nodes = self.intermediate_nodes + self.output_nodes
+        all nodes, output-only deps on output nodes).
+
+        Args:
+            dest: Target whose nodes receive the deps. Defaults to self.
+                A resolver passes a consumer target here when self is an
+                interface target with no nodes of its own to attach to
+                (#111): the ordering is applied where it can take effect
+                instead of being silently dropped.
+        """
+        dest = dest if dest is not None else self
+        all_nodes = dest.intermediate_nodes + dest.output_nodes
         for dep in self._extra_implicit_deps:
             for node in all_nodes:
                 if dep not in node.implicit_deps:
                     node.implicit_deps.append(dep)
         for dep in self._extra_implicit_deps_output_only:
-            for node in self.output_nodes:
+            for node in dest.output_nodes:
                 if dep not in node.implicit_deps:
                     node.implicit_deps.append(dep)
 

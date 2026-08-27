@@ -223,6 +223,43 @@ class TestResolverHeaderOnlyLibrary:
         assert "headers/include" in includes_normalized
         assert "HEADER_LIB_API" in context.defines
 
+    def test_depends_on_header_only_library_forwards_to_consumers(
+        self, tmp_path, gcc_toolchain
+    ):
+        """depends() on a HeaderOnlyLibrary must not be silently dropped (#111).
+
+        An interface target builds nothing of its own, so the ordering it
+        declares can only hold in whoever consumes it - here, an app that
+        links the interface library must wait on the generator the library
+        itself declared a dependency on.
+        """
+        src_file = tmp_path / "main.c"
+        src_file.write_text("int main() { return 0; }")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        gen = env.Command(name="gen", target="gen/gen.h", command="touch $TARGET")
+
+        header_lib = project.HeaderOnlyLibrary("headers")
+        header_lib.depends(gen)
+
+        app = project.Program("myapp", env, sources=[str(src_file)])
+        app.private.link_libs.append(header_lib)
+
+        project.resolve()
+
+        # The interface target still builds nothing - it never becomes a
+        # node the generator could attach to.
+        assert header_lib.intermediate_nodes == []
+        assert header_lib.output_nodes == []
+
+        # The dependency lands on the consumer's compile instead.
+        app_obj = app.intermediate_nodes[0]
+        assert gen.output_nodes[0] in app_obj.implicit_deps
+
 
 class TestResolverObjectCaching:
     def test_object_caching_same_flags(self, tmp_path, gcc_toolchain):

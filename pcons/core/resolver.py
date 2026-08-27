@@ -287,25 +287,56 @@ class Resolver:
             # Apply implicit target dependencies from target.depends(other_target).
             # Propagated deps: outputs become implicit deps on all build nodes
             # (intermediate + output). Output-only deps: only on output nodes.
-            for dep_target in target._implicit_target_deps:
-                if not dep_target._resolved:
-                    self._resolve_target(dep_target)
-                for node in target.intermediate_nodes + target.output_nodes:
-                    for dep_node in dep_target.output_nodes:
-                        if dep_node not in node.implicit_deps:
-                            node.implicit_deps.append(dep_node)
+            self._apply_implicit_target_deps(
+                target._implicit_target_deps,
+                target.intermediate_nodes + target.output_nodes,
+            )
+            self._apply_implicit_target_deps(
+                target._implicit_target_deps_output_only, target.output_nodes
+            )
 
-            for dep_target in target._implicit_target_deps_output_only:
-                if not dep_target._resolved:
-                    self._resolve_target(dep_target)
-                for node in target.output_nodes:
-                    for dep_node in dep_target.output_nodes:
-                        if dep_node not in node.implicit_deps:
-                            node.implicit_deps.append(dep_node)
+            # An interface target (e.g. HeaderOnlyLibrary) builds nothing of its
+            # own, so a depends() call on it above has no node to attach the
+            # dependency to and would otherwise be silently dropped (#111). Its
+            # ordering can only hold in whoever consumes it, so forward any
+            # interface dependency's own unappliable implicit deps onto this
+            # target's nodes instead - the same rule depends() documents, just
+            # applied where it can actually take effect.
+            for iface_dep in target.transitive_dependencies():
+                if iface_dep.intermediate_nodes or iface_dep.output_nodes:
+                    continue  # has its own nodes; its deps already applied to itself
+                if not iface_dep._resolved:
+                    self._resolve_target(iface_dep)
+                if (
+                    iface_dep._extra_implicit_deps
+                    or iface_dep._extra_implicit_deps_output_only
+                ):
+                    iface_dep._apply_extra_implicit_deps(dest=target)
+                self._apply_implicit_target_deps(
+                    iface_dep._implicit_target_deps,
+                    target.intermediate_nodes + target.output_nodes,
+                )
+                self._apply_implicit_target_deps(
+                    iface_dep._implicit_target_deps_output_only, target.output_nodes
+                )
         finally:
             self._resolving.pop()
 
         target._resolved = True
+
+    def _apply_implicit_target_deps(
+        self, dep_targets: list[Target], dest_nodes: list[FileNode]
+    ) -> None:
+        """Make every node in ``dest_nodes`` implicitly depend on each of
+        ``dep_targets``'s output nodes, resolving a dep target first if
+        needed."""
+        for dep_target in dep_targets:
+            if not dep_target._resolved:
+                self._resolve_target(dep_target)
+            for node in dest_nodes:
+                for dep_node in dep_target.output_nodes:
+                    if dep_node not in node.implicit_deps:
+                        node.implicit_deps.append(dep_node)
 
     def resolve_pending_sources(self) -> None:
         """Resolve _pending_sources for all targets that have them.
