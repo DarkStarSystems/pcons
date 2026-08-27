@@ -2730,6 +2730,11 @@ The Makefile generator supports the same project structure as the Ninja generato
 #### Xcode project generator
 
 Pcons can also generate Xcode projects, though the functionality is significantly limited compared to Ninja and Makefiles.
+
+This generator needs the [pbxproj](https://pypi.org/project/pbxproj/) package,
+which a plain install doesn't bring in; ask for it explicitly with
+`pip install 'pcons[xcode]'`. Without it, `-G xcode` says so and stops.
+
 Some of these limitations:
 
 - **Custom commands and generated sources.** `env.Command()`, custom tools,

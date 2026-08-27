@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for XcodeGenerator."""
 
+import importlib.util
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
-from pcons.generators.xcode import XcodeGenerator
+from pcons.generators.xcode import XcodeGenerator, ensure_available
 
 
 class TestXcodeGeneratorBasic:
@@ -838,6 +839,30 @@ class TestXcodeImportIsolation:
         finally:
             sys.meta_path.remove(blocker)
             sys.modules.update(saved)
+
+
+class TestXcodeAvailability:
+    """The Xcode generator needs the optional pbxproj package."""
+
+    def test_available_when_installed(self):
+        pytest.importorskip("pbxproj")
+        ensure_available()  # does not raise
+
+    def test_missing_package_explains_how_to_install(self, monkeypatch):
+        monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+        with pytest.raises(PconsError, match="pcons\\[xcode\\]"):
+            ensure_available()
+
+    def test_generate_refuses_before_doing_any_work(self, tmp_path, monkeypatch):
+        """The check fires when generation is asked for, not partway through."""
+        project = Project("myapp", root_dir=tmp_path, build_dir=tmp_path)
+        Target("myapp", target_type="program")
+
+        monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+
+        with pytest.raises(PconsError, match="pcons\\[xcode\\]"):
+            XcodeGenerator().generate(project)
+        assert not (tmp_path / "myapp.xcodeproj").exists()
 
 
 class TestXcodeGeneratorDyndep:

@@ -24,7 +24,6 @@ dependencies = [
     "click>=8.4,<9",  # CLI parsing; <9: the CLI reads click internals click 9 removes
     "tomli>=2.0;python_version<'3.11'",  # TOML parsing (built-in in 3.11+)
     "tomli-w>=1.0",  # TOML writing
-    "pbxproj>=3.0.0",  # Xcode project file manipulation
     # Native filesystem notification for `pcons --watch`. Marked to the
     # platforms pcons supports, which are the ones watchfiles ships wheels
     # for: elsewhere pcons still installs, and only --watch is unavailable.
@@ -36,6 +35,12 @@ dependencies = [
 # dependency. Elsewhere this asks for it anyway, building from source.
 watch = [
     "watchfiles>=1.0",
+]
+# The Xcode generator only. pbxproj brings in docopt, which ships no wheel and
+# so builds from source; a plain install shouldn't pay that for a niche,
+# macOS-only generator.
+xcode = [
+    "pbxproj>=3.0.0",  # Xcode project file manipulation
 ]
 dev = [
     "pytest>=8.0",
@@ -80,6 +85,7 @@ packages = ["pcons"]
 
 [dependency-groups]
 dev = [
+    "pcons[xcode]",  # the Xcode generator's tests and example need pbxproj
     "pytest>=8.0",
     "pytest-cov>=4.0",
     "coverage>=7.10",

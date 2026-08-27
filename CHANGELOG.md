@@ -359,6 +359,15 @@ read the whole changelog!
 - **Breaking:** `HeaderOnlyLibrary(name, env, ...)` takes the environment
   second, like every other builder, and `include_dirs` is now keyword-only. (#124)
 
+#### Installing
+
+- **The Xcode generator's `pbxproj` dependency is now an optional extra.**
+  `pbxproj` pulls in `docopt`, which ships no wheel, so every plain
+  `pip install pcons` compiled it from source, and failed offline, for one
+  macOS-only generator. `pip install pcons` no longer installs it; for
+  `-G xcode`, use `pip install 'pcons[xcode]'`. Without it the generator
+  says so up front instead of failing partway through.
+
 #### MSVC and Conan
 
 - **The `debug` and `relwithdebinfo` variants compile with `/Z7` on MSVC and
