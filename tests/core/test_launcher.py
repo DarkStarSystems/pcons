@@ -3,11 +3,14 @@
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
+
+import pytest
 
 from pcons import Generator
 from pcons.core.environment import Environment
-from pcons.core.launcher import resolve_launcher
+from pcons.core.launcher import env_vars_launcher, resolve_launcher
 from pcons.generators.generator import BaseGenerator
 
 
@@ -124,6 +127,55 @@ class TestPerCommandLauncher:
         text = (tmp_path / "build" / "build.ninja").read_text(encoding="utf-8")
         assert "valgrind copy" in text
         assert "valgrind convert" not in text
+
+
+class TestEnvVarsLauncher:
+    """Per-command environment variables, rendered as the innermost launcher."""
+
+    @staticmethod
+    def _pretend_os(monkeypatch, name: str) -> None:
+        """Swap the launcher module's view of os.name, and nothing else's."""
+        import pcons.core.launcher
+
+        monkeypatch.setattr(pcons.core.launcher, "os", types.SimpleNamespace(name=name))
+
+    def test_posix_writes_env(self, monkeypatch) -> None:
+        self._pretend_os(monkeypatch, "posix")
+
+        tokens = env_vars_launcher({"A": "1", "B": "two words"})
+
+        assert tokens == ["env", "A=1", "B=two words"]
+
+    def test_windows_writes_the_pcons_helper(self, monkeypatch) -> None:
+        """No env(1) there, so this Python runs `pcons.util.commands env`."""
+        self._pretend_os(monkeypatch, "nt")
+
+        tokens = env_vars_launcher({"A": "1"})
+
+        assert tokens[1:] == ["-m", "pcons.util.commands", "env", "A=1"]
+        assert tokens[0]  # this Python
+
+    def test_an_invalid_name_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="A=B"):
+            env_vars_launcher({"A=B": "x"})
+        with pytest.raises(ValueError):
+            env_vars_launcher({"": "x"})
+
+    def test_the_variables_precede_the_command(self, tmp_path: Path) -> None:
+        rule = TestPerCommandLauncher._command_rule(
+            tmp_path, env_vars={"GREETING": "hi"}
+        )
+
+        assert "GREETING=hi copy" in rule
+
+    def test_they_sit_inside_the_edge_launcher(self, tmp_path: Path) -> None:
+        """Innermost: whatever wraps the command, the variables reach it."""
+        rule = TestPerCommandLauncher._command_rule(
+            tmp_path, launcher=["valgrind"], env_vars={"GREETING": "hi"}
+        )
+
+        assert "GREETING=hi copy" in rule
+        assert rule.index("valgrind") < rule.index("GREETING=hi")
 
 
 class TestGeneratedCommands:

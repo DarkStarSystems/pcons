@@ -1612,6 +1612,7 @@ Notes:
 
 - **Launcher tokens are passed through as written.** They are a program and its arguments, and/or multiple programs, not paths in the dependency graph, so pcons does not rewrite them for the directory the build runs in. Use absolute paths (`project.root_dir / "tools" / "wrap.py"` if they're not on `$PATH`).
 - **`compile_commands.json` reports the compiler itself**, without launchers, so clangd and other tools see the real compile.
+- **Environment variables for one command** are a launcher under the hood: `env_vars=` on `Command()` renders as `env NAME=VALUE` (or a pcons helper on Windows) innermost in the chain. See Custom Commands below.
 
 See `examples/63_command_launcher` for two stacked launchers wrapping every C compile, and a third belonging to one command.
 
@@ -2117,6 +2118,21 @@ Note: pcons warns when you write the singular form and the command has more than
 
 !!! tip
     Instead of passing and slicing implicit sources like this, you can also set up a separate dependency: `target.depends('gridfinity.py')`.
+
+**Environment variables for one command: `env_vars=`**
+
+A tool that reads its configuration from the environment — a signing server URL, a license key — needs that variable set for its own command and no other:
+
+```python
+env.Command(
+    target="firmware.signed",
+    source="firmware.bin",
+    command="sign-tool $SOURCE -o $TARGET",
+    env_vars={"SIGNING_URL": "https://signer.example.com"},
+)
+```
+
+The variables are written into the generated build file, in front of the one command they belong to: `env NAME=VALUE` on POSIX, a small pcons helper on Windows (which has no `env`). So they survive a direct `ninja` or `make` run, and no other command sees them. Setting `os.environ` in the build script would do neither — it reaches every command, and only while pcons itself runs. See `examples/73_command_env`.
 
 ### Post-Build Commands
 

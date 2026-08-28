@@ -14,10 +14,12 @@ which is how ``compile_commands.json`` reports the compiler an IDE wants.
 
 from __future__ import annotations
 
+import os
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Mapping, Sequence
 
     from pcons.core.environment import Environment
 
@@ -42,6 +44,25 @@ def resolve_launcher(
     if not tokens:
         return []
     return [str(token) for token in env.subst_list(tokens)]
+
+
+def env_vars_launcher(variables: Mapping[str, str]) -> list[str]:
+    """Launcher tokens that set *variables* for one command alone.
+
+    POSIX has ``env(1)``; Windows has no equivalent, so there the launcher is
+    this Python running ``pcons.util.commands env``. Either way the variables
+    ride the command line: they survive a direct ``ninja`` or ``make`` run and
+    never touch the pcons process's own environment.
+    """
+    assignments: list[str] = []
+    for name, value in variables.items():
+        if not name or "=" in name:
+            raise ValueError(f"Invalid environment variable name: {name!r}")
+        assignments.append(f"{name}={value}")
+    if os.name == "nt":
+        python = sys.executable.replace("\\", "/")
+        return [python, "-m", "pcons.util.commands", "env", *assignments]
+    return ["env", *assignments]
 
 
 def _as_tokens(value: Sequence[str] | str | None) -> list[str]:

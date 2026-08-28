@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import UserList
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from difflib import get_close_matches
 from pathlib import Path
@@ -1186,6 +1186,7 @@ class Environment(_EnvironmentStubs):
         write_if_different: bool = False,
         cwd: str | Path | None = None,
         launcher: Sequence[str] | None = None,
+        env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
         depfile: str | None = None,
         deps_style: str | None = None,
@@ -1224,8 +1225,9 @@ class Environment(_EnvironmentStubs):
                       sources (e.g., config files, scripts). Example:
                       "$SRCDIR/scripts/generate.py $SOURCE $TARGET"
                     - $$: A literal dollar sign, delivered to the command
-                      verbatim (the shell does not expand it). Environment
-                      variables belong in the build script, via os.environ.
+                      verbatim (the shell does not expand it). A variable
+                      for the command's own environment belongs in
+                      ``env_vars=``, not in the command line.
                     Any of these may be part of a larger argument, e.g.
                     "./${SOURCES[0]}" to run a program this build produced (a
                     POSIX shell would otherwise look a bare name up on $PATH)
@@ -1282,6 +1284,17 @@ class Environment(_EnvironmentStubs):
                    a launcher on a tool namespace (``env.cc.launcher``), which
                    follows every edge that tool runs, this one applies to this
                    command alone. See :mod:`pcons.core.launcher`.
+            env_vars: Environment variables for this command alone, e.g.
+                   ``{"SIGNING_URL": url}``. Rendered as the innermost
+                   launcher (``env NAME=VALUE`` on POSIX, the pcons ``env``
+                   helper command on Windows), so the variables ride the
+                   generated build file: they survive a direct ``ninja`` run
+                   and are seen by no other command. Values expand ``$var``
+                   references from this environment, like any launcher token;
+                   the per-edge ``$TARGET``/``$SOURCE`` forms are not
+                   available here. Setting ``os.environ``
+                   in the build script instead would reach every command in
+                   the build, and only when pcons itself runs the tool.
             worker: A :class:`pcons.workers.Worker` to run this command in,
                    for an action that costs more to start than to run.
                    Renders to a launcher, so the generated build file still
@@ -1408,6 +1421,12 @@ class Environment(_EnvironmentStubs):
         # the tokens that route it through one.
         if worker is not None:
             launcher = [*(launcher or []), *worker.launcher()]
+        # Innermost, after any worker client: the variables must reach the
+        # command itself, not the wrappers in front of it.
+        if env_vars:
+            from pcons.core.launcher import env_vars_launcher
+
+            launcher = [*(launcher or []), *env_vars_launcher(env_vars)]
 
         builder = GenericCommandBuilder(
             command,

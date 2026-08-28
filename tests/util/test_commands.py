@@ -242,3 +242,105 @@ class TestCopytreeSymlinks:
         copytree(str(src), str(tmp_path / "dest"))
 
         assert (tmp_path / "dest" / "file.txt").read_text() == "x\n"
+
+
+class TestRunWithEnv:
+    """The `env` helper command: env(1) for platforms without one."""
+
+    def test_variables_reach_the_command(self, tmp_path: Path, monkeypatch) -> None:
+        import sys
+
+        from pcons.util.commands import run_with_env
+
+        monkeypatch.delenv("PCONS_TEST_GREETING", raising=False)
+        out = tmp_path / "out.txt"
+        code = run_with_env(
+            [
+                "PCONS_TEST_GREETING=from-env",
+                sys.executable,
+                "-c",
+                "import os, pathlib, sys; "
+                "pathlib.Path(sys.argv[1]).write_text("
+                "os.environ['PCONS_TEST_GREETING'])",
+                str(out),
+            ]
+        )
+
+        assert code == 0
+        assert out.read_text() == "from-env"
+
+    def test_the_commands_exit_code_is_returned(self, monkeypatch) -> None:
+        import sys
+
+        from pcons.util.commands import run_with_env
+
+        monkeypatch.delenv("PCONS_TEST_A", raising=False)
+        code = run_with_env(
+            ["PCONS_TEST_A=1", sys.executable, "-c", "import sys; sys.exit(3)"]
+        )
+
+        assert code == 3
+
+    def test_assignments_stop_at_the_command(self, tmp_path: Path, monkeypatch) -> None:
+        """A later argument that happens to contain '=' is the command's own."""
+        import sys
+
+        from pcons.util.commands import run_with_env
+
+        monkeypatch.delenv("PCONS_TEST_LATER", raising=False)
+        out = tmp_path / "out.txt"
+        code = run_with_env(
+            [
+                sys.executable,
+                "-c",
+                "import os, pathlib, sys; "
+                "pathlib.Path(sys.argv[1]).write_text("
+                "os.environ.get('PCONS_TEST_LATER', 'unset'))",
+                str(out),
+                "PCONS_TEST_LATER=1",
+            ]
+        )
+
+        assert code == 0
+        assert out.read_text() == "unset"
+
+    def test_no_command_is_a_usage_error(self, capsys) -> None:
+        from pcons.util.commands import run_with_env
+
+        assert run_with_env(["A=1"]) == 1
+        assert "Usage" in capsys.readouterr().err
+
+    def test_a_missing_program_reports_127(self, monkeypatch, capsys) -> None:
+        """The shell convention, and no traceback in the build output."""
+        from pcons.util.commands import run_with_env
+
+        monkeypatch.delenv("PCONS_TEST_A", raising=False)
+        code = run_with_env(["PCONS_TEST_A=1", "pcons-no-such-program-xyzzy"])
+
+        assert code == 127
+        assert "pcons-no-such-program-xyzzy" in capsys.readouterr().err
+
+    def test_the_module_entry_point_dispatches(self, tmp_path: Path) -> None:
+        """End to end, the way a generated build file invokes it."""
+        import subprocess
+        import sys
+
+        out = tmp_path / "out.txt"
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pcons.util.commands",
+                "env",
+                "PCONS_TEST_GREETING=via-module",
+                sys.executable,
+                "-c",
+                "import os, pathlib, sys; "
+                "pathlib.Path(sys.argv[1]).write_text("
+                "os.environ['PCONS_TEST_GREETING'])",
+                str(out),
+            ]
+        )
+
+        assert result.returncode == 0
+        assert out.read_text() == "via-module"

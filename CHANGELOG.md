@@ -33,6 +33,13 @@ machinery to support this kind of dynamic dependencies.
   `deps_style="gcc"` for a make-style depfile, `"msvc"` for `/showIncludes`
   output.
 
+- **`env.Command` takes `env_vars=`: environment variables for one command
+  alone.** Written into the generated build file (`env NAME=VALUE` on POSIX,
+  a new `pcons.util.commands env` helper on Windows), so they survive a
+  direct `ninja` run, and no other command sees them — unlike `os.environ`
+  in the build script, which reaches everything. `examples/73_command_env`.
+  (#109)
+
 ### Changed
 
 - **C++20 modules are rebuilt on the Scanner primitive, for clang, GCC and

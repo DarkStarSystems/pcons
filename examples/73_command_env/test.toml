@@ -1,0 +1,18 @@
+# Test configuration for the command-env example
+
+[test]
+description = "Per-command environment variables: env_vars= reaches its own command and no other, via env(1) on POSIX and the pcons env helper on Windows"
+
+expected_outputs = [
+    "build/with_var.txt",
+    "build/without_var.txt",
+]
+
+[verify]
+commands = [
+    { run = "uv run python check_env.py", expect_stdout = "env ok" },
+]
+
+[skip]
+# Commands with launchers have no place in Xcode's script phases.
+generators = ["xcode"]

@@ -8,12 +8,14 @@ Usage in build rules:
     python -m pcons.util.commands copy <src> <dest>
     python -m pcons.util.commands concat <src1> <src2> ... <dest>
     python -m pcons.util.commands copytree [--depfile FILE] [--stamp FILE] <src> <dest>
+    python -m pcons.util.commands env NAME=VALUE ... <command> [args...]
 """
 
 from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -162,13 +164,44 @@ def copytree(
         stamp_path.touch()
 
 
+def run_with_env(args: list[str]) -> int:
+    """Run a command with extra environment variables, env(1)-style.
+
+    Leading ``NAME=VALUE`` arguments are set in the environment; the first
+    argument that is not an assignment starts the command. Exists because
+    Windows has no ``env(1)``: on POSIX pcons writes the real one.
+    """
+    i = 0
+    while i < len(args):
+        name, sep, _ = args[i].partition("=")
+        if not sep or not name:
+            break
+        i += 1
+    command = args[i:]
+    if not command:
+        print(
+            "Usage: python -m pcons.util.commands env NAME=VALUE ... "
+            "<command> [args...]",
+            file=sys.stderr,
+        )
+        return 1
+    for assignment in args[:i]:
+        name, _, value = assignment.partition("=")
+        os.environ[name] = value
+    try:
+        return subprocess.run(command).returncode
+    except OSError as exc:
+        print(f"pcons env: {command[0]}: {exc}", file=sys.stderr)
+        return 127
+
+
 def main() -> int:
     """Command-line entry point."""
     if len(sys.argv) < 2:
         print(
             "Usage: python -m pcons.util.commands <command> [args...]", file=sys.stderr
         )
-        print("Commands: copy, concat, copytree", file=sys.stderr)
+        print("Commands: copy, concat, copytree, env", file=sys.stderr)
         return 1
 
     cmd = sys.argv[1]
@@ -238,6 +271,9 @@ def main() -> int:
             return 1
         copytree(positional[0], positional[1], depfile, stamp, replace)
         return 0
+
+    elif cmd == "env":
+        return run_with_env(sys.argv[2:])
 
     else:
         print(f"Unknown command: {cmd}", file=sys.stderr)

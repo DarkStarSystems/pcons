@@ -23,7 +23,7 @@ type checkers see the declarations, runtime never executes them.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -81,6 +81,7 @@ if TYPE_CHECKING:
             write_if_different: bool = False,
             cwd: str | Path | None = None,
             launcher: Sequence[str] | None = None,
+            env_vars: Mapping[str, str] | None = None,
             worker: Any = None,
             depfile: str | None = None,
             deps_style: str | None = None,

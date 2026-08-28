@@ -12,7 +12,7 @@ This module provides builders for compiled targets:
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -297,6 +297,7 @@ class CommandBuilder:
         write_if_different: bool = False,
         cwd: str | Path | None = None,
         launcher: Sequence[str] | None = None,
+        env_vars: Mapping[str, str] | None = None,
         worker: Any = None,
         depfile: str | None = None,
         deps_style: str | None = None,
@@ -319,6 +320,7 @@ class CommandBuilder:
             write_if_different: Restore identically-rewritten outputs.
             cwd: Directory to run the command in.
             launcher: Program to run this command behind, as tokens.
+            env_vars: Environment variables for this command alone.
             depfile: Suffix of the depfile the command writes beside its
                 output, e.g. ".d".
             deps_style: How those dependencies arrive, "gcc" or "msvc".
@@ -336,6 +338,7 @@ class CommandBuilder:
             write_if_different=write_if_different,
             cwd=cwd,
             launcher=launcher,
+            env_vars=env_vars,
             worker=worker,
             depfile=depfile,
             deps_style=deps_style,
