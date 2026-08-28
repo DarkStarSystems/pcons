@@ -148,6 +148,16 @@ jobs:
         run: uv python install $PYTHON_VERSION
       - name: Install dependencies
         run: uv sync
+      - name: Cache Conan packages
+        # The conan example resolves and builds its dependency inside pcons'
+        # configure step, under the example runner's generate timeout. A warm
+        # cache takes the network and the fmt build off that clock — the
+        # windows runners are the ones that flake on it.
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.conan2
+          key: conan2-${{ runner.os }}-${{ hashFiles('examples/**/conanfile.*') }}
+          restore-keys: conan2-${{ runner.os }}-
       - name: Run example tests
         run: uv run pytest tests/test_examples.py -n auto --cov=pcons --cov-report=xml -k "not 21_msvcup_hello"
       - name: Upload coverage to Codecov
