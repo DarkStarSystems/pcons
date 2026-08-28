@@ -260,6 +260,53 @@ class TestResolverHeaderOnlyLibrary:
         app_obj = app.intermediate_nodes[0]
         assert gen.output_nodes[0] in app_obj.implicit_deps
 
+    def test_unresolved_compiled_dependency_is_not_treated_as_interface(
+        self, tmp_path, gcc_toolchain
+    ):
+        """A compiled target reached only through a non-link dependency edge
+        can still be unresolved when its consumer is resolved (that edge
+        isn't part of the topological sort), and its node lists are then
+        empty for the same reason an interface target's always are: nothing
+        has run yet, not because it builds nothing. The forwarding loop has
+        to resolve it first and check its nodes afterwards, or it treats an
+        ordinary compiled target as if it were interface-only and forwards
+        its dependency onto the consumer instead of leaving it on its own
+        compile step, where the dependency actually belongs.
+        """
+        src_file = tmp_path / "main.c"
+        src_file.write_text("int main() { return 0; }")
+        lib_src = tmp_path / "lib.c"
+        lib_src.write_text("int helper(void) { return 0; }")
+        generated = tmp_path / "generated.h"
+        generated.write_text("")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        gen = env.Command(name="gen", target="gen/gen.h", command="touch $TARGET")
+
+        tool = project.StaticLibrary("tool", env, sources=[str(lib_src)])
+        tool.depends(gen)
+
+        app = project.Program("myapp", env, sources=[str(src_file)])
+        app.add_dependency(tool)
+
+        resolver = Resolver(project)
+        assert not tool._resolved
+        resolver._resolve_target(app)
+
+        # Resolving the consumer resolved the still-unresolved compiled
+        # dependency on demand, and gen's dependency stayed on tool's own
+        # compile step rather than getting forwarded onto app's.
+        assert tool._resolved
+        tool_obj = tool.intermediate_nodes[0]
+        assert gen.output_nodes[0] in tool_obj.implicit_deps
+
+        app_obj = app.intermediate_nodes[0]
+        assert gen.output_nodes[0] not in app_obj.implicit_deps
+
     def test_interface_target_file_dep_forwards_and_resolves_on_demand(
         self, tmp_path, gcc_toolchain
     ):

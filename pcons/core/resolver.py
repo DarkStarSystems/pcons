@@ -303,10 +303,10 @@ class Resolver:
             # target's nodes instead - the same rule depends() documents, just
             # applied where it can actually take effect.
             for iface_dep in target.transitive_dependencies():
-                if iface_dep.intermediate_nodes or iface_dep.output_nodes:
-                    continue  # has its own nodes; its deps already applied to itself
                 if not iface_dep._resolved:
                     self._resolve_target(iface_dep)
+                if iface_dep.intermediate_nodes or iface_dep.output_nodes:
+                    continue  # has its own nodes; its deps already applied to itself
                 if (
                     iface_dep._extra_implicit_deps
                     or iface_dep._extra_implicit_deps_output_only
