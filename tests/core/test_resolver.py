@@ -260,6 +260,47 @@ class TestResolverHeaderOnlyLibrary:
         app_obj = app.intermediate_nodes[0]
         assert gen.output_nodes[0] in app_obj.implicit_deps
 
+    def test_interface_target_file_dep_forwards_and_resolves_on_demand(
+        self, tmp_path, gcc_toolchain
+    ):
+        """Same forwarding (#111), exercised for the other _resolve_target
+        forwarding path: a file-level depends() (_extra_implicit_deps, set
+        when the depends() argument isn't a Target) rather than a target
+        dep, and with the interface target still unresolved when its
+        consumer is resolved.
+
+        The normal project.resolve() loop always resolves a link_lib before
+        its consumer, so that second case can only be observed by calling
+        the resolver's per-target entry point directly, the same way
+        TestResolverImplicitDependsCycle does above.
+        """
+        src_file = tmp_path / "main.c"
+        src_file.write_text("int main() { return 0; }")
+        generated = tmp_path / "generated.h"
+        generated.write_text("")
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        env.add_tool("cc")
+        env.cc.objcmd = "gcc -c $SOURCE -o $TARGET"
+
+        header_lib = project.HeaderOnlyLibrary("headers")
+        header_lib.depends(str(generated))
+        generated_node = project.node(str(generated))
+
+        app = project.Program("myapp", env, sources=[str(src_file)])
+        app.private.link_libs.append(header_lib)
+
+        resolver = Resolver(project)
+        assert not header_lib._resolved
+        resolver._resolve_target(app)
+
+        # Resolving the consumer resolved the still-unresolved interface
+        # target on demand, and its file-level dep landed on the consumer.
+        assert header_lib._resolved
+        app_obj = app.intermediate_nodes[0]
+        assert generated_node in app_obj.implicit_deps
+
 
 class TestResolverObjectCaching:
     def test_object_caching_same_flags(self, tmp_path, gcc_toolchain):
