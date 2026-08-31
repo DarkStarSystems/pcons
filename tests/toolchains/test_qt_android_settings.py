@@ -21,6 +21,8 @@ from pcons.toolchains.presets import android
 from pcons.toolchains.qt.android import android_deployment_settings, deployment_settings
 from pcons.toolchains.qt.finder import QtPackage
 
+from ._qt_test_utils import fake_qt_toolchain
+
 NDK = "/fake/ndk"
 SDK = "/fake/sdk"
 
@@ -70,6 +72,17 @@ def _android_env(arch: str = "arm64-v8a", *, sdk: str | None = SDK) -> Environme
     env._toolchain = LlvmToolchain()
     env.apply_cross_preset(android(ndk=NDK, arch=arch, api=35, sdk=sdk))
     return env
+
+
+def _qml_module(project, env, name: str, directory: str) -> None:
+    """A QtQmlModule whose one QML file sits in *directory*."""
+    qml = Path(project.root_dir) / directory
+    qml.mkdir(parents=True, exist_ok=True)
+    (qml / "Main.qml").write_text("import QtQml\nQtObject {}\n")
+    env.add_toolchain(fake_qt_toolchain())
+    project.QtQmlModule(
+        name, env, uri=f"com.example.{name}", qml_files=[f"{directory}/Main.qml"]
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -342,15 +355,90 @@ class TestWhatItLeavesToAndroiddeployqt:
     """Keys the tool answers for itself. Writing them would be a second
     opinion, and the tool's own is the one that has the app in front of it."""
 
-    @pytest.mark.parametrize(
-        "key",
-        ["android-deploy-plugins", "qml-import-paths", "qml-root-path"],
-    )
-    def test_absent(self, key: str, settings_for) -> None:
-        assert key not in settings_for(_android_env())
+    def test_the_plugin_list_is_absent(self, settings_for) -> None:
+        assert "android-deploy-plugins" not in settings_for(_android_env())
 
     def test_the_scanner_is_skipped_for_an_app_with_no_qml(self, settings_for) -> None:
-        assert settings_for(_android_env())["qml-skip-import-scanning"] is True
+        settings = settings_for(_android_env())
+
+        assert settings["qml-skip-import-scanning"] is True
+        assert "qml-root-path" not in settings
+        assert "qml-import-paths" not in settings
+
+
+class TestTheQmlKeys:
+    """androiddeployqt runs qmlimportscanner itself, and the scanner reads the
+    filesystem. So it is told where the QML source is, and nothing else: which
+    Qt QML modules to bundle stays its own answer."""
+
+    def test_the_root_path_is_every_qml_module_source_directory(
+        self, settings_for, test_project
+    ) -> None:
+        env = _android_env()
+        _qml_module(test_project, env, "ui", "qml")
+        _qml_module(test_project, env, "widgets", "extra/qml")
+
+        settings = settings_for(env)
+
+        assert settings["qml-root-path"] == [
+            str(Path(test_project.root_dir) / "qml"),
+            str(Path(test_project.root_dir) / "extra" / "qml"),
+        ]
+
+    def test_a_directory_two_modules_share_is_named_once(
+        self, settings_for, test_project
+    ) -> None:
+        env = _android_env()
+        _qml_module(test_project, env, "ui", "qml")
+        _qml_module(test_project, env, "more", "qml")
+
+        assert settings_for(env)["qml-root-path"] == [
+            str(Path(test_project.root_dir) / "qml")
+        ]
+
+    def test_a_module_built_elsewhere_is_not_this_package_s(
+        self, settings_for, test_project
+    ) -> None:
+        """One project may build the same module for the host too. The Android
+        package describes the Android environment."""
+        host = _android_env()
+        host.name = "host"
+        _qml_module(test_project, host, "ui", "qml")
+
+        settings = settings_for(_android_env())
+
+        assert settings["qml-skip-import-scanning"] is True
+
+    def test_the_scanner_is_not_skipped_when_there_is_qml(
+        self, settings_for, test_project
+    ) -> None:
+        env = _android_env()
+        _qml_module(test_project, env, "ui", "qml")
+
+        assert "qml-skip-import-scanning" not in settings_for(env)
+
+    def test_the_two_keys_do_not_have_the_same_shape(
+        self, settings_for, test_project
+    ) -> None:
+        """Measured off a CMake-written file: qml-root-path is a JSON list and
+        qml-import-paths is one comma-separated string. Symmetrical names, and
+        androiddeployqt reads them with different code."""
+        env = _android_env()
+        _qml_module(test_project, env, "ui", "qml")
+
+        settings = settings_for(env)
+
+        assert isinstance(settings["qml-root-path"], list)
+        assert isinstance(settings["qml-import-paths"], str)
+
+    def test_the_paths_are_absolute(self, settings_for, test_project) -> None:
+        env = _android_env()
+        _qml_module(test_project, env, "ui", "qml")
+
+        settings = settings_for(env)
+
+        assert Path(settings["qml-root-path"][0]).is_absolute()
+        assert Path(settings["qml-import-paths"]).is_absolute()
 
 
 class TestTheOptionalKeys:

@@ -10,9 +10,9 @@ it no Android package can be built, however well the compile and link went.
     app = project.QtSharedLibrary("myapp", env, sources=[...])
     settings = android_deployment_settings(project, env, app=app)
 
-This writes the smallest useful slice: one ABI, one application, no QML.
-Two things it deliberately does not answer, because androiddeployqt answers
-them itself and a pcons key would only be a second opinion:
+This writes one ABI and one application. Two things it deliberately does
+not answer, because androiddeployqt answers them itself and a pcons key
+would only be a second opinion:
 
 - the transitive Qt library set, which it reads out of the staged ``.so``
   with ``llvm-readobj --needed-libs`` and out of Qt's own
@@ -92,9 +92,7 @@ def _library_dir(project: Project, env: Environment) -> Path:
     below = env.output_directory_for("shared_library")
     if below:
         directory = directory / below
-    if directory.is_absolute():
-        return directory
-    return Path(project.root_dir) / directory
+    return _absolute(project, directory)
 
 
 def _android_preset(env: Environment) -> CrossPreset:
@@ -182,7 +180,6 @@ def deployment_settings(
         "android-legacy-packaging": False,
         "zstdCompression": False,
         "generate-java-qtquickview-contents": False,
-        "qml-skip-import-scanning": True,
     }
     for key, value in _QT_SUBDIRECTORIES.items():
         settings[key] = {abi: value}
@@ -190,7 +187,38 @@ def deployment_settings(
         path = qt.tool_path(tool)
         if path is not None:
             settings[key] = str(path)
+    settings.update(_qml_keys(project, env))
     return settings
+
+
+def _qml_keys(project: Project, env: Environment) -> dict[str, Any]:
+    """Where androiddeployqt should point qmlimportscanner, or not to run it.
+
+    The scanner reads the filesystem, so it is given the QML *source*
+    directories of this environment's QML modules. Their generated ``qmldir``
+    is embedded in a resource and pcons writes it flat, so an import path
+    resolves none of the application's own modules -- measured against Qt
+    6.11.1 not to matter, as long as every module's source directory is a
+    root path: the Qt modules reported are then identical either way.
+    """
+    from pcons.toolchains.qt.qml import qml_source_dirs
+
+    roots = [
+        _absolute(project, directory) for directory in qml_source_dirs(project, env)
+    ]
+    if not roots:
+        return {"qml-skip-import-scanning": True}
+    import_paths = [_absolute(project, env.build_dir_for(Path()))]
+    return {
+        "qml-root-path": [str(root) for root in roots],
+        "qml-import-paths": ",".join(str(path) for path in import_paths),
+    }
+
+
+def _absolute(project: Project, directory: Path) -> Path:
+    if directory.is_absolute():
+        return directory
+    return Path(project.root_dir) / directory
 
 
 def android_deployment_settings(

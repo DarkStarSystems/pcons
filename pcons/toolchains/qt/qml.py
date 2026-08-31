@@ -34,6 +34,7 @@ Q_INIT_RESOURCE or plugin import boilerplate is needed.
 from __future__ import annotations
 
 import re
+import weakref
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -56,6 +57,41 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.util.source_location import SourceLocation
+
+
+#: Every QtQmlModule declared in a project tree, with the directories its
+#: QML came from. A deployment tool that runs qmlimportscanner has to be told
+#: where the QML *source* is: the scanner reads the filesystem, and a
+#: module's own QML ends up in a resource. Keyed by the top-level project,
+#: the way ``finder.py`` keys located installs, so it dies with the build.
+_qml_module_sources: weakref.WeakKeyDictionary[
+    Project, list[tuple[Target, list[Path]]]
+] = weakref.WeakKeyDictionary()
+
+
+def qml_source_dirs(project: Project, env: Environment | None = None) -> list[Path]:
+    """Directories holding the QML of the QtQmlModule targets in this tree.
+
+    In declaration order, without duplicates, sub-projects included. This is
+    what ``qmlimportscanner`` wants as a root path: it walks the directories
+    it is given and reads the ``import`` lines out of the files it finds.
+
+    Args:
+        project: Any project of the tree; the whole tree is searched.
+        env: Only count modules built in this environment. All of them when
+             None.
+
+    Returns:
+        The directories, as they were spelled to :class:`QtQmlModuleBuilder`.
+    """
+    dirs: list[Path] = []
+    for target, sources in _qml_module_sources.get(project.top, ()):
+        if env is not None and target.env is not env:
+            continue
+        for directory in sources:
+            if directory not in dirs:
+                dirs.append(directory)
+    return dirs
 
 
 def _parse_version(version: str) -> tuple[str, str]:
@@ -267,4 +303,16 @@ class QtQmlModuleBuilder:
             rcc_node.implicit_deps.append(registrar_node)
         target.add_sources([rcc_node])
 
+        _qml_module_sources.setdefault(project.top, []).append(
+            (target, _source_dirs(root, qml_files))
+        )
         return target
+
+
+def _source_dirs(root: Path, qml_files: Sequence[str | Path]) -> list[Path]:
+    dirs: list[Path] = []
+    for qml in qml_files:
+        directory = (root / Path(qml)).parent
+        if directory not in dirs:
+            dirs.append(directory)
+    return dirs

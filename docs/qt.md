@@ -436,13 +436,32 @@ Android ships none of them, and `qtpaths --query` on such an install reports
 `find_qt` already answers with the right directories. `qmldom` is not in
 every Qt build and is left out when it is missing.
 
-This covers one ABI, one application, and no QML. Two things pcons never
-writes, because androiddeployqt works them out itself with the built
-application in front of it: the transitive Qt library set, which it reads
-out of the staged `.so`, and the QML imports, which it finds by running
-`qmlimportscanner`. `android-deploy-plugins` is left out for the same
-reason — absent, Qt's own XML decides which plugin directories are
-bundled, which makes a larger package and never a broken one.
+This covers one ABI and one application. Two things pcons never writes,
+because androiddeployqt works them out itself with the built application in
+front of it: the transitive Qt library set, which it reads out of the staged
+`.so`, and the QML imports, which it finds by running `qmlimportscanner`.
+`android-deploy-plugins` is left out for the same reason — absent, Qt's own
+XML decides which plugin directories are bundled, which makes a larger
+package and never a broken one.
+
+#### QML
+
+androiddeployqt runs `qmlimportscanner` to decide which Qt QML modules to
+bundle, and the scanner reads the filesystem. So pcons writes
+`qml-root-path`: the QML source directory of every `QtQmlModule` built in
+this environment. Nothing is asked of the build script -- a module already
+knows where its QML is.
+
+`qml-skip-import-scanning` is written only when the environment has no
+`QtQmlModule` at all. An application with QML gets the scan.
+
+A `QtQmlModule`'s generated `qmldir` is embedded in a resource, and pcons
+writes it flat, so an import path resolves none of the application's own
+modules. Measured against Qt 6.11.1: that costs nothing as long as every
+module's QML source directory is a root path. The scanner then reports the
+same Qt modules either way, and the application's own module is reported
+with no path -- which is right, since it is in the resource and there is
+nothing on disk to bundle.
 
 Running the tool, staging the `.so` into `<output>/libs/<abi>/`, and
 Gradle are not pcons's job yet.

@@ -244,3 +244,77 @@ class TestQmlModuleEnvironment:
 
         assert on_host.qualified_name == "qmltest::ui@host"
         assert on_cross.qualified_name == "qmltest::ui@cross"
+
+
+class TestQmlSourceDirs:
+    """Where a module's QML came from, for tools that read the filesystem.
+
+    ``qmlimportscanner`` is the one that matters: a deployment step has to
+    hand it root paths, and the module's own QML is embedded in a resource
+    by then. Nothing else knows the directory, so the module records it.
+    """
+
+    def test_a_module_records_where_its_qml_is(self, qml_project, tmp_path):
+        from pcons.toolchains.qt.qml import qml_source_dirs
+
+        env = cxx_env_with_qt(qml_project)
+        qml_project.QtQmlModule("ui", env, uri="X.Y", qml_files=["qml/Main.qml"])
+
+        assert qml_source_dirs(qml_project) == [tmp_path / "qml"]
+
+    def test_a_project_with_no_qml_module_has_none(self, qml_project):
+        from pcons.toolchains.qt.qml import qml_source_dirs
+
+        assert qml_source_dirs(qml_project) == []
+
+    def test_a_module_with_no_qml_files_contributes_nothing(self, qml_project):
+        """C++ QML_ELEMENT types and no .qml file. There is nothing for a
+        scanner to read."""
+        from pcons.toolchains.qt.qml import qml_source_dirs
+
+        env = cxx_env_with_qt(qml_project)
+        qml_project.QtQmlModule("ui", env, uri="X.Y", sources=["src/backend.cpp"])
+
+        assert qml_source_dirs(qml_project) == []
+
+    def test_two_modules_sharing_a_directory_name_it_once(self, qml_project, tmp_path):
+        from pcons.toolchains.qt.qml import qml_source_dirs
+
+        (tmp_path / "qml" / "Other.qml").write_text("import QtQml\nQtObject {}\n")
+        env = cxx_env_with_qt(qml_project)
+        qml_project.QtQmlModule("ui", env, uri="X.Y", qml_files=["qml/Main.qml"])
+        qml_project.QtQmlModule("more", env, uri="X.Z", qml_files=["qml/Other.qml"])
+
+        assert qml_source_dirs(qml_project) == [tmp_path / "qml"]
+
+    def test_the_environment_narrows_it(self, qml_project, tmp_path):
+        from pcons.toolchains.qt.qml import qml_source_dirs
+
+        host = cxx_env_with_qt(qml_project, name="host")
+        cross = cxx_env_with_qt(qml_project, name="cross")
+        qml_project.QtQmlModule("ui", host, uri="X.Y", qml_files=["qml/Main.qml"])
+
+        assert qml_source_dirs(qml_project, host) == [tmp_path / "qml"]
+        assert qml_source_dirs(qml_project, cross) == []
+
+    def test_a_subdirectory_project_is_included(self, qml_project, tmp_path):
+        """The package describes one build, and add_subdirectory does not make
+        a second one."""
+        from pcons.toolchains.qt.qml import qml_source_dirs
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        child_qml = tmp_path / "child" / "qml"
+        child_qml.mkdir(parents=True)
+        (child_qml / "Main.qml").write_text("import QtQml\nQtObject {}\n")
+        (tmp_path / "child" / "pcons-build.py").write_text(
+            "from pcons import get_var\n"
+            "from pcons.core.project import Project\n"
+            "child = Project('child', root_dir=get_var('ROOT'))\n"
+            "child.QtQmlModule('ui', child.default_environment, uri='X.Y',\n"
+            "                  qml_files=['child/qml/Main.qml'])\n"
+        )
+        env = cxx_env_with_qt(qml_project)
+
+        add_subdirectory("child", env=env, vars={"ROOT": str(tmp_path)})
+
+        assert qml_source_dirs(qml_project) == [child_qml]
