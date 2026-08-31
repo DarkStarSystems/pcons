@@ -1,0 +1,30 @@
+# Test configuration for the Android APK example
+
+[test]
+description = "An APK cross-compiled for arm64-v8a and signed with a debug key, built by the SDK tools alone: four installed host tools driven with tool=, packaging a library built for Android"
+
+expected_outputs = [
+    "build/android/lib/libnative.so",
+    "build/apk/base.apk",
+    "build/apk/unaligned.apk",
+    "build/apk/aligned.apk",
+    "build/apk/debug.keystore",
+    "build/apk/app-debug.apk",
+]
+
+[skip]
+# macOS and Windows runners ship an NDK and set the same variables, so the
+# environment check alone would let this run where it has never been tried.
+platforms = ["windows", "darwin"]
+require_env = ["ANDROID_NDK_HOME", "ANDROID_HOME"]
+requires = ["clang", "keytool", "unzip", "file"]
+
+[verify]
+commands = [
+    # The APK is well-formed and carries the debug signature.
+    { run = '$(find $ANDROID_HOME/build-tools -name apksigner | sort | tail -1) verify --print-certs build/apk/app-debug.apk', expect_stdout = "CN=Android Debug" },
+    # The library is in the APK at the path Android looks for.
+    { run = "unzip -l build/apk/app-debug.apk", expect_stdout = "lib/arm64-v8a/libnative.so" },
+    # It really cross-compiled: a host compiler would have made an x86-64 file.
+    { run = "file build/android/lib/libnative.so", expect_stdout = "ARM aarch64" },
+]
