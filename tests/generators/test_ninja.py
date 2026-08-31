@@ -54,6 +54,24 @@ class TestNinjaGenerator:
         # builddir is always "." since the ninja file is inside the build directory
         assert "builddir = ." in content
 
+    @pytest.mark.parametrize("reference", ["${TARGET}", "$TARGET"])
+    def test_embedded_target_in_link_flag_reaches_generated_command(
+        self, tmp_path, gcc_toolchain, reference
+    ):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+        app = project.Program("app", env, sources=["main.c"])
+        app.private.link_flags.append(f"-Wl,-Map={reference}.map")
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert "-Wl,-Map=$target_0.map" in content
+        assert "TargetPath(" not in content
+
 
 class TestNinjaBuildStatements:
     def test_writes_build_for_target(self, tmp_path):
