@@ -165,6 +165,14 @@ class CrossPreset:
                 or says it wrong. Left None, `target_platform` derives it from
                 `triple`. Same information as `arch`, in the place that
                 answers questions rather than as metadata.
+        ndk: Root of the NDK this preset was built against, as the caller
+             wrote it. Kept, not discovered: a packaging step needs the same
+             path the compiler came from, and re-deriving it would be a
+             second answer to a question already settled.
+        ndk_host: The NDK's prebuilt host tag ("linux-x86_64"), which names
+                  the directory the tools were found in.
+        sdk: Root of the Android SDK. Nothing in compiling or linking uses
+             it; packaging does, and no other part of pcons knows it.
     """
 
     name: str
@@ -176,6 +184,9 @@ class CrossPreset:
     tool_cmds: dict[str, str] = field(default_factory=dict)
     env_vars: dict[str, str] = field(default_factory=dict)
     target: Platform | None = None
+    ndk: str | None = None
+    ndk_host: str | None = None
+    sdk: str | None = None
 
     @property
     def target_platform(self) -> Platform | None:
@@ -217,6 +228,7 @@ def android(
     *,
     api: int,
     stl: AndroidStl = "c++_shared",
+    sdk: str | None = None,
 ) -> CrossPreset:
     """Create a cross-compilation preset for Android NDK.
 
@@ -241,6 +253,10 @@ def android(
              runtime shared by every library. "c++_static" links a private
              copy into each artifact. "none" links no C++ runtime, leaving
              its symbols undefined for whoever links last.
+        sdk: Path to the Android SDK root. Compiling and linking never need
+             it, so it is optional; packaging an APK does, and the preset is
+             where a packaging step will look. Recorded as given, never
+             searched for.
 
     Returns:
         CrossPreset configured for Android.
@@ -287,6 +303,9 @@ def android(
         triple=triple,
         sysroot=sysroot,
         extra_link_flags=_ANDROID_STL_LINK_FLAGS[stl],
+        ndk=str(ndk_path),
+        ndk_host=host_tag,
+        sdk=sdk,
         tool_cmds={
             "cc": str(bin_dir / f"{triple}-clang{wrapper_ext}"),
             "cxx": str(bin_dir / f"{triple}-clang++{wrapper_ext}"),

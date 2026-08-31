@@ -374,6 +374,15 @@ the arch preset.
 | `tool_cmds` | per-tool command overrides keyed by pcons tool name — the binary-retarget mechanism | replaces `<tool>.cmd` for every named tool |
 | `env_vars` | *(deprecated alias for `tool_cmds`: CC→cc, CXX→cxx, LD→link, AR→ar)* | merged into `tool_cmds`; `tool_cmds` wins |
 | `extra_compile_flags` / `extra_link_flags` | verbatim escape hatch for target-required flags (`-mios-version-min=`, `-sSIDE_MODULE=1`) | appended to `cc`+`cxx` / `link` as-is |
+| `ndk` / `ndk_host` / `sdk` | Android install facts, kept as the caller wrote them | **nothing** — never a flag source; read by a packaging step |
+
+A preset is also where a target's install facts live once something outside
+compiling needs them. `android()` already computes the NDK root and the
+prebuilt host tag to find its tools; it now keeps both, and takes an optional
+`sdk=`. Packaging an APK needs all three by name, and re-deriving them
+elsewhere would be a second answer to a question the preset already settled.
+These are recorded, not discovered: `sdk` has no default because nothing in
+pcons searches for one.
 
 ### Bounded auto-detection
 

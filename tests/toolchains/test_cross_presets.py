@@ -125,6 +125,59 @@ class TestAndroidPreset:
         assert "sysroot" in preset.sysroot
 
 
+class TestTheAndroidInstallFactsSurvive:
+    """`android()` finds its tools under an NDK root and a prebuilt host tag.
+    Packaging needs the same two, by name, so the preset keeps them instead of
+    letting a later step guess at them again."""
+
+    def test_the_ndk_root_is_the_one_that_was_passed(self) -> None:
+        preset = android(ndk="/fake/ndk", api=21)
+        assert preset.ndk == "/fake/ndk"
+
+    def test_a_user_path_is_expanded_like_the_tools_were(self) -> None:
+        """The tools live under the expanded path, so the recorded root has
+        to be the expanded one or the two disagree."""
+        preset = android(ndk="~/ndk", api=21)
+        assert preset.ndk is not None
+        assert not preset.ndk.startswith("~")
+        assert preset.resolved_tool_cmds()["cc"].startswith(preset.ndk)
+
+    def test_the_host_tag_names_the_directory_the_tools_came_from(self) -> None:
+        preset = android(ndk="/fake/ndk", api=21)
+        assert preset.ndk_host is not None
+        assert (
+            f"prebuilt/{preset.ndk_host}"
+            in Path(preset.resolved_tool_cmds()["cc"]).as_posix()
+        )
+
+    def test_the_sdk_is_absent_until_someone_says_it(self) -> None:
+        """Nothing searches for one; compiling and linking never need it."""
+        assert android(ndk="/fake/ndk", api=21).sdk is None
+
+    def test_the_sdk_is_what_was_passed(self) -> None:
+        preset = android(ndk="/fake/ndk", api=21, sdk="/fake/sdk")
+        assert preset.sdk == "/fake/sdk"
+
+    def test_the_facts_read_back_off_the_environment(self, test_project) -> None:  # noqa: F811
+        """`env.cross` is where a packaging step will look for them."""
+        from pcons.toolchains.llvm import LlvmToolchain
+
+        env = _make_unix_env()
+        ar = env.add_tool("ar")
+        ar.set("cmd", "ar")
+        env._toolchain = LlvmToolchain()
+        env.apply_cross_preset(android(ndk="/fake/ndk", api=21, sdk="/fake/sdk"))
+
+        assert env.cross.ndk == "/fake/ndk"
+        assert env.cross.sdk == "/fake/sdk"
+        assert env.cross.ndk_host is not None
+
+    def test_a_preset_that_is_not_android_has_none_of_them(self) -> None:
+        """The fields are optional, so every other factory is untouched."""
+        preset = ios()
+        assert (preset.ndk, preset.ndk_host, preset.sdk) == (None, None, None)
+
+
 class TestAndroidStl:
     """Which C++ runtime an Android artifact links.
 
