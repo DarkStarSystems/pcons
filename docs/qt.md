@@ -364,6 +364,40 @@ use linuxdeploy/appimagetool on the installed tree.
     (e.g. QtGui → QtDBus) — a known macdeployqt limitation that affects
     CMake builds identically.
 
+### Android: the androiddeployqt settings file
+
+`androiddeployqt` is driven by a JSON file that Qt's CMake writes. pcons
+writes it too:
+
+```python
+from pcons.toolchains.presets import android
+from pcons.toolchains.qt.android import android_deployment_settings
+
+env.apply_cross_preset(android(ndk=NDK, api=35, sdk=SDK))
+qt = find_qt(project, env, modules=["Core"])
+app = project.SharedLibrary("myapp", env, sources=["main.cpp"])
+
+settings = android_deployment_settings(
+    project, env, app=app, package_name="org.example.myapp"
+)
+```
+
+It is written at configure time, like `configure_file`, and the path is
+returned. Everything in it comes from the cross preset and from the Qt
+found for that environment, so `android()` must be given `sdk=` as well as
+`ndk=`.
+
+This covers one ABI, one application, and no QML. Two things pcons never
+writes, because androiddeployqt works them out itself with the built
+application in front of it: the transitive Qt library set, which it reads
+out of the staged `.so`, and the QML imports, which it finds by running
+`qmlimportscanner`. `android-deploy-plugins` is left out for the same
+reason — absent, Qt's own XML decides which plugin directories are
+bundled, which makes a larger package and never a broken one.
+
+Running the tool, staging the `.so` into `<output>/libs/<abi>/`, and
+Gradle are not pcons's job yet.
+
 ### Packaging into installers
 
 Deployed Qt apps compose with the installer generators in
