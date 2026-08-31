@@ -347,3 +347,300 @@ class TestWhatTheRunnerRefuses:
 
         with pytest.raises(QtNotFoundError, match="androiddeployqt"):
             android_apk(app_project, env, app=_app(app_project, env), settings="s.json")
+
+
+PASSWORD = "s3cr3t-store-pw"
+UNSIGNED = "myapp/build/outputs/apk/release/myapp-release-unsigned.apk"
+SIGNED = "myapp/build/outputs/apk/release/myapp-release-signed.apk"
+
+
+@pytest.fixture
+def sdk(tmp_path) -> Path:
+    """An SDK with two build-tools revisions, both holding an apksigner."""
+    from pcons.configure.platform import get_platform
+
+    suffix = ".bat" if get_platform().is_windows else ""
+    root = tmp_path / "sdk"
+    for revision in ("9.0.0", "37.0.0"):
+        directory = root / "build-tools" / revision
+        directory.mkdir(parents=True)
+        (directory / f"apksigner{suffix}").write_text("")
+    return root
+
+
+def _release(project, env, app, **kwargs):
+    from pcons.toolchains.qt.apk import sign_apk
+
+    apk = _apk(project, env, app, release=True)
+    return sign_apk(project, env, app=app, apk=apk, **kwargs)
+
+
+def _signed_ninja(project, env, app, **kwargs) -> str:
+    from ._qt_test_utils import generate_ninja
+
+    _release(project, env, app, **kwargs)
+    return generate_ninja(project)
+
+
+class TestThePasswordNeverReachesTheBuildFile:
+    """The one property this whole surface exists for. A password written
+    into build.ninja is a password in a generated file people commit."""
+
+    def test_an_environment_variable_is_named_and_not_read(
+        self, app_project, deployable, sdk
+    ) -> None:
+        env = android_env(sdk=str(sdk))
+
+        content = _signed_ninja(
+            app_project,
+            env,
+            _app(app_project, env),
+            keystore="release.jks",
+            store_password="env:MYAPP_KEYSTORE_PASS",
+        )
+
+        assert PASSWORD not in content
+        assert "env:MYAPP_KEYSTORE_PASS" in content
+
+    def test_a_password_file_is_named_by_path_and_not_read(
+        self, app_project, deployable, sdk, tmp_path
+    ) -> None:
+        secret = tmp_path / "keystore-pass"
+        secret.write_text(f"{PASSWORD}\n")
+        env = android_env(sdk=str(sdk))
+
+        content = _signed_ninja(
+            app_project,
+            env,
+            _app(app_project, env),
+            keystore="release.jks",
+            store_password=f"file:{secret}",
+        )
+
+        assert PASSWORD not in content
+        assert secret.name in content
+
+    def test_a_literal_password_is_refused(self, app_project, deployable, sdk) -> None:
+        env = android_env(sdk=str(sdk))
+        app = _app(app_project, env)
+
+        with pytest.raises(ValueError, match="build.ninja"):
+            _release(
+                app_project,
+                env,
+                app,
+                keystore="release.jks",
+                store_password=f"pass:{PASSWORD}",
+            )
+
+    def test_a_literal_key_password_is_refused(
+        self, app_project, deployable, sdk
+    ) -> None:
+        env = android_env(sdk=str(sdk))
+        app = _app(app_project, env)
+
+        with pytest.raises(ValueError, match="key_password"):
+            _release(
+                app_project,
+                env,
+                app,
+                keystore="release.jks",
+                store_password="env:KS",
+                key_password=f"pass:{PASSWORD}",
+            )
+
+
+class TestTheSigningEdge:
+    def _content(self, project, env, **kwargs):
+        return _signed_ninja(
+            project,
+            env,
+            _app(project, env),
+            keystore="release.jks",
+            store_password="env:KS",
+            **kwargs,
+        )
+
+    def test_it_signs_the_unsigned_release_package(
+        self, app_project, deployable, sdk
+    ) -> None:
+        env = android_env(sdk=str(sdk))
+
+        edge = _edge(self._content(app_project, env), SIGNED)
+
+        assert UNSIGNED in edge
+
+    def test_it_is_a_second_edge_and_gradle_does_not_re_run(
+        self, app_project, deployable, sdk
+    ) -> None:
+        """Signing is not folded into androiddeployqt's own --sign, so a new
+        keystore re-signs the package rather than rebuilding it."""
+        env = android_env(sdk=str(sdk))
+
+        content = self._content(app_project, env)
+
+        assert _edge(content, UNSIGNED)
+        assert _edge(content, SIGNED)
+
+    def test_the_keystore_is_a_dependency(self, app_project, deployable, sdk) -> None:
+        env = android_env(sdk=str(sdk))
+
+        edge = _edge(self._content(app_project, env), SIGNED)
+
+        assert "release.jks" in edge
+
+    def test_the_alias_is_passed_when_it_is_given(
+        self, app_project, deployable, sdk
+    ) -> None:
+        env = android_env(sdk=str(sdk))
+
+        content = self._content(app_project, env, alias="upload")
+
+        assert "--ks-key-alias upload" in content
+
+    def test_no_alias_is_passed_when_none_is_given(
+        self, app_project, deployable, sdk
+    ) -> None:
+        env = android_env(sdk=str(sdk))
+
+        assert "--ks-key-alias" not in self._content(app_project, env)
+
+    def test_the_key_password_is_left_to_the_keystore_password(
+        self, app_project, deployable, sdk
+    ) -> None:
+        """apksigner opens the key with the keystore password when
+        --key-pass is absent, so absent is one fewer secret to place."""
+        env = android_env(sdk=str(sdk))
+
+        assert "--key-pass" not in self._content(app_project, env)
+
+    def test_the_highest_build_tools_revision_wins(
+        self, app_project, deployable, sdk
+    ) -> None:
+        """Ordered as versions, not as strings: "9.0.0" sorts above
+        "37.0.0" alphabetically and is the older release."""
+        env = android_env(sdk=str(sdk))
+
+        content = self._content(app_project, env)
+
+        assert "37.0.0" in content
+        assert "9.0.0" not in content
+
+    def test_it_is_a_target(self, app_project, deployable, sdk) -> None:
+        env = android_env(sdk=str(sdk))
+        app = _app(app_project, env)
+
+        signed = _release(
+            app_project, env, app, keystore="release.jks", store_password="env:KS"
+        )
+
+        assert signed.name == "myapp-apk-signed"
+
+
+class TestWhatSigningRefuses:
+    def _sign(self, project, env, **kwargs):
+        return _release(project, env, _app(project, env), **kwargs)
+
+    def test_no_keystore_at_all(self, app_project, deployable, sdk) -> None:
+        env = android_env(sdk=str(sdk))
+
+        with pytest.raises(ValueError, match="keystore="):
+            self._sign(app_project, env, store_password="env:KS")
+
+    def test_no_keystore_never_falls_back_to_a_debug_key(
+        self, app_project, deployable, sdk
+    ) -> None:
+        env = android_env(sdk=str(sdk))
+
+        with pytest.raises(ValueError, match="never signed with a debug key"):
+            self._sign(app_project, env, store_password="env:KS")
+
+    def test_no_password_source(self, app_project, deployable, sdk) -> None:
+        env = android_env(sdk=str(sdk))
+
+        with pytest.raises(ValueError, match="store_password="):
+            self._sign(app_project, env, keystore="release.jks")
+
+    def test_a_prompt_a_build_edge_cannot_answer(
+        self, app_project, deployable, sdk
+    ) -> None:
+        env = android_env(sdk=str(sdk))
+
+        with pytest.raises(ValueError, match="no console"):
+            self._sign(app_project, env, keystore="release.jks", store_password="stdin")
+
+    def test_a_source_apksigner_does_not_understand(
+        self, app_project, deployable, sdk
+    ) -> None:
+        env = android_env(sdk=str(sdk))
+
+        with pytest.raises(ValueError, match="not an apksigner password source"):
+            self._sign(
+                app_project, env, keystore="release.jks", store_password="MYAPP_PASS"
+            )
+
+    def test_a_source_that_names_nothing(self, app_project, deployable, sdk) -> None:
+        env = android_env(sdk=str(sdk))
+
+        with pytest.raises(ValueError, match="names nothing"):
+            self._sign(app_project, env, keystore="release.jks", store_password="env:")
+
+    def test_one_password_file_for_both_passwords(
+        self, app_project, deployable, sdk, tmp_path
+    ) -> None:
+        """Measured: apksigner reads one line per password from a file and
+        dies with "end of file reached" on the second."""
+        env = android_env(sdk=str(sdk))
+        secret = f"file:{tmp_path / 'pass'}"
+
+        with pytest.raises(ValueError, match="one password per line"):
+            self._sign(
+                app_project,
+                env,
+                keystore="release.jks",
+                store_password=secret,
+                key_password=secret,
+            )
+
+    def test_an_sdk_with_no_build_tools(
+        self, app_project, deployable, tmp_path
+    ) -> None:
+        env = android_env(sdk=str(tmp_path / "empty-sdk"))
+
+        with pytest.raises(ValueError, match="apksigner="):
+            self._sign(
+                app_project, env, keystore="release.jks", store_password="env:KS"
+            )
+
+    def test_an_environment_that_was_never_retargeted(self, app_project) -> None:
+        from pcons.toolchains.qt.apk import sign_apk
+
+        env = Environment()
+
+        with pytest.raises(ValueError, match="retargeted with"):
+            sign_apk(
+                app_project,
+                env,
+                app="myapp",
+                apk=None,  # ty: ignore[invalid-argument-type]
+                keystore="release.jks",
+                store_password="env:KS",
+            )
+
+
+class TestWhereTheSignedPackageGoes:
+    def test_it_is_the_name_qt_gives_it(self, app_project) -> None:
+        from pcons.toolchains.qt.apk import signed_apk_path
+
+        env = android_env()
+
+        assert signed_apk_path(env, "myapp") == Path("build") / SIGNED
+
+    def test_an_explicit_output_directory_is_honoured(self, app_project) -> None:
+        from pcons.toolchains.qt.apk import signed_apk_path
+
+        env = android_env()
+
+        assert signed_apk_path(env, "myapp", output="package") == Path(
+            "package/build/outputs/apk/release/package-release-signed.apk"
+        )

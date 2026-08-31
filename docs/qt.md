@@ -524,6 +524,61 @@ default.
     brings its own wrapper. Gradle needs a JDK it supports: 21 works, 26
     fails inside the Android Gradle plugin.
 
+#### Signing a release package
+
+A release package comes out of androiddeployqt unsigned and installs on
+nothing. `sign_apk` signs it with `apksigner`, on an edge of its own:
+
+```python
+from pcons.toolchains.qt.apk import android_apk, sign_apk
+
+apk = android_apk(project, env, app=app, settings=settings, release=True)
+signed = sign_apk(
+    project,
+    env,
+    app=app,
+    apk=apk,
+    keystore="/etc/keys/release.jks",
+    alias="upload",
+    store_password="env:MYAPP_KEYSTORE_PASS",
+)
+```
+
+**The password is named, never given.** `store_password` is an apksigner
+password source: `env:NAME` reads it from the environment the build runs
+in, `file:PATH` from the first line of a file. Either way the generated
+build file holds a variable name or a path, and apksigner reads the value
+itself when the edge runs. `pass:<password>` is refused, because pcons
+would write it into `build.ninja`, and so is `stdin`, because a build edge
+has no console to answer a prompt.
+
+`alias` is needed only when the keystore holds more than one key.
+`key_password` names where the private key password comes from, in the same
+two forms; left out, apksigner opens the key with the keystore password.
+Two `file:` sources may not be the same file: apksigner reads one password
+per line from a file and fails on the second with `end of file reached`.
+
+The keystore is an implicit dependency of the edge, so a new keystore
+re-signs. It is never generated: without `keystore=` the call raises and
+names the argument, rather than falling back to a debug key. Debug packages
+need none of this -- Gradle signs them with its own debug key, and
+`android_apk` without `release=True` produces one that installs.
+
+The signed package lands beside the unsigned one, at
+`<output>/build/outputs/apk/release/<output>-release-signed.apk`, which is
+the name Qt's own `--sign` gives it.
+
+!!! note "Why not androiddeployqt --sign"
+    androiddeployqt signs on its own with `--sign <keystore> <alias>`, and
+    it does read `QT_ANDROID_KEYSTORE_STORE_PASS` and
+    `QT_ANDROID_KEYSTORE_KEY_PASS` from the build-time environment, so that
+    path would keep the password out of the build file too. A separate edge
+    wins on three counts: changing the keystore re-signs instead of
+    re-running Gradle, the build file says where the password comes from
+    instead of depending on ambient variables nothing declares, and
+    `--sign` renames the package androiddeployqt writes, which would make
+    the path depend on a signing argument.
+
 ### Packaging into installers
 
 Deployed Qt apps compose with the installer generators in
