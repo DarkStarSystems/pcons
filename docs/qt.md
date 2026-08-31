@@ -487,7 +487,42 @@ directory the way Qt's CMake does. One environment then builds any number of
 applications instead of needing one environment each because of a packaging
 detail.
 
-Running androiddeployqt and Gradle are not pcons's job yet.
+#### Building the package
+
+```python
+from pcons.toolchains.qt.apk import android_apk
+
+apk = android_apk(project, env, app=app, settings=settings)
+```
+
+The staging above happens on its own when `android_apk` is not given a
+`staged=`, so a package cannot be built without the application in it.
+androiddeployqt is a host tool, and the Qt located for an Android
+environment already answers with the host directories, so nothing has to be
+told where it is.
+
+The package lands at
+`<output>/build/outputs/apk/debug/<output>-debug.apk`. Gradle names it after
+the **output directory**, not after the application, and `release=True`
+gives `<output>/build/outputs/apk/release/<output>-release-unsigned.apk` --
+unsigned, so it installs on nothing until it is signed. The debug default is
+signed with Gradle's own debug key and installs.
+
+`no_build=True` passes `--no-build`, which is androiddeployqt's "install a
+package built earlier" mode rather than a way to stop before Gradle: on its
+own it writes nothing at all. The target is a stamp and is not built by
+default.
+
+!!! note "This edge runs a build system"
+    androiddeployqt drives Gradle, and pcons's first rule is configuration
+    rather than execution. It is still the right call -- the alternative is
+    owning Qt's Java, its manifest merging and its resource pipeline -- but
+    the cost is real. The first run downloads the Gradle distribution and
+    the Android Gradle plugin from the network, which takes minutes; later
+    runs use the cache. With a warm cache, Qt 6.11.1: 19 s and 35 Gradle
+    tasks for a debug package. No system Gradle is needed, androiddeployqt
+    brings its own wrapper. Gradle needs a JDK it supports: 21 works, 26
+    fails inside the Android Gradle plugin.
 
 ### Packaging into installers
 
