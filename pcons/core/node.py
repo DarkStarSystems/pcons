@@ -56,7 +56,7 @@ class BuildInfo(TypedDict, total=False):
     sources: list[Any]  # list[Node], but avoid circular import
     depfile: PathToken | None  # PathToken with suffix for depfile path
     deps_style: str | None  # Ninja dependency style ("gcc" or "msvc")
-    command: str | list[str]  # Direct command (generic/custom builders)
+    command: str | list[Any]  # Direct command (generic/custom builders)
     description: str  # Human-readable build description
 
     # Toolchain-provided context; the resolver uses

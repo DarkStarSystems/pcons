@@ -30,7 +30,7 @@ from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode, Node
-from pcons.core.subst import TargetPath
+from pcons.core.subst import PathToken, TargetPath
 
 logger = logging.getLogger(__name__)
 
@@ -234,10 +234,45 @@ class Resolver:
 
         ScannerResolver(self.project).run(self._targets_in_build_order())
 
+        self._link_command_paths()
+
         # Expand command templates for all nodes
         trace("resolve", "Starting command expansion")
         self._expand_node_commands()
         trace("resolve", "Resolution complete")
+
+    def _link_command_paths(self) -> None:
+        """Replace each Target or Node written into a command with its path.
+
+        ``env.Command(command=[tool, ...])`` names what runs the command.
+        The token survives declaration as the object itself, because the
+        outputs it stands for do not exist until every target is resolved.
+        Here they do, so it becomes a ``PathToken`` the generators render
+        the way they render every other path they produce.
+
+        The dependency edge is not made here: ``env.Command`` already
+        recorded it with ``depends()``, which keeps the tool out of
+        ``$SOURCES`` and leaves the caller's indices meaning what they meant.
+        """
+        from pcons.core.target import Target as TargetClass
+
+        for target in self.project.targets:
+            if target._builder_name != "Command" or not target.output_nodes:
+                continue
+            build_info = target.output_nodes[0]._build_info
+            if not build_info:
+                continue
+            command = build_info.get("command")
+            if not command or not any(
+                isinstance(token, (TargetClass, FileNode)) for token in command
+            ):
+                continue
+            build_info["command"] = [
+                _command_path(target, token)
+                if isinstance(token, (TargetClass, FileNode))
+                else token
+                for token in command
+            ]
 
     def _targets_in_build_order(self) -> list[Target]:
         """Get targets in resolution order (dependencies before dependents)."""
@@ -451,3 +486,35 @@ class Resolver:
             "  Expanded command: %s",
             command_tokens[:10] if len(command_tokens) > 10 else command_tokens,
         )
+
+
+def _command_path(owner: Target, token: Target | FileNode) -> PathToken:
+    """The path a Target or FileNode written into *owner*'s command stands for.
+
+    A target has to name one file for this to mean anything, so one that
+    builds several says which of them it meant rather than having a choice
+    made for it.
+    """
+    from pcons.core.errors import PconsError
+    from pcons.core.target import Target as TargetClass
+
+    if not isinstance(token, TargetClass):
+        return PathToken(path=str(token.path), path_type="project")
+
+    outputs = token.output_nodes
+    if not outputs:
+        raise PconsError(
+            f"command for '{owner.qualified_name}' names target "
+            f"'{token.qualified_name}', which builds no file.",
+            location=owner.defined_at,
+        )
+    if len(outputs) > 1:
+        names = ", ".join(str(n.path) for n in outputs)
+        raise PconsError(
+            f"command for '{owner.qualified_name}' names target "
+            f"'{token.qualified_name}', which builds several files "
+            f"({names}), so which one to run is not decided. Write the "
+            f"one that is meant: {token.name}.output_nodes[0].",
+            location=owner.defined_at,
+        )
+    return PathToken(path=str(outputs[0].path), path_type="project")

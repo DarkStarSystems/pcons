@@ -884,7 +884,7 @@ class GenericCommandBuilder(BaseBuilder):
 
     def __init__(
         self,
-        command: str | list[str],
+        command: str | Sequence[Any],
         *,
         rule_name: str | None = None,
         restat: bool = False,
@@ -938,7 +938,7 @@ class GenericCommandBuilder(BaseBuilder):
         self._depfile = depfile
         self._deps_style = deps_style
 
-    def _tokenize_command(self, command: str | list[str]) -> list:
+    def _tokenize_command(self, command: str | Sequence[Any]) -> list:
         """Convert command string to tokenized list with typed markers.
 
         Converts $SOURCE/$TARGET patterns to SourcePath()/TargetPath()

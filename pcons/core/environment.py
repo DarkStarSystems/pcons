@@ -58,7 +58,7 @@ _SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
 
 
 def _warn_if_source_reads_as_singular(
-    command: str | list[str], sources: int, at: SourceLocation
+    command: str | Sequence[Any], sources: int, at: SourceLocation
 ) -> None:
     """Flag ``$SOURCE`` written where more than one source will land.
 
@@ -1408,7 +1408,7 @@ class Environment(_EnvironmentStubs):
         *,
         target: str | Path | list[str | Path],
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
-        command: str | list[str] = "",
+        command: str | Sequence[str | Target | FileNode] = "",
         name: str | None = None,
         depends: str | Path | Sequence[str | Path] | None = None,
         restat: bool = False,
@@ -1469,6 +1469,16 @@ class Environment(_EnvironmentStubs):
                     or "--out=$TARGET". Attached to a form that expands to
                     several paths, the text repeats on each of them.
                     Any other $variable is expanded from this environment.
+
+                    In the list form, a token may be a ``Target`` or a
+                    ``FileNode`` instead of a string: it expands to that
+                    output's path, as seen from where the command runs, and
+                    becomes an implicit dependency of this command, so the
+                    build produces it first and re-runs when it changes. It
+                    does not join ``$SOURCES``, so the indices a caller
+                    already wrote keep their meaning. A ``Target`` with
+                    several outputs is ambiguous and raises; name the one
+                    that is meant, ``tool.output_nodes[0]``.
 
                     **The command runs in the build directory**, unlike
                     ``sources=`` (read from the declaring script's
@@ -1591,6 +1601,14 @@ class Environment(_EnvironmentStubs):
                 command="./${SOURCES[0]} --out=$TARGET ${SOURCES[1:]}"
             )
 
+            # Name a tool this build produced. It becomes its own path
+            # and a dependency, and $SOURCES stays the real inputs.
+            atlas = env.Command(
+                target="atlas.bin",
+                source=sprites,
+                command=[packer, "--out=$TARGET", "$SOURCES"],
+            )
+
             # Can be passed to Install() since it's a Target
             project.Install("dist/", [generated])
         """
@@ -1598,6 +1616,13 @@ class Environment(_EnvironmentStubs):
         from pcons.core.errors import PconsError
         from pcons.core.node import FileNode
         from pcons.core.target import Target as TargetClass
+
+        command_deps: list[TargetClass | FileNode] = []
+        if not isinstance(command, str):
+            command = list(command)
+            command_deps = [
+                token for token in command if isinstance(token, (TargetClass, FileNode))
+            ]
 
         if depfile is not None and not depfile.startswith("."):
             raise PconsError(
@@ -1721,6 +1746,9 @@ class Environment(_EnvironmentStubs):
                 src if isinstance(src, TargetClass) else next(normalized_iter)
                 for src in source_list
             ]
+
+        for dep in command_deps:
+            cmd_target.depends(dep)
 
         # Apply extra implicit dependencies
         if depends is not None:
