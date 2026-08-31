@@ -199,3 +199,19 @@ def test_the_executable_spelling_each_shell_needs(
     from pcons.core.paths import executable_form
 
     assert executable_form(path, windows=windows) == expected
+
+
+def test_text_attached_to_the_marker_comes_along(tmp_path: Path, gcc_toolchain) -> None:
+    """$TOOL is a path like $SOURCE and $TARGET, so a token may carry it
+    inside a larger argument."""
+    project = _project(tmp_path)
+    env = project.Environment(toolchain=gcc_toolchain)
+    env.Command(
+        name="run",
+        target=project.build_dir / "out.txt",
+        tool="/opt/sdk/bin/signer",
+        source=["in.txt"],
+        command="cp --helper=$TOOL $SOURCE $TARGET",
+    )
+
+    assert "cp --helper=/opt/sdk/bin/signer $in $out" in _ninja(project)

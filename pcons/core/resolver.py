@@ -261,9 +261,7 @@ class Resolver:
         for target in self.project.targets:
             if target._builder_name != "Command" or not target.output_nodes:
                 continue
-            build_info = target.output_nodes[0]._build_info
-            if not build_info:
-                continue
+            build_info = target.output_nodes[0]._build_info or {}
             command = build_info.get("command")
             if not command or not any(
                 isinstance(token, (TargetClass, FileNode, ToolPath))

@@ -219,3 +219,46 @@ class TestTheFileOnDisk:
 
         assert path == tmp_path / "sub" / "s.json"
         assert json.loads(path.read_text())["abi"] == "arm64-v8a"
+
+
+class TestAnAbiNobodyMapped:
+    def test_a_preset_whose_abi_has_no_sysroot_directory(self, found_qt) -> None:
+        """`android()` rejects an unknown ABI itself, so this only reaches a
+        preset written by hand -- riscv64, which the NDK ships a sysroot for
+        and pcons has no ABI name for."""
+        from pcons.toolchains.presets import CrossPreset
+
+        env = _android_env()
+        env._cross_preset = CrossPreset(
+            name="android-riscv64",
+            arch="riscv64",
+            triple="riscv64-linux-android35",
+            ndk=NDK,
+            ndk_host="linux-x86_64",
+            sdk=SDK,
+        )
+
+        with pytest.raises(ValueError, match="riscv64"):
+            _settings(env)
+
+
+class TestWhereTheFileGoes:
+    def test_the_default_is_the_build_directory(self, found_qt, test_project) -> None:
+        env = _android_env()
+        env.build_dir = "build"
+
+        path = android_deployment_settings(test_project, env, app="myapp")
+
+        assert path == Path(test_project.root_dir) / "build" / (
+            "android-deployment-settings.json"
+        )
+        assert json.loads(path.read_text())["abi"] == "arm64-v8a"
+
+    def test_a_relative_path_is_from_the_project_root(
+        self, found_qt, test_project
+    ) -> None:
+        path = android_deployment_settings(
+            test_project, _android_env(), app="myapp", output="out/s.json"
+        )
+
+        assert path == Path(test_project.root_dir) / "out" / "s.json"
