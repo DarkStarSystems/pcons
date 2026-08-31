@@ -6,6 +6,7 @@ from pathlib import Path
 from pcons.core.builder import MultiOutputBuilder, OutputSpec
 from pcons.core.node import FileNode
 from pcons.core.project import Project
+from pcons.core.subst import TargetPath, subst
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
@@ -146,6 +147,73 @@ class TestNinjaMultiOutput:
         # Check for output variables
         assert "out_primary = build/mylib.dll" in content
         assert "out_import_lib = build/mylib.lib" in content
+
+    def test_dll_outputs_keep_indexed_flags_and_expand_embedded_target(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir=".")
+        target = Target("shlib")
+        dll_node = FileNode("build/mylib.dll")
+        source_node = FileNode("src/mylib.obj")
+        outputs = {
+            "primary": {
+                "path": Path("build/mylib.dll"),
+                "suffix": ".dll",
+                "implicit": False,
+                "required": True,
+            },
+            "import_lib": {
+                "path": Path("build/mylib.lib"),
+                "suffix": ".lib",
+                "implicit": False,
+                "required": True,
+            },
+            "export_file": {
+                "path": Path("build/mylib.exp"),
+                "suffix": ".exp",
+                "implicit": True,
+                "required": True,
+            },
+        }
+        dll_node._build_info = {
+            "tool": "link",
+            "command_var": "sharedcmd",
+            "language": None,
+            "sources": [source_node],
+            "outputs": outputs,
+            "command": subst(
+                [
+                    "link",
+                    TargetPath(prefix="/OUT:", index=0),
+                    TargetPath(prefix="/IMPLIB:", index=1),
+                    "-Map=${TARGET}.map",
+                ],
+                {"TARGET": TargetPath()},
+            ),
+        }
+        dll_node.builder = MultiOutputBuilder(
+            "SharedLibrary",
+            "link",
+            "sharedcmd",
+            outputs=[
+                OutputSpec("primary", ".dll"),
+                OutputSpec("import_lib", ".lib"),
+                OutputSpec("export_file", ".exp", implicit=True),
+            ],
+            src_suffixes=[".obj"],
+        )
+        target.output_nodes.append(dll_node)
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = normalize_path((tmp_path / "build.ninja").read_text())
+        command = next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("command = link ")
+        )
+        assert "/OUT:$target_0" in command
+        assert "/IMPLIB:$target_1" in command
+        assert command.count("-Map=$target_") == 3
 
     def test_secondary_nodes_not_written(self, tmp_path):
         """Test that secondary nodes don't get their own build statements."""

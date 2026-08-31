@@ -6,6 +6,7 @@ Shell quoting happens only at the final step via to_shell_command().
 """
 
 import platform
+from dataclasses import replace
 
 import pytest
 
@@ -18,6 +19,7 @@ from pcons.core.subst import (
     MultiCmd,
     Namespace,
     PathToken,
+    SourcePath,
     TargetPath,
     subst,
     to_shell_command,
@@ -277,6 +279,34 @@ class TestEmbeddedTargetMarker:
                 ["${TARGET}.map=${TARGET}"],
                 {"TARGET": TargetPath()},
             )
+
+    def test_attached_text_is_expanded_recursively(self):
+        result = subst(
+            ["${PFX}${TARGET}.map"],
+            {
+                "PFX": "-Wl,-Map=$STEM",
+                "STEM": "report-",
+                "TARGET": TargetPath(),
+            },
+        )
+
+        assert result == [TargetPath(prefix="-Wl,-Map=report-", suffix=".map", start=0)]
+
+    @pytest.mark.parametrize("marker", [SourcePath(), TargetPath()])
+    @pytest.mark.parametrize(
+        ("expression", "prefix", "suffix"),
+        [
+            ("${prefix(-Map=, PATH)}", "-Map=", ""),
+            ("${suffix(PATH, .map)}", "", ".map"),
+            ("${wrap(-Map=, PATH, .map)}", "-Map=", ".map"),
+        ],
+    )
+    def test_affix_functions_preserve_path_marker(
+        self, marker, expression, prefix, suffix
+    ):
+        result = subst([expression], {"PATH": marker})
+
+        assert result == [replace(marker, prefix=prefix, suffix=suffix, start=0)]
 
 
 class TestSubstFunctions:

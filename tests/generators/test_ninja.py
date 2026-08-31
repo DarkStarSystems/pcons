@@ -72,6 +72,52 @@ class TestNinjaGenerator:
         assert "-Wl,-Map=$target_0.map" in content
         assert "TargetPath(" not in content
 
+    def test_embedded_target_does_not_rewrite_bare_multi_output_target(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target=["a.txt", "b.txt"],
+            source=[],
+            command=["tool", "-o", "$TARGET", "-Map=${TARGET}.map"],
+        )
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        command = next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("command = tool ")
+        )
+        assert "tool -o $out" in command
+        assert command.count("-Map=$target_") == 2
+        assert "$target_0.map" in command
+        assert "$target_1.map" in command
+
+    def test_embedded_source_does_not_rewrite_bare_multi_input_source(self, tmp_path):
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        env.Command(
+            target="out.txt",
+            source=["a.txt", "b.txt"],
+            command=["tool", "-i", "$SOURCE", "--dep=${SOURCE}.d"],
+        )
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        command = next(
+            line.strip()
+            for line in content.splitlines()
+            if line.strip().startswith("command = tool ")
+        )
+        assert "tool -i $in" in command
+        assert command.count("--dep=$source_") == 2
+
 
 class TestNinjaBuildStatements:
     def test_writes_build_for_target(self, tmp_path):

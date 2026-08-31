@@ -919,15 +919,14 @@ class MakefileGenerator(BaseGenerator):
             out_path = self._at_build_dir(out_path)
             depfile_path = self._at_build_dir(depfile_path) if depfile_path else ""
 
-        # An explicit index on any marker (even 0) switches all markers of
-        # that type to indexed mode; index=None means "auto".
+        # An explicit index on any marker (even 0) switches all unindexed
+        # markers of that type to indexed mode. A slice expands independently
+        # and does not change a neighbouring all-paths marker.
         has_indexed_source = any(
-            isinstance(t, SourcePath) and (t.index is not None or t.is_slice)
-            for t in tokens
+            isinstance(t, SourcePath) and t.index is not None for t in tokens
         )
         has_indexed_target = any(
-            isinstance(t, TargetPath) and (t.index is not None or t.is_slice)
-            for t in tokens
+            isinstance(t, TargetPath) and t.index is not None for t in tokens
         )
 
         result: list[str] = []

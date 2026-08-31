@@ -697,10 +697,11 @@ def _bare_marker_fallback(
     parts = var_name.split(".")
     for end in range(len(parts) - 1, 0, -1):
         prefix_name = ".".join(parts[:end])
-        value = namespace.get(prefix_name, _MISSING)
+        try:
+            value = _lookup_var(prefix_name, namespace, expanding, location)
+        except MissingVariableError:
+            continue
         if isinstance(value, (SourcePath, TargetPath)):
-            if prefix_name in expanding:
-                _lookup_var(prefix_name, namespace, expanding, location)
             return value, "." + ".".join(parts[end:])
     return None
 
@@ -812,6 +813,8 @@ def _call_function(
                 result.append(PathToken(prefix, item.path, "project"))
             elif isinstance(item, BuildPath):
                 result.append(PathToken(prefix, item.path, "build"))
+            elif isinstance(item, (SourcePath, TargetPath)):
+                result.append(_attach_path_marker(item, prefix, ""))
             else:
                 result.append(prefix + str(item))
         return result
@@ -825,7 +828,12 @@ def _call_function(
         suffix = str(_resolve_arg(args[1], namespace, expanding, location))
         items = items if isinstance(items, list) else [items]
         items = _expand_items(items, namespace, expanding, location)
-        suffix_result: list[CommandToken] = [str(item) + suffix for item in items]
+        suffix_result: list[CommandToken] = [
+            _attach_path_marker(item, "", suffix)
+            if isinstance(item, (SourcePath, TargetPath))
+            else str(item) + suffix
+            for item in items
+        ]
         return suffix_result
 
     elif func_name == "wrap":
@@ -839,7 +847,10 @@ def _call_function(
         items = items if isinstance(items, list) else [items]
         items = _expand_items(items, namespace, expanding, location)
         wrap_result: list[CommandToken] = [
-            prefix + str(item) + suffix for item in items
+            _attach_path_marker(item, prefix, suffix)
+            if isinstance(item, (SourcePath, TargetPath))
+            else prefix + str(item) + suffix
+            for item in items
         ]
         return wrap_result
 
