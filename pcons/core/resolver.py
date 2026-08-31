@@ -23,6 +23,8 @@ flags, etc. can be customized after target creation.
 from __future__ import annotations
 
 import logging
+import os
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -30,7 +32,7 @@ from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode, Node
-from pcons.core.subst import PathToken, TargetPath
+from pcons.core.subst import PathToken, TargetPath, ToolPath
 
 logger = logging.getLogger(__name__)
 
@@ -264,14 +266,13 @@ class Resolver:
                 continue
             command = build_info.get("command")
             if not command or not any(
-                isinstance(token, (TargetClass, FileNode)) for token in command
+                isinstance(token, (TargetClass, FileNode, ToolPath))
+                for token in command
             ):
                 continue
+            tool = (getattr(target, "_builder_data", None) or {}).get("tool")
             build_info["command"] = [
-                _command_path(target, token)
-                if isinstance(token, (TargetClass, FileNode))
-                else token
-                for token in command
+                _resolved_command_token(target, token, tool) for token in command
             ]
 
     def _targets_in_build_order(self) -> list[Target]:
@@ -486,6 +487,45 @@ class Resolver:
             "  Expanded command: %s",
             command_tokens[:10] if len(command_tokens) > 10 else command_tokens,
         )
+
+
+def _resolved_command_token(owner: Target, token: Any, tool: Any) -> Any:
+    """One command token with whatever stands for a path turned into one."""
+    from pcons.core.target import Target as TargetClass
+
+    if isinstance(token, (TargetClass, FileNode)):
+        return _command_path(owner, token)
+    if isinstance(token, ToolPath):
+        return _tool_token(owner, tool, token)
+    return token
+
+
+def _tool_token(owner: Target, tool: Any, marker: ToolPath) -> Any:
+    """What ``$TOOL`` stands for, spelled so the shell will run it.
+
+    A tool this build produces is a path, and the only one whose spelling
+    pcons owns. Anything else is the caller's own word for a program that
+    already exists — an absolute path to an installed tool, or a bare name
+    for ``$PATH`` — and passes through, since rewriting either would only
+    break it.
+    """
+    from pcons.core.target import Target as TargetClass
+
+    if isinstance(tool, TargetClass):
+        path = _command_path(owner, tool)
+        return replace(
+            path, prefix=marker.prefix, suffix=marker.suffix, executable=True
+        )
+    text = str(tool)
+    if os.path.isabs(text):
+        return PathToken(
+            prefix=marker.prefix,
+            path=text,
+            path_type="absolute",
+            suffix=marker.suffix,
+            executable=True,
+        )
+    return f"{marker.prefix}{text}{marker.suffix}"
 
 
 def _command_path(owner: Target, token: Target | FileNode) -> PathToken:

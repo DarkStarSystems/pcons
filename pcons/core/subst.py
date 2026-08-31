@@ -27,6 +27,8 @@ Generator-agnostic path markers, which generators render in native syntax:
 - TargetPath(basename=True): the output's filename alone, for a flag that
   names the library it is building (an install name, a SONAME).
 - NodeVar("NAME"): a per-edge value the toolchain attached to the node.
+- ToolPath(): the program a command runs, from ``env.Command(tool=...)``.
+  A command template writes it as $TOOL.
 """
 
 from __future__ import annotations
@@ -135,6 +137,10 @@ class PathToken:
     path: str = ""
     path_type: str = "project"  # "project", "build", or "absolute"
     suffix: str = ""
+    #: This token is the program the command runs, not an argument to it, so
+    #: it is spelled the way the shell will execute it. See
+    #: :func:`pcons.core.paths.executable_form`.
+    executable: bool = False
 
     def relativize(self, relativizer: Callable[[str], str]) -> str:
         """Return the complete token: prefix + path + suffix, with the
@@ -142,8 +148,15 @@ class PathToken:
         for ninja); "build" and "absolute" paths pass through unchanged.
         """
         if self.path_type in ("build", "absolute"):
-            return self.prefix + self.path + self.suffix
-        return self.prefix + relativizer(self.path) + self.suffix
+            path = self.path
+        else:
+            path = relativizer(self.path)
+        if self.executable:
+            from pcons.configure.platform import get_platform
+            from pcons.core.paths import executable_form
+
+            path = executable_form(path, windows=get_platform().is_windows)
+        return self.prefix + path + self.suffix
 
     def __str__(self) -> str:
         """Fallback string representation (no relativization)."""
@@ -212,6 +225,23 @@ class TargetPath:
 
 
 @dataclass(frozen=True)
+class ToolPath:
+    """Marker for ``$TOOL``, the program a command runs.
+
+    ``env.Command(tool=...)`` says what runs the command; this stands for it
+    in the command template until resolution, which replaces it with a
+    ``PathToken`` carrying the tool's path and ``executable=True``.
+
+    Attributes:
+        prefix: Text that preceded the marker in its token.
+        suffix: Text that followed it.
+    """
+
+    prefix: str = ""
+    suffix: str = ""
+
+
+@dataclass(frozen=True)
 class NodeVar:
     """Marker for a per-edge value the toolchain attached to one node.
 
@@ -266,7 +296,7 @@ class SourcePath:
 
 # Type alias for command tokens (can be string, PathToken, or marker objects)
 # SourcePath/TargetPath markers are preserved through subst() for generators to handle
-CommandToken = str | PathToken | SourcePath | TargetPath | NodeVar
+CommandToken = str | PathToken | SourcePath | TargetPath | ToolPath | NodeVar
 
 # A flag, which may carry a path (PathToken) or something the generator
 # resolves per edge (TargetPath, e.g. an install name naming its own output).

@@ -1407,6 +1407,7 @@ class Environment(_EnvironmentStubs):
         self,
         *,
         target: str | Path | list[str | Path],
+        tool: Target | str | Path | None = None,
         source: Target | str | Path | Sequence[Target | str | Path] | None = None,
         command: str | Sequence[str | Target | FileNode] = "",
         name: str | None = None,
@@ -1444,6 +1445,20 @@ class Environment(_EnvironmentStubs):
                     the prefix explicitly: ``project.build_dir / "build/x.h"``.
                     An absolute path outside the build directory is an
                     external output, produced in place.
+            tool: The program that runs this command, written ``$TOOL`` in
+                    *command*. A ``Target`` becomes an implicit dependency,
+                    never a source, so ``$SOURCES`` keeps meaning what the
+                    command consumes and the indices a caller wrote keep
+                    their files. It is spelled the way the shell will run
+                    it, so no ``./`` is written by hand and the same script
+                    works on every platform. A tool from another environment
+                    carries that environment's own output directory, which
+                    is what makes a host tool usable in a cross build.
+
+                    A ``str`` or ``Path`` is for a tool this build does not
+                    produce: an absolute path to an installed program, or a
+                    bare name looked up on ``$PATH``. Neither adds a
+                    dependency, since there is nothing to build.
             source: Input file(s) that the command depends on. Can be Targets
                    (whose output files become sources), paths, or None. A
                    relative path is read from the directory of the script
@@ -1601,12 +1616,13 @@ class Environment(_EnvironmentStubs):
                 command="./${SOURCES[0]} --out=$TARGET ${SOURCES[1:]}"
             )
 
-            # Name a tool this build produced. It becomes its own path
-            # and a dependency, and $SOURCES stays the real inputs.
+            # Name the tool that runs it. $SOURCES stays the real inputs,
+            # and nothing writes a "./" or a platform conditional.
             atlas = env.Command(
                 target="atlas.bin",
+                tool=packer,
                 source=sprites,
-                command=[packer, "--out=$TARGET", "$SOURCES"],
+                command="$TOOL --out=$TARGET $SOURCES",
             )
 
             # Can be passed to Install() since it's a Target
@@ -1699,6 +1715,23 @@ class Environment(_EnvironmentStubs):
             deps_style=deps_style,
         )
 
+        from pcons.core.subst import ToolPath
+
+        names_tool = any(isinstance(t, ToolPath) for t in builder.command)
+        if names_tool and tool is None:
+            raise PconsError(
+                "$TOOL in a command names the program tool= gives it, and "
+                "this command has no tool=.",
+                location=get_caller_location(),
+            )
+        if tool is not None and not names_tool:
+            raise PconsError(
+                f"tool={tool!r} is never run: the command has no $TOOL. "
+                f"Write it where the program goes, or drop tool= and list "
+                f"the tool under source= or depends=.",
+                location=get_caller_location(),
+            )
+
         # Nodes up front, so the declared order below can splice Targets back
         # into their positions; the builder passes existing nodes through.
         normalized = builder._normalize_sources(immediate_sources, self)
@@ -1749,6 +1782,11 @@ class Environment(_EnvironmentStubs):
 
         for dep in command_deps:
             cmd_target.depends(dep)
+
+        if tool is not None:
+            cmd_target._builder_data["tool"] = tool
+            if isinstance(tool, TargetClass):
+                cmd_target.depends(tool)
 
         # Apply extra implicit dependencies
         if depends is not None:

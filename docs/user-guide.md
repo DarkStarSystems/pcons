@@ -2163,6 +2163,7 @@ env.Command(
 | `${TARGETS[n]}` | Indexed target access (0-based) |
 | `${SOURCES[n:m]}` | A range of sources — either end may be omitted |
 | `${TARGETS[n:m]}` | A range of targets |
+| `$TOOL` | The program `tool=` names, spelled so the shell will run it |
 | `$SRCDIR` | Project source tree root directory |
 | `$$` | Literal `$` (escaped) |
 
@@ -2185,7 +2186,22 @@ env.Command(
 command = "./${SOURCES[0]} --out=$TARGET -i${SOURCES[1:]}"
 ```
 
-The `./` above is not decoration: `${SOURCES[0]}` expands to a plain build-directory name like `collate`, and a POSIX shell reads a bare name as something to look up on `$PATH`, where it will not find it. (`cmd.exe` searches the current directory instead, and does not take `./`, so a build script that runs a built tool should pick the prefix per platform — see `examples/61_command_substitution`.)
+The `./` above is not decoration: `${SOURCES[0]}` expands to a plain build-directory name like `collate`, and a POSIX shell reads a bare name as something to look up on `$PATH`, where it will not find it. `cmd.exe` searches the current directory instead, and does not take `./`, so this spelling needs a per-platform prefix — see `examples/61_command_substitution`.
+
+**`tool=` writes it for you.** The program that runs a command is not one of its inputs, so it has its own argument, and pcons spells it the way the shell it is writing for will execute it:
+
+```python
+env.Command(
+    target=gen_dir / "entries.c",
+    tool=collate_tool,
+    source=def_files,
+    command="$TOOL $TARGET $SOURCES",
+)
+```
+
+`tool=` becomes an implicit dependency, never a source, so `$SOURCES` keeps meaning what the command consumes and the indices you already wrote keep their files. A `Target` is a program this build produces, from any environment — a host tool over a cross-compiled artifact is the case it exists for. A `str` or a `Path` is a program that already exists: an absolute path to an installed tool, or a bare name looked up on `$PATH`. Neither of those adds a dependency, since there is nothing to build.
+
+`$TOOL` and `tool=` go together: one without the other is an error.
 
 Text attached to a form that expands to *several* paths repeats on each of them, which is what such a flag always means: `-i${SOURCES[1:]}` becomes `-ione.def -itwo.def`, not one `-i` welded to the first path.
 
