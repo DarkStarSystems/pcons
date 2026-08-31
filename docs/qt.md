@@ -406,7 +406,12 @@ qt = find_qt(project, env, modules=["Core"])
 app = project.SharedLibrary("myapp", env, sources=["main.cpp"])
 
 settings = android_deployment_settings(
-    project, env, app=app, package_name="org.example.myapp"
+    project,
+    env,
+    app=app,
+    package_name="org.example.myapp",
+    package_source_dir="android",
+    permissions=["android.permission.INTERNET"],
 )
 ```
 
@@ -415,6 +420,21 @@ returned. A configure that decides the same settings again leaves the file
 alone, so androiddeployqt does not re-run for it. Everything in it comes from the cross preset and from the Qt
 found for that environment, so `android()` must be given `sdk=` as well as
 `ndk=`.
+
+`package_source_dir` is a directory of Android sources -- the manifest,
+Java, resources -- that androiddeployqt overlays on Qt's own templates. It
+is made absolute against the project root, because androiddeployqt reads it
+directly rather than through a build directory. Assembling that directory
+is the caller's: `project.Install()` is one way to build it out of a shared
+tree and a per-application one. `permissions` takes bare names; the
+`[{"name": ...}]` shape the file wants is not the caller's business.
+
+The tools androiddeployqt runs itself -- `rcc`, `qmlimportscanner`,
+`qmldom` -- are named in the file, and they are **host** programs. A Qt for
+Android ships none of them, and `qtpaths --query` on such an install reports
+`QT_HOST_BINS` and `QT_HOST_LIBEXECS` pointing at the host Qt beside it, so
+`find_qt` already answers with the right directories. `qmldom` is not in
+every Qt build and is left out when it is missing.
 
 This covers one ABI, one application, and no QML. Two things pcons never
 writes, because androiddeployqt works them out itself with the built
