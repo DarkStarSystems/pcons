@@ -463,8 +463,31 @@ same Qt modules either way, and the application's own module is reported
 with no path -- which is right, since it is in the resource and there is
 nothing on disk to bundle.
 
-Running the tool, staging the `.so` into `<output>/libs/<abi>/`, and
-Gradle are not pcons's job yet.
+#### Staging the application library
+
+androiddeployqt reads the application out of `<output>/libs/<abi>/` and does
+not put it there. Its own dependency libraries it does copy, out of the
+`extraLibraryDirs` the settings file names, but not the application itself.
+With nothing staged it exits 0 and reports success, having packaged no
+application at all, so this step is not optional:
+
+```python
+from pcons.toolchains.qt.apk import stage_application_library
+
+staged = stage_application_library(project, env, app=app)
+```
+
+One copy, into `<build>/<app>/libs/<abi>/lib<app>_<abi>.so`. The ABI suffix
+is what androiddeployqt looks for, and the directory is named after the
+application because androiddeployqt owns the whole of it -- two applications
+built in one environment each get their own.
+
+pcons copies rather than building the application straight into the staging
+directory the way Qt's CMake does. One environment then builds any number of
+applications instead of needing one environment each because of a packaging
+detail.
+
+Running androiddeployqt and Gradle are not pcons's job yet.
 
 ### Packaging into installers
 

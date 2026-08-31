@@ -1,13 +1,3 @@
-# SPDX-License-Identifier: MIT
-"""The deployment settings androiddeployqt reads.
-
-Every expected value here was read off a real file written by Qt's own CMake
-for an Android build, Qt 6.11.1, arm64-v8a. One version is one data point:
-these tests pin what that version wants, not a universal schema.
-"""
-
-from __future__ import annotations
-
 import json
 import os
 from collections.abc import Sequence
@@ -15,63 +5,18 @@ from pathlib import Path
 
 import pytest
 
-from pcons.configure.platform import get_platform
 from pcons.core.environment import Environment
-from pcons.toolchains.presets import android
 from pcons.toolchains.qt.android import android_deployment_settings, deployment_settings
 from pcons.toolchains.qt.finder import QtPackage
 
-from ._qt_test_utils import fake_qt_toolchain
-
-NDK = "/fake/ndk"
-SDK = "/fake/sdk"
-
-HOST_TOOLS = ("rcc", "qmlimportscanner", "qmldom")
-
-
-def _qt_package(root: Path, tools: Sequence[str] = HOST_TOOLS) -> QtPackage:
-    """A Qt for Android whose tools sit in the host Qt beside it.
-
-    That split is what ``qtpaths --query`` reports for a Qt for Android: the
-    prefix is the Android install, QT_HOST_BINS and QT_HOST_LIBEXECS are the
-    host one, and the Android install ships no runnable rcc at all.
-    """
-    host = root / "Qt" / "6.11.1" / "gcc_64"
-    (host / "bin").mkdir(parents=True, exist_ok=True)
-    (host / "libexec").mkdir(parents=True, exist_ok=True)
-    suffix = ".exe" if get_platform().is_windows else ""
-    for tool in tools:
-        (host / "libexec" / f"{tool}{suffix}").write_text("")
-    prefix = root / "Qt" / "6.11.1" / "android_arm64_v8a"
-    prefix.mkdir(parents=True, exist_ok=True)
-    return QtPackage(
-        version="6.11.1",
-        prefix=prefix,
-        bin_dir=host / "bin",
-        libexec_dir=host / "libexec",
-        is_framework=False,
-        found_via="qtpaths",
-        modules={},
-        module_factory=lambda name: None,
-    )
-
-
-def _android_env(arch: str = "arm64-v8a", *, sdk: str | None = SDK) -> Environment:
-    from pcons.toolchains.llvm import LlvmToolchain
-
-    env = Environment()
-    for name, cmd in (
-        ("cc", "clang"),
-        ("cxx", "clang++"),
-        ("link", "clang"),
-        ("ar", "ar"),
-    ):
-        tool = env.add_tool(name)
-        tool.set("cmd", cmd)
-        tool.set("flags", [])
-    env._toolchain = LlvmToolchain()
-    env.apply_cross_preset(android(ndk=NDK, arch=arch, api=35, sdk=sdk))
-    return env
+from ._qt_test_utils import (
+    ANDROID_NDK,
+    ANDROID_SDK,
+    QT_HOST_TOOLS,
+    android_env,
+    fake_qt_for_android,
+    fake_qt_toolchain,
+)
 
 
 def _qml_module(project, env, name: str, directory: str) -> None:
@@ -95,8 +40,8 @@ def _project(test_project):
 def install_qt(monkeypatch, tmp_path):
     """Put a Qt install in front of the settings writer, tools of my choosing."""
 
-    def install(tools: Sequence[str] = HOST_TOOLS) -> QtPackage:
-        qt = _qt_package(tmp_path, tools)
+    def install(tools: Sequence[str] = QT_HOST_TOOLS) -> QtPackage:
+        qt = fake_qt_for_android(tmp_path, tools)
         monkeypatch.setattr(
             "pcons.toolchains.qt.finder.qt_install", lambda project, env=None: qt
         )
@@ -135,43 +80,43 @@ class TestTheRequiredKeys:
     )
 
     def test_every_required_key_is_written(self, settings_for) -> None:
-        settings = settings_for(_android_env())
+        settings = settings_for(android_env())
         assert set(self.REQUIRED) <= set(settings)
 
     def test_the_qt_directory_is_the_one_found_for_this_environment(
         self, settings_for, found_qt
     ) -> None:
         """The Android Qt, not the host one that runs androiddeployqt."""
-        v = settings_for(_android_env())["qt"]
+        v = settings_for(android_env())["qt"]
         assert "arm64-v8a" in v
         assert Path(v["arm64-v8a"]).as_posix() == found_qt.prefix.as_posix()
 
     def test_the_install_facts_come_from_the_preset(self, settings_for) -> None:
         """The host tag names the machine running the build, so a literal one
         here would be red everywhere but on a Linux x86_64 runner."""
-        env = _android_env()
+        env = android_env()
         settings = settings_for(env)
 
-        assert settings["sdk"] == SDK
+        assert settings["sdk"] == ANDROID_SDK
         assert settings["ndk"] == env.cross.ndk
         assert settings["ndk-host"] == env.cross.ndk_host
 
     def test_the_application_binary_is_a_name_not_a_path(self, settings_for) -> None:
         """androiddeployqt builds lib<name>_<abi>.so out of it and looks for
         that under the output directory."""
-        settings = settings_for(_android_env(), app="myapp")
+        settings = settings_for(android_env(), app="myapp")
 
         assert settings["application-binary"] == "myapp"
 
     def test_the_stdcpp_path_is_the_sysroot_library_directory(
         self, settings_for
     ) -> None:
-        env = _android_env()
+        env = android_env()
         settings = settings_for(env)
 
         assert (
-            settings["stdcpp-path"]
-            == f"{NDK}/toolchains/llvm/prebuilt/{env.cross.ndk_host}/sysroot/usr/lib/"
+            settings["stdcpp-path"] == f"{ANDROID_NDK}/toolchains/llvm/prebuilt/"
+            f"{env.cross.ndk_host}/sysroot/usr/lib/"
         )
 
 
@@ -192,11 +137,11 @@ class TestTheStaticKeys:
         ],
     )
     def test_the_value(self, key: str, value: object, settings_for) -> None:
-        assert settings_for(_android_env())[key] == value
+        assert settings_for(android_env())[key] == value
 
     def test_the_description_names_pcons(self, settings_for) -> None:
         """CMake's own text says cmake wrote it. This one did not."""
-        assert "pcons" in settings_for(_android_env())["description"]
+        assert "pcons" in settings_for(android_env())["description"]
 
 
 class TestTheQtRelativeDirectories:
@@ -215,10 +160,10 @@ class TestTheQtRelativeDirectories:
         ],
     )
     def test_the_subdirectory(self, key: str, subdirectory: str, settings_for) -> None:
-        assert settings_for(_android_env())[key] == {"arm64-v8a": subdirectory}
+        assert settings_for(android_env())[key] == {"arm64-v8a": subdirectory}
 
     def test_they_are_keyed_by_the_same_abi_as_qt(self, settings_for) -> None:
-        settings = settings_for(_android_env("x86_64"))
+        settings = settings_for(android_env("x86_64"))
 
         for key in (
             "qtDataDirectory",
@@ -232,7 +177,7 @@ class TestTheQtRelativeDirectories:
 
 class TestWhereItLooksForLibraries:
     def test_the_extra_prefix_is_the_android_qt(self, settings_for, found_qt) -> None:
-        assert settings_for(_android_env())["extraPrefixDirs"] == [str(found_qt.prefix)]
+        assert settings_for(android_env())["extraPrefixDirs"] == [str(found_qt.prefix)]
 
     def test_the_extra_library_dir_is_where_a_shared_library_lands(
         self, settings_for, test_project
@@ -241,7 +186,7 @@ class TestWhereItLooksForLibraries:
         beside it. Asserted against a real target's output rather than against
         a second derivation of the path."""
         (Path(test_project.root_dir) / "a.c").write_text("int f(void){return 0;}\n")
-        env = _android_env()
+        env = android_env()
         env.library_directory = "lib"
         lib = test_project.SharedLibrary("dep", env, sources=["a.c"])
         test_project.resolve()
@@ -254,7 +199,7 @@ class TestWhereItLooksForLibraries:
     def test_the_paths_are_absolute(self, settings_for) -> None:
         """androiddeployqt runs from wherever it is invoked and reads them
         directly, not through a build directory."""
-        settings = settings_for(_android_env())
+        settings = settings_for(android_env())
 
         assert Path(settings["extraLibraryDirs"][0]).is_absolute()
         assert Path(settings["extraPrefixDirs"][0]).is_absolute()
@@ -275,7 +220,7 @@ class TestTheToolsItRunsItself:
     def test_it_is_the_host_tool(
         self, key: str, tool: str, settings_for, found_qt
     ) -> None:
-        path = Path(settings_for(_android_env())[key])
+        path = Path(settings_for(android_env())[key])
 
         assert path == found_qt.tool_path(tool)
         assert path.is_relative_to(found_qt.libexec_dir)
@@ -288,7 +233,7 @@ class TestTheToolsItRunsItself:
         the whole file unwritable."""
         install_qt(tools=("rcc", "qmlimportscanner"))
 
-        settings = deployment_settings(test_project, _android_env(), app="myapp")
+        settings = deployment_settings(test_project, android_env(), app="myapp")
 
         assert "qml-dom-binary" not in settings
         assert "rcc-binary" in settings
@@ -300,7 +245,7 @@ class TestTheArchitectureMapping:
     two disagree on the CPU as well."""
 
     def test_arm64_drops_the_api_level(self, settings_for) -> None:
-        env = _android_env("arm64-v8a")
+        env = android_env("arm64-v8a")
 
         assert env.cross.triple == "aarch64-linux-android35"
         assert settings_for(env)["architectures"] == {
@@ -308,7 +253,7 @@ class TestTheArchitectureMapping:
         }
 
     def test_armeabi_v7a_is_not_its_triple_at_all(self, settings_for) -> None:
-        env = _android_env("armeabi-v7a")
+        env = android_env("armeabi-v7a")
 
         assert env.cross.triple == "armv7a-linux-androideabi35"
         assert settings_for(env)["architectures"] == {
@@ -320,7 +265,7 @@ class TestTheArchitectureMapping:
         [("x86_64", "x86_64-linux-android"), ("x86", "i686-linux-android")],
     )
     def test_the_intel_abis(self, arch: str, directory: str, settings_for) -> None:
-        assert settings_for(_android_env(arch))["architectures"] == {arch: directory}
+        assert settings_for(android_env(arch))["architectures"] == {arch: directory}
 
 
 class TestWhatItRefuses:
@@ -333,7 +278,7 @@ class TestWhatItRefuses:
     def test_a_preset_with_no_sdk(self, settings_for) -> None:
         """Nothing in compiling needs it, so the preset may omit it and only
         this refuses."""
-        env = _android_env(sdk=None)
+        env = android_env(sdk=None)
 
         with pytest.raises(ValueError, match="Android SDK"):
             settings_for(env)
@@ -348,7 +293,7 @@ class TestWhatItRefuses:
         )
 
         with pytest.raises(QtNotFoundError, match="find_qt"):
-            deployment_settings(test_project, _android_env(), app="myapp")
+            deployment_settings(test_project, android_env(), app="myapp")
 
 
 class TestWhatItLeavesToAndroiddeployqt:
@@ -356,10 +301,10 @@ class TestWhatItLeavesToAndroiddeployqt:
     opinion, and the tool's own is the one that has the app in front of it."""
 
     def test_the_plugin_list_is_absent(self, settings_for) -> None:
-        assert "android-deploy-plugins" not in settings_for(_android_env())
+        assert "android-deploy-plugins" not in settings_for(android_env())
 
     def test_the_scanner_is_skipped_for_an_app_with_no_qml(self, settings_for) -> None:
-        settings = settings_for(_android_env())
+        settings = settings_for(android_env())
 
         assert settings["qml-skip-import-scanning"] is True
         assert "qml-root-path" not in settings
@@ -374,7 +319,7 @@ class TestTheQmlKeys:
     def test_the_root_path_is_every_qml_module_source_directory(
         self, settings_for, test_project
     ) -> None:
-        env = _android_env()
+        env = android_env()
         _qml_module(test_project, env, "ui", "qml")
         _qml_module(test_project, env, "widgets", "extra/qml")
 
@@ -388,7 +333,7 @@ class TestTheQmlKeys:
     def test_a_directory_two_modules_share_is_named_once(
         self, settings_for, test_project
     ) -> None:
-        env = _android_env()
+        env = android_env()
         _qml_module(test_project, env, "ui", "qml")
         _qml_module(test_project, env, "more", "qml")
 
@@ -401,18 +346,18 @@ class TestTheQmlKeys:
     ) -> None:
         """One project may build the same module for the host too. The Android
         package describes the Android environment."""
-        host = _android_env()
+        host = android_env()
         host.name = "host"
         _qml_module(test_project, host, "ui", "qml")
 
-        settings = settings_for(_android_env())
+        settings = settings_for(android_env())
 
         assert settings["qml-skip-import-scanning"] is True
 
     def test_the_scanner_is_not_skipped_when_there_is_qml(
         self, settings_for, test_project
     ) -> None:
-        env = _android_env()
+        env = android_env()
         _qml_module(test_project, env, "ui", "qml")
 
         assert "qml-skip-import-scanning" not in settings_for(env)
@@ -423,7 +368,7 @@ class TestTheQmlKeys:
         """Measured off a CMake-written file: qml-root-path is a JSON list and
         qml-import-paths is one comma-separated string. Symmetrical names, and
         androiddeployqt reads them with different code."""
-        env = _android_env()
+        env = android_env()
         _qml_module(test_project, env, "ui", "qml")
 
         settings = settings_for(env)
@@ -432,7 +377,7 @@ class TestTheQmlKeys:
         assert isinstance(settings["qml-import-paths"], str)
 
     def test_the_paths_are_absolute(self, settings_for, test_project) -> None:
-        env = _android_env()
+        env = android_env()
         _qml_module(test_project, env, "ui", "qml")
 
         settings = settings_for(env)
@@ -446,7 +391,7 @@ class TestTheOptionalKeys:
         self, found_qt, test_project, tmp_path
     ) -> None:
         path = android_deployment_settings(
-            test_project, _android_env(), app="myapp", output=tmp_path / "s.json"
+            test_project, android_env(), app="myapp", output=tmp_path / "s.json"
         )
         settings = json.loads(path.read_text())
 
@@ -460,7 +405,7 @@ class TestTheOptionalKeys:
     ) -> None:
         path = android_deployment_settings(
             test_project,
-            _android_env(),
+            android_env(),
             app="myapp",
             output=tmp_path / "s.json",
             package_name="org.example.myapp",
@@ -480,7 +425,7 @@ class TestThePackageSourceDirectory:
     def _written(self, project, tmp_path, source_dir) -> dict:
         path = android_deployment_settings(
             project,
-            _android_env(),
+            android_env(),
             app="myapp",
             output=tmp_path / "s.json",
             package_source_dir=source_dir,
@@ -510,7 +455,7 @@ class TestThePermissions:
         """The [{"name": ...}] shape is the file's business, not the caller's."""
         path = android_deployment_settings(
             test_project,
-            _android_env(),
+            android_env(),
             app="myapp",
             output=tmp_path / "s.json",
             permissions=["android.permission.INTERNET", "android.permission.CAMERA"],
@@ -528,7 +473,7 @@ class TestTheFileOnDisk:
     ) -> None:
         path = android_deployment_settings(
             test_project,
-            _android_env(),
+            android_env(),
             app="myapp",
             output=tmp_path / "sub" / "s.json",
         )
@@ -544,14 +489,14 @@ class TestAnAbiNobodyMapped:
         and pcons has no ABI name for."""
         from pcons.toolchains.presets import CrossPreset
 
-        env = _android_env()
+        env = android_env()
         env._cross_preset = CrossPreset(
             name="android-riscv64",
             arch="riscv64",
             triple="riscv64-linux-android35",
-            ndk=NDK,
+            ndk=ANDROID_NDK,
             ndk_host="linux-x86_64",
-            sdk=SDK,
+            sdk=ANDROID_SDK,
         )
 
         with pytest.raises(ValueError, match="riscv64"):
@@ -562,7 +507,7 @@ class TestWhereTheFileGoes:
     def test_the_default_is_the_projects_build_directory(
         self, found_qt, test_project
     ) -> None:
-        path = android_deployment_settings(test_project, _android_env(), app="myapp")
+        path = android_deployment_settings(test_project, android_env(), app="myapp")
 
         assert path == Path(test_project.root_dir) / test_project.build_dir / (
             "android-deployment-settings.json"
@@ -574,7 +519,7 @@ class TestWhereTheFileGoes:
     ) -> None:
         """Where the build writes is the project's answer. An environment
         that carries a build_dir of its own is not a second one."""
-        env = _android_env()
+        env = android_env()
         env.build_dir = Path("elsewhere")
 
         path = android_deployment_settings(test_project, env, app="myapp")
@@ -585,7 +530,7 @@ class TestWhereTheFileGoes:
         self, found_qt, test_project
     ) -> None:
         path = android_deployment_settings(
-            test_project, _android_env(), app="myapp", output="out/s.json"
+            test_project, android_env(), app="myapp", output="out/s.json"
         )
 
         assert path == Path(test_project.root_dir) / "out" / "s.json"
@@ -597,21 +542,21 @@ class TestRewritingIt:
     ) -> None:
         """A build edge reads this file, so a configure that decided the same
         thing again must not make it look newer."""
-        first = android_deployment_settings(test_project, _android_env(), app="myapp")
+        first = android_deployment_settings(test_project, android_env(), app="myapp")
         stamp = first.stat().st_mtime_ns
         os.utime(first, ns=(stamp - 2_000_000_000, stamp - 2_000_000_000))
         before = first.stat().st_mtime_ns
 
-        again = android_deployment_settings(test_project, _android_env(), app="myapp")
+        again = android_deployment_settings(test_project, android_env(), app="myapp")
 
         assert again == first
         assert again.stat().st_mtime_ns == before
 
     def test_changed_settings_are_written(self, found_qt, test_project) -> None:
-        path = android_deployment_settings(test_project, _android_env(), app="myapp")
+        path = android_deployment_settings(test_project, android_env(), app="myapp")
 
         android_deployment_settings(
-            test_project, _android_env(), app="myapp", build_tools="37.0.0"
+            test_project, android_env(), app="myapp", build_tools="37.0.0"
         )
 
         assert json.loads(path.read_text())["sdkBuildToolsRevision"] == "37.0.0"

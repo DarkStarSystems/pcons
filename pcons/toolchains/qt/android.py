@@ -81,6 +81,58 @@ _SYSROOT_DIR: dict[str, str] = {
 }
 
 
+def application_binary(app: Target | str) -> str:
+    """The name androiddeployqt knows the application by.
+
+    It builds ``lib<name>_<abi>.so`` out of this and looks for that file
+    under its output directory, so it is a name and never a path.
+
+    Args:
+        app: The application target, or its name.
+
+    Returns:
+        The name.
+    """
+    return app if isinstance(app, str) else app.name
+
+
+def application_library_name(app: Target | str, abi: str) -> str:
+    """The file name androiddeployqt reads the application out of.
+
+    The ABI suffix is not decoration. Measured against Qt 6.11.1: with the
+    file staged under its plain name androiddeployqt logs an ``llvm-readobj:
+    No such file or directory`` for the suffixed one, packages nothing, and
+    still exits 0.
+
+    Args:
+        app: The application target, or its name.
+        abi: The Android ABI ("arm64-v8a").
+
+    Returns:
+        The file name, ``lib<name>_<abi>.so``.
+    """
+    return f"lib{application_binary(app)}_{abi}.so"
+
+
+def android_output_dir(env: Environment, app: Target | str) -> Path:
+    """The directory androiddeployqt fills for this application.
+
+    Below the environment's build directory and named after the application,
+    because androiddeployqt owns the whole directory and names the package
+    it builds after it. Two applications built in one environment therefore
+    cannot share one.
+
+    Args:
+        env: The environment the application is built in.
+        app: The application target, or its name.
+
+    Returns:
+        The directory, relative to the project root unless the environment's
+        build directory is absolute.
+    """
+    return env.build_dir_for(Path()) / application_binary(app)
+
+
 def _library_dir(project: Project, env: Environment) -> Path:
     """Absolute directory this environment writes shared libraries into.
 
@@ -176,7 +228,7 @@ def deployment_settings(
         "stdcpp-path": f"{stdcpp.as_posix()}/",
         "abi": abi,
         "architectures": {abi: _SYSROOT_DIR[abi]},
-        "application-binary": app if isinstance(app, str) else app.name,
+        "application-binary": application_binary(app),
         "android-legacy-packaging": False,
         "zstdCompression": False,
         "generate-java-qtquickview-contents": False,
