@@ -196,6 +196,38 @@ class TestWhereItLooksForLibraries:
         landed = Path(test_project.root_dir) / lib.output_nodes[0].path
         assert settings["extraLibraryDirs"] == [str(landed.parent)]
 
+    def test_a_library_in_every_directory_one_landed_in(
+        self, test_project, settings_for
+    ) -> None:
+        """A target places itself with its own build directory, which carries
+        the subdirectory it was declared in. Naming the environment's root
+        once names a directory holding no library at all, and androiddeployqt
+        then builds an APK that dies on its first dlopen."""
+        from pcons.util.add_subdirectory import add_subdirectory
+
+        root = Path(test_project.root_dir)
+        env = android_env()
+        for name in ("one", "two"):
+            (root / name).mkdir()
+            (root / name / "a.c").write_text("int f(void){return 0;}\n")
+            (root / name / "pcons-build.py").write_text(
+                "from pcons import context\n"
+                "project = context.current_project\n"
+                "env = project.default_environment\n"
+                f'lib = project.SharedLibrary("{name}", env, sources=["a.c"])\n'
+            )
+            add_subdirectory(name, project=test_project, env=env)
+        test_project.resolve()
+
+        landed = {
+            str((root / target.output_nodes[0].path).parent)
+            for target in test_project.targets
+            if target.target_type == "shared_library"
+        }
+
+        assert set(settings_for(env)["extraLibraryDirs"]) == landed
+        assert len(landed) == 2
+
     def test_the_paths_are_absolute(self, settings_for) -> None:
         """androiddeployqt runs from wherever it is invoked and reads them
         directly, not through a build directory."""

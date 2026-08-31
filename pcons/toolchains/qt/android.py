@@ -133,18 +133,33 @@ def android_output_dir(env: Environment, app: Target | str) -> Path:
     return env.build_dir_for(Path()) / application_binary(app)
 
 
-def _library_dir(project: Project, env: Environment) -> Path:
-    """Absolute directory this environment writes shared libraries into.
+def _library_dirs(project: Project, env: Environment) -> list[Path]:
+    """Absolute directories this environment's shared libraries land in.
 
-    androiddeployqt reads the paths in the file directly, from wherever it
-    runs, so they are absolute. Asked of the same two methods the resolver
-    places a shared library with, so the two cannot drift apart.
+    androiddeployqt copies the application's own dependencies out of these,
+    so one that holds no library gives an APK that dies on its first dlopen,
+    having built and installed without complaint.
+
+    One directory per environment is only right for a project whose targets
+    all sit in one source directory: a target places itself with its own
+    build directory, which carries the subdirectory it was declared in. So
+    this asks each shared library where it goes rather than asking the
+    environment once. Paths are absolute because androiddeployqt reads them
+    from wherever it runs.
     """
-    directory = env.build_dir_for(Path())
     below = env.output_directory_for("shared_library")
-    if below:
-        directory = directory / below
-    return _absolute(project, directory)
+
+    def placed(directory: Path) -> Path:
+        return _absolute(project, directory / below if below else directory)
+
+    found = {
+        placed(target.build_dir): None
+        for target in project.targets
+        if target._env is env and target.target_type == "shared_library"
+    }
+    if not found:
+        return [placed(env.build_dir_for(Path()))]
+    return list(found)
 
 
 def _android_preset(env: Environment) -> CrossPreset:
@@ -217,7 +232,7 @@ def deployment_settings(
         "description": _DESCRIPTION,
         "qt": {abi: str(qt.prefix)},
         "extraPrefixDirs": [str(qt.prefix)],
-        "extraLibraryDirs": [str(_library_dir(project, env))],
+        "extraLibraryDirs": [str(d) for d in _library_dirs(project, env)],
         "sdk": str(cross.sdk),
         "ndk": str(ndk),
         "ndk-host": host,
