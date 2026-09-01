@@ -867,6 +867,32 @@ class TestTargetDepends:
         assert len(target.dependencies) == 0
         assert len(target._extra_implicit_deps) == 0
 
+    def test_depends_on_install_target_raises(self, tmp_path):
+        """depends() on an install target must not be silently accepted and dropped.
+
+        Install targets (Install/InstallAs/InstallDir) only create their output
+        nodes during pending-sources resolution, which runs after main
+        resolution, so a depends() on one can never be wired in the generator
+        output - the resolver reads the dep's now-empty output_nodes and attaches
+        nothing. Refusing to accept the call surfaces that at configure time
+        instead of letting the build run targets out of order (#129).
+        """
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        source = tmp_path / "tree"
+        source.mkdir()
+
+        staged = project.InstallDir(tmp_path / "stage", source)
+
+        env = project.Environment()
+        cmd = env.Command(
+            target=tmp_path / "build" / "out.txt",
+            command="echo done > $TARGET",
+            name="after",
+        )
+
+        with pytest.raises(ValueError, match="install"):
+            cmd.depends(staged)
+
     def test_depends_mixed_args(self, test_project):  # noqa: F811
         """depends() handles mixed Target and file args."""
         target = Target("app")

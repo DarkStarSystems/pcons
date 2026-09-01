@@ -90,6 +90,17 @@ _KNOWN_USAGE_REQUIREMENTS: set[str] = {
 }
 
 
+#: Builder names for the install builders (Install / InstallAs / InstallDir).
+#: Their targets only create output nodes during pending-sources resolution,
+#: which runs after main resolution, so a Target-level depends() on one can
+#: never be ordered correctly into the generated build — it is accepted and
+#: silently dropped. Refusing it up front surfaces the misuse at configure time
+#: instead (#129). Compare against Target._builder_name.
+_INSTALL_TARGET_BUILDER_NAMES: frozenset[str] = frozenset(
+    ("Install", "InstallAs", "InstallDir")
+)
+
+
 def _unknown_requirement_message(name: str) -> str:
     """Explain an unrecognized usage-requirement name, and guess the intent."""
     import difflib
@@ -814,6 +825,19 @@ class Target:
             if isinstance(item, Target):
                 if item is self:
                     raise ValueError(f"Target '{self.name}' cannot depend on itself.")
+                if item._builder_name in _INSTALL_TARGET_BUILDER_NAMES:
+                    # Install targets only produce their output nodes during
+                    # pending-sources resolution, after main resolution, so a
+                    # depends() on one is accepted and then silently dropped:
+                    # this ordering can never be expressed in the generated
+                    # build. Refuse instead of silently keeping nothing (#129).
+                    raise ValueError(
+                        f"Target '{self.name}' cannot depend on install target "
+                        f"'{item.name}': install targets create their nodes after "
+                        f"main resolution, so depending on one would silently do "
+                        f"nothing. Restructure so the ordering is carried by the "
+                        f"nodes that already exist in the graph."
+                    )
                 self._check_same_tree(item, "depend on")
                 target_list = (
                     self._implicit_target_deps
