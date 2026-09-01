@@ -9,9 +9,10 @@ Users can customize the copy commands via the tool namespace
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -194,6 +195,20 @@ def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path
     return prefix / dest
 
 
+def _overlay_walk(root: Path) -> Iterator[tuple[Path, list[str]]]:
+    """Walk *root*, yielding every directory in it and the files it holds.
+
+    Args:
+        root: Tree to walk, an existing directory.
+
+    Yields:
+        An absolute directory path and its file names, sorted.
+    """
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        yield Path(dirpath), sorted(filenames)
+
+
 def _overlay_file_map(
     project: Project, source_dirs: Sequence[Path], target: Target
 ) -> dict[Path, Path]:
@@ -202,6 +217,12 @@ def _overlay_file_map(
     Later entries of *source_dirs* overwrite earlier ones, so the argument
     order at the call site is the whole conflict rule: nothing is decided by
     modification time, by depth, or by which tree looks more specific.
+
+    Every directory walked is registered as a configure dependency, so adding
+    or removing an entry re-runs pcons and the destination is up to date on
+    the next build with no hand-run. Registering only each root would not do:
+    a directory's mtime changes when a direct entry appears, not when one
+    appears further down.
 
     Args:
         project: Project the source directories are resolved against.
@@ -225,10 +246,11 @@ def _overlay_file_map(
                 f"OverlayDir source is not a directory: {source_dir}",
                 location=target.defined_at,
             )
-        for item in sorted(root.rglob("*")):
-            if item.is_dir():
-                continue
-            winners[item.relative_to(root)] = item
+        for directory, filenames in _overlay_walk(root):
+            project.add_configure_dependency(directory)
+            for name in filenames:
+                item = directory / name
+                winners[item.relative_to(root)] = item
     return winners
 
 
@@ -854,6 +876,18 @@ class OverlayDirBuilder:
     The destination is a staging directory in the build tree, anchored under
     *env*'s build directory, and the install prefix is never applied. This is
     file staging, not an install.
+
+    Adding a file anywhere under a source tree makes it appear in the
+    destination on the next build, with no hand-run of pcons: every directory
+    in every source tree is registered as a configure dependency, so pcons
+    re-runs before the build when one gains or loses an entry. The price is
+    that any edit to those trees re-runs the build description.
+
+    Removing a file from a source tree drops its copy edge, but the copy
+    already in the destination stays: this stages files, it does not mirror,
+    and deleting from a directory the builder does not own would be a wider
+    promise than it makes. Delete the destination, or run
+    ``ninja -t cleandead``, to clear stale copies.
 
     Example::
 
