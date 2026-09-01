@@ -2,6 +2,7 @@
 """Tests for Project.Install() method."""
 
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
@@ -339,6 +340,85 @@ class TestInstallWithNinja:
         assert "INSTALL" in content
         # Should have a build statement for the installed file
         assert "mylib.a" in content
+
+    def test_install_dir_tracks_recursive_changes_and_stale_files(self, tmp_path):
+        """Ninja rebuilds an InstallDir for nested tree changes only."""
+        assets = tmp_path / "assets"
+        nested = assets / "sub"
+        nested.mkdir(parents=True)
+        (assets / "top.txt").write_text("top")
+        (nested / "deep.txt").write_text("deep")
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\n"
+            'project = Project("repro")\n'
+            'project.InstallDir("staged", project.root_dir / "assets", no_prefix=True)\n'
+        )
+
+        def run_ninja() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, "-m", "pcons", "--build-dir", "build"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        run_ninja()
+        destination = tmp_path / "build" / "staged" / "assets"
+        assert (destination / "sub" / "deep.txt").read_text() == "deep"
+
+        unchanged = subprocess.run(
+            ["ninja", "-C", "build"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "no work to do" in unchanged.stdout
+
+        (nested / "added.txt").write_text("added")
+        added = subprocess.run(
+            ["ninja", "-C", "build"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "INSTALLDIR" in added.stdout
+        assert (destination / "sub" / "added.txt").read_text() == "added"
+
+        (nested / "deep.txt").write_text("changed")
+        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        assert (destination / "sub" / "deep.txt").read_text() == "changed"
+
+        (nested / "added.txt").unlink()
+        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        assert not (destination / "sub" / "added.txt").exists()
+
+        (nested / "deep.txt").rename(nested / "moved.txt")
+        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        assert not (destination / "sub" / "deep.txt").exists()
+        assert (destination / "sub" / "moved.txt").read_text() == "changed"
+
+        new_nested = nested / "created-after-configure"
+        new_nested.mkdir()
+        (new_nested / "first.txt").write_text("first")
+        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        (new_nested / "second.txt").write_text("second")
+        second = subprocess.run(
+            ["ninja", "-C", "build"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "INSTALLDIR" in second.stdout
+        assert (destination / "sub" / "created-after-configure" / "second.txt").exists()
+
+        (nested / "created-after-configure").rename(nested / "renamed-directory")
+        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        assert not (destination / "sub" / "created-after-configure").exists()
+        assert (destination / "sub" / "renamed-directory" / "first.txt").exists()
 
     def test_install_output_rendered_relocatably(self, tmp_path):
         """Install destinations under the project root render via $topdir."""

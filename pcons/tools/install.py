@@ -317,6 +317,8 @@ class InstallTool(StandaloneTool):
                 "copytree",
                 "--depfile",
                 TargetPath(suffix=".d"),
+                "--manifest",
+                TargetPath(suffix=".manifest"),
                 "--stamp",
                 TargetPath(),
                 SourcePath(),
@@ -463,6 +465,9 @@ class InstallNodeFactory(PendingSourceFactory):
                 "depfile": PathToken(
                     path=str(stamp_path), path_type="build", suffix=".d"
                 ),
+                "manifest": PathToken(
+                    path=str(stamp_path), path_type="build", suffix=".manifest"
+                ),
                 "deps_style": "gcc",
                 "description": "INSTALLDIR $out",
                 "context": context,
@@ -569,6 +574,9 @@ class InstallNodeFactory(PendingSourceFactory):
                 "sources": [source_node],
                 "depfile": PathToken(
                     path=str(stamp_path), path_type="build", suffix=".d"
+                ),
+                "manifest": PathToken(
+                    path=str(stamp_path), path_type="build", suffix=".manifest"
                 ),
                 "deps_style": "gcc",
                 "description": "INSTALLDIR $out",

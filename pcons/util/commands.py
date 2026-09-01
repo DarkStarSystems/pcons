@@ -13,6 +13,7 @@ Usage in build rules:
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -112,8 +113,9 @@ def copytree(
     depfile: str | None = None,
     stamp: str | None = None,
     replace: bool = False,
+    manifest: str | None = None,
 ) -> None:
-    """Copy a directory tree, optionally writing a depfile and stamp file.
+    """Copy a directory tree, optionally writing dependency state and a stamp.
 
     Merges into the destination, leaving files that are already there and
     identical, and anything at the destination the source doesn't have. An
@@ -127,12 +129,43 @@ def copytree(
         depfile: Optional path to write a ninja depfile listing source files.
         stamp: Optional stamp file to touch after copy (for ninja build tracking).
         replace: Delete the destination tree first, rather than merging.
+        manifest: Optional JSON path recording files copied by this edge. Files
+            previously recorded but absent on a later run are removed.
     """
     src_path = Path(src)
     dest_path = Path(dest)
 
     if not src_path.is_dir():
         raise ValueError(f"Source is not a directory: {src}")
+
+    current_files = {
+        str(item.relative_to(src_path)).replace("\\", "/")
+        for item in src_path.rglob("*")
+        if item.is_file()
+    }
+    if manifest:
+        manifest_path = Path(manifest)
+        if manifest_path.exists():
+            try:
+                decoded = json.loads(manifest_path.read_text())
+                previous_files = (
+                    {item for item in decoded if isinstance(item, str)}
+                    if isinstance(decoded, list)
+                    else set()
+                )
+            except (OSError, TypeError, ValueError):
+                previous_files = set()
+            for relative in previous_files - current_files:
+                stale = dest_path / relative
+                if stale.is_file() or stale.is_symlink():
+                    stale.unlink()
+                parent = stale.parent
+                while parent != dest_path:
+                    try:
+                        parent.rmdir()
+                    except OSError:
+                        break
+                    parent = parent.parent
 
     if replace and dest_path.exists():
         shutil.rmtree(dest_path)
@@ -143,19 +176,23 @@ def copytree(
         depfile_path = Path(depfile)
         depfile_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Collect all files in the source directory
-        source_files: list[str] = []
-        for item in src_path.rglob("*"):
-            if item.is_file():
-                # Use forward slashes for ninja compatibility
-                source_files.append(str(item).replace("\\", "/"))
+        # Track the root and every current descendant. Directories are
+        # intentional dependencies: their mtimes notice additions/removals,
+        # including files in directories created after configuration.
+        source_entries = [src_path, *src_path.rglob("*")]
+        source_files = [str(item).replace("\\", "/") for item in source_entries]
 
         # Ninja depfile format, with the stamp file (or dest) as the target
-        target_str = (stamp or str(dest_path)).replace("\\", "/")
+        target_str = _escape_depfile_path((stamp or str(dest_path)).replace("\\", "/"))
         escaped_files = [_escape_depfile_path(f) for f in source_files]
         deps_str = " \\\n  ".join(escaped_files)
         with open(depfile_path, "w", encoding="utf-8") as f:
             f.write(f"{target_str}: \\\n  {deps_str}\n")
+
+    if manifest:
+        manifest_path = Path(manifest)
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_path.write_text(json.dumps(sorted(current_files)), encoding="utf-8")
 
     # Touch stamp file if specified
     if stamp:
@@ -240,6 +277,7 @@ def main() -> int:
         depfile = None
         stamp = None
         replace = False
+        manifest = None
         positional: list[str] = []
         i = 0
         while i < len(args):
@@ -248,6 +286,12 @@ def main() -> int:
                 i += 2
             elif args[i].startswith("--depfile="):
                 depfile = args[i].split("=", 1)[1]
+                i += 1
+            elif args[i] == "--manifest" and i + 1 < len(args):
+                manifest = args[i + 1]
+                i += 2
+            elif args[i].startswith("--manifest="):
+                manifest = args[i].split("=", 1)[1]
                 i += 1
             elif args[i] == "--stamp" and i + 1 < len(args):
                 stamp = args[i + 1]
@@ -269,7 +313,7 @@ def main() -> int:
                 file=sys.stderr,
             )
             return 1
-        copytree(positional[0], positional[1], depfile, stamp, replace)
+        copytree(positional[0], positional[1], depfile, stamp, replace, manifest)
         return 0
 
     elif cmd == "env":
