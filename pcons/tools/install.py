@@ -8,6 +8,7 @@ Users can customize the copy commands via the tool namespace
 
 from __future__ import annotations
 
+import fnmatch
 import logging
 import os
 import re
@@ -15,7 +16,7 @@ import sys
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import builder
@@ -195,22 +196,65 @@ def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path
     return prefix / dest
 
 
-def _overlay_walk(root: Path) -> Iterator[tuple[Path, list[str]]]:
-    """Walk *root*, yielding every directory in it and the files it holds.
+def _overlay_excluded(rel_path: Path, patterns: Sequence[str]) -> bool:
+    """Whether an overlay entry is filtered out by one of *patterns*.
+
+    A pattern holding no ``/`` matches an entry's name at any depth; one
+    holding a ``/`` is anchored at the source root. Matching is case
+    sensitive on every platform, so a build description means the same thing
+    wherever it runs.
+
+    Args:
+        rel_path: File or directory path, relative to its source root.
+        patterns: Glob patterns, as passed to ``OverlayDir(exclude=...)``.
+
+    Returns:
+        True when the entry is excluded, and with it everything under it.
+    """
+    text = rel_path.as_posix()
+    return any(
+        fnmatch.fnmatchcase(text, pattern)
+        or ("/" not in pattern and fnmatch.fnmatchcase(rel_path.name, pattern))
+        for pattern in patterns
+    )
+
+
+def _overlay_walk(
+    root: Path, exclude: Sequence[str]
+) -> Iterator[tuple[Path, list[str]]]:
+    """Walk *root*, yielding every surviving directory and the files it holds.
+
+    An excluded directory is pruned rather than emptied, so it costs no walk
+    and never becomes a configure dependency — which is what keeps
+    ``exclude=[".git"]`` from re-running pcons on every commit.
 
     Args:
         root: Tree to walk, an existing directory.
+        exclude: Glob patterns to drop, matched against paths relative to
+            *root*.
 
     Yields:
         An absolute directory path and its file names, sorted.
     """
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames.sort()
-        yield Path(dirpath), sorted(filenames)
+        here = Path(dirpath)
+        rel = here.relative_to(root)
+        dirnames[:] = sorted(
+            name for name in dirnames if not _overlay_excluded(rel / name, exclude)
+        )
+        yield (
+            here,
+            sorted(
+                name for name in filenames if not _overlay_excluded(rel / name, exclude)
+            ),
+        )
 
 
 def _overlay_file_map(
-    project: Project, source_dirs: Sequence[Path], target: Target
+    project: Project,
+    source_dirs: Sequence[Path],
+    target: Target,
+    exclude: Sequence[str] = (),
 ) -> dict[Path, Path]:
     """Map each relative path under the overlay to the file that wins it.
 
@@ -224,10 +268,16 @@ def _overlay_file_map(
     a directory's mtime changes when a direct entry appears, not when one
     appears further down.
 
+    Excluding is per source root and happens before the merge, so a path the
+    caller excluded never reaches the conflict at all: excluding the file
+    that would have won leaves nothing at that path rather than promoting
+    the loser, which would ship a path the caller asked to drop.
+
     Args:
         project: Project the source directories are resolved against.
         source_dirs: Source tree roots, in increasing precedence.
         target: The overlay target, for error locations.
+        exclude: Glob patterns dropped from every source tree.
 
     Returns:
         Relative path to absolute source file, in first-seen order.
@@ -246,7 +296,7 @@ def _overlay_file_map(
                 f"OverlayDir source is not a directory: {source_dir}",
                 location=target.defined_at,
             )
-        for directory, filenames in _overlay_walk(root):
+        for directory, filenames in _overlay_walk(root, exclude):
             project.add_configure_dependency(directory)
             for name in filenames:
                 item = directory / name
@@ -275,7 +325,7 @@ def _make_install_target(
     project: Project,
     target_name: str,
     builder_name: str,
-    builder_data: dict[str, str],
+    builder_data: dict[str, Any],
     sources: Sequence[Target | Node | Path | str],
     *,
     defined_at: SourceLocation,
@@ -424,7 +474,8 @@ class InstallNodeFactory(PendingSourceFactory):
             self._create_install_dir_node(target, resolved_sources, dest_dir)
         elif builder_name == "OverlayDir":
             dest_dir = Path(target._builder_data["dest_dir"])
-            self._create_overlay_nodes(target, resolved_sources, dest_dir)
+            exclude = cast("Sequence[str]", target._builder_data.get("exclude", ()))
+            self._create_overlay_nodes(target, resolved_sources, dest_dir, exclude)
 
     def _get_install_env(self, target: Target) -> Environment | None:
         """Get the target's env, or any project env with the install tool."""
@@ -544,14 +595,18 @@ class InstallNodeFactory(PendingSourceFactory):
         installed_nodes.append(stamp_node)
 
     def _create_overlay_nodes(
-        self, target: Target, sources: list[FileNode], dest_dir: Path
+        self,
+        target: Target,
+        sources: list[FileNode],
+        dest_dir: Path,
+        exclude: Sequence[str],
     ) -> None:
         """Create one copy node per surviving file for an OverlayDir target."""
         env = self._get_install_env(target)
 
         installed_nodes: list[FileNode] = []
         for rel_path, source_path in _overlay_file_map(
-            self.project, [node.path for node in sources], target
+            self.project, [node.path for node in sources], target, exclude
         ).items():
             source_node = self.project.node(source_path)
             dest_node = self.project.node(
@@ -889,12 +944,23 @@ class OverlayDirBuilder:
     promise than it makes. Delete the destination, or run
     ``ninja -t cleandead``, to clear stale copies.
 
+    *exclude* drops entries from every source tree before they are merged.
+    Patterns are globs matched against the path relative to *each source
+    root*, never the destination and never an absolute path, because the
+    roots are the only thing the caller named. A pattern holding no ``/``
+    matches a name at any depth, one holding a ``/`` is anchored at the
+    root, and matching is case sensitive everywhere. An excluded directory
+    takes its contents with it. Nothing is excluded by default: a staging
+    directory holds what the caller said it holds, and a silent filter is
+    worse than a visible one.
+
     Example::
 
         stage = project.OverlayDir(
             env,
             "stage/app",
             sources=[shared_dir, app_dir],
+            exclude=["*.orig", ".git"],
         )
     """
 
@@ -906,6 +972,7 @@ class OverlayDirBuilder:
         sources: Sequence[Path | str | FileNode | Target],
         *,
         name: str | None = None,
+        exclude: Sequence[str] = (),
     ) -> Target:
         """Create an OverlayDir target.
 
@@ -918,6 +985,10 @@ class OverlayDirBuilder:
             sources: Source tree roots, in increasing precedence: the last
                 one wins a path the others also hold.
             name: Optional name for the target.
+            exclude: Glob patterns dropped from every source tree, matched
+                against paths relative to each source root. A pattern
+                matching nothing is not an error: source trees legitimately
+                differ in what they hold.
 
         Returns:
             A Target whose outputs are the merged files.
@@ -934,7 +1005,7 @@ class OverlayDirBuilder:
             project,
             target_name,
             "OverlayDir",
-            {"dest_dir": str(anchored)},
+            {"dest_dir": str(anchored), "exclude": list(exclude)},
             list(sources),
             defined_at=get_caller_location(),
         )

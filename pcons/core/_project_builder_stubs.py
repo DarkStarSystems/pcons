@@ -235,6 +235,7 @@ if TYPE_CHECKING:
             sources: Sequence[Path | str | FileNode | Target],
             *,
             name: str | None = None,
+            exclude: Sequence[str] = (),
         ) -> Target:
             """Merge several source trees into one directory, later sources winning."""
             ...

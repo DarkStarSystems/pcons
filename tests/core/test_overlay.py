@@ -36,13 +36,23 @@ def make_trees(root: Path) -> tuple[Path, Path]:
     return shared, app
 
 
-def overlay_project(root: Path, sources: list[Path]) -> tuple[Project, Target]:
+def overlay_project(
+    root: Path, sources: list[Path], exclude: list[str] | None = None
+) -> tuple[Project, Target]:
     """A resolved project whose single target overlays *sources* into "stage"."""
     project = Project("test", root_dir=root, build_dir=root / "build")
     env = project.Environment(name="host")
-    stage = project.OverlayDir(env, "stage", sources=sources)
+    stage = project.OverlayDir(env, "stage", sources=sources, exclude=exclude or [])
     project.resolve()
     return project, stage
+
+
+def staged(target: Target) -> set[str]:
+    """The destination-relative paths the overlay would produce."""
+    return {
+        node.path.relative_to(Path("build") / "stage").as_posix()
+        for node in target.output_nodes
+    }
 
 
 def build(project: Project, root: Path) -> Path:
@@ -342,3 +352,113 @@ class TestOverlayFreshness:
 
         assert not (stage / "shared_only.txt").exists()
         assert (stage / "Manifest.xml").exists()
+
+
+class TestOverlayExclude:
+    """`exclude=`, matched against the path relative to each source root."""
+
+    def test_nothing_is_excluded_by_default(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / ".git" / "HEAD", "ref: refs/heads/main\n")
+        write(shared / "NOTES.md", "notes\n")
+        _, stage = overlay_project(tmp_path, [shared, app])
+
+        assert ".git/HEAD" in staged(stage)
+        assert "NOTES.md" in staged(stage)
+
+    def test_a_file_at_a_tree_root_is_dropped(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / "NOTES.md", "notes\n")
+        _, stage = overlay_project(tmp_path, [shared, app], ["NOTES.md"])
+
+        assert "NOTES.md" not in staged(stage)
+        assert "shared_only.txt" in staged(stage)
+
+    def test_a_file_nested_deep_is_dropped(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / "src" / "com" / "example" / "Thing.java.orig", "old\n")
+        _, stage = overlay_project(tmp_path, [shared, app], ["*.orig"])
+
+        assert staged(stage) >= {"src/com/example/Thing.java"}
+        assert "src/com/example/Thing.java.orig" not in staged(stage)
+
+    def test_a_bare_name_matches_at_any_depth(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / "NOTES.md", "root\n")
+        write(shared / "src" / "NOTES.md", "nested\n")
+        _, stage = overlay_project(tmp_path, [shared, app], ["NOTES.md"])
+
+        assert not [p for p in staged(stage) if p.endswith("NOTES.md")]
+
+    def test_a_pattern_with_a_separator_is_anchored_at_the_root(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / "src" / "res" / "xml" / "a.txt", "not the root one\n")
+        _, stage = overlay_project(tmp_path, [shared, app], ["res/xml/a.txt"])
+
+        assert "res/xml/a.txt" not in staged(stage)
+        assert "src/res/xml/a.txt" in staged(stage)
+
+    def test_an_excluded_directory_takes_its_contents(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / ".git" / "HEAD", "ref: refs/heads/main\n")
+        write(shared / ".git" / "objects" / "ab" / "cdef", "blob\n")
+        _, stage = overlay_project(tmp_path, [shared, app], [".git"])
+
+        assert not [p for p in staged(stage) if p.startswith(".git")]
+
+    def test_an_excluded_directory_is_not_a_configure_dependency(self, tmp_path):
+        """Otherwise excluding .git would re-run pcons on every commit."""
+        shared, app = make_trees(tmp_path)
+        write(shared / ".git" / "objects" / "ab" / "cdef", "blob\n")
+        project, _ = overlay_project(tmp_path, [shared, app], [".git"])
+
+        assert not [d for d in project.configure_dependencies if ".git" in d.parts]
+
+    def test_the_pattern_applies_to_every_source_root(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / "NOTES.md", "shared\n")
+        write(app / "NOTES.md", "app\n")
+        _, stage = overlay_project(tmp_path, [shared, app], ["NOTES.md"])
+
+        assert "NOTES.md" not in staged(stage)
+
+    def test_excluding_a_conflict_winner_leaves_no_file(self, tmp_path):
+        """Pinned: the loser is not promoted, because it matches too.
+
+        Patterns are relative to each source root, so a path excluded in the
+        winning tree is excluded in every tree that holds it. Promoting the
+        loser would ship the very path the caller asked to drop.
+        """
+        shared, app = make_trees(tmp_path)
+        _, stage = overlay_project(tmp_path, [shared, app], ["Manifest.xml"])
+
+        assert "Manifest.xml" not in staged(stage)
+
+    def test_a_pattern_matching_nothing_is_not_an_error(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        _, stage = overlay_project(tmp_path, [shared, app], ["*.absent"])
+
+        assert "shared_only.txt" in staged(stage)
+
+    def test_matching_is_case_sensitive_on_every_platform(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / "NOTES.md", "notes\n")
+        _, stage = overlay_project(tmp_path, [shared, app], ["notes.md"])
+
+        assert "NOTES.md" in staged(stage)
+
+
+@needs_ninja
+class TestOverlayExcludeBuild:
+    """What an exclusion means once the copies have actually run."""
+
+    def test_an_excluded_file_never_reaches_the_destination(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        write(shared / "NOTES.md", "notes\n")
+        write(app / "res" / "drawable" / "b.txt.orig", "old\n")
+        project, _ = overlay_project(tmp_path, [shared, app], ["NOTES.md", "*.orig"])
+        build_dir = build(project, tmp_path)
+
+        assert not (build_dir / "stage" / "NOTES.md").exists()
+        assert not (build_dir / "stage" / "res" / "drawable" / "b.txt.orig").exists()
+        assert (build_dir / "stage" / "res" / "drawable" / "b.txt").exists()
