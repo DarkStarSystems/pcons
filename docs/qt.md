@@ -429,6 +429,12 @@ is the caller's: `project.Install()` is one way to build it out of a shared
 tree and a per-application one. `permissions` takes bare names; the
 `[{"name": ...}]` shape the file wants is not the caller's business.
 
+`build_tools` reads as optional and is not: androiddeployqt detects no
+build-tools revision of its own, so without it gradle.properties gets an
+empty `androidBuildToolsVersion` and Gradle stops with `Invalid revision`.
+Naming the highest revision installed under the SDK is what
+`examples/78_qt_android_apk` does.
+
 The tools androiddeployqt runs itself -- `rcc`, `qmlimportscanner`,
 `qmldom` -- are named in the file, and they are **host** programs. A Qt for
 Android ships none of them, and `qtpaths --query` on such an install reports
@@ -578,6 +584,29 @@ the name Qt's own `--sign` gives it.
     instead of depending on ambient variables nothing declares, and
     `--sign` renames the package androiddeployqt writes, which would make
     the path depend on a signing argument.
+
+#### The worked example
+
+`examples/78_qt_android_apk` is the whole path end to end: a Qt Quick
+application, a `QtQmlModule` cross-compiled with the host Qt's moc and rcc,
+one Java class in the package source directory, a manifest naming
+`QtActivity`, the settings file, the staging and androiddeployqt.
+
+Three things it needs that nothing probes for:
+
+- `PCONS_QT_ANDROID_ROOT`, the Qt built for Android. `find_qt` is given it
+  as `qt_root=` with `probe="qtpaths"` -- the pkg-config probe would answer
+  with a libexec directory full of target executables.
+- a build-tools revision, see above.
+- for a real Gradle run, a JDK the Android Gradle plugin supports. 21 works;
+  26 fails in the `androidJdkImage` transform. That is a property of the
+  machine, so the example does not choose one: set `JAVA_HOME` if the
+  default is newer.
+
+CI runs it with `no_build=True`, which proves everything pcons writes --
+the settings, the staged `lib<app>_<abi>.so`, the command line -- without
+the network and the minutes Gradle's first run costs. `PCONS_ANDROID_GRADLE=1`
+switches the example to a real package.
 
 ### Packaging into installers
 

@@ -325,8 +325,11 @@ def android_deployment_settings(
         permissions: Android permissions ("android.permission.INTERNET"),
                       as bare names. The ``[{"name": ...}]`` shape the file
                       wants is this function's business, not the caller's.
-        build_tools: SDK build-tools revision ("37.0.0"). Left out,
-                     androiddeployqt picks the highest installed.
+        build_tools: SDK build-tools revision ("37.0.0"). Needed for a real
+                     package: androiddeployqt does not detect one, and left
+                     out it writes an empty ``androidBuildToolsVersion`` into
+                     gradle.properties, on which Gradle stops with "Invalid
+                     revision". Measured against Qt 6.11.1.
 
     Returns:
         The path written.

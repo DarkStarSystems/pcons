@@ -417,7 +417,7 @@ jobs:
   test-android:
     name: "test android (ndk cross-compile)"
     needs: lint
-    timeout-minutes: 15
+    timeout-minutes: 30
     # Linux only. The macOS and Windows images carry an NDK too, but a cross
     # build's output does not depend on the host that produced it, so a second
     # runner buys proportionally little. The exception is the prebuilt host tag
@@ -459,6 +459,36 @@ jobs:
             --cov-report=xml -v -k "77_android_apk" | tee apk.txt
           if grep -q '77_android_apk-ninja] SKIPPED' apk.txt; then
             echo "::error::the APK example skipped instead of running"
+            exit 1
+          fi
+      - name: Install Qt for Android
+        # Two installs, and they must land side by side: a Qt for Android
+        # ships no runnable moc, rcc or androiddeployqt, and reaches its host
+        # Qt through a relative HostPrefix (../../gcc_64) in its
+        # bin/target_qt.conf. aqtinstall's layout puts them exactly there.
+        run: |
+          uvx --from aqtinstall aqt install-qt linux desktop 6.8.3 linux_gcc_64 \
+            --outputdir "$HOME/Qt"
+          uvx --from aqtinstall aqt install-qt linux android 6.8.3 android_arm64_v8a \
+            --outputdir "$HOME/Qt"
+          echo "PCONS_QT_ANDROID_ROOT=$HOME/Qt/6.8.3/android_arm64_v8a" >> "$GITHUB_ENV"
+      - name: Verify the Qt for Android is usable
+        # The same guard as the desktop Qt job: fail here rather than let the
+        # example skip itself green because the install produced nothing.
+        run: |
+          test -x "$HOME/Qt/6.8.3/gcc_64/bin/androiddeployqt"
+          test -d "$PCONS_QT_ANDROID_ROOT/lib"
+          "$HOME/Qt/6.8.3/gcc_64/bin/androiddeployqt" --help | head -3
+      - name: Package a Qt application as an APK
+        # --no-build: androiddeployqt parses the settings and reads the staged
+        # library without running Gradle, which needs the network and a JDK the
+        # Android Gradle plugin supports. A full Gradle run is manual.
+        run: |
+          set -o pipefail
+          uv run pytest tests/test_examples.py --cov=pcons --cov-append \
+            --cov-report=xml -v -k "78_qt_android_apk" | tee qtapk.txt
+          if grep -q '78_qt_android_apk-ninja] SKIPPED' qtapk.txt; then
+            echo "::error::the Qt APK example skipped instead of running"
             exit 1
           fi
       - name: Upload coverage to Codecov
