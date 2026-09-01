@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
-"""Install tool (copy command templates) and the Install/InstallAs/InstallDir
-builders.
+"""Install tool (copy command templates) and the Install/InstallAs/InstallDir/
+OverlayDir builders.
 
 Users can customize the copy commands via the tool namespace
 (env.install.copycmd) or override destdir per InstallDir target.
@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import builder
 from pcons.core.node import BuildInfo, FileNode, PathRole
 from pcons.core.resolver import PendingSourceFactory
@@ -193,6 +194,44 @@ def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path
     return prefix / dest
 
 
+def _overlay_file_map(
+    project: Project, source_dirs: Sequence[Path], target: Target
+) -> dict[Path, Path]:
+    """Map each relative path under the overlay to the file that wins it.
+
+    Later entries of *source_dirs* overwrite earlier ones, so the argument
+    order at the call site is the whole conflict rule: nothing is decided by
+    modification time, by depth, or by which tree looks more specific.
+
+    Args:
+        project: Project the source directories are resolved against.
+        source_dirs: Source tree roots, in increasing precedence.
+        target: The overlay target, for error locations.
+
+    Returns:
+        Relative path to absolute source file, in first-seen order.
+
+    Raises:
+        BuilderError: If a source directory does not exist or is not a
+            directory.
+    """
+    from pcons.core.errors import BuilderError
+
+    winners: dict[Path, Path] = {}
+    for source_dir in source_dirs:
+        root = project.root_dir / source_dir
+        if not root.is_dir():
+            raise BuilderError(
+                f"OverlayDir source is not a directory: {source_dir}",
+                location=target.defined_at,
+            )
+        for item in sorted(root.rglob("*")):
+            if item.is_dir():
+                continue
+            winners[item.relative_to(root)] = item
+    return winners
+
+
 def _mode_flags(target: Target) -> dict[str, list[str]]:
     """``--mode`` tokens for the copy command, when a mode was asked for.
 
@@ -347,7 +386,7 @@ class InstallNodeFactory(PendingSourceFactory):
             return
 
         builder_name = target._builder_name
-        if builder_name not in ("Install", "InstallAs", "InstallDir"):
+        if builder_name not in ("Install", "InstallAs", "InstallDir", "OverlayDir"):
             return
 
         resolved_sources = self._resolve_sources(target)
@@ -361,6 +400,9 @@ class InstallNodeFactory(PendingSourceFactory):
         elif builder_name == "InstallDir":
             dest_dir = Path(target._builder_data["dest_dir"])
             self._create_install_dir_node(target, resolved_sources, dest_dir)
+        elif builder_name == "OverlayDir":
+            dest_dir = Path(target._builder_data["dest_dir"])
+            self._create_overlay_nodes(target, resolved_sources, dest_dir)
 
     def _get_install_env(self, target: Target) -> Environment | None:
         """Get the target's env, or any project env with the install tool."""
@@ -478,6 +520,33 @@ class InstallNodeFactory(PendingSourceFactory):
         )
 
         installed_nodes.append(stamp_node)
+
+    def _create_overlay_nodes(
+        self, target: Target, sources: list[FileNode], dest_dir: Path
+    ) -> None:
+        """Create one copy node per surviving file for an OverlayDir target."""
+        env = self._get_install_env(target)
+
+        installed_nodes: list[FileNode] = []
+        for rel_path, source_path in _overlay_file_map(
+            self.project, [node.path for node in sources], target
+        ).items():
+            source_node = self.project.node(source_path)
+            dest_node = self.project.node(
+                dest_dir / rel_path, role=_install_role(dest_dir)
+            )
+            dest_node.add_inputs([source_node])
+            dest_node._build_info = {
+                "tool": "install",
+                "command_var": "copycmd",
+                "sources": [source_node],
+                "description": "OVERLAY $out",
+                "env": env,
+            }
+            installed_nodes.append(dest_node)
+
+        target._install_nodes = installed_nodes
+        target.output_nodes.extend(installed_nodes)
 
     def _create_install_as_node(
         self, target: Target, sources: list[FileNode], dest: Path
@@ -758,3 +827,82 @@ class InstallDirBuilder:
             [source],
             defined_at=get_caller_location(),
         )
+
+
+@builder(
+    "OverlayDir",
+    target_type="interface",
+    factory_class=InstallNodeFactory,
+    requires_env=True,
+)
+class OverlayDirBuilder:
+    """Merge several source trees into one directory, later sources winning.
+
+    Each source tree's *contents* land directly in the destination, keeping
+    their relative paths, so ``a/tree/x/y.txt`` and ``b/tree/x/z.txt`` both
+    arrive under ``<dest>/x/``. The source directory's own name is not
+    appended; that is what separates this from :class:`InstallDirBuilder`,
+    whose callers rely on the name being appended.
+
+    When two trees hold the same relative path, the later one in *sources*
+    wins. Argument order is the only rule, so the call site shows the answer.
+
+    One target owns the destination and emits one copy edge per surviving
+    file, which is what makes the conflict expressible: two independent
+    targets writing one file would be two producers, which pcons refuses.
+
+    The destination is a staging directory in the build tree, anchored under
+    *env*'s build directory, and the install prefix is never applied. This is
+    file staging, not an install.
+
+    Example::
+
+        stage = project.OverlayDir(
+            env,
+            "stage/app",
+            sources=[shared_dir, app_dir],
+        )
+    """
+
+    @staticmethod
+    def create_target(
+        project: Project,
+        env: Environment,
+        dest_dir: Path | str,
+        sources: Sequence[Path | str | FileNode | Target],
+        *,
+        name: str | None = None,
+    ) -> Target:
+        """Create an OverlayDir target.
+
+        Args:
+            project: The project to add the target to.
+            env: Environment whose build directory the destination is
+                anchored under.
+            dest_dir: Destination directory, relative to that build
+                directory.
+            sources: Source tree roots, in increasing precedence: the last
+                one wins a path the others also hold.
+            name: Optional name for the target.
+
+        Returns:
+            A Target whose outputs are the merged files.
+        """
+        dest_dir = Path(dest_dir)
+        target_name = _deduplicate_target_name(
+            project,
+            name or _install_target_name(project, dest_dir, "overlay"),
+            named_by_caller=name is not None,
+        )
+        anchored = anchor_target_paths(env, [dest_dir], target_name=target_name)[0]
+
+        target = _make_install_target(
+            project,
+            target_name,
+            "OverlayDir",
+            {"dest_dir": str(anchored)},
+            list(sources),
+            defined_at=get_caller_location(),
+        )
+        target._env = env
+        return target
