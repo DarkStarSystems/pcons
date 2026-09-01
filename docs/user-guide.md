@@ -3105,6 +3105,68 @@ project.Install(install_dir(env, "program"), [exe])  # -> <prefix>/bin/
 
 `InstallDir` uses ninja's depfile mechanism for incremental rebuilds - if any file in the source directory changes, the copy is re-run.
 
+### Merging Source Trees into One Directory
+
+`OverlayDir` merges the *contents* of several source trees into one directory.
+Use it to assemble a package source directory from a shared tree plus a
+per-application tree, or any other layered staging job:
+
+```python
+stage = project.OverlayDir(
+    env,
+    "stage/app",
+    sources=[shared_dir, app_dir],   # app_dir wins a shared path
+    exclude=["*.orig", ".git"],
+)
+```
+
+How it differs from `InstallDir`:
+
+- **Contents, not the directory.** `InstallDir(dest, "shared")` produces
+  `dest/shared/...`. `OverlayDir(env, dest, sources=["shared"])` puts
+  `shared`'s children directly in `dest`. That is what lets two trees with the
+  same name merge instead of colliding.
+- **Several sources.** `InstallDir` takes exactly one.
+- **The later source wins.** When two trees hold the same relative path, the
+  last one in `sources` is the one that lands. Argument order is the only rule:
+  not modification time, not depth, not which tree looks more specific.
+- **No install prefix.** The destination is a staging directory under the
+  environment's build directory, not an install. There is no `no_prefix=True`
+  to pass.
+- **It takes an environment.** The destination is anchored under *that*
+  environment's build directory.
+
+Relative paths are kept, so `src/com/example/Thing.java` arrives at
+`<dest>/src/com/example/Thing.java`. Two trees can each contribute a different
+child of one shared directory. One target owns the destination and emits one
+copy edge per surviving file, so every output has exactly one producer.
+
+`exclude` patterns are globs matched against the path relative to **each source
+root**, never the destination and never an absolute path. A pattern with no `/`
+matches a name at any depth, one with a `/` is anchored at the root, and
+matching is case sensitive on every platform. An excluded directory takes its
+contents with it. Nothing is excluded by default. A pattern that matches
+nothing is not an error, since source trees differ in what they hold.
+
+An excluded path is dropped from every source tree, so excluding the file that
+would have won a conflict leaves nothing at that path rather than falling back
+to the other tree - falling back would stage the very path you asked to drop.
+
+**Freshness.** Every directory in every source tree is a configure dependency,
+so adding a file anywhere - including deep under `src/com/example/` - makes it
+appear in the destination on the next build, with no hand-run of pcons.
+Registering only the roots would not be enough: a directory's modification time
+changes when a direct entry appears, not when one appears further down. The
+price is that any edit to those trees re-runs the build description.
+
+**Removal.** A file removed from a source tree loses its copy edge, but the copy
+already in the destination stays. `OverlayDir` stages files, it does not mirror
+them, and deleting from a directory it does not own would be a wider promise
+than it makes. Run `ninja -t cleandead`, or delete the destination, to clear
+stale copies.
+
+See `examples/78_overlay_dirs` for a working two-tree overlay.
+
 ### Generating pkg-config Files
 
 To make a pcons-built library consumable by downstream CMake or pkg-config projects, generate a `.pc` file:

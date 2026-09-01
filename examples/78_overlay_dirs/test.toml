@@ -1,0 +1,45 @@
+# Test configuration for the overlay-dirs example
+
+[test]
+description = "Two source trees merged into one staging directory with OverlayDir: the later source wins a shared path, nested paths survive, one directory takes a child from each tree, and exclude= drops what should not ship"
+
+expected_outputs = [
+    "build/stage/config.txt",
+    "build/stage/res/xml/a.txt",
+    "build/stage/res/drawable/b.txt",
+    "build/stage/src/com/example/Thing.java",
+]
+
+[verify]
+# There is no program to run here: the assertion is what ended up *inside* the
+# staged files. Checking that a path exists would pass just as well for a
+# builder that copied the wrong tree's version of it.
+commands = [
+    # The conflict. Both trees hold config.txt; app is second, so app wins.
+    { run = "cat build/stage/config.txt", expect_stdout = "origin = app tree" },
+    # A nested path, not flattened to stage/Thing.java.
+    { run = "cat build/stage/src/com/example/Thing.java", expect_stdout = "shared tree wrote Thing.java" },
+    # One directory, a child from each tree.
+    { run = "cat build/stage/res/xml/a.txt", expect_stdout = "shared tree wrote res/xml/a.txt" },
+    { run = "cat build/stage/res/drawable/b.txt", expect_stdout = "app tree wrote res/drawable/b.txt" },
+    # excluded in both trees, so there is nothing to read.
+    { run = "cat build/stage/notes.md", expect_returncode = 1 },
+]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "Editing a source file recopies just that one"
+touch = "shared/res/xml/a.txt"
+expect_rebuild = ["stage*a.txt"]
+expect_no_rebuild = ["stage*config.txt", "stage*b.txt", "stage*Thing.java"]
+
+[skip]
+# Runs on Linux, macOS and Windows -- nothing here is platform-specific.
+# The Xcode generator has no OverlayDir branch: it emits the aggregate target
+# with no script phase, so nothing is staged and the outputs never appear.
+# Same reason 14_install_dir skips it, and it is the generator's gap rather
+# than the example's.
+generators = ["xcode"]
