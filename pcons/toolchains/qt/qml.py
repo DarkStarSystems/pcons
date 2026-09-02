@@ -43,9 +43,9 @@ from pcons.toolchains.qt.builders import (
     _qrc_xml,
     _qt_make_target,
     _require_qt_tool,
+    _set_node_vars,
     _write_if_changed,
 )
-from pcons.toolchains.qt.toolchain import _source_path
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
@@ -56,13 +56,6 @@ if TYPE_CHECKING:
     from pcons.core.project import Project
     from pcons.core.target import Target
     from pcons.util.source_location import SourceLocation
-
-
-def _set_node_vars(node: Node, node_vars: dict[str, object]) -> None:
-    """Attach per-node command variables (the swift.py precedent)."""
-    info = getattr(node, "_build_info", None)
-    if info is not None:
-        info["vars"] = node_vars
 
 
 def _parse_version(version: str) -> tuple[str, str]:
@@ -213,24 +206,8 @@ class QtQmlModuleBuilder:
         registrar_node: Node | None = None
         qmltypes_name = f"{name}.qmltypes"
         resolver = project._path_resolver
-        # Both moc modes emit JSON sidecars: QML_ELEMENT in a header
-        # (moc_X.cpp.json) or in a self-mocing .cpp (X.moc.json).
-        moc_output_nodes = [*info.moc_header_nodes, *info.dot_moc_nodes]
-        if moc_output_nodes:
-            # Sidecars are named as the build tool sees them (PathToken
-            # path_type="build" renders verbatim).
-            json_tokens = [
-                PathToken(
-                    path=f"{resolver.make_execution_relative(_source_path(node))}.json",
-                    path_type="build",
-                )
-                for node in moc_output_nodes
-            ]
-            metatypes = qt_env.qt.CollectJson(
-                qt_dir / f"{name}_metatypes.json", moc_output_nodes
-            )[0]
-            _set_node_vars(metatypes, {"JSONFILES": json_tokens})
-
+        metatypes = info.metatypes_node
+        if metatypes is not None:
             foreign = _qt_metatypes(project, env, link)
             registrar_node = qt_env.qt.TypeRegistrar(
                 qt_dir / f"{name}_qmltyperegistrations.cpp", [metatypes]

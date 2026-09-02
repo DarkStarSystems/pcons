@@ -1,19 +1,14 @@
 # SPDX-License-Identifier: MIT
-"""Generate-time scan for Qt meta-object macros (automoc).
+"""Scan for Qt meta-object macros (automoc).
 
 Finds ``Q_OBJECT``/``Q_GADGET``/``Q_NAMESPACE`` in a target's sources and
-their project-local headers, deciding which moc edges to create. This is
-the qmake model (scan at generation, not at build), made safe:
+their project-local headers, deciding which files moc must run on. The scan
+reads file *contents*, so it runs at build time, inside the per-target
+automoc edge (:mod:`pcons.toolchains.qt._automoc`), and a generated header is
+just another input of that edge. Configure decides nothing here.
 
-- moc's own depfiles keep every *existing* edge incrementally correct at
-  build time — the scan only decides *which* edges exist.
-- A per-target staleness guard (scan manifest, checked by a cheap build
-  edge) turns "the scan result would change" into a loud, actionable
-  build error instead of a mysterious vtable link failure.
-
-Scanning reads file *contents* at configure/generate time (like any
-configure check) and is cached by (path, mtime, size), so warm re-runs
-do no I/O beyond stat calls.
+Results are cached by (path, mtime, size), so re-scanning an unchanged tree
+does no I/O beyond stat calls.
 """
 
 from __future__ import annotations
@@ -59,6 +54,30 @@ _STRING_RE = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 _HEADER_SUFFIXES = (".h", ".hh", ".hpp", ".hxx")
 
 _MAX_INCLUDE_DEPTH = 32
+
+
+def output_rel_dir(source: Path, project_root: Path | None = None) -> tuple[str, ...]:
+    """Dir parts of *source*, for a collision-free generated-file layout.
+
+    A generated file mirrors its source's directory under the target's
+    generation dir, so same-named files in different directories do not
+    collide. Out-of-project sources mirror their absolute path; drive and
+    root markers are dropped so the parts always join into a relative
+    subpath. Configure and the build-time automoc tool both lay files out
+    with this, so the two agree on where a ``.moc`` lands.
+
+    Args:
+        source: The source file whose directory to mirror.
+        project_root: Root the path is taken relative to, when it is under
+            one.
+    """
+    parent = Path(str(source).replace("\\", "/")).parent
+    if project_root is not None and parent.is_absolute():
+        try:
+            parent = parent.relative_to(project_root)
+        except ValueError:
+            pass
+    return tuple(p.replace(":", "") for p in parent.parts if p not in ("..", "/", "."))
 
 
 @dataclass

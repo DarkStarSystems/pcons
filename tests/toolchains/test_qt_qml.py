@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from pcons.core.project import Project
@@ -112,14 +114,15 @@ class TestQmlSingletons:
 
 
 class TestQtQmlModuleUnderABuildPrefix:
-    """An environment's `build_prefix` reaches the moc sidecar paths.
+    """An environment's `build_prefix` reaches the generated Qt paths.
 
     The build tool runs in the top-level build directory, so the paths the
     commands name carry the prefix. Relativizing against the environment's own
-    build directory subtracts it and moc cannot open the sidecars.
+    build directory subtracts it, and then the automoc reader cannot open its
+    spec and qmltyperegistrar cannot open the metatypes.
     """
 
-    def test_the_sidecar_paths_carry_the_prefix(self, qml_project):
+    def test_the_sidecar_paths_carry_the_prefix(self, qml_project, tmp_path):
         env = cxx_env_with_qt(qml_project)
         env.build_prefix = "host"
         qml_project.QtQmlModule(
@@ -132,9 +135,26 @@ class TestQtQmlModuleUnderABuildPrefix:
 
         content = generate_ninja(qml_project)
 
-        assert "  JSONFILES = host/qt.ui/src/moc_backend.cpp.json\n" in content
+        assert "  AUTOMOCSPEC = host/qt.ui/automoc.json\n" in content
+        assert (
+            "build host/qt.ui/mocs_compilation.cpp | host/qt.ui/ui_metatypes.json:"
+            " qt_automoccmd" in content
+        )
+        registrar = next(
+            line
+            for line in content.splitlines()
+            if line.startswith("build host/qt.ui/ui_qmltyperegistrations.cpp:")
+        )
+        assert registrar.endswith(" host/qt.ui/ui_metatypes.json")
         assert "  QMLTYPES = host/qt.ui/ui.qmltypes\n" in content
-        assert "build host/qt.ui/src/moc_backend.cpp:" in content
+
+        spec = json.loads(
+            (tmp_path / "build" / "host" / "qt.ui" / "automoc.json").read_text()
+        )
+        assert spec["gen_dir"] == str(tmp_path / "build" / "host" / "qt.ui")
+        assert spec["metatypes"] == str(
+            tmp_path / "build" / "host" / "qt.ui" / "ui_metatypes.json"
+        )
 
 
 class TestQtQmlModule:
@@ -151,10 +171,13 @@ class TestQtQmlModule:
         content = generate_ninja(qml_project)
 
         # moc runs with JSON sidecar output.
-        assert "--output-json" in content
+        spec = json.loads((tmp_path / "build" / "qt.ui" / "automoc.json").read_text())
+        assert "--output-json" in spec["moc_args"]
         # JSON sidecars merge into metatypes...
-        assert "build qt.ui/ui_metatypes.json: qt_collectjsoncmd" in content
-        assert "moc_backend.cpp.json" in content
+        assert (
+            "build qt.ui/mocs_compilation.cpp | qt.ui/ui_metatypes.json: qt_automoccmd"
+            in content
+        )
         # ...which feed qmltyperegistrar with URI and version.
         assert "build qt.ui/ui_qmltyperegistrations.cpp: qt_typeregcmd" in content
         # The URI, version and qmltypes path are per-edge variables, so one
@@ -189,7 +212,7 @@ class TestQtQmlModule:
         )
         content = generate_ninja(qml_project)
         assert "qt_typeregcmd" not in content
-        assert "qt_collectjsoncmd" not in content
+        assert "qt_automoccmd" not in content
         qmldir = (tmp_path / "build" / "qt.puremod" / "qmldir").read_text()
         assert "module Pure.Ui" in qmldir
         assert "typeinfo" not in qmldir
