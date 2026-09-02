@@ -296,7 +296,7 @@ class QtQmlModuleBuilder:
         _write_if_changed(root / qrc_rel, _qrc_xml(f"/qt/qml/{uri_path}", entries))
 
         rcc_node = qt_env.qt.Rcc(
-            qt_dir / f"qrc_{name}.cpp", qrc_rel, name=f"qml_{name}"
+            qt_dir / f"qrc_{name}.cpp", project.node(qrc_rel), name=f"qml_{name}"
         )[0]
         if registrar_node is not None:
             # rcc embeds the .qmltypes the registrar writes.

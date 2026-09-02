@@ -43,6 +43,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from xml.sax.saxutils import escape
 
+from pcons.core.builder import anchor_target_paths
 from pcons.core.builder_registry import builder
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import PathToken
@@ -121,17 +122,22 @@ def _qt_gen_dir_for(
 ) -> tuple[Path, Path]:
     """Where a Qt builder writes its generated files: ``(root, gen_dir)``.
 
-    *gen_dir* is build-relative and carries the declaring project's offset
-    from the top-level root, so two subdirectories declaring a target of one
-    name do not write over each other's generated files.
+    *gen_dir* is a builder target path anchored by ``anchor_target_paths``,
+    the one place that turns a build-relative name into node-canonical form,
+    so it carries the declaring script's offset from the top-level root and
+    two subdirectories declaring a target of one name keep their own
+    generated files.
 
     *root* is the top-level project's root directory, the one node paths are
     anchored at. A sub-project's own ``root_dir`` names a directory the
     generated build files never refer to, so a file written there is a file
-    no rule knows how to make.
+    no rule knows how to make. ``root / gen_dir`` is therefore the directory
+    on disk, and ``project.node(gen_dir / ...)`` the node a builder reads.
     """
-    root = project._path_resolver.project_root
-    return root, env.build_dir_for(project._node_offset) / subdir
+    return (
+        project._path_resolver.project_root,
+        anchor_target_paths(env, [Path(subdir)])[0],
+    )
 
 
 def _env_include_dirs(project: Project, env: Environment) -> list[Path]:
@@ -492,7 +498,7 @@ def _qt_make_target(
             ),
         )
         edge = qt_env.qt.Automoc(
-            qt_dir / "mocs_compilation.cpp", [spec_rel, *cpp_paths]
+            qt_dir / "mocs_compilation.cpp", [project.node(spec_rel), *cpp_paths]
         )[0]
         _set_node_vars(
             edge,
@@ -751,7 +757,9 @@ class QtResourcesBuilder:
         qrc_rel = res_dir / f"{name}.qrc"
         _write_if_changed(top_root / qrc_rel, _qrc_xml(prefix, entries))
 
-        cpp_node = env.qt.Rcc(res_dir / f"qrc_{name}.cpp", qrc_rel, name=name)[0]
+        cpp_node = env.qt.Rcc(
+            res_dir / f"qrc_{name}.cpp", project.node(qrc_rel), name=name
+        )[0]
         # getattr: the generated builder stubs omit the internal
         # defined_at parameter, but passing it keeps "defined at"
         # diagnostics pointing at the user's call site.

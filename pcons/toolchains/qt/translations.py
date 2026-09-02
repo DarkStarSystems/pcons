@@ -100,7 +100,9 @@ class QtTranslationsBuilder:
         qrc_rel = qt_dir / f"{name}.qrc"
         _write_if_changed(root / qrc_rel, _qrc_xml(prefix, entries))
 
-        rcc_node = env.qt.Rcc(qt_dir / f"qrc_{name}.cpp", qrc_rel, name=name)[0]
+        rcc_node = env.qt.Rcc(
+            qt_dir / f"qrc_{name}.cpp", project.node(qrc_rel), name=name
+        )[0]
         rcc_node.implicit_deps.extend(qm_nodes)
 
         factory = getattr(project, "ObjectLibrary")  # noqa: B009
