@@ -7,7 +7,9 @@ This demonstrates a subdir that works both:
 
 It also pulls in its own subdirectory, so libbar ends up one level down when
 libfoo is built directly and two levels down when the top-level project
-builds everything. Neither script says anything about where it sits.
+builds everything. Neither script says anything about where it sits. libbar
+is where the generator lives, so its paths have to be anchored two levels
+down from the top-level build.
 """
 
 from pcons import Project, add_subdirectory

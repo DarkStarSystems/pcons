@@ -1390,7 +1390,11 @@ class Environment(_EnvironmentStubs):
 
         Args:
             target: Output file(s) that the command produces. Paths are
-                    relative to the build directory; a leading build-dir
+                    relative to the build directory of the script that
+                    declares them: in a subdirectory reached through
+                    ``add_subdirectory``, ``"out.txt"`` is
+                    ``<build_dir>/<subdir>/out.txt``, where that script's
+                    programs and libraries also build. A leading build-dir
                     component is absorbed, so a target written from the
                     project root (``build_dir / "out.txt"``) means the same
                     file as ``"out.txt"``. For a file in a literal
@@ -1399,7 +1403,9 @@ class Environment(_EnvironmentStubs):
                     An absolute path outside the build directory is an
                     external output, produced in place.
             source: Input file(s) that the command depends on. Can be Targets
-                   (whose output files become sources), paths, or None.
+                   (whose output files become sources), paths, or None. A
+                   relative path is read from the directory of the script
+                   that declares it, like a target's ``sources=``.
             command: The shell command to run. Supports variable substitution:
                     - $SOURCE / $SOURCES: All source files (space-separated);
                       the two spellings mean the same thing
@@ -1423,13 +1429,15 @@ class Environment(_EnvironmentStubs):
                     Any other $variable is expanded from this environment.
 
                     **The command runs in the build directory**, unlike
-                    ``sources=`` (project-root-relative) and ``target=``
-                    (build-dir-relative). So a path
+                    ``sources=`` (read from the declaring script's
+                    directory) and ``target=`` (written to its build
+                    directory). So a path
                     written relative — "tools/gen.pl" — is looked for under
                     the build directory and won't be found. Spell it
-                    "$SRCDIR/tools/gen.pl", pass an absolute path (pcons
-                    rewrites those to stay relocatable), or move the whole
-                    command with ``cwd=``.
+                    "$SRCDIR/tools/gen.pl" (``$SRCDIR`` is the *project*
+                    root, not the subdirectory), pass an absolute path
+                    (pcons rewrites those to stay relocatable), or move the
+                    whole command with ``cwd=``.
 
                     Do not quote a token yourself: pcons keeps the command as
                     tokens and quotes each for the shell it writes for, so

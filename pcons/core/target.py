@@ -825,7 +825,9 @@ class Target:
 
         Args:
             *items: Files or targets to depend on. Strings and Paths are
-                   converted to FileNodes via ``project.node()``.
+                   converted to FileNodes via ``project.node()``, read from
+                   the directory of the script that declared this target,
+                   like ``add_sources()``.
             propagate: If True (default), apply to all build steps
                       (intermediate + output). If False, only output.
 
@@ -869,6 +871,8 @@ class Target:
                     # str or Path — convert to FileNode via project
                     project = self.project
                     if project is not None:
+                        if self._subdir.parts:
+                            item = self._subdir / item
                         file_list.append(project.node(item))
                     else:
                         file_list.append(

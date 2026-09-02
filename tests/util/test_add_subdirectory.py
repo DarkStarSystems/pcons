@@ -11,6 +11,7 @@ import pytest
 
 from pcons import get_var
 from pcons.core.project import Project
+from pcons.generators.generator import BaseGenerator
 from pcons.util.add_subdirectory import add_subdirectory
 
 
@@ -665,3 +666,261 @@ class TestSubdirectoryEnvironment:
             child = Project("child", root_dir=test_project.root_dir)
             child.Environment(toolchain=gcc_toolchain, name="own")
             assert child.default_environment is mcu
+
+
+class TestSubdirectoryCommandPaths:
+    """``env.Command`` anchors both ends at the script that declares it.
+
+    A generator declared in a subdirectory writes into that subdirectory's
+    build directory and reads its inputs from that subdirectory, the same
+    way ``Program`` and ``StaticLibrary`` place their objects. Anchoring
+    either end at the top-level project instead puts the output in the
+    wrong place and names a source file that does not exist.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    CHILD = (
+        "from pcons.core.project import Project\n"
+        "project = Project.current()\n"
+        "env = project.default_environment\n"
+        "gen = env.Command(\n"
+        "    target='gen/extra.h',\n"
+        "    source='mk.py',\n"
+        "    command='python3 $SOURCE $TARGET',\n"
+        ")\n"
+    )
+
+    def test_command_target_lands_in_subdir_build_dir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(test_project, "child", self.CHILD)
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build child/gen/extra.h: " in text
+
+    def test_command_source_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(test_project, "child", self.CHILD)
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/mk.py" in text
+        assert "$topdir/mk.py" not in text
+
+    def test_nested_subdirectories_accumulate(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(test_project, "a/aa", self.CHILD)
+        _make_subdir(
+            test_project,
+            "a",
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "inner = add_subdirectory('aa')\n",
+        )
+
+        add_subdirectory("a")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build a/aa/gen/extra.h: " in text
+        assert "$topdir/a/aa/mk.py" in text
+
+    def test_subproject_with_own_project_object(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        """A subdir that creates its own Project anchors the same way.
+
+        Its ``build_dir`` already carries the offset, so the anchor must not
+        apply it twice.
+        """
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project('child')\n"
+            "env = project.Environment(toolchain='c')\n"
+            "gen = env.Command(\n"
+            "    target='gen/extra.h',\n"
+            "    source='mk.py',\n"
+            "    command='python3 $SOURCE $TARGET',\n"
+            ")\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build child/gen/extra.h: " in text
+        assert "$topdir/child/mk.py" in text
+
+    def test_nested_subproject_inheriting_the_parent_environment(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        """Two levels down, on an environment the top-level project owns.
+
+        The environment reached through ``project.parent`` belongs to the
+        top-level project, so its own offset is empty. The anchor is the
+        declaring script's, not the environment owner's, or the same edge
+        contradicts itself: the target and the source land one level down
+        while ``depends=`` lands two.
+        """
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "a/aa",
+            "from pcons.core.project import Project\n"
+            "project = Project('aa')\n"
+            "env = project.parent.default_environment\n"
+            "gen = env.Command(\n"
+            "    target='gen/extra.h',\n"
+            "    source='mk.py',\n"
+            "    command='python3 $SOURCE $TARGET',\n"
+            "    depends='schema.json',\n"
+            ")\n",
+        )
+        _make_subdir(
+            test_project,
+            "a",
+            "from pcons.core.project import Project\n"
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "project = Project('a')\n"
+            "inner = add_subdirectory('aa')\n",
+        )
+
+        add_subdirectory("a")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build a/aa/gen/extra.h: " in text
+        assert "$topdir/a/aa/mk.py" in text
+        assert "$topdir/a/aa/schema.json" in text
+
+    def test_top_level_command_unchanged(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        env = test_project.Environment(toolchain="c")
+        env.Command(
+            target="gen/extra.h",
+            source="mk.py",
+            command="python3 $SOURCE $TARGET",
+        )
+
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build gen/extra.h: " in text
+        assert "$topdir/mk.py" in text
+
+    def test_command_depends_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "env = project.default_environment\n"
+            "gen = env.Command(\n"
+            "    target='gen/extra.h',\n"
+            "    source='mk.py',\n"
+            "    command='python3 $SOURCE $TARGET',\n"
+            "    depends='schema.json',\n"
+            ")\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/schema.json" in text
+
+
+class TestSubdirectoryInstallPaths:
+    """Install and archive sources anchor at the declaring script too.
+
+    These builders keep their sources pending until resolution, long after
+    the subdirectory script finished, so the offset has to come from the
+    target rather than from the project's current directory.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    def test_install_source_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "inst = project.Install('share', ['data.txt'])\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/data.txt" in text
+
+    def test_install_as_source_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "inst = project.InstallAs('share/renamed.txt', 'data.txt')\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/data.txt" in text
+
+    def test_install_dir_source_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "inst = project.InstallDir('share/tree', 'assets')\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/assets" in text
+
+    def test_top_level_install_unchanged(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        test_project.Install("share", ["data.txt"])
+
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/data.txt" in text
