@@ -334,6 +334,64 @@ app.depends(gen)
 """
 
 
+E2E_CHILD_BUILD_SCRIPT = """\
+# SPDX-License-Identifier: MIT
+import sys
+from pathlib import Path
+
+from pcons.core.project import Project
+from pcons.toolchains.qt import find_qt
+
+project = Project("child")
+env = project.parent.default_environment
+qt = find_qt(project, env, modules=["Core"])
+env.cxx.includes.append(str(project.root_dir / "gen"))
+gen = env.Command(
+    target="gen.stamp",
+    source=(project.root_dir / "mk.py").as_posix(),
+    command=[
+        sys.executable,
+        "$SOURCE",
+        (project.root_dir / "gen" / "generated.hpp").as_posix(),
+        "$TARGET",
+    ],
+)
+app = project.QtProgram("app", env, sources=["src/main.cpp"], link=[qt.Core])
+app.depends(gen)
+"""
+
+SAME_NAME_CHILD_BUILD_SCRIPT = """\
+# SPDX-License-Identifier: MIT
+from pcons.core.project import Project
+from pcons.toolchains.qt import find_qt
+
+project = Project("{name}")
+env = project.parent.default_environment
+qt = find_qt(project, env, modules=["Core"])
+project.QtProgram("app", env, sources=["src/main.cpp", "src/thing.h"], link=[qt.Core])
+"""
+
+
+def same_name_child(root: Path, name: str) -> None:
+    """A subdirectory whose Qt target is called ``app``, like its sibling's."""
+    write(
+        root / name / "pcons-build.py",
+        SAME_NAME_CHILD_BUILD_SCRIPT.format(name=name),
+    )
+    write(
+        root / name / "src" / "thing.h",
+        "#pragma once\n#include <QObject>\n"
+        f"class Thing_{name} : public QObject {{ Q_OBJECT\n"
+        f'public:\n    const char *who() const {{ return "{name}"; }}\n}};\n',
+    )
+    write(
+        root / name / "src" / "main.cpp",
+        '#include "thing.h"\n#include <cstdio>\n'
+        f"int main() {{ Thing_{name} t; "
+        'std::printf("%s %s\\n", t.metaObject()->className(), t.who()); return 0; }\n',
+    )
+
+
 class TestSubdirectoryTargets:
     """A Qt target declared by an add_subdirectory child script.
 
@@ -368,6 +426,89 @@ class TestSubdirectoryTargets:
         )
         assert "|| " in automoc
         assert "gen/extra.h" in automoc.split("|| ", 1)[1]
+
+
+@needs_qt
+@needs_ninja
+class TestSubdirectoryTargetsBuild:
+    """The same shape, built for real: the generated files must be findable.
+
+    ninja resolves an edge's paths against the top-level build directory,
+    so a Qt file the configure step wrote under the child's own root is a
+    file no rule knows how to make.
+    """
+
+    @staticmethod
+    def _project(root: Path, monkeypatch) -> Project:
+        from pcons.toolchains import find_c_toolchain
+
+        monkeypatch.chdir(root)
+        child = root / "child"
+        write(child / "pcons-build.py", E2E_CHILD_BUILD_SCRIPT)
+        write(child / "mk.py", SLOW_GENERATOR)
+        write(child / "src" / "main.cpp", MAIN_CPP)
+
+        project = Project("top", root_dir=root, build_dir=root / "build")
+        env = project.Environment(toolchain=find_c_toolchain())
+        env.cxx.set_standard(17)
+        project.add_subdirectory("child")
+        project.resolve()
+        return project
+
+    def test_a_child_qt_target_builds_and_runs(self, tmp_path, monkeypatch):
+        project = self._project(tmp_path, monkeypatch)
+        build_dir = build_files(project)
+
+        result = run_ninja(build_dir)
+        assert result.returncode == 0, result.stderr or result.stdout
+
+        aggregated = (
+            build_dir / "child" / "qt.app" / "mocs_compilation.cpp"
+        ).read_text()
+        assert "moc_generated.cpp" in aggregated
+        program = subprocess.run(
+            [str(build_dir / "child" / "app")],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "meta=Generated" in program.stdout
+        assert "answer=42" in program.stdout
+
+    def test_two_children_of_one_name_keep_their_own_generated_files(
+        self, tmp_path, monkeypatch
+    ):
+        from pcons.toolchains import find_c_toolchain
+
+        monkeypatch.chdir(tmp_path)
+        same_name_child(tmp_path, "alpha")
+        same_name_child(tmp_path, "beta")
+
+        project = Project("top", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=find_c_toolchain())
+        env.cxx.set_standard(17)
+        project.add_subdirectory("alpha")
+        project.add_subdirectory("beta")
+        project.resolve()
+        build_dir = build_files(project)
+
+        result = run_ninja(build_dir)
+        assert result.returncode == 0, result.stderr or result.stdout
+
+        for name in ("alpha", "beta"):
+            aggregated = (
+                build_dir / name / "qt.app" / "mocs_compilation.cpp"
+            ).read_text()
+            assert f"{name}/src/moc_thing.cpp" in aggregated
+            other = "beta" if name == "alpha" else "alpha"
+            assert other not in aggregated
+            program = subprocess.run(
+                [str(build_dir / name / "app")],
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert program.stdout.strip() == f"Thing_{name} {name}"
 
 
 class TestNinjaShape:

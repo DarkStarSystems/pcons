@@ -236,7 +236,7 @@ class QtQmlModuleBuilder:
         )
         qt_env = info.qt_env
         qt_dir = info.qt_dir
-        root = project.root_dir
+        root = project._path_resolver.project_root
 
         # ---- C++ type registration (only when there are moc'ed types) ----
         registrar_node: Node | None = None

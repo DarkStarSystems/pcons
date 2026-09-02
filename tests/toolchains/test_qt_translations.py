@@ -78,3 +78,48 @@ class TestTranslationsEnvironment:
         assert on_host.qualified_name == "trtest::i18n@host"
         assert on_cross.qualified_name == "trtest::i18n@cross"
         assert len(tr_project.environments) == before
+
+
+CHILD_TRANSLATIONS_SCRIPT = """\
+# SPDX-License-Identifier: MIT
+from pcons.core.project import Project
+
+project = Project("child")
+project.QtTranslations(
+    "i18n", project.default_environment, ts_files=["i18n/app_de.ts"]
+)
+"""
+
+
+class TestTranslationsInASubdirectory:
+    """The .qrc a child script generates must land where its edge names it.
+
+    ninja resolves an edge's paths against the top-level build directory,
+    which is where node paths are anchored too. A sub-project's own
+    ``root_dir`` is a directory the generated build files never mention, so
+    a file written there is a file no rule knows how to make.
+    """
+
+    def test_the_generated_qrc_is_the_file_the_rcc_edge_reads(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        child = tmp_path / "child"
+        (child / "i18n").mkdir(parents=True)
+        (child / "i18n" / "app_de.ts").write_text("<TS/>\n")
+        (child / "pcons-build.py").write_text(CHILD_TRANSLATIONS_SCRIPT)
+
+        project = Project("top", root_dir=tmp_path, build_dir=tmp_path / "build")
+        cxx_env_with_qt(project)
+        project.add_subdirectory("child")
+        content = generate_ninja(project)
+
+        edge = next(
+            line
+            for line in content.splitlines()
+            if line.startswith("build ") and "/qrc_i18n.cpp:" in line
+        )
+        inputs = edge.split(":", 1)[1].split("|", 1)[0].split()[1:]
+        assert len(inputs) == 1
+        assert 'alias="app_de.qm"' in (tmp_path / "build" / inputs[0]).read_text()
+        assert inputs == ["child/qt.i18n/i18n.qrc"]

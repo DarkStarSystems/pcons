@@ -302,6 +302,51 @@ class TestQtResources:
             project.QtResources("assets", env, files=["nope/*.png"])
 
 
+CHILD_RESOURCES_SCRIPT = """\
+# SPDX-License-Identifier: MIT
+from pcons.core.project import Project
+
+project = Project("child")
+project.QtResources(
+    "assets", project.default_environment, files=["assets/hello.txt"], prefix="/"
+)
+"""
+
+
+class TestResourcesInASubdirectory:
+    """The .qrc a child script generates must land where its edge names it.
+
+    ninja resolves an edge's paths against the top-level build directory,
+    which is where node paths are anchored too. A sub-project's own
+    ``root_dir`` is a directory the generated build files never mention, so
+    a file written there is a file no rule knows how to make.
+    """
+
+    def test_the_generated_qrc_is_the_file_the_rcc_edge_reads(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        child = tmp_path / "child"
+        (child / "assets").mkdir(parents=True)
+        (child / "assets" / "hello.txt").write_text("hello\n")
+        (child / "pcons-build.py").write_text(CHILD_RESOURCES_SCRIPT)
+
+        project = Project("top", root_dir=tmp_path, build_dir=tmp_path / "build")
+        cxx_env_with_qt(project)
+        project.add_subdirectory("child")
+        content = generate_ninja(project)
+
+        edge = next(
+            line
+            for line in content.splitlines()
+            if line.startswith("build ") and "/qrc_assets.cpp:" in line
+        )
+        inputs = edge.split(":", 1)[1].split("|", 1)[0].split()[1:]
+        assert len(inputs) == 1
+        assert (tmp_path / "build" / inputs[0]).is_file()
+        assert inputs == ["child/qt.res/assets.qrc"]
+
+
 class TestAlongsideCxxToolchain:
     """The qt toolchain composes with a C++ toolchain via add_toolchain."""
 

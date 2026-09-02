@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from pcons.core.builder_registry import builder
 from pcons.toolchains.qt.builders import (
     _qrc_xml,
+    _qt_gen_dir_for,
     _require_qt_tool,
     _stamped_command,
     _write_if_changed,
@@ -81,9 +82,7 @@ class QtTranslationsBuilder:
         defined_at = defined_at or get_caller_location()
         if not ts_files:
             raise ValueError(f"QtTranslations '{name}': ts_files is empty")
-        root = project.root_dir
-        build_dir = Path(env.get("build_dir", "build"))
-        qt_dir = build_dir / f"qt.{name}"
+        root, qt_dir = _qt_gen_dir_for(project, env, f"qt.{name}")
 
         # lrelease each catalog: .ts -> .qm
         qm_nodes: list[Node] = []

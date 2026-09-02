@@ -227,6 +227,14 @@ generated automatically for GCC/Clang).
 | QtResources | `build/qt.res/` |
 | automoc spec + aggregate TU | `build/qt.app/automoc.json`, `mocs_compilation.cpp` |
 
+A target declared by an `add_subdirectory` script gets the same layout one
+level down, under that script's directory: a `sub/pcons-build.py` declaring
+`QtProgram("app", ...)` generates into `build/sub/qt.app/`, next to the
+`build/sub/obj.app/` its objects land in. Two subdirectories may then each
+declare a target named `app` without writing over each other. The resource
+layout of a QML module does not follow: `qml_files` entries keep the paths
+the declaring script gave them, so moving the script moves no QML URL.
+
 ## Current limitations
 
 Worth knowing before porting a large CMake project:
