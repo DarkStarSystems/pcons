@@ -31,10 +31,12 @@ description = "Nothing changed"
 expect_no_work = true
 
 [[rebuild]]
-description = "Editing a source file recopies just that one"
-touch = "shared/res/xml/a.txt"
-expect_rebuild = ["stage*a.txt"]
-expect_no_rebuild = ["stage*config.txt", "stage*b.txt", "stage*Thing.java"]
+description = "Editing a source file restages it, and pcons is not re-run"
+write."shared/res/xml/a.txt" = "edited in place\n"
+expect_rebuild = ["*stage.stamp"]
+expect_no_rebuild = ["build.ninja"]
+run = "cat build/stage/res/xml/a.txt"
+expect_stdout = "edited in place"
 
 [skip]
 # Runs on Linux, macOS and Windows -- nothing here is platform-specific.

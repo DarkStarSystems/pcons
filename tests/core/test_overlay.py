@@ -1,5 +1,10 @@
 # SPDX-License-Identifier: MIT
-"""Tests for Project.OverlayDir(): N source trees merged into one directory."""
+"""Tests for Project.OverlayDir(): N source trees merged into one directory.
+
+The merged set is decided by the overlay command at build time, so almost
+everything here is read back out of the staged directory after a real build.
+Asserting on the target's output nodes would only say what pcons intended.
+"""
 
 import shutil
 import subprocess
@@ -47,14 +52,6 @@ def overlay_project(
     return project, stage
 
 
-def staged(target: Target) -> set[str]:
-    """The destination-relative paths the overlay would produce."""
-    return {
-        node.path.relative_to(Path("build") / "stage").as_posix()
-        for node in target.output_nodes
-    }
-
-
 def build(project: Project, root: Path) -> Path:
     """Generate build.ninja and run ninja; return the build directory."""
     NinjaGenerator().generate(project)
@@ -65,6 +62,20 @@ def build(project: Project, root: Path) -> Path:
     )
     assert result.returncode == 0, result.stderr or result.stdout
     return build_dir
+
+
+def overlay_build(
+    root: Path, sources: list[Path], exclude: list[str] | None = None
+) -> Path:
+    """Overlay *sources* into "stage" for real; return the build directory."""
+    project, _ = overlay_project(root, sources, exclude)
+    return build(project, root)
+
+
+def staged(build_dir: Path) -> set[str]:
+    """The destination-relative paths the overlay actually produced."""
+    stage = build_dir / "stage"
+    return {p.relative_to(stage).as_posix() for p in stage.rglob("*") if p.is_file()}
 
 
 needs_ninja = pytest.mark.skipif(
@@ -84,11 +95,55 @@ BUILD_SCRIPT = textwrap.dedent(
     """
 )
 
+GENERATOR = textwrap.dedent(
+    """\
+    # SPDX-License-Identifier: MIT
+    import sys
+    import time
+    from pathlib import Path
+
+    time.sleep(2)
+    out = Path(sys.argv[1])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text("generated\\n")
+    """
+)
+
+GENERATED_BUILD_SCRIPT = textwrap.dedent(
+    """\
+    # SPDX-License-Identifier: MIT
+    import sys
+    from pathlib import Path
+
+    from pcons import Project
+
+    project = Project("generated")
+    env = project.Environment(name="host")
+    root = Path(__file__).parent
+    made = env.Command(
+        target=str(root / "shared" / "generated.txt"),
+        source="mk.py",
+        command=[sys.executable, "$SOURCE", "$TARGET"],
+    )
+    stage = project.OverlayDir(env, "stage", sources=["shared", "app"])
+    stage.depends(made)
+    project.Default(stage)
+    """
+)
+
 
 def freshness_project(root: Path) -> Path:
     """Two trees plus a build script, laid out for a real `pcons` run."""
     make_trees(root)
     write(root / "pcons-build.py", BUILD_SCRIPT)
+    return root / "build" / "stage"
+
+
+def generated_project(root: Path) -> Path:
+    """A source tree one build edge writes into, slowly enough to be seen."""
+    make_trees(root)
+    write(root / "mk.py", GENERATOR)
+    write(root / "pcons-build.py", GENERATED_BUILD_SCRIPT)
     return root / "build" / "stage"
 
 
@@ -137,40 +192,26 @@ class TestOverlayGraph:
 
         assert stage.name == "pkg"
 
-    def test_one_output_node_per_surviving_file(self, tmp_path):
+    def test_the_only_output_is_one_stamp(self, tmp_path):
         shared, app = make_trees(tmp_path)
         _, stage = overlay_project(tmp_path, [shared, app])
 
-        paths = {node.path for node in stage.output_nodes}
-        assert paths == {
-            Path("build/stage/Manifest.xml"),
-            Path("build/stage/shared_only.txt"),
-            Path("build/stage/res/xml/a.txt"),
-            Path("build/stage/res/drawable/b.txt"),
-            Path("build/stage/src/com/example/Thing.java"),
-        }
+        assert [node.path for node in stage.output_nodes] == [
+            Path("build/.stamps/stage.stamp")
+        ]
 
-    def test_destination_is_anchored_under_the_env_build_dir(self, tmp_path):
+    def test_the_source_roots_are_the_edge_inputs(self, tmp_path):
         shared, app = make_trees(tmp_path)
         _, stage = overlay_project(tmp_path, [shared, app])
 
-        assert all(
-            node.path.parts[0] == "build" and node.role is None
-            for node in stage.output_nodes
-        )
+        inputs = [node.path for node in stage.output_nodes[0].explicit_deps]
+        assert inputs == [Path("shared"), Path("app")]
 
     def test_no_install_prefix_is_applied(self, tmp_path):
         shared, app = make_trees(tmp_path)
         _, stage = overlay_project(tmp_path, [shared, app])
 
         assert not any("dist" in node.path.parts for node in stage.output_nodes)
-
-    def test_one_producer_per_output(self, tmp_path):
-        shared, app = make_trees(tmp_path)
-        _, stage = overlay_project(tmp_path, [shared, app])
-
-        paths = [node.path for node in stage.output_nodes]
-        assert len(paths) == len(set(paths))
 
     def test_two_overlays_into_one_destination_collide(self, tmp_path):
         shared, app = make_trees(tmp_path)
@@ -191,15 +232,26 @@ class TestOverlayGraph:
         with pytest.raises(BuilderError, match="not a directory"):
             project.resolve()
 
-    def test_generated_rule_copies_each_file(self, tmp_path):
+    def test_the_generated_rule_is_one_overlay_edge(self, tmp_path):
         shared, app = make_trees(tmp_path)
         project, _ = overlay_project(tmp_path, [shared, app])
         NinjaGenerator().generate(project)
         BaseGenerator._generate_pending(project)
 
         content = (tmp_path / "build" / "build.ninja").read_text()
-        assert "rule install_copycmd" in content
-        assert "build stage/src/com/example/Thing.java:" in content
+        assert "pcons.util.commands overlay" in content
+        assert "build .stamps/stage.stamp:" in content
+        assert "build stage/" not in content
+
+    def test_the_exclude_patterns_reach_the_command(self, tmp_path):
+        shared, app = make_trees(tmp_path)
+        project, _ = overlay_project(tmp_path, [shared, app], ["*.orig", ".git"])
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert "--exclude=*.orig" in content
+        assert "--exclude=.git" in content
 
 
 @needs_ninja
@@ -208,8 +260,7 @@ class TestOverlayBuild:
 
     def test_later_source_wins_a_shared_path(self, tmp_path):
         shared, app = make_trees(tmp_path)
-        project, _ = overlay_project(tmp_path, [shared, app])
-        build_dir = build(project, tmp_path)
+        build_dir = overlay_build(tmp_path, [shared, app])
 
         assert (build_dir / "stage" / "Manifest.xml").read_bytes() == (
             app / "Manifest.xml"
@@ -217,8 +268,7 @@ class TestOverlayBuild:
 
     def test_reversing_the_order_reverses_the_winner(self, tmp_path):
         shared, app = make_trees(tmp_path)
-        project, _ = overlay_project(tmp_path, [app, shared])
-        build_dir = build(project, tmp_path)
+        build_dir = overlay_build(tmp_path, [app, shared])
 
         assert (build_dir / "stage" / "Manifest.xml").read_bytes() == (
             shared / "Manifest.xml"
@@ -226,8 +276,7 @@ class TestOverlayBuild:
 
     def test_a_nested_path_is_not_flattened(self, tmp_path):
         shared, app = make_trees(tmp_path)
-        project, _ = overlay_project(tmp_path, [shared, app])
-        build_dir = build(project, tmp_path)
+        build_dir = overlay_build(tmp_path, [shared, app])
 
         deep = build_dir / "stage" / "src" / "com" / "example" / "Thing.java"
         assert deep.read_text() == "class Thing {}\n"
@@ -235,23 +284,20 @@ class TestOverlayBuild:
 
     def test_both_trees_fill_one_shared_directory(self, tmp_path):
         shared, app = make_trees(tmp_path)
-        project, _ = overlay_project(tmp_path, [shared, app])
-        build_dir = build(project, tmp_path)
+        build_dir = overlay_build(tmp_path, [shared, app])
 
         assert (build_dir / "stage" / "res" / "xml" / "a.txt").exists()
         assert (build_dir / "stage" / "res" / "drawable" / "b.txt").exists()
 
     def test_a_file_only_one_tree_has_arrives(self, tmp_path):
         shared, app = make_trees(tmp_path)
-        project, _ = overlay_project(tmp_path, [shared, app])
-        build_dir = build(project, tmp_path)
+        build_dir = overlay_build(tmp_path, [shared, app])
 
         assert (build_dir / "stage" / "shared_only.txt").read_text() == "shared only\n"
 
     def test_the_second_build_has_nothing_to_do(self, tmp_path):
         shared, app = make_trees(tmp_path)
-        project, _ = overlay_project(tmp_path, [shared, app])
-        build_dir = build(project, tmp_path)
+        build_dir = overlay_build(tmp_path, [shared, app])
 
         again = subprocess.run(
             ["ninja"], cwd=build_dir, capture_output=True, text=True, check=False
@@ -261,35 +307,14 @@ class TestOverlayBuild:
 
 
 class TestOverlayConfigureDependencies:
-    """What resolving registers, before any build runs."""
+    """Nothing is enumerated at configure time any more."""
 
-    def test_every_source_directory_is_registered(self, tmp_path):
+    def test_no_source_directory_is_registered(self, tmp_path):
         shared, app = make_trees(tmp_path)
         project, _ = overlay_project(tmp_path, [shared, app])
 
         deps = set(project.configure_dependencies)
-        assert deps >= {
-            Path("shared"),
-            Path("shared/res"),
-            Path("shared/res/xml"),
-            Path("shared/src"),
-            Path("shared/src/com"),
-            Path("shared/src/com/example"),
-            Path("app"),
-            Path("app/res"),
-            Path("app/res/drawable"),
-        }
-
-    def test_registering_only_the_roots_would_not_be_enough(self, tmp_path):
-        """The mtime signal the regen edge reads stops at the direct parent."""
-        shared, _ = make_trees(tmp_path)
-        deep = shared / "src" / "com" / "example"
-        before = shared.stat().st_mtime_ns
-
-        write(deep / "New.java", "class New {}\n")
-
-        assert shared.stat().st_mtime_ns == before
-        assert deep.stat().st_mtime_ns != before
+        assert not [d for d in deps if d.parts and d.parts[0] in ("shared", "app")]
 
 
 @needs_ninja
@@ -303,7 +328,7 @@ class TestOverlayFreshness:
         write(tmp_path / "shared/src/com/example/New.java", "class New {}\n")
         output = run_ninja(tmp_path)
 
-        assert "Regenerating" in output
+        assert "Regenerating" not in output
         assert (stage / "src/com/example/New.java").read_text() == "class New {}\n"
 
     def test_a_new_directory_added_deep_is_noticed(self, tmp_path):
@@ -315,45 +340,73 @@ class TestOverlayFreshness:
 
         assert (stage / "src/com/example/util/Util.java").exists()
 
+    def test_an_edit_in_place_restages_the_file(self, tmp_path):
+        """No directory changes here, so the depfile's file half is what fires."""
+        stage = freshness_project(tmp_path)
+        run_pcons(tmp_path)
+
+        write(tmp_path / "shared/shared_only.txt", "edited\n")
+        run_ninja(tmp_path)
+
+        assert (stage / "shared_only.txt").read_text() == "edited\n"
+
     def test_an_unchanged_tree_does_no_work(self, tmp_path):
-        """Registering a directory must not put the regen edge in a loop."""
         freshness_project(tmp_path)
         run_pcons(tmp_path)
 
         assert "no work to do" in run_ninja(tmp_path)
 
-    def test_a_removed_file_loses_its_edge_but_keeps_its_copy(self, tmp_path):
-        """Pinned: this stages files, it does not mirror."""
-        stage = freshness_project(tmp_path)
-        run_pcons(tmp_path)
-
-        (tmp_path / "shared/shared_only.txt").unlink()
-        output = run_ninja(tmp_path)
-
-        assert "Regenerating" in output
-        manifest = (tmp_path / "build" / "build.ninja").read_text()
-        assert "shared_only.txt" not in manifest
-        assert (stage / "shared_only.txt").exists()
-
-    def test_cleandead_removes_the_stale_copy(self, tmp_path):
-        """The remedy the builder documents, exercised rather than asserted."""
+    def test_a_removed_file_loses_its_staged_copy(self, tmp_path):
         stage = freshness_project(tmp_path)
         run_pcons(tmp_path)
 
         (tmp_path / "shared/shared_only.txt").unlink()
         run_ninja(tmp_path)
-        subprocess.run(
-            ["ninja", "-t", "cleandead"],
-            cwd=tmp_path / "build",
-            capture_output=True,
-            text=True,
-            check=True,
-        )
 
         assert not (stage / "shared_only.txt").exists()
         assert (stage / "Manifest.xml").exists()
 
+    def test_a_removed_directory_leaves_nothing_behind(self, tmp_path):
+        stage = freshness_project(tmp_path)
+        run_pcons(tmp_path)
 
+        shutil.rmtree(tmp_path / "shared/src")
+        run_ninja(tmp_path)
+
+        assert not (stage / "src").exists()
+
+    def test_a_file_the_overlay_never_wrote_is_left_alone(self, tmp_path):
+        """Stale removal reads what it staged, not what the destination holds."""
+        stage = freshness_project(tmp_path)
+        run_pcons(tmp_path)
+
+        write(stage / "installed_by_someone_else.txt", "not ours\n")
+        (tmp_path / "shared/shared_only.txt").unlink()
+        run_ninja(tmp_path)
+
+        assert (stage / "installed_by_someone_else.txt").exists()
+
+
+@needs_ninja
+class TestOverlayGeneratedSource:
+    """A file written into a source tree by the same build."""
+
+    def test_a_generated_file_is_staged_by_the_first_invocation(self, tmp_path):
+        """The generator is slow on purpose: a fast one is scheduled first."""
+        stage = generated_project(tmp_path)
+        run_pcons(tmp_path)
+
+        assert (tmp_path / "shared" / "generated.txt").exists()
+        assert (stage / "generated.txt").read_text() == "generated\n"
+
+    def test_the_second_invocation_has_nothing_to_do(self, tmp_path):
+        generated_project(tmp_path)
+        run_pcons(tmp_path)
+
+        assert "no work to do" in run_ninja(tmp_path)
+
+
+@needs_ninja
 class TestOverlayExclude:
     """`exclude=`, matched against the path relative to each source root."""
 
@@ -361,66 +414,58 @@ class TestOverlayExclude:
         shared, app = make_trees(tmp_path)
         write(shared / ".git" / "HEAD", "ref: refs/heads/main\n")
         write(shared / "NOTES.md", "notes\n")
-        _, stage = overlay_project(tmp_path, [shared, app])
+        build_dir = overlay_build(tmp_path, [shared, app])
 
-        assert ".git/HEAD" in staged(stage)
-        assert "NOTES.md" in staged(stage)
+        assert ".git/HEAD" in staged(build_dir)
+        assert "NOTES.md" in staged(build_dir)
 
     def test_a_file_at_a_tree_root_is_dropped(self, tmp_path):
         shared, app = make_trees(tmp_path)
         write(shared / "NOTES.md", "notes\n")
-        _, stage = overlay_project(tmp_path, [shared, app], ["NOTES.md"])
+        build_dir = overlay_build(tmp_path, [shared, app], ["NOTES.md"])
 
-        assert "NOTES.md" not in staged(stage)
-        assert "shared_only.txt" in staged(stage)
+        assert "NOTES.md" not in staged(build_dir)
+        assert "shared_only.txt" in staged(build_dir)
 
     def test_a_file_nested_deep_is_dropped(self, tmp_path):
         shared, app = make_trees(tmp_path)
         write(shared / "src" / "com" / "example" / "Thing.java.orig", "old\n")
-        _, stage = overlay_project(tmp_path, [shared, app], ["*.orig"])
+        build_dir = overlay_build(tmp_path, [shared, app], ["*.orig"])
 
-        assert staged(stage) >= {"src/com/example/Thing.java"}
-        assert "src/com/example/Thing.java.orig" not in staged(stage)
+        assert staged(build_dir) >= {"src/com/example/Thing.java"}
+        assert "src/com/example/Thing.java.orig" not in staged(build_dir)
 
     def test_a_bare_name_matches_at_any_depth(self, tmp_path):
         shared, app = make_trees(tmp_path)
         write(shared / "NOTES.md", "root\n")
         write(shared / "src" / "NOTES.md", "nested\n")
-        _, stage = overlay_project(tmp_path, [shared, app], ["NOTES.md"])
+        build_dir = overlay_build(tmp_path, [shared, app], ["NOTES.md"])
 
-        assert not [p for p in staged(stage) if p.endswith("NOTES.md")]
+        assert not [p for p in staged(build_dir) if p.endswith("NOTES.md")]
 
     def test_a_pattern_with_a_separator_is_anchored_at_the_root(self, tmp_path):
         shared, app = make_trees(tmp_path)
         write(shared / "src" / "res" / "xml" / "a.txt", "not the root one\n")
-        _, stage = overlay_project(tmp_path, [shared, app], ["res/xml/a.txt"])
+        build_dir = overlay_build(tmp_path, [shared, app], ["res/xml/a.txt"])
 
-        assert "res/xml/a.txt" not in staged(stage)
-        assert "src/res/xml/a.txt" in staged(stage)
+        assert "res/xml/a.txt" not in staged(build_dir)
+        assert "src/res/xml/a.txt" in staged(build_dir)
 
     def test_an_excluded_directory_takes_its_contents(self, tmp_path):
         shared, app = make_trees(tmp_path)
         write(shared / ".git" / "HEAD", "ref: refs/heads/main\n")
         write(shared / ".git" / "objects" / "ab" / "cdef", "blob\n")
-        _, stage = overlay_project(tmp_path, [shared, app], [".git"])
+        build_dir = overlay_build(tmp_path, [shared, app], [".git"])
 
-        assert not [p for p in staged(stage) if p.startswith(".git")]
-
-    def test_an_excluded_directory_is_not_a_configure_dependency(self, tmp_path):
-        """Otherwise excluding .git would re-run pcons on every commit."""
-        shared, app = make_trees(tmp_path)
-        write(shared / ".git" / "objects" / "ab" / "cdef", "blob\n")
-        project, _ = overlay_project(tmp_path, [shared, app], [".git"])
-
-        assert not [d for d in project.configure_dependencies if ".git" in d.parts]
+        assert not [p for p in staged(build_dir) if p.startswith(".git")]
 
     def test_the_pattern_applies_to_every_source_root(self, tmp_path):
         shared, app = make_trees(tmp_path)
         write(shared / "NOTES.md", "shared\n")
         write(app / "NOTES.md", "app\n")
-        _, stage = overlay_project(tmp_path, [shared, app], ["NOTES.md"])
+        build_dir = overlay_build(tmp_path, [shared, app], ["NOTES.md"])
 
-        assert "NOTES.md" not in staged(stage)
+        assert "NOTES.md" not in staged(build_dir)
 
     def test_excluding_a_conflict_winner_leaves_no_file(self, tmp_path):
         """Pinned: the loser is not promoted, because it matches too.
@@ -430,34 +475,28 @@ class TestOverlayExclude:
         loser would ship the very path the caller asked to drop.
         """
         shared, app = make_trees(tmp_path)
-        _, stage = overlay_project(tmp_path, [shared, app], ["Manifest.xml"])
+        build_dir = overlay_build(tmp_path, [shared, app], ["Manifest.xml"])
 
-        assert "Manifest.xml" not in staged(stage)
+        assert "Manifest.xml" not in staged(build_dir)
 
     def test_a_pattern_matching_nothing_is_not_an_error(self, tmp_path):
         shared, app = make_trees(tmp_path)
-        _, stage = overlay_project(tmp_path, [shared, app], ["*.absent"])
+        build_dir = overlay_build(tmp_path, [shared, app], ["*.absent"])
 
-        assert "shared_only.txt" in staged(stage)
+        assert "shared_only.txt" in staged(build_dir)
 
     def test_matching_is_case_sensitive_on_every_platform(self, tmp_path):
         shared, app = make_trees(tmp_path)
         write(shared / "NOTES.md", "notes\n")
-        _, stage = overlay_project(tmp_path, [shared, app], ["notes.md"])
+        build_dir = overlay_build(tmp_path, [shared, app], ["notes.md"])
 
-        assert "NOTES.md" in staged(stage)
-
-
-@needs_ninja
-class TestOverlayExcludeBuild:
-    """What an exclusion means once the copies have actually run."""
+        assert "NOTES.md" in staged(build_dir)
 
     def test_an_excluded_file_never_reaches_the_destination(self, tmp_path):
         shared, app = make_trees(tmp_path)
         write(shared / "NOTES.md", "notes\n")
         write(app / "res" / "drawable" / "b.txt.orig", "old\n")
-        project, _ = overlay_project(tmp_path, [shared, app], ["NOTES.md", "*.orig"])
-        build_dir = build(project, tmp_path)
+        build_dir = overlay_build(tmp_path, [shared, app], ["NOTES.md", "*.orig"])
 
         assert not (build_dir / "stage" / "NOTES.md").exists()
         assert not (build_dir / "stage" / "res" / "drawable" / "b.txt.orig").exists()

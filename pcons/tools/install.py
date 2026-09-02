@@ -8,12 +8,10 @@ Users can customize the copy commands via the tool namespace
 
 from __future__ import annotations
 
-import fnmatch
 import logging
-import os
 import re
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -196,112 +194,15 @@ def _apply_install_prefix(project: Project, dest: Path, no_prefix: bool) -> Path
     return prefix / dest
 
 
-def _overlay_excluded(rel_path: Path, patterns: Sequence[str]) -> bool:
-    """Whether an overlay entry is filtered out by one of *patterns*.
+def _exclude_flags(exclude: Sequence[str]) -> dict[str, list[str]]:
+    """``--exclude`` tokens for the overlay command, one per pattern.
 
-    A pattern holding no ``/`` matches an entry's name at any depth; one
-    holding a ``/`` is anchored at the source root. Matching is case
-    sensitive on every platform, so a build description means the same thing
-    wherever it runs.
-
-    Args:
-        rel_path: File or directory path, relative to its source root.
-        patterns: Glob patterns, as passed to ``OverlayDir(exclude=...)``.
-
-    Returns:
-        True when the entry is excluded, and with it everything under it.
+    ``--exclude=PATTERN`` rather than two tokens: extra command flags are
+    appended one at a time and dropped when already present, so a repeated
+    bare ``--exclude`` would swallow every pattern after the first.
     """
-    text = rel_path.as_posix()
-    return any(
-        fnmatch.fnmatchcase(text, pattern)
-        or ("/" not in pattern and fnmatch.fnmatchcase(rel_path.name, pattern))
-        for pattern in patterns
-    )
-
-
-def _overlay_walk(
-    root: Path, exclude: Sequence[str]
-) -> Iterator[tuple[Path, list[str]]]:
-    """Walk *root*, yielding every surviving directory and the files it holds.
-
-    An excluded directory is pruned rather than emptied, so it costs no walk
-    and never becomes a configure dependency — which is what keeps
-    ``exclude=[".git"]`` from re-running pcons on every commit.
-
-    Args:
-        root: Tree to walk, an existing directory.
-        exclude: Glob patterns to drop, matched against paths relative to
-            *root*.
-
-    Yields:
-        An absolute directory path and its file names, sorted.
-    """
-    for dirpath, dirnames, filenames in os.walk(root):
-        here = Path(dirpath)
-        rel = here.relative_to(root)
-        dirnames[:] = sorted(
-            name for name in dirnames if not _overlay_excluded(rel / name, exclude)
-        )
-        yield (
-            here,
-            sorted(
-                name for name in filenames if not _overlay_excluded(rel / name, exclude)
-            ),
-        )
-
-
-def _overlay_file_map(
-    project: Project,
-    source_dirs: Sequence[Path],
-    target: Target,
-    exclude: Sequence[str] = (),
-) -> dict[Path, Path]:
-    """Map each relative path under the overlay to the file that wins it.
-
-    Later entries of *source_dirs* overwrite earlier ones, so the argument
-    order at the call site is the whole conflict rule: nothing is decided by
-    modification time, by depth, or by which tree looks more specific.
-
-    Every directory walked is registered as a configure dependency, so adding
-    or removing an entry re-runs pcons and the destination is up to date on
-    the next build with no hand-run. Registering only each root would not do:
-    a directory's mtime changes when a direct entry appears, not when one
-    appears further down.
-
-    Excluding is per source root and happens before the merge, so a path the
-    caller excluded never reaches the conflict at all: excluding the file
-    that would have won leaves nothing at that path rather than promoting
-    the loser, which would ship a path the caller asked to drop.
-
-    Args:
-        project: Project the source directories are resolved against.
-        source_dirs: Source tree roots, in increasing precedence.
-        target: The overlay target, for error locations.
-        exclude: Glob patterns dropped from every source tree.
-
-    Returns:
-        Relative path to absolute source file, in first-seen order.
-
-    Raises:
-        BuilderError: If a source directory does not exist or is not a
-            directory.
-    """
-    from pcons.core.errors import BuilderError
-
-    winners: dict[Path, Path] = {}
-    for source_dir in source_dirs:
-        root = project.root_dir / source_dir
-        if not root.is_dir():
-            raise BuilderError(
-                f"OverlayDir source is not a directory: {source_dir}",
-                location=target.defined_at,
-            )
-        for directory, filenames in _overlay_walk(root, exclude):
-            project.add_configure_dependency(directory)
-            for name in filenames:
-                item = directory / name
-                winners[item.relative_to(root)] = item
-    return winners
+    flags = [f"--exclude={pattern}" for pattern in exclude]
+    return {"extra_command_flags": flags} if flags else {}
 
 
 def _mode_flags(target: Target) -> dict[str, list[str]]:
@@ -389,14 +290,16 @@ class InstallTool(StandaloneTool):
     """Tool for file and directory installation operations.
 
     Provides cross-platform copy commands using Python helpers.
-    The Install, InstallAs, and InstallDir builders reference these
-    command templates.
+    The Install, InstallAs, InstallDir and OverlayDir builders reference
+    these command templates.
 
     Variables:
         copycmd: Command template for single file copy (list of tokens).
                  Default: [python, -m, pcons.util.commands, copy, $$SOURCE, $$TARGET]
         copytreecmd: Command template for directory tree copy (list of tokens).
                      Default: [python, -m, pcons.util.commands, copytree, ...]
+        overlaycmd: Command template for the OverlayDir merge (list of tokens).
+                    Default: [python, -m, pcons.util.commands, overlay, ...]
         destdir: Default destination directory for InstallDir.
 
     Example:
@@ -436,6 +339,18 @@ class InstallTool(StandaloneTool):
                 TargetPath(),
                 SourcePath(),
                 "$install.destdir",
+            ],
+            "overlaycmd": [
+                python_cmd,
+                "-m",
+                "pcons.util.commands",
+                "overlay",
+                "--depfile",
+                TargetPath(suffix=".d"),
+                "--stamp",
+                TargetPath(),
+                "$install.destdir",
+                SourcePath(),
             ],
             "destdir": "",
         }
@@ -601,29 +516,55 @@ class InstallNodeFactory(PendingSourceFactory):
         dest_dir: Path,
         exclude: Sequence[str],
     ) -> None:
-        """Create one copy node per surviving file for an OverlayDir target."""
+        """Create the one stamp node an OverlayDir target builds.
+
+        The merged set is not enumerated here. Which files win is decided by
+        the overlay command when it runs, so a file another edge generates
+        into a source tree is staged by the build that writes it.
+        """
+        from pcons.core.errors import BuilderError
+
+        for node in sources:
+            if not (self.project.root_dir / node.path).is_dir():
+                raise BuilderError(
+                    f"OverlayDir source is not a directory: {node.path}",
+                    location=target.defined_at,
+                )
+
+        try:
+            rel_dest = dest_dir.relative_to(target.build_dir)
+        except ValueError:
+            rel_dest = dest_dir
+
+        stamp_path = target.build_dir / ".stamps" / _stamp_name_for(rel_dest)
+        stamp_node = self.project.node(stamp_path)
+        stamp_node.add_inputs(sources)
+
         env = self._get_install_env(target)
+        context = InstallContext.from_target(
+            target, env, destdir=str(rel_dest).replace("\\", "/")
+        )
 
-        installed_nodes: list[FileNode] = []
-        for rel_path, source_path in _overlay_file_map(
-            self.project, [node.path for node in sources], target, exclude
-        ).items():
-            source_node = self.project.node(source_path)
-            dest_node = self.project.node(
-                dest_dir / rel_path, role=_install_role(dest_dir)
-            )
-            dest_node.add_inputs([source_node])
-            dest_node._build_info = {
+        stamp_node._build_info = cast(
+            BuildInfo,
+            {
                 "tool": "install",
-                "command_var": "copycmd",
-                "sources": [source_node],
+                "command_var": "overlaycmd",
+                "sources": list(sources),
+                "depfile": PathToken(
+                    path=str(stamp_path), path_type="build", suffix=".d"
+                ),
+                "deps_style": "gcc",
+                "restat": True,
                 "description": "OVERLAY $out",
+                "context": context,
                 "env": env,
-            }
-            installed_nodes.append(dest_node)
+                **_exclude_flags(exclude),
+            },
+        )
 
-        target._install_nodes = installed_nodes
-        target.output_nodes.extend(installed_nodes)
+        target._install_nodes = [stamp_node]
+        target.output_nodes.append(stamp_node)
 
     def _create_install_as_node(
         self, target: Target, sources: list[FileNode], dest: Path
@@ -924,25 +865,27 @@ class OverlayDirBuilder:
     When two trees hold the same relative path, the later one in *sources*
     wins. Argument order is the only rule, so the call site shows the answer.
 
-    One target owns the destination and emits one copy edge per surviving
-    file, which is what makes the conflict expressible: two independent
-    targets writing one file would be two producers, which pcons refuses.
+    One target owns the destination and stages all of it with a single build
+    edge, whose only output is a stamp. Individual staged files are therefore
+    not build targets: ``ninja <dest>/x/y.txt`` names nothing, and the tool
+    removes a stale copy itself rather than leaving it to ``ninja -t clean``.
 
     The destination is a staging directory in the build tree, anchored under
     *env*'s build directory, and the install prefix is never applied. This is
     file staging, not an install.
 
-    Adding a file anywhere under a source tree makes it appear in the
-    destination on the next build, with no hand-run of pcons: every directory
-    in every source tree is registered as a configure dependency, so pcons
-    re-runs before the build when one gains or loses an entry. The price is
-    that any edit to those trees re-runs the build description.
+    Which files win is decided when that edge runs, not when pcons runs, so a
+    file another edge generates into a source tree is staged by the same build
+    that writes it — declare the ordering with ``depends()``. The edge reports
+    every directory it walked and every file it copied in a depfile, so adding,
+    removing or editing a file anywhere under a source tree restages on the
+    next build with no hand-run of pcons: directories catch an add or a
+    removal, files catch an edit in place.
 
-    Removing a file from a source tree drops its copy edge, but the copy
-    already in the destination stays: this stages files, it does not mirror,
-    and deleting from a directory the builder does not own would be a wider
-    promise than it makes. Delete the destination, or run
-    ``ninja -t cleandead``, to clear stale copies.
+    Removing a file from a source tree removes its staged copy, along with any
+    directory that leaves empty. Only the files this target staged are
+    candidates — the stamp records them — so anything else installed into the
+    same destination is left alone.
 
     *exclude* drops entries from every source tree before they are merged.
     Patterns are globs matched against the path relative to *each source
@@ -991,7 +934,7 @@ class OverlayDirBuilder:
                 differ in what they hold.
 
         Returns:
-            A Target whose outputs are the merged files.
+            A Target whose one output is the stamp of the staged tree.
         """
         dest_dir = Path(dest_dir)
         target_name = _deduplicate_target_name(

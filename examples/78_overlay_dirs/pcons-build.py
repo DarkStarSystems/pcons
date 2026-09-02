@@ -25,13 +25,14 @@ trees' *contents* into one destination, which is a different job:
 4. **`exclude=` drops what should not ship.** Patterns are matched against the
     path relative to *each source root*, so both trees' `notes.md` go.
 
-One target owns the destination, and that is what makes the conflict rule
-expressible at all: two targets writing one file would be two producers, which
-pcons refuses. Every directory in every source tree is a configure dependency,
-so adding a file anywhere -- including deep under `src/com/example/` -- makes
-it appear in `stage/` on the next build with no hand-run of pcons. A file
-*removed* from a source tree keeps the copy it already put there: this stages
-files, it does not mirror them. `ninja -t cleandead` clears those.
+One target owns the destination and stages all of it with a single build edge,
+so which files win is decided when that edge runs rather than when pcons runs.
+The edge reports every directory it walked and every file it copied in a
+depfile. That is what makes a file added anywhere -- including deep under
+`src/com/example/` -- appear in `stage/` on the next `ninja`, with no hand-run
+of pcons, and it is why a file removed from a source tree takes its staged copy
+with it. A file another build edge generates into one of these trees is staged
+by the same build that writes it.
 """
 
 from pcons import Project

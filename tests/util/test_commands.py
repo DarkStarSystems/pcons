@@ -6,7 +6,16 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pcons.util.commands import _escape_depfile_path, concat, copy, copytree, main
+import pytest
+
+from pcons.util.commands import (
+    _escape_depfile_path,
+    concat,
+    copy,
+    copytree,
+    main,
+    overlay,
+)
 
 
 class TestCopy:
@@ -307,6 +316,153 @@ class TestCopytreeMerges:
         copytree(str(src), str(dest))
 
         assert (dest / "a.txt").read_text() == "changed\n"
+
+
+def depfile_deps(depfile: Path) -> set[str]:
+    """The dependency paths a written depfile names, unescaped."""
+    _, deps_part = depfile.read_text().split(":", 1)
+    deps_part = deps_part.replace("\\\n", " ")
+    tokens = re.split(r"(?<!\\) ", deps_part)
+    return {t.strip().replace("\\ ", " ") for t in tokens if t.strip()}
+
+
+def posix(path: Path) -> str:
+    """The path as the depfile spells it."""
+    return str(path).replace("\\", "/")
+
+
+class TestCopytreeDepfileDirectories:
+    """A depfile naming only files cannot notice a file that is added."""
+
+    def test_every_walked_directory_is_named(self, tmp_path: Path) -> None:
+        src = tmp_path / "src"
+        (src / "sub" / "deeper").mkdir(parents=True)
+        (src / "sub" / "b.txt").write_text("b\n")
+        depfile = tmp_path / "deps.d"
+
+        copytree(str(src), str(tmp_path / "dest"), depfile=str(depfile))
+
+        deps = depfile_deps(depfile)
+        assert posix(src) in deps
+        assert posix(src / "sub") in deps
+        assert posix(src / "sub" / "deeper") in deps
+        assert posix(src / "sub" / "b.txt") in deps
+
+
+class TestOverlay:
+    """The overlay command: N trees merged into one directory at build time."""
+
+    def _trees(self, tmp_path: Path) -> tuple[Path, Path, Path]:
+        shared, app = tmp_path / "shared", tmp_path / "app"
+        (shared / "res").mkdir(parents=True)
+        (app / "res").mkdir(parents=True)
+        (shared / "both.txt").write_text("shared\n")
+        (shared / "res" / "a.txt").write_text("a\n")
+        (app / "both.txt").write_text("app\n")
+        (app / "res" / "b.txt").write_text("b\n")
+        return shared, app, tmp_path / "stage"
+
+    def test_the_later_source_wins(self, tmp_path: Path) -> None:
+        shared, app, dest = self._trees(tmp_path)
+
+        overlay(str(dest), [str(shared), str(app)])
+
+        assert (dest / "both.txt").read_text() == "app\n"
+        assert (dest / "res" / "a.txt").read_text() == "a\n"
+        assert (dest / "res" / "b.txt").read_text() == "b\n"
+
+    def test_a_missing_source_is_an_error(self, tmp_path: Path) -> None:
+        shared, _, dest = self._trees(tmp_path)
+
+        with pytest.raises(ValueError, match="not a directory"):
+            overlay(str(dest), [str(shared), str(tmp_path / "absent")])
+
+    def test_the_depfile_names_directories_and_copied_files(
+        self, tmp_path: Path
+    ) -> None:
+        shared, app, dest = self._trees(tmp_path)
+        depfile = tmp_path / "deps.d"
+
+        overlay(str(dest), [str(shared), str(app)], depfile=str(depfile))
+
+        deps = depfile_deps(depfile)
+        assert posix(shared / "res") in deps
+        assert posix(app / "res") in deps
+        assert posix(app / "both.txt") in deps
+
+    def test_a_shadowed_file_is_not_a_dependency(self, tmp_path: Path) -> None:
+        """Editing a file another tree shadows changes nothing in the stage."""
+        shared, app, dest = self._trees(tmp_path)
+        depfile = tmp_path / "deps.d"
+
+        overlay(str(dest), [str(shared), str(app)], depfile=str(depfile))
+
+        assert posix(shared / "both.txt") not in depfile_deps(depfile)
+
+    def test_an_excluded_directory_is_nowhere_in_the_depfile(
+        self, tmp_path: Path
+    ) -> None:
+        shared, app, dest = self._trees(tmp_path)
+        (shared / ".git" / "objects").mkdir(parents=True)
+        (shared / ".git" / "objects" / "ab").write_text("blob\n")
+        depfile = tmp_path / "deps.d"
+
+        overlay(str(dest), [str(shared), str(app)], [".git"], depfile=str(depfile))
+
+        assert not [d for d in depfile_deps(depfile) if ".git" in d]
+
+    def test_the_stamp_records_what_was_staged(self, tmp_path: Path) -> None:
+        shared, app, dest = self._trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert stamp.read_text().split() == ["both.txt", "res/a.txt", "res/b.txt"]
+
+    def test_a_file_that_no_longer_exists_is_removed(self, tmp_path: Path) -> None:
+        shared, app, dest = self._trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        (shared / "res" / "a.txt").unlink()
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert not (dest / "res" / "a.txt").exists()
+        assert (dest / "res" / "b.txt").exists()
+
+    def test_a_directory_left_empty_is_removed(self, tmp_path: Path) -> None:
+        shared, app, dest = self._trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        (shared / "res" / "a.txt").unlink()
+        (app / "res" / "b.txt").unlink()
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert not (dest / "res").exists()
+        assert dest.is_dir()
+
+    def test_a_file_the_overlay_never_staged_is_left_alone(
+        self, tmp_path: Path
+    ) -> None:
+        shared, app, dest = self._trees(tmp_path)
+        stamp = tmp_path / "stage.stamp"
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+        (dest / "theirs.txt").write_text("not ours\n")
+
+        (shared / "res" / "a.txt").unlink()
+        overlay(str(dest), [str(shared), str(app)], stamp=str(stamp))
+
+        assert (dest / "theirs.txt").read_text() == "not ours\n"
+
+    def test_an_unchanged_file_is_not_recopied(self, tmp_path: Path) -> None:
+        shared, app, dest = self._trees(tmp_path)
+        overlay(str(dest), [str(shared), str(app)])
+        before = (dest / "both.txt").stat().st_mtime_ns
+
+        overlay(str(dest), [str(shared), str(app)])
+
+        assert (dest / "both.txt").stat().st_mtime_ns == before
 
 
 class TestCopytreeSymlinks:

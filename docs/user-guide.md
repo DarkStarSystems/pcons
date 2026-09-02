@@ -3138,8 +3138,9 @@ How it differs from `InstallDir`:
 
 Relative paths are kept, so `src/com/example/Thing.java` arrives at
 `<dest>/src/com/example/Thing.java`. Two trees can each contribute a different
-child of one shared directory. One target owns the destination and emits one
-copy edge per surviving file, so every output has exactly one producer.
+child of one shared directory. One target owns the destination and stages all of
+it with a single build edge, whose only output is a stamp. Individual staged
+files are not build targets: `ninja <dest>/x/y.txt` names nothing.
 
 `exclude` patterns are globs matched against the path relative to **each source
 root**, never the destination and never an absolute path. A pattern with no `/`
@@ -3152,18 +3153,26 @@ An excluded path is dropped from every source tree, so excluding the file that
 would have won a conflict leaves nothing at that path rather than falling back
 to the other tree - falling back would stage the very path you asked to drop.
 
-**Freshness.** Every directory in every source tree is a configure dependency,
-so adding a file anywhere - including deep under `src/com/example/` - makes it
-appear in the destination on the next build, with no hand-run of pcons.
-Registering only the roots would not be enough: a directory's modification time
-changes when a direct entry appears, not when one appears further down. The
-price is that any edit to those trees re-runs the build description.
+**Freshness.** Which files win is decided when the edge runs, not when pcons
+runs. The edge reports every directory it walked and every file it copied in a
+depfile, so adding a file anywhere - including deep under `src/com/example/` -
+restages on the next `ninja`, with no hand-run of pcons. Both halves of the
+depfile are needed: a directory's modification time changes when it gains or
+loses an entry, an edit in place changes no directory at all.
 
-**Removal.** A file removed from a source tree loses its copy edge, but the copy
-already in the destination stays. `OverlayDir` stages files, it does not mirror
-them, and deleting from a directory it does not own would be a wider promise
-than it makes. Run `ninja -t cleandead`, or delete the destination, to clear
-stale copies.
+A file another build edge generates into a source tree is staged by the same
+build that writes it. Order the two with `depends()`:
+
+```python
+generated = env.Command(target=str(shared_dir / "version.txt"), ...)
+stage = project.OverlayDir(env, "stage", sources=[shared_dir, app_dir])
+stage.depends(generated)
+```
+
+**Removal.** A file removed from a source tree loses its staged copy, along with
+any directory that leaves empty. Only the files this target staged are removed -
+the stamp records them - so anything else installed into the same destination is
+left alone.
 
 See `examples/78_overlay_dirs` for a working two-tree overlay.
 
