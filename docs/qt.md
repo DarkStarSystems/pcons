@@ -350,11 +350,32 @@ to pass: the pragma is read from the file, and editing one re-runs pcons so
 the qmldir keeps up. A generated QML file that does not exist yet when the
 build is described reads as not a singleton.
 
+Each `qml_files` entry is also the file's path inside the module
+resource, which is what `qt_add_qml_module` does. `qml/pages/Detail.qml`
+is reachable at `qrc:/qt/qml/<uri>/qml/pages/Detail.qml`, and the qmldir
+names that same path, so a hardcoded nested URL resolves.
+
+Entries are relative to the directory of the build script that declares
+the module, the same root `sources=` uses, and the same one CMake uses
+(`CMAKE_CURRENT_SOURCE_DIR`). A module declared through
+`add_subdirectory` therefore spells `qml/Theme.qml` whatever its depth,
+and the location of that build script is not part of the resource
+layout. An absolute entry under that directory works too, and is turned
+back into a relative one. An entry landing *outside* it is refused, `..`
+included: there is no place under the module's resource prefix for it.
+`qt_add_qml_module` differs on both counts, refusing every absolute entry
+and keeping the dot-dots of an upward one.
+
+Two entries whose file names share a stem, such as `pages/Detail.qml` and
+`widgets/Detail.qml`, declare the same QML type twice. The engine
+resolves the name to one of them and the other is unreachable, so pcons
+refuses the module and names both files. Rename one, or split them into
+two modules. `examples/81_qml_nested_layout` shows a nested layout end to
+end.
+
 Not yet included: `qmlcachegen` ahead-of-time QML compilation (the
 embedded QML runs through the normal engine path — functionally
 identical, slightly slower startup) and separate QML plugin libraries.
-`qml_files` entries are embedded under their base name, so a nested layout
-is flattened and two files with one base name collide.
 
 ## Translations
 

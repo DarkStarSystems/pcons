@@ -1,0 +1,24 @@
+# Test configuration for the nested QML layout example
+
+[test]
+description = "Nested QML layout: a qml_files entry keeps its path, relative to the declaring script"
+
+expected_outputs = [
+    "build/qt.nested_ui/qrc_nested_ui.cpp",
+    "build/chips/qt.chips_ui/qrc_chips_ui.cpp",
+    "build/qml_nested",
+]
+
+[verify]
+commands = [
+    { run = "./build/qml_nested", expect_stdout = "type Detail is qml/pages/Detail.qml" },
+    { run = "./build/qml_nested", expect_stdout = "type Badge is qml/widgets/Badge.qml" },
+    { run = "./build/qml_nested", expect_stdout = "url qrc:/qt/qml/PconsNested/qml/pages/Detail.qml is qml/pages/Detail.qml" },
+    { run = "./build/qml_nested", expect_stdout = "url qrc:/qt/qml/PconsNested/Chips/qml/Chip.qml is qml/Chip.qml" },
+    { run = "./build/qml_nested", expect_stdout = "type Chip is qml/Chip.qml" },
+]
+
+[skip]
+require_qt = true
+require_qt_modules = ["Qml"]
+generators = ["make", "xcode"]
