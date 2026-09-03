@@ -364,17 +364,57 @@ class TestInstallWithNinja:
                 check=True,
             )
 
-        def wait_for_mtime(path: Path, previous_mtime_ns: int) -> None:
-            """Wait for a real source mtime transition without changing it."""
+        def run_install_rebuild() -> None:
+            result = subprocess.run(
+                ["ninja", "-C", "build"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            install_lines = [
+                line for line in result.stdout.splitlines() if "INSTALLDIR" in line
+            ]
+            assert len(install_lines) == 1, result.stdout
+
+            unchanged = subprocess.run(
+                ["ninja", "-C", "build"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert "no work to do" in unchanged.stdout
+            assert not any(
+                "INSTALLDIR" in line for line in unchanged.stdout.splitlines()
+            )
+
+        def wait_for_new_tick(reference_path: Path) -> None:
+            """Wait for the filesystem clock to advance past a build timestamp."""
+            reference_mtime = reference_path.stat().st_mtime_ns
+            probe_file = reference_path.parent / ".time_probe"
             deadline = time.monotonic() + 2.0
-            while path.stat().st_mtime_ns <= previous_mtime_ns:
-                if time.monotonic() >= deadline:
-                    raise AssertionError(f"mtime did not advance for {path}")
-                time.sleep(0.01)
+
+            try:
+                while True:
+                    probe_file.touch()
+                    current_mtime = probe_file.stat().st_mtime_ns
+                    if current_mtime > reference_mtime:
+                        return
+                    if time.monotonic() >= deadline:
+                        raise AssertionError(
+                            "filesystem timestamp did not advance past "
+                            f"{reference_mtime}"
+                        )
+                    time.sleep(0.01)
+            finally:
+                probe_file.unlink(missing_ok=True)
 
         run_ninja()
         destination = tmp_path / "build" / "staged" / "assets"
         assert (destination / "sub" / "deep.txt").read_text() == "deep"
+        ninja_log = tmp_path / "build" / ".ninja_log"
+        assert ninja_log.exists()
 
         unchanged = subprocess.run(
             ["ninja", "-C", "build"],
@@ -385,69 +425,41 @@ class TestInstallWithNinja:
         )
         assert "no work to do" in unchanged.stdout
 
-        nested_mtime = nested.stat().st_mtime_ns
+        wait_for_new_tick(ninja_log)
         (nested / "added.txt").write_text("added")
-        wait_for_mtime(nested, nested_mtime)
-        added = subprocess.run(
-            ["ninja", "-C", "build"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert "INSTALLDIR" in added.stdout
+        run_install_rebuild()
         assert (destination / "sub" / "added.txt").read_text() == "added"
-        unchanged_after_add = subprocess.run(
-            ["ninja", "-C", "build"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert "no work to do" in unchanged_after_add.stdout
 
-        deep_mtime = (nested / "deep.txt").stat().st_mtime_ns
+        wait_for_new_tick(ninja_log)
         (nested / "deep.txt").write_text("changed")
-        wait_for_mtime(nested / "deep.txt", deep_mtime)
-        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        run_install_rebuild()
         assert (destination / "sub" / "deep.txt").read_text() == "changed"
 
-        nested_mtime = nested.stat().st_mtime_ns
+        wait_for_new_tick(ninja_log)
         (nested / "added.txt").unlink()
-        wait_for_mtime(nested, nested_mtime)
-        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        run_install_rebuild()
         assert not (destination / "sub" / "added.txt").exists()
 
-        nested_mtime = nested.stat().st_mtime_ns
+        wait_for_new_tick(ninja_log)
         (nested / "deep.txt").rename(nested / "moved.txt")
-        wait_for_mtime(nested, nested_mtime)
-        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        run_install_rebuild()
         assert not (destination / "sub" / "deep.txt").exists()
         assert (destination / "sub" / "moved.txt").read_text() == "changed"
 
-        nested_mtime = nested.stat().st_mtime_ns
+        wait_for_new_tick(ninja_log)
         new_nested = nested / "created-after-configure"
         new_nested.mkdir()
         (new_nested / "first.txt").write_text("first")
-        wait_for_mtime(nested, nested_mtime)
-        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
-        new_nested_mtime = new_nested.stat().st_mtime_ns
+        run_install_rebuild()
+
+        wait_for_new_tick(ninja_log)
         (new_nested / "second.txt").write_text("second")
-        wait_for_mtime(new_nested, new_nested_mtime)
-        second = subprocess.run(
-            ["ninja", "-C", "build"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert "INSTALLDIR" in second.stdout
+        run_install_rebuild()
         assert (destination / "sub" / "created-after-configure" / "second.txt").exists()
 
-        nested_mtime = nested.stat().st_mtime_ns
+        wait_for_new_tick(ninja_log)
         (nested / "created-after-configure").rename(nested / "renamed-directory")
-        wait_for_mtime(nested, nested_mtime)
-        subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        run_install_rebuild()
         assert not (destination / "sub" / "created-after-configure").exists()
         assert (destination / "sub" / "renamed-directory" / "first.txt").exists()
 
