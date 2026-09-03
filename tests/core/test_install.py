@@ -2,7 +2,6 @@
 """Tests for Project.Install() method."""
 
 import logging
-import os
 import subprocess
 import sys
 import time
@@ -365,17 +364,13 @@ class TestInstallWithNinja:
                 check=True,
             )
 
-        def mark_source_changed(path: Path) -> None:
-            # Ninja's timestamp-based dependency checking cannot distinguish a
-            # source mutation that lands in the same filesystem timestamp tick
-            # as the previous install.  Advance the changed path and its
-            # containing directories so this test exercises the dependency
-            # semantics rather than filesystem timestamp granularity.
-            timestamp = time.time_ns() + 2_000_000_000
-            for candidate in (path, *path.parents):
-                if candidate == tmp_path:
-                    break
-                os.utime(candidate, ns=(timestamp, timestamp))
+        def wait_for_mtime(path: Path, previous_mtime_ns: int) -> None:
+            """Wait for a real source mtime transition without changing it."""
+            deadline = time.monotonic() + 2.0
+            while path.stat().st_mtime_ns <= previous_mtime_ns:
+                if time.monotonic() >= deadline:
+                    raise AssertionError(f"mtime did not advance for {path}")
+                time.sleep(0.01)
 
         run_ninja()
         destination = tmp_path / "build" / "staged" / "assets"
@@ -390,8 +385,9 @@ class TestInstallWithNinja:
         )
         assert "no work to do" in unchanged.stdout
 
+        nested_mtime = nested.stat().st_mtime_ns
         (nested / "added.txt").write_text("added")
-        mark_source_changed(nested / "added.txt")
+        wait_for_mtime(nested, nested_mtime)
         added = subprocess.run(
             ["ninja", "-C", "build"],
             cwd=tmp_path,
@@ -401,30 +397,43 @@ class TestInstallWithNinja:
         )
         assert "INSTALLDIR" in added.stdout
         assert (destination / "sub" / "added.txt").read_text() == "added"
+        unchanged_after_add = subprocess.run(
+            ["ninja", "-C", "build"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "no work to do" in unchanged_after_add.stdout
 
+        deep_mtime = (nested / "deep.txt").stat().st_mtime_ns
         (nested / "deep.txt").write_text("changed")
-        mark_source_changed(nested / "deep.txt")
+        wait_for_mtime(nested / "deep.txt", deep_mtime)
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         assert (destination / "sub" / "deep.txt").read_text() == "changed"
 
+        nested_mtime = nested.stat().st_mtime_ns
         (nested / "added.txt").unlink()
-        mark_source_changed(nested)
+        wait_for_mtime(nested, nested_mtime)
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         assert not (destination / "sub" / "added.txt").exists()
 
+        nested_mtime = nested.stat().st_mtime_ns
         (nested / "deep.txt").rename(nested / "moved.txt")
-        mark_source_changed(nested)
+        wait_for_mtime(nested, nested_mtime)
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         assert not (destination / "sub" / "deep.txt").exists()
         assert (destination / "sub" / "moved.txt").read_text() == "changed"
 
+        nested_mtime = nested.stat().st_mtime_ns
         new_nested = nested / "created-after-configure"
         new_nested.mkdir()
         (new_nested / "first.txt").write_text("first")
-        mark_source_changed(new_nested / "first.txt")
+        wait_for_mtime(nested, nested_mtime)
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
+        new_nested_mtime = new_nested.stat().st_mtime_ns
         (new_nested / "second.txt").write_text("second")
-        mark_source_changed(new_nested / "second.txt")
+        wait_for_mtime(new_nested, new_nested_mtime)
         second = subprocess.run(
             ["ninja", "-C", "build"],
             cwd=tmp_path,
@@ -435,8 +444,9 @@ class TestInstallWithNinja:
         assert "INSTALLDIR" in second.stdout
         assert (destination / "sub" / "created-after-configure" / "second.txt").exists()
 
+        nested_mtime = nested.stat().st_mtime_ns
         (nested / "created-after-configure").rename(nested / "renamed-directory")
-        mark_source_changed(nested)
+        wait_for_mtime(nested, nested_mtime)
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         assert not (destination / "sub" / "created-after-configure").exists()
         assert (destination / "sub" / "renamed-directory" / "first.txt").exists()
