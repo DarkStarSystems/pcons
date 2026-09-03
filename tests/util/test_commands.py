@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from pcons.util.commands import _escape_depfile_path, concat, copy, copytree
+from pcons.util.commands import _escape_depfile_path, concat, copy, copytree, main
 
 
 class TestCopy:
@@ -149,6 +149,63 @@ class TestCopytree:
         assert (dest / "new.txt").read_text() == "new"
         assert (dest / "unrelated" / "keep.txt").read_text() == "keep"
 
+    def test_copytree_manifest_removes_empty_stale_directories(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "src"
+        (src / "old" / "nested").mkdir(parents=True)
+        old = src / "old" / "nested" / "file.txt"
+        old.write_text("old")
+        dest = tmp_path / "dest"
+        manifest = tmp_path / "tree.manifest"
+
+        copytree(str(src), str(dest), manifest=str(manifest))
+        old.unlink()
+        (src / "old" / "nested").rmdir()
+        (src / "old").rmdir()
+
+        copytree(str(src), str(dest), manifest=str(manifest))
+
+        assert not (dest / "old").exists()
+
+    def test_copytree_manifest_recovers_from_corrupt_state(
+        self, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "current.txt").write_text("current")
+        dest = tmp_path / "dest"
+        manifest = tmp_path / "tree.manifest"
+        manifest.write_text("not json")
+
+        copytree(str(src), str(dest), manifest=str(manifest))
+
+        assert (dest / "current.txt").read_text() == "current"
+
+    def test_copytree_cli_accepts_manifest_option(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "file.txt").write_text("content")
+        dest = tmp_path / "dest"
+        manifest = tmp_path / "tree.manifest"
+        monkeypatch.setattr(
+            "sys.argv",
+            [
+                "pcons.util.commands",
+                "copytree",
+                "--manifest",
+                str(manifest),
+                str(src),
+                str(dest),
+            ],
+        )
+
+        assert main() == 0
+        assert (dest / "file.txt").read_text() == "content"
+        assert manifest.exists()
+
     def test_copytree_depfile_escapes_spaces(self, tmp_path: Path) -> None:
         """Test that source paths with spaces are escaped in the depfile.
 
@@ -196,7 +253,8 @@ class TestCopytree:
         )
 
         content = depfile.read_text()
-        assert "\\ " in content.split(":", 1)[0]
+        target, _ = content.split(": \\\n", 1)
+        assert "\\ " in target
         assert _escape_depfile_path(str(src).replace("\\", "/")) in content
         assert _escape_depfile_path(str(src.parent).replace("\\", "/")) in content
 

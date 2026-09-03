@@ -309,7 +309,8 @@ def main() -> int:
         if len(positional) != 2:
             print(
                 "Usage: python -m pcons.util.commands copytree "
-                "[--depfile FILE] [--stamp FILE] [--replace] <src> <dest>",
+                "[--depfile FILE] [--manifest FILE] [--stamp FILE] "
+                "[--replace] <src> <dest>",
                 file=sys.stderr,
             )
             return 1

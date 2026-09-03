@@ -2,8 +2,10 @@
 """Tests for Project.Install() method."""
 
 import logging
+import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -363,6 +365,18 @@ class TestInstallWithNinja:
                 check=True,
             )
 
+        def mark_source_changed(path: Path) -> None:
+            # Ninja's timestamp-based dependency checking cannot distinguish a
+            # source mutation that lands in the same filesystem timestamp tick
+            # as the previous install.  Advance the changed path and its
+            # containing directories so this test exercises the dependency
+            # semantics rather than filesystem timestamp granularity.
+            timestamp = time.time_ns() + 2_000_000_000
+            for candidate in (path, *path.parents):
+                if candidate == tmp_path:
+                    break
+                os.utime(candidate, ns=(timestamp, timestamp))
+
         run_ninja()
         destination = tmp_path / "build" / "staged" / "assets"
         assert (destination / "sub" / "deep.txt").read_text() == "deep"
@@ -377,6 +391,7 @@ class TestInstallWithNinja:
         assert "no work to do" in unchanged.stdout
 
         (nested / "added.txt").write_text("added")
+        mark_source_changed(nested / "added.txt")
         added = subprocess.run(
             ["ninja", "-C", "build"],
             cwd=tmp_path,
@@ -388,14 +403,17 @@ class TestInstallWithNinja:
         assert (destination / "sub" / "added.txt").read_text() == "added"
 
         (nested / "deep.txt").write_text("changed")
+        mark_source_changed(nested / "deep.txt")
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         assert (destination / "sub" / "deep.txt").read_text() == "changed"
 
         (nested / "added.txt").unlink()
+        mark_source_changed(nested)
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         assert not (destination / "sub" / "added.txt").exists()
 
         (nested / "deep.txt").rename(nested / "moved.txt")
+        mark_source_changed(nested)
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         assert not (destination / "sub" / "deep.txt").exists()
         assert (destination / "sub" / "moved.txt").read_text() == "changed"
@@ -403,8 +421,10 @@ class TestInstallWithNinja:
         new_nested = nested / "created-after-configure"
         new_nested.mkdir()
         (new_nested / "first.txt").write_text("first")
+        mark_source_changed(new_nested / "first.txt")
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         (new_nested / "second.txt").write_text("second")
+        mark_source_changed(new_nested / "second.txt")
         second = subprocess.run(
             ["ninja", "-C", "build"],
             cwd=tmp_path,
@@ -416,6 +436,7 @@ class TestInstallWithNinja:
         assert (destination / "sub" / "created-after-configure" / "second.txt").exists()
 
         (nested / "created-after-configure").rename(nested / "renamed-directory")
+        mark_source_changed(nested)
         subprocess.run(["ninja", "-C", "build"], cwd=tmp_path, check=True)
         assert not (destination / "sub" / "created-after-configure").exists()
         assert (destination / "sub" / "renamed-directory" / "first.txt").exists()
