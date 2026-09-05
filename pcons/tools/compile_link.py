@@ -915,7 +915,7 @@ class CompileLinkFactory:
         """
         dep_aux = [
             node
-            for node in self._collect_dependency_outputs(target)
+            for node in self._ordering_dependency_outputs(target)
             if not _is_link_input(node.path)
         ]
         if not dep_aux:
@@ -926,6 +926,33 @@ class CompileLinkFactory:
                 node.order_after(dep_aux)
             else:
                 node.depends(dep_aux)
+
+    def _ordering_dependency_outputs(self, target: Target) -> list[FileNode]:
+        """Everything a compile in *target* has to wait for.
+
+        The link closure's own outputs, plus the outputs of the generators
+        each of those dependencies declared with ``depends()``. A dependency's
+        public include dirs are on this target's compile line, so a generator
+        that fills one of them has to run before this target compiles, not
+        only before the dependency does -- otherwise the ordering that makes a
+        public header usable stops at the target that declared it, and every
+        consumer races the generator.
+
+        ``add_dependency()`` needs nothing here: ``transitive_dependencies()``
+        already walks those edges. ``depends(propagate=False)`` is left out on
+        purpose, being the spelling for "only my own final output waits".
+        """
+        outputs = self._collect_dependency_outputs(target)
+        seen = {id(node) for node in outputs}
+        for dep in target.transitive_dependencies(for_link=True):
+            for generator in dep._implicit_target_deps:
+                if generator is target:
+                    continue
+                for node in generator.output_nodes:
+                    if id(node) not in seen:
+                        seen.add(id(node))
+                        outputs.append(node)
+        return outputs
 
     def _collect_dependency_outputs(self, target: Target) -> list[FileNode]:
         """Collect output nodes from all dependencies.
