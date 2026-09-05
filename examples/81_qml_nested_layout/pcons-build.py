@@ -11,6 +11,12 @@ The entries are relative to the declaring script's own directory, so the
 second module in chips/ spells "qml/Chip.qml" and gets
 qrc:/qt/qml/PconsNested/Chips/qml/Chip.qml. Where the build script sits
 in the source tree is not part of the resource layout.
+
+Every resource directory below the module root also gets a qmldir of its
+own, holding one "prefer" line back to the root. Without it a file down
+there resolves an unqualified type name against its own directory only:
+qml/pages/Detail.qml names Badge, which lives in qml/widgets/, and the
+application prints it. That line is the whole reason it can.
 """
 
 from pcons import Project, add_subdirectory, find_c_toolchain

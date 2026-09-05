@@ -35,6 +35,8 @@ int main(int argc, char *argv[]) {
     }
     std::printf("url %s is %s\n", qPrintable(url.toString()),
                 qPrintable(instance->property("label").toString()));
+    std::printf("neighbor of %s is %s\n", qPrintable(url.toString()),
+                qPrintable(instance->property("neighbor").toString()));
 
     const QUrl chipUrl(
         QStringLiteral("qrc:/qt/qml/PconsNested/Chips/qml/Chip.qml"));

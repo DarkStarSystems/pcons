@@ -423,6 +423,118 @@ class TestQmlFilesKeepTheirPath:
         assert embedded["qml/Chip.qml"] == str(sub / "qml" / "Chip.qml")
 
 
+class TestQmldirInEverySubdirectory:
+    """Every resource directory below the root needs a qmldir of its own.
+
+    The engine resolves an unqualified type name through the implicit import
+    of the loaded file's own resource directory. A file below the module root
+    therefore sees nothing of the module unless a qmldir sits beside it
+    redirecting to the root, which is what ``qt_add_qml_module`` writes under
+    ``QTP0004`` NEW. Everything here was read back out of Qt 6.11.1's own
+    output for the same file list.
+
+    ``examples/81_qml_nested_layout`` is the end-to-end half of this: it
+    builds and runs an application whose ``qml/pages/Detail.qml`` names a type
+    living in ``qml/widgets/``. Without these files it dies with
+    ``Badge is not a type``.
+    """
+
+    def _generate(self, project, tmp_path, files, uri="My.Module"):
+        for name in files:
+            path = tmp_path / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("import QtQuick\nItem {}\n")
+        env = cxx_env_with_qt(project)
+        project.QtQmlModule("ui", env, uri=uri, qml_files=list(files))
+        generate_ninja(project)
+        return tmp_path / "build" / "qt.ui"
+
+    def test_each_directory_holding_qml_gets_one(self, qml_project, tmp_path):
+        module_dir = self._generate(
+            qml_project,
+            tmp_path,
+            ["Main.qml", "sub/Thing.qml", "deep/nested/Page.qml"],
+        )
+
+        written = sorted(
+            path.parent.relative_to(module_dir).as_posix()
+            for path in module_dir.rglob("qmldir")
+        )
+        assert written == [".", "deep/nested", "sub"]
+
+    def test_the_stub_prefers_the_module_root(self, qml_project, tmp_path):
+        module_dir = self._generate(qml_project, tmp_path, ["sub/Thing.qml"])
+
+        assert (module_dir / "sub" / "qmldir").read_text() == (
+            "prefer :/qt/qml/My/Module/\n"
+        )
+
+    def test_the_module_root_keeps_the_real_qmldir(self, qml_project, tmp_path):
+        module_dir = self._generate(qml_project, tmp_path, ["sub/Thing.qml"])
+
+        lines = (module_dir / "qmldir").read_text().splitlines()
+        assert lines[0] == "module My.Module"
+        assert "Thing 1.0 sub/Thing.qml" in lines
+
+    def test_a_directory_holding_no_qml_of_its_own_gets_none(
+        self, qml_project, tmp_path
+    ):
+        """``deep/`` only holds a directory, so nothing ever loads from it."""
+        module_dir = self._generate(qml_project, tmp_path, ["deep/nested/Page.qml"])
+
+        assert not (module_dir / "deep" / "qmldir").exists()
+        assert (module_dir / "deep" / "nested" / "qmldir").exists()
+
+    def test_a_flat_module_gets_only_the_root_qmldir(self, qml_project, tmp_path):
+        module_dir = self._generate(qml_project, tmp_path, ["Main.qml", "Other.qml"])
+
+        assert [path.parent for path in module_dir.rglob("qmldir")] == [module_dir]
+
+    def test_the_stubs_are_embedded_under_their_own_directory(
+        self, qml_project, tmp_path
+    ):
+        module_dir = self._generate(
+            qml_project,
+            tmp_path,
+            ["Main.qml", "sub/Thing.qml", "deep/nested/Page.qml"],
+        )
+
+        embedded = _qrc_files(module_dir / "ui.qrc")
+        assert embedded["qmldir"] == str(module_dir / "qmldir")
+        assert embedded["sub/qmldir"] == str(module_dir / "sub" / "qmldir")
+        assert embedded["deep/nested/qmldir"] == str(
+            module_dir / "deep" / "nested" / "qmldir"
+        )
+
+    def test_a_directory_holding_a_singleton_gets_the_same_stub(
+        self, qml_project, tmp_path
+    ):
+        """The redirect is what makes the singleton resolve as an instance.
+
+        A subdirectory left without a qmldir resolves ``Theme`` by scanning
+        that directory, which yields the type. Redirecting to the root qmldir
+        yields its ``singleton`` line instead, so no separate handling is
+        needed here.
+        """
+        (tmp_path / "state").mkdir()
+        (tmp_path / "state" / "Theme.qml").write_text(
+            "pragma Singleton\nimport QtQml\nQtObject {}\n"
+        )
+        env = cxx_env_with_qt(qml_project)
+        qml_project.QtQmlModule(
+            "ui", env, uri="My.Module", qml_files=["state/Theme.qml"]
+        )
+        generate_ninja(qml_project)
+        module_dir = tmp_path / "build" / "qt.ui"
+
+        assert (module_dir / "state" / "qmldir").read_text() == (
+            "prefer :/qt/qml/My/Module/\n"
+        )
+        assert "singleton Theme 1.0 state/Theme.qml" in (
+            (module_dir / "qmldir").read_text().splitlines()
+        )
+
+
 class TestQmlEntriesOutsideTheRoot:
     """The root is ``project.current_dir``, and an entry has to sit under it.
 
