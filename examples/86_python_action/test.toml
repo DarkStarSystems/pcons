@@ -1,0 +1,31 @@
+# Test configuration for the python-action example
+
+[test]
+description = "Run a Python function as a build step: env.PyCommand writes the function to a generated module and ninja runs it"
+
+expected_outputs = ["build/report.txt"]
+
+[verify]
+commands = [
+    { run = "uv run python check_report.py", expect_stdout = "report ok" },
+]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "A source changed: the function runs again"
+touch = "src/a.txt"
+expect_rebuild = ["report.txt"]
+
+[[rebuild]]
+description = "The build script changed but the function did not: regenerating alone does not re-run the edge"
+touch = "pcons-build.py"
+expect_rebuild = ["build.ninja"]
+expect_no_rebuild = ["report.txt"]
+
+[[rebuild]]
+description = "A comment does not re-run the function, a changed body does"
+run = "uv run python rebuild_check.py"
+expect_stdout = "rebuild ok"

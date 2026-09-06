@@ -2536,6 +2536,93 @@ sources list on MSVC and clang-cl (it becomes `/DEF:`), and a version script
 or symbol list as a `PathToken` in `link_flags` on Linux and macOS, which
 the link then depends on.
 
+### Python Functions as Build Steps: env.PyCommand()
+
+`env.Command()` runs a program. `env.PyCommand()` runs a Python function you wrote in the build script:
+
+```python
+@env.PyCommand(
+    target=project.build_dir / "report.txt",
+    source=["src/a.txt", "src/b.txt"],
+    kwargs={"title": "word counts"},
+)
+def report(sources, targets, title):
+    from pathlib import Path
+
+    lines = [title]
+    for name in sources:
+        lines.append(f"{Path(name).name}: {len(Path(name).read_text().split())}")
+    Path(targets[0]).write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+project.Default(report)
+```
+
+The function does not run while the build is described. pcons writes its source to a generated module under the environment's build directory, `build/pycmd/report.py`, its keyword arguments to a pickle beside it, and emits an ordinary edge that runs the module. So the work happens when ninja decides it is needed, in parallel with every other edge, and not again until an input changes. It is a build step, not a configure step.
+
+The function is called as `fn(sources, targets, **kwargs)`. Both path lists are spelled as the build tool sees them, so they open as written.
+
+**Three rules follow from the function travelling alone.**
+
+1. *It imports what it needs inside its own body.* The generated module holds the function and nothing else, so a name this script imported does not exist there. pcons refuses a body that reads one, naming it, rather than letting the build fail later with `NameError`.
+2. *It reads nothing from around it.* A function that closes over a variable of an enclosing function is refused for the same reason. Pass the value through `kwargs=`, which travels in the pickle, so every value there must be picklable. Some that pickle are refused anyway: a target, a node, an environment, a project and a tool namespace all belong to the build description, which does not exist when the function runs. A target goes in `source=`, and the function receives its output paths in `sources`; from an environment, read the values you want here and pass those, `env.cc.flags` rather than `env.cc`.
+3. *The decorated name becomes the `Target`.* `report` above is a target, not a function, like everything else a pcons builder returns. It goes to `project.Default()`, to `project.Install()`, or into another target's `source=`.
+
+A lambda, a `functools.partial`, a method and a builtin are all refused: only a plain `def` written out in a build script has source to extract.
+
+**Everything `env.Command()` takes, it takes**, and with the same meaning: `name=`, `depends=`, `restat=`, `write_if_different=`, `cwd=`, `launcher=`, `env_vars=`, `worker=`. `depfile=` and `deps_style=` are the exception, left out on purpose: a function that discovers its own dependencies has to write a make-style depfile by hand, which is a separate subject.
+
+`write_if_different=True` is worth knowing here, because a Python function usually rewrites its output every run. See the `env.Command()` section above.
+
+**Rebuilds.** The generated module and the pickle are inputs of the edge, and both are written only when their bytes change. Edit the function body and the edge re-runs. Change a `kwargs=` value and it re-runs. Edit anything else in the build script, a comment or a line above the decoration, and pcons regenerates the build files but the edge does not re-run, because nothing it depends on moved.
+
+**Several environments** are served by a plain Python factory, the way every other pcons target is:
+
+```python
+def make_report(env, title):
+    @env.PyCommand(
+        target="report.txt",
+        source=[project.root_dir / "src" / "a.txt"],
+        kwargs={"title": title},
+    )
+    def report(sources, targets, title):
+        from pathlib import Path
+
+        Path(targets[0]).write_text(title + "\n", encoding="utf-8")
+
+    return report
+
+host.build_prefix = "host"
+strict.build_prefix = "strict"
+
+reports = [make_report(env, f"{env.name} report") for env in (host, strict)]
+project.Default("report@host", "report@strict")
+```
+
+`env` is bound at decoration, so one decoration builds for one environment, and `build_prefix` is what keeps the two apart. Each then writes into its own build directory, `build/host/report.txt` and `build/strict/report.txt`, and so does its generated module. Leave the prefixes out and both environments share one build directory, both decorations land on `build/pycmd/report.py`, and pcons refuses the second one, naming the two environments. See `examples/75_multi_env` for the multi-environment idiom itself. The closure ban and this shape fit each other: the body sits inside `make_report`, where `env` and `title` are in scope, so pass what it needs through `kwargs=`.
+
+**A warm interpreter.** Starting Python costs more than a small function does. `worker=PythonWorker()` runs the edge in an interpreter that is already up:
+
+```python
+from pcons.workers.python import PythonWorker
+
+worker = PythonWorker()
+
+@env.PyCommand(target="report.txt", source=["a.txt"], worker=worker)
+def report(sources, targets):
+    ...
+```
+
+The generated build file still builds standalone: with no worker listening, the command runs directly. See `examples/64_persistent_worker`.
+
+**Details worth knowing.**
+
+- Sources and targets travel on the command line, so a very long source list meets the same limit `env.Command()` has, about 32000 characters on Windows.
+- The build tool creates the directory of every output you declared, and no other. A function writing to `Path(targets[0]).parent / "extra.txt"` is on its own; `mkdir(parents=True, exist_ok=True)` first.
+- The generated module carries `from __future__ import annotations`, so a parameter *annotation* is never evaluated there and `def render(sources, targets, out: Path)` costs nothing. A *default value* is the opposite: it is evaluated where the generated module defines the function, so a literal default is fine and `n=DEFAULT_N`, naming something the build script computed, is refused. Pass it through `kwargs=` and write the parameter without a default. The one other consequence of the future import is that a body calling `typing.get_type_hints()` on itself can raise, where the annotation names something the generated module does not have.
+- `python=` names the interpreter, defaulting to the one running pcons, which matters when pcons came from `uvx`. An interpreter whose file name does not contain "python" makes `worker=` a no-op, since that is how a worker recognises a command it can run in itself; the command then runs directly, correctly but cold.
+
+See `examples/86_python_action`.
+
 ### Post-Build Commands
 
 Add commands that run after a target is built using `target.post_build()`:
