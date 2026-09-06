@@ -31,9 +31,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-from pcons.toolchains.qt.scan import MocIncludeError, QtScanner, output_rel_dir
+from pcons.toolchains.qt.scan import (
+    MocIncludeError,
+    QtScanner,
+    TargetScan,
+    output_rel_dir,
+)
 
 SPEC_VERSION = 1
+EXPORTS_VERSION = 1
 
 _EMPTY_TU = "enum pcons_automoc_empty { pcons_automoc_needs_more_than_nothing };\n"
 
@@ -181,6 +187,48 @@ def _collect_json(moc: list[str], sidecars: list[Path], metatypes: Path) -> int:
     return 0
 
 
+def _display(path: Path, project_root: Path) -> str:
+    """*path* relative to the project root when it lives there."""
+    try:
+        return str(path.relative_to(project_root))
+    except ValueError:
+        return str(path)
+
+
+def _include_chain(header: Path, reached_from: dict[Path, Path]) -> list[Path]:
+    """The files that led the walk to *header*, source first."""
+    chain = [header]
+    seen = {header}
+    parent = reached_from.get(header)
+    while parent is not None and parent not in seen:
+        seen.add(parent)
+        chain.append(parent)
+        parent = reached_from.get(parent)
+    return list(reversed(chain))
+
+
+def _write_exports(
+    exports: Path, target: str, project_root: Path, scan: TargetScan
+) -> None:
+    """Name the headers this target moc'ed and how the walk reached each.
+
+    Read back by :mod:`pcons.toolchains.qt._moc_report`, one edge per link
+    closure, to report a header two targets that link together both moc.
+    """
+    document = {
+        "version": EXPORTS_VERSION,
+        "target": target,
+        "headers": {
+            _display(header, project_root): [
+                _display(step, project_root)
+                for step in _include_chain(header, scan.reached_from)
+            ]
+            for header in scan.moc_headers
+        },
+    }
+    _write_if_changed(exports, json.dumps(document, indent=1, sort_keys=True) + "\n")
+
+
 def _remove(path: Path) -> None:
     path.unlink(missing_ok=True)
     path.with_name(path.name + ".d").unlink(missing_ok=True)
@@ -276,6 +324,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     body = "".join(f'#include "{name}"\n' for name in includes) or _EMPTY_TU
     _write_aggregator(aggregator, body, moc_ran)
+
+    exports = spec.get("exports")
+    if exports is not None:
+        _write_exports(Path(exports), spec["target"], project_root, result)
 
     metatypes = spec.get("metatypes")
     if metatypes is not None:

@@ -137,8 +137,9 @@ class TestQtQmlModuleUnderABuildPrefix:
 
         assert "  AUTOMOCSPEC = host/qt.ui/automoc.json\n" in content
         assert (
-            "build host/qt.ui/mocs_compilation.cpp | host/qt.ui/ui_metatypes.json:"
-            " qt_automoccmd" in content
+            "build host/qt.ui/mocs_compilation.cpp | "
+            "host/qt.ui/automoc.exports.json host/qt.ui/ui_metatypes.json: "
+            "qt_automoccmd" in content
         )
         registrar = next(
             line
@@ -152,6 +153,9 @@ class TestQtQmlModuleUnderABuildPrefix:
             (tmp_path / "build" / "host" / "qt.ui" / "automoc.json").read_text()
         )
         assert spec["gen_dir"] == str(tmp_path / "build" / "host" / "qt.ui")
+        assert spec["exports"] == str(
+            tmp_path / "build" / "host" / "qt.ui" / "automoc.exports.json"
+        )
         assert spec["metatypes"] == str(
             tmp_path / "build" / "host" / "qt.ui" / "ui_metatypes.json"
         )
@@ -175,8 +179,8 @@ class TestQtQmlModule:
         assert "--output-json" in spec["moc_args"]
         # JSON sidecars merge into metatypes...
         assert (
-            "build qt.ui/mocs_compilation.cpp | qt.ui/ui_metatypes.json: qt_automoccmd"
-            in content
+            "build qt.ui/mocs_compilation.cpp | qt.ui/automoc.exports.json "
+            "qt.ui/ui_metatypes.json: qt_automoccmd" in content
         )
         # ...which feed qmltyperegistrar with URI and version.
         assert "build qt.ui/ui_qmltyperegistrations.cpp: qt_typeregcmd" in content

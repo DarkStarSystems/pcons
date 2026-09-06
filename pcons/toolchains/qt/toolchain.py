@@ -313,6 +313,14 @@ class QtTool(BaseTool):
                 "--depfile",
                 TargetPath(suffix=".d"),
             ],
+            "mocreportcmd": [
+                "$qt.python",
+                "-m",
+                "pcons.toolchains.qt._moc_report",
+                "--stamp",
+                TargetPath(),
+                SourcePath(),
+            ],
             # Compiler-predefined macros for moc (GCC/Clang only). The
             # compiler flags matter: -std/--target/-arch change the
             # predefined-macro set.
@@ -392,6 +400,12 @@ class QtTool(BaseTool):
                 depfile=TargetPath(suffix=".d"),
                 deps_style="gcc",
                 restat=True,
+            ),
+            "MocReport": CommandBuilder(
+                "MocReport",
+                "qt",
+                "mocreportcmd",
+                target_suffixes=[".stamp"],
             ),
             "Predefs": CommandBuilder(
                 "Predefs",
@@ -473,14 +487,21 @@ class QtToolchain(BaseToolchain):
         project: Project,
         source_obj_by_language: dict[str, list[tuple[Path, FileNode]]],
     ) -> None:
-        """Order each automoc edge behind what the target's compiles wait on.
+        """Wire what only the finished target graph can answer.
 
-        The edge exists before the compiles do, so the ordering can only be
-        wired once every ``target.depends()`` has reached them.
+        The automoc edge exists before the compiles do, so its ordering can
+        only be inherited once every ``target.depends()`` has reached them,
+        and the duplicate-moc report groups by link closure, which a target
+        gains after it is created: ``app.link(module)`` is the usual
+        spelling.
         """
-        from pcons.toolchains.qt.builders import inherit_automoc_deps
+        from pcons.toolchains.qt.builders import (
+            inherit_automoc_deps,
+            wire_duplicate_moc_report,
+        )
 
         inherit_automoc_deps(project)
+        wire_duplicate_moc_report(project)
 
     @classmethod
     def from_package(cls, qt: QtPackage) -> QtToolchain:

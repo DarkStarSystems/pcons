@@ -282,6 +282,81 @@ def inherit_automoc_deps(project: Project) -> None:
             node.wait_for(inherited)
 
 
+def _link_closure(target: Target) -> list[Target]:
+    """*target* and every target reachable from it through link_libs.
+
+    ``transitive_dependencies()`` also follows ``depends()`` edges, which
+    order a build without linking anything, so the walk is done here over
+    the link edges alone.
+    """
+    from pcons.core.target import Target as TargetClass
+
+    found: dict[int, Target] = {}
+    stack = [target]
+    while stack:
+        current = stack.pop()
+        if id(current) in found:
+            continue
+        found[id(current)] = current
+        stack.extend(
+            lib
+            for lib in (*current.public.link_libs, *current.private.link_libs)
+            if isinstance(lib, TargetClass)
+        )
+    return list(found.values())
+
+
+_moc_exports: weakref.WeakKeyDictionary[
+    Project, list[tuple[Target, FileNode, Environment]]
+] = weakref.WeakKeyDictionary()
+
+
+def wire_duplicate_moc_report(project: Project) -> None:
+    """Add one report edge per link-closure root that mocs in two places.
+
+    Two targets that both moc a header and then link together compile its
+    meta-object code twice, and the link fails on ``staticMetaObject`` and
+    ``qt_static_metacall`` in files the author never wrote. Which headers a
+    target moc'ed is decided while the build runs, so each automoc edge
+    exports that list with the include chain that reached each header, and
+    this edge reads the closure's exports files back and warns.
+
+    The link closure is a static fact about the target graph, so the set of
+    exports files one report reads is known here. A header moc'ed by two
+    targets that never meet at a link is two separate programs sharing a
+    source file, which is correct, hence one edge per closure rather than
+    one per project.
+    """
+    from pcons.core.scan import scope_id_for
+    from pcons.core.target import Target as TargetClass
+
+    exporters = _moc_exports.pop(project.top, [])
+    if len(exporters) < 2:
+        return
+    by_id = {id(entry[0]): entry for entry in exporters}
+    linked = {
+        id(lib)
+        for target in project.top.targets
+        for lib in (*target.public.link_libs, *target.private.link_libs)
+        if isinstance(lib, TargetClass)
+    }
+    for root in project.top.targets:
+        if id(root) in linked:
+            continue
+        closure = sorted(
+            (by_id[id(t)] for t in _link_closure(root) if id(t) in by_id),
+            key=lambda entry: entry[0].name,
+        )
+        if len(closure) < 2:
+            continue
+        qt_env = closure[0][2]
+        build_dir = Path(qt_env.get("build_dir", "build"))
+        stamp = build_dir / f"qt.mocreport.{scope_id_for(root)}.stamp"
+        report = qt_env.qt.MocReport(stamp, [node for _, node, _ in closure])[0]
+        for output in root.output_nodes:
+            output.order_after(report)
+
+
 def _set_node_vars(node: Node, node_vars: dict[str, object]) -> None:
     """Attach per-edge command variables (the swift.py precedent)."""
     info = getattr(node, "_build_info", None)
@@ -299,21 +374,23 @@ def _declare_implicit_output(primary: FileNode, extra: FileNode) -> None:
     info = getattr(primary, "_build_info", None)
     if info is None:
         return
-    info["outputs"] = {
+    outputs = info.get("outputs") or {
         "primary": {
             "path": primary.path,
             "suffix": primary.path.suffix,
             "implicit": False,
             "required": True,
         },
-        "extra": {
-            "path": extra.path,
-            "suffix": extra.path.suffix,
-            "implicit": True,
-            "required": True,
-        },
     }
-    extra._build_info = {"primary_node": primary, "output_name": "extra"}
+    name = f"extra{len(outputs)}"
+    outputs[name] = {
+        "path": extra.path,
+        "suffix": extra.path.suffix,
+        "implicit": True,
+        "required": True,
+    }
+    info["outputs"] = outputs
+    extra._build_info = {"primary_node": primary, "output_name": name}
 
 
 def _moc_args(qt_env: Environment, predefs: Path | None) -> list[str]:
@@ -476,10 +553,12 @@ def _qt_make_target(
 
     # ---- automoc ---------------------------------------------------------
     automoc_node: Node | None = None
+    exports_node: FileNode | None = None
     metatypes_node: Node | None = None
     moc_header_dirs: list[Path] = []
     if automoc and cpp_paths:
         metatypes_rel = qt_dir / f"{name}_metatypes.json" if moc_json else None
+        exports_rel = qt_dir / "automoc.exports.json"
         spec_rel = qt_dir / "automoc.json"
         _write_if_changed(
             root / spec_rel,
@@ -498,6 +577,7 @@ def _qt_make_target(
                     "moc_args": _moc_args(qt_env, predefs_path),
                     "moc_deps": [str(predefs_path)] if predefs_path else [],
                     "has_includes": bool(includes),
+                    "exports": str(project.root_dir / exports_rel),
                     "metatypes": (
                         None if metatypes_rel is None else str(root / metatypes_rel)
                     ),
@@ -520,6 +600,8 @@ def _qt_make_target(
         )
         if predefs_node is not None:
             edge.implicit_deps.append(predefs_node)
+        exports_node = project.node(exports_rel)
+        _declare_implicit_output(edge, exports_node)
         if metatypes_rel is not None:
             metatypes_node = project.node(metatypes_rel)
             _declare_implicit_output(edge, metatypes_node)
@@ -545,6 +627,8 @@ def _qt_make_target(
             target.depends(node)
     if isinstance(automoc_node, FileNode):
         _automoc_edges.setdefault(project.top, []).append((automoc_node, target))
+    if exports_node is not None:
+        _moc_exports.setdefault(project.top, []).append((target, exports_node, qt_env))
 
     info = _QtGenInfo(
         qt_env=qt_env,
@@ -590,7 +674,12 @@ class QtProgramBuilder:
             link: Targets to link — pass the Qt modules here
                 (link=[qt.Widgets]) so moc sees their headers/defines.
             automoc/autouic/autorcc: Disable individual generators.
-            no_moc: Files to exclude from the moc scan.
+            no_moc: Files that must not get a moc edge. This excludes moc
+                *generation* for the file itself, nothing else: the scan
+                still opens it and still follows its includes, so a
+                Q_OBJECT header behind an excluded one is still moc'ed.
+                Only a directory the target's includes never reach keeps
+                the walk out.
         """
         target, _ = _qt_make_target(
             "Program",

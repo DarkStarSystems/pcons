@@ -171,6 +171,38 @@ costs one moc run and one recompile.
 Escape hatches: `automoc=False`, `autouic=False`, `autorcc=False`, and
 `no_moc=["src/weird.h"]`.
 
+### `no_moc` does not stop the walk
+
+`no_moc` excludes a file from moc *generation*. The scan still opens it
+and still follows its `#include` lines, so a `Q_OBJECT` header behind an
+excluded one is still moc'ed. Excluding one header moves the problem one
+include deeper rather than removing it.
+
+What ends the walk is a header the target's sources never include. A
+quoted `#include "Controller.hpp"` resolves against the including file's
+own directory first, exactly as the compiler does it, so two targets
+whose sources share a directory reach each other's headers with no
+include directory configured at all.
+
+When two targets that link together both moc one header, its meta-object
+code is compiled twice and the link fails on duplicate
+`staticMetaObject` and `qt_static_metacall` symbols in generated files
+nobody wrote. Which headers a target mocs is decided while the build
+runs, so the build reports that, one edge per link closure, with the
+include chain each target reached the header through:
+
+```
+pcons Qt: targets 'app' and 'ui_module' both run moc on src/sub/Helper.hpp
+and link together, so its meta-object code is compiled once per target ...
+  'app' reaches it through src/main.cpp -> src/Controller.hpp -> src/sub/Helper.hpp
+  'ui_module' reaches it through src/Controller.cpp -> src/Controller.hpp -> src/sub/Helper.hpp
+```
+
+The fix is to give the class one owner: keep the module's headers in a
+directory the other target's sources do not include from. The same
+header moc'ed by two targets that never meet at a link is two separate
+programs sharing a source file, which is fine, and is not reported.
+
 A `.cpp` file with `Q_OBJECT` needs its moc output included at the end
 of the file (`#include "myfile.moc"`); the automoc edge fails the build
 if the include is missing.
@@ -252,8 +284,10 @@ Worth knowing before porting a large CMake project:
 - **Prebuilt Qt-based SDKs:** the automoc scan follows includes into
   directories you list in `env.cxx.includes` — including out-of-project
   ones. Headers from a *prebuilt* Qt-based SDK reached that way would
-  get moc'ed spuriously; exclude them with `no_moc=[...]`. (Libraries
-  found via `find_package`/`find_qt` are excluded automatically.)
+  get spurious moc edges; `no_moc=[...]` suppresses the edge on each
+  header you name, and the scan still walks through them, so name every
+  such header the walk reaches. (Libraries found via
+  `find_package`/`find_qt` are excluded automatically.)
 - **pcons cannot see what the target Qt was built with.** moc, uic and
   rcc run on the build machine, from the host Qt, and their output is
   compiled against the Qt you link. When the two were configured
