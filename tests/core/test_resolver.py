@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.core.resolver."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -1515,6 +1516,32 @@ class TestSourceTargetsResolveFirst:
             assert gen.output_nodes[0] in node.implicit_deps
         for node in consumer.intermediate_nodes + consumer.output_nodes:
             assert gen.output_nodes[0] not in node.implicit_deps
+
+    def test_source_targets_without_a_factory_warn(self, tmp_path, caplog):
+        """A builder that registered no factory cannot turn Target sources
+        into nodes, and says so rather than dropping them silently."""
+        project = Project("nf", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        odd = Target("odd", project=project)
+        odd._builder_name = "NoSuchBuilder"
+        odd.add_sources([gen])
+        empty = Target("empty", project=project)
+        empty._builder_name = "NoSuchBuilder"
+        empty._pending_sources = []
+
+        with caplog.at_level(logging.WARNING):
+            project.resolve()
+
+        warned = [r for r in caplog.records if "no factory registered" in r.message]
+        assert [r.args[0] for r in warned] == ["odd"]
+        assert odd._pending_sources is None
+        assert empty._pending_sources is None
 
 
 class TestOutputOnlyFileDeps:
