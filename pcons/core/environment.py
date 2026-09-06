@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import re
 from collections import UserList
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from difflib import get_close_matches
 from pathlib import Path
@@ -1865,6 +1865,100 @@ class Environment(_EnvironmentStubs):
                 cmd_target.name = name
 
         return cmd_target
+
+    def PyCommand(
+        self,
+        *,
+        target: str | Path | list[str | Path],
+        source: Target | str | Path | Sequence[Target | str | Path] | None = None,
+        kwargs: Mapping[str, Any] | None = None,
+        name: str | None = None,
+        depends: str | Path | Sequence[str | Path] | None = None,
+        python: str | None = None,
+        restat: bool = False,
+        write_if_different: bool = False,
+        cwd: str | Path | None = None,
+        launcher: Sequence[str] | None = None,
+        env_vars: Mapping[str, str] | None = None,
+        worker: Any = None,
+    ) -> Callable[[Callable[..., object]], Target]:
+        """Run a Python function of this build script as a build edge.
+
+        The decorated name is bound to the ``Target``, not to the function,
+        the way every pcons builder returns one::
+
+            @env.PyCommand(target="report.txt", source=["a.txt"],
+                           kwargs={"title": "Report"})
+            def report(sources, targets, title):
+                from pathlib import Path
+                Path(targets[0]).write_text(title + Path(sources[0]).read_text())
+
+        The function does not run now. Its source is written to a generated
+        module under the environment's build directory, its keyword arguments
+        to a pickle beside it, and the edge runs the module at build time with
+        *sources* and *targets* as the build tool spells them.
+
+        Only the function's own source travels, so the body may use nothing
+        from around it: no name the build script imported or defined, no
+        variable of an enclosing function. Import what it needs inside the
+        body and take everything else through ``kwargs``. Anything else is
+        refused here, at configure time, rather than at build time.
+
+        ``depfile`` and ``deps_style`` are deliberately absent: a function
+        that discovers its own dependencies has to write a make-style depfile
+        by hand, which deserves its own example.
+
+        Sources and targets travel on the command line, so a very long source
+        list meets the same command-line limit ``env.Command`` already has,
+        about 32000 characters on Windows.
+
+        Args:
+            target: Output file(s), exactly as ``env.Command`` takes them.
+            source: Input file(s), or None. They arrive as the function's
+                    *sources*, in the order written.
+            kwargs: Keyword arguments for the build-time call. Each value
+                    must be picklable.
+            name: Target name for ``ninja <name>``, and the generated
+                  module's file name. Defaults to the first target's stem.
+            depends: Extra files that trigger a rebuild without being
+                    sources, as ``env.Command`` takes them.
+            python: The interpreter that runs the function, defaulting to the
+                    one running pcons. A string, never a detected tool: the
+                    day PyCommand has to *find* an interpreter or ask its
+                    version, that is tool knowledge and this moves to a
+                    python tool. One whose file name does not contain
+                    "python" makes ``worker=`` a no-op, since that is how a
+                    worker recognises a command it can run in itself; the
+                    command then runs directly, correctly but cold.
+            restat: See :meth:`Command`.
+            write_if_different: See :meth:`Command`.
+            cwd: See :meth:`Command`.
+            launcher: See :meth:`Command`.
+            env_vars: See :meth:`Command`.
+            worker: See :meth:`Command`. A :class:`pcons.workers.PythonWorker`
+                    keeps an interpreter warm, which is most of the cost of a
+                    small function.
+
+        Returns:
+            A decorator that returns the edge's ``Target``.
+        """
+        from pcons.tools.pycommand import py_command
+
+        return py_command(
+            self,
+            target=target,
+            source=source,
+            kwargs=kwargs,
+            name=name,
+            depends=depends,
+            python=python,
+            restat=restat,
+            write_if_different=write_if_different,
+            cwd=cwd,
+            launcher=launcher,
+            env_vars=env_vars,
+            worker=worker,
+        )
 
     def __str__(self) -> str:
         """User-friendly string representation for debugging."""
