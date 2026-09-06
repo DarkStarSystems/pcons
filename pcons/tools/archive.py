@@ -95,14 +95,14 @@ class ArchiveTool(StandaloneTool):
 
 
 class ArchiveNodeFactory(PendingSourceFactory):
-    """Factory creating archive (tar/zip) output nodes during pending-sources
-    resolution."""
+    """Factory creating archive (tar/zip) output nodes from a target's
+    resolved sources."""
 
     def resolve_pending(self, target: Target) -> None:
-        """Resolve pending sources for an archive target (phase 2).
+        """Create the archive node.
 
-        Runs after main resolution when output_nodes are populated, so
-        archive targets can reference outputs from other targets.
+        The source targets have resolved by now, so an archive target can
+        reference their outputs.
         """
         if target._builder_name not in ("Tarfile", "Zipfile"):
             return

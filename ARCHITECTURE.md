@@ -564,11 +564,11 @@ class NodeFactory(Protocol):
         ...
 
     def resolve(self, target: Target, env: Environment | None) -> None:
-        """Resolve target in phase 1 (compilation)."""
+        """Create the target's nodes (e.g. objects and the link output)."""
         ...
 
     def resolve_pending(self, target: Target) -> None:
-        """Resolve pending sources in phase 2 (after outputs are populated)."""
+        """Create nodes from sources that are other targets, once those have resolved."""
         ...
 ```
 
@@ -721,16 +721,13 @@ project.resolve()
 - Toolchain defaults (platform-specific naming like `.dylib` vs `.so`)
 - Effective requirements from dependencies (must be computed in dependency order)
 
-**Pending sources for lazy resolution.** Some operations, like `Install()`, need to reference a target's outputs. Rather than requiring users to carefully order their build script, targets can have `_pending_sources` - references that are resolved after the main resolution phase:
+**Pending sources for lazy resolution.** Some operations, like `Install()`, need to reference a target's outputs, which don't exist until that target resolves. A Target given as a source is recorded as a pending source and as a dependency, and `resolve()` visits targets in dependency order, so the source target's outputs exist when the dependent's nodes are created:
 
 ```python
-# These can appear in any order:
 lib = project.SharedLibrary("mylib", env, sources=["lib.cpp"])
 install = project.Install("dist/lib", [lib])  # lib.output_nodes is empty here!
 
-# resolve() handles it:
-# 1. Phase 1: Resolve build targets (populates lib.output_nodes)
-# 2. Phase 2: Resolve pending sources (install now sees lib.output_nodes)
+# resolve() visits lib before install, so install sees lib.output_nodes
 project.resolve()
 ```
 

@@ -765,21 +765,29 @@ class TestScannerErrors:
         with pytest.raises(PconsError, match="already has a producer"):
             project.resolve()
 
-    def test_target_objects_as_sources_are_rejected(self, tmp_path, monkeypatch):
-        """Target sources resolve after the wiring pass, so they cannot be scanned."""
+    def test_target_objects_as_sources_are_scanned(self, tmp_path, monkeypatch):
+        """A source given as a Target resolves before the wiring pass, so the
+        scan edge reads that target's output like any other source."""
         project = make_project(tmp_path, monkeypatch)
         env = project.Environment()
-        a = pack(env, "a")
+        gen = env.Command(
+            target="gen/c.scene",
+            source=["a.scene"],
+            command=["cp", "$SOURCE", "$TARGET"],
+            name="gen_c",
+        )
         b = env.Command(
             target="packs/b.pack",
-            source=[a, "b.scene"],
+            source=[gen, "b.scene"],
             command=["cat", "$SOURCES", ">", "$TARGET"],
             name="pack_b",
         )
         make_scanner().attach(b)
 
-        with pytest.raises(PconsError, match="resolve too late"):
-            project.resolve()
+        project.resolve()
+
+        scan_node = project.node(Path("build/packs/b.pack.scaninfo.json"))
+        assert node_paths(scan_node.explicit_deps) == ["build/gen/c.scene", "b.scene"]
 
 
 def test_scan_and_collate_nodes_are_registered_with_the_environment(

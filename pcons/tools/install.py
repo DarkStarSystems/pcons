@@ -331,13 +331,13 @@ class InstallTool(StandaloneTool):
 
 
 class InstallNodeFactory(PendingSourceFactory):
-    """Factory creating install/copy nodes during pending-sources resolution."""
+    """Factory creating install/copy nodes from a target's resolved sources."""
 
     def resolve_pending(self, target: Target) -> None:
-        """Resolve pending sources for an install target (phase 2).
+        """Create the install nodes.
 
-        Runs after main resolution when output_nodes are populated, so
-        Install targets can reference outputs from other targets.
+        The source targets have resolved by now, so an install target can
+        reference their outputs.
         """
         if not target._builder_data:
             return

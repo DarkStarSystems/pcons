@@ -1400,3 +1400,118 @@ class TestLinkInputOrder:
         project.resolve()
 
         self._assert_links_in_order(exe, lib_a, lib_b)
+
+
+class TestSourceTargetsResolveFirst:
+    """A target whose sources are other targets gets its nodes in the same
+    pass as everything else, so a depends() edge to or from it lands (#129)."""
+
+    @staticmethod
+    def _source_tree(tmp_path: Path) -> Path:
+        tree = tmp_path / "tree"
+        (tree / "sub").mkdir(parents=True)
+        (tree / "sub" / "f.txt").write_text("x")
+        return tree
+
+    def test_command_depends_on_install_dir(self, tmp_path):
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        staged = project.InstallDir("stage", self._source_tree(tmp_path))
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo done > $TARGET",
+            name="after",
+        )
+        cmd.depends(staged)
+
+        project.resolve()
+
+        assert staged.output_nodes, "install target produced no nodes"
+        implicit = {n.path for n in cmd.output_nodes[0].implicit_deps}
+        assert {n.path for n in staged.output_nodes} <= implicit
+
+    def test_install_dir_depends_on_command(self, tmp_path):
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        staged = project.InstallDir("stage", self._source_tree(tmp_path))
+        staged.depends(gen)
+
+        project.resolve()
+
+        assert staged.output_nodes, "install target produced no nodes"
+        for node in staged.output_nodes:
+            assert gen.output_nodes[0] in node.implicit_deps
+
+    def test_install_dir_file_dep_reaches_its_nodes(self, tmp_path):
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        stamp_input = tmp_path / "version.txt"
+        stamp_input.write_text("1")
+
+        staged = project.InstallDir("stage", self._source_tree(tmp_path))
+        staged.depends(stamp_input)
+
+        project.resolve()
+
+        assert staged.output_nodes, "install target produced no nodes"
+        for node in staged.output_nodes:
+            assert any(d.path.name == stamp_input.name for d in node.implicit_deps)
+
+    def test_dependency_reached_out_of_order_resolves_its_sources(self, tmp_path):
+        """A depends() edge can reach a target before build order does. Its
+        own source targets must still resolve before its nodes are made."""
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo done > $TARGET",
+            name="after",
+        )
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        installed = project.Install("dist", [gen])
+        cmd.depends(installed)
+
+        project.resolve()
+
+        assert [n.path.name for n in installed.output_nodes] == ["gen.txt"]
+        assert installed.output_nodes[0] in cmd.output_nodes[0].implicit_deps
+
+    def test_source_target_deps_are_not_forwarded_to_consumers(self, tmp_path):
+        """An install target has nodes of its own, so its depends() belong on
+        them and not on whoever consumes it, unlike an interface target."""
+        project = Project("fwd", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        staged = project.InstallDir("stage", self._source_tree(tmp_path))
+        staged.depends(gen)
+
+        consumer = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo done > $TARGET",
+            name="consumer",
+        )
+        consumer.add_dependency(staged)
+
+        project.resolve()
+
+        for node in staged.output_nodes:
+            assert gen.output_nodes[0] in node.implicit_deps
+        for node in consumer.intermediate_nodes + consumer.output_nodes:
+            assert gen.output_nodes[0] not in node.implicit_deps

@@ -42,11 +42,12 @@ if TYPE_CHECKING:
 
 
 class PendingSourceFactory:
-    """Base factory for targets that resolve pending sources in phase 2.
+    """Base factory for targets whose sources may be other Targets.
 
-    A "pending source" is a source that references another Target whose
-    output_nodes aren't available yet during phase 1, so resolution is
-    deferred until phase 2 when all targets have been resolved.
+    A "pending source" is a source given as a Target: it stands for that
+    target's outputs. A source target is a dependency, and targets resolve
+    in dependency order, so those outputs exist by the time
+    ``resolve_pending`` creates this target's nodes from them.
     """
 
     def __init__(self, project: Project) -> None:
@@ -57,10 +58,13 @@ class PendingSourceFactory:
         target: Target,  # noqa: ARG002
         env: Environment | None,  # noqa: ARG002
     ) -> None:
-        """Phase 1 — no-op by default."""
+        """No-op by default: the nodes come from resolve_pending()."""
 
     def resolve_pending(self, target: Target) -> None:
-        """Phase 2 — resolve pending sources. Subclasses must override."""
+        """Create the target's nodes from its resolved sources.
+
+        Subclasses must override.
+        """
         raise NotImplementedError
 
     def _resolve_sources(self, target: Target) -> list[FileNode]:
@@ -259,6 +263,16 @@ class Resolver:
         try:
             env = target._env
 
+            # A source given as a Target stands for its outputs. Build order
+            # resolves it first; a target reached out of order through a
+            # depends() edge resolves it here.
+            if target._pending_sources is not None:
+                from pcons.core.target import Target
+
+                for source in target._pending_sources:
+                    if isinstance(source, Target) and not source._resolved:
+                        self._resolve_target(source)
+
             # Dispatch to registered factory via _builder_name
             builder_name = target._builder_name
             if builder_name is not None and builder_name in self._builder_factories:
@@ -272,6 +286,9 @@ class Resolver:
                     target.name,
                     builder_name,
                 )
+
+            if target._pending_sources is not None:
+                self._resolve_pending_sources(target)
 
             if target.output_nodes:
                 trace(
@@ -338,50 +355,24 @@ class Resolver:
                     if dep_node not in node.implicit_deps:
                         node.implicit_deps.append(dep_node)
 
-    def resolve_pending_sources(self) -> None:
-        """Resolve _pending_sources for all targets that have them.
-
-        Must run after main resolution so output_nodes are populated;
-        afterwards expands command templates for any new nodes.
-        """
-        for target in self._targets_in_build_order():
-            if target._pending_sources is not None:
-                self._resolve_target_pending_sources(target)
-
-        # Expand command templates for any new nodes created during pending resolution
-        self._expand_node_commands()
-
-    def _resolve_target_pending_sources(self, target: Target) -> None:
-        """Resolve pending sources for a single target, recursing into
-        source targets that themselves have pending sources first."""
-        from pcons.core.target import Target
-
-        if target._pending_sources is None:
-            return
-
-        # Recursively resolve any source targets that also have pending sources
-        for source in target._pending_sources:
-            if isinstance(source, Target) and source._pending_sources is not None:
-                self._resolve_target_pending_sources(source)
-
-        # Use factory dispatch via _builder_name
+    def _resolve_pending_sources(self, target: Target) -> None:
+        """Let the target's factory create its nodes from its Target sources,
+        which have resolved by now."""
         builder_name = target._builder_name
-        if builder_name is not None and builder_name in self._builder_factories:
-            factory = self._builder_factories[builder_name]
+        factory = (
+            self._builder_factories.get(builder_name)
+            if builder_name is not None
+            else None
+        )
+        if factory is not None:
             factory.resolve_pending(target)
-            target._pending_sources = None
-            return
-
-        # No factory found - log a warning if there are pending sources
-        if target._pending_sources:
+        elif target._pending_sources:
             logger.warning(
                 "Target '%s' has pending sources but no factory registered for "
                 "builder '%s'. Sources will not be resolved.",
                 target.name,
                 builder_name,
             )
-
-        # Mark as processed
         target._pending_sources = None
 
     def _expand_node_commands(self) -> None:

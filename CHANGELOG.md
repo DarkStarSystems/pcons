@@ -91,6 +91,12 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- `target.depends()` on an install or archive target now orders the build.
+  The resolver visits targets in dependency order in a single pass, so a
+  target whose sources are other targets has its nodes by the time the edge
+  is applied. Before, such edges were silently dropped. Reported in #129.
+- A scanner can be attached to a target whose sources are other targets.
+
 - **Fortran no longer rebuilds its whole module scope forever.** gfortran
   leaves a `.mod` untouched when a recompile produces an identical one, and
   with that `.mod` as a dyndep output ninja saw the edge as permanently out
