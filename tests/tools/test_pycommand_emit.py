@@ -440,9 +440,8 @@ class TestEmit:
         (tmp_path / "sub").mkdir()
         with project._enter_subdir("sub"):
             child = Project("child", root_dir=tmp_path / "sub")
-        child_env = child.Environment()
-
-        module_rel, _ = run_emit(child, child_env, writes_sources)
+            child_env = child.Environment()
+            module_rel, _ = run_emit(child, child_env, writes_sources)
 
         assert module_rel == Path("build/sub/pycmd/report.py")
         assert (tmp_path / module_rel).is_file()

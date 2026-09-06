@@ -938,3 +938,50 @@ class TestPyCommandErrors:
                 return s
 
         assert "an element of kwargs['s'] is the target 'made'" in str(caught.value)
+
+    def test_a_node_in_kwargs_points_at_source(self, project_env):
+        """A node is the fifth build-description type, and reads as a path."""
+        project, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt", kwargs={"n": project.node("src/main.c")})
+            def render(sources, targets, n):
+                return n
+
+        message = str(caught.value)
+        assert "kwargs['n'] is the build graph's file 'src/main.c'" in message
+        assert "List it in source= instead" in message
+
+    def test_a_structure_that_contains_itself_is_refused_not_walked_forever(
+        self, project_env
+    ):
+        """The walk's seen set is what makes this return instead of recursing."""
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+        looping: dict[str, object] = {}
+        looping["self"] = looping
+        looping["t"] = made
+
+        with pytest.raises(PconsError, match="is the target 'made'"):
+
+            @env.PyCommand(target="out.txt", kwargs={"loop": looping})
+            def render(sources, targets, loop):
+                return loop
+
+    def test_a_renamed_lambda_says_its_source_is_not_a_def(self, project_env):
+        """Reaches the ast fallback: __name__ says def, the source says lambda."""
+        _, env = project_env
+        renamed = lambda sources, targets: None  # noqa: E731
+        renamed.__name__ = "renamed"
+
+        with pytest.raises(PconsError) as caught:
+            env.PyCommand(target="out.txt")(renamed)
+
+        message = str(caught.value)
+        assert "is not a def, it reads as Assign" in message
+        assert "write one out in the build script" in message

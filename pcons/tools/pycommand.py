@@ -111,9 +111,7 @@ def _extract(
     node = ast.parse(text).body[0]
     if not isinstance(node, ast.FunctionDef):
         raise PyCommandError(
-            f"PyCommand needs a plain function, but {_describe(fn)} is "
-            f"a {_node_kind(node)}.",
-            at,
+            f"PyCommand needs a plain function: {_not_a_def(fn, node)}", at
         )
     return "".join(text.splitlines(keepends=True)[node.lineno - 1 :]), node
 
@@ -188,14 +186,23 @@ def _describe(fn: Callable[..., object]) -> str:
     return f"{name}()" if name else repr(fn)
 
 
-def _node_kind(node: ast.stmt) -> str:
-    """What an extracted statement is, in a user's words."""
+def _not_a_def(fn: Callable[..., object], node: ast.stmt) -> str:
+    """Why the source that was found is not a function definition.
+
+    The second case is reached by a function whose source does not start at a
+    ``def``: a lambda given another ``__name__``, or a function assembled at
+    run time from another one's code object.
+    """
     if isinstance(node, ast.AsyncFunctionDef):
         return (
-            "coroutine function, which a build edge cannot await. Write it "
-            "as a plain def"
+            f"{_describe(fn)} is a coroutine function, which a build edge "
+            f"cannot await. Write it as a plain def."
         )
-    return type(node).__name__
+    return (
+        f"the source found for {_describe(fn)} is not a def, it reads as "
+        f"{type(node).__name__}. A function built at run time has no def to "
+        f"extract: write one out in the build script."
+    )
 
 
 def _plain_function(
@@ -620,11 +627,9 @@ def _runner_path() -> str:
 
 
 def _as_list(value: object) -> list[Any]:
-    """One value, a sequence of them, or nothing, as a list."""
+    """One target or several, as a list. Both call sites pass ``target=``."""
     from pcons.core.target import Target as TargetClass
 
-    if value is None:
-        return []
     if isinstance(value, (str, Path, TargetClass)):
         return [value]
     return list(cast("Sequence[Any]", value))
