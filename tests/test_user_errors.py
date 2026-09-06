@@ -10,6 +10,8 @@ These serve as both regression tests for existing good errors and a
 roadmap for future error handling improvements.
 """
 
+import functools
+import textwrap
 import warnings
 from pathlib import Path
 
@@ -22,6 +24,7 @@ from pcons.core.errors import (
     MissingVariableError,
     PconsError,
 )
+from pcons.core.invocation import RUN_NAME
 from pcons.core.project import Project
 
 
@@ -592,3 +595,346 @@ class TestBuilderEdgeCases:
         # This should work -- Install resolves Target to output_nodes
         install = project.Install("dist", [app])
         assert install is not None
+
+
+PYCOMMAND_DEFAULT = "a value the build script computed"
+
+
+def build_script_function(tmp_path, source, name="render"):
+    """Define a function the way a build script does, under ``__pcons__``.
+
+    The module name is half of what PyCommand's messages reason about: a
+    helper defined here has nowhere to be imported from, and a test module,
+    which is importable, cannot stand in for that.
+    """
+    path = tmp_path / "pcons-build.py"
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    namespace = {"__name__": RUN_NAME, "__file__": str(path)}
+    exec(compile(path.read_text(encoding="utf-8"), str(path), "exec"), namespace)  # noqa: S102
+    return namespace[name]
+
+
+class TestPyCommandErrors:
+    """What env.PyCommand() says when a function cannot travel to build time.
+
+    Every message is read here as the user reads it, whole, because the
+    feature's failures are all configure-time refusals whose only job is to
+    say what to type instead.
+    """
+
+    def test_a_lambda_says_to_write_a_def(self, project_env):
+        _, env = project_env
+        with pytest.raises(PconsError, match="write it as a def"):
+            env.PyCommand(target="out.txt")(lambda sources, targets: None)
+
+    def test_a_closure_names_the_variable_and_points_at_kwargs(self, project_env):
+        _, env = project_env
+        title = "report"
+
+        def make():
+            @env.PyCommand(target="out.txt")
+            def render(sources, targets):
+                return title
+
+            return render
+
+        with pytest.raises(PconsError) as caught:
+            make()
+
+        message = str(caught.value)
+        assert "reads title from the function it is nested in" in message
+        assert "Pass it in kwargs= and take it as an argument." in message
+
+    def test_a_global_says_to_move_the_import_into_the_body(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt")
+            def render(sources, targets):
+                return Path(targets[0])
+
+        message = str(caught.value)
+        assert "uses Path from the build script" in message
+        assert "Import Path inside the function body, the way this script" in message
+
+    def test_a_default_says_to_drop_it_and_use_kwargs(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt")
+            def render(sources, targets, n=PYCOMMAND_DEFAULT):
+                return n
+
+        message = str(caught.value)
+        assert "PYCOMMAND_DEFAULT is a parameter's default value" in message
+        assert "write the parameter without a default and pass" in message
+        assert "in kwargs=" in message
+
+    def test_a_target_in_kwargs_points_at_source(self, project_env):
+        """The first mistake: passing a target the way it reads naturally."""
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt", kwargs={"t": made})
+            def render(sources, targets, t):
+                return t
+
+        message = str(caught.value)
+        assert "kwargs['t'] is the target 'made'" in message
+        assert "the build description does not exist when the function runs" in message
+        assert "List it in source= instead" in message
+
+    def test_a_target_nested_in_kwargs_is_found_and_located(self, project_env):
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt", kwargs={"inputs": {"first": [made]}})
+            def render(sources, targets, inputs):
+                return inputs
+
+        assert "kwargs['inputs']['first'][0] is the target 'made'" in str(caught.value)
+
+    def test_the_environment_in_kwargs_says_to_read_it_here(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt", kwargs={"e": env})
+            def render(sources, targets, e):
+                return e
+
+        message = str(caught.value)
+        assert "kwargs['e'] is the environment itself" in message
+        assert "Read what the function needs from it here" in message
+
+    def test_an_unpicklable_kwarg_names_the_key_and_the_way_out(
+        self, project_env, tmp_path
+    ):
+        _, env = project_env
+        handle = (tmp_path / "src" / "main.c").open()
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt", kwargs={"f": handle})
+            def render(sources, targets, f):
+                return f
+
+        handle.close()
+        message = str(caught.value)
+        assert "cannot pickle kwargs f" in message
+        assert "Pass what describes it instead, a path or a string" in message
+
+    def test_two_commands_deriving_one_name_name_both_and_say_name(self, project_env):
+        _, env = project_env
+
+        @env.PyCommand(target="report.txt")
+        def first(sources, targets):
+            return 1
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="sub/report.txt")
+            def second(sources, targets):
+                return 2
+
+        message = str(caught.value)
+        assert "would overwrite build/pycmd/report.py" in message
+        assert "test_user_errors.py:" in message.split("already written by")[1]
+        assert "Pass name= to one of them" in message
+
+    def test_a_partial_says_to_pass_the_function(self, project_env):
+        _, env = project_env
+
+        def render(sources, targets, n):
+            return n
+
+        with pytest.raises(PconsError) as caught:
+            env.PyCommand(target="out.txt")(functools.partial(render, n=1))
+
+        message = str(caught.value)
+        assert "was given a functools.partial" in message
+        assert "put its bound arguments in kwargs=" in message
+
+    def test_a_bound_method_says_to_write_a_def(self, project_env):
+        _, env = project_env
+
+        class Holder:
+            def render(self, sources, targets):
+                return 1
+
+        with pytest.raises(PconsError) as caught:
+            env.PyCommand(target="out.txt")(Holder().render)
+
+        message = str(caught.value)
+        assert "needs a function written in a build script" in message
+        assert "Write a def beside the other targets" in message
+
+    def test_a_method_says_to_move_it_out_of_the_class(self, project_env):
+        _, env = project_env
+
+        class Holder:
+            def render(self, sources, targets):
+                return 1
+
+        with pytest.raises(PconsError, match="move the def out of the class"):
+            env.PyCommand(target="out.txt")(Holder.render)
+
+    def test_a_coroutine_says_to_write_a_plain_def(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError, match="Write it as a plain def"):
+
+            @env.PyCommand(target="out.txt")
+            async def render(sources, targets):
+                return 1
+
+    def test_dunder_file_says_what_it_would_name(self, project_env):
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt")
+            def render(sources, targets):
+                return __file__
+
+        message = str(caught.value)
+        assert "names the generated module rather than this script" in message
+        assert "Pass the path it means in kwargs=" in message
+
+    def test_every_refusal_names_the_build_script_and_line(self, project_env):
+        """The location is half the message: the user has the script open."""
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+            env.PyCommand(target="out.txt")(lambda sources, targets: None)
+
+        location = caught.value.location
+        assert location is not None
+        assert location.filename.endswith("test_user_errors.py")
+        assert location.lineno > 0
+        assert str(caught.value).startswith(f"{location}: ")
+
+    def test_a_script_local_helper_is_not_offered_an_import(
+        self, project_env, tmp_path
+    ):
+        """__pcons__ is not importable, so no import can reach a helper."""
+        _, env = project_env
+        render = build_script_function(
+            tmp_path,
+            """
+            def helper(value):
+                return value
+
+
+            def render(sources, targets):
+                return helper(1)
+            """,
+        )
+
+        with pytest.raises(PconsError) as caught:
+            env.PyCommand(target="out.txt")(render)
+
+        message = str(caught.value)
+        assert "helper lives only in this build script" in message
+        assert "write out what it does inside the function body" in message
+        assert "import" not in message.split("nothing defines that name there.")[1][:40]
+
+    def test_an_import_is_named_by_the_script_not_by_the_implementation(
+        self, project_env, tmp_path
+    ):
+        """os.path.join is posixpath.join here and ntpath.join on Windows."""
+        _, env = project_env
+        render = build_script_function(
+            tmp_path,
+            """
+            from os.path import join
+
+
+            def render(sources, targets):
+                return join("a", "b")
+            """,
+        )
+
+        with pytest.raises(PconsError) as caught:
+            env.PyCommand(target="out.txt")(render)
+
+        message = str(caught.value)
+        assert "Import join inside the function body, the way this script" in message
+        assert "posixpath" not in message
+        assert "ntpath" not in message
+
+    def test_a_module_still_gets_its_import_line(self, project_env, tmp_path):
+        _, env = project_env
+        render = build_script_function(
+            tmp_path,
+            """
+            import json
+
+
+            def render(sources, targets):
+                return json.dumps({})
+            """,
+        )
+
+        with pytest.raises(PconsError, match='Write "import json"'):
+            env.PyCommand(target="out.txt")(render)
+
+    def test_a_tool_namespace_in_kwargs_points_at_its_values(self, project_env):
+        """env.cc pickles, and drags the environment behind it."""
+        _, env = project_env
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt", kwargs={"cc": env.cc})
+            def render(sources, targets, cc):
+                return cc
+
+        message = str(caught.value)
+        assert "kwargs['cc'] is the 'cc' tool namespace" in message
+        assert "env.cc.flags rather than env.cc" in message
+
+    def test_a_target_used_as_a_dict_key_is_found(self, project_env):
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt", kwargs={"m": {made: 1}})
+            def render(sources, targets, m):
+                return m
+
+        assert "a key of kwargs['m'] is the target 'made'" in str(caught.value)
+
+    def test_a_target_in_a_set_is_found_without_an_index(self, project_env):
+        _, env = project_env
+        made = env.Command(
+            target="made.txt",
+            source=["src/main.c"],
+            command=["cp", "$SOURCE", "$TARGET"],
+        )
+
+        with pytest.raises(PconsError) as caught:
+
+            @env.PyCommand(target="out.txt", kwargs={"s": {made}})
+            def render(sources, targets, s):
+                return s
+
+        assert "an element of kwargs['s'] is the target 'made'" in str(caught.value)

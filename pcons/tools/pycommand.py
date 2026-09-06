@@ -31,16 +31,18 @@ import sys
 import textwrap
 import types
 import weakref
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from pcons.core.builder import anchor_target_paths
 from pcons.core.errors import PconsError
+from pcons.core.invocation import RUN_NAME
 from pcons.util import pycommand as runner
 from pcons.util.source_location import get_caller_location
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
+    from collections.abc import Callable, Sequence
 
     from pcons.core.environment import Environment
     from pcons.core.project import Project
@@ -57,9 +59,9 @@ class PyCommandError(PconsError):
     """A function cannot be turned into a build edge."""
 
 
-_claimed: weakref.WeakKeyDictionary[Project, dict[Path, SourceLocation]] = (
-    weakref.WeakKeyDictionary()
-)
+_claimed: weakref.WeakKeyDictionary[
+    Project, dict[Path, tuple[SourceLocation, Environment]]
+] = weakref.WeakKeyDictionary()
 
 
 def function_source(fn: Callable[..., object]) -> str:
@@ -153,6 +155,7 @@ def emit(
     function = _plain_function(fn, name, at)
     source, node = _extract(function, at)
     _reject_script_globals(function, node, name, at)
+    _reject_description_objects(kwargs, name, at)
     text = _module_text(source, project, at)
 
     stem = _sanitized(name)
@@ -161,7 +164,7 @@ def emit(
     module_rel = gen_dir / f"{stem}.py"
     args_rel = gen_dir / f"{stem}.args.pkl"
 
-    _claim(project, module_rel, name, at)
+    _claim(project, env, module_rel, name, at)
     _write_if_changed(root / module_rel, text.encode("utf-8"))
     _write_if_changed(
         root / args_rel,
@@ -188,7 +191,10 @@ def _describe(fn: Callable[..., object]) -> str:
 def _node_kind(node: ast.stmt) -> str:
     """What an extracted statement is, in a user's words."""
     if isinstance(node, ast.AsyncFunctionDef):
-        return "coroutine function, which a build edge cannot await"
+        return (
+            "coroutine function, which a build edge cannot await. Write it "
+            "as a plain def"
+        )
     return type(node).__name__
 
 
@@ -217,7 +223,8 @@ def _plain_function(
     if not isinstance(fn, types.FunctionType):
         raise PyCommandError(
             f"PyCommand {name!r} needs a function written in a build script, "
-            f"not {_describe(fn)} of type {type(fn).__name__}.",
+            f"not {_describe(fn)} of type {type(fn).__name__}. Write a def "
+            f"beside the other targets and pass what it needs in kwargs=.",
             at,
         )
     if fn.__name__ == "<lambda>":
@@ -227,18 +234,22 @@ def _plain_function(
             at,
         )
     if fn.__closure__ is not None:
-        free = ", ".join(fn.__code__.co_freevars)
+        free = fn.__code__.co_freevars
         raise PyCommandError(
-            f"PyCommand {name!r} reads {free} from the function it is nested "
-            f"in. Only the function's own source travels to build time, so "
-            f"there is nothing to read it from. Pass those values in kwargs= "
-            f"and take them as arguments.",
+            f"PyCommand {name!r} reads {', '.join(free)} from the function it "
+            f"is nested in. Only the function's own source travels to build "
+            f"time, so there is nothing to read "
+            f"{'them' if len(free) > 1 else 'it'} from. Pass "
+            f"{'them' if len(free) > 1 else 'it'} in kwargs= and take "
+            f"{'them' if len(free) > 1 else 'it'} as "
+            f"{'arguments' if len(free) > 1 else 'an argument'}.",
             at,
         )
     if _class_scoped(fn):
         raise PyCommandError(
             f"PyCommand {name!r} was given {_describe(fn)}, defined in a "
-            f"class body. Only a plain function can be extracted.",
+            f"class body. Only a plain function can be extracted: move the "
+            f"def out of the class.",
             at,
         )
     return fn
@@ -283,6 +294,61 @@ def _evaluated_names(node: ast.FunctionDef) -> set[str]:
     return names
 
 
+def _defined_by_the_script(value: object) -> bool:
+    """Whether the build script itself defines this, so no import can reach it.
+
+    A build script runs as ``__pcons__``, a module nothing can import, so a
+    helper defined beside the targets has nowhere to be imported from.
+    ``__main__`` is the same situation from the other direction: importing it
+    by name would run a second copy of the script rather than reach this one.
+    """
+    return getattr(value, "__module__", None) in (RUN_NAME, "__main__")
+
+
+def _global_remedy(
+    found: str, value: object, from_default: bool, imports: list[str]
+) -> str | None:
+    """What to type instead, for one name the body reads from the script.
+
+    An import line is only ever synthesised for a module, where the module's
+    own name is the whole answer. For anything else the script's existing
+    import is the thing to move, and echoing a line built from
+    ``__module__`` would name the implementation rather than the module the
+    script imported: ``from os.path import join`` would come back as
+    ``from posixpath import join``, which is wrong on Windows.
+
+    Args:
+        found: The name.
+        value: What the build script has under it.
+        from_default: Whether it was read by a parameter's default value.
+        imports: Collects the import lines, which are answered together.
+
+    Returns:
+        A sentence, or None when the name joins the import advice instead.
+    """
+    if _defined_by_the_script(value):
+        return (
+            f"{found} lives only in this build script, which is not a module "
+            f"anything can import: write out what it does inside the "
+            f"function body, or move it to a module the build can import."
+        )
+    if from_default:
+        return (
+            f"{found} is a parameter's default value, and a default is "
+            f"evaluated again where the generated module defines the "
+            f"function: write the parameter without a default and pass "
+            f"{found} in kwargs=."
+        )
+    if isinstance(value, types.ModuleType):
+        imports.append(f"import {value.__name__}")
+        return None
+    if callable(value) or isinstance(value, type):
+        return (
+            f"Import {found} inside the function body, the way this script imports it."
+        )
+    return f"Pass {found} in kwargs= and take it as an argument."
+
+
 def _reject_script_globals(
     fn: types.FunctionType, node: ast.FunctionDef, name: str, at: SourceLocation
 ) -> None:
@@ -293,28 +359,50 @@ def _reject_script_globals(
     ``@pytest_ar`` would otherwise be reported as a global of the body.
 
     Raises:
-        PyCommandError: Naming those globals and the fix.
+        PyCommandError: Naming those globals and what to type instead.
     """
     allowed = _SAFE_GLOBALS | {fn.__name__}
-    reachable = _global_loads(fn.__code__) | _evaluated_names(node)
+    defaults = _evaluated_names(node)
     suspect = sorted(
         found
-        for found in reachable
+        for found in _global_loads(fn.__code__) | defaults
         if found.isidentifier() and found in fn.__globals__ and found not in allowed
     )
-    if suspect:
-        message = (
-            f"PyCommand {name!r} uses {', '.join(suspect)} from the build "
-            f"script. The generated module holds the function alone, so those "
-            f"names do not exist at build time: import them inside the "
-            f"function body, or pass them in kwargs=."
+    if not suspect:
+        return
+
+    if "__file__" in suspect:
+        raise PyCommandError(
+            f"PyCommand {name!r} uses __file__, which at build time names the "
+            f"generated module rather than this script. Pass the path it "
+            f'means in kwargs=, project.root_dir / "...", and take it as an '
+            f"argument.",
+            at,
         )
-        if "__file__" in suspect:
-            message += (
-                " __file__ does exist there, but it names the generated "
-                "module rather than this script."
+
+    imports: list[str] = []
+    remedies = [
+        remedy
+        for found in suspect
+        if (
+            remedy := _global_remedy(
+                found, fn.__globals__[found], found in defaults, imports
             )
-        raise PyCommandError(message, at)
+        )
+        is not None
+    ]
+    if imports:
+        written = ", ".join(f'"{line}"' for line in dict.fromkeys(imports))
+        remedies.insert(
+            0, f"Write {written} at the top of the function body, not of the script."
+        )
+    those = "those names" if len(suspect) > 1 else "that name"
+    raise PyCommandError(
+        f"PyCommand {name!r} uses {', '.join(suspect)} from the build script, "
+        f"and only the function's own source travels to build time, so "
+        f"nothing defines {those} there. " + " ".join(remedies),
+        at,
+    )
 
 
 def _sanitized(name: str) -> str:
@@ -322,11 +410,23 @@ def _sanitized(name: str) -> str:
     return re.sub(r"[^0-9A-Za-z_]", "_", name)
 
 
-def _claim(project: Project, module_rel: Path, name: str, at: SourceLocation) -> None:
+def _env_label(env: Environment) -> str:
+    """How to name an environment in a message, or nothing when it is unnamed."""
+    return f" in environment {env.name!r}" if env.name else ""
+
+
+def _claim(
+    project: Project, env: Environment, module_rel: Path, name: str, at: SourceLocation
+) -> None:
     """Record that *module_rel* is taken, refusing a second claim on it.
 
     The registry hangs off the top-level project rather than off this module,
     so a second project in the same process starts clean.
+
+    Two environments decorating one function through a factory land on the
+    same source line, so the environment is what tells the two claims apart,
+    and giving one of them a ``build_prefix`` is the fix the factory shape
+    calls for.
 
     Raises:
         PyCommandError: If another PyCommand already wrote that file.
@@ -334,13 +434,19 @@ def _claim(project: Project, module_rel: Path, name: str, at: SourceLocation) ->
     taken = _claimed.setdefault(project.top, {})
     first = taken.get(module_rel)
     if first is not None:
+        first_at, first_env = first
+        advice = (
+            "Give one environment its own build_prefix, or pass name= to one of them."
+            if first_env is not env
+            else "Pass name= to one of them."
+        )
         raise PyCommandError(
-            f"PyCommand {name!r} would overwrite {module_rel.as_posix()}, "
-            f"already written by the PyCommand at {first}. Give one of them "
-            f"another name, or another build_prefix on its environment.",
+            f"PyCommand {name!r}{_env_label(env)} would overwrite "
+            f"{module_rel.as_posix()}, already written by the PyCommand"
+            f"{_env_label(first_env)} at {first_at}. {advice}",
             at,
         )
-    taken[module_rel] = at
+    taken[module_rel] = (at, env)
 
 
 def _origin(project: Project, at: SourceLocation) -> str:
@@ -377,6 +483,86 @@ def _module_text(source: str, project: Project, at: SourceLocation) -> str:
     )
 
 
+def _describe_description_object(value: object) -> tuple[str, str] | None:
+    """What *value* is and what to do with it, when it cannot cross into a build.
+
+    Nothing of the build description exists when the function runs, and most
+    of it pickles without complaining, so a target passed through ``kwargs``
+    would arrive at build time as a stale copy of the graph with no edge
+    behind it. That is worse than an error, so it is one.
+    """
+    from pcons.core.environment import Environment
+    from pcons.core.node import Node
+    from pcons.core.project import Project as ProjectClass
+    from pcons.core.target import Target as TargetClass
+    from pcons.core.toolconfig import ToolConfig
+
+    if isinstance(value, TargetClass):
+        return (
+            f"the target {value.name!r}",
+            "List it in source= instead, and the function receives its "
+            "output paths in sources.",
+        )
+    if isinstance(value, Node):
+        return (
+            f"the build graph's file {value.name!r}",
+            "List it in source= instead, and the function receives its path "
+            "in sources.",
+        )
+    if isinstance(value, ToolConfig):
+        return (
+            f"the {value.name!r} tool namespace, which holds the environment "
+            f"it belongs to",
+            f"Read the values the function needs here, and pass those: "
+            f"env.{value.name}.flags rather than env.{value.name}.",
+        )
+    if isinstance(value, (Environment, ProjectClass)):
+        kind = "environment" if isinstance(value, Environment) else "project"
+        return (
+            f"the {kind} itself",
+            "Read what the function needs from it here, and pass that: a "
+            "string, a path, a number.",
+        )
+    return None
+
+
+def _reject_description_objects(
+    kwargs: Mapping[str, Any], name: str, at: SourceLocation
+) -> None:
+    """Refuse a kwarg holding a piece of the build description.
+
+    Raises:
+        PyCommandError: Naming where it sits and what to write instead.
+    """
+    seen: set[int] = set()
+
+    def walk(value: object, where: str) -> None:
+        if id(value) in seen:
+            return
+        seen.add(id(value))
+        described = _describe_description_object(value)
+        if described is not None:
+            where_it_is, remedy = described
+            raise PyCommandError(
+                f"PyCommand {name!r}: {where} is {where_it_is}, and the build "
+                f"description does not exist when the function runs. {remedy}",
+                at,
+            )
+        if isinstance(value, Mapping):
+            for key, item in value.items():
+                walk(key, f"a key of {where}")
+                walk(item, f"{where}[{key!r}]")
+        elif isinstance(value, (list, tuple)):
+            for index, item in enumerate(value):
+                walk(item, f"{where}[{index}]")
+        elif isinstance(value, (set, frozenset)):
+            for item in value:
+                walk(item, f"an element of {where}")
+
+    for key, value in kwargs.items():
+        walk(value, f"kwargs[{key!r}]")
+
+
 def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> bytes:
     """The sidecar pickle's bytes, at a fixed protocol.
 
@@ -393,7 +579,8 @@ def _payload_bytes(payload: dict[str, Any], name: str, at: SourceLocation) -> by
         raise PyCommandError(
             f"PyCommand {name!r} cannot pickle kwargs {bad}: {exc}. "
             f"Arguments travel to build time as a file, so each one must be "
-            f"picklable.",
+            f"picklable. Pass what describes it instead, a path or a string, "
+            f"and build the object inside the function.",
             at,
         ) from exc
 
