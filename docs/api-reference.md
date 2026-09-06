@@ -73,6 +73,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.apply_cross_preset(preset)` | Apply cross-compilation preset |
 | `env.explain(tool=None)` | Attribute each flag/define/command to the preset that set it |
 | `env.use_compiler_cache(tool=None)` | Wrap compilers with ccache/sccache |
+| `env.use_clang_tidy(tool=None, args=())` | Run clang-tidy alongside every C/C++ compile |
 | `env.use(package)` | Apply package settings |
 | `env.clone()` | Create a copy |
 | `env.override(**kwargs)` | Context manager for temporary overrides |
