@@ -15,7 +15,9 @@ generation tools (moc/uic/rcc/...), and the Qt version, probing in order:
 
 Discovery is cached per project and environment (each Qt module becomes
 exactly one ImportedTarget per environment, so target identity is stable
-across the build script); repeated calls may add modules.
+across the build script); repeated calls may add modules. Consumers read
+that cache through :func:`qt_install`, which walks up the project tree so
+a subdirectory project sees the Qt its parent located.
 
 Platform requirements are baked into the returned module targets so users
 never see them: MSVC-style compilers get ``/Zc:__cplusplus /permissive-``
@@ -158,9 +160,44 @@ def _describe_key(key: _InstallKey) -> str:
     return f"{which} (cross target '{cross}')" if cross else which
 
 
+def _own_install(project: Project, key: _InstallKey) -> QtPackage | None:
+    """The install *project* itself located under *key*, ignoring its parents.
+
+    What :func:`find_qt` reads. A subdirectory calling ``find_qt()`` is
+    asking for its own Qt, so answering out of an enclosing project's cache
+    would make the call a no-op and hand the child the parent's install.
+    Only consumers, through :func:`qt_install`, walk the project tree.
+    """
+    return _qt_installs.get(project, {}).get(key)
+
+
 def qt_install(project: Project, env: Environment | None = None) -> QtPackage | None:
-    """The Qt installation located for *env* in *project*, or None."""
-    return _qt_installs.get(project, {}).get(_install_key(project, env))
+    """The Qt installation located for *env* in *project*, or None.
+
+    Discovery is cached on the project find_qt() was called with, so a
+    subdirectory that creates its own Project has no install of its own:
+    the lookup walks up the project tree and returns the nearest one. A
+    child that calls find_qt() itself caches on itself and therefore
+    keeps its own install, whatever the enclosing projects located.
+
+    Args:
+        project: The project asking, typically a builder's own project.
+        env: The environment whose install is wanted; defaults to the
+            project's inherited one.
+
+    Returns:
+        The nearest located QtPackage, or None when neither this project
+        nor any enclosing one ever called find_qt().
+    """
+    key = _install_key(project, env)
+    current = project
+    while True:
+        qt = _qt_installs.get(current, {}).get(key)
+        if qt is not None:
+            return qt
+        if current.is_top_level:
+            return None
+        current = current.parent
 
 
 class QtPackage:
@@ -365,7 +402,7 @@ def find_qt(
         )
 
     key = _install_key(project, env)
-    qt = _qt_installs.get(project, {}).get(key)
+    qt = _own_install(project, key)
     if qt is not None:
         ignored: list[str] = []
         if qt_root is not None and not qt.prefix.is_relative_to(qt_root):
