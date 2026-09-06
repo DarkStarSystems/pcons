@@ -298,8 +298,7 @@ class Resolver:
                 )
 
             # Apply any extra implicit deps added via target.depends()
-            if target._extra_implicit_deps:
-                target._apply_extra_implicit_deps()
+            target._apply_extra_implicit_deps()
 
             # Apply implicit target dependencies from target.depends(other_target).
             # Propagated deps: outputs become implicit deps on all build nodes

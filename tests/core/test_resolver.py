@@ -1515,3 +1515,28 @@ class TestSourceTargetsResolveFirst:
             assert gen.output_nodes[0] in node.implicit_deps
         for node in consumer.intermediate_nodes + consumer.output_nodes:
             assert gen.output_nodes[0] not in node.implicit_deps
+
+
+class TestOutputOnlyFileDeps:
+    """depends(path, propagate=False) records a file dep in a second list
+    that the resolver did not apply, so it never reached any node."""
+
+    def test_output_only_file_dep_lands_on_the_output_node(self, tmp_path):
+        project = Project("oo", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        version = tmp_path / "version.txt"
+        version.write_text("1")
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo x > $TARGET",
+            name="c",
+        )
+        cmd.depends(version, propagate=False)
+
+        project.resolve()
+
+        assert any(
+            d.path.name == version.name for d in cmd.output_nodes[0].implicit_deps
+        )

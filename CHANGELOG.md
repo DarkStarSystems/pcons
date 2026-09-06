@@ -95,6 +95,7 @@ machinery to support this kind of dynamic dependencies.
   The resolver visits targets in dependency order in a single pass, so a
   target whose sources are other targets has its nodes by the time the edge
   is applied. Before, such edges were silently dropped. Reported in #129.
+- `depends(path, propagate=False)` no longer drops the file dependency.
 - A scanner can be attached to a target whose sources are other targets.
 
 - **Fortran no longer rebuilds its whole module scope forever.** gfortran
