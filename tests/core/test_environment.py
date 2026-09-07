@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.core.environment."""
 
+import logging
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,7 @@ import pytest
 from pcons.core.environment import Environment
 from pcons.core.project import Project
 from pcons.core.toolconfig import ToolConfig
-from pcons.tools import compiler_cache
+from pcons.tools import co_compile, compiler_cache
 
 
 class TestEnvironmentBasic:
@@ -436,6 +438,87 @@ class TestCompilerCache:
         env.use_compiler_cache("ccache")
 
         assert env.cc.launcher == []
+
+
+class TestClangTidy:
+    """use_clang_tidy() runs the co_compile driver in front of the compilers."""
+
+    @staticmethod
+    def _env_with_compilers() -> Environment:
+        env = Environment()
+        env.add_tool("cc").set("cmd", "gcc")
+        env.add_tool("cxx").set("cmd", "g++")
+        env.add_tool("link").set("cmd", "g++")
+        return env
+
+    @staticmethod
+    def _installed(*names: str):
+        return lambda prog: f"/usr/bin/{prog}" if prog in names else None
+
+    def test_wraps_both_compilers_and_nothing_else(
+        self, test_project, monkeypatch
+    ) -> None:  # noqa: F811
+        monkeypatch.setattr(co_compile.shutil, "which", self._installed("clang-tidy"))
+        env = self._env_with_compilers()
+
+        env.use_clang_tidy(args=["--use-color"])
+
+        expected = [
+            sys.executable,
+            "-m",
+            "pcons.tools.co_compile",
+            "--tidy",
+            "/usr/bin/clang-tidy",
+            "--tidy-arg",
+            "--use-color",
+            "--",
+        ]
+        assert env.cc.launcher == expected
+        assert env.cxx.launcher == expected
+        assert env.link.launcher == []
+        assert env.cxx.cmd == "g++"
+
+    def test_missing_clang_tidy_is_a_warning(
+        self, test_project, monkeypatch, caplog
+    ) -> None:  # noqa: F811
+        monkeypatch.setattr(co_compile.shutil, "which", self._installed())
+        env = self._env_with_compilers()
+
+        with caplog.at_level(logging.WARNING):
+            env.use_clang_tidy()
+
+        assert env.cxx.launcher == []
+        assert "clang-tidy not found" in caplog.text
+
+    def test_no_double_wrapping(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(co_compile.shutil, "which", self._installed("clang-tidy"))
+        env = self._env_with_compilers()
+
+        env.use_clang_tidy()
+        env.use_clang_tidy()
+
+        assert env.cxx.launcher.count("pcons.tools.co_compile") == 1
+
+    @pytest.mark.parametrize("cache_first", [True, False])
+    def test_runs_outside_a_compiler_cache(
+        self, test_project, monkeypatch, cache_first
+    ) -> None:  # noqa: F811
+        """The cache must wrap the compiler itself, whichever was asked for
+        first, or it would be asked to cache the analysis driver."""
+        which = self._installed("clang-tidy", "ccache")
+        monkeypatch.setattr(co_compile.shutil, "which", which)
+        monkeypatch.setattr(compiler_cache.shutil, "which", which)
+        env = self._env_with_compilers()
+
+        if cache_first:
+            env.use_compiler_cache("ccache")
+            env.use_clang_tidy()
+        else:
+            env.use_clang_tidy()
+            env.use_compiler_cache("ccache")
+
+        assert env.cxx.launcher[0] == sys.executable
+        assert env.cxx.launcher[-1] == "ccache"
 
 
 class TestEnvironmentRepr:

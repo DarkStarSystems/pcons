@@ -1089,6 +1089,27 @@ class Environment(_EnvironmentStubs):
 
         apply_compiler_cache(self, tool)
 
+    def use_clang_tidy(self, tool: str | None = None, args: Sequence[str] = ()) -> None:
+        """Run clang-tidy alongside every C and C++ compile.
+
+        Each compile first runs clang-tidy on its source with the compile's
+        own flags, then compiles; a diagnostic fails the build, the way
+        CMake's ``CXX_CLANG_TIDY`` does. The driver is
+        :mod:`pcons.tools.co_compile`. Composes with ``use_compiler_cache()``
+        in either order.
+
+        Args:
+            tool: The clang-tidy program, by name or path. None looks for
+                  "clang-tidy" in PATH; a missing one is a warning and the
+                  compiles are left alone.
+            args: Extra clang-tidy arguments, e.g. ``["--use-color"]`` or
+                  ``["--warnings-as-errors=*"]``. Checks are best set in a
+                  ``.clang-tidy`` file, which clang-tidy finds by itself.
+        """
+        from pcons.tools.co_compile import apply_clang_tidy
+
+        apply_clang_tidy(self, tool, args)
+
     def apply_preset(self, name: KnownFeaturePreset | str) -> None:
         """Apply a named feature preset to this environment.
 

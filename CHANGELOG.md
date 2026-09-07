@@ -18,6 +18,12 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **`env.use_clang_tidy()`**: run clang-tidy alongside every C and C++
+  compile, with the compile's own flags, and fail the build on a diagnostic
+  the way CMake's `CXX_CLANG_TIDY` does. Composes with `use_compiler_cache()`.
+  The driver, `pcons.tools.co_compile`, is a launcher; see
+  `examples/76_clang_tidy`.
+
 - **Scanners: runtime-discovered dependencies.** A `Scanner` declares
   that some edges' real dependencies, their extra outputs, and even
   parts of their command lines, come from their inputs' *content*. Users can now give

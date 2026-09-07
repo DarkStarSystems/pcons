@@ -1784,6 +1784,22 @@ Notes:
 
 See `examples/63_command_launcher` for two stacked launchers wrapping every C compile, and a third belonging to one command.
 
+### Running clang-tidy With Every Compile
+
+`env.use_clang_tidy()` runs clang-tidy on each C and C++ source, with that compile's own flags, and then compiles it. A clang-tidy diagnostic fails the build, the way CMake's `CXX_CLANG_TIDY` does; the object is still produced, so the diagnostic repeats on the next build rather than turning into a missing file downstream.
+
+```python
+env.use_clang_tidy()                              # clang-tidy from PATH
+env.use_clang_tidy("/opt/llvm/bin/clang-tidy")    # a specific one
+env.use_clang_tidy(args=["--warnings-as-errors=*"])
+```
+
+Put the checks in a `.clang-tidy` file next to the sources; clang-tidy finds it by itself. `args` is for the rest: `--use-color`, `--export-fixes=...`, `--warnings-as-errors=...`.
+
+Under the hood this is a launcher, `python -m pcons.tools.co_compile`, and it composes with `use_compiler_cache()` in either order: the cache keeps wrapping the compiler, and the analysis never sees it. If clang-tidy isn't installed, a warning is logged and the compiles are left alone. `compile_commands.json` still reports the compiler itself.
+
+See `examples/76_clang_tidy`.
+
 ---
 
 ## Working with External Dependencies

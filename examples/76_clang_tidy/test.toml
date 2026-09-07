@@ -1,0 +1,21 @@
+# Test configuration for the clang-tidy example
+
+[test]
+description = "clang-tidy runs alongside every C++ compile via env.use_clang_tidy(); the diagnostic it finds is exported, and the build still produces the program"
+
+expected_outputs = [
+    "build/obj.hello/src/hello.cc.o",
+    "build/hello",
+    # Written only by clang-tidy, so its existence proves the analysis ran.
+    "build/tidy-fixes.yaml",
+]
+
+[verify]
+commands = [
+    { run = "./build/hello", expect_stdout = "Analyzed by clang-tidy, answer 42" },
+]
+
+[skip]
+requires = ["clang-tidy"]
+# Xcode drives its own compile commands, so a launcher on cxx has nowhere to go.
+generators = ["xcode"]
