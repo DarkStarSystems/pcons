@@ -1489,6 +1489,35 @@ class TestSourceTargetsResolveFirst:
         assert [n.path.name for n in installed.output_nodes] == ["gen.txt"]
         assert installed.output_nodes[0] in cmd.output_nodes[0].implicit_deps
 
+    @pytest.mark.parametrize("via_install", [True, False])
+    def test_out_of_order_link_target_still_links_its_library(
+        self, tmp_path, gcc_toolchain, via_install
+    ):
+        """A depends() edge can reach a program before build order reaches
+        the library it links. The library must resolve first, or the link
+        line silently loses it."""
+        (tmp_path / "lib.c").write_text("int lib_f(void) { return 1; }")
+        (tmp_path / "main.c").write_text(
+            "int lib_f(void); int main(void) { return lib_f(); }"
+        )
+        project = Project("oob", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        first = env.Command(
+            target=project.build_dir / "x.txt",
+            command="echo x > $TARGET",
+            name="x",
+        )
+        lib = project.StaticLibrary("mylib", env, sources=["lib.c"])
+        app = project.Program("app", env, sources=["main.c"])
+        app.link(lib)
+        first.depends(project.Install("dist", [app]) if via_install else app)
+
+        project.resolve()
+
+        link_inputs = {n.path.name for n in app.output_nodes[0].explicit_deps}
+        assert lib.output_nodes[0].path.name in link_inputs
+
     def test_source_target_deps_are_not_forwarded_to_consumers(self, tmp_path):
         """An install target has nodes of its own, so its depends() belong on
         them and not on whoever consumes it, unlike an interface target."""

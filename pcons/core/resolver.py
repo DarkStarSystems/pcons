@@ -263,15 +263,13 @@ class Resolver:
         try:
             env = target._env
 
-            # A source given as a Target stands for its outputs. Build order
-            # resolves it first; a target reached out of order through a
-            # depends() edge resolves it here.
-            if target._pending_sources is not None:
-                from pcons.core.target import Target
-
-                for source in target._pending_sources:
-                    if isinstance(source, Target) and not source._resolved:
-                        self._resolve_target(source)
+            # Build order resolves a target's dependencies first: the
+            # libraries it links and the targets whose outputs are its
+            # sources. A target reached out of order through a depends()
+            # edge resolves them here, before its factory reads them.
+            for dep in target.dependencies:
+                if not dep._resolved:
+                    self._resolve_target(dep)
 
             # Dispatch to registered factory via _builder_name
             builder_name = target._builder_name
