@@ -19,6 +19,7 @@ import pytest
 
 from pcons.core.project import Project
 from pcons.toolchains.qt._automoc import _write_exports
+from pcons.toolchains.qt._moc_report import EXPORTS_VERSION
 from pcons.toolchains.qt._moc_report import main as moc_report
 from pcons.toolchains.qt.scan import QtScanner
 
@@ -47,13 +48,18 @@ def _report_edges(ninja: str) -> list[str]:
 
 
 def _exports(
-    root: Path, name: str, sources: list[str], no_moc: list[str] | None = None
+    root: Path,
+    name: str,
+    sources: list[str],
+    no_moc: list[str] | None = None,
+    include_dirs: list[Path] | None = None,
 ) -> Path:
     """Run the real scan for one target and write its exports file."""
     gen_dir = root / "build" / f"qt.{name}"
     scanner = QtScanner(root, cache_dir=gen_dir)
     scan = scanner.scan_target_sources(
         [root / source for source in sources],
+        include_dirs=include_dirs or [],
         no_moc=[root / path for path in no_moc or []],
     )
     path = gen_dir / "automoc.exports.json"
@@ -214,6 +220,23 @@ class TestTheExportsFile:
             ],
         }
 
+    def test_a_header_outside_the_project_root_keeps_its_absolute_path(self, tmp_path):
+        root = tmp_path / "proj"
+        vendor = tmp_path / "vendor"
+        (root / "src").mkdir(parents=True)
+        vendor.mkdir()
+        (vendor / "Far.hpp").write_text(_header("Far"))
+        (root / "src" / "main.cpp").write_text(
+            '#include "Far.hpp"\nint main() { return 0; }\n'
+        )
+
+        path = _exports(root, "app", ["src/main.cpp"], include_dirs=[vendor])
+
+        far = str((vendor / "Far.hpp").resolve())
+        assert json.loads(path.read_text())["headers"] == {
+            far: [str(Path("src/main.cpp")), far]
+        }
+
 
 class TestTheMessage:
     def test_the_shared_directory_split_is_reported(self, shared_dir_tree, capsys):
@@ -304,3 +327,43 @@ class TestTheMessage:
 
         assert moc_report(["--stamp", str(tmp_path / "s.stamp"), str(broken)]) == 1
         assert "cannot read" in capsys.readouterr().err
+
+    def test_an_exports_file_from_another_version_fails_the_edge(
+        self, tmp_path, capsys
+    ):
+        stale = tmp_path / "stale.json"
+        stale.write_text(
+            json.dumps({"version": EXPORTS_VERSION + 1, "target": "app", "headers": {}})
+        )
+        stamp = tmp_path / "s.stamp"
+
+        assert moc_report(["--stamp", str(stamp), str(stale)]) == 1
+        assert "unrecognized automoc exports version" in capsys.readouterr().err
+        assert not stamp.exists()
+
+    def test_a_document_whose_headers_are_not_a_map_is_ignored(
+        self, shared_dir_tree, capsys
+    ):
+        malformed = shared_dir_tree / "build" / "malformed.exports.json"
+        malformed.parent.mkdir(parents=True, exist_ok=True)
+        malformed.write_text(
+            json.dumps(
+                {
+                    "version": EXPORTS_VERSION,
+                    "target": "bad",
+                    "headers": ["src/Controller.hpp"],
+                }
+            )
+        )
+
+        text = _warnings(
+            shared_dir_tree,
+            capsys,
+            _exports(shared_dir_tree, "app", ["src/main.cpp"]),
+            malformed,
+            _exports(shared_dir_tree, "mod", ["src/Controller.cpp"]),
+        )
+
+        assert "Controller.hpp" in text
+        assert "'app'" in text and "'mod'" in text
+        assert "'bad'" not in text
