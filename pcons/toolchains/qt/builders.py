@@ -387,8 +387,17 @@ def _qt_make_target(
     qrc_files: list[Path] = []
 
     def entry_path(entry: str | Path | FileNode) -> Path:
-        path = _source_path(entry) if isinstance(entry, FileNode) else Path(entry)
-        return path if path.is_absolute() else project.root_dir / path
+        """A source entry as a filesystem path.
+
+        A node path is already anchored at the top-level root, so *root* is
+        what turns it back into one. A path the build script wrote is
+        relative to that script's own directory, like every other path handed
+        to a builder, so it carries the declaring project's offset.
+        """
+        if isinstance(entry, FileNode):
+            return root / _source_path(entry)
+        path = Path(entry)
+        return path if path.is_absolute() else project.current_dir / path
 
     for entry in sources or []:
         suffix = None
@@ -484,7 +493,7 @@ def _qt_make_target(
                     "include_dirs": [
                         str(p) for p in _scan_include_dirs(project, env, link)
                     ],
-                    "no_moc": sorted(str(project.root_dir / p) for p in no_moc),
+                    "no_moc": sorted(str(entry_path(p)) for p in no_moc),
                     "moc": [str(qt_env.qt.moc)],
                     "moc_args": _moc_args(qt_env, predefs_path),
                     "moc_deps": [str(predefs_path)] if predefs_path else [],

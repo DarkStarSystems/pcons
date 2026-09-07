@@ -224,3 +224,60 @@ class TestQtInstallAcrossSubdirectories:
 
         metatypes = str(qt_prefix / "lib" / "metatypes").replace("\\", "/")
         assert f"--foreign-types {metatypes}" in content
+
+    def test_child_reusing_the_top_project_scans_its_own_sources(
+        self, top, tmp_path, qt_prefix
+    ):
+        cxx_env_with_qt(top)
+        _find_fake_qt(top, qt_prefix)
+        child = _child(
+            tmp_path,
+            "import sys\n"
+            "from pcons import context\n"
+            "project = context.current_project\n"
+            "env = project.default_environment\n"
+            "gen = env.Command(\n"
+            "    target='gen/extra.cpp', source='mk.py',\n"
+            "    command=[sys.executable, '$SOURCE', '$TARGET'],\n"
+            ")\n"
+            "app = project.QtProgram(\n"
+            "    'app', env, sources=['src/main.cpp', gen.output_nodes[0]],\n"
+            "    no_moc=['src/window.h'],\n"
+            ")\n",
+        )
+        (child / "mk.py").write_text("import sys\n")
+        (child / "src" / "window.h").write_text(
+            "#pragma once\n#include <QObject>\n"
+            "class Window : public QObject {\n    Q_OBJECT\n};\n"
+        )
+        (child / "src" / "main.cpp").write_text(
+            '#include "window.h"\nint main() { return 0; }\n'
+        )
+
+        add_subdirectory("child")
+        content = generate_ninja(top)
+
+        assert "child/qt.app/automoc.json $topdir/child/src/main.cpp" in content
+        spec_path = tmp_path / "build" / "child" / "qt.app" / "automoc.json"
+        spec = json.loads(spec_path.read_text())
+        assert spec["sources"] == [str(child / "src" / "main.cpp")]
+        assert spec["no_moc"] == [str(child / "src" / "window.h")]
+        assert "child/obj.app/gen/extra.cpp.o: cxx" in content
+
+        gen = spec_path.parent
+        assert (
+            _automoc.main(
+                [
+                    "--spec",
+                    str(spec_path),
+                    "-o",
+                    str(gen / "mocs_compilation.cpp"),
+                    "--depfile",
+                    str(gen / "mocs_compilation.cpp.d"),
+                ]
+            )
+            == 0
+        )
+        depfile = (gen / "mocs_compilation.cpp.d").read_text().replace("\\", "/")
+        for name in ("main.cpp", "window.h"):
+            assert str(child / "src" / name).replace("\\", "/") in depfile
