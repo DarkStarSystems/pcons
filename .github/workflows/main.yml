@@ -273,9 +273,14 @@ jobs:
         # qmltyperegistrar; qml6-module-qtqml: runtime for `import QtQml`;
         # l10n/tools: lrelease/lupdate (package split varies by release,
         # so install both — example 55 skips gracefully if absent).
+        # Retries + a short per-connection timeout keep a degraded mirror
+        # from burning the whole job budget; this job needs Qt, so unlike
+        # the LaTeX install a failure here is still a failure.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools \
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=5 -o Acquire::http::Timeout=20 \
+            qt6-base-dev qt6-base-dev-tools \
             qt6-declarative-dev qt6-declarative-dev-tools \
             qml6-module-qtqml qml6-module-qtqml-models \
             qml6-module-qtqml-workerscript \
