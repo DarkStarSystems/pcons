@@ -21,9 +21,11 @@ from pathlib import Path
 
 import pytest
 
+from pcons.core.errors import DependencyCycleError
 from pcons.core.project import Project
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
+from pcons.tools.compile_link import CompileLinkFactory
 
 SLOW_GENERATOR = textwrap.dedent(
     """\
@@ -133,3 +135,44 @@ class TestTheBuildConverges:
         )
         assert second.returncode == 0, second.stderr or second.stdout
         assert "no work to do" in second.stdout
+
+
+class TestABackEdgeStopsAtTheTarget:
+    """A dependency that depends back on its consumer never orders it.
+
+    ``lib.depends(app)`` with ``app.link(lib)`` closes a loop, and the
+    resolver says so. The walk that carries a dependency's generators to its
+    consumers still has to answer for the shape, because it reads the same
+    ``depends()`` list: whatever it collects for ``app``, ``app``'s own link
+    output is not part of it. A compile that waited for the program it is
+    linked into would be an edge ninja cannot schedule.
+    """
+
+    def test_the_resolver_rejects_the_back_edge(self, tmp_path):
+        write(tmp_path / "lib" / "lib.c", "int lib_value(void) { return 1; }\n")
+        write(
+            tmp_path / "app" / "main.c",
+            "int lib_value(void);\nint main(void) { return lib_value(); }\n",
+        )
+        project = Project("backedge", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain="c")
+        lib = project.StaticLibrary("bits", env, sources=["lib/lib.c"])
+        app = project.Program("app", env, sources=["app/main.c"])
+        app.link(lib)
+        lib.depends(app)
+
+        with pytest.raises(DependencyCycleError):
+            project.resolve()
+
+    def test_a_targets_own_output_stays_out_of_its_compile_ordering(self, tmp_path):
+        project = consumer_project(tmp_path, "depends")
+        lib = project.get_target("shared_bits")
+        app = project.get_target("app")
+        lib.depends(app)
+
+        ordering = CompileLinkFactory(project)._ordering_dependency_outputs(app)
+        paths = {node.path for node in ordering}
+
+        assert app.output_nodes
+        assert paths.isdisjoint({node.path for node in app.output_nodes})
+        assert any(path.name == "gen.stamp" for path in paths)
