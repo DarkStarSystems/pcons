@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import pytest
 
+from pcons.core.node import FileNode
 from pcons.core.project import Project
+from pcons.toolchains.qt.builders import _declare_implicit_output
 
 from ._qt_test_utils import (
     cxx_env_with_qt,
@@ -449,3 +451,16 @@ class TestTargetEnvironment:
         assert on_host.qualified_name == "qtb::assets@host"
         assert on_cross.qualified_name == "qtb::assets@cross"
         assert len(project.environments) == before
+
+
+class TestImplicitOutputs:
+    """A second output only exists on an edge that already writes one."""
+
+    def test_a_node_no_edge_produced_declares_nothing(self):
+        source = FileNode("src/thing.h")
+        metatypes = FileNode("build/qt.app/app_metatypes.json")
+
+        _declare_implicit_output(source, metatypes)
+
+        assert source._build_info is None
+        assert metatypes._build_info is None
