@@ -213,6 +213,36 @@ class TestOverlayGraph:
 
         assert not any("dist" in node.path.parts for node in stage.output_nodes)
 
+    def test_a_destination_outside_the_build_directory_stays_absolute(self, tmp_path):
+        """No relative_to() answer exists, so the anchored path is used as is."""
+        shared, app = make_trees(tmp_path)
+        outside = tmp_path / "outside" / "stage"
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(name="host")
+        stage = project.OverlayDir(env, outside, sources=[shared, app])
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        stamp = stage.output_nodes[0].path
+        assert stamp.parent == Path("build/.stamps")
+        assert stamp.name.endswith("_outside_stage.stamp")
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        assert (
+            f"overlay --depfile $out.d --stamp $out {outside.as_posix()} $in" in content
+        )
+
+    def test_two_destinations_outside_the_build_directory_keep_apart(self, tmp_path):
+        """The flattened stamp name carries the whole path, not just the tail."""
+        shared, app = make_trees(tmp_path)
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(name="host")
+        one = project.OverlayDir(env, tmp_path / "a" / "stage", sources=[shared])
+        two = project.OverlayDir(env, tmp_path / "b" / "stage", sources=[app])
+        project.resolve()
+
+        assert one.output_nodes[0].path != two.output_nodes[0].path
+
     def test_two_overlays_into_one_destination_collide(self, tmp_path):
         shared, app = make_trees(tmp_path)
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
