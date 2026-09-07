@@ -69,12 +69,19 @@ class PendingSourceFactory:
         Handles Target sources (extracts output_nodes — final products
         only, not intermediates), FileNode passthrough, and Path/str
         sources (creates nodes via project).
+
+        A written-out relative source is read from the directory of the
+        script that declared the target, whose offset from the top-level
+        root the target carries. Resolution runs long after that script
+        finished, so the offset comes from the target rather than from the
+        project's current directory.
         """
         from pcons.core.target import Target as TargetClass
 
         if target._pending_sources is None:
             return []
 
+        offset = target._subdir
         resolved: list[FileNode] = []
         for source in target._pending_sources:
             if isinstance(source, TargetClass):
@@ -84,7 +91,9 @@ class PendingSourceFactory:
             elif isinstance(source, Node):
                 pass
             elif isinstance(source, (Path, str)):
-                resolved.append(self.project.node(source))
+                resolved.append(
+                    self.project.node(offset / source if offset.parts else source)
+                )
         return resolved
 
 

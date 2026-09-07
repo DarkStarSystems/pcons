@@ -30,7 +30,7 @@ uvx pcons
 | [`10_paths_with_spaces`](https://github.com/DarkStarSystems/pcons/tree/main/examples/10_paths_with_spaces) | Paths with spaces throughout: a source file, its directory, an include directory, and a define whose value contains spaces |
 | [`11_windows_resource`](https://github.com/DarkStarSystems/pcons/tree/main/examples/11_windows_resource) | Demonstrates compiling Windows resource files (.rc) with MSVC |
 | [`12_env_override`](https://github.com/DarkStarSystems/pcons/tree/main/examples/12_env_override) | Demonstrates env.override() for per-file compiler settings |
-| [`13_subdirs`](https://github.com/DarkStarSystems/pcons/tree/main/examples/13_subdirs) | Nested subdirectories with add_subdirectory() |
+| [`13_subdirs`](https://github.com/DarkStarSystems/pcons/tree/main/examples/13_subdirs) | Nested subdirectories with add_subdirectory(), plus a generator declared two levels down in libfoo/libbar: its output lands in that subdirectory's build directory and its inputs are read from that subdirectory |
 | [`14_install_dir`](https://github.com/DarkStarSystems/pcons/tree/main/examples/14_install_dir) | InstallDir for recursive directory copying |
 | [`15_custom_builder`](https://github.com/DarkStarSystems/pcons/tree/main/examples/15_custom_builder) | Demonstrates creating a custom builder with the @builder decorator |
 | [`16_xcode`](https://github.com/DarkStarSystems/pcons/tree/main/examples/16_xcode) | Demonstrates Xcode project generation (macOS only) |

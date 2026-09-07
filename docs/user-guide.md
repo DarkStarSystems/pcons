@@ -892,7 +892,7 @@ cached as usual: the standard library, installed packages, and a module beside
 the root script, which is the place to put one several subdirectories share.
 
 See `examples/13_subdirs` for a worked example, including a library nested two
-levels down.
+levels down that declares its own generator with relative paths.
 
 #### One subdirectory, once per environment
 
@@ -2182,7 +2182,7 @@ env.Command(
 )
 ```
 
-Each of the three kinds of path has its own base. `sources=` are relative to the project root. `target=` is relative to the build directory, and a leading build-dir component is absorbed: `target=project.build_dir / "out.txt"` and `target="out.txt"` mean the same file, so targets may be written either way. (For a file in a literal subdirectory that shares the build directory's name, write the prefix twice: `project.build_dir / "build/browse_py.h"`.) The command's own tokens are the third kind, and worth stating plainly: a *relative* path inside a command is looked for under the build directory, where the command runs. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below.
+Each of the three kinds of path has its own base. `sources=` and `depends=` are relative to the directory of the script that declares the command; in a subdirectory reached through `add_subdirectory` that is the subdirectory, not the project root. `target=` is relative to the build directory of that same script — `build/<subdir>/`, where its programs and libraries also build — and a leading build-dir component is absorbed: `target=project.build_dir / "out.txt"` and `target="out.txt"` mean the same file, so targets may be written either way. (For a file in a literal subdirectory that shares the build directory's name, write the prefix twice: `project.build_dir / "build/browse_py.h"`.) The command's own tokens are the third kind, and worth stating plainly: a *relative* path inside a command is looked for under the build directory, where the command runs. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below.
 
 **To use a generated file as a source, pass the target.** `sources=` names files in the source tree, so a generated file passed the way its `target=` was — `sources=["gen/parser.c"]` — would erroneously look in the source tree. Using the proper build path works fine: `sources=[project.build_dir / "gen/parser.c"]`. That will also correctly add the dependency. Passing the target is even better; no path to keep in sync:
 

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from pcons.core.node import BuildInfo, FileNode, Node, OutputInfo
+from pcons.core.project import Project
 from pcons.core.subst import PathToken, SourcePath, TargetPath
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -273,14 +274,22 @@ class BaseBuilder(ABC):
         sources: list[str | Path | Node],
         env: Environment | None = None,
     ) -> list[Node]:
-        """Convert sources to nodes, via project.node() (dedup) when available."""
+        """Convert sources to nodes, via project.node() (dedup) when available.
+
+        A written-out relative source is read from the directory of the
+        script that declared it, so it carries that script's offset from
+        the top-level root — the same prefix ``Target.add_sources`` puts
+        on a compile builder's sources. An existing Node is already
+        canonical and passes through.
+        """
         result: list[Node] = []
         project = getattr(env, "_project", None) if env else None
+        offset = Project.current()._node_offset if project is not None else Path()
         for src in sources:
             if isinstance(src, Node):
                 result.append(src)
             elif project is not None:
-                result.append(project.node(src))
+                result.append(project.node(offset / src if offset.parts else src))
             else:
                 result.append(FileNode(src, defined_at=get_caller_location()))
         return result
@@ -790,12 +799,17 @@ def anchor_target_paths(
     through untouched (external outputs), and an existing Node keeps its
     identity: its path is already canonical, so anchoring it again would
     name a second file.
+
+    The build directory is the declaring script's own, so a target written
+    in a subdirectory lands under ``<build_dir>/<subdir>`` — the same
+    ``env.build_dir_for()`` slice ``Target.build_dir`` puts a compile
+    builder's objects in.
     """
     project = getattr(env, "_project", None) if env is not None else None
     if project is None or env is None:
         return [Path(t.name) if isinstance(t, Node) else Path(t) for t in targets]
     resolver = project._path_resolver
-    build_dir = Path(env.get("build_dir", "build"))
+    build_dir = env.build_dir_for(Project.current()._node_offset)
     at = get_caller_location()
     anchored: list[Path] = []
     for t in targets:
