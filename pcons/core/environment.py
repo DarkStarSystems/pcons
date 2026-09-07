@@ -24,6 +24,7 @@ from pcons.core.vars import _record_variant
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
+    from pcons.configure.platform import Platform
     from pcons.core._environment_stubs import _EnvironmentStubs
     from pcons.core._preset_names import KnownFeaturePreset
     from pcons.core._toolchain_names import KnownToolchain
@@ -142,6 +143,7 @@ class Environment(_EnvironmentStubs):
         "_fanout_seen",
         "_name",
         "_cross_preset",
+        "_target",
         "defined_at",
     )
 
@@ -206,6 +208,7 @@ class Environment(_EnvironmentStubs):
         # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
         self._fanout_seen: set[Any] | None = None
         self._cross_preset: Any = None
+        self._target: Platform | None = None
         if name is not None:
             validate_name("Environment", name)
         self._name = name
@@ -669,6 +672,7 @@ class Environment(_EnvironmentStubs):
         new_env._build_dir_base = self._build_dir_base
         new_env._build_dir_offset = self._build_dir_offset
         new_env._cross_preset = self._cross_preset
+        new_env._target = self._target
 
         # Copy toolchain references (not cloned - they're shared)
         new_env._toolchain = self._toolchain
@@ -1219,7 +1223,7 @@ class Environment(_EnvironmentStubs):
         Example:
             from pcons.toolchains.presets import android, ios
 
-            env.apply_cross_preset(android(ndk="~/android-ndk"))
+            env.apply_cross_preset(android(ndk="~/android-ndk", api=35))
             env.apply_cross_preset(ios(arch="arm64"))
         """
         if self.toolchains:
@@ -1227,6 +1231,7 @@ class Environment(_EnvironmentStubs):
                 for toolchain in self.toolchains:
                     toolchain.apply_cross_preset(self, preset)
             self._cross_preset = preset
+            self._target = getattr(preset, "target_platform", None)
         else:
             logger.warning(
                 "No toolchains configured; cannot apply cross-preset '%s'",
@@ -1248,6 +1253,22 @@ class Environment(_EnvironmentStubs):
         """
         preset: Any = self._cross_preset
         return preset
+
+    @property
+    def target(self) -> Platform:
+        """The platform this environment builds for.
+
+        The host platform unless something said otherwise: a cross preset
+        whose triple names a platform, or one carrying an explicit one. An
+        environment retargeted by hand, by setting tool commands with no
+        preset, says nothing and so reads as the host.
+
+        This answers "what was declared", never "what will actually run", so
+        a caller may not treat a host answer as proof of a host build.
+        """
+        from pcons.configure.platform import get_platform
+
+        return self._target or get_platform()
 
     def Glob(self, pattern: str) -> list[FileNode]:
         """Find files matching a glob pattern.

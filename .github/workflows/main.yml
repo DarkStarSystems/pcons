@@ -409,6 +409,45 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: bare-metal
 
+  test-android:
+    name: "test android (ndk cross-compile)"
+    needs: lint
+    timeout-minutes: 15
+    # Linux only. The macOS and Windows images carry an NDK too, but a cross
+    # build's output does not depend on the host that produced it, so a second
+    # runner buys proportionally little. The exception is the prebuilt host tag
+    # android() computes, which is precisely the kind of thing only another host
+    # can break -- an argument for adding macOS when it does, not before.
+    runs-on: ubuntu-latest
+    env:
+      # Arms the safety net. One test then demands an NDK instead of skipping,
+      # so this job cannot report success having built nothing: every Android
+      # test skipping is otherwise silent and green.
+      PCONS_REQUIRE_ANDROID_NDK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "latest"
+      # No install step: the runner image ships the NDKs already.
+      - name: Install dependencies
+        run: uv sync
+      - name: Show the NDK the tests will use
+        # The image ships three revisions and points the standard variables at
+        # the oldest, so a failure has to name the one that produced it. Print
+        # what the fixture resolves rather than what the environment says.
+        run: |
+          ls "$ANDROID_HOME/ndk"
+          uv run python -c "from tests.support import find_android_ndk;             ndk = find_android_ndk(); print('NDK:', ndk);             print((ndk / 'source.properties').read_text())"
+      - name: Run the Android tests
+        run: uv run pytest tests/ --cov=pcons --cov-report=xml -q -n auto -k android
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: android
+
   test-msvcup:
     name: "test msvcup (windows, no VS)"
     needs: lint

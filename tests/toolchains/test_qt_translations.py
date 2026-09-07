@@ -62,3 +62,19 @@ class TestQtTranslations:
         for line in content.splitlines():
             if line.startswith("build all: phony") or line.startswith("default "):
                 assert "lupdate" not in line
+
+
+class TestTranslationsEnvironment:
+    """Translations keep the environment they were declared in."""
+
+    def test_one_name_in_two_environments(self, tr_project):
+        host = cxx_env_with_qt(tr_project, name="host")
+        cross = cxx_env_with_qt(tr_project, name="cross")
+        before = len(tr_project.environments)
+
+        on_host = tr_project.QtTranslations("i18n", host, ts_files=["i18n/app_de.ts"])
+        on_cross = tr_project.QtTranslations("i18n", cross, ts_files=["i18n/app_de.ts"])
+
+        assert on_host.qualified_name == "trtest::i18n@host"
+        assert on_cross.qualified_name == "trtest::i18n@cross"
+        assert len(tr_project.environments) == before

@@ -618,8 +618,9 @@ class CompileLinkFactory:
         Always applies prefix and suffix to the base name (output_name or
         target.name), like CMake's OUTPUT_NAME / PREFIX / SUFFIX.
 
-        Default prefix/suffix come from the toolchain (which handles
-        cross-compilation, e.g., Emscripten → ".js"). Use
+        Default prefix/suffix come from the toolchain, which decides how it
+        spells a name for the platform being built for (Emscripten → ".js",
+        mingw → ".dll" with a "lib*.a" import library). Use
         output_prefix/output_suffix to override (set to "" to suppress).
 
         Args:
@@ -630,16 +631,14 @@ class CompileLinkFactory:
         Returns:
             Output filename (relative, may include subdirectory via prefix).
         """
-        from pcons.configure.platform import get_platform
-
         base_name = target.output_name or target.name
         toolchain = env._toolchain
 
         if toolchain:
-            default_prefix = toolchain.get_output_prefix(target_type)
-            default_suffix = toolchain.get_output_suffix(target_type)
+            default_prefix = toolchain.get_output_prefix(target_type, env.target)
+            default_suffix = toolchain.get_output_suffix(target_type, env.target)
         else:
-            plat = get_platform()
+            plat = env.target
             if target_type == "static_library":
                 default_prefix, default_suffix = (
                     plat.static_lib_prefix,

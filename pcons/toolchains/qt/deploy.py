@@ -80,7 +80,6 @@ class QtDeployBuilder:
         _require_qt_tool(env, "QtDeploy()")
         defined_at = defined_at or get_caller_location()
         platform = get_platform()
-        qt_env = env.clone()
         build_dir = Path(env.get("build_dir", "build"))
         stamp = build_dir / f"qt.{name}" / "deploy.stamp"
 
@@ -102,15 +101,13 @@ class QtDeployBuilder:
                     "(macdeployqt operates on app bundles; see "
                     "pcons.contrib.bundle for building one)."
                 )
-            command = _stamped_command(
-                qt_env, qt_tool("macdeployqt"), str(bundle), *flags
-            )
+            command = _stamped_command(env, qt_tool("macdeployqt"), str(bundle), *flags)
         elif platform.is_windows:
             extra: list[str] = []
             if deploy_dir is not None:
                 extra = ["--dir", str(deploy_dir)]
             command = _stamped_command(
-                qt_env, qt_tool("windeployqt"), *extra, *flags, "$SOURCE"
+                env, qt_tool("windeployqt"), *extra, *flags, "$SOURCE"
             )
         else:
             raise RuntimeError(
@@ -119,7 +116,7 @@ class QtDeployBuilder:
                 "appimagetool on the installed tree."
             )
 
-        target = qt_env.Command(
+        target = env.Command(
             target=stamp,
             source=[app],
             command=command,

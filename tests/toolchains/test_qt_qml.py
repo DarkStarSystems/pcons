@@ -203,3 +203,21 @@ class TestQtQmlModule:
             "ui", env, uri="X.Y", sources=["src/backend.cpp"]
         )
         assert target.target_type == "object"
+
+
+class TestQmlModuleEnvironment:
+    """A QML module keeps the environment it was declared in."""
+
+    def test_one_name_in_two_environments(self, qml_project):
+        host = cxx_env_with_qt(qml_project, name="host")
+        cross = cxx_env_with_qt(qml_project, name="cross")
+
+        on_host = qml_project.QtQmlModule(
+            "ui", host, uri="X.Y", sources=["src/backend.cpp"]
+        )
+        on_cross = qml_project.QtQmlModule(
+            "ui", cross, uri="X.Y", sources=["src/backend.cpp"]
+        )
+
+        assert on_host.qualified_name == "qmltest::ui@host"
+        assert on_cross.qualified_name == "qmltest::ui@cross"

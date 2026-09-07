@@ -7,7 +7,7 @@ for building on a different platform. Use with env.apply_cross_preset().
 Example:
     from pcons.toolchains.presets import android, ios, emscripten, wasi_sdk, linux_cross
 
-    env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a"))
+    env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a", api=35))
     env.apply_cross_preset(ios(arch="arm64"))
     env.apply_cross_preset(emscripten(emsdk="~/emsdk"))
     env.apply_cross_preset(linux_cross(triple="aarch64-linux-gnu"))
@@ -16,8 +16,11 @@ Example:
 from __future__ import annotations
 
 import platform
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Literal
+
+from pcons.configure.platform import Platform
 
 # Deprecated env_vars keys mapped to pcons tool names (see CrossPreset).
 _ENV_VAR_TOOL_MAP: dict[str, str] = {
@@ -26,6 +29,117 @@ _ENV_VAR_TOOL_MAP: dict[str, str] = {
     "LD": "link",
     "AR": "ar",
 }
+
+
+def _naming(
+    os_name: str,
+    *,
+    exe: str = "",
+    shared: str = ".so",
+    shared_prefix: str = "lib",
+    static: str = ".a",
+    static_prefix: str = "lib",
+    obj: str = ".o",
+) -> Platform:
+    return Platform(
+        os=os_name,
+        arch="",
+        is_64bit=True,
+        exe_suffix=exe,
+        shared_lib_suffix=shared,
+        shared_lib_prefix=shared_prefix,
+        static_lib_suffix=static,
+        static_lib_prefix=static_prefix,
+        object_suffix=obj,
+    )
+
+
+_TARGET_PLATFORMS: dict[str, Platform] = {
+    "android": _naming("android"),
+    "linux": _naming("linux"),
+    "darwin": _naming("darwin", shared=".dylib"),
+    "ios": _naming("ios", shared=".dylib"),
+    "windows-gnu": _naming("windows", exe=".exe", shared=".dll", shared_prefix=""),
+    "windows-msvc": _naming(
+        "windows",
+        exe=".exe",
+        shared=".dll",
+        shared_prefix="",
+        static=".lib",
+        static_prefix="",
+        obj=".obj",
+    ),
+}
+
+_TRIPLE_OS_MARKERS_MOST_SPECIFIC_FIRST: tuple[tuple[str, str], ...] = (
+    ("android", "android"),
+    ("mingw", "windows-gnu"),
+    ("windows-msvc", "windows-msvc"),
+    ("windows-gnu", "windows-gnu"),
+    ("ios", "ios"),
+    ("macos", "darwin"),
+    ("darwin", "darwin"),
+    ("linux", "linux"),
+)
+
+_TRIPLE_ARCHS: dict[str, str] = {
+    "aarch64": "arm64",
+    "aarch64_be": "arm64",
+    "arm64": "arm64",
+    "arm64e": "arm64",
+    "x86_64": "x86_64",
+    "amd64": "x86_64",
+    "i386": "i686",
+    "i586": "i686",
+    "i686": "i686",
+    "armv7a": "arm",
+    "armv7": "arm",
+    "armv7l": "arm",
+    "thumbv7a": "arm",
+    "arm": "arm",
+}
+
+_64BIT_ARCHS = frozenset(
+    {"arm64", "x86_64", "riscv64", "powerpc64", "powerpc64le", "mips64", "mips64el"}
+)
+
+
+def _triple_os_key(triple: str) -> str | None:
+    lowered = triple.lower()
+    for marker, key in _TRIPLE_OS_MARKERS_MOST_SPECIFIC_FIRST:
+        if marker in lowered:
+            return key
+    return None
+
+
+def _triple_arch(triple: str) -> str:
+    raw = triple.split("-")[0].lower()
+    return _TRIPLE_ARCHS.get(raw, raw)
+
+
+def target_platform_for_triple(triple: str) -> Platform | None:
+    """The platform a compiler triple describes, or None if unrecognized.
+
+    Reads the OS and CPU out of the triple and answers with the naming
+    conventions that go with them. A GNU-flavoured Windows triple (mingw)
+    gets ``.a`` static libraries and an MSVC one gets ``.lib``, because the
+    OS alone does not decide a name.
+
+    An unrecognized triple is None rather than an error, so a cross build
+    this table has never heard of keeps naming its outputs the way it does
+    today.
+
+    Args:
+        triple: A compiler target triple, e.g. ``"aarch64-linux-android35"``.
+
+    Returns:
+        The target platform, or None.
+    """
+    key = _triple_os_key(triple)
+    if key is None:
+        return None
+    arch = _triple_arch(triple)
+    return replace(_TARGET_PLATFORMS[key], arch=arch, is_64bit=arch in _64BIT_ARCHS)
 
 
 @dataclass(frozen=True)
@@ -47,6 +161,10 @@ class CrossPreset:
         env_vars: Deprecated alias for tool_cmds using environment-variable
                   vocabulary (CC→cc, CXX→cxx, LD→link, AR→ar). tool_cmds
                   wins on conflict.
+        target: The platform being built for, when the triple does not say it
+                or says it wrong. Left None, `target_platform` derives it from
+                `triple`. Same information as `arch`, in the place that
+                answers questions rather than as metadata.
     """
 
     name: str
@@ -57,6 +175,21 @@ class CrossPreset:
     extra_link_flags: tuple[str, ...] = ()
     tool_cmds: dict[str, str] = field(default_factory=dict)
     env_vars: dict[str, str] = field(default_factory=dict)
+    target: Platform | None = None
+
+    @property
+    def target_platform(self) -> Platform | None:
+        """The platform this preset builds for, or None if nothing says.
+
+        `target` when the preset carries one, otherwise derived from `triple`.
+        None means the reader assumes the host, which is also what a triple
+        the derivation does not recognize gets: today's answer, not an error.
+        """
+        if self.target is not None:
+            return self.target
+        if self.triple is None:
+            return None
+        return target_platform_for_triple(self.triple)
 
     def resolved_tool_cmds(self) -> dict[str, str]:
         """tool_cmds merged with the deprecated env_vars aliases."""
@@ -69,22 +202,54 @@ class CrossPreset:
         return cmds
 
 
+_ANDROID_STL_LINK_FLAGS: dict[str, tuple[str, ...]] = {
+    "c++_shared": (),
+    "c++_static": ("-static-libstdc++",),
+    "none": ("-nostdlib++",),
+}
+
+AndroidStl = Literal["c++_shared", "c++_static", "none"]
+
+
 def android(
     ndk: str,
     arch: str = "arm64-v8a",
-    api: int = 21,
+    *,
+    api: int,
+    stl: AndroidStl = "c++_shared",
 ) -> CrossPreset:
     """Create a cross-compilation preset for Android NDK.
+
+    An app made of more than one shared library needs ``c++_shared``, or
+    each library carries its own C++ runtime and static initializers,
+    ``std::type_info`` comparisons and exceptions stop working across
+    library boundaries. That is the NDK's own default, so it adds no flag.
+
+    Shipping ``libc++_shared.so`` into an APK is a packaging step this
+    preset does not perform: it describes how to compile and link, not
+    what the package contains.
 
     Args:
         ndk: Path to the Android NDK root directory.
         arch: Android architecture name. Supported values:
               "arm64-v8a", "armeabi-v7a", "x86_64", "x86".
-        api: Minimum Android API level (default: 21).
+        api: Minimum Android API level. Required, and deliberately without
+             a default: it is the oldest Android release the app runs on,
+             a product decision that decides which NDK headers and which
+             symbols the build sees.
+        stl: C++ runtime to link. "c++_shared" is the NDK default and one
+             runtime shared by every library. "c++_static" links a private
+             copy into each artifact. "none" links no C++ runtime, leaving
+             its symbols undefined for whoever links last.
 
     Returns:
         CrossPreset configured for Android.
     """
+    if stl not in _ANDROID_STL_LINK_FLAGS:
+        raise ValueError(
+            f"Unknown Android STL '{stl}'. "
+            f"Supported: {', '.join(_ANDROID_STL_LINK_FLAGS)}"
+        )
     triple_map = {
         "arm64-v8a": "aarch64-linux-android",
         "armeabi-v7a": "armv7a-linux-androideabi",
@@ -109,6 +274,9 @@ def android(
     else:
         host_tag = "windows-x86_64"
 
+    wrapper_ext = ".cmd" if host_system == "windows" else ""
+    binary_ext = ".exe" if host_system == "windows" else ""
+
     toolchain_dir = ndk_path / "toolchains" / "llvm" / "prebuilt" / host_tag
     sysroot = str(toolchain_dir / "sysroot")
     bin_dir = toolchain_dir / "bin"
@@ -118,11 +286,12 @@ def android(
         arch=arch,
         triple=triple,
         sysroot=sysroot,
+        extra_link_flags=_ANDROID_STL_LINK_FLAGS[stl],
         tool_cmds={
-            "cc": str(bin_dir / f"{triple}-clang"),
-            "cxx": str(bin_dir / f"{triple}-clang++"),
-            "link": str(bin_dir / f"{triple}-clang++"),
-            "ar": str(bin_dir / "llvm-ar"),
+            "cc": str(bin_dir / f"{triple}-clang{wrapper_ext}"),
+            "cxx": str(bin_dir / f"{triple}-clang++{wrapper_ext}"),
+            "link": str(bin_dir / f"{triple}-clang++{wrapper_ext}"),
+            "ar": str(bin_dir / f"llvm-ar{binary_ext}"),
         },
     )
 

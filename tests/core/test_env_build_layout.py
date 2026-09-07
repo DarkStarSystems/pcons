@@ -56,11 +56,13 @@ def windows_toolchain(gcc_toolchain, monkeypatch):
     `BaseToolchain.__subclasses__()`, so a toolchain class defined here would
     leak into the generated preset names and fail the stub freshness test.
     """
-    monkeypatch.setattr(gcc_toolchain, "get_output_prefix", lambda target_type: "")
+    monkeypatch.setattr(
+        gcc_toolchain, "get_output_prefix", lambda target_type, target=None: ""
+    )
     monkeypatch.setattr(
         gcc_toolchain,
         "get_output_suffix",
-        lambda target_type: _WINDOWS_SUFFIXES.get(target_type, ".exe"),
+        lambda target_type, target=None: _WINDOWS_SUFFIXES.get(target_type, ".exe"),
     )
     return gcc_toolchain
 
@@ -438,3 +440,57 @@ class TestWindowsImportLibrary:
         project.resolve()
 
         assert "outputs" not in shared.output_nodes[0]._build_info
+
+
+class TestNamingWithoutAToolchain:
+    """An environment with no toolchain still names for what it targets.
+
+    The toolchain normally decides the spelling. Without one there is
+    nothing to ask, and the fallback used to name for the build machine,
+    which is the same bug one level down.
+    """
+
+    def _mingw(self, project, gcc_toolchain):
+        from pcons.toolchains.presets import CrossPreset
+
+        env = project.Environment(toolchain=gcc_toolchain, name="mingw")
+        env.apply_cross_preset(
+            CrossPreset(
+                name="mingw64",
+                arch="x86_64",
+                triple="x86_64-w64-mingw32",
+                tool_cmds={
+                    "cc": "x86_64-w64-mingw32-gcc",
+                    "cxx": "x86_64-w64-mingw32-g++",
+                    "link": "x86_64-w64-mingw32-g++",
+                    "ar": "x86_64-w64-mingw32-ar",
+                },
+            )
+        )
+        return env
+
+    def test_it_reads_the_target_not_the_host(self, tmp_path, gcc_toolchain):
+        from pcons.tools.compile_link import CompileLinkFactory
+
+        project = Project("p", root_dir=tmp_path)
+        env = self._mingw(project, gcc_toolchain)
+        lib = project.SharedLibrary("foo", env)
+        env._toolchain = None
+
+        name = CompileLinkFactory._apply_output_naming(lib, env, "shared_library")
+
+        assert name == "foo.dll"
+
+    def test_a_host_environment_is_unchanged(self, tmp_path, gcc_toolchain):
+        from pcons.configure.platform import get_platform
+        from pcons.tools.compile_link import CompileLinkFactory
+
+        project = Project("p", root_dir=tmp_path)
+        env = project.Environment(toolchain=gcc_toolchain, name="host")
+        lib = project.SharedLibrary("foo", env)
+        env._toolchain = None
+
+        name = CompileLinkFactory._apply_output_naming(lib, env, "shared_library")
+
+        plat = get_platform()
+        assert name == f"{plat.shared_lib_prefix}foo{plat.shared_lib_suffix}"

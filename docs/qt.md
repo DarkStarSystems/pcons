@@ -53,6 +53,7 @@ qt = find_qt(
     modules=["Widgets"],  # short names; Core is always included
     version=">=6.4",  # optional constraint
     qt_root="/opt/Qt/6.7.0/gcc_64",  # optional; also $PCONS_QT_ROOT
+    probe="auto",  # "auto" | "pkg-config" | "qtpaths"
     private_headers=["Core"],  # opt-in to QtCore/x.y.z/private
 )
 
@@ -67,6 +68,43 @@ Probing order:
    distributions and Homebrew macOS; handles framework linking.
 2. **qtpaths/qmake introspection** (`qtpaths6 -query`) — for installs
    without pkg-config files, e.g. the official Qt installer and Windows.
+   This route resolves inter-module dependencies from a built-in table, so
+   asking for `Qml` also brings in `Network` and `QmlIntegration`. The
+   latter is header-only: it contributes an include directory, which every
+   `QML_ELEMENT` header needs, and links nothing.
+
+### Choosing the probe
+
+`probe=` runs one of them instead of both. `"auto"` is the default and the
+order above; `"pkg-config"` and `"qtpaths"` run that probe alone and fail
+if it finds nothing.
+
+A cross Qt is the reason this exists. Such an install has two halves: the
+libraries and headers you link against, built for the target, and the
+moc/uic/rcc binaries, built for the machine running the build. pkg-config
+cannot describe that split. Its `libexecdir` is `${prefix}/bin`, which for
+a Windows target Qt holds Windows executables, so `qt.tool_path("moc")`
+comes back `None` and nothing explains why. `qtpaths6 -query` on the same
+install reports `QT_HOST_BINS` and `QT_HOST_LIBEXECS`, which is where the
+runnable tools are, and the qtpaths probe prefers them.
+
+So when the target Qt ships complete `.pc` files, pkg-config wins the
+`"auto"` race with the wrong answer, and the way out is to ask for the
+other probe:
+
+```python
+host_qt = find_qt(project, host, modules=["Widgets"])
+cross_qt = find_qt(project, cross, modules=["Widgets"],
+                   qt_root="/opt/qt6-mingw", probe="qtpaths")
+```
+
+`qt_root` alone does not do this: it *scopes* the pkg-config search to
+that prefix rather than skipping it, so pointing it at the cross Qt only
+makes pkg-config answer with more confidence.
+
+`qt_module_available()` is unaffected: it asks whether a module is
+installed at all, not which install a target builds against, so it always
+tries both probes and takes no `probe` argument.
 
 Passing `env` adds the `qt` toolchain to the environment (tool paths for
 moc/uic/rcc), enabling the builders below. Discovery is cached per project
@@ -81,6 +119,16 @@ mcu_qt = find_qt(project, mcu, modules=["Core"])
 Each environment gets its own install and its own module targets, told
 apart by `Qt6Core@host` and `Qt6Core@mcu`. Two environments without names
 share one install, because nothing tells them apart.
+
+A Qt target belongs to the environment it was declared in, like any other
+target, so one name can be built for both:
+
+```python
+project.QtProgram("app", host, sources=["main.cpp"], link=[host_qt.Widgets])
+project.QtProgram("app", mcu, sources=["main.cpp"], link=[mcu_qt.Core])
+```
+
+They are `app@host` and `app@mcu`, in separate build directories.
 
 ## The automoc scan
 
@@ -180,6 +228,25 @@ Worth knowing before porting a large CMake project:
   ones. Headers from a *prebuilt* Qt-based SDK reached that way would
   get spurious moc edges; exclude them with `no_moc=[...]`. (Libraries
   found via `find_package`/`find_qt` are excluded automatically.)
+- **pcons cannot see what the target Qt was built with.** moc, uic and
+  rcc run on the build machine, from the host Qt, and their output is
+  compiled against the Qt you link. When the two were configured
+  differently the generated code can reference something the target does
+  not have: rcc compresses with zstd by default, and a target Qt built
+  without zstd then fails to link on `qResourceFeatureZstd`. Neither
+  `qtpaths6 --query` nor pkg-config reports a Qt install's feature set
+  (only paths, mkspec and version), so pcons cannot detect this. Spell
+  the flag out on the environment that needs it, which is per
+  environment like everything else:
+
+  ```python
+  cross.qt.rccflags.append("--no-zstd")
+  ```
+
+  The target Qt's feature list is in
+  `<prefix>/mkspecs/qconfig.pri` (`QT.global.enabled_features`) and in
+  `<prefix>/include/QtCore/qconfig.h` (`QT_FEATURE_zstd`) if you need to
+  check which way it was built.
 - **Not yet implemented:** qmlcachegen AOT compilation, QML plugin
   libraries / singletons / subdirectory QML files, static-Qt plugin
   imports (`Q_IMPORT_PLUGIN`), per-file resource compression options and
@@ -199,6 +266,12 @@ Worth knowing before porting a large CMake project:
   libraries; moc runs with `--compiler-flavor msvc`.
 - **Linux**: distro Qt (apt/dnf/pacman) is found via pkg-config; the
   official installer via `qtpaths` or `qt_root=`/`$PCONS_QT_ROOT`.
+- **Android**: Qt names every library after the ABI, so an
+  `android_arm64_v8a` install holds `libQt6Core_arm64-v8a.so` and no
+  unsuffixed file. `find_qt` reads the suffix off the install and links
+  `-lQt6Core_arm64-v8a`. The module target keeps its plain name,
+  `qt.Core`. Qt reports no ABI of its own, so this needs the `qtpaths`
+  probe and a real install to read.
 
 ## QML modules
 

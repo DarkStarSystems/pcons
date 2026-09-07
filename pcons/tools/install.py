@@ -235,8 +235,9 @@ def _make_install_target(
 def install_dir(env: Environment, target_type: str) -> str:
     """Return the conventional install subdirectory for *target_type*.
 
-    The convention is sourced from the environment's primary toolchain, so it
-    follows the platform that toolchain targets rather than the host OS:
+    The convention is sourced from the environment's primary toolchain, asked
+    about ``env.target``, so it follows the platform being built for rather
+    than the build machine:
 
     - ``"program"``: ``bin``
     - ``"static_library"``: ``lib``
@@ -253,7 +254,8 @@ def install_dir(env: Environment, target_type: str) -> str:
     explicit directory string (e.g. ``project.Install("lib64", [lib])``).
 
     Args:
-        env: Environment whose toolchain defines the convention.
+        env: Environment whose toolchain defines the convention and whose
+            ``target`` says which platform it is being asked about.
         target_type: One of ``"program"``, ``"static_library"``,
             ``"shared_library"``.
 
@@ -269,7 +271,7 @@ def install_dir(env: Environment, target_type: str) -> str:
             "install_dir() requires an environment with a toolchain; "
             "pass an explicit directory string to Install() instead."
         )
-    return toolchains[0].get_install_dir(target_type)
+    return toolchains[0].get_install_dir(target_type, env.target)
 
 
 class InstallTool(StandaloneTool):

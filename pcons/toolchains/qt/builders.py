@@ -405,7 +405,7 @@ def _qt_make_target(
     factory = getattr(project, kind)
     target: Target = factory(
         name,
-        qt_env,
+        env,
         sources=[*plain, *moc_nodes, *qrc_nodes],
         defined_at=defined_at,
     )
@@ -638,15 +638,12 @@ class QtResourcesBuilder:
         qrc_rel = build_dir / "qt.res" / f"{name}.qrc"
         _write_if_changed(root / qrc_rel, _qrc_xml(prefix, entries))
 
-        qt_env = env.clone()
-        cpp_node = qt_env.qt.Rcc(
+        cpp_node = env.qt.Rcc(
             build_dir / "qt.res" / f"qrc_{name}.cpp", qrc_rel, name=name
         )[0]
         # getattr: the generated builder stubs omit the internal
         # defined_at parameter, but passing it keeps "defined at"
         # diagnostics pointing at the user's call site.
         factory = getattr(project, "ObjectLibrary")  # noqa: B009
-        target: Target = factory(
-            name, qt_env, sources=[cpp_node], defined_at=defined_at
-        )
+        target: Target = factory(name, env, sources=[cpp_node], defined_at=defined_at)
         return target

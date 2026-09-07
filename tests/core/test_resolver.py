@@ -972,12 +972,12 @@ class TestResolverToolAgnostic:
             def get_object_suffix(self) -> str:
                 return ".obj"  # Custom object suffix
 
-            def get_output_prefix(self, target_type: str) -> str:
+            def get_output_prefix(self, target_type: str, target=None) -> str:
                 if target_type == "static_library":
                     return "static_"
                 return ""
 
-            def get_output_suffix(self, target_type: str) -> str:
+            def get_output_suffix(self, target_type: str, target=None) -> str:
                 if target_type == "static_library":
                     return ".mylib"
                 return ".exe"
@@ -1021,10 +1021,10 @@ class TestResolverToolAgnostic:
                     )
                 return None
 
-            def get_output_suffix(self, target_type: str) -> str:
+            def get_output_suffix(self, target_type: str, target=None) -> str:
                 if target_type == "program":
                     return ".exe"
-                return super().get_output_suffix(target_type)
+                return super().get_output_suffix(target_type, target)
 
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")

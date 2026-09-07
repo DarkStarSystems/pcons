@@ -43,7 +43,7 @@ def qt_only_env(project: Project) -> Environment:
     return project.Environment(toolchain=fake_qt_toolchain())
 
 
-def cxx_env_with_qt(project: Project) -> Environment:
+def cxx_env_with_qt(project: Project, name: str | None = None) -> Environment:
     """A real C++ toolchain env with the fake qt toolchain added.
 
     Skips the calling test when no C++ compiler is available.
@@ -54,7 +54,7 @@ def cxx_env_with_qt(project: Project) -> Environment:
         cxx_toolchain = find_c_toolchain()
     except RuntimeError:
         pytest.skip("no C++ toolchain available")
-    env = project.Environment(toolchain=cxx_toolchain)
+    env = project.Environment(toolchain=cxx_toolchain, name=name)
     env.add_toolchain(fake_qt_toolchain())
     return env
 

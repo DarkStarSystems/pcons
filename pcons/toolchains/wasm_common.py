@@ -16,6 +16,7 @@ from pcons.core.subst import TargetPath
 from pcons.toolchains.unix import UnixToolchain
 
 if TYPE_CHECKING:
+    from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
     from pcons.tools.toolchain import SourceHandler
 
@@ -49,14 +50,18 @@ class WasmToolchain(UnixToolchain):
 
     # -- Suffix / naming overrides ------------------------------------------
 
-    def get_output_prefix(self, target_type: str) -> str:
+    def get_output_prefix(
+        self, target_type: str, target: Platform | None = None
+    ) -> str:
         # wasm targets are Unix-like — always use the "lib" prefix regardless of
         # host platform (e.g. when cross-compiling from Windows).
         if target_type in ("static_library", "shared_library"):
             return "lib"
         return ""
 
-    def get_output_suffix(self, target_type: str) -> str:
+    def get_output_suffix(
+        self, target_type: str, target: Platform | None = None
+    ) -> str:
         if target_type == "program":
             return self.program_suffix
         if target_type == "shared_library":

@@ -280,6 +280,42 @@ with tool commands and no preset: `None` means "nothing said otherwise", so a
 reader defaults to the host and never refuses on it. Applying a second cross
 preset replaces the first, since an environment has one target.
 
+### The environment knows what platform it targets
+
+`env.target` is a `Platform` describing **what is being built for**, and it is
+the host platform unless something said otherwise. It exists so that decisions
+about the artifact, what it is called and where it installs, can stop asking
+the build machine.
+
+It is filled in from the preset. `CrossPreset.target_platform` derives it from
+`triple`: `aarch64-linux-android35` is Android, `x86_64-w64-mingw32` is
+Windows with GNU spellings (`libfoo.a`, not `foo.lib`), `x86_64-pc-windows-msvc`
+is Windows with Microsoft ones. A preset whose triple the derivation does not
+recognize, or which carries no triple at all, says nothing and the environment
+keeps reading as the host: today's answer, never an error. A preset that knows
+better sets `target=` explicitly and that wins.
+
+`target` is never `None`: an environment retargeted by hand, with tool commands
+and no preset, reads as the host too. So `env.target` answers *what was
+declared*, not *what will actually run*, and a caller may not treat a host
+answer as proof of a host build. `env.cross` is the surface that distinguishes
+the two.
+
+The target platform is an **input** to naming, not a replacement for it. The
+toolchain still decides: `get_output_prefix`, `get_output_suffix` and
+`get_install_dir` take an optional target and produce the spelling that
+toolchain emits, because two toolchains targeting Windows disagree about static
+libraries. Passed nothing they answer for the build machine, which is what a
+caller with no environment in reach can honestly say.
+
+So a cross build's artifacts are named for the platform they target, and
+`install_dir(env, "shared_library")` sends a Windows DLL to `bin` even when the
+build runs on Linux.
+
+`CrossPreset.arch` stays metadata in the target ecosystem's own vocabulary
+(`arm64-v8a`); `env.target.arch` is the same CPU in the place that answers
+questions (`arm64`).
+
 ### Exactly two retarget mechanisms
 
 Every toolchain reaches a foreign target in one (or both) of two ways:
@@ -479,6 +515,7 @@ acme/no-rtti - drop -frtti, force -fno-rtti`.
 | One application per resolution (no per-toolchain double-apply) | implemented |
 | Exclusive groups replace on re-apply (knob semantics; group presets additive-only) | implemented |
 | `CrossPreset.arch` decoupled from flag emission (host-independent) | implemented |
+| `env.target` / `CrossPreset.target_platform`: what the environment builds for | implemented |
 | Fail fast on unrealizable cross presets (MSVC + any, GCC + triple-only) | implemented |
 | MSVC/clang-cl `set_target_arch` selects the cross toolset (cl/lib dirs), not just `/MACHINE:` | implemented |
 | `tool_cmds` binary-retarget (any tool; `env_vars` deprecated alias); wasm presets require the wasm toolchains | implemented |

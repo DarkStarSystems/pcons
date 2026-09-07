@@ -32,6 +32,7 @@ from pcons.util.source_location import SourceLocation, get_caller_location
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from pcons.configure.platform import Platform
     from pcons.core.builder import Builder
     from pcons.core.environment import Environment
     from pcons.core.node import FileNode, Node
@@ -393,16 +394,20 @@ class LlvmToolchain(UnixToolchain):
     def __init__(self) -> None:
         super().__init__("llvm")
 
-    def get_output_prefix(self, target_type: str) -> str:
+    def get_output_prefix(
+        self, target_type: str, target: Platform | None = None
+    ) -> str:
         """A .metallib takes its name verbatim; everything else is Unix."""
         if target_type == METAL_LIBRARY_TARGET_TYPE:
             return ""
-        return super().get_output_prefix(target_type)
+        return super().get_output_prefix(target_type, target)
 
-    def get_output_suffix(self, target_type: str) -> str:
+    def get_output_suffix(
+        self, target_type: str, target: Platform | None = None
+    ) -> str:
         if target_type == METAL_LIBRARY_TARGET_TYPE:
             return ".metallib"
-        return super().get_output_suffix(target_type)
+        return super().get_output_suffix(target_type, target)
 
     def get_source_handler(self, suffix: str) -> SourceHandler | None:
         """Return handler for source file suffix, or None if not handled.
