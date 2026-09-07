@@ -602,7 +602,19 @@ class Target:
         linked_private_targets = [
             t for t in self.private.link_libs if isinstance(t, Target)
         ]
-        return (*self._dependencies, *linked_public_targets, *linked_private_targets)
+        # A Target given as a source is a dependency too: its outputs are this
+        # target's inputs, so it must resolve first.
+        source_targets = [
+            t
+            for t in (self._pending_sources or ())
+            if isinstance(t, Target) and t not in self._dependencies
+        ]
+        return (
+            *self._dependencies,
+            *source_targets,
+            *linked_public_targets,
+            *linked_private_targets,
+        )
 
     @property
     def sources(self) -> list[Node]:

@@ -340,6 +340,40 @@ class TestInstallWithNinja:
         # Should have a build statement for the installed file
         assert "mylib.a" in content
 
+    def test_dep_on_install_target_reaches_the_ninja_edge(self, tmp_path):
+        """A command that depends() on an install target carries the
+        install's stamp as an implicit dep in build.ninja (#129)."""
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        tree = tmp_path / "tree"
+        (tree / "sub").mkdir(parents=True)
+        (tree / "sub" / "f.txt").write_text("x")
+
+        staged = project.InstallDir("stage", tree)
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo done > $TARGET",
+            name="after",
+        )
+        cmd.depends(staged)
+
+        project.resolve()
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        edge = next(
+            line for line in content.splitlines() if line.startswith("build out.txt:")
+        )
+        stamp = staged.output_nodes[0].path.relative_to("build").as_posix()
+        assert "|" in edge, edge
+        assert stamp in edge, edge
+
     def test_install_output_rendered_relocatably(self, tmp_path):
         """Install destinations under the project root render via $topdir."""
         from pcons.generators.ninja import NinjaGenerator

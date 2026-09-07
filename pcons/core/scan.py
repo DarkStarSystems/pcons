@@ -375,13 +375,6 @@ class ScannerResolver:
                 f"Scanner '{scanner.name}' is attached to target "
                 f"'{target.qualified_name}', which has no environment."
             )
-        if target._pending_sources is not None:
-            raise PconsError(
-                f"Scanner '{scanner.name}': target '{target.qualified_name}' "
-                f"passes Target objects as sources, which resolve too late "
-                f"for scanning. Name the file paths instead — a generated "
-                f"file's path carries its producer's ordering."
-            )
 
         edges = self._governed_edges(target, scanner)
         if not edges:
