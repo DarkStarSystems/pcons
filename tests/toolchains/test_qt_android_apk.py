@@ -420,6 +420,27 @@ class TestThePasswordNeverReachesTheBuildFile:
         assert PASSWORD not in content
         assert secret.name in content
 
+    def test_a_relative_password_file_is_named_absolutely(
+        self, app_project, deployable, sdk, tmp_path
+    ) -> None:
+        """apksigner runs from the build directory, so a path relative to
+        the script would name a file that is not there."""
+        secret = tmp_path / "secrets" / "keystore-pass"
+        secret.parent.mkdir()
+        secret.write_text(f"{PASSWORD}\n")
+        env = android_env(sdk=str(sdk))
+
+        content = _signed_ninja(
+            app_project,
+            env,
+            _app(app_project, env),
+            keystore="release.jks",
+            store_password="file:secrets/keystore-pass",
+        )
+
+        assert f"file:{secret}" in content
+        assert "file:secrets/keystore-pass" not in content
+
     def test_a_literal_password_is_refused(self, app_project, deployable, sdk) -> None:
         env = android_env(sdk=str(sdk))
         app = _app(app_project, env)
@@ -513,6 +534,37 @@ class TestTheSigningEdge:
         env = android_env(sdk=str(sdk))
 
         assert "--key-pass" not in self._content(app_project, env)
+
+    def test_a_key_password_of_its_own_is_passed(
+        self, app_project, deployable, sdk
+    ) -> None:
+        """A keystore whose key carries a second password needs --key-pass,
+        and the source is named there the same way the keystore one is."""
+        env = android_env(sdk=str(sdk))
+
+        content = self._content(app_project, env, key_password="env:MYAPP_KEY_PASS")
+
+        assert "--key-pass env:MYAPP_KEY_PASS" in content
+        assert "--ks-pass env:KS" in content
+
+    def test_an_explicit_apksigner_is_the_one_that_runs(
+        self, app_project, deployable, tmp_path
+    ) -> None:
+        """Named outright, apksigner is taken as given: no build-tools
+        revision is looked for, so an SDK holding none still signs."""
+        env = android_env(sdk=str(tmp_path / "empty-sdk"))
+        tool = tmp_path / "tools" / "apksigner"
+
+        content = _signed_ninja(
+            app_project,
+            env,
+            _app(app_project, env),
+            keystore="release.jks",
+            store_password="env:KS",
+            apksigner=tool,
+        )
+
+        assert str(tool) in content
 
     def test_the_highest_build_tools_revision_wins(
         self, app_project, deployable, sdk
