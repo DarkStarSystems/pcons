@@ -6,9 +6,9 @@ description = "Nested QML layout: an entry keeps its path, and each subdirectory
 expected_outputs = [
     "build/qt.nested_ui/qrc_nested_ui.cpp",
     "build/chips/qt.chips_ui/qrc_chips_ui.cpp",
-    "build/qt.nested_ui/qml/pages/qmldir",
-    "build/qt.nested_ui/qml/widgets/qmldir",
-    "build/chips/qt.chips_ui/qml/qmldir",
+    # (the per-directory qmldir files are generated too, but the test
+    # harness's Windows .exe heuristic can't express an extension-less
+    # expected file; the [verify] commands below need them all to exist.)
     "build/qml_nested",
 ]
 
