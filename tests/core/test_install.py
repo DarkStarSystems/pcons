@@ -410,11 +410,22 @@ class TestInstallWithNinja:
             finally:
                 probe_file.unlink(missing_ok=True)
 
+        def refresh_dependency_metadata(*paths: Path) -> None:
+            """Make filesystem metadata visible before ninja reads dependencies.
+
+            Windows can leave a directory's parent-index metadata stale briefly
+            after a child changes.  ``Path.stat()`` refreshes that metadata
+            before ninja reads the dependency, without changing any timestamps
+            or touching the source tree with a probe file.
+            """
+            for path in paths:
+                path.stat()
+
         run_ninja()
         destination = tmp_path / "build" / "staged" / "assets"
         assert (destination / "sub" / "deep.txt").read_text() == "deep"
-        ninja_log = tmp_path / "build" / ".ninja_log"
-        assert ninja_log.exists()
+        install_stamp = tmp_path / "build" / ".stamps" / "staged_assets.stamp"
+        assert install_stamp.exists()
 
         unchanged = subprocess.run(
             ["ninja", "-C", "build"],
@@ -425,40 +436,47 @@ class TestInstallWithNinja:
         )
         assert "no work to do" in unchanged.stdout
 
-        wait_for_new_tick(ninja_log)
+        wait_for_new_tick(install_stamp)
         (nested / "added.txt").write_text("added")
+        refresh_dependency_metadata(nested)
         run_install_rebuild()
         assert (destination / "sub" / "added.txt").read_text() == "added"
 
-        wait_for_new_tick(ninja_log)
+        wait_for_new_tick(install_stamp)
         (nested / "deep.txt").write_text("changed")
+        refresh_dependency_metadata(nested / "deep.txt")
         run_install_rebuild()
         assert (destination / "sub" / "deep.txt").read_text() == "changed"
 
-        wait_for_new_tick(ninja_log)
+        wait_for_new_tick(install_stamp)
         (nested / "added.txt").unlink()
+        refresh_dependency_metadata(nested)
         run_install_rebuild()
         assert not (destination / "sub" / "added.txt").exists()
 
-        wait_for_new_tick(ninja_log)
+        wait_for_new_tick(install_stamp)
         (nested / "deep.txt").rename(nested / "moved.txt")
+        refresh_dependency_metadata(nested)
         run_install_rebuild()
         assert not (destination / "sub" / "deep.txt").exists()
         assert (destination / "sub" / "moved.txt").read_text() == "changed"
 
-        wait_for_new_tick(ninja_log)
+        wait_for_new_tick(install_stamp)
         new_nested = nested / "created-after-configure"
         new_nested.mkdir()
         (new_nested / "first.txt").write_text("first")
+        refresh_dependency_metadata(nested, new_nested)
         run_install_rebuild()
 
-        wait_for_new_tick(ninja_log)
+        wait_for_new_tick(install_stamp)
         (new_nested / "second.txt").write_text("second")
+        refresh_dependency_metadata(new_nested)
         run_install_rebuild()
         assert (destination / "sub" / "created-after-configure" / "second.txt").exists()
 
-        wait_for_new_tick(ninja_log)
+        wait_for_new_tick(install_stamp)
         (nested / "created-after-configure").rename(nested / "renamed-directory")
+        refresh_dependency_metadata(nested)
         run_install_rebuild()
         assert not (destination / "sub" / "created-after-configure").exists()
         assert (destination / "sub" / "renamed-directory" / "first.txt").exists()
