@@ -188,8 +188,7 @@ def _format_requirements(target: Target, root: Path, style: _Style) -> Iterator[
 
     # A value can legitimately appear twice with one meaning (a target in
     # link_libs plus the same name as a plain lib); one row tells the story.
-    seen: set[tuple[str, str, tuple[str, str] | None]] = set()
-    rows = [row for row in rows if not (row in seen or seen.add(row))]
+    rows = list(dict.fromkeys(rows))
 
     if not rows:
         return
