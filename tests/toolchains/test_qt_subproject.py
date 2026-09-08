@@ -225,6 +225,36 @@ class TestQtInstallAcrossSubdirectories:
         metatypes = str(qt_prefix / "lib" / "metatypes").replace("\\", "/")
         assert f"--foreign-types {metatypes}" in content
 
+    def test_child_qml_files_resolve_against_the_child(self, top, tmp_path, qt_prefix):
+        """qml_files are script-relative, like every other builder path.
+
+        Anchoring them at the top-level root, which is where the generated
+        qmldir and .qrc belong, names a file that does not exist, and rcc
+        fails on a resource the .qrc cannot open.
+        """
+        cxx_env_with_qt(top)
+        _find_fake_qt(top, qt_prefix, modules=("Core", "Qml"))
+        child = _child(
+            tmp_path,
+            "from pcons.core.project import Project\n"
+            "project = Project('child')\n"
+            "project.QtQmlModule(\n"
+            "    'ui', project.default_environment, uri='com.example.demo',\n"
+            "    qml_files=['qml/Main.qml'],\n"
+            ")\n",
+        )
+        (child / "qml").mkdir()
+        (child / "qml" / "Main.qml").write_text("pragma Singleton\nimport QtQml\n")
+
+        add_subdirectory("child")
+        generate_ninja(top)
+
+        qt_dir = tmp_path / "build" / "child" / "qt.ui"
+        qrc = (qt_dir / "ui.qrc").read_text()
+        assert f">{child / 'qml' / 'Main.qml'}<" in qrc
+        assert "singleton Main 1.0 Main.qml" in (qt_dir / "qmldir").read_text()
+        assert Path("child/qml/Main.qml") in set(top.configure_dependencies)
+
     def test_child_reusing_the_top_project_scans_its_own_sources(
         self, top, tmp_path, qt_prefix
     ):
