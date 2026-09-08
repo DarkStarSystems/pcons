@@ -84,6 +84,47 @@ def listed_names(root: Path) -> set[str]:
     return set((root / "build" / "listing.txt").read_text().split())
 
 
+def recorded_deps(build_dir: Path) -> set[str]:
+    """What ninja stored for the reader edge, as forward-slash paths.
+
+    ninja folds a depfile into its own log and deletes it, so the log is the
+    only place to read back what it understood.
+    """
+    result = subprocess.run(
+        ["ninja", "-t", "deps", "listing.txt"],
+        cwd=build_dir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return {
+        line.strip().replace("\\", "/")
+        for line in result.stdout.splitlines()
+        if line.startswith(" ")
+    }
+
+
+def written_deps(build_dir: Path) -> set[str]:
+    """The prerequisites the reader wrote, as forward-slash paths.
+
+    Split on the first colon only: the target is build-relative and carries
+    none, while a prerequisite on Windows begins with a drive letter.
+    """
+    text = (build_dir / "listing.txt.d").read_text()
+    return {dep.replace("\\", "/") for dep in text.split(":", 1)[1].split()}
+
+
+def assert_names(deps: set[str], directory: Path) -> None:
+    """Fail here, not at the build tool, when the depfile is the broken half.
+
+    The assertions after this one ask whether the build tool acted on a
+    directory prerequisite. They can only mean that if the prerequisite
+    reached it, so this separates what we wrote from what read it.
+    """
+    wanted = directory.as_posix()
+    assert wanted in deps, f"{wanted} not among {sorted(deps)}"
+
+
 needs_ninja = pytest.mark.skipif(
     shutil.which("ninja") is None, reason="ninja not installed"
 )
@@ -127,6 +168,8 @@ class TestNinjaDepfileDirectories:
         project = reader_project(tmp_path, "dirs")
         build_dir = _generate(tmp_path, NinjaGenerator(), project)
         run_ninja(build_dir)
+
+        assert_names(recorded_deps(build_dir), tmp_path / "tree" / "sub")
 
         write(tmp_path / "tree" / "sub" / "new.txt", "new\n")
         output = run_ninja(build_dir)
@@ -172,6 +215,8 @@ class TestMakefileDepfileDirectories:
         project = reader_project(tmp_path, "dirs")
         build_dir = _generate(tmp_path, MakefileGenerator(), project)
         run_make(build_dir)
+
+        assert_names(written_deps(build_dir), tmp_path / "tree" / "sub")
 
         write(tmp_path / "tree" / "sub" / "new.txt", "new\n")
         run_make(build_dir)

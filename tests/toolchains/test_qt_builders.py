@@ -7,6 +7,8 @@ tool paths and the generated build.ninja is inspected directly.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from pcons.core.node import FileNode
@@ -247,7 +249,8 @@ class TestMocSeesTargetFlags:
         project.QtProgram("app", env, sources=["src/main.cpp"], link=[mylib])
         generate_ninja(project)
         spec = _automoc_spec(tmp_path)
-        assert any(p.endswith("libs/mylib/inc") for p in spec["include_dirs"])
+        wanted = Path("libs") / "mylib" / "inc"
+        assert any(Path(p).parts[-3:] == wanted.parts for p in spec["include_dirs"])
 
     def test_header_in_sources_scanned_not_linked(self, tmp_path, monkeypatch):
         project = _make_project(tmp_path, monkeypatch)
