@@ -153,7 +153,7 @@ def test_a_target_with_several_outputs_says_so(tmp_path: Path, gcc_toolchain) ->
         command=[pair, "$TARGET"],
     )
 
-    with pytest.raises(PconsError, match=r"a\.txt, build/b\.txt"):
+    with pytest.raises(PconsError, match=r"a\.txt, build[/\\]b\.txt"):
         project.resolve()
 
 

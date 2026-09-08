@@ -88,7 +88,9 @@ class TestTheRequiredKeys:
         self, found_qt
     ) -> None:
         """The Android Qt, not the host one that runs androiddeployqt."""
-        assert _settings(_android_env())["qt"] == {"arm64-v8a": QT_PREFIX}
+        v = _settings(_android_env())["qt"]
+        assert "arm64-v8a" in v
+        assert Path(v["arm64-v8a"]).as_posix() == QT_PREFIX
 
     def test_the_install_facts_come_from_the_preset(self, found_qt) -> None:
         """The host tag names the machine running the build, so a literal one

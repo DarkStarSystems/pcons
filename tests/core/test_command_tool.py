@@ -109,7 +109,12 @@ def test_a_tool_from_another_environment_carries_its_prefix(
 def test_an_installed_tool_keeps_its_absolute_path(
     tmp_path: Path, gcc_toolchain
 ) -> None:
-    """The androiddeployqt case: a host tool this build did not produce."""
+    """The androiddeployqt case: a host tool this build did not produce.
+
+    The path is the caller's own word and reaches the command line unchanged.
+    Windows does not read a leading "/" as absolute, so this one is not a path
+    pcons re-spells there either, and the expectation is the same everywhere.
+    """
     project = _project(tmp_path)
     env = project.Environment(toolchain=gcc_toolchain)
     tool = "/opt/qt/bin/androiddeployqt"
@@ -123,9 +128,7 @@ def test_an_installed_tool_keeps_its_absolute_path(
 
     text = _ninja(project)
 
-    program = as_ninja_command(runs_as(tool))
-
-    assert f"command = {program} --input $in --output $out" in text
+    assert f"command = {tool} --input $in --output $out" in text
     assert "|" not in _line(text, "build out.txt:")
 
 
@@ -230,6 +233,6 @@ def test_text_attached_to_the_marker_comes_along(tmp_path: Path, gcc_toolchain) 
         command="cp --helper=$TOOL $SOURCE $TARGET",
     )
 
-    argv = as_ninja_command("cp", f"--helper={runs_as(tool)}")
+    argv = as_ninja_command("cp", f"--helper={tool}")
 
     assert f"{argv} $in $out" in _ninja(project)
