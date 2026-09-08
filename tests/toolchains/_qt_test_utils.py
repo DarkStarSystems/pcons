@@ -154,3 +154,18 @@ def generate_ninja(project: Project) -> str:
     if not build_dir.is_absolute():
         build_dir = Path(project.root_dir) / build_dir
     return (build_dir / "build.ninja").read_text().replace("\\", "/")
+
+
+def object_of(project: Project, target: str, source: str) -> str:
+    """The object file *target* compiles *source* to, named as the toolchain names it.
+
+    The suffix is ``.o`` or ``.obj`` depending on the detected toolchain, so no
+    test may spell it out.
+    """
+    nodes = [
+        node
+        for node in project.get_target(target).intermediate_nodes
+        if node.path.name.startswith(source)
+    ]
+    assert len(nodes) == 1, [node.path.name for node in nodes]
+    return nodes[0].path.name

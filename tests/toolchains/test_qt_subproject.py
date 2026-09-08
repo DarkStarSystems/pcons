@@ -22,7 +22,7 @@ from pcons.packages.description import PackageDescription
 from pcons.toolchains.qt import _automoc, find_qt
 from pcons.util.add_subdirectory import add_subdirectory
 
-from ._qt_test_utils import cxx_env_with_qt, generate_ninja
+from ._qt_test_utils import cxx_env_with_qt, generate_ninja, object_of
 
 _MODULES = ("Core", "Qml")
 _TOOLS = ("macdeployqt", "moc", "qmltyperegistrar")
@@ -292,7 +292,8 @@ class TestQtInstallAcrossSubdirectories:
         spec = json.loads(spec_path.read_text())
         assert spec["sources"] == [str(child / "src" / "main.cpp")]
         assert spec["no_moc"] == [str(child / "src" / "window.h")]
-        assert "child/obj.app/gen/extra.cpp.o: cxx" in content
+        obj = object_of(top, "app", "extra.cpp")
+        assert f"child/obj.app/gen/{obj}: cxx" in content
 
         gen = spec_path.parent
         assert (
