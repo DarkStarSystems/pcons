@@ -507,3 +507,117 @@ class TestMocFailures:
         assert "moc --collect-json failed" in capsys.readouterr().err
         assert not metatypes.with_name(metatypes.name + ".tmp").exists()
         assert not metatypes.exists()
+
+
+LIBRARY_HEADER = """\
+#pragma once
+#include <QObject>
+class Bits : public QObject {
+    Q_OBJECT
+public:
+    int bits() const { return 3; }
+};
+"""
+
+LIBRARY_SOURCE = '#include "bits.h"\nint bits_value() { return Bits().bits(); }\n'
+
+CONSUMER_MAIN = """\
+#include "generated.hpp"
+#include <cstdio>
+
+int bits_value();
+
+int main() {
+    Generated g;
+    std::printf("meta=%s answer=%d bits=%d\\n", g.metaObject()->className(),
+                g.answer(), bits_value());
+    return 0;
+}
+"""
+
+
+def _generated_include_project(root: Path, monkeypatch, *, real_qt: bool) -> Project:
+    """A Qt program whose scan include path holds a generated directory.
+
+    The directory is a *library's* public include dir, filled by a generator
+    the library declares with ``depends()``. The program only ever sees the
+    directory through the link, so nothing but the propagated ordering can
+    put the generator ahead of the program's automoc scan.
+    """
+    from pcons.toolchains import find_c_toolchain
+    from pcons.toolchains.qt import find_qt
+
+    monkeypatch.chdir(root)
+    write(root / "mk.py", SLOW_GENERATOR)
+    write(root / "lib" / "bits.h", LIBRARY_HEADER)
+    write(root / "lib" / "bits.cpp", LIBRARY_SOURCE)
+    write(root / "app" / "main.cpp", CONSUMER_MAIN)
+
+    project = Project("automoc", root_dir=root, build_dir=root / "build")
+    if real_qt:
+        env = project.Environment(toolchain=find_c_toolchain())
+        env.cxx.set_standard(17)
+        qt_modules = [find_qt(project, env, modules=["Core"]).Core]
+    else:
+        env = cxx_env_with_qt(project)
+        qt_modules = []
+
+    gen_dir = Path(project.root_dir) / project.build_dir / "gen"
+    gen = env.Command(
+        target="gen.stamp",
+        source="mk.py",
+        command=[
+            sys.executable,
+            "$SOURCE",
+            (gen_dir / "generated.hpp").as_posix(),
+            "$TARGET",
+        ],
+    )
+    lib = project.QtStaticLibrary(
+        "bits", env, sources=["lib/bits.cpp", "lib/bits.h"], link=qt_modules
+    )
+    lib.depends(gen)
+    lib.public.include_dirs.append(gen_dir)
+    project.QtProgram("app", env, sources=["app/main.cpp"], link=[lib, *qt_modules])
+    project.resolve()
+    return project
+
+
+class TestAGeneratedDirectoryOnTheScanPath:
+    """The reported three-pass build: a generated dir in the scan path."""
+
+    def test_the_consumers_automoc_waits_for_the_generator(self, tmp_path, monkeypatch):
+        project = _generated_include_project(tmp_path, monkeypatch, real_qt=False)
+        content = generate_ninja(project)
+
+        automoc = next(
+            line
+            for line in content.splitlines()
+            if line.startswith("build qt.app/mocs_compilation.cpp:")
+        )
+        assert "|| " in automoc, automoc
+        assert "gen.stamp" in automoc.split("|| ", 1)[1], automoc
+
+
+@needs_qt
+@needs_ninja
+class TestAGeneratedDirectoryConverges:
+    """Built for real: one pass, then nothing."""
+
+    def test_a_clean_build_settles_in_one_pass(self, tmp_path, monkeypatch):
+        project = _generated_include_project(tmp_path, monkeypatch, real_qt=True)
+        build_dir = build_files(project)
+
+        first = run_ninja(build_dir)
+        assert first.returncode == 0, first.stderr or first.stdout
+        assert "moc_generated.cpp" in aggregator(tmp_path).read_text()
+
+        second = run_ninja(build_dir)
+        assert second.returncode == 0, second.stderr or second.stdout
+        assert "no work to do" in second.stdout, second.stdout
+
+        program = subprocess.run(
+            [str(build_dir / "app")], capture_output=True, text=True, check=True
+        )
+        assert "meta=Generated" in program.stdout
+        assert "answer=42 bits=3" in program.stdout
