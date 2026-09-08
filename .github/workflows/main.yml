@@ -27,7 +27,7 @@ jobs:
       - name: Run ruff format check
         run: uv run ruff format --check .
       - name: Run ty typecheck
-        run: uvx ty check pcons/ examples/
+        run: uv run ty check pcons/ examples/
 
   docs:
     # Both docs builds are seconds each; a broken one otherwise surfaces
@@ -567,7 +567,7 @@ jobs:
         # The default `ty` lint excludes pcons/integrations/rez because rez
         # isn't in that environment; here rez is importable, so type-check it
         # against the real rez API. Explicit file paths bypass the exclude.
-        run: find pcons/integrations/rez -name '*.py' -print0 | xargs -0 uvx ty check
+        run: find pcons/integrations/rez -name '*.py' -print0 | xargs -0 uv run --no-sync ty check
       - name: Build the rez test packages and run the example end-to-end
         # hello_lib (rez's built-in cmake build_system) then hello_app (pcons's
         # build_system plugin — exercises PconsBuildSystem.build()); then run
