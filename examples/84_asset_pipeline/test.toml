@@ -1,0 +1,42 @@
+# Test configuration for the asset pipeline example
+
+[test]
+description = "A custom three-step builder: what depends() means to each step, and the one input a depfile cannot see"
+
+expected_outputs = [
+    "build/palette.txt",
+    "build/abin/forest.abin",
+    "build/abin/cave.abin",
+    "build/level.pak",
+    "build/level.manifest",
+]
+
+[verify]
+commands = [
+    { run = "${PCONS} build", expect_file = "build/level.manifest", expect_content = "forest 3 entries" },
+    { run = "${PCONS} build", expect_file = "build/abin/forest.abin", expect_content = "texture grass 4" },
+]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "A texture: the compile that read it reruns (its depfile said so), the other does not"
+touch = "textures/grass.txt"
+expect_rebuild = ["abin*forest.abin", "level.pak", "level.manifest"]
+expect_no_rebuild = ["abin*cave.abin"]
+
+[[rebuild]]
+description = "The palette: every compile read it, so every compile reruns"
+write."palette.src" = "sky=1e90ff\nlava=cf1020\n"
+expect_rebuild = ["palette.txt", "abin*forest.abin", "abin*cave.abin", "level.pak", "level.manifest"]
+
+[[rebuild]]
+description = "The options file: no step can discover it, so the builder declared it on the compile step"
+write."assetc.opts" = "scale=2\n"
+expect_rebuild = ["abin*forest.abin", "abin*cave.abin", "level.pak", "level.manifest"]
+
+[skip]
+# A custom builder has no Xcode equivalent.
+generators = ["xcode"]

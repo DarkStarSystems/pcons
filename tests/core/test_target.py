@@ -293,7 +293,7 @@ class TestTarget:
         # Usage-requirement propagation must NOT pull in libB.
         assert set(exe.transitive_dependencies()) == {libA}
         # Link-input collection must include libB.
-        assert set(exe.transitive_dependencies(for_link=True)) == {libA, libB}
+        assert set(exe.transitive_link_dependencies()) == {libA, libB}
 
     def test_transitive_link_deps_stop_at_shared_lib(self, test_project):  # noqa: F811
         # A shared library resolves its own private deps, so libB stays hidden.
@@ -303,7 +303,7 @@ class TestTarget:
         exe = Target("exe", target_type="program")
         exe.private.link_libs.append(libA)
 
-        assert set(exe.transitive_dependencies(for_link=True)) == {libA}
+        assert set(exe.transitive_link_dependencies()) == {libA}
 
     def test_usage_requirements(self, test_project):  # noqa: F811
         lib = Target("lib")
@@ -836,231 +836,188 @@ class TestPostBuild:
 
 
 class TestTargetDepends:
-    """Tests for target.depends() implicit dependency support."""
+    """Tests for target.depends()."""
 
     def test_depends_with_file_node(self, test_project):  # noqa: F811
         """depends() accepts FileNode objects."""
         target = Target("app")
         dep = FileNode("tools/codegen.py")
-
         target.depends(dep)
-
-        assert dep in target._extra_implicit_deps
+        assert target._dependencies == [dep]
 
     def test_depends_with_string_no_project(self, test_project):  # noqa: F811
         """depends() with string creates FileNode when no project."""
         target = Target("app")
-
         target.depends("tools/codegen.py")
-
-        assert len(target._extra_implicit_deps) == 1
-        assert target._extra_implicit_deps[0].path == Path("tools/codegen.py")
+        assert len(target._dependencies) == 1
+        assert target._dependencies[0].path == Path("tools/codegen.py")
 
     def test_depends_with_target(self, test_project):  # noqa: F811
-        """depends() with Target adds to implicit target deps, not link deps."""
+        """depends() with a Target is a build dependency, not a link dep."""
         target = Target("app")
         lib = Target("mylib")
-
         target.depends(lib)
-
-        assert lib in target._implicit_target_deps
-        assert len(target.dependencies) == 0
-        assert len(target._extra_implicit_deps) == 0
+        assert target.dependencies == (lib,)
+        assert lib not in target.public.link_libs
+        assert lib not in target.private.link_libs
 
     def test_depends_mixed_args(self, test_project):  # noqa: F811
-        """depends() handles mixed Target and file args."""
+        """depends() handles mixed Target and file args, in order."""
         target = Target("app")
         lib = Target("mylib")
         config = FileNode("config.yaml")
-
         target.depends(lib, config, "tools/script.py")
-
-        assert lib in target._implicit_target_deps
-        assert lib not in target.dependencies
-        assert config in target._extra_implicit_deps
-        assert len(target._extra_implicit_deps) == 2
+        items = list(target._dependencies)
+        assert items[:2] == [lib, config]
+        assert items[2].path == Path("tools/script.py")
+        assert target.dependencies == (lib,)
 
     def test_depends_fluent(self, test_project):  # noqa: F811
         """depends() returns self for chaining."""
         target = Target("app")
-
         result = target.depends("a.txt").depends("b.txt")
-
         assert result is target
-        assert len(target._extra_implicit_deps) == 2
+        assert len(target._dependencies) == 2
 
     def test_depends_applied_during_resolve(self, tmp_path):
         """depends() deps are applied to output nodes during resolve."""
         project = Project("test", root_dir=tmp_path, build_dir="build")
         env = project.Environment()
-
         cmd = env.Command(
             target="output.txt",
             source="input.txt",
             command="tool $SOURCE $TARGET",
         )
         cmd.depends("tools/codegen.py")
-
         # Before resolve, output nodes don't have the implicit dep yet
         assert len(cmd.output_nodes[0].implicit_deps) == 0
-
         project.resolve()
-
         # After resolve, the dep is on the output node
         assert len(cmd.output_nodes[0].implicit_deps) == 1
 
-    def test_apply_extra_implicit_deps_propagated(self, test_project):  # noqa: F811
-        """Propagated deps go on both object nodes and output nodes."""
+    @staticmethod
+    def _target_with_nodes() -> tuple[Target, FileNode, FileNode]:
+        """A target with one compile (which records its own dependencies)
+        and one link output (which does not)."""
         target = Target("app")
         obj = FileNode("build/main.o")
+        obj._build_info = {"deps_style": "gcc"}
         exe = FileNode("build/app")
         target.intermediate_nodes.append(obj)
         target.output_nodes.append(exe)
-        dep = FileNode("version.h")
-        target._extra_implicit_deps.append(dep)
+        return target, obj, exe
 
-        target._apply_extra_implicit_deps()
-
-        assert dep in obj.implicit_deps
+    def test_file_dep_waits_as_loosely_as_each_node_allows(self, test_project):  # noqa: F811
+        """A file follows the same rule as a target's outputs: order-only
+        for a node with dependency discovery, implicit for one without."""
+        target, obj, exe = self._target_with_nodes()
+        dep = FileNode("app.ld")
+        target.depends(dep)
+        target._apply_dependencies()
+        assert dep in obj.order_only_deps
         assert dep in exe.implicit_deps
 
-    def test_apply_extra_implicit_deps_output_only(self, test_project):  # noqa: F811
-        """Output-only deps go on output nodes but not object nodes."""
-        target = Target("app")
-        obj = FileNode("build/main.o")
-        exe = FileNode("build/app")
-        target.intermediate_nodes.append(obj)
-        target.output_nodes.append(exe)
-        dep = FileNode("data.bin")
-        target._extra_implicit_deps_output_only.append(dep)
+    def test_target_dep_waits_as_loosely_as_each_node_allows(self, test_project):  # noqa: F811
+        """A compile with dependency discovery waits order-only for a
+        dependency's outputs; a node without it takes them as implicit deps."""
+        target, obj, exe = self._target_with_nodes()
+        gen = Target("gen")
+        header = FileNode("build/generated.h")
+        gen.output_nodes.append(header)
+        target.depends(gen)
+        target._apply_dependencies()
+        assert header in obj.order_only_deps
+        assert header not in obj.implicit_deps
+        assert header in exe.implicit_deps
 
-        target._apply_extra_implicit_deps()
+    def test_a_dependency_with_no_outputs_stands_for_its_own(self, test_project):  # noqa: F811
+        """An interface target builds nothing, so depending on it means
+        depending on whatever it depends on: its generator's outputs, and
+        its files, land on the dependent's nodes by the same rule."""
+        target, obj, exe = self._target_with_nodes()
+        gen = Target("gen")
+        header = FileNode("build/generated.h")
+        gen.output_nodes.append(header)
+        config = FileNode("config.h")
+        headers = Target("headers")
+        headers.depends(gen, config)
+        target.depends(headers)
+        target._apply_dependencies()
+        assert header in obj.order_only_deps
+        assert header in exe.implicit_deps
+        assert config in obj.order_only_deps
+        assert config in exe.implicit_deps
 
-        assert dep not in obj.implicit_deps
-        assert dep in exe.implicit_deps
-
-    def test_depends_propagate_false(self, test_project):  # noqa: F811
-        """depends(propagate=False) stores in output-only lists."""
-        target = Target("app")
-        lib = Target("mylib")
-
-        target.depends(lib, "config.yaml", propagate=False)
-
-        assert lib in target._implicit_target_deps_output_only
-        assert lib not in target._implicit_target_deps
-        assert len(target._extra_implicit_deps) == 0
-        assert len(target._extra_implicit_deps_output_only) == 1
+    def test_ordering_outputs_ends_on_a_cycle_of_interface_targets(self, test_project):  # noqa: F811
+        a = Target("a")
+        b = Target("b")
+        a.depends(b)
+        b.depends(a)
+        assert a.ordering_outputs() == []
 
     def test_apply_no_duplicates(self, test_project):  # noqa: F811
-        """_apply_extra_implicit_deps doesn't add duplicates."""
+        """_apply_dependencies doesn't add duplicates."""
         target = Target("app")
         output = FileNode("build/app")
         target.output_nodes.append(output)
-        dep = FileNode("version.txt")
-        target._extra_implicit_deps.append(dep)
-
-        target._apply_extra_implicit_deps()
-        target._apply_extra_implicit_deps()  # Apply twice
-
-        assert output.implicit_deps.count(dep) == 1
+        target.depends(FileNode("version.txt"))
+        target._apply_dependencies()
+        target._apply_dependencies()  # Apply twice
+        assert len(output.implicit_deps) == 1
 
     def test_depends_with_project(self, tmp_path):
         """depends() uses project.node() when project is available."""
         project = Project("test", root_dir=tmp_path, build_dir="build")
         target = Target("app")
-
         target.depends("tools/codegen.py")
-
-        dep = target._extra_implicit_deps[0]
+        dep = target._dependencies[0]
         # project.node() canonicalizes the path
         assert dep is project.node("tools/codegen.py")
 
+    def test_raises_after_resolve(self, test_project):  # noqa: F811
+        """depends() fails once the target is resolved."""
+        target = Target("app")
+        target._resolved = True
+        with pytest.raises(RuntimeError, match="after resolve"):
+            target.depends("a.txt")
 
-class TestTargetAddDependency:
-    """Tests for target.add_dependency()."""
 
-    def test_adds_single_dependency(self, test_project):  # noqa: F811
-        """add_dependency() records the target as a build dependency."""
-        app = Target("app")
-        lib = Target("lib")
-
-        app.add_dependency(lib)
-
-        assert lib in app._dependencies
-        assert lib in app.dependencies
-
-    def test_returns_self_for_chaining(self, test_project):  # noqa: F811
-        """add_dependency() returns self for fluent chaining."""
-        app = Target("app")
-        a = Target("a")
-        b = Target("b")
-
-        result = app.add_dependency(a).add_dependency(b)
-
-        assert result is app
-        assert app._dependencies == [a, b]
-
-    def test_adds_multiple_in_one_call(self, test_project):  # noqa: F811
-        """add_dependency() accepts several targets at once."""
-        app = Target("app")
-        a = Target("a")
-        b = Target("b")
-
-        app.add_dependency(a, b)
-
-        assert app._dependencies == [a, b]
+class TestTargetDependsOnTargets:
+    """depends() with Target arguments."""
 
     def test_ignores_duplicates(self, test_project):  # noqa: F811
-        """add_dependency() ignores already-present targets."""
         app = Target("app")
         lib = Target("lib")
-
-        app.add_dependency(lib)
-        app.add_dependency(lib, lib)
-
-        assert app._dependencies.count(lib) == 1
+        app.depends(lib)
+        app.depends(lib, lib)
+        assert app.dependencies.count(lib) == 1
 
     def test_not_treated_as_link_lib(self, test_project):  # noqa: F811
-        """add_dependency() does not add the target as a library to link."""
+        """depends() does not add the target as a library to link."""
         app = Target("app")
         lib = Target("lib")
-
-        app.add_dependency(lib)
-
+        app.depends(lib)
         assert lib not in app.public.link_libs
         assert lib not in app.private.link_libs
 
     def test_propagates_to_transitive_dependencies(self, test_project):  # noqa: F811
-        """Dependencies added via add_dependency() are transitively collected."""
+        """depends() targets are transitively collected."""
         app = Target("app")
         lib = Target("lib")
         sublib = Target("sublib")
-
-        lib.add_dependency(sublib)
-        app.add_dependency(lib)
-
+        lib.depends(sublib)
+        app.depends(lib)
         transitive = app.transitive_dependencies()
         assert lib in transitive
         assert sublib in transitive
 
     def test_invalidates_cached_requirements(self, test_project):  # noqa: F811
-        """add_dependency() clears the collected-requirements cache."""
+        """depends() clears the collected-requirements cache."""
         app = Target("app")
         lib = Target("lib")
         app._collected_requirements = UsageRequirements()  # pretend a cache exists
-
-        app.add_dependency(lib)
-
+        app.depends(lib)
         assert app._collected_requirements is None
-
-    def test_raises_after_resolve(self, test_project):  # noqa: F811
-        """add_dependency() fails once the target is resolved."""
-        app = Target("app")
-        lib = Target("lib")
-        app._resolved = True
-
-        with pytest.raises(RuntimeError, match="after resolve"):
-            app.add_dependency(lib)
 
 
 class TestTargetSubdir:

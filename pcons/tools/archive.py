@@ -273,7 +273,7 @@ class TarfileBuilder:
             "compression": compression,
             "base_dir": str(base_dir) if base_dir else ".",
         }
-        target._pending_sources = list(sources) if sources else []
+        target._add_pending_sources(sources or [])
 
         return target
 
@@ -334,7 +334,7 @@ class ZipfileBuilder:
             "output": str(output_path),
             "base_dir": str(base_dir) if base_dir else ".",
         }
-        target._pending_sources = list(sources) if sources else []
+        target._add_pending_sources(sources or [])
 
         return target
 

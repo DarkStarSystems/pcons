@@ -82,7 +82,7 @@ def reference_project(
     scanner = scanner if scanner is not None else make_scanner()
     a = pack(env, "a")
     b = pack(env, "b")
-    b.add_dependency(a)
+    b.depends(a)
     scanner.attach(a, b)
     project.resolve()
     return project, scanner, a, b
@@ -506,8 +506,8 @@ class TestManifest:
         env = project.Environment()
         scanner = make_scanner()
         a, b, c = pack(env, "a"), pack(env, "b"), pack(env, "c")
-        b.add_dependency(a)
-        c.add_dependency(b)
+        b.depends(a)
+        c.depends(b)
         scanner.attach(a, b, c)
         project.resolve()
 
@@ -522,7 +522,7 @@ class TestManifest:
         project = make_project(tmp_path, monkeypatch)
         env = project.Environment()
         a, b = pack(env, "a"), pack(env, "b")
-        b.add_dependency(a)
+        b.depends(a)
         make_scanner().attach(b)
         project.resolve()
 
@@ -715,7 +715,7 @@ class TestSharedEdgeOwnership:
         consumer_edge = FileNode("build/obj.consumer/c.pack")
         consumer_edge._build_info = {"env": env, "sources": [consumer_src]}
         consumer = make_target("consumer", [consumer_edge])
-        consumer.add_dependency(two)
+        consumer.depends(two)
 
         scanner = make_scanner()
         scanner.attach(one, two, consumer)

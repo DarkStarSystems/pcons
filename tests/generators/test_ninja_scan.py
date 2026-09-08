@@ -63,7 +63,7 @@ def build_ninja(
         )
 
     a, b = pack("a"), pack("b")
-    b.add_dependency(a)
+    b.depends(a)
     (scanner if scanner is not None else make_scanner()).attach(a, b)
     project.resolve()
 
@@ -170,9 +170,12 @@ class TestScanStatement:
 
         line = statement(content, "build packs/b.pack.scaninfo.json:")[0]
 
+        # b.depends(a) makes b's pack wait for a.pack (order-only:
+        # its dyndep discovers what it reads). The scan inherits the wait,
+        # and with no dependency tracking of its own holds it as implicit.
         assert re.match(
             r"^build packs/b\.pack\.scaninfo\.json: scan_scene_refs_\S+ "
-            r"\$topdir/b\.scene \| \$topdir/tools/scan\.py$",
+            r"\$topdir/b\.scene \| \$topdir/tools/scan\.py packs/a\.pack$",
             line,
         ), line
 

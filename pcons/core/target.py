@@ -462,19 +462,6 @@ class Target:
         #       Files passed to linker with flags and handler info
         #   - Other builder-specific data (dest_dir, compression, etc.)
         "_builder_data",
-        # Implicit file deps from target.depends(file/path/node).
-        # Applied to all build nodes (object + output) during resolve.
-        "_extra_implicit_deps",
-        # Implicit file deps with propagate=False (output nodes only).
-        "_extra_implicit_deps_output_only",
-        # Implicit target deps from target.depends(other_target).
-        # Outputs become implicit deps on all build nodes; public usage
-        # requirements propagate to compile steps (like link() but without
-        # adding outputs to linker $in).
-        "_implicit_target_deps",
-        # Implicit target deps with propagate=False (output nodes only,
-        # no usage requirement propagation).
-        "_implicit_target_deps_output_only",
         # Per-source environment overrides (add_sources(..., env=...)),
         # keyed by source node path.
         "_source_envs",
@@ -517,7 +504,8 @@ class Target:
         self.builder = builder
         self._sources: list[Node] = []
         self._source_set: set[Node] = set()
-        self._dependencies: list[Target] = []
+        # Every depends() edge: a target to build first, or a file to have.
+        self._dependencies: list[Target | Node] = []
         self.public = _make_default_requirements(self.__link_libs_validator)
         self.private = _make_default_requirements(self.__link_libs_validator)
         self.required_languages: set[str] = set()
@@ -542,12 +530,6 @@ class Target:
         self._build_info: BuildInfo | dict[str, Any] | None = None
         self._builder_name: str | None = None
         self._builder_data: dict[str, Any] = {}
-        # Implicit file deps (from target.depends(file/path/node))
-        self._extra_implicit_deps: list[Node] = []
-        self._extra_implicit_deps_output_only: list[Node] = []
-        # Implicit target deps (from target.depends(other_target))
-        self._implicit_target_deps: list[Target] = []
-        self._implicit_target_deps_output_only: list[Target] = []
         # Sources that compile with an environment other than the target's
         # (add_sources(..., env=...)), keyed by source node path.
         self._source_envs: dict[Path, Environment] = {}
@@ -594,27 +576,19 @@ class Target:
         return self._env
 
     @property
-    def dependencies(self):
-        """Get the list of Target dependencies for this target."""
-        linked_public_targets = [
-            t for t in self.public.link_libs if isinstance(t, Target)
-        ]
-        linked_private_targets = [
-            t for t in self.private.link_libs if isinstance(t, Target)
-        ]
-        # A Target given as a source is a dependency too: its outputs are this
-        # target's inputs, so it must resolve first.
-        source_targets = [
-            t
-            for t in (self._pending_sources or ())
-            if isinstance(t, Target) and t not in self._dependencies
-        ]
+    def dependencies(self) -> tuple[Target, ...]:
+        """Every target that must be resolved before this one: the targets
+        it depends on (a source target among them) and the libraries it
+        links."""
         return (
-            *self._dependencies,
-            *source_targets,
-            *linked_public_targets,
-            *linked_private_targets,
+            *self._dependency_targets(),
+            *(t for t in self.public.link_libs if isinstance(t, Target)),
+            *(t for t in self.private.link_libs if isinstance(t, Target)),
         )
+
+    def _dependency_targets(self) -> list[Target]:
+        """The targets named by depends(), in order."""
+        return [d for d in self._dependencies if isinstance(d, Target)]
 
     @property
     def sources(self) -> list[Node]:
@@ -801,50 +775,33 @@ class Target:
             )  # ValidatedUniqueList: validates, de-dupes, invalidates cache
         return self
 
-    def add_dependency(self, *targets: Target) -> Target:
-        """Add Targets as build dependencies of this target.
+    def depends(self, *items: Target | Node | Path | str) -> Target:
+        """Build *items* before this target (fluent API).
 
-        Public usage requirements propagate here, but unlike ``link()`` /
-        ``link_private()`` the targets are not linked as libraries.
-        Duplicates are ignored. Returns self for chaining.
-        """
-        if self._resolved:
-            raise RuntimeError(
-                f"Cannot modify target '{self.name}' after resolve(). "
-                f"Add dependencies before project.resolve() or project.generate()."
-            )
-        for target in targets:
-            if target not in self._dependencies:
-                self._dependencies.append(target)
-        # Invalidate cached requirements
-        self._collected_requirements = None
+        A target is built first, and its public usage requirements
+        (headers, defines, flags) apply here and to this target's consumers,
+        as with ``link()`` -- but it is not linked. A file (Node, Path or
+        str, read from the directory of the script that declared this
+        target, like ``add_sources()``) is up to date first, without being
+        passed as a source.
 
-        return self
-
-    def depends(
-        self,
-        *items: Target | Node | Path | str,
-        propagate: bool = True,
-    ) -> Target:
-        """Add implicit dependencies (fluent API).
-
-        Implicit deps (after ``|`` in ninja) must be up to date before this
-        target builds, but are NOT passed as sources (not in ``$in``) — use
-        ``target.link()`` for that. By default deps apply to **all** build
-        nodes (so generated files exist before any compile starts), and
-        Target deps propagate public usage requirements like ``link()``.
-        With ``propagate=False``, deps apply only to the final output nodes.
-
-        Args:
-            *items: Files or targets to depend on. Strings and Paths are
-                   converted to FileNodes via ``project.node()``, read from
-                   the directory of the script that declared this target,
-                   like ``add_sources()``.
-            propagate: If True (default), apply to all build steps
-                      (intermediate + output). If False, only output.
+        Each build step of this target then holds the dependency's outputs
+        (or the file) as tightly as it needs to. A step that records what it
+        reads -- a compile with a depfile -- waits only for them to exist,
+        and its own record says whether a change reruns it. A step that
+        records nothing reruns whenever they change. So ``app.depends(
+        "app.ld")`` relinks when the linker script changes and leaves the
+        compiles alone, and ``lib.depends(gen)`` recompiles only the sources
+        that included what ``gen`` wrote. What a library you ``link()``
+        waits for reaches your compiles the same way, so a library whose
+        public headers are generated declares the generator once.
 
         Returns:
             self for method chaining.
+
+        Raises:
+            ValueError: If a target depends on itself.
+            RuntimeError: If called after the target has been resolved.
 
         Example:
             gen = env.Command(
@@ -853,67 +810,98 @@ class Target:
                 command="python codegen.py $SOURCE -o $TARGET",
                 restat=True,
             )
-            # Generated header: use depends() so compile steps wait.
+            # Generated header: depends() so compile steps wait for it.
             app = project.Program("app", env, sources=["main.c"])
             app.depends(gen)
         """
-        from pcons.core.node import FileNode, Node
+        from pcons.core.node import Node
 
+        if self._resolved:
+            raise RuntimeError(
+                f"Cannot modify target '{self.name}' after resolve(). "
+                f"Add dependencies before project.resolve() or project.generate()."
+            )
         for item in items:
             if isinstance(item, Target):
                 if item is self:
                     raise ValueError(f"Target '{self.name}' cannot depend on itself.")
                 self._check_same_tree(item, "depend on")
-                target_list = (
-                    self._implicit_target_deps
-                    if propagate
-                    else self._implicit_target_deps_output_only
-                )
-                if item not in target_list:
-                    target_list.append(item)
-            else:
-                file_list = (
-                    self._extra_implicit_deps
-                    if propagate
-                    else self._extra_implicit_deps_output_only
-                )
-                if isinstance(item, Node):
-                    file_list.append(item)
-                else:
-                    # str or Path — convert to FileNode via project
-                    project = self.project
-                    if project is not None:
-                        if self._subdir.parts:
-                            item = self._subdir / item
-                        file_list.append(project.node(item))
-                    else:
-                        file_list.append(
-                            FileNode(item, defined_at=get_caller_location())
-                        )
+            elif not isinstance(item, Node):
+                # str or Path: a FileNode via the project
+                if self._subdir.parts:
+                    item = self._subdir / item
+                item = self.project.node(item)
+            if item not in self._dependencies:
+                self._dependencies.append(item)
+        # Invalidate cached requirements
+        self._collected_requirements = None
 
         return self
 
-    def _apply_extra_implicit_deps(self, dest: Target | None = None) -> None:
-        """Apply file-level implicit deps to build nodes (propagated deps on
-        all nodes, output-only deps on output nodes).
+    def _apply_dependencies(self) -> None:
+        """Wire the depends() edges onto this target's nodes.
 
-        Args:
-            dest: Target whose nodes receive the deps. Defaults to self.
-                A resolver passes a consumer target here when self is an
-                interface target with no nodes of its own to attach to
-                (#111): the ordering is applied where it can take effect
-                instead of being silently dropped.
+        Called by the resolver once every target has its nodes and every
+        edge knows whether it discovers its own dependencies; see
+        :meth:`depends` and :meth:`FileNode.wait_for`.
         """
-        dest = dest if dest is not None else self
-        all_nodes = dest.intermediate_nodes + dest.output_nodes
-        for dep in self._extra_implicit_deps:
-            for node in all_nodes:
-                if dep not in node.implicit_deps:
-                    node.implicit_deps.append(dep)
-        for dep in self._extra_implicit_deps_output_only:
-            for node in dest.output_nodes:
-                if dep not in node.implicit_deps:
-                    node.implicit_deps.append(dep)
+        nodes = self.intermediate_nodes + self.output_nodes
+        for dep in self._dependencies:
+            outputs = dep.ordering_outputs() if isinstance(dep, Target) else [dep]
+            for node in nodes:
+                node.wait_for(outputs)
+
+    def ordering_outputs(self, seen: set[Target | Node] | None = None) -> list[Node]:
+        """What a dependent of this target waits for.
+
+        This target's outputs -- or, for a target that builds nothing of its
+        own (an interface library), whatever its own dependencies produce,
+        since that ordering can only hold in the dependent. ``seen`` keeps a
+        chain of such targets finite even before cycle detection has run.
+        """
+        if seen is None:
+            seen = set()
+        if self.output_nodes:
+            return list(self.output_nodes)
+        result: list[Node] = []
+        for dep in self._dependencies:
+            if dep in seen:
+                continue
+            seen.add(dep)
+            if isinstance(dep, Target):
+                result.extend(dep.ordering_outputs(seen))
+            else:
+                result.append(dep)
+        return result
+
+    def inherited_dependency_outputs(self) -> list[Node]:
+        """What the targets this one links wait for, for this target's own
+        build steps to wait for too.
+
+        A linked library's public headers are on this target's compile line,
+        but only the link step waits for the library itself, so the compiles
+        would race whatever fills those headers. A library whose public
+        headers are generated therefore declares ``lib.depends(gen)`` once,
+        and every target that links it waits for the same generator: this
+        returns the outputs of every dependency (a ``depends()``, a generated
+        source) of every target in the link closure.
+
+        A target reached through ``depends()`` needs none of this: this
+        target's steps wait for its outputs directly, and those wait for
+        everything it needs.
+        """
+        seen: set[int] = set()
+        result: list[Node] = []
+        for member in self.transitive_link_dependencies():
+            for dep in member._dependencies:
+                if dep is self:
+                    continue
+                outputs = dep.ordering_outputs() if isinstance(dep, Target) else [dep]
+                for node in outputs:
+                    if id(node) not in seen:
+                        seen.add(id(node))
+                        result.append(node)
+        return result
 
     def add_source(
         self, source: Target | Node | Path | str, *, env: Environment | None = None
@@ -1018,9 +1006,17 @@ class Target:
                 f"consumed twice."
             )
         self._pending_sources.append(source)
-        # Add as dependency to ensure correct build order
-        if source not in self._dependencies:
-            self._dependencies.append(source)
+        # A source target is a dependency whose outputs are also inputs.
+        self.depends(source)
+
+    def _add_pending_sources(
+        self, sources: Sequence[Target | Node | Path | str]
+    ) -> None:
+        """Sources a factory turns into inputs once their targets resolve
+        (Install, Tarfile, env.Command). A source target is a dependency
+        whose outputs are also inputs."""
+        self._pending_sources = list(sources)
+        self.depends(*[s for s in sources if isinstance(s, Target)])
 
     def _add_source_node(self, node: Node, env: Environment | None) -> None:
         """Add one source node, rejecting a source the target already has.
@@ -1172,24 +1168,28 @@ class Target:
 
         return languages
 
-    def transitive_dependencies(self, *, for_link: bool = False) -> list[Target]:
-        """Return all transitive dependencies (DFS order, no duplicates,
-        not including self).
+    def transitive_dependencies(self) -> list[Target]:
+        """Every target whose public usage requirements reach this one (DFS
+        order, no duplicates, not including self): the targets it depends on
+        and links, and theirs, through public edges. A dependency's private
+        link_libs stay with it."""
+        return self._closure(for_link=False)
 
-        Args:
-            for_link: When True, collect link inputs rather than propagated
-                usage requirements: private link_libs are followed through
-                static-library targets, since an archive does not contain
-                its dependencies. With for_link=False, private deps are
-                never followed.
-        """
+    def transitive_link_dependencies(self) -> list[Target]:
+        """Every target whose output is a link input of this one (DFS order,
+        no duplicates, not including self): the linked targets, with private
+        link_libs followed through static libraries, since an archive does
+        not contain its dependencies. depends() targets are not linked."""
+        return self._closure(for_link=True)
+
+    def _closure(self, *, for_link: bool) -> list[Target]:
         result: list[Target] = []
         visited: set[str] = set()
 
         def direct_deps(target: Target, *, include_private: bool) -> list[Target]:
             # A dependency's *private* link_libs do not propagate to consumers,
             # so we only follow public ones when recursing.
-            deps = list(target._dependencies)
+            deps = [] if for_link else target._dependency_targets()
             deps += [t for t in target.public.link_libs if isinstance(t, Target)]
             if include_private:
                 deps += [t for t in target.private.link_libs if isinstance(t, Target)]

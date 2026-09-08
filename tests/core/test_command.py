@@ -889,7 +889,7 @@ class TestCommandDepends:
             depends="tools/gen.py",
         )
 
-        assert len(result._extra_implicit_deps) == 1
+        assert len(result._dependencies) == 1
         # Applied to output nodes during resolve
         project.resolve()
         assert len(result.output_nodes[0].implicit_deps) == 1
@@ -906,7 +906,7 @@ class TestCommandDepends:
             depends=["tools/gen.py", "config.yaml"],
         )
 
-        assert len(result._extra_implicit_deps) == 2
+        assert len(result._dependencies) == 2
         project.resolve()
         assert len(result.output_nodes[0].implicit_deps) == 2
 

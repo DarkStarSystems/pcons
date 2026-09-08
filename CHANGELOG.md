@@ -103,6 +103,37 @@ machinery to support this kind of dynamic dependencies.
 
 ### Changed
 
+- **`depends()` is now the one way to declare a dependency that is not linked,
+  and every dependency edge lives in one list** with the linked libraries,
+  so every part of pcons that walks the dependency graph sees the same
+  graph. Several fixes in this release were each one place that did not
+  (#104, #111, #129, #139). What changes for a build script:
+  - **Breaking:** `add_dependency()` is gone; write `depends()`. It had
+    become the same edge, and on an install, archive or `env.Command`
+    target it used to be accepted and do nothing.
+  - Each step in a builder decides how tightly it holds a dependency.
+    A compile with a depfile becomes order-only: a generated header it
+    doesn't include won't recompile it, and neither does a linker
+    script. A step with no dependency tracking, such as the link, still
+    reruns when the dependency changes. So e.g. `app.depends("app.ld")`
+    properly relinks without recompiling when `app.ld` changes.
+    See `examples/84_asset_pipeline` for a custom three-step builder
+    that shows much of this, including one input a depfile can't see.
+  - A linked target's dependencies reach its consumers uniformly: the
+    generators, generated sources and files a library `depends()` on order
+    the compiles of every target that links it, whether the library is
+    compiled, header-only or an imported wrapper, and its public usage
+    requirements propagate.
+  - **Breaking:** `depends(..., propagate=False)` is gone. It chose which
+    steps a dependency reached; the rule above makes that choice automatic per step.
+  - A dependency cycle through `depends()` is reported by the build-order
+    check like any other. `depends()` after `resolve()` raises.
+  - The link line comes from linked targets only, so a `depends()` on a
+    target that builds a library no longer puts that library on the link
+    line. Link it, or leave it a plain dependency.
+    `transitive_dependencies(for_link=True)` is now
+    `transitive_link_dependencies()`.
+
 - **C++20 modules are rebuilt on the Scanner primitive, for clang, GCC and
   MSVC.** Nothing is scanned at configure time any more. Each translation
   unit gets its own scan edge (`clang-scan-deps`, `cl /scanDependencies`,
@@ -192,7 +223,8 @@ machinery to support this kind of dynamic dependencies.
   The resolver visits targets in dependency order in a single pass, so a
   target whose sources are other targets has its nodes by the time the edge
   is applied. Before, such edges were silently dropped. Reported in #129.
-- `depends(path, propagate=False)` no longer drops the file dependency.
+- `depends(path, propagate=False)` no longer drops the file dependency
+  (the flag itself is gone; see Changed).
 - A scanner can be attached to a target whose sources are other targets.
 
 - **Fortran no longer rebuilds its whole module scope forever.** gfortran

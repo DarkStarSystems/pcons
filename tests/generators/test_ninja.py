@@ -903,8 +903,9 @@ class TestNinjaSrcDir:
         content = (tmp_path / "build" / "build.ninja").read_text()
         assert "restat" not in content
 
-    def test_target_depends_creates_implicit_dep_on_all_steps(self, tmp_path):
-        """target.depends(gen) adds | dep to both compile and link steps."""
+    def test_target_depends_orders_compiles_and_waits_at_link(self, tmp_path):
+        """target.depends(gen): order-only (||) on the compile, whose depfile
+        settles whether it read the header; implicit (|) on the link."""
         from pcons import find_c_toolchain
 
         try:
@@ -931,11 +932,10 @@ class TestNinjaSrcDir:
         content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
         lines = content.splitlines()
 
-        # Compile step should have generated.h as implicit dep
         compile_line = next((ln for ln in lines if ln.startswith("build obj.")), None)
         assert compile_line is not None, "compile line not found"
-        assert "| " in compile_line, f"No implicit dep on compile: {compile_line}"
-        assert "generated.h" in compile_line.split("| ", 1)[1]
+        assert "|| " in compile_line, f"No order-only dep on compile: {compile_line}"
+        assert "generated.h" in compile_line.split("|| ", 1)[1]
 
         # Link step should also have generated.h as implicit dep, not in $in
         link_line = next(
@@ -955,7 +955,7 @@ class TestNinjaSrcDir:
 
 
 class TestExtraObjectDeps:
-    """`depends=` and `node.depends()` must be implicit deps, not $in (G24).
+    """`depends=` and `node.depends()` must be dependencies, not $in (G24).
 
     A generated header that arrives in $in is a second positional input, and
     clang refuses: "cannot specify -o when generating multiple output files".
@@ -1000,6 +1000,7 @@ class TestExtraObjectDeps:
         assert "main.c" in inputs
 
     def test_object_builder_depends_kwarg(self, tmp_path, gcc_toolchain):
+        """depends= on a single edge is that edge's own input: implicit."""
         project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
         env.cc.Object("build/manual.o", "main.c", depends=[gen.output_nodes[0]])
 
@@ -1013,14 +1014,16 @@ class TestExtraObjectDeps:
         "builder", ["Program", "StaticLibrary", "SharedLibrary", "ObjectLibrary"]
     )
     def test_compile_builder_depends_kwarg(self, tmp_path, gcc_toolchain, builder):
+        """A target in depends= is waited for order-only: the compile's
+        depfile records the generated header if it reads it."""
         project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
         getattr(project, builder)("app", env, sources=["main.c"], depends=[gen])
 
         lines = self._generate(project, tmp_path)
         obj_line = self._obj_line(lines)
-        inputs, implicit = obj_line.split(" | ", 1)
+        inputs, order_only = obj_line.split(" || ", 1)
         assert "generated.h" not in inputs
-        assert "generated.h" in implicit
+        assert "generated.h" in order_only
 
     def test_the_source_is_still_a_positional_input(self, tmp_path, gcc_toolchain):
         project, env, gen = self._project_with_generated_header(tmp_path, gcc_toolchain)
@@ -1028,10 +1031,10 @@ class TestExtraObjectDeps:
 
         lines = self._generate(project, tmp_path)
         obj_line = self._obj_line(lines)
-        inputs, implicit = obj_line.split(" | ", 1)
+        inputs, rest = obj_line.split(" |", 1)
         assert "$topdir/main.c" in inputs
-        # ...and only there, not also as an implicit dep.
-        assert "main.c" not in implicit
+        # ...and only there, not also as a dependency of another kind.
+        assert "main.c" not in rest
 
     def test_unknown_kwarg_is_rejected(self, tmp_path, gcc_toolchain):
         project = Project("test", root_dir=tmp_path, build_dir="build")
@@ -1114,12 +1117,51 @@ class TestGeneratedSourcesOfALinkedDep:
         assert "|| gen.inc" in c_line
         assert "| gen.inc" in s_line and "|| gen.inc" not in s_line
 
-    def test_the_link_still_waits_on_it(self, tmp_path, gcc_toolchain):
+    def test_the_link_waits_through_the_library(self, tmp_path, gcc_toolchain):
+        """The link's wait is the library itself, whose objects wait for the
+        generated file; a direct edge would only relink for a change that
+        already relinks through the library."""
         lines = self._build(tmp_path, gcc_toolchain)
         # "app" on POSIX, "app.exe" on Windows.
         link_line = next(ln for ln in lines if ln.startswith("build app"))
 
-        assert "gen.c" in link_line.split(" | ", 1)[1]
+        # libgenlib.a here, genlib.lib on Windows.
+        assert "genlib" in link_line.split(" |", 1)[0]
+        assert "gen.c" not in link_line
+
+    def test_a_command_dependencys_own_inputs_are_not_inherited(
+        self, tmp_path, gcc_toolchain
+    ):
+        """depends(cmd) waits for the command's outputs, and those wait for
+        the command's inputs; inheriting the inputs as well would relink the
+        program whenever the command's data changed, even when its output
+        did not (write_if_different)."""
+        project = Project("test", root_dir=tmp_path, build_dir="build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        (tmp_path / "main.c").write_text("int main(void){return 0;}\n")
+        (tmp_path / "tool.c").write_text("int main(void){return 0;}\n")
+        (tmp_path / "data.txt").write_text("1\n")
+        tool = project.Program("tool", env, sources=["tool.c"])
+        items = env.Command(
+            target="gen/items.c",
+            source=[tool],
+            depends=["data.txt"],
+            command="$SOURCE $TARGET",
+        )
+        app = project.Program("app", env, sources=["main.c"])
+        app.depends(items)
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
+        lines = content.splitlines()
+        obj_line = next(ln for ln in lines if ln.startswith("build obj.app/"))
+        link_line = next(ln for ln in lines if ln.startswith("build app"))
+
+        assert obj_line.split(" || ", 1)[1].split() == ["gen/items.c"]
+        assert "data.txt" not in link_line
+        assert "tool" not in link_line.split(" | ", 1)[1].split()
 
     @pytest.mark.parametrize(
         "consumer", ["Program", "SharedLibrary", "StaticLibrary", "ObjectLibrary"]

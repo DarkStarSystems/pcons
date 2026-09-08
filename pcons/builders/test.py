@@ -249,6 +249,6 @@ class TestBuilder:
         # it first (its output_nodes must exist before the factory runs)
         # and so the Ninja `test-build` phony pulls it in transitively.
         if isinstance(program, Target):
-            target.add_dependency(program)
+            target.depends(program)
 
         return target

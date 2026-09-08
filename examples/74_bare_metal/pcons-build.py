@@ -161,7 +161,8 @@ fw.private.link_flags.append(
 # Nothing in the program references the reset handler, so the archive member
 # holding it (and the vector table) would never be pulled in. -u forces it.
 fw.private.link_flags += ["-Wl,-u,Reset_Handler"]
-# Relink when the linker script changes.
+# Relink when the linker script changes (the compiles, which track what they
+# read, are left alone).
 fw.depends("link/lm3s6965evb.ld")
 fw.depends(version_h)
 

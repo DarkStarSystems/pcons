@@ -42,8 +42,7 @@ API:
 | `target.set_option(key, value)` | Set a builder/toolchain option (e.g. `install_name`) |
 | `target.link(t, "m")` | Link a dependency (or raw lib name) and re-export it to consumers |
 | `target.link_private(t, "m")` | Link a dependency (or raw lib name), keeping it local |
-| `target.add_dependency(t)` | Add a non-link build dependency |
-| `target.depends(*items, propagate=True)` | Add implicit dependencies (fluent form of `add_dependency`) |
+| `target.depends(*items)` | Build targets or have files first, without linking them |
 | `target.pre_build(command)` | Shell command to run before this target is built |
 | `target.post_build(command)` | Shell command to run after this target is built |
 | `target.get_option(key, default=None)` | Read an option set with `set_option()` |

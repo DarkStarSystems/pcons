@@ -1711,7 +1711,7 @@ class Environment(_EnvironmentStubs):
 
         # Handle Target sources - store for deferred resolution
         if target_sources:
-            cmd_target._pending_sources = list(target_sources)
+            cmd_target._add_pending_sources(target_sources)
             # The declared sequence, with each Target still a Target: the
             # factory substitutes its outputs in place once they exist, so
             # $SOURCES keeps the order the script wrote instead of listing
@@ -1721,10 +1721,6 @@ class Environment(_EnvironmentStubs):
                 src if isinstance(src, TargetClass) else next(normalized_iter)
                 for src in source_list
             ]
-            # Add as dependencies to ensure correct build order
-            for src_target in target_sources:
-                if src_target not in cmd_target.dependencies:
-                    cmd_target.add_dependency(src_target)
 
         # Apply extra implicit dependencies
         if depends is not None:

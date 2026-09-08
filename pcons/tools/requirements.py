@@ -379,21 +379,12 @@ def compute_effective_requirements(
         origin=(target.name, "public"),
     )
 
-    # Layer 3: All dependencies' public requirements (transitive).
+    # Layer 3: All dependencies' public requirements (transitive): linked
+    # libraries and depends() targets alike.
     for dep in target.transitive_dependencies():
         result.merge(
             _resolve_and_add_includes_for(dep.public, dep), origin=(dep.name, "public")
         )
-
-    # Layer 4: Implicit target deps from target.depends(other_target):
-    # propagate public usage requirements to compile steps without adding
-    # outputs to the linker's $in.
-    if for_compilation:
-        for dep in target._implicit_target_deps:
-            result.merge(
-                _resolve_and_add_includes_for(dep.public, dep),
-                origin=(dep.name, "public"),
-            )
 
     return result
 
