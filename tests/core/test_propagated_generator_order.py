@@ -97,6 +97,21 @@ def build_files(project: Project) -> Path:
     return Path(project.root_dir) / project.build_dir
 
 
+def object_of(project: Project, target: str, source: str) -> str:
+    """The object file *target* compiles *source* to, named as the toolchain names it.
+
+    The suffix is ``.o`` or ``.obj`` depending on the detected toolchain, so no
+    test may spell it out.
+    """
+    nodes = [
+        node
+        for node in project.get_target(target).intermediate_nodes
+        if node.path.name.startswith(source)
+    ]
+    assert len(nodes) == 1, [node.path.name for node in nodes]
+    return nodes[0].path.name
+
+
 def edge_for(build_ninja: str, output: str) -> str:
     """The one ``build`` statement in *build_ninja* that writes *output*."""
     for block in build_ninja.split("\nbuild ")[1:]:
@@ -113,7 +128,7 @@ class TestOrderReachesTheConsumer:
         build_dir = build_files(project)
         text = (build_dir / "build.ninja").read_text()
 
-        edge = edge_for(text, "main.c.o")
+        edge = edge_for(text, object_of(project, "app", "main.c"))
         assert "||" in edge, edge
         assert "gen.stamp" in edge.split("||", 1)[1], edge
 
