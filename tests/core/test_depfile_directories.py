@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import time
 from pathlib import Path
 
 import pytest
@@ -125,6 +126,38 @@ def assert_names(deps: set[str], directory: Path) -> None:
     assert wanted in deps, f"{wanted} not among {sorted(deps)}"
 
 
+def advance_past(reference: Path) -> None:
+    """Wait until a file written now would be stamped later than *reference*.
+
+    A change made inside the same filesystem tick as the build output looks no
+    newer than it, and the edge is then correctly left alone.
+    """
+    deadline = time.monotonic() + 2.0
+    probe = reference.parent / ".tick"
+    try:
+        while True:
+            probe.write_text("")
+            if probe.stat().st_mtime_ns > reference.stat().st_mtime_ns:
+                return
+            assert time.monotonic() < deadline, "the filesystem clock did not advance"
+            time.sleep(0.01)
+    finally:
+        probe.unlink(missing_ok=True)
+
+
+def gained_an_entry(directory: Path) -> None:
+    """Read *directory* back, so the stamp a build tool reads next is current.
+
+    NTFS keeps a directory's mtime in its parent's index entry and updates it
+    lazily, and ninja's Windows stat cache reads mtimes from that index rather
+    than from the directory itself, so a build starting right after a write can
+    still be handed the old stamp. Stat'ing the directory settles the entry.
+    Diagnosed by the maintainer on #132, where these same cases failed the same
+    way.
+    """
+    directory.stat()
+
+
 needs_ninja = pytest.mark.skipif(
     shutil.which("ninja") is None, reason="ninja not installed"
 )
@@ -171,7 +204,10 @@ class TestNinjaDepfileDirectories:
 
         assert_names(recorded_deps(build_dir), tmp_path / "tree" / "sub")
 
-        write(tmp_path / "tree" / "sub" / "new.txt", "new\n")
+        sub = tmp_path / "tree" / "sub"
+        advance_past(build_dir / "listing.txt")
+        write(sub / "new.txt", "new\n")
+        gained_an_entry(sub)
         output = run_ninja(build_dir)
 
         assert "no work to do" not in output
@@ -182,7 +218,10 @@ class TestNinjaDepfileDirectories:
         build_dir = _generate(tmp_path, NinjaGenerator(), project)
         run_ninja(build_dir)
 
-        write(tmp_path / "tree" / "top.txt", "top\n")
+        tree = tmp_path / "tree"
+        advance_past(build_dir / "listing.txt")
+        write(tree / "top.txt", "top\n")
+        gained_an_entry(tree)
         run_ninja(build_dir)
 
         assert "top.txt" in listed_names(tmp_path)
@@ -200,7 +239,10 @@ class TestNinjaDepfileDirectories:
         build_dir = _generate(tmp_path, NinjaGenerator(), project)
         run_ninja(build_dir)
 
-        write(tmp_path / "tree" / "sub" / "new.txt", "new\n")
+        sub = tmp_path / "tree" / "sub"
+        advance_past(build_dir / "listing.txt")
+        write(sub / "new.txt", "new\n")
+        gained_an_entry(sub)
         output = run_ninja(build_dir)
 
         assert "no work to do" in output
@@ -218,7 +260,10 @@ class TestMakefileDepfileDirectories:
 
         assert_names(written_deps(build_dir), tmp_path / "tree" / "sub")
 
-        write(tmp_path / "tree" / "sub" / "new.txt", "new\n")
+        sub = tmp_path / "tree" / "sub"
+        advance_past(build_dir / "listing.txt")
+        write(sub / "new.txt", "new\n")
+        gained_an_entry(sub)
         run_make(build_dir)
 
         assert "new.txt" in listed_names(tmp_path)
@@ -228,7 +273,10 @@ class TestMakefileDepfileDirectories:
         build_dir = _generate(tmp_path, MakefileGenerator(), project)
         run_make(build_dir)
 
-        write(tmp_path / "tree" / "sub" / "new.txt", "new\n")
+        sub = tmp_path / "tree" / "sub"
+        advance_past(build_dir / "listing.txt")
+        write(sub / "new.txt", "new\n")
+        gained_an_entry(sub)
         run_make(build_dir)
 
         assert "new.txt" not in listed_names(tmp_path)
