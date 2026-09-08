@@ -11,6 +11,13 @@ from pcons import Generator, Project
 from pcons.core.errors import PconsError
 from pcons.generators.generator import BaseGenerator
 
+from ._command_test_utils import (
+    as_ninja_command,
+    built_path,
+    file_name_in,
+    runs_as,
+)
+
 
 def _ninja(project: Project) -> str:
     Generator().generate(project)
@@ -46,7 +53,11 @@ def test_a_built_tool_runs_without_a_hand_written_dot_slash(
         command="$TOOL $SOURCE $TARGET",
     )
 
-    assert "command = ./gen $in $out" in _ninja(project)
+    text = _ninja(project)
+
+    tool = as_ninja_command(runs_as(built_path(project, gen)))
+
+    assert f"command = {tool} $in $out" in text
 
 
 def test_the_tool_is_a_dependency_and_not_a_source(
@@ -89,9 +100,10 @@ def test_a_tool_from_another_environment_carries_its_prefix(
     )
 
     text = _ninja(project)
+    built = built_path(project, gen)
 
-    assert "command = ./host/gen $in $out" in text
-    assert "| host/gen" in _line(text, "build tgt/out.txt:")
+    assert f"command = {as_ninja_command(runs_as(built))} $in $out" in text
+    assert f"| {built}" in _line(text, "build tgt/out.txt:")
 
 
 def test_an_installed_tool_keeps_its_absolute_path(
@@ -100,17 +112,20 @@ def test_an_installed_tool_keeps_its_absolute_path(
     """The androiddeployqt case: a host tool this build did not produce."""
     project = _project(tmp_path)
     env = project.Environment(toolchain=gcc_toolchain)
+    tool = "/opt/qt/bin/androiddeployqt"
     env.Command(
         name="run",
         target=project.build_dir / "out.txt",
-        tool="/opt/qt/bin/androiddeployqt",
+        tool=tool,
         source=["in.txt"],
         command="$TOOL --input $SOURCE --output $TARGET",
     )
 
     text = _ninja(project)
 
-    assert "command = /opt/qt/bin/androiddeployqt --input $in --output $out" in text
+    program = as_ninja_command(runs_as(tool))
+
+    assert f"command = {program} --input $in --output $out" in text
     assert "|" not in _line(text, "build out.txt:")
 
 
@@ -176,7 +191,7 @@ def test_make_runs_the_same_tool(tmp_path: Path, gcc_toolchain) -> None:
     rule = lines.index(_line(text, "out.txt:"))
 
     assert "gen" in lines[rule].split("|")[0]
-    assert Path(lines[rule + 1].split()[0]).name == "gen"
+    assert file_name_in(lines[rule + 1].split()[0]) == gen.output_nodes[0].path.name
 
 
 @pytest.mark.parametrize(
@@ -206,12 +221,15 @@ def test_text_attached_to_the_marker_comes_along(tmp_path: Path, gcc_toolchain) 
     inside a larger argument."""
     project = _project(tmp_path)
     env = project.Environment(toolchain=gcc_toolchain)
+    tool = "/opt/sdk/bin/signer"
     env.Command(
         name="run",
         target=project.build_dir / "out.txt",
-        tool="/opt/sdk/bin/signer",
+        tool=tool,
         source=["in.txt"],
         command="cp --helper=$TOOL $SOURCE $TARGET",
     )
 
-    assert "cp --helper=/opt/sdk/bin/signer $in $out" in _ninja(project)
+    argv = as_ninja_command("cp", f"--helper={runs_as(tool)}")
+
+    assert f"{argv} $in $out" in _ninja(project)

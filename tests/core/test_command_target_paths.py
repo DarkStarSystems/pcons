@@ -11,6 +11,8 @@ from pcons import Generator, Project
 from pcons.core.errors import PconsError
 from pcons.generators.generator import BaseGenerator
 
+from ._command_test_utils import built_path, file_name_in
+
 
 def _ninja(project: Project) -> str:
     Generator().generate(project)
@@ -43,8 +45,9 @@ def test_a_target_becomes_the_path_the_generator_writes_for_it(
     )
 
     text = _ninja(project)
-    built = _line(text, "build gen:").split(":")[0].removeprefix("build ").strip()
+    built = built_path(project, gen)
 
+    assert f"build {built}:" in text
     assert f"command = {built} $in $out" in text
 
 
@@ -106,9 +109,10 @@ def test_a_tool_from_another_environment_carries_its_prefix(
     )
 
     text = _ninja(project)
+    built = built_path(project, gen)
 
-    assert "command = host/gen $in $out" in text
-    assert "| host/gen" in _line(text, "build tgt/out.txt:")
+    assert f"command = {built} $in $out" in text
+    assert f"| {built}" in _line(text, "build tgt/out.txt:")
 
 
 def test_a_file_node_names_one_output_of_several(tmp_path: Path, gcc_toolchain) -> None:
@@ -187,4 +191,4 @@ def test_make_writes_the_same_path(tmp_path: Path, gcc_toolchain) -> None:
     rule = lines.index(_line(text, "out.txt:"))
 
     assert "gen" in lines[rule].split("|")[0]
-    assert Path(lines[rule + 1].split()[0]).name == "gen"
+    assert file_name_in(lines[rule + 1].split()[0]) == gen.output_nodes[0].path.name
