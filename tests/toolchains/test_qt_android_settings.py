@@ -91,11 +91,14 @@ class TestTheRequiredKeys:
         assert _settings(_android_env())["qt"] == {"arm64-v8a": QT_PREFIX}
 
     def test_the_install_facts_come_from_the_preset(self, found_qt) -> None:
-        settings = _settings(_android_env())
+        """The host tag names the machine running the build, so a literal one
+        here would be red everywhere but on a Linux x86_64 runner."""
+        env = _android_env()
+        settings = _settings(env)
 
         assert settings["sdk"] == SDK
-        assert settings["ndk"] == NDK
-        assert settings["ndk-host"] == "linux-x86_64"
+        assert settings["ndk"] == env.cross.ndk
+        assert settings["ndk-host"] == env.cross.ndk_host
 
     def test_the_application_binary_is_a_name_not_a_path(self, found_qt) -> None:
         """androiddeployqt builds lib<name>_<abi>.so out of it and looks for
@@ -105,11 +108,12 @@ class TestTheRequiredKeys:
         assert settings["application-binary"] == "myapp"
 
     def test_the_stdcpp_path_is_the_sysroot_library_directory(self, found_qt) -> None:
-        settings = _settings(_android_env())
+        env = _android_env()
+        settings = _settings(env)
 
         assert (
             settings["stdcpp-path"]
-            == f"{NDK}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/"
+            == f"{NDK}/toolchains/llvm/prebuilt/{env.cross.ndk_host}/sysroot/usr/lib/"
         )
 
 

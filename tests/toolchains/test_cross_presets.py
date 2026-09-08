@@ -132,7 +132,8 @@ class TestTheAndroidInstallFactsSurvive:
 
     def test_the_ndk_root_is_the_one_that_was_passed(self) -> None:
         preset = android(ndk="/fake/ndk", api=21)
-        assert preset.ndk == "/fake/ndk"
+        assert preset.ndk is not None
+        assert Path(preset.ndk) == Path("/fake/ndk")
 
     def test_a_user_path_is_expanded_like_the_tools_were(self) -> None:
         """The tools live under the expanded path, so the recorded root has
@@ -168,7 +169,8 @@ class TestTheAndroidInstallFactsSurvive:
         env._toolchain = LlvmToolchain()
         env.apply_cross_preset(android(ndk="/fake/ndk", api=21, sdk="/fake/sdk"))
 
-        assert env.cross.ndk == "/fake/ndk"
+        assert env.cross.ndk is not None
+        assert Path(env.cross.ndk) == Path("/fake/ndk")
         assert env.cross.sdk == "/fake/sdk"
         assert env.cross.ndk_host is not None
 
