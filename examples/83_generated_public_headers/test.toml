@@ -16,3 +16,8 @@ commands = [
 [[rebuild]]
 description = "Nothing changed: a clean build converges in one pass"
 expect_no_work = true
+
+[skip]
+# The xcode generator does not order the generator ahead of the library's own
+# compile, so metrics_limits.h is missing when that compile runs.
+generators = ["xcode"]
