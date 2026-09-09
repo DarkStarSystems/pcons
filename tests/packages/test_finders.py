@@ -398,7 +398,7 @@ class TestFinderChainContract:
                 calls["n"] += 1
                 return None
 
-        project._package_finder_chain = FinderChain([CountingFinder({})])
+        project._package_finder_chains[None] = FinderChain([CountingFinder({})])
 
         assert project.find_package("nope", required=False) is None
         assert project.find_package("nope", required=False) is None
@@ -407,3 +407,61 @@ class TestFinderChainContract:
         with pytest.raises(PackageNotFoundError):
             project.find_package("nope")  # required=True raises from cache
         assert calls["n"] == 1
+
+
+class TestDefaultFinders:
+    """host_finders() and sysroot_finders(): what a chain is built from."""
+
+    def test_the_host_searches_the_machine(self) -> None:
+        from pcons.packages.finders import host_finders
+
+        finders = host_finders()
+
+        assert [type(f).__name__ for f in finders] == [
+            "PkgConfigFinder",
+            "SystemFinder",
+        ]
+        assert finders[1].include_paths == SystemFinder().include_paths
+
+    def test_a_sysroot_replaces_the_search_paths(self, tmp_path: Path) -> None:
+        from pcons.packages.finders import sysroot_finders
+
+        finders = sysroot_finders(tmp_path)
+
+        assert [type(f).__name__ for f in finders] == [
+            "PkgConfigFinder",
+            "SystemFinder",
+        ]
+        assert finders[1].include_paths == [
+            tmp_path / "usr/include",
+            tmp_path / "include",
+        ]
+        assert finders[1].library_paths == [tmp_path / "usr/lib", tmp_path / "lib"]
+
+    def test_pkg_config_runs_against_the_sysroot(self, tmp_path: Path) -> None:
+        """PKG_CONFIG_LIBDIR moves the search; SYSROOT_DIR alone would not."""
+        import os
+
+        from pcons.packages.finders import sysroot_finders
+
+        finder = sysroot_finders(tmp_path)[0]
+        seen: list[dict[str, str]] = []
+
+        def mock_run(cmd, **kwargs):
+            seen.append(kwargs["env"])
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            return result
+
+        with (
+            patch("shutil.which", return_value="/usr/bin/pkg-config"),
+            patch("subprocess.run", side_effect=mock_run),
+        ):
+            finder._run_pkg_config("--exists", "zlib")
+
+        assert seen[0]["PKG_CONFIG_SYSROOT_DIR"] == str(tmp_path)
+        assert seen[0]["PKG_CONFIG_LIBDIR"].split(os.pathsep) == [
+            str(tmp_path / "usr/lib/pkgconfig"),
+            str(tmp_path / "usr/share/pkgconfig"),
+        ]

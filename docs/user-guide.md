@@ -871,8 +871,94 @@ Notes:
   build has no parent to take a toolchain from. `default_environment` searches
   enclosing projects, so a library nested several levels down still finds it.
 
+A subdirectory script imports Python modules sitting next to it, the way a root
+build script does:
+
+```python
+# libfoo/pcons-build.py
+import sources          # libfoo/sources.py
+```
+
+Its own directory comes first, so a module there shadows a same-named one beside
+the root script while the inclusion runs. Editing an imported module re-runs
+pcons, like editing the build script itself.
+
+Those modules belong to the inclusion, packages as much as single files. Two
+subdirectories may each carry a `sources.py`, or a `shapes/` package, without
+seeing each other's, and a directory included twice imports
+its own again rather than reusing what the first pass computed, so a helper that
+reads the environment is right both times. Modules from anywhere else stay
+cached as usual: the standard library, installed packages, and a module beside
+the root script, which is the place to put one several subdirectories share.
+
 See `examples/13_subdirs` for a worked example, including a library nested two
-levels down.
+levels down that declares its own generator with relative paths.
+
+#### One subdirectory, once per environment
+
+`add_subdirectory(..., env=...)` names the environment the included tree builds
+in. It is the default environment for the duration of the call, so the script
+above needs no change: its `default_environment` answers with the environment
+the caller passed. Include the same directory twice to build it twice:
+
+```python
+host = project.Environment(toolchain="c", name="host")
+host.build_prefix = "host"
+
+mcu = project.Environment(toolchain="gcc", name="mcu")
+mcu.build_prefix = "mcu"
+
+add_subdirectory("libfoo", env=host)   # build/host/libfoo/libfoo.a
+add_subdirectory("libfoo", env=mcu)    # build/mcu/libfoo/libfoo.a
+
+project.get_target("foo@host")
+```
+
+#### Configuring what you include
+
+`add_subdirectory(..., vars={...})` sets the build variables the included tree
+reads with `get_var`, for the duration of the call:
+
+```python
+add_subdirectory("libfoo", env=vendor_env, vars={
+    "LIBFOO_TESTS": False,
+    "LIBFOO_PYTHON": False,
+})
+```
+
+Values are spelled as Python, not as command-line strings: `False`, `2`,
+`Path("/opt")`. They shadow the command line, because a project vendoring a
+dependency is deciding how it builds, not offering a default. To let the user
+override one, say so:
+
+```python
+vars={"LIBFOO_PYTHON": get_var("LIBFOO_PYTHON", False)}
+```
+
+Names you do not mention keep whatever the command line gave them, and a nested
+`add_subdirectory()` keeps yours while overriding only the names it passes.
+
+This replaces setting `os.environ` before the call, which leaked into every
+later inclusion and lost to the command line rather than beating it.
+
+The rules:
+
+- **Both environments must be named and must differ in `build_prefix`.**
+  The names are what tell the two `foo` targets apart, and the prefixes are
+  what keep their output files apart. Without them the second inclusion is a
+  duplicate, and pcons says so, naming both definition sites.
+- **A nested `add_subdirectory()` inherits it.** Everything under the call
+  builds in that environment, however deep, unless an inner call passes its
+  own `env=`, which wins for its own subtree only.
+- **It overrides every other source**, including the environments the enclosing
+  project registered. The included script asks its parent, and the parent has
+  environments of its own, so filling in only for a project without any would
+  never fire.
+- **A script that makes its own environment is not overridden.** It said which
+  environment it builds in, and including it twice collides.
+
+See `examples/75_multi_env` for a worked example: `parity/` is described once
+and built for both environments, with each environment's flags.
 
 ### Multiple projects in one script
 
@@ -1565,6 +1651,88 @@ Toolchain name strings resolve through finder functions, which are also availabl
 | `find_c_toolchain()` | Find C/C++ toolchain (LLVM, GCC, MSVC, etc.) |
 | `find_cuda_toolchain()` | Find CUDA toolchain (returns `None` if nvcc not found) |
 
+### One Library, Several Environments
+
+A firmware build needs two toolchains at once: the cross compiler that makes the
+image, and the host compiler for the generators and tests that run on the build
+machine. Some code belongs to both.
+
+Each environment owns where its targets are built:
+
+```python
+mcu = project.Environment(toolchain="gcc", name="mcu")
+mcu.build_prefix = "mcu"        # everything this environment writes
+mcu.archive_directory = "lib"   # its static libraries, below that
+
+host = project.Environment(toolchain="gcc", name="host")
+host.build_prefix = "host"
+host.archive_directory = "lib"
+```
+
+| Setting | What it moves |
+|---------|---------------|
+| `env.build_prefix` | Everything: link outputs, object files, `env.Command()` targets |
+| `env.runtime_directory` | Programs |
+| `env.library_directory` | Shared libraries |
+| `env.archive_directory` | Static libraries, and Windows import libraries |
+
+All four are relative to the build directory, and empty by default: a project
+that sets none of them sees no path change. The toolchain still decides the
+`lib` prefix and the `.a` / `.lib` suffix, which is why these are directories
+and `output_prefix` is not (that one replaces the toolchain's filename prefix).
+
+`build_prefix` sits under the build directory and above the `add_subdirectory`
+offset. With `env.build_dir = "build/rel"`, a `build_prefix` of `mcu` gives
+`build/rel/mcu`, and a sub-project keeps its shape inside the slice, at
+`build/mcu/sub`. Setting `env.build_dir` names the whole directory, so a
+sub-project that does it drops its own offset, and its targets keep theirs.
+
+Everything the environment writes follows both settings, objects and artifacts
+alike. `env.build_dir` is the one place that decides where an environment builds.
+
+Because the two environments write in different directories, a target name can
+be repeated, and building one library for both is a plain Python function:
+
+```python
+def common_lib(env):
+    lib = project.StaticLibrary("common", env, sources=["src/common.c"])
+    lib.public.include_dirs.append(project.root_dir / "src")
+    return lib
+
+
+common = common_lib(mcu)        # build/mcu/lib/libcommon.a
+common_host = common_lib(host)  # build/host/lib/libcommon.a
+```
+
+Two targets may share a name only when both environments are named and the names
+differ. Otherwise the old error stands, and it says so.
+
+#### Naming one of them: `name@env`
+
+`@` selects the environment, `::` selects the project, and `@` binds tighter, so
+`sub::common@mcu` is target `common` of sub-project `sub`, built in `mcu`. It
+works wherever a target can be named:
+
+```python
+project.get_target("common@mcu")
+project.Default("app@host", "app@strict")
+app.link(project.get_target("common@mcu"))
+```
+
+A `link()` string is always a raw link token, so `link("m")` means `-lm` and a
+target is linked by looking it up first.
+
+```console
+$ pcons build common@mcu
+$ pcons explain common@mcu
+```
+
+An unqualified name that matches two targets raises and prints both spellings
+rather than picking one.
+
+See `examples/75_multi_env` for the smallest complete case, and
+`examples/74_bare_metal` for the cross-compiled one.
+
 ### Compiler Cache
 
 Speed up rebuilds by wrapping compile commands with [ccache](https://ccache.dev/) or [sccache](https://github.com/mozilla/sccache):
@@ -1616,6 +1784,22 @@ Notes:
 
 See `examples/63_command_launcher` for two stacked launchers wrapping every C compile, and a third belonging to one command.
 
+### Running clang-tidy With Every Compile
+
+`env.use_clang_tidy()` runs clang-tidy on each C and C++ source, with that compile's own flags, and then compiles it. A clang-tidy diagnostic fails the build, the way CMake's `CXX_CLANG_TIDY` does; the object is still produced, so the diagnostic repeats on the next build rather than turning into a missing file downstream.
+
+```python
+env.use_clang_tidy()                              # clang-tidy from PATH
+env.use_clang_tidy("/opt/llvm/bin/clang-tidy")    # a specific one
+env.use_clang_tidy(args=["--warnings-as-errors=*"])
+```
+
+Put the checks in a `.clang-tidy` file next to the sources; clang-tidy finds it by itself. `args` is for the rest: `--use-color`, `--export-fixes=...`, `--warnings-as-errors=...`.
+
+Under the hood this is a launcher, `python -m pcons.tools.co_compile`, and it composes with `use_compiler_cache()` in either order: the cache keeps wrapping the compiler, and the analysis never sees it. If clang-tidy isn't installed, a warning is logged and the compiles are left alone. `compile_commands.json` still reports the compiler itself.
+
+See `examples/76_clang_tidy`.
+
 ---
 
 ## Working with External Dependencies
@@ -1665,16 +1849,53 @@ fmt = project.find_package("fmt")
 ```
 
 **Precedence**: first finder to return a result wins. `add_package_finder()` call prepends, so the most recently added finder is
-consulted first, then the defaults (PkgConfig, then System). A finder that comes up empty (wrong version, tool
+consulted first, then the defaults (PkgConfig, then System). A finder added
+after a package was already looked up still applies to every later lookup. A finder that comes up empty (wrong version, tool
 missing the package) falls through to the next, and the winning source is
 recorded on the package as a `found_by` property (e.g. `"pkg-config"`, `"rez+pkg-config"`,
 `"system"`). A finder whose tool isn't installed is skipped with a warning. Run with `--debug configure` (see [debug logging](cli.md#options)) to
 see which finder answered (or passed on) each package.
 
-Results are cached per `(name, version, components)` — including *negative*
-results, so repeated `find_package(..., required=False)` probes don't re-run
-the finder chain and its subprocesses; a later `required=True` call for the
-same failed key raises from the cache.
+Results are cached per `(environment, name, version, components)` — including
+*negative* results, so repeated `find_package(..., required=False)` probes
+don't re-run the finder chain and its subprocesses; a later `required=True`
+call for the same failed key raises from the cache.
+
+#### One search per environment
+
+A cross build and a host build must not share an answer: the host's headers are
+the wrong ones for the cross compiler, and using them fails much later as a
+missing header. So each environment searches its own chain and holds its own
+result.
+
+```python
+mcu = project.Environment(toolchain="gcc", name="mcu")
+mcu.apply_cross_preset(linux_cross(triple="aarch64-linux-gnu", sysroot="/opt/aarch64"))
+host = project.Environment(toolchain="gcc", name="host")
+
+zlib_mcu = project.find_package("zlib", env=mcu)    # searches /opt/aarch64
+zlib_host = project.find_package("zlib", env=host)  # searches this machine
+```
+
+An environment given a cross preset with a sysroot searches that sysroot and
+nothing else, through `PKG_CONFIG_SYSROOT_DIR` and `PKG_CONFIG_LIBDIR` for
+pkg-config and the sysroot's `usr/include` and `usr/lib` for the system finder.
+One with a cross preset and no sysroot searches nothing and raises
+`PackageNotFoundError`, which is the honest answer: pcons does not know where
+that target's packages are. Add a finder that does:
+
+```python
+project.add_package_finder(ConanFinder(config, profile="mcu"), env=mcu)
+```
+
+An `env=` finder is used in that environment only, and is tried before the
+project-wide ones. Without `env=`, a finder is used everywhere, which is what
+a single-environment project wants.
+
+Omitting `env=` on `find_package()` uses the environment a target created
+without one would get, so a single-environment project needs none of this and
+behaves as before. Environments are told apart by their name, so scoping
+needs a named environment.
 
 See [Using Conan Packages](#using-conan-packages) below for more details about using Conan with pcons.
 
@@ -1977,7 +2198,7 @@ env.Command(
 )
 ```
 
-Each of the three kinds of path has its own base. `sources=` are relative to the project root. `target=` is relative to the build directory, and a leading build-dir component is absorbed: `target=project.build_dir / "out.txt"` and `target="out.txt"` mean the same file, so targets may be written either way. (For a file in a literal subdirectory that shares the build directory's name, write the prefix twice: `project.build_dir / "build/browse_py.h"`.) The command's own tokens are the third kind, and worth stating plainly: a *relative* path inside a command is looked for under the build directory, where the command runs. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below.
+Each of the three kinds of path has its own base. `sources=` and `depends=` are relative to the directory of the script that declares the command; in a subdirectory reached through `add_subdirectory` that is the subdirectory, not the project root. `target=` is relative to the build directory of that same script — `build/<subdir>/`, where its programs and libraries also build — and a leading build-dir component is absorbed: `target=project.build_dir / "out.txt"` and `target="out.txt"` mean the same file, so targets may be written either way. (For a file in a literal subdirectory that shares the build directory's name, write the prefix twice: `project.build_dir / "build/browse_py.h"`.) The command's own tokens are the third kind, and worth stating plainly: a *relative* path inside a command is looked for under the build directory, where the command runs. `"tools/gen.pl"` will not be found. Write `$SRCDIR/tools/gen.pl`, or pass an absolute path (pcons rewrites those to `$topdir/...` so the build file stays relocatable), or move the whole command with `cwd=` below.
 
 **To use a generated file as a source, pass the target.** `sources=` names files in the source tree, so a generated file passed the way its `target=` was — `sources=["gen/parser.c"]` — would erroneously look in the source tree. Using the proper build path works fine: `sources=[project.build_dir / "gen/parser.c"]`. That will also correctly add the dependency. Passing the target is even better; no path to keep in sync:
 
@@ -3772,8 +3993,11 @@ For cross-compiling to other platforms, pcons provides ready-made presets that c
 ```python
 from pcons.toolchains.presets import android, ios, linux_cross, pyodide
 
-# Android NDK
-env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a"))
+# Android NDK. stl="c++_shared" is the default and the NDK's own: an app
+# made of several shared libraries needs one shared C++ runtime, or each
+# library gets its own and exceptions stop crossing between them. Use
+# stl="c++_static" only for a single artifact.
+env.apply_cross_preset(android(ndk="~/android-ndk", arch="arm64-v8a", api=35))
 
 # iOS — works with both the Swift and LLVM (C/C++/Objective-C++) toolchains;
 # the iPhoneOS SDK is resolved via xcrun unless sdk= is given
@@ -3809,7 +4033,7 @@ project.Program("hello", env, sources=["src/hello.c"])
 
 | Factory | Key Arguments | Description |
 |---------|--------------|-------------|
-| `android(ndk, arch, api)` | `arch`: arm64-v8a, armeabi-v7a, x86_64, x86; `api`: minimum API level (default 21) | Android NDK cross-compilation |
+| `android(ndk, arch, *, api, stl)` | `arch`: arm64-v8a, armeabi-v7a, x86_64, x86; `api`: minimum API level, required; `stl`: `c++_shared` (default), `c++_static`, `none` | Android NDK cross-compilation |
 | `ios(arch, min_version, sdk)` | `arch`: arm64 or x86_64 (simulator); `min_version`: deployment target | iOS cross-compilation |
 | `emscripten(emsdk)` | `emsdk`: path to Emscripten SDK (optional if emcc in PATH) | WebAssembly via Emscripten (requires `toolchain="emscripten"`) |
 | `wasi_sdk(sdk_path)` | `sdk_path`: path to wasi-sdk (optional, auto-detected) | WebAssembly via wasi-sdk (requires `toolchain="wasi"`) |

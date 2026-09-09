@@ -855,15 +855,38 @@ def _cached_names(ctx: click.Context, key: str) -> list[str]:
     return [name for name in names if isinstance(name, str)]
 
 
+def _cached_env_spellings(ctx: click.Context) -> list[str]:
+    """The ``name@env`` spellings the last generate recorded, if any.
+
+    Same source and same rule as `_cached_names`: read back, never computed by
+    running the build script.
+    """
+    from pcons.core.cache import BuildCache
+
+    build_dir = inherited_param(ctx, "build_dir")
+    if build_dir is None:
+        build_dir = _declared_build_dir(ctx)
+    if build_dir is None:
+        return []
+    try:
+        recorded = BuildCache(Path(build_dir)).get("env_targets")
+    except OSError:
+        return []
+    if not isinstance(recorded, dict):
+        return []
+    return sorted(name for name in recorded if isinstance(name, str))
+
+
 def complete_target(
     ctx: click.Context, param: click.Parameter | None, incomplete: str
 ) -> list[CompletionItem]:
-    """The target names the last generate left in this build directory's cache."""
-    return [
-        CompletionItem(name)
-        for name in _cached_names(ctx, "targets")
-        if name.startswith(incomplete)
-    ]
+    """The target names the last generate left in this build directory's cache.
+
+    Both spellings: what the build tool knows, and the ``name@env`` names pcons
+    translates for it.
+    """
+    names = [*_cached_names(ctx, "targets"), *_cached_env_spellings(ctx)]
+    return [CompletionItem(name) for name in names if name.startswith(incomplete)]
 
 
 def _complete_variant(

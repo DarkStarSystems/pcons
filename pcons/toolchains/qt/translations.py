@@ -84,14 +84,13 @@ class QtTranslationsBuilder:
         root = project.root_dir
         build_dir = Path(env.get("build_dir", "build"))
         qt_dir = build_dir / f"qt.{name}"
-        qt_env = env.clone()
 
         # lrelease each catalog: .ts -> .qm
         qm_nodes: list[Node] = []
         for ts in ts_files:
             ts_path = Path(ts)
             qm_nodes.append(
-                qt_env.qt.Lrelease(qt_dir / f"{ts_path.stem}.qm", str(ts_path))[0]
+                env.qt.Lrelease(qt_dir / f"{ts_path.stem}.qm", str(ts_path))[0]
             )
 
         # Embed the .qm files under <prefix>/.
@@ -102,24 +101,20 @@ class QtTranslationsBuilder:
         qrc_rel = qt_dir / f"{name}.qrc"
         _write_if_changed(root / qrc_rel, _qrc_xml(prefix, entries))
 
-        rcc_node = qt_env.qt.Rcc(qt_dir / f"qrc_{name}.cpp", qrc_rel, name=name)[0]
+        rcc_node = env.qt.Rcc(qt_dir / f"qrc_{name}.cpp", qrc_rel, name=name)[0]
         rcc_node.implicit_deps.extend(qm_nodes)
 
         factory = getattr(project, "ObjectLibrary")  # noqa: B009
-        target: Target = factory(
-            name, qt_env, sources=[rcc_node], defined_at=defined_at
-        )
+        target: Target = factory(name, env, sources=[rcc_node], defined_at=defined_at)
 
         if lupdate_sources:
-            _add_lupdate_target(
-                project, qt_env, name, qt_dir, ts_files, lupdate_sources
-            )
+            _add_lupdate_target(project, env, name, qt_dir, ts_files, lupdate_sources)
         return target
 
 
 def _add_lupdate_target(
     project: Project,
-    qt_env: Environment,
+    env: Environment,
     name: str,
     qt_dir: Path,
     ts_files: Sequence[str | Path],
@@ -134,13 +129,13 @@ def _add_lupdate_target(
     stamp = qt_dir / f"{name}-lupdate.stamp"
     # env.Command has no tool-namespace expansion; use the concrete paths.
     command = _stamped_command(
-        qt_env,
-        str(qt_env.qt.lupdate),
+        env,
+        str(env.qt.lupdate),
         "$SOURCES",
         "-ts",
         *[f"$SRCDIR/{Path(ts).as_posix()}" for ts in ts_files],
     )
-    lupdate_target = qt_env.Command(
+    lupdate_target = env.Command(
         target=stamp,
         source=list(sources),
         command=command,

@@ -33,6 +33,7 @@ Q_INIT_RESOURCE or plugin import boilerplate is needed.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -91,7 +92,9 @@ def _linked_qt_modules(link: Sequence[Target]) -> set[str]:
     return names
 
 
-def _qt_metatypes(project: Project, link: Sequence[Target]) -> list[Path]:
+def _qt_metatypes(
+    project: Project, env: Environment, link: Sequence[Target]
+) -> list[Path]:
     """Qt's own metatypes files for the linked modules.
 
     Restricted to the link closure (plus core/qml, always needed as
@@ -99,9 +102,9 @@ def _qt_metatypes(project: Project, link: Sequence[Target]) -> list[Path]:
     makes qmltyperegistrar trip over unrelated modules that define
     same-named types (e.g. Charts vs Graphs QAbstractAxis).
     """
-    from pcons.toolchains.qt.finder import _qt_installs
+    from pcons.toolchains.qt.finder import qt_install
 
-    qt = _qt_installs.get(project)
+    qt = qt_install(project, env)
     if qt is None:
         return []
     wanted = _linked_qt_modules(link) | {"core", "qml"}
@@ -110,6 +113,37 @@ def _qt_metatypes(project: Project, link: Sequence[Target]) -> list[Path]:
         for path in qt.metatypes_files()
         if any(path.name.startswith(f"qt6{module}_") for module in wanted)
     ]
+
+
+_BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def _declares_singleton(path: Path) -> bool:
+    """Whether a QML file declares itself a singleton.
+
+    ``pragma Singleton`` lives in the leading pragma block, above the imports,
+    so only that block is read: the first line that is not a comment and not a
+    pragma ends it. A file pcons cannot read yet, a generated one, reads as not
+    a singleton.
+
+    The engine resolves a type declared without ``singleton`` in the qmldir as a
+    type rather than an instance, so every property access through it is
+    undefined at runtime while the build stays green. That is why this is read
+    from the source rather than left to the author to declare twice.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    for line in _BLOCK_COMMENT.sub(" ", text).splitlines():
+        statement = " ".join(line.split("//", 1)[0].split()).rstrip(";")
+        if not statement:
+            continue
+        if not statement.startswith("pragma"):
+            return False
+        if statement == "pragma Singleton":
+            return True
+    return False
 
 
 @builder(
@@ -178,33 +212,26 @@ class QtQmlModuleBuilder:
         # ---- C++ type registration (only when there are moc'ed types) ----
         registrar_node: Node | None = None
         qmltypes_name = f"{name}.qmltypes"
-        build_dir = Path(qt_env.get("build_dir", "build"))
-        try:
-            qt_dir_rel = qt_dir.relative_to(build_dir)
-        except ValueError:
-            qt_dir_rel = qt_dir
+        resolver = project._path_resolver
         # Both moc modes emit JSON sidecars: QML_ELEMENT in a header
         # (moc_X.cpp.json) or in a self-mocing .cpp (X.moc.json).
         moc_output_nodes = [*info.moc_header_nodes, *info.dot_moc_nodes]
         if moc_output_nodes:
-            # Sidecars are named relative to the build dir (PathToken
-            # path_type="build" expects build-relative paths).
-            json_tokens = []
-            for node in moc_output_nodes:
-                node_path = _source_path(node)
-                try:
-                    rel = node_path.relative_to(build_dir)
-                except ValueError:
-                    rel = node_path
-                json_tokens.append(
-                    PathToken(path=f"{rel.as_posix()}.json", path_type="build")
+            # Sidecars are named as the build tool sees them (PathToken
+            # path_type="build" renders verbatim).
+            json_tokens = [
+                PathToken(
+                    path=f"{resolver.make_execution_relative(_source_path(node))}.json",
+                    path_type="build",
                 )
+                for node in moc_output_nodes
+            ]
             metatypes = qt_env.qt.CollectJson(
                 qt_dir / f"{name}_metatypes.json", moc_output_nodes
             )[0]
             _set_node_vars(metatypes, {"JSONFILES": json_tokens})
 
-            foreign = _qt_metatypes(project, link)
+            foreign = _qt_metatypes(project, env, link)
             registrar_node = qt_env.qt.TypeRegistrar(
                 qt_dir / f"{name}_qmltyperegistrations.cpp", [metatypes]
             )[0]
@@ -215,7 +242,7 @@ class QtQmlModuleBuilder:
                     "QMLMAJOR": major,
                     "QMLMINOR": minor,
                     "QMLTYPES": PathToken(
-                        path=(qt_dir_rel / qmltypes_name).as_posix(),
+                        path=resolver.make_execution_relative(qt_dir / qmltypes_name),
                         path_type="build",
                     ),
                     "QMLFOREIGN": (
@@ -237,8 +264,14 @@ class QtQmlModuleBuilder:
             qmldir_lines.append(f"typeinfo {qmltypes_name}")
         qmldir_lines.append(f"prefer :/qt/qml/{uri_path}/")
         for qml in qml_files:
-            stem = Path(qml).stem
-            qmldir_lines.append(f"{stem} {major}.{minor} {Path(qml).name}")
+            qml_path = Path(qml)
+            # The qmldir is written now, from the file's own content, so a
+            # pragma added later has to re-run pcons and not only rcc.
+            project.add_configure_dependency(root / qml_path)
+            kind = "singleton " if _declares_singleton(root / qml_path) else ""
+            qmldir_lines.append(
+                f"{kind}{qml_path.stem} {major}.{minor} {qml_path.name}"
+            )
         _write_if_changed(root / qt_dir / "qmldir", "\n".join(qmldir_lines) + "\n")
 
         # ---- resources under :/qt/qml/<uri>/ ---------------------------

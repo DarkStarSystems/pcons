@@ -9,7 +9,7 @@ protocol; the core resolver dispatches to it via the builder registry.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
@@ -618,8 +618,9 @@ class CompileLinkFactory:
         Always applies prefix and suffix to the base name (output_name or
         target.name), like CMake's OUTPUT_NAME / PREFIX / SUFFIX.
 
-        Default prefix/suffix come from the toolchain (which handles
-        cross-compilation, e.g., Emscripten → ".js"). Use
+        Default prefix/suffix come from the toolchain, which decides how it
+        spells a name for the platform being built for (Emscripten → ".js",
+        mingw → ".dll" with a "lib*.a" import library). Use
         output_prefix/output_suffix to override (set to "" to suppress).
 
         Args:
@@ -630,16 +631,14 @@ class CompileLinkFactory:
         Returns:
             Output filename (relative, may include subdirectory via prefix).
         """
-        from pcons.configure.platform import get_platform
-
         base_name = target.output_name or target.name
         toolchain = env._toolchain
 
         if toolchain:
-            default_prefix = toolchain.get_output_prefix(target_type)
-            default_suffix = toolchain.get_output_suffix(target_type)
+            default_prefix = toolchain.get_output_prefix(target_type, env.target)
+            default_suffix = toolchain.get_output_suffix(target_type, env.target)
         else:
-            plat = get_platform()
+            plat = env.target
             if target_type == "static_library":
                 default_prefix, default_suffix = (
                     plat.static_lib_prefix,
@@ -662,6 +661,14 @@ class CompileLinkFactory:
 
         return f"{prefix}{base_name}{suffix}"
 
+    def _output_path(
+        self, target: Target, env: Environment, filename: str, target_type: str
+    ) -> Path:
+        """Where *filename* lands: the target's build dir, plus the kind's directory."""
+        directory = env.output_directory_for(target_type)
+        base = target.build_dir / directory if directory else target.build_dir
+        return base / target.path_resolver.normalize_target_path(filename)
+
     def _create_static_library_output(self, target: Target, env: Environment) -> None:
         """Create static library output node."""
         if not target.intermediate_nodes:
@@ -670,11 +677,8 @@ class CompileLinkFactory:
                 target.name,
             )
             return
-        build_dir = target.build_dir
-        path_resolver = target.path_resolver
-
         lib_name = self._apply_output_naming(target, env, "static_library")
-        lib_path = build_dir / path_resolver.normalize_target_path(lib_name)
+        lib_path = self._output_path(target, env, lib_name, "static_library")
 
         lib_node = self.project.node(lib_path)
         lib_node.add_inputs(target.intermediate_nodes)
@@ -705,11 +709,8 @@ class CompileLinkFactory:
             )
             return
 
-        build_dir = target.build_dir
-        path_resolver = target.path_resolver
-
         lib_name = self._apply_output_naming(target, env, "shared_library")
-        lib_path = build_dir / path_resolver.normalize_target_path(lib_name)
+        lib_path = self._output_path(target, env, lib_name, "shared_library")
 
         lib_node = self.project.node(lib_path)
         lib_node.add_inputs(target.intermediate_nodes)
@@ -728,7 +729,17 @@ class CompileLinkFactory:
         import sys
 
         if sys.platform == "win32":
-            import_lib_path = lib_path.with_suffix(".lib")
+            # An import library is an archive, so archive_directory places it,
+            # the way CMake does. Unset, it follows its DLL rather than falling
+            # back to the build-dir root.
+            import_name = str(PurePosixPath(lib_name).with_suffix(".lib"))
+            archive_directory = env.output_directory_for("static_library")
+            import_lib_path = self._output_path(
+                target,
+                env,
+                import_name,
+                "static_library" if archive_directory is not None else "shared_library",
+            )
             lib_node._build_info["outputs"] = {
                 "primary": {"path": lib_path, "suffix": lib_path.suffix},
                 "import_lib": {"path": import_lib_path, "suffix": ".lib"},
@@ -746,11 +757,8 @@ class CompileLinkFactory:
             )
             return
 
-        build_dir = target.build_dir
-        path_resolver = target.path_resolver
-
         prog_name = self._apply_output_naming(target, env, "program")
-        prog_path = build_dir / path_resolver.normalize_target_path(prog_name)
+        prog_path = self._output_path(target, env, prog_name, "program")
 
         prog_node = self.project.node(prog_path)
         prog_node.add_inputs(target.intermediate_nodes)
@@ -907,7 +915,7 @@ class CompileLinkFactory:
         """
         dep_aux = [
             node
-            for node in self._collect_dependency_outputs(target)
+            for node in self._ordering_dependency_outputs(target)
             if not _is_link_input(node.path)
         ]
         if not dep_aux:
@@ -918,6 +926,33 @@ class CompileLinkFactory:
                 node.order_after(dep_aux)
             else:
                 node.depends(dep_aux)
+
+    def _ordering_dependency_outputs(self, target: Target) -> list[FileNode]:
+        """Everything a compile in *target* has to wait for.
+
+        The link closure's own outputs, plus the outputs of the generators
+        each of those dependencies declared with ``depends()``. A dependency's
+        public include dirs are on this target's compile line, so a generator
+        that fills one of them has to run before this target compiles, not
+        only before the dependency does -- otherwise the ordering that makes a
+        public header usable stops at the target that declared it, and every
+        consumer races the generator.
+
+        ``add_dependency()`` needs nothing here: ``transitive_dependencies()``
+        already walks those edges. ``depends(propagate=False)`` is left out on
+        purpose, being the spelling for "only my own final output waits".
+        """
+        outputs = self._collect_dependency_outputs(target)
+        seen = {id(node) for node in outputs}
+        for dep in target.transitive_dependencies(for_link=True):
+            for generator in dep._implicit_target_deps:
+                if generator is target:
+                    continue
+                for node in generator.output_nodes:
+                    if id(node) not in seen:
+                        seen.add(id(node))
+                        outputs.append(node)
+        return outputs
 
     def _collect_dependency_outputs(self, target: Target) -> list[FileNode]:
         """Collect output nodes from all dependencies.

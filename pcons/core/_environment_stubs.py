@@ -60,3 +60,7 @@ if TYPE_CHECKING:
         swiftc: ToolConfig  # SwiftToolchain
         build_dir: Path
         variant: str
+        build_prefix: str | Path | None
+        runtime_directory: str | Path | None
+        library_directory: str | Path | None
+        archive_directory: str | Path | None

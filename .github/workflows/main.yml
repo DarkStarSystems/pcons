@@ -27,7 +27,7 @@ jobs:
       - name: Run ruff format check
         run: uv run ruff format --check .
       - name: Run ty typecheck
-        run: uvx ty check pcons/ examples/
+        run: uv run ty check pcons/ examples/
 
   docs:
     # Both docs builds are seconds each; a broken one otherwise surfaces
@@ -273,9 +273,14 @@ jobs:
         # qmltyperegistrar; qml6-module-qtqml: runtime for `import QtQml`;
         # l10n/tools: lrelease/lupdate (package split varies by release,
         # so install both — example 55 skips gracefully if absent).
+        # Retries + a short per-connection timeout keep a degraded mirror
+        # from burning the whole job budget; this job needs Qt, so unlike
+        # the LaTeX install a failure here is still a failure.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools \
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=5 -o Acquire::http::Timeout=20 \
+            qt6-base-dev qt6-base-dev-tools \
             qt6-declarative-dev qt6-declarative-dev-tools \
             qml6-module-qtqml qml6-module-qtqml-models \
             qml6-module-qtqml-workerscript \
@@ -364,6 +369,89 @@ jobs:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
           flags: wasm
+
+  test-bare-metal:
+    name: "test bare-metal example (arm-none-eabi + qemu)"
+    needs: lint
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "latest"
+      - name: Install the ARM bare-metal toolchain and QEMU
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        # No "|| true" here, unlike the best-effort LaTeX install in the test
+        # job: example 74 skips itself when arm-none-eabi-gcc is absent, so a
+        # tolerated install failure would turn this job green while testing
+        # nothing.
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=5 -o Acquire::http::Timeout=20 \
+            gcc-arm-none-eabi binutils-arm-none-eabi qemu-system-arm
+          arm-none-eabi-gcc --version | head -1
+          qemu-system-arm --version | head -1
+      - name: Install dependencies
+        run: uv sync
+      - name: Run the bare-metal example
+        # The example skips itself when a tool is missing, so a green job is
+        # not on its own evidence that it ran: check that it did.
+        run: |
+          set -o pipefail
+          uv run pytest tests/test_examples.py --cov=pcons --cov-report=xml -v \
+            -k "74_bare_metal" | tee result.txt
+          if grep -q '74_bare_metal-ninja] SKIPPED' result.txt; then
+            echo "::error::the bare-metal example skipped instead of running"
+            exit 1
+          fi
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: bare-metal
+
+  test-android:
+    name: "test android (ndk cross-compile)"
+    needs: lint
+    timeout-minutes: 15
+    # Linux only. The macOS and Windows images carry an NDK too, but a cross
+    # build's output does not depend on the host that produced it, so a second
+    # runner buys proportionally little. The exception is the prebuilt host tag
+    # android() computes, which is precisely the kind of thing only another host
+    # can break -- an argument for adding macOS when it does, not before.
+    runs-on: ubuntu-latest
+    env:
+      # Arms the safety net. One test then demands an NDK instead of skipping,
+      # so this job cannot report success having built nothing: every Android
+      # test skipping is otherwise silent and green.
+      PCONS_REQUIRE_ANDROID_NDK: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "latest"
+      # No install step: the runner image ships the NDKs already.
+      - name: Install dependencies
+        run: uv sync
+      - name: Show the NDK the tests will use
+        # The image ships three revisions and points the standard variables at
+        # the oldest, so a failure has to name the one that produced it. Print
+        # what the fixture resolves rather than what the environment says.
+        run: |
+          ls "$ANDROID_HOME/ndk"
+          uv run python -c "from tests.support import find_android_ndk;             ndk = find_android_ndk(); print('NDK:', ndk);             print((ndk / 'source.properties').read_text())"
+      - name: Run the Android tests
+        run: uv run pytest tests/ --cov=pcons --cov-report=xml -q -n auto -k android
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+          flags: android
 
   test-msvcup:
     name: "test msvcup (windows, no VS)"
@@ -479,7 +567,7 @@ jobs:
         # The default `ty` lint excludes pcons/integrations/rez because rez
         # isn't in that environment; here rez is importable, so type-check it
         # against the real rez API. Explicit file paths bypass the exclude.
-        run: find pcons/integrations/rez -name '*.py' -print0 | xargs -0 uvx ty check
+        run: find pcons/integrations/rez -name '*.py' -print0 | xargs -0 uv run --no-sync ty check
       - name: Build the rez test packages and run the example end-to-end
         # hello_lib (rez's built-in cmake build_system) then hello_app (pcons's
         # build_system plugin — exercises PconsBuildSystem.build()); then run
@@ -540,7 +628,7 @@ jobs:
       - name: Generate Changelog
         run: .github/release_message.sh > release_message.md
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           body_path: release_message.md
           files: |

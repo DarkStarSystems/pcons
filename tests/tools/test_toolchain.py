@@ -3,6 +3,7 @@
 
 from pcons.core.builder import Builder
 from pcons.core.environment import Environment
+from pcons.toolchains.presets import target_platform_for_triple
 from pcons.tools.tool import BaseTool, Tool
 from pcons.tools.toolchain import BaseToolchain, Toolchain
 
@@ -101,7 +102,7 @@ class TestInstallDir:
         """ELF/Mach-O shared libraries (.so/.dylib) install to lib/."""
 
         class UnixToolchain(MockToolchain):
-            def get_output_suffix(self, target_type: str) -> str:
+            def get_output_suffix(self, target_type: str, target=None) -> str:
                 return ".so" if target_type == "shared_library" else ""
 
         assert UnixToolchain().get_install_dir("shared_library") == "lib"
@@ -110,10 +111,70 @@ class TestInstallDir:
         """Windows DLLs install next to executables in bin/."""
 
         class DllToolchain(MockToolchain):
-            def get_output_suffix(self, target_type: str) -> str:
+            def get_output_suffix(self, target_type: str, target=None) -> str:
                 return ".dll" if target_type == "shared_library" else ".exe"
 
         assert DllToolchain().get_install_dir("shared_library") == "bin"
+
+
+class TestNamingFollowsTheTarget:
+    """The naming hooks answer for the platform being built for."""
+
+    def test_no_target_still_answers_for_the_build_machine(self):
+        from pcons.configure.platform import get_platform
+
+        tc = MockToolchain()
+        host = get_platform()
+
+        assert tc.get_output_suffix("program") == host.exe_suffix
+        assert tc.get_output_suffix("shared_library") == host.shared_lib_suffix
+        assert tc.get_output_prefix("shared_library") == host.shared_lib_prefix
+        assert tc.get_output_suffix("static_library") == host.static_lib_suffix
+
+    def test_an_android_target_names_a_shared_library(self):
+        tc = MockToolchain()
+        android = target_platform_for_triple("aarch64-linux-android35")
+
+        assert tc.get_output_prefix("shared_library", android) == "lib"
+        assert tc.get_output_suffix("shared_library", android) == ".so"
+        assert tc.get_output_suffix("program", android) == ""
+
+    def test_a_mingw_target_names_gnu_windows(self):
+        tc = MockToolchain()
+        mingw = target_platform_for_triple("x86_64-w64-mingw32")
+
+        assert tc.get_output_suffix("program", mingw) == ".exe"
+        assert tc.get_output_prefix("shared_library", mingw) == ""
+        assert tc.get_output_suffix("shared_library", mingw) == ".dll"
+        assert tc.get_output_prefix("static_library", mingw) == "lib"
+        assert tc.get_output_suffix("static_library", mingw) == ".a"
+
+    def test_a_windows_target_installs_a_shared_library_to_bin(self):
+        tc = MockToolchain()
+        mingw = target_platform_for_triple("x86_64-w64-mingw32")
+
+        assert tc.get_install_dir("shared_library", mingw) == "bin"
+        assert tc.get_install_dir("static_library", mingw) == "lib"
+        assert tc.get_install_dir("program", mingw) == "bin"
+
+    def test_an_elf_target_installs_a_shared_library_to_lib(self):
+        tc = MockToolchain()
+        android = target_platform_for_triple("aarch64-linux-android35")
+
+        assert tc.get_install_dir("shared_library", android) == "lib"
+
+    def test_install_dir_asks_its_own_hook_about_the_target(self):
+        """A subclass naming outputs its own way still decides where they go."""
+
+        class DotDllForAndroid(MockToolchain):
+            def get_output_suffix(self, target_type: str, target=None) -> str:
+                return ".dll" if target is not None else ".so"
+
+        tc = DotDllForAndroid()
+        android = target_platform_for_triple("aarch64-linux-android35")
+
+        assert tc.get_install_dir("shared_library") == "lib"
+        assert tc.get_install_dir("shared_library", android) == "bin"
 
 
 class TestLanguagePriority:

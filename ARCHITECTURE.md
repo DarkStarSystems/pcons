@@ -564,11 +564,11 @@ class NodeFactory(Protocol):
         ...
 
     def resolve(self, target: Target, env: Environment | None) -> None:
-        """Resolve target in phase 1 (compilation)."""
+        """Create the target's nodes (e.g. objects and the link output)."""
         ...
 
     def resolve_pending(self, target: Target) -> None:
-        """Resolve pending sources in phase 2 (after outputs are populated)."""
+        """Create nodes from sources that are other targets, once those have resolved."""
         ...
 ```
 
@@ -653,6 +653,37 @@ libbar = env.StaticLibrary("bar", bar_sources, public_link_libs=[libfoo])
 app = env.Program("app", ["main.cpp"], link_libs=[libbar])
 ```
 
+### Target Identity and Build Placement
+> **Status: Implemented**
+
+A target is identified by its **name and its environment**. Two targets in one
+project may share a name when both environments are named and the names differ;
+anything else is still an error at declaration.
+
+Naming a target in full is `project::target@env`: `::` selects the project, `@`
+selects the environment, and `@` binds tighter, so `sub::common@mcu` is target
+`common` of sub-project `sub`. Both halves are optional when what is left says
+which target is meant, and an ambiguous name is an error rather than a choice.
+`target.name` stays the plain name and `target.qualified_name` is the full
+spelling; equality, hashing and every message use it. A spelling is read by
+`get_target`, by `Default()` and by the CLI, never by `link()`, where a string
+is a raw link token. A build tool only knows
+output paths, so the CLI translates a spelling into paths before dispatching.
+
+Placement belongs to the environment, never to the core or to a target:
+
+- `env.build_prefix` sits between the top-level build directory and the
+  `add_subdirectory()` offset, and covers everything the environment writes,
+  intermediates included. It folds into `env.build_dir`, so builders that anchor
+  on that variable (`env.Command()`, the Qt builders) follow with no change.
+- `env.runtime_directory`, `library_directory` and `archive_directory` place
+  final artifacts by kind below it. The mapping from `target_type` to setting is
+  core-level; what a `lib` prefix or a `.a` suffix looks like stays in the
+  toolchain.
+
+Two targets that still resolve to one output path are an error at resolve time,
+naming both.
+
 ### Target Resolution and Lazy Node Creation
 > **Status: Implemented**
 
@@ -690,16 +721,13 @@ project.resolve()
 - Toolchain defaults (platform-specific naming like `.dylib` vs `.so`)
 - Effective requirements from dependencies (must be computed in dependency order)
 
-**Pending sources for lazy resolution.** Some operations, like `Install()`, need to reference a target's outputs. Rather than requiring users to carefully order their build script, targets can have `_pending_sources` - references that are resolved after the main resolution phase:
+**Pending sources for lazy resolution.** Some operations, like `Install()`, need to reference a target's outputs, which don't exist until that target resolves. A Target given as a source is recorded as a pending source and as a dependency, and `resolve()` visits targets in dependency order, so the source target's outputs exist when the dependent's nodes are created:
 
 ```python
-# These can appear in any order:
 lib = project.SharedLibrary("mylib", env, sources=["lib.cpp"])
 install = project.Install("dist/lib", [lib])  # lib.output_nodes is empty here!
 
-# resolve() handles it:
-# 1. Phase 1: Resolve build targets (populates lib.output_nodes)
-# 2. Phase 2: Resolve pending sources (install now sees lib.output_nodes)
+# resolve() visits lib before install, so install sees lib.output_nodes
 project.resolve()
 ```
 
@@ -1735,7 +1763,7 @@ httplib.link(openssl)  # re-exported to consumers
 ### Package Finders
 > **Status: Implemented** - PkgConfigFinder, SystemFinder, and ConanFinder implemented. FinderChain provides ordered search.
 
-Finders locate packages and return `PackageDescription` objects. The easiest way to use them is through `project.find_package()`, which manages a FinderChain internally:
+Finders locate packages and return `PackageDescription` objects. The easiest way to use them is through `project.find_package()`, which manages one FinderChain per environment internally: a host environment searches the machine, an environment given a cross preset searches that target's sysroot.
 
 ```python
 # High-level API (preferred) — uses PkgConfig → System by default
@@ -1747,6 +1775,10 @@ from pcons.packages.finders import ConanFinder
 
 project.add_package_finder(ConanFinder(config, conanfile="conanfile.txt"))
 fmt = project.find_package("fmt")  # tries Conan → PkgConfig → System
+
+# Scope a finder and a search to one environment
+project.add_package_finder(ConanFinder(config, profile="mcu"), env=mcu)
+fmt_mcu = project.find_package("fmt", env=mcu)
 
 # Low-level API — use finders directly
 from pcons.packages.finders import PkgConfigFinder, SystemFinder

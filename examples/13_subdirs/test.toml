@@ -1,20 +1,38 @@
 # Test configuration for subdirs example
 
 [test]
-description = "Nested subdirectories with add_subdirectory()"
+description = "Nested subdirectories with add_subdirectory(), plus a generator declared two levels down in libfoo/libbar: its output lands in that subdirectory's build directory and its inputs are read from that subdirectory"
 # Both libraries claim to build either way. Build each on its own as well as
 # embedded, so that claim stays true. libfoo/libbar also covers the two-level
-# case: it sits one level down standalone and two levels down from here.
+# case: it sits one level down standalone and two levels down from here, and
+# it takes libfoo's environment, which the top-level project owns.
 standalone_subdirs = ["libfoo", "libfoo/libbar"]
 # Build the complete project (no build_targets means build all defaults)
 
 # Check that all expected files are built. Object files live under
 # obj.<target_name>/ directories, nested inside each subdir's own build
-# subdirectory (build/<subdir>/obj.<target_name>/...).
+# subdirectory (build/<subdir>/obj.<target_name>/...). libbar's generated
+# source lands in libbar's own build directory, two levels down, not in
+# libfoo's and not in the top-level one.
 expected_outputs = [
-    "build/libfoo/obj.foo/libfoo/src/foo.c.o",
+    "build/libfoo/libbar/gen/bar_version.c",
+    "build/libfoo/libbar/obj.bar/gen/bar_version.c.o",
     "build/libfoo/libbar/obj.bar/libfoo/libbar/src/bar.c.o",
     "build/libfoo/libbar/libbar.a",
+    "build/libfoo/obj.foo/libfoo/src/foo.c.o",
     "build/app/obj.app/app/src/main.c.o",
     "build/app/app",
 ]
+
+[[rebuild]]
+description = "Nothing changed"
+expect_no_work = true
+
+[[rebuild]]
+description = "Touching the data file the generator reads regenerates the C source"
+touch = "libfoo/libbar/version.txt"
+expect_rebuild = ["libfoo/libbar/gen/bar_version.c"]
+
+[skip]
+# The xcode generator has no build phase for a source generator, so it never writes libfoo/libbar/gen/bar_version.c.
+generators = ["xcode"]

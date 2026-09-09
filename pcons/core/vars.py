@@ -10,6 +10,8 @@ import builtins
 import json
 import os
 import sys
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from pathlib import Path, PurePath
 from typing import TypeAlias, overload
 
@@ -161,11 +163,10 @@ def _coerce_var(name: str, raw: str, target: builtins.type[VarValue]) -> VarValu
         raise ConfigureError(f"{name}={raw!r} is not a valid {target.__name__}") from e
 
 
-def _raw_var(name: str) -> str | None:
-    """Return a variable's raw string from PCONS_VARS or the environment."""
+def _ensure_cli_vars() -> dict[str, object]:
+    """Parse PCONS_VARS once, on the first read or override of a variable."""
     global _cli_vars
 
-    # Lazy-load CLI vars from environment on first access
     if _cli_vars is None:
         pcons_vars = os.environ.get("PCONS_VARS")
         if pcons_vars:
@@ -182,9 +183,57 @@ def _raw_var(name: str) -> str | None:
                 _cli_vars = {}
         else:
             _cli_vars = {}
+    return _cli_vars
 
-    # Check CLI vars first
-    assert _cli_vars is not None
+
+def _spell(name: str, value: VarValue) -> str:
+    """Spell *value* the way a command line would, for ``get_var`` to convert.
+
+    A bool becomes ``"true"`` or ``"false"`` rather than ``str(True)``, so a
+    script reading the variable without a ``type=`` sees what a user would have
+    typed.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, _SUPPORTED_TYPES):
+        return str(value)
+    raise ConfigureError(
+        f"vars[{name!r}]: {value!r} is a {builtins.type(value).__name__}; "
+        f"expected {_SUPPORTED_NAMES}"
+    )
+
+
+@contextmanager
+def scoped_vars(values: Mapping[str, VarValue]) -> Generator[None]:
+    """Give *values* to every ``get_var`` call made inside this block.
+
+    They sit where the command line's variables sit and shadow them, so a
+    caller configuring an included build description decides, rather than
+    suggesting a default. Pass ``get_var(name, default)`` as the value to let
+    the command line back in.
+
+    Names the caller does not mention keep whatever the command line gave them,
+    and a nested block keeps what an enclosing one set.
+
+    Args:
+        values: Variables to set, spelled as ``get_var`` will read them.
+
+    Raises:
+        ConfigureError: A value is not a type a build variable can hold.
+    """
+    global _cli_vars
+
+    before = _ensure_cli_vars()
+    _cli_vars = {**before, **{n: _spell(n, v) for n, v in values.items()}}
+    try:
+        yield
+    finally:
+        _cli_vars = before
+
+
+def _raw_var(name: str) -> str | None:
+    """Return a variable's raw string from PCONS_VARS or the environment."""
+    _cli_vars = _ensure_cli_vars()
     if name in _cli_vars:
         value = _cli_vars[name]
         # PCONS_VARS carries the raw text of `VAR=value` arguments, so every

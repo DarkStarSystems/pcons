@@ -1,0 +1,32 @@
+# Test configuration for the multi-environment example
+
+[test]
+description = "One project, two named environments: each owns its build directory, so one library and one program name serve both, and one subdirectory is included once per environment"
+
+# parity/ claims to build either way, so build it on its own as well as
+# embedded twice.
+standalone_subdirs = ["parity"]
+
+# Paths are Unix-style; automatically adapted for Windows
+expected_outputs = [
+    "build/host/lib/libchecksum.a",
+    "build/host/obj.checksum/src/checksum.c.o",
+    "build/host/bin/app",
+    "build/strict/lib/libchecksum.a",
+    "build/strict/bin/app",
+    "build/host/parity/lib/libparity.a",
+    "build/strict/parity/lib/libparity.a",
+]
+
+[verify]
+commands = [
+    # The same source, two environments, two results. The "parity" half comes
+    # from the subdirectory, so it also shows the environment reached the
+    # included script's flags and not only its output paths.
+    { run = "./build/host/bin/app", expect_stdout = "plain checksum 10, plain parity 0" },
+    { run = "./build/strict/bin/app", expect_stdout = "strict checksum 10, strict parity 0" },
+]
+
+[skip]
+# Xcode builds to its own paths.
+generators = ["xcode"]

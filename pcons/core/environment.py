@@ -17,12 +17,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
 
 from pcons.core.debug import trace, trace_value
+from pcons.core.names import validate_name
 from pcons.core.subst import Namespace, subst, to_shell_command
 from pcons.core.toolconfig import ToolConfig
 from pcons.core.vars import _record_variant
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 if TYPE_CHECKING:
+    from pcons.configure.platform import Platform
     from pcons.core._environment_stubs import _EnvironmentStubs
     from pcons.core._preset_names import KnownFeaturePreset
     from pcons.core._toolchain_names import KnownToolchain
@@ -42,6 +44,16 @@ logger = logging.getLogger(__name__)
 
 
 #: ``$SOURCE`` or ``${SOURCE}``, but not ``$SOURCES`` or ``${SOURCES[0]}``.
+PLACEMENT_VARS = frozenset(
+    {"build_prefix", "runtime_directory", "library_directory", "archive_directory"}
+)
+
+_OUTPUT_DIRECTORY_VARS: dict[str, str] = {
+    "program": "runtime_directory",
+    "shared_library": "library_directory",
+    "static_library": "archive_directory",
+}
+
 _SINGULAR_SOURCE = re.compile(r"\$SOURCE(?![S\w])|\$\{SOURCE\}")
 
 
@@ -92,18 +104,35 @@ class Environment(_EnvironmentStubs):
         env.build_dir = 'build/release'
         env.variant = 'release'
 
+    An environment owns where its targets are built:
+        env.build_prefix = 'mcu'          # everything it writes, below build/
+        env.archive_directory = 'lib'     # static libraries, below that
+        env.library_directory = 'lib'     # shared libraries and Windows import libs
+        env.runtime_directory = 'bin'     # programs
+
     Environments can be cloned for variant builds:
         debug = env.clone()
         debug.cc.flags += ['-g']
 
     Attributes:
-        build_dir: Directory for build outputs.
+        build_dir: Directory for build outputs, with build_prefix applied.
+        build_prefix: Directory below the build directory holding everything
+            this environment writes, outputs and intermediates alike. It sits
+            under an explicitly set build_dir and above the add_subdirectory
+            offset, so 'build/rel' plus 'mcu' is build/rel/mcu while a
+            sub-project of a plain build is build/mcu/sub.
+        runtime_directory: Directory for program outputs, below build_dir.
+        library_directory: Directory for shared library outputs, below build_dir.
+        archive_directory: Directory for static library outputs, and for Windows
+            import libraries, below build_dir.
         defined_at: Source location where this environment was created.
     """
 
     __slots__ = (
         "_tools",
         "_vars",
+        "_build_dir_base",
+        "_build_dir_offset",
         "_project",
         "_toolchain",
         "_additional_toolchains",
@@ -113,6 +142,8 @@ class Environment(_EnvironmentStubs):
         "_use_origins",
         "_fanout_seen",
         "_name",
+        "_cross_preset",
+        "_target",
         "defined_at",
     )
 
@@ -148,10 +179,20 @@ class Environment(_EnvironmentStubs):
         self._vars: dict[str, Any] = {
             "build_dir": Path("build"),
             "variant": "default",
+            "build_prefix": None,
+            "runtime_directory": None,
+            "library_directory": None,
+            "archive_directory": None,
         }
+        self._build_dir_base = Path("build")
+        self._build_dir_offset = Path()
         from pcons.core.project import Project
 
         self._project = Project.current()
+        if self._project is not None:
+            self._set_project_build_dir(
+                self._project.top.build_dir, self._project.build_dir
+            )
 
         self._toolchain = toolchain
         self._additional_toolchains: list[Toolchain] = []
@@ -166,6 +207,10 @@ class Environment(_EnvironmentStubs):
         self._use_origins: dict[tuple[str, str], tuple[str, str]] = {}
         # Active only inside a set_*/apply_* fan-out (see _dedup_fanout)
         self._fanout_seen: set[Any] | None = None
+        self._cross_preset: Any = None
+        self._target: Platform | None = None
+        if name is not None:
+            validate_name("Environment", name)
         self._name = name
         self.defined_at = defined_at or get_caller_location()
 
@@ -264,9 +309,122 @@ class Environment(_EnvironmentStubs):
             tools = self._get_tools()
             tools[name] = value
             value._env = self
+        elif name == "name":
+            if value is not None:
+                validate_name("Environment", value)
+                self._refuse_taken_name(value)
+            object.__setattr__(self, "_name", value)
+        elif name in PLACEMENT_VARS:
+            self._set_placement(name, value)
+        elif name == "build_dir":
+            self._build_dir_base = Path(value)
+            self._build_dir_offset = Path()
+            self._get_vars()["build_dir"] = self._effective_build_dir()
         else:
             vars_dict = self._get_vars()
             vars_dict[name] = value
+
+    def _set_placement(self, name: str, value: str | Path | None) -> None:
+        """Store one of the placement directories, rejecting what cannot be one."""
+        from pcons.core.errors import PconsError
+
+        if value is None or value == "":
+            self._get_vars()[name] = None
+        else:
+            path = Path(value)
+            if path.is_absolute():
+                raise PconsError(
+                    f"Environment.{name} must be relative to the build directory, "
+                    f"got the absolute path {str(path)!r}."
+                )
+            if ".." in path.parts:
+                raise PconsError(
+                    f"Environment.{name} must stay inside the build directory, "
+                    f"got {str(path)!r}."
+                )
+            self._get_vars()[name] = path
+        if name == "build_prefix":
+            self._get_vars()["build_dir"] = self._effective_build_dir()
+
+    def _set_project_build_dir(self, top_build_dir: Path, build_dir: Path) -> None:
+        """Anchor this environment on its project's build directory.
+
+        The top-level directory becomes the base and the ``add_subdirectory``
+        remainder the offset, so ``build_prefix`` lands between the two and a
+        sub-project keeps its shape inside the environment's slice instead of
+        the offset being applied twice.
+        """
+        base = Path(top_build_dir)
+        try:
+            offset = Path(build_dir).relative_to(base)
+        except ValueError:
+            base, offset = Path(build_dir), Path()
+        self._build_dir_base = base
+        self._build_dir_offset = offset
+        self._get_vars()["build_dir"] = self._effective_build_dir()
+
+    def build_dir_for(self, subdir: Path) -> Path:
+        """The directory a target at *subdir* builds in.
+
+        The offset is the target's rather than this environment's: an
+        environment defined in one project may build targets declared in
+        another, and it is the target's place in the tree that decides.
+
+        Args:
+            subdir: The target's offset from the top-level root, empty for a
+                target of the top-level project.
+
+        Returns:
+            The build directory, ``build_prefix`` included.
+        """
+        base: Path = self._build_dir_base
+        prefix = self._get_vars().get("build_prefix")
+        result = base / prefix if prefix else base
+        return result / subdir if subdir.parts else result
+
+    def _effective_build_dir(self) -> Path:
+        """This environment's own build directory.
+
+        The prefix goes below the named directory and above the
+        ``add_subdirectory`` offset. Assigning ``build_dir`` names the whole
+        directory, which clears the offset, so an explicitly set build
+        directory keeps the prefix under it.
+        """
+        return self.build_dir_for(self._build_dir_offset)
+
+    def _refuse_taken_name(self, name: str) -> None:
+        """Raise if another environment of this project already answers to *name*.
+
+        The name is half of a target's identity, so two environments sharing one
+        would leave ``common@mcu`` meaning two things. Scoped to one project: a
+        sub-project may have its own ``host`` environment, since its targets are
+        spelled ``child::app@host``. Called wherever an environment gets its
+        name: the constructor, and assignment afterwards.
+        """
+        from pcons.core.errors import PconsError
+
+        project = self._project
+        for other in project.environments:
+            if other is not self and other.name == name:
+                raise PconsError(
+                    f"Project '{project.name}' already has an environment named "
+                    f"'{name}' (defined at {other.defined_at}). The name says "
+                    f"which environment a target was built in, so it has to be "
+                    f"unique in a project. Leave one unnamed, or name them apart."
+                )
+
+    def output_directory_for(self, target_type: str | None) -> Path | None:
+        """The directory this environment places *target_type* outputs in.
+
+        Relative to the environment's build directory, or None to leave them at
+        its root. Object files and other intermediates are never placed here;
+        they follow ``build_prefix`` only.
+        """
+        attr = _OUTPUT_DIRECTORY_VARS.get(target_type or "")
+        if attr is None:
+            return None
+        directory: Path | None = self._get_vars().get(attr)
+        return directory
 
     def add_tool(self, name: str, config: ToolConfig | None = None) -> ToolConfig:
         """Add or get a tool namespace.
@@ -377,13 +535,19 @@ class Environment(_EnvironmentStubs):
 
     @property
     def name(self) -> str | None:
-        """Return the environment name, if set."""
-        return object.__getattribute__(self, "_name")
+        """The environment name, if set.
+
+        Assignment goes through ``__setattr__``, which validates the new name.
+        """
+        return self._name
 
     @name.setter
     def name(self, value: str | None) -> None:
-        """Set the environment name."""
-        object.__setattr__(self, "_name", value)
+        """Never runs: ``__setattr__`` takes the assignment first. Here so the
+        property stays read-write to type checkers, and delegating so it cannot
+        drift from the assignment that does run.
+        """
+        setattr(self, "name", value)  # noqa: B010
 
     def get(self, name: str, default: Any = None) -> Any:
         """Get a variable or tool with a default."""
@@ -447,6 +611,11 @@ class Environment(_EnvironmentStubs):
         # Start with cross-tool variables
         data: dict[str, Any] = dict(vars_dict)
 
+        # $name expands to the environment's name, which lives outside _vars.
+        env_name = object.__getattribute__(self, "_name")
+        if env_name:
+            data["name"] = env_name
+
         # Add tool namespaces
         for name, config in tools.items():
             data[name] = config.as_namespace()
@@ -499,6 +668,11 @@ class Environment(_EnvironmentStubs):
         new_env._applied_presets = list(self._applied_presets)
         new_env._applied_imperative = list(self._applied_imperative)
         new_env._use_origins = dict(self._use_origins)
+
+        new_env._build_dir_base = self._build_dir_base
+        new_env._build_dir_offset = self._build_dir_offset
+        new_env._cross_preset = self._cross_preset
+        new_env._target = self._target
 
         # Copy toolchain references (not cloned - they're shared)
         new_env._toolchain = self._toolchain
@@ -919,6 +1093,27 @@ class Environment(_EnvironmentStubs):
 
         apply_compiler_cache(self, tool)
 
+    def use_clang_tidy(self, tool: str | None = None, args: Sequence[str] = ()) -> None:
+        """Run clang-tidy alongside every C and C++ compile.
+
+        Each compile first runs clang-tidy on its source with the compile's
+        own flags, then compiles; a diagnostic fails the build, the way
+        CMake's ``CXX_CLANG_TIDY`` does. The driver is
+        :mod:`pcons.tools.co_compile`. Composes with ``use_compiler_cache()``
+        in either order.
+
+        Args:
+            tool: The clang-tidy program, by name or path. None looks for
+                  "clang-tidy" in PATH; a missing one is a warning and the
+                  compiles are left alone.
+            args: Extra clang-tidy arguments, e.g. ``["--use-color"]`` or
+                  ``["--warnings-as-errors=*"]``. Checks are best set in a
+                  ``.clang-tidy`` file, which clang-tidy finds by itself.
+        """
+        from pcons.tools.co_compile import apply_clang_tidy
+
+        apply_clang_tidy(self, tool, args)
+
     def apply_preset(self, name: KnownFeaturePreset | str) -> None:
         """Apply a named feature preset to this environment.
 
@@ -1028,18 +1223,52 @@ class Environment(_EnvironmentStubs):
         Example:
             from pcons.toolchains.presets import android, ios
 
-            env.apply_cross_preset(android(ndk="~/android-ndk"))
+            env.apply_cross_preset(android(ndk="~/android-ndk", api=35))
             env.apply_cross_preset(ios(arch="arm64"))
         """
         if self.toolchains:
             with self._dedup_fanout():
                 for toolchain in self.toolchains:
                     toolchain.apply_cross_preset(self, preset)
+            self._cross_preset = preset
+            self._target = getattr(preset, "target_platform", None)
         else:
             logger.warning(
                 "No toolchains configured; cannot apply cross-preset '%s'",
                 preset.name if hasattr(preset, "name") else preset,
             )
+
+    @property
+    def cross(self) -> Any:
+        """The cross preset this environment was retargeted with, or None.
+
+        None means "nothing said otherwise", never "this is a host build": an
+        environment retargeted by hand, by setting tool commands without a
+        preset, records nothing, and so does every ordinary build. A reader
+        must default to the host on None and may never refuse on it.
+
+        A second ``apply_cross_preset`` replaces the first: an environment has
+        one target, and the flags of the later preset are the ones that end up
+        deciding it.
+        """
+        preset: Any = self._cross_preset
+        return preset
+
+    @property
+    def target(self) -> Platform:
+        """The platform this environment builds for.
+
+        The host platform unless something said otherwise: a cross preset
+        whose triple names a platform, or one carrying an explicit one. An
+        environment retargeted by hand, by setting tool commands with no
+        preset, says nothing and so reads as the host.
+
+        This answers "what was declared", never "what will actually run", so
+        a caller may not treat a host answer as proof of a host build.
+        """
+        from pcons.configure.platform import get_platform
+
+        return self._target or get_platform()
 
     def Glob(self, pattern: str) -> list[FileNode]:
         """Find files matching a glob pattern.
@@ -1203,7 +1432,11 @@ class Environment(_EnvironmentStubs):
 
         Args:
             target: Output file(s) that the command produces. Paths are
-                    relative to the build directory; a leading build-dir
+                    relative to the build directory of the script that
+                    declares them: in a subdirectory reached through
+                    ``add_subdirectory``, ``"out.txt"`` is
+                    ``<build_dir>/<subdir>/out.txt``, where that script's
+                    programs and libraries also build. A leading build-dir
                     component is absorbed, so a target written from the
                     project root (``build_dir / "out.txt"``) means the same
                     file as ``"out.txt"``. For a file in a literal
@@ -1212,7 +1445,9 @@ class Environment(_EnvironmentStubs):
                     An absolute path outside the build directory is an
                     external output, produced in place.
             source: Input file(s) that the command depends on. Can be Targets
-                   (whose output files become sources), paths, or None.
+                   (whose output files become sources), paths, or None. A
+                   relative path is read from the directory of the script
+                   that declares it, like a target's ``sources=``.
             command: The shell command to run. Supports variable substitution:
                     - $SOURCE / $SOURCES: All source files (space-separated);
                       the two spellings mean the same thing
@@ -1236,13 +1471,15 @@ class Environment(_EnvironmentStubs):
                     Any other $variable is expanded from this environment.
 
                     **The command runs in the build directory**, unlike
-                    ``sources=`` (project-root-relative) and ``target=``
-                    (build-dir-relative). So a path
+                    ``sources=`` (read from the declaring script's
+                    directory) and ``target=`` (written to its build
+                    directory). So a path
                     written relative — "tools/gen.pl" — is looked for under
                     the build directory and won't be found. Spell it
-                    "$SRCDIR/tools/gen.pl", pass an absolute path (pcons
-                    rewrites those to stay relocatable), or move the whole
-                    command with ``cwd=``.
+                    "$SRCDIR/tools/gen.pl" (``$SRCDIR`` is the *project*
+                    root, not the subdirectory), pass an absolute path
+                    (pcons rewrites those to stay relocatable), or move the
+                    whole command with ``cwd=``.
 
                     Do not quote a token yourself: pcons keeps the command as
                     tokens and quotes each for the shell it writes for, so
@@ -1454,8 +1691,8 @@ class Environment(_EnvironmentStubs):
             name,
             target_type="command",
             defined_at=get_caller_location(),
+            env=self,
         )
-        cmd_target._env = self
         cmd_target._builder_name = "Command"
 
         # Register nodes with the environment and add to target

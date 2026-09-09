@@ -40,12 +40,12 @@ class NodeFactory(Protocol):
         ...
 
     def resolve(self, target: Target, env: Environment | None) -> None:
-        """First resolution phase: create the target's object/output nodes."""
+        """Create the target's object/output nodes."""
         ...
 
     def resolve_pending(self, target: Target) -> None:
-        """Second resolution phase: resolve sources that reference other
-        targets (e.g. Install targets)."""
+        """Create nodes from sources that are other targets (e.g. Install
+        targets). Runs after resolve(), once those targets have resolved."""
         ...
 
 

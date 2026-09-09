@@ -114,6 +114,21 @@ class TestXcodeGeneratorTargets:
         )
 
 
+class TestXcodeGeneratorDuplicateNames:
+    """Xcode addresses a target by name, so two of one name cannot both exist."""
+
+    def test_it_refuses_them(self, tmp_path, gcc_toolchain):
+        project = Project("app", root_dir=tmp_path, build_dir=tmp_path)
+        for name in ("mcu", "host"):
+            env = project.Environment(toolchain=gcc_toolchain, name=name)
+            env.build_prefix = name
+            Target("common", target_type="static_library", env=env)
+
+        XcodeGenerator().generate(project)
+        with pytest.raises(PconsError, match="common@mcu"):
+            BaseGenerator._generate_pending(project)
+
+
 class TestXcodeGeneratorBuildSettings:
     """Tests for build settings mapping."""
 

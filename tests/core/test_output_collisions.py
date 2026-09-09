@@ -44,7 +44,7 @@ class TestOutputCollisions:
         message = str(exc_info.value)
         assert "common-a" in message
         assert "common-b" in message
-        assert "environment-keyed" in message  # both envs are named
+        assert "build_prefix" in message  # both envs are named
 
     def test_distinct_prefixes_resolve_fine(self, tmp_path, source, gcc_toolchain):
         """The documented recipe: an environment-keyed prefix."""
@@ -60,6 +60,30 @@ class TestOutputCollisions:
             node.path for target in project.targets for node in target.output_nodes
         }
         assert len(paths) == 2
+
+    def test_distinct_build_prefixes_resolve_fine(
+        self, tmp_path, source, gcc_toolchain
+    ):
+        """The recipe the collision message now names."""
+        project = Project("p", root_dir=tmp_path)
+        env_a = project.Environment(toolchain=gcc_toolchain, name="a")
+        env_a.build_prefix = "a"
+        env_b = project.Environment(toolchain=gcc_toolchain, name="b")
+        env_b.build_prefix = "b"
+        _lib(project, env_a, "common-a", output_name="common")
+        _lib(project, env_b, "common-b", output_name="common")
+
+        project.resolve()
+
+        paths = {
+            node.path.as_posix()
+            for target in project.targets
+            for node in target.output_nodes
+        }
+        prefix = gcc_toolchain.get_output_prefix("static_library")
+        suffix = gcc_toolchain.get_output_suffix("static_library")
+        name = f"{prefix}common{suffix}"
+        assert paths == {f"build/a/{name}", f"build/b/{name}"}
 
     def test_two_commands_one_target_file_raises(self, tmp_path, gcc_toolchain):
         project = Project("p", root_dir=tmp_path)

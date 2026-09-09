@@ -20,6 +20,7 @@ from pcons.core.subst import TargetPath
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from pcons.configure.platform import Platform
     from pcons.core.environment import Environment
     from pcons.core.subst import FlagToken
     from pcons.core.target import Target
@@ -665,25 +666,41 @@ class Toolchain(Protocol):
         """Return filename for a program."""
         ...
 
-    def get_output_prefix(self, target_type: str) -> str:
+    def get_output_prefix(
+        self, target_type: str, target: Platform | None = None
+    ) -> str:
         """Return the default output filename prefix for a target type.
 
         E.g., "lib" for shared/static libraries on Unix, "" on Windows.
+
+        Args:
+            target_type: "program", "static_library", "shared_library", ...
+            target: Platform being built for. None means the build machine.
         """
         ...
 
-    def get_output_suffix(self, target_type: str) -> str:
+    def get_output_suffix(
+        self, target_type: str, target: Platform | None = None
+    ) -> str:
         """Return the default output filename suffix for a target type.
 
         E.g., ".so" / ".dylib" / ".dll" for shared libraries.
+
+        Args:
+            target_type: "program", "static_library", "shared_library", ...
+            target: Platform being built for. None means the build machine.
         """
         ...
 
-    def get_install_dir(self, target_type: str) -> str:
+    def get_install_dir(self, target_type: str, target: Platform | None = None) -> str:
         """Return the conventional install subdirectory for a target type.
 
         E.g., "bin" for programs, "lib" for static libraries, and "bin" or
         "lib" for shared libraries depending on the target platform.
+
+        Args:
+            target_type: "program", "static_library", "shared_library", ...
+            target: Platform being built for. None means the build machine.
         """
         ...
 
@@ -1177,39 +1194,54 @@ class BaseToolchain(ABC):
         """Return the archiver tool name ("ar" for GCC, "lib" for MSVC)."""
         return "ar"
 
-    def get_output_prefix(self, target_type: str) -> str:
+    def get_output_prefix(
+        self, target_type: str, target: Platform | None = None
+    ) -> str:
         """Return the default output filename prefix for a target type.
 
         Override in subclasses for platform/toolchain-specific naming.
         Default is "lib" for libraries, "" for programs.
+
+        Args:
+            target_type: "program", "static_library", "shared_library", ...
+            target: Platform being built for, usually ``env.target``. None
+                means the build machine, which is what a caller with no
+                environment in reach can honestly say.
         """
         from pcons.configure.platform import get_platform
 
-        plat = get_platform()
+        plat = target or get_platform()
         if target_type == "static_library":
             return plat.static_lib_prefix
         elif target_type == "shared_library":
             return plat.shared_lib_prefix
         return ""
 
-    def get_output_suffix(self, target_type: str) -> str:
+    def get_output_suffix(
+        self, target_type: str, target: Platform | None = None
+    ) -> str:
         """Return the default output filename suffix for a target type.
 
         Override in subclasses for platform/toolchain-specific naming.
+
+        Args:
+            target_type: "program", "static_library", "shared_library", ...
+            target: Platform being built for, usually ``env.target``. None
+                means the build machine.
         """
         from pcons.configure.platform import get_platform
 
-        plat = get_platform()
+        plat = target or get_platform()
         if target_type == "static_library":
             return plat.static_lib_suffix
         elif target_type == "shared_library":
             return plat.shared_lib_suffix
         return plat.exe_suffix
 
-    def get_install_dir(self, target_type: str) -> str:
+    def get_install_dir(self, target_type: str, target: Platform | None = None) -> str:
         """Return the conventional install subdirectory for a target type.
 
-        The convention follows the platform this toolchain targets:
+        The convention follows the platform being built for:
 
         - programs go in ``bin``
         - static libraries (and archives) go in ``lib``
@@ -1218,11 +1250,17 @@ class BaseToolchain(ABC):
           in ``lib`` otherwise (ELF ``.so`` / Mach-O ``.dylib``).
 
         Override in subclasses for non-standard layouts (e.g. ``lib64``).
+
+        Args:
+            target_type: "program", "static_library", "shared_library", ...
+            target: Platform being built for, usually ``env.target``. None
+                means the build machine, so a cross-built DLL only lands in
+                ``bin`` when the caller says what it is building for.
         """
         if target_type == "program":
             return "bin"
         if target_type == "shared_library":
-            if self.get_output_suffix("shared_library") == ".dll":
+            if self.get_output_suffix("shared_library", target) == ".dll":
                 return "bin"
             return "lib"
         # static_library and anything else (archives, data) default to lib.

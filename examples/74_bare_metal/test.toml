@@ -1,0 +1,39 @@
+# Test configuration for the bare-metal example
+
+[test]
+description = "A Cortex-M3 firmware and its host tools in one project: a cross toolchain via CrossPreset, a host-built generator, and one checksum library built for both worlds, each environment owning its build directory"
+
+expected_outputs = [
+    "build/host/bin/genver",
+    "build/host/gen/version.h",
+    "build/target/lib/libbsp.a",
+    "build/target/lib/libcommon.a",
+    "build/host/lib/libcommon.a",
+    "build/host/bin/checksum_test",
+    "build/target/firmware.elf",
+    "build/target/firmware.bin",
+    "build/target/firmware.hex",
+    "build/target/firmware.size",
+]
+
+[verify]
+# ${PCONS} is the pcons under test, as a shell command.
+commands = [
+    # The firmware is an ARM image, whatever the machine that built it.
+    { run = "arm-none-eabi-readelf -h build/target/firmware.elf", expect_stdout = "Machine:                           ARM" },
+    # The same checksum source, compiled by the host compiler, tested here.
+    { run = "./build/host/bin/checksum_test", expect_stdout = "checksum 0x1f0f" },
+    # ... and running on the MCU, where it agrees.
+    { run = "${PCONS} run qemu", expect_stdout = "checksum ok" },
+    { run = "${PCONS} run qemu", expect_stdout = "Hello from bare metal (pcons)!" },
+    { run = "${PCONS} run qemu", expect_stdout = "version 1.4.0" },
+    # One target of one environment, named by the environment it builds in.
+    { run = "${PCONS} build common@host", expect_stdout = "" },
+]
+
+[skip]
+# Needs the ARM bare-metal toolchain to build and QEMU to run.
+require_commands = ["arm-none-eabi-gcc", "arm-none-eabi-objcopy", "qemu-system-arm"]
+# Windows: the host generator is built as genver.exe and the shell differs.
+platforms = ["win32"]
+generators = ["xcode"]

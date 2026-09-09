@@ -12,6 +12,7 @@ from pcons.core.target import Target, UsageRequirements
 if TYPE_CHECKING:
     from typing import Any
 
+    from pcons.core.environment import Environment
     from pcons.packages.description import PackageDescription
 
 
@@ -86,6 +87,7 @@ class ImportedTarget(Target):
         package: PackageDescription | None = None,
         requested_components: Sequence[str] | None = None,
         system: bool = False,
+        env: Environment | None = None,
     ) -> None:
         """Create an imported target.
 
@@ -95,8 +97,11 @@ class ImportedTarget(Target):
             requested_components: Which components were requested.
             system: Treat the package's headers as system headers, so
                 warnings from them are suppressed in every dependent.
+            env: The environment the package was located for. Two
+                environments may hold two different results for one
+                package name, and this is what tells the targets apart.
         """
-        super().__init__(name)
+        super().__init__(name, env=env)
         if system and package is not None:
             package = package.as_system()
         self.package = package
@@ -138,6 +143,7 @@ class ImportedTarget(Target):
         components: Sequence[str] | None = None,
         *,
         system: bool = False,
+        env: Environment | None = None,
     ) -> ImportedTarget:
         """Create an imported target from a package description.
 
@@ -147,6 +153,7 @@ class ImportedTarget(Target):
             system: Treat the package's headers as system headers
                 (``-isystem``, ``/external:I``), so their warnings are
                 suppressed in every dependent.
+            env: The environment the package was located for.
 
         Returns:
             ImportedTarget instance.
@@ -164,6 +171,7 @@ class ImportedTarget(Target):
             package=merged_pkg,
             requested_components=components,
             system=system,
+            env=env,
         )
 
     @property

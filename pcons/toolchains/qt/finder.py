@@ -13,9 +13,9 @@ generation tools (moc/uic/rcc/...), and the Qt version, probing in order:
    ``QT_HOST_LIBEXECS``/``QT_HOST_BINS`` give the tool directory,
    ``QT_INSTALL_LIBS``/``QT_INSTALL_HEADERS`` the libraries.
 
-Discovery is cached per project (each Qt module becomes exactly one
-ImportedTarget, so target identity is stable across the build script);
-repeated calls may add modules.
+Discovery is cached per project and environment (each Qt module becomes
+exactly one ImportedTarget per environment, so target identity is stable
+across the build script); repeated calls may add modules.
 
 Platform requirements are baked into the returned module targets so users
 never see them: MSVC-style compilers get ``/Zc:__cplusplus /permissive-``
@@ -65,7 +65,8 @@ _MODULE_DEPS: dict[str, tuple[str, ...]] = {
     "OpenGL": ("Gui",),
     "OpenGLWidgets": ("OpenGL", "Widgets"),
     "PrintSupport": ("Widgets",),
-    "Qml": ("Network",),
+    "Qml": ("Network", "QmlIntegration"),
+    "QmlIntegration": ("Core",),
     "Quick": ("Qml", "Gui"),
     "QuickControls2": ("Quick",),
     "QuickWidgets": ("Quick", "Widgets"),
@@ -78,11 +79,45 @@ _MODULE_DEPS: dict[str, tuple[str, ...]] = {
     "MultimediaWidgets": ("Multimedia", "Widgets"),
 }
 
-# One QtPackage per project: Qt module targets register with the project,
-# so discovery must not run twice. Weak keys let projects be collected.
-_qt_installs: weakref.WeakKeyDictionary[Project, QtPackage] = (
+_HEADER_ONLY_MODULES: frozenset[str] = frozenset({"QmlIntegration"})
+"""Modules Qt ships with headers and no library, so nothing is linked."""
+
+# One QtPackage per project and environment name: a cross build and a host
+# build need different installs, and their module targets are told apart by
+# their environments. Weak keys let projects be collected.
+_qt_installs: weakref.WeakKeyDictionary[Project, dict[str | None, QtPackage]] = (
     weakref.WeakKeyDictionary()
 )
+
+
+QtProbe = Literal["auto", "pkg-config", "qtpaths"]
+"""Which probe :func:`find_qt` may run: both in order, or one only."""
+
+_PROBES: tuple[QtProbe, ...] = ("auto", "pkg-config", "qtpaths")
+
+
+def _probe_used(qt: QtPackage) -> QtProbe:
+    """Which probe located *qt*, as a :data:`QtProbe` value."""
+    return "pkg-config" if qt.found_via == "pkg-config" else "qtpaths"
+
+
+def _install_key(project: Project, env: Environment | None) -> str | None:
+    """The cache slot an install lands in.
+
+    A caller passing no environment still gets module targets in one: the
+    project's inherited environment, which is what ``Target`` falls back to.
+    Keying on that keeps the cache and the targets it holds in step, so a
+    script mixing ``find_qt(project)`` and ``find_qt(project, env)`` in a
+    single-environment project keeps getting one install.
+    """
+    if env is None:
+        env = project._inherited_environment()
+    return env.name if env is not None else None
+
+
+def qt_install(project: Project, env: Environment | None = None) -> QtPackage | None:
+    """The Qt installation located for *env* in *project*, or None."""
+    return _qt_installs.get(project, {}).get(_install_key(project, env))
 
 
 class QtPackage:
@@ -204,6 +239,7 @@ def find_qt(
     modules: Sequence[str],
     version: str | None = None,
     qt_root: str | Path | None = None,
+    probe: QtProbe = "auto",
     private_headers: Sequence[str] = (),
     required: Literal[True] = True,
 ) -> QtPackage: ...
@@ -217,6 +253,7 @@ def find_qt(
     modules: Sequence[str],
     version: str | None = None,
     qt_root: str | Path | None = None,
+    probe: QtProbe = "auto",
     private_headers: Sequence[str] = (),
     required: Literal[False],
 ) -> QtPackage | None: ...
@@ -229,6 +266,7 @@ def find_qt(
     modules: Sequence[str],
     version: str | None = None,
     qt_root: str | Path | None = None,
+    probe: QtProbe = "auto",
     private_headers: Sequence[str] = (),
     required: bool = True,
 ) -> QtPackage | None:
@@ -237,16 +275,27 @@ def find_qt(
     Args:
         project: The project; module targets register with it, and
             discovery is cached on it (repeat calls may add modules).
-        env: When given, the ``qt`` toolchain is added to this environment
-            with moc/uic/rcc paths configured, enabling ``env.qt.*``
-            builders and ``project.QtProgram(...)``. MSVC-style toolchains
-            also get Qt's required compiler flags on the Core module.
+        env: The environment Qt is located for. Discovery is cached per
+            environment name, so a cross build and a host build each get
+            their own install and their own module targets. The ``qt``
+            toolchain is added to the environment with moc/uic/rcc paths
+            configured, enabling ``env.qt.*`` builders and
+            ``project.QtProgram(...)``. MSVC-style toolchains also get
+            Qt's required compiler flags on the Core module.
         modules: Qt module short names, e.g. ["Widgets", "Network"].
             Core is always included.
         version: Optional constraint, e.g. ">=6.4".
         qt_root: Explicit Qt prefix (overrides probing); also taken from
-            the PCONS_QT_ROOT environment variable. First call wins: the
-            cached install is reused by later calls.
+            the PCONS_QT_ROOT environment variable. First call for an
+            environment wins: the cached install is reused by later calls
+            for the same environment.
+        probe: Which probe to run. "auto" (default) tries pkg-config and
+            falls back to qtpaths. "pkg-config" and "qtpaths" run that one
+            only. A cross Qt whose .pc files describe the target while its
+            moc/uic/rcc run on the build machine needs probe="qtpaths":
+            only that probe reads QT_HOST_BINS and QT_HOST_LIBEXECS, and
+            pkg-config would otherwise answer first with a libexecdir full
+            of target executables.
         private_headers: Modules whose private headers should be added to
             the include path (e.g. ["Core"] for QtCore/x.y.z/private).
         required: If True (default), raise QtNotFoundError when Qt or any
@@ -255,6 +304,11 @@ def find_qt(
     Returns:
         A QtPackage, or None (only when required=False).
     """
+    if probe not in _PROBES:
+        raise ValueError(
+            f"find_qt: probe={probe!r} is not one of "
+            f"{', '.join(repr(p) for p in _PROBES)}."
+        )
     wanted = list(dict.fromkeys(["Core", *modules]))  # dedupe, Core first
     if qt_root is None:
         env_root = os.environ.get("PCONS_QT_ROOT", "").strip()
@@ -267,24 +321,33 @@ def find_qt(
             f"{'$PCONS_QT_ROOT' if 'PCONS_QT_ROOT' in os.environ else 'qt_root='})."
         )
 
-    qt = _qt_installs.get(project)
-    if qt is not None and qt_root is not None and not qt.prefix.is_relative_to(qt_root):
-        logger.warning(
-            "find_qt: qt_root=%s ignored — Qt %s at %s is already located "
-            "for this project (discovery is cached; the first call wins).",
-            qt_root,
-            qt.version,
-            qt.prefix,
-        )
+    qt = qt_install(project, env)
+    if qt is not None:
+        ignored: list[str] = []
+        if qt_root is not None and not qt.prefix.is_relative_to(qt_root):
+            ignored.append(f"qt_root={qt_root}")
+        if probe != "auto" and _probe_used(qt) != probe:
+            ignored.append(f"probe={probe!r}")
+        if ignored:
+            logger.warning(
+                "find_qt: %s ignored — Qt %s at %s (found via %s) is already "
+                "located for this environment (discovery is cached; the first "
+                "call wins).",
+                " and ".join(ignored),
+                qt.version,
+                qt.prefix,
+                qt.found_via,
+            )
     if qt is None:
-        qt = _probe_pkgconfig(wanted, version, qt_root)
-        if qt is None:
-            qt = _probe_qtpaths(wanted, version, qt_root)
+        if probe in ("auto", "pkg-config"):
+            qt = _probe_pkgconfig(wanted, version, qt_root, env)
+        if qt is None and probe in ("auto", "qtpaths"):
+            qt = _probe_qtpaths(wanted, version, qt_root, env)
         if qt is None:
             if not required:
                 return None
-            raise QtNotFoundError(_not_found_message(wanted, version, qt_root))
-        _qt_installs[project] = qt
+            raise QtNotFoundError(_not_found_message(wanted, version, qt_root, probe))
+        _qt_installs.setdefault(project, {})[_install_key(project, env)] = qt
     elif version is not None and not _version_satisfies(qt.version, version):
         if not required:
             return None
@@ -317,7 +380,10 @@ def qt_module_available(name: str, qt_root: str | Path | None = None) -> bool:
     """Cheap existence probe for one Qt module (no targets created).
 
     Used by test harnesses and feature guards; find_qt() is the real
-    discovery entry point.
+    discovery entry point. Unlike find_qt this always tries pkg-config
+    then qtpaths: it answers "is this module installed anywhere", not
+    "which install will be built against", so it has no ``probe``
+    parameter.
     """
     root = Path(qt_root) if qt_root else None
     finder = _pkgconfig_finder(root)
@@ -331,24 +397,37 @@ def qt_module_available(name: str, qt_root: str | Path | None = None) -> bool:
     headers = Path(query.get("QT_INSTALL_HEADERS", prefix / "include"))
     is_framework = (libs / "QtCore.framework").is_dir()
     return (
-        _module_package(name, query.get("QT_VERSION", ""), libs, headers, is_framework)
+        _module_package(
+            name,
+            query.get("QT_VERSION", ""),
+            libs,
+            headers,
+            is_framework,
+            _android_abi_suffix(query, libs),
+        )
         is not None
     )
 
 
 def _not_found_message(
-    wanted: list[str], version: str | None, qt_root: Path | None
+    wanted: list[str],
+    version: str | None,
+    qt_root: Path | None,
+    probe: QtProbe = "auto",
 ) -> str:
-    probes = [
-        "pkg-config " + ", ".join(f"Qt6{m}" for m in wanted),
-        "qtpaths6/qtpaths/qmake6/qmake -query",
-    ]
+    probes = []
+    if probe in ("auto", "pkg-config"):
+        probes.append("pkg-config " + ", ".join(f"Qt6{m}" for m in wanted))
+    if probe in ("auto", "qtpaths"):
+        probes.append("qtpaths6/qtpaths/qmake6/qmake -query")
     lines = [
         f"Qt 6 not found (need modules: {', '.join(wanted)}"
         + (f", version {version}" if version else "")
         + ")."
     ]
     lines.append("Probed: " + "; ".join(probes) + ".")
+    if probe != "auto":
+        lines.append(f"probe={probe!r} ran that probe only.")
     if qt_root:
         lines.append(f"qt_root was set to {qt_root}.")
     lines.append(
@@ -378,7 +457,10 @@ def _pkgconfig_finder(qt_root: Path | None) -> PkgConfigFinder:
 
 
 def _probe_pkgconfig(
-    wanted: list[str], version: str | None, qt_root: Path | None
+    wanted: list[str],
+    version: str | None,
+    qt_root: Path | None,
+    env: Environment | None = None,
 ) -> QtPackage | None:
     """Locate Qt via Qt6*.pc files.
 
@@ -410,7 +492,8 @@ def _probe_pkgconfig(
         descriptions[name] = pkg
 
     modules = {
-        name: ImportedTarget.from_package(pkg) for name, pkg in descriptions.items()
+        name: ImportedTarget.from_package(pkg, env=env)
+        for name, pkg in descriptions.items()
     }
     # Every module depends on Core: the .pc files flatten compile/link
     # flags, but pcons-added platform requirements live on the Core
@@ -423,7 +506,7 @@ def _probe_pkgconfig(
         pkg = finder.find(f"Qt6{name}")
         if pkg is None:
             return None
-        target = ImportedTarget.from_package(pkg)
+        target = ImportedTarget.from_package(pkg, env=env)
         target.link(modules["Core"])
         return target
 
@@ -551,7 +634,10 @@ def _find_qtpaths_query(qt_root: Path | None) -> dict[str, str] | None:
 
 
 def _probe_qtpaths(
-    wanted: list[str], version: str | None, qt_root: Path | None
+    wanted: list[str],
+    version: str | None,
+    qt_root: Path | None,
+    env: Environment | None = None,
 ) -> QtPackage | None:
     """Locate Qt by querying qtpaths/qmake and inspecting the install tree."""
     query = _find_qtpaths_query(qt_root)
@@ -571,13 +657,14 @@ def _probe_qtpaths(
     )
     libexec_dir = Path(query.get("QT_HOST_LIBEXECS") or bin_dir)
     is_framework = (libs / "QtCore.framework").is_dir()
+    abi_suffix = _android_abi_suffix(query, libs)
 
     # Validate before creating any targets: descriptions for the wanted
     # modules and their implicit deps must all resolve.
     order = _closure_in_dep_order(wanted)
     descriptions: dict[str, PackageDescription] = {}
     for name in order:
-        pkg = _module_package(name, qt_version, libs, headers, is_framework)
+        pkg = _module_package(name, qt_version, libs, headers, is_framework, abi_suffix)
         if pkg is None:
             if name in wanted:
                 return None
@@ -587,7 +674,7 @@ def _probe_qtpaths(
     modules: dict[str, ImportedTarget] = {}
 
     def add_module(name: str, pkg: PackageDescription) -> ImportedTarget:
-        target = ImportedTarget.from_package(pkg)
+        target = ImportedTarget.from_package(pkg, env=env)
         for dep in _MODULE_DEPS.get(name, ("Core",)):
             if dep in modules:
                 target.link(modules[dep])
@@ -601,11 +688,13 @@ def _probe_qtpaths(
     def factory(name: str) -> ImportedTarget | None:
         # Create implicit deps first so link() targets exist.
         for dep in _MODULE_DEPS.get(name, ("Core",)):
-            if dep not in modules and factory(dep) is None:
+            if dep in modules:
+                continue
+            if factory(dep) is None and dep not in _HEADER_ONLY_MODULES:
                 return None
         if name in modules:
             return modules[name]
-        pkg = _module_package(name, qt_version, libs, headers, is_framework)
+        pkg = _module_package(name, qt_version, libs, headers, is_framework, abi_suffix)
         return add_module(name, pkg) if pkg is not None else None
 
     return QtPackage(
@@ -637,12 +726,44 @@ def _closure_in_dep_order(wanted: list[str]) -> list[str]:
     return order
 
 
+def _android_abi_suffix(query: dict[str, str], libs: Path) -> str:
+    """ABI suffix a Qt for Android appends to every library file name.
+
+    Empty for any other Qt: only an ``android-clang`` install is looked
+    at, so no other platform pays for a directory scan. Qt reports *that*
+    it is Android and never *which* Android, so the ABI is read back from
+    the file names Core was installed under (``libQt6Core_arm64-v8a.so``
+    -> ``_arm64-v8a``). Assumed uniform across the install, which is what
+    a Qt installer produces: one ABI per prefix.
+    """
+    if query.get("QMAKE_XSPEC") != "android-clang":
+        return ""
+    for lib in sorted(libs.glob("libQt6Core_*.so")):
+        return lib.name[len("libQt6Core") : -len(".so")]
+    return ""
+
+
 def _module_package(
-    name: str, qt_version: str, libs: Path, headers: Path, is_framework: bool
+    name: str,
+    qt_version: str,
+    libs: Path,
+    headers: Path,
+    is_framework: bool,
+    abi_suffix: str = "",
 ) -> PackageDescription | None:
-    """PackageDescription for one Qt module from an introspected install."""
+    """PackageDescription for one Qt module from an introspected install.
+
+    A module listed in :data:`_HEADER_ONLY_MODULES` gets include
+    directories and no library, whatever the install layout: Qt builds no
+    framework for a module it builds no library for.
+
+    @p abi_suffix is appended to the library name, for a Qt for Android
+    whose libraries are named per ABI. A module with headers but no
+    library under that name is reported missing, like any absent module.
+    """
     define = f"QT_{name.upper()}_LIB"
-    if is_framework:
+    header_only = name in _HEADER_ONLY_MODULES
+    if is_framework and not header_only:
         framework_dir = libs / f"Qt{name}.framework"
         if not framework_dir.is_dir():
             return None
@@ -658,12 +779,15 @@ def _module_package(
     module_headers = headers / f"Qt{name}"
     if not module_headers.is_dir():
         return None
+    library = f"Qt6{name}{abi_suffix}"
+    if abi_suffix and not header_only and not (libs / f"lib{library}.so").is_file():
+        return None
     return PackageDescription(
         name=f"Qt6{name}",
         version=qt_version,
         include_dirs=[str(headers), str(module_headers)],
-        library_dirs=[str(libs)],
-        libraries=[f"Qt6{name}"],
+        library_dirs=[] if header_only else [str(libs)],
+        libraries=[] if header_only else [library],
         defines=[define],
         prefix=str(libs.parent),
     )

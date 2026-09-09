@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from pcons.core.target import Target
     from pcons.util.source_location import SourceLocation
 
 
@@ -149,6 +150,38 @@ class DependencyCycleError(PconsError):
         self.cycle = cycle
         cycle_str = " -> ".join(cycle)
         super().__init__(f"dependency cycle: {cycle_str}", location)
+
+
+class DuplicateTargetError(PconsError):
+    """Two targets answer to one qualified name.
+
+    Always fatal: a name and an environment are a target's identity, so the
+    build graph cannot tell the two apart, and neither can anything that names
+    a target on the command line.
+
+    Attributes:
+        qualified_name: The name both targets answer to.
+    """
+
+    fatal = True
+
+    def __init__(
+        self,
+        qualified_name: str,
+        first: Target,
+        second: Target,
+        location: SourceLocation | None = None,
+    ) -> None:
+        self.qualified_name = qualified_name
+        super().__init__(
+            f"two targets are both named '{qualified_name}'\n"
+            f"  first  at {first.defined_at}\n"
+            f"  second at {second.defined_at}\n"
+            f"A name and an environment are a target's identity, so they have "
+            f"to differ. Name the environments apart, or give one target "
+            f"another name.",
+            location,
+        )
 
 
 class MissingSourceError(PconsError):

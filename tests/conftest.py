@@ -33,6 +33,7 @@ from pcons.toolchains.gcc import (
     GccLinker,
     GccToolchain,
 )
+from tests.support import NO_ANDROID_NDK, find_android_ndk
 
 # Hypothesis profiles for the property tests in tests/fuzz/. "dev" is the
 # default: small and derandomized, so a normal `make test` costs little and
@@ -239,3 +240,17 @@ def test_project(tmp_path):
     """Create a default project for testing."""
     project = Project(name="test_project", root_dir=tmp_path)
     return project
+
+
+@pytest.fixture
+def android_ndk() -> Path:
+    """An Android NDK to build with, or skip the calling test.
+
+    Real-toolchain Android tests take this instead of a hardcoded path, so
+    they run on CI and on a developer machine, and skip where there is no
+    NDK. See ``tests.support.find_android_ndk`` for what is searched.
+    """
+    ndk = find_android_ndk()
+    if ndk is None:
+        pytest.skip(NO_ANDROID_NDK)
+    return ndk

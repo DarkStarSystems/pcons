@@ -1,0 +1,23 @@
+# Test configuration for the generated-public-headers example
+
+[test]
+description = "A library whose public header a generator writes: the ordering reaches every target that links the library, and a clean build settles in one pass"
+
+expected_outputs = [
+    "build/gen/metrics_limits.h",
+    "build/app${BINARY_EXT}",
+]
+
+[verify]
+commands = [
+    { run = "build/app${BINARY_EXT}", expect_stdout = "generated 8 8" },
+]
+
+[[rebuild]]
+description = "Nothing changed: a clean build converges in one pass"
+expect_no_work = true
+
+[skip]
+# The xcode generator does not order the generator ahead of the library's own
+# compile, so metrics_limits.h is missing when that compile runs.
+generators = ["xcode"]

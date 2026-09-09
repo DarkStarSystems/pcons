@@ -1,13 +1,16 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.core.environment."""
 
+import logging
+import sys
 from pathlib import Path
 
 import pytest
 
 from pcons.core.environment import Environment
+from pcons.core.project import Project
 from pcons.core.toolconfig import ToolConfig
-from pcons.tools import compiler_cache
+from pcons.tools import co_compile, compiler_cache
 
 
 class TestEnvironmentBasic:
@@ -437,6 +440,87 @@ class TestCompilerCache:
         assert env.cc.launcher == []
 
 
+class TestClangTidy:
+    """use_clang_tidy() runs the co_compile driver in front of the compilers."""
+
+    @staticmethod
+    def _env_with_compilers() -> Environment:
+        env = Environment()
+        env.add_tool("cc").set("cmd", "gcc")
+        env.add_tool("cxx").set("cmd", "g++")
+        env.add_tool("link").set("cmd", "g++")
+        return env
+
+    @staticmethod
+    def _installed(*names: str):
+        return lambda prog: f"/usr/bin/{prog}" if prog in names else None
+
+    def test_wraps_both_compilers_and_nothing_else(
+        self, test_project, monkeypatch
+    ) -> None:  # noqa: F811
+        monkeypatch.setattr(co_compile.shutil, "which", self._installed("clang-tidy"))
+        env = self._env_with_compilers()
+
+        env.use_clang_tidy(args=["--use-color"])
+
+        expected = [
+            sys.executable,
+            "-m",
+            "pcons.tools.co_compile",
+            "--tidy",
+            "/usr/bin/clang-tidy",
+            "--tidy-arg",
+            "--use-color",
+            "--",
+        ]
+        assert env.cc.launcher == expected
+        assert env.cxx.launcher == expected
+        assert env.link.launcher == []
+        assert env.cxx.cmd == "g++"
+
+    def test_missing_clang_tidy_is_a_warning(
+        self, test_project, monkeypatch, caplog
+    ) -> None:  # noqa: F811
+        monkeypatch.setattr(co_compile.shutil, "which", self._installed())
+        env = self._env_with_compilers()
+
+        with caplog.at_level(logging.WARNING):
+            env.use_clang_tidy()
+
+        assert env.cxx.launcher == []
+        assert "clang-tidy not found" in caplog.text
+
+    def test_no_double_wrapping(self, test_project, monkeypatch) -> None:  # noqa: F811
+        monkeypatch.setattr(co_compile.shutil, "which", self._installed("clang-tidy"))
+        env = self._env_with_compilers()
+
+        env.use_clang_tidy()
+        env.use_clang_tidy()
+
+        assert env.cxx.launcher.count("pcons.tools.co_compile") == 1
+
+    @pytest.mark.parametrize("cache_first", [True, False])
+    def test_runs_outside_a_compiler_cache(
+        self, test_project, monkeypatch, cache_first
+    ) -> None:  # noqa: F811
+        """The cache must wrap the compiler itself, whichever was asked for
+        first, or it would be asked to cache the analysis driver."""
+        which = self._installed("clang-tidy", "ccache")
+        monkeypatch.setattr(co_compile.shutil, "which", which)
+        monkeypatch.setattr(compiler_cache.shutil, "which", which)
+        env = self._env_with_compilers()
+
+        if cache_first:
+            env.use_compiler_cache("ccache")
+            env.use_clang_tidy()
+        else:
+            env.use_clang_tidy()
+            env.use_compiler_cache("ccache")
+
+        assert env.cxx.launcher[0] == sys.executable
+        assert env.cxx.launcher[-1] == "ccache"
+
+
 class TestEnvironmentRepr:
     def test_repr(self, test_project):  # noqa: F811
         env = Environment()
@@ -545,3 +629,124 @@ class TestUseUnifiedWithRequirements:
 
         with pytest.raises(ValueError, match="target.link"):
             env.use(Duck())
+
+
+class TestBuildDirLayout:
+    """Where ``build_prefix`` lands relative to the build directory (#96)."""
+
+    def _sub_project(self, project, tmp_path):
+        (tmp_path / "sub").mkdir(exist_ok=True)
+        with project._enter_subdir("sub"):
+            return Project(name="child", root_dir=tmp_path / "sub")
+
+    def test_plain_project(self, test_project):  # noqa: F811
+        env = test_project.Environment()
+        env.build_prefix = "mcu"
+        assert env.build_dir == Path("build/mcu")
+
+    def test_sub_project_offset_stays_below_the_prefix(self, test_project, tmp_path):  # noqa: F811
+        child = self._sub_project(test_project, tmp_path)
+        env = child.Environment()
+        env.build_prefix = "mcu"
+        assert env.build_dir == Path("build/mcu/sub")
+
+    def test_user_build_dir_takes_the_prefix_below_it(self, test_project):  # noqa: F811
+        env = test_project.Environment()
+        env.build_dir = "build/rel"
+        env.build_prefix = "mcu"
+        assert env.build_dir == Path("build/rel/mcu")
+
+    def test_user_build_dir_in_a_sub_project_drops_the_offset(
+        self,
+        test_project,  # noqa: F811
+        tmp_path,
+    ):
+        """Naming the directory names the whole of it, offset included."""
+        child = self._sub_project(test_project, tmp_path)
+        env = child.Environment()
+        env.build_dir = "build/rel"
+        env.build_prefix = "mcu"
+        assert env.build_dir == Path("build/rel/mcu")
+
+    def test_no_prefix_leaves_the_build_dir_alone(self, test_project):  # noqa: F811
+        env = test_project.Environment()
+        env.build_dir = "build/rel"
+        assert env.build_dir == Path("build/rel")
+
+    def test_setting_order_does_not_matter(self, test_project):  # noqa: F811
+        first = test_project.Environment()
+        first.build_prefix = "mcu"
+        first.build_dir = "build/rel"
+
+        second = test_project.Environment()
+        second.build_dir = "build/rel"
+        second.build_prefix = "mcu"
+
+        assert first.build_dir == second.build_dir == Path("build/rel/mcu")
+
+    def test_build_dir_outside_the_top_build_dir(self, test_project, tmp_path):  # noqa: F811
+        """A project built out of tree has no offset to split off."""
+        child = self._sub_project(test_project, tmp_path)
+        env = child.Environment()
+        env._set_project_build_dir(Path("build"), Path("/elsewhere/out"))
+        env.build_prefix = "mcu"
+        assert env.build_dir == Path("/elsewhere/out/mcu")
+
+
+class TestCloneBuildDir:
+    def test_clone_keeps_the_build_dir(self, test_project):  # noqa: F811
+        env = test_project.Environment()
+        env.build_dir = "build/rel"
+        assert env.clone().build_dir == env.build_dir
+
+    def test_clone_prefix_stays_under_the_parents_build_dir(self, test_project):  # noqa: F811
+        env = test_project.Environment()
+        env.build_dir = "build/rel"
+
+        clone = env.clone()
+        clone.build_prefix = "x"
+
+        assert clone.build_dir == Path("build/rel/x")
+        assert env.build_dir == Path("build/rel")
+
+    def test_clone_keeps_the_sub_project_offset(self, test_project, tmp_path):  # noqa: F811
+        (tmp_path / "sub").mkdir(exist_ok=True)
+        with test_project._enter_subdir("sub"):
+            child = Project(name="child", root_dir=tmp_path / "sub")
+        env = child.Environment()
+
+        clone = env.clone()
+        clone.build_prefix = "mcu"
+
+        assert clone.build_dir == Path("build/mcu/sub")
+
+
+class TestEnvironmentName:
+    def test_the_property_setter_delegates(self, tmp_path) -> None:
+        """Reached through the descriptor: `__setattr__` intercepts every
+        normal assignment, so the setter exists only for type checkers and
+        must not be a second, unvalidated implementation.
+        """
+        project = Project("p", root_dir=tmp_path)
+        env = project.Environment(name="host")
+
+        Environment.name.fset(env, "other")
+        assert env.name == "other"
+
+        with pytest.raises(ValueError, match="invalid characters"):
+            Environment.name.fset(env, "bad@name")
+
+    def test_name_is_settable_after_construction(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="mcu")
+        env.name = "other"
+        assert env.name == "other"
+
+    def test_name_rejects_the_environment_separator(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="mcu")
+        with pytest.raises(ValueError, match="@"):
+            env.name = "bad@name"
+
+    def test_name_can_be_cleared(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="mcu")
+        env.name = None
+        assert env.name is None

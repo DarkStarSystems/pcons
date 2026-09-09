@@ -18,6 +18,12 @@ machinery to support this kind of dynamic dependencies.
 
 ### Added
 
+- **`env.use_clang_tidy()`**: run clang-tidy alongside every C and C++
+  compile, with the compile's own flags, and fail the build on a diagnostic
+  the way CMake's `CXX_CLANG_TIDY` does. Composes with `use_compiler_cache()`.
+  The driver, `pcons.tools.co_compile`, is a launcher; see
+  `examples/76_clang_tidy`.
+
 - **Scanners: runtime-discovered dependencies.** A `Scanner` declares
   that some edges' real dependencies, their extra outputs, and even
   parts of their command lines, come from their inputs' *content*. Users can now give
@@ -39,6 +45,61 @@ machinery to support this kind of dynamic dependencies.
   direct `ninja` run, and no other command sees them — unlike `os.environ`
   in the build script, which reaches everything. `examples/73_command_env`.
   (#109)
+
+- **Multiple environments in one project: each decides where its targets
+  are built.** A firmware image and the host tools that build it, or a cross
+  build and a host build, can now share one script and even one target name
+  without their outputs colliding. Nothing changes for a project that sets
+  none of the new attributes.
+  - `env.build_prefix` puts everything an environment writes (objects, link
+    outputs, `env.Command()` targets) under `build/<prefix>/`. Below that,
+    `env.runtime_directory`, `env.library_directory` and
+    `env.archive_directory` place programs, shared libraries and static
+    libraries by kind, like the CMake variables. All four are relative to the
+    build directory and empty by default. The toolchain still decides the
+    `lib` prefix and the `.a` / `.lib` suffix, so these are directories, not
+    a replacement for `output_prefix`.
+  - Two targets may share a name when both environments are named and their
+    `build_prefix` differs. Where a target is looked up by its string name
+    rather than held as a `Target`, the name can carry the environment to
+    say which one: `<target>@<env>`, as in `pcons build common@mcu`,
+    `project.get_target("common@mcu")`, or the full form `sub::common@mcu`.
+    A bare name that matches targets in several environments is an error
+    rather than a silent pick.
+  - `add_subdirectory(dir, env=...)` builds an included directory in that
+    environment. Include the same directory twice with two environments to
+    build it for both; the included script needs no change, since its
+    `default_environment` is the one the caller passed.
+  - `add_subdirectory(dir, vars={...})` sets the build variables the included
+    tree reads with `get_var()`, for the duration of the call. They shadow the
+    command line. This replaces setting `os.environ` before the call.
+  - `find_package(env=...)` and `add_package_finder(env=...)` search and cache
+    per environment, so a cross build and a host build can hold different
+    answers for one package name. See the Changed entry below for what a
+    cross environment now searches.
+  - `project.has_target(name)` answers whether a name is taken, including
+    when several targets answer to it.
+  - `env.cross` is the cross preset an environment was retargeted with, or
+    None.
+
+  `examples/74_bare_metal` (a firmware image plus host tools) and
+  `examples/75_multi_env` show all of this. (#96, #118)
+
+- **A cross build's outputs are named and installed for the platform it
+  targets.** `env.target` is a `Platform` derived from the cross preset's
+  triple, or the host when there is no preset. The toolchain consults it, so
+  a mingw cross produces `foo.exe` and `foo.dll`, and a cross-built DLL
+  installs beside its executable rather than into `lib`. A project that set
+  `output_suffix` per target to get this can drop it.
+  - `android()` takes `stl=` (`"c++_shared"` by default, the NDK's own
+    default; also `"c++_static"` and `"none"`).
+  - Linking Qt for Android works: its libraries carry the ABI in their names
+    (`libQt6Core_arm64-v8a.so`), and `find_qt` now reads that from the
+    install.
+  - `find_qt(probe=...)` picks the discovery method: `"pkg-config"`,
+    `"qtpaths"`, or `"auto"` (the default, which tries both). A cross Qt needs
+    `probe="qtpaths"`: its `.pc` files describe the target, and only qtpaths
+    reports where the host's moc/uic/rcc live. (#127)
 
 ### Changed
 
@@ -89,7 +150,54 @@ machinery to support this kind of dynamic dependencies.
 - **A scanned build declares `ninja_required_version = 1.11`,** where
   cross-file dyndep references resolve reliably.
 
+- **A relative path given to `env.Command`, `Install`, `InstallAs`,
+  `InstallDir`, `Tarfile` or `Zipfile` is now anchored at the script that
+  declares it**, as it always was for `Program` and `StaticLibrary`. This
+  only matters inside a directory reached through `add_subdirectory`:
+  - `target="gen.c"` now lands at `build/<subdir>/gen.c`, where it used to
+    land at `build/gen.c`.
+  - `source="mk.py"` and `depends=["schema.json"]` are now read from
+    `<subdir>/`, where they used to be read from the project root.
+  - A script that worked around the old behavior by writing the subdirectory
+    prefix itself now gets it twice, and should drop it.
+
+  Absolute paths, install destinations, and `$SRCDIR` (still the project
+  root) are unaffected. (#137)
+
+- **A cross environment searches its target, not the build machine, in
+  `find_package`.** With a cross preset that has a sysroot, the sysroot's
+  `pkg-config` files and `usr/include` / `usr/lib` are searched and nothing
+  else. With a cross preset and no sysroot, nothing is searched and a lookup
+  raises; add a finder for the target with
+  `project.add_package_finder(finder, env=...)`. Host environments are
+  unchanged. (#118)
+
+- **Breaking:** `Toolchain.get_output_prefix`, `get_output_suffix` and
+  `get_install_dir` take an optional target `Platform` as their second
+  argument. An out-of-tree toolchain overriding them needs the new
+  signature, and should pass the argument through to `super()`. (#127)
+
+- **Breaking:** `android()` requires `api=`; the old default of 21 is gone.
+  The API level is the oldest Android release the app runs on, a product
+  decision rather than something a build tool should guess. (#127)
+
+- A target created without an environment (`HeaderOnlyLibrary`, the install
+  and archive builders) now gets the first environment registered in its
+  project, or the nearest enclosing one, rather than the most recently
+  registered one. Single-environment projects are unaffected. (#118)
+
 ### Fixed
+
+- A generator declared with `lib.depends(gen)` now runs before every target
+  that links `lib`, not only before `lib` itself. A library whose public
+  headers are generated no longer needs each consumer to repeat the
+  `depends()`. See `examples/83_generated_public_headers`. (#139)
+- `target.depends()` on an install or archive target now orders the build.
+  The resolver visits targets in dependency order in a single pass, so a
+  target whose sources are other targets has its nodes by the time the edge
+  is applied. Before, such edges were silently dropped. Reported in #129.
+- `depends(path, propagate=False)` no longer drops the file dependency.
+- A scanner can be attached to a target whose sources are other targets.
 
 - **Fortran no longer rebuilds its whole module scope forever.** gfortran
   leaves a `.mod` untouched when a recompile produces an identical one, and
@@ -102,6 +210,27 @@ machinery to support this kind of dynamic dependencies.
 - **The Makefile and Xcode generators refuse a project that uses discovered
   dependencies,** with an error naming the edge, instead of writing build
   files that couldn't work. Only ninja can express `dyndep`.
+
+- A `pragma Singleton` QML file was registered in the qmldir as a plain
+  type, so the engine handed out the type instead of the instance. (#118)
+- Two environments could share a name, which left `common@mcu` meaning two
+  things. `env.name = ...` after creation now refuses a taken name, as the
+  constructor does. (#118)
+- `target.public.include_dirs += ["inc"]` (and `+=` on any other usage
+  requirement list) threw away what it added and said nothing. Only `+=`
+  was affected; `.append()` and `.extend()` always worked. (#108)
+- `depends()` on an interface target such as `HeaderOnlyLibrary` was
+  accepted and silently dropped. The target builds nothing of its own, so
+  the ordering now applies to every target that consumes it. (#111, #114)
+- `pcons build VAR=value` accepted the variable and never re-ran the build
+  script that reads it, so an already-generated directory kept building
+  with the old value. A variable, `--reconfigure` or `--fresh` on
+  `pcons build` now forces regeneration; a plain `pcons build` still skips
+  the script. (#116)
+- A verb in a `cli_group` can now name the targets it needs with
+  `depends=`, and `pcons run` builds what every level of the command path
+  declared. `pcons run <group>` with only the group's own options no longer
+  builds the group's targets and then fails with "Missing command". (#107)
 
 ### Removed
 
@@ -125,6 +254,12 @@ machinery to support this kind of dynamic dependencies.
   generated header could compile before the header existed. Ordering a
   compile is a property of compiling, not of linking, and now applies
   to every target type.
+
+### Contributors
+
+- Sylvain Garcia (@Garcia6l20): #107, #108, #116, #118, #127, #137, #138, #139, and the #133 fix
+- @afonsojanu: #114
+- @anisayakmitra-in: docs (#112)
 
 ## [0.28.0] - 2026-08-23
 

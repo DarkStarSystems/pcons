@@ -13,7 +13,80 @@ from pcons import (
     get_variant,
 )
 from pcons.core.errors import ConfigureError
-from pcons.core.vars import _clear_cli_vars
+from pcons.core.vars import _clear_cli_vars, scoped_vars
+
+
+class TestScopedVars:
+    """Variables set around an included build description."""
+
+    @pytest.fixture(autouse=True)
+    def _clean(self, monkeypatch):
+        _clear_cli_vars()
+        monkeypatch.delenv("PCONS_VARS", raising=False)
+        monkeypatch.delenv("PCONS_BUILD_DIR", raising=False)
+        for name in ("SCOPED", "OTHER", "UNTOUCHED"):
+            monkeypatch.delenv(name, raising=False)
+
+    def test_a_value_is_visible_inside_and_gone_after(self) -> None:
+        with scoped_vars({"SCOPED": False}):
+            assert get_var("SCOPED", True) is False
+
+        assert get_var("SCOPED", True) is True
+
+    def test_it_shadows_the_command_line(self, monkeypatch) -> None:
+        monkeypatch.setenv("PCONS_VARS", '{"SCOPED": "on"}')
+
+        with scoped_vars({"SCOPED": False}):
+            assert get_var("SCOPED", True) is False
+
+        assert get_var("SCOPED", True) is True
+
+    def test_a_name_it_does_not_mention_keeps_the_command_line(
+        self, monkeypatch
+    ) -> None:
+        """The lazy PCONS_VARS load has to happen before the override."""
+        monkeypatch.setenv("PCONS_VARS", '{"UNTOUCHED": "from-cli"}')
+
+        with scoped_vars({"SCOPED": "x"}):
+            assert get_var("UNTOUCHED") == "from-cli"
+
+    def test_a_nested_block_keeps_the_outer_names(self) -> None:
+        with scoped_vars({"SCOPED": "outer", "OTHER": "kept"}):
+            with scoped_vars({"SCOPED": "inner"}):
+                assert (get_var("SCOPED"), get_var("OTHER")) == ("inner", "kept")
+
+            assert get_var("SCOPED") == "outer"
+
+    def test_it_is_restored_when_the_body_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="boom"):
+            with scoped_vars({"SCOPED": "x"}):
+                raise RuntimeError("boom")
+
+        assert get_var("SCOPED") is None
+
+    @pytest.mark.parametrize(
+        ("value", "default", "expected"),
+        [
+            (True, False, True),
+            (False, True, False),
+            (7, 0, 7),
+            (1.5, 0.0, 1.5),
+            ("text", "", "text"),
+            (Path("/opt"), Path("/usr"), Path("/opt")),
+        ],
+    )
+    def test_every_supported_type_round_trips(self, value, default, expected) -> None:
+        with scoped_vars({"SCOPED": value}):
+            assert get_var("SCOPED", default) == expected
+
+    def test_a_bool_reads_as_a_command_line_spells_it(self) -> None:
+        with scoped_vars({"SCOPED": True}):
+            assert get_var("SCOPED") == "true"
+
+    def test_an_unsupported_value_is_refused(self) -> None:
+        with pytest.raises(ConfigureError, match="SCOPED"):
+            with scoped_vars({"SCOPED": ["a", "b"]}):
+                pass
 
 
 class TestGetVar:

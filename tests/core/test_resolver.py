@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for pcons.core.resolver."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -971,12 +972,12 @@ class TestResolverToolAgnostic:
             def get_object_suffix(self) -> str:
                 return ".obj"  # Custom object suffix
 
-            def get_output_prefix(self, target_type: str) -> str:
+            def get_output_prefix(self, target_type: str, target=None) -> str:
                 if target_type == "static_library":
                     return "static_"
                 return ""
 
-            def get_output_suffix(self, target_type: str) -> str:
+            def get_output_suffix(self, target_type: str, target=None) -> str:
                 if target_type == "static_library":
                     return ".mylib"
                 return ".exe"
@@ -1020,10 +1021,10 @@ class TestResolverToolAgnostic:
                     )
                 return None
 
-            def get_output_suffix(self, target_type: str) -> str:
+            def get_output_suffix(self, target_type: str, target=None) -> str:
                 if target_type == "program":
                     return ".exe"
-                return super().get_output_suffix(target_type)
+                return super().get_output_suffix(target_type, target)
 
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
@@ -1400,3 +1401,198 @@ class TestLinkInputOrder:
         project.resolve()
 
         self._assert_links_in_order(exe, lib_a, lib_b)
+
+
+class TestSourceTargetsResolveFirst:
+    """A target whose sources are other targets gets its nodes in the same
+    pass as everything else, so a depends() edge to or from it lands (#129)."""
+
+    @staticmethod
+    def _source_tree(tmp_path: Path) -> Path:
+        tree = tmp_path / "tree"
+        (tree / "sub").mkdir(parents=True)
+        (tree / "sub" / "f.txt").write_text("x")
+        return tree
+
+    def test_command_depends_on_install_dir(self, tmp_path):
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        staged = project.InstallDir("stage", self._source_tree(tmp_path))
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo done > $TARGET",
+            name="after",
+        )
+        cmd.depends(staged)
+
+        project.resolve()
+
+        assert staged.output_nodes, "install target produced no nodes"
+        implicit = {n.path for n in cmd.output_nodes[0].implicit_deps}
+        assert {n.path for n in staged.output_nodes} <= implicit
+
+    def test_install_dir_depends_on_command(self, tmp_path):
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        staged = project.InstallDir("stage", self._source_tree(tmp_path))
+        staged.depends(gen)
+
+        project.resolve()
+
+        assert staged.output_nodes, "install target produced no nodes"
+        for node in staged.output_nodes:
+            assert gen.output_nodes[0] in node.implicit_deps
+
+    def test_install_dir_file_dep_reaches_its_nodes(self, tmp_path):
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+
+        stamp_input = tmp_path / "version.txt"
+        stamp_input.write_text("1")
+
+        staged = project.InstallDir("stage", self._source_tree(tmp_path))
+        staged.depends(stamp_input)
+
+        project.resolve()
+
+        assert staged.output_nodes, "install target produced no nodes"
+        for node in staged.output_nodes:
+            assert any(d.path.name == stamp_input.name for d in node.implicit_deps)
+
+    def test_dependency_reached_out_of_order_resolves_its_sources(self, tmp_path):
+        """A depends() edge can reach a target before build order does. Its
+        own source targets must still resolve before its nodes are made."""
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo done > $TARGET",
+            name="after",
+        )
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        installed = project.Install("dist", [gen])
+        cmd.depends(installed)
+
+        project.resolve()
+
+        assert [n.path.name for n in installed.output_nodes] == ["gen.txt"]
+        assert installed.output_nodes[0] in cmd.output_nodes[0].implicit_deps
+
+    @pytest.mark.parametrize("via_install", [True, False])
+    def test_out_of_order_link_target_still_links_its_library(
+        self, tmp_path, gcc_toolchain, via_install
+    ):
+        """A depends() edge can reach a program before build order reaches
+        the library it links. The library must resolve first, or the link
+        line silently loses it."""
+        (tmp_path / "lib.c").write_text("int lib_f(void) { return 1; }")
+        (tmp_path / "main.c").write_text(
+            "int lib_f(void); int main(void) { return lib_f(); }"
+        )
+        project = Project("oob", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+
+        first = env.Command(
+            target=project.build_dir / "x.txt",
+            command="echo x > $TARGET",
+            name="x",
+        )
+        lib = project.StaticLibrary("mylib", env, sources=["lib.c"])
+        app = project.Program("app", env, sources=["main.c"])
+        app.link(lib)
+        first.depends(project.Install("dist", [app]) if via_install else app)
+
+        project.resolve()
+
+        link_inputs = {n.path.name for n in app.output_nodes[0].explicit_deps}
+        assert lib.output_nodes[0].path.name in link_inputs
+
+    def test_source_target_deps_are_not_forwarded_to_consumers(self, tmp_path):
+        """An install target has nodes of its own, so its depends() belong on
+        them and not on whoever consumes it, unlike an interface target."""
+        project = Project("fwd", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        staged = project.InstallDir("stage", self._source_tree(tmp_path))
+        staged.depends(gen)
+
+        consumer = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo done > $TARGET",
+            name="consumer",
+        )
+        consumer.add_dependency(staged)
+
+        project.resolve()
+
+        for node in staged.output_nodes:
+            assert gen.output_nodes[0] in node.implicit_deps
+        for node in consumer.intermediate_nodes + consumer.output_nodes:
+            assert gen.output_nodes[0] not in node.implicit_deps
+
+    def test_source_targets_without_a_factory_warn(self, tmp_path, caplog):
+        """A builder that registered no factory cannot turn Target sources
+        into nodes, and says so rather than dropping them silently."""
+        project = Project("nf", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        odd = Target("odd", project=project)
+        odd._builder_name = "NoSuchBuilder"
+        odd.add_sources([gen])
+        empty = Target("empty", project=project)
+        empty._builder_name = "NoSuchBuilder"
+        empty._pending_sources = []
+
+        with caplog.at_level(logging.WARNING):
+            project.resolve()
+
+        warned = [r for r in caplog.records if "no factory registered" in r.message]
+        assert [r.args[0] for r in warned] == ["odd"]
+        assert odd._pending_sources is None
+        assert empty._pending_sources is None
+
+
+class TestOutputOnlyFileDeps:
+    """depends(path, propagate=False) records a file dep in a second list
+    that the resolver did not apply, so it never reached any node."""
+
+    def test_output_only_file_dep_lands_on_the_output_node(self, tmp_path):
+        project = Project("oo", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+
+        version = tmp_path / "version.txt"
+        version.write_text("1")
+
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo x > $TARGET",
+            name="c",
+        )
+        cmd.depends(version, propagate=False)
+
+        project.resolve()
+
+        assert any(
+            d.path.name == version.name for d in cmd.output_nodes[0].implicit_deps
+        )

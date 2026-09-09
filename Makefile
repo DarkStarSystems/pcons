@@ -30,11 +30,11 @@ fmt:              ## Format code using ruff (whole repo, including Python in Mar
 lint:             ## Run ruff and ty linters.
 	uv run ruff check .
 	uv run ruff format --check .
-	uvx ty check pcons/ examples/
+	uv run ty check pcons/ examples/
 
 .PHONY: lint-rez
 lint-rez:         ## Type-check the rez integration (needs rez installed).
-	find pcons/integrations/rez -name '*.py' -print0 | xargs -0 uvx ty check
+	find pcons/integrations/rez -name '*.py' -print0 | xargs -0 uv run ty check
 
 .PHONY: test
 test:             ## Run tests.

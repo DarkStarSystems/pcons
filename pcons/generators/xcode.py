@@ -30,6 +30,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from pcons.core.errors import PconsError
 from pcons.generators.generator import BaseGenerator
 
 if TYPE_CHECKING:
@@ -59,6 +60,21 @@ EXPLICIT_FILE_TYPE_MAP = {
 def _generate_id() -> str:
     """Generate a 24-character hex ID like Xcode uses."""
     return uuid.uuid4().hex[:24].upper()
+
+
+def _refuse_duplicate_names(project: Project) -> None:
+    """Xcode identifies a target by its name, so two of one name cannot both exist."""
+    seen: dict[str, Target] = {}
+    for target in project.targets:
+        other = seen.get(target.name)
+        if other is not None:
+            raise PconsError(
+                f"The Xcode generator cannot build targets "
+                f"'{other.qualified_name}' and '{target.qualified_name}': "
+                f"it identifies a target by its name, and these share one. Give "
+                f"them different names, or generate ninja for this project."
+            )
+        seen[target.name] = target
 
 
 class XcodeGenerator(BaseGenerator):
@@ -93,6 +109,8 @@ class XcodeGenerator(BaseGenerator):
         self._reject_dyndep(project)
 
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        _refuse_duplicate_names(project)
 
         self._output_dir = output_dir.resolve()
         self._project_root = project.root_dir.resolve()

@@ -85,6 +85,18 @@ class TestBuilderTargetCreation:
         assert a._builder_data["spec_partial"]["name"] == "dup"
         assert b._builder_data["spec_partial"]["name"] == "dup"
 
+    def test_an_ambiguous_name_takes_the_counter(self, tmp_path, gcc_toolchain):
+        """A derived name matching two environments is taken, not a crash."""
+        src = tmp_path / "main.c"
+        src.write_text("int main(void){return 0;}\n")
+        proj = Project("unit", root_dir=tmp_path, build_dir=tmp_path / "build")
+        host = proj.Environment(toolchain=gcc_toolchain, name="host")
+        mcu = proj.Environment(toolchain=gcc_toolchain, name="mcu")
+        prog = proj.Program("test_smoke", host, sources=[str(src)])
+        proj.Program("test_smoke", mcu, sources=[str(src)])
+
+        assert proj.Test("smoke", prog).name == "test_smoke_1"
+
     def test_rejects_empty_name(self, project):
         proj, _env, prog = project
         with pytest.raises(TypeError, match="non-empty"):

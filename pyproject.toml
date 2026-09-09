@@ -44,6 +44,7 @@ dev = [
     "hypothesis>=6.100",
     "mypy>=1.0",
     "ruff>=0.4",
+    "ty>=0.0.79",
 ]
 docs = [
     "mkdocs>=1.5",
@@ -86,6 +87,7 @@ dev = [
     "hypothesis>=6.100",
     "mypy>=1.0",
     "ruff>=0.4",
+    "ty>=0.0.79",
 ]
 
 [tool.pytest.ini_options]

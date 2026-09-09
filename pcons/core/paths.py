@@ -71,7 +71,10 @@ class PathResolver:
 
         *build_dir* overrides the base directory (still relative to the
         project root) for callers that anchor somewhere other than this
-        resolver's own build_dir, e.g. a sub-project's offset directory.
+        resolver's own build_dir, e.g. a sub-project's offset directory or an
+        environment with a ``build_prefix``. Absorption then accepts either
+        that base or this resolver's own, so ``project.build_dir / "x.h"``
+        and ``"x.h"`` keep meaning the same file.
         """
         if build_dir is None:
             bd, resolved_bd = self.build_dir, self._resolved_build_dir
@@ -90,9 +93,14 @@ class PathResolver:
                 # Not under build_dir - external output
                 return path_obj
 
-        bd_parts = bd.parts
         parts = path_obj.parts
-        if bd_parts and parts[: len(bd_parts)] == bd_parts:
+        bd_parts: tuple[str, ...] = ()
+        for candidate in (bd, self.build_dir):
+            cand_parts = candidate.parts
+            if cand_parts and parts[: len(cand_parts)] == cand_parts:
+                bd_parts = cand_parts
+                break
+        if bd_parts:
             absorbed = (
                 Path(*parts[len(bd_parts) :]) if parts[len(bd_parts) :] else (Path("."))
             )

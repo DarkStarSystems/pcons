@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, overload
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, overload
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.environment import Environment as Env
@@ -26,7 +26,7 @@ from pcons.core.graph import (
 from pcons.core.invocation import program_name, running_as_a_program
 from pcons.core.node import AliasNode, DirNode, FileNode, Node, PathRole
 from pcons.core.paths import PathResolver
-from pcons.core.target import Target, split_qualified_name
+from pcons.core.target import Target, split_target_spec
 from pcons.util.source_location import SourceLocation, get_caller_location
 
 logger = logging.getLogger(__name__)
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from pcons._cli_click import UserCommand, UserGroup
     from pcons.core._project_builder_stubs import _ProjectBuilders
     from pcons.core._toolchain_names import KnownToolchain
+    from pcons.core.vars import VarValue
     from pcons.tools.toolchain import Toolchain
 else:
     # At runtime, builder lookup goes through Project.__getattr__; the
@@ -151,6 +152,70 @@ def _emit_direct_run_notice() -> None:
     )
 
 
+class _PackageKey(NamedTuple):
+    """What makes two find_package() calls the same lookup.
+
+    ``env`` is an environment name rather than the environment itself: a
+    cross build and a host build must not share an answer, and two
+    environments with no name cannot be told apart at all.
+    """
+
+    name: str
+    env: str | None
+    version: str | None
+    components: tuple[str, ...]
+    system: bool
+
+
+def _refuse_duplicate(existing: Target, new: Target) -> None:
+    """Raise unless *existing* and *new* are told apart by their environments.
+
+    Two targets may share a name when both environments are named and the names
+    differ: they then write into different directories (Environment.build_prefix)
+    and ``name@env`` says which one is meant.
+    """
+    existing_env = existing.env
+    new_env = new.env
+    existing_name = existing_env.name if existing_env is not None else None
+    new_name = new_env.name if new_env is not None else None
+    where = f" (defined at {existing.defined_at})"
+
+    if existing_name and new_name and existing_name != new_name:
+        return
+    if existing_env is not None and existing_env is new_env and existing_name:
+        raise ValueError(
+            f"Target '{new.name}' already exists in environment "
+            f"'{existing_name}'{where}."
+        )
+    raise ValueError(
+        f"Target '{new.name}' already exists{where}. Two targets may share a "
+        f"name only when their environments are named and different. Name the "
+        f"environment: project.Environment(..., name='host')."
+    )
+
+
+def _ambiguous_target(name: str, where: str, matches: list[Target]) -> KeyError:
+    """Build the error for a name several targets answer to.
+
+    Advising a qualified spelling only helps when the environments are named:
+    unnamed ones qualify to the same string, so the advice would repeat the
+    spelling it just refused.
+    """
+    spellings = [t.qualified_name for t in matches]
+    if len(set(spellings)) == len(spellings):
+        advice = f"Name the environment, e.g. '{spellings[0]}'."
+    else:
+        advice = (
+            "Their environments have no name, so no spelling tells them apart. "
+            "Name the environment: project.Environment(..., name='host')."
+        )
+    # One line: KeyError renders its message with repr(), so a newline would
+    # reach the reader as a literal backslash-n.
+    return KeyError(
+        f"Multiple targets named '{name}' {where}: {', '.join(spellings)}. {advice}"
+    )
+
+
 class Project(_ProjectBuilders):
     """Top-level container for a pcons build.
 
@@ -195,7 +260,8 @@ class Project(_ProjectBuilders):
         "_resolved",
         "_path_resolver",
         "_found_packages",
-        "_package_finder_chain",
+        "_package_finder_chains",
+        "_extra_finders",
         "_configure_deps",
         "_pending_stages",
         "_scan_scopes",
@@ -216,6 +282,7 @@ class Project(_ProjectBuilders):
     # innermost entry; created while it is empty with a top-level project
     # already present, it is an error.
     __parent_stack: list[Project] = []
+    __default_env: Env | None = None
 
     @staticmethod
     def _clear_tree() -> None:
@@ -223,6 +290,7 @@ class Project(_ProjectBuilders):
         Project.__current = None
         Project.__top_level = None
         Project.__parent_stack.clear()
+        Project.__default_env = None
         _cancel_direct_run_notice()
 
     def __init__(
@@ -280,10 +348,10 @@ class Project(_ProjectBuilders):
         self._config = config
         self._resolved = False
         # None caches a negative find_package result for the key.
-        self._found_packages: dict[
-            tuple[str, str | None, tuple[str, ...], bool], Target | None
-        ] = {}
-        self._package_finder_chain: Any = None  # Lazy-initialized FinderChain
+        self._found_packages: dict[_PackageKey, Target | None] = {}
+        # One lazily built FinderChain per environment name.
+        self._package_finder_chains: dict[str | None, Any] = {}
+        self._extra_finders: list[tuple[str | None, Any]] = []
         # Files the build description read while running: the generated build
         # files depend on these, so editing one re-runs pcons (see
         # add_configure_dependency / generated_input).
@@ -478,22 +546,38 @@ class Project(_ProjectBuilders):
         return self._offset
 
     @contextmanager
-    def _enter_subdir(self, subdir: str | Path) -> Generator[None, None, None]:
-        """Context manager for entering a subdirectory in the project."""
+    def _enter_subdir(
+        self, subdir: str | Path, env: Env | None = None
+    ) -> Generator[None, None, None]:
+        """Context manager for entering a subdirectory in the project.
+
+        Args:
+            subdir: The directory to enter, relative to the current one.
+            env: Environment the entered scripts build in. While set, it is
+                what ``default_environment`` answers, anywhere in the tree,
+                so a sub script's ``project.parent.default_environment``
+                gets it instead of the parent's own first environment.
+                A nested entry inherits it and may override it for its own
+                subtree.
+        """
         old_subdir = self._subdir
         old_current = Project.__current
+        old_default_env = Project.__default_env
         self._subdir = subdir if old_subdir is None else f"{old_subdir}/{subdir}"
         # The entered project is the context: the subdirectory script's
         # Project.current() must mean this tree even when another sibling
         # was created more recently.
         Project.__current = self
         Project.__parent_stack.append(self)
+        if env is not None:
+            Project.__default_env = env
         try:
             yield
         finally:
             Project.__parent_stack.pop()
             self._subdir = old_subdir
             Project.__current = old_current
+            Project.__default_env = old_default_env
 
     def write_build_files(self, *, regen_command: Sequence[str] | None = None) -> None:
         """Write this project's build files, here and now.
@@ -547,7 +631,12 @@ class Project(_ProjectBuilders):
         BaseGenerator._generate_pending(self)
 
     def add_subdirectory(
-        self, subdir: str | Path, pick: list[str] | None = None
+        self,
+        subdir: str | Path,
+        pick: list[str] | None = None,
+        *,
+        env: Env | None = None,
+        vars: Mapping[str, VarValue] | None = None,
     ) -> Any:
         """Run *subdir*'s pcons-build.py as part of this project.
 
@@ -557,7 +646,7 @@ class Project(_ProjectBuilders):
         """
         from pcons.util.add_subdirectory import add_subdirectory
 
-        return add_subdirectory(subdir, pick, project=self)
+        return add_subdirectory(subdir, pick, project=self, env=env, vars=vars)
 
     @property
     def config(self) -> Any:
@@ -602,13 +691,15 @@ class Project(_ProjectBuilders):
             defined_at=get_caller_location(),
         )
         env._project = self
+        if name is not None:
+            env._refuse_taken_name(name)
 
         # Set any extra variables
         for key, value in kwargs.items():
             setattr(env, key, value)
 
         # Set build_dir from project
-        env.build_dir = self.build_dir
+        env._set_project_build_dir(self.top.build_dir, self.build_dir)
 
         self._environments.append(env)
         return env
@@ -678,17 +769,12 @@ class Project(_ProjectBuilders):
         """Register a target; called only by Target.__init__.
 
         Raises:
-            ValueError: If a target with the same name already exists.
+            ValueError: If a target of that name is already registered and the
+                two cannot be told apart by their environments.
         """
-        if (
-            existing := self.get_target(
-                target.name, raise_if_missing=False, recursive=False
-            )
-        ) is not None:
-            raise ValueError(
-                f"Target '{target.name}' already exists "
-                f"(defined at {existing.defined_at})"
-            )
+        for existing in self._targets:
+            if existing.name == target.name:
+                _refuse_duplicate(existing, target)
         self._targets.append(target)
 
     @overload
@@ -704,26 +790,65 @@ class Project(_ProjectBuilders):
     def get_target(
         self, name: str, raise_if_missing: bool = True, recursive: bool = True
     ) -> Target | None:
-        """Get a target by (possibly qualified) name.
+        """Get a target by name, optionally qualified.
 
-        Returns None if not found and raise_if_missing is False;
-        otherwise raises KeyError.
+        The full spelling is ``"project::target@env"``: ``::`` selects the
+        project, ``@`` the environment, and either may be left out.
+
+        Args:
+            name: The target name, qualified or not.
+            raise_if_missing: What to do when no target answers to *name*:
+                True raises KeyError, False returns None.
+            recursive: Search sub-projects too.
+
+        Returns:
+            The matching target, or None when there is none and
+            *raise_if_missing* is False.
+
+        Raises:
+            KeyError: When no target answers to *name* and *raise_if_missing*
+                is True. Also whenever several targets answer to it, on either
+                setting: two targets may share a name when their environments
+                differ, so such a name is not missing but underspecified. The
+                lookup refuses to pick one, and the message names the qualified
+                spellings. A caller asking whether a name is still free should
+                read that KeyError as "taken".
         """
 
-        project, target_name = split_qualified_name(name)
-        if project is not None:
-            if project == self.name:
-                for target in self._targets:
-                    if target.name == target_name:
-                        return target
-                else:
+        project, target_name, env_name = split_target_spec(name)
+        if project is None or project == self.name:
+            matches = [t for t in self._targets if t.name == target_name]
+            if env_name is not None:
+                in_env = [
+                    t for t in matches if t.env is not None and t.env.name == env_name
+                ]
+                if not in_env and matches:
+                    available = ", ".join(
+                        sorted(
+                            t.env.name
+                            for t in matches
+                            if t.env is not None and t.env.name
+                        )
+                    )
+                    where = (
+                        f" '{target_name}' is built in environments: {available}."
+                        if available
+                        else f" '{target_name}' has no named environment."
+                    )
                     if raise_if_missing:
-                        raise KeyError(f"Target '{name}' not found")
+                        raise KeyError(f"Target '{name}' not found.{where}")
                     return None
-        else:
-            for target in self._targets:
-                if target.name == target_name:
-                    return target
+                matches = in_env
+            if len(matches) > 1:
+                raise _ambiguous_target(
+                    target_name, f"in project '{self.name}'", matches
+                )
+            if matches:
+                return matches[0]
+            if project is not None:
+                if raise_if_missing:
+                    raise KeyError(f"Target '{name}' not found")
+                return None
 
         if recursive:
             targets_found = []
@@ -733,11 +858,7 @@ class Project(_ProjectBuilders):
                 ) is not None:
                     targets_found.append(target)
             if len(targets_found) > 1:
-                raise KeyError(
-                    f"Multiple targets named '{name}' found in child projects: "
-                    f"{', '.join(t.qualified_name for t in targets_found)}\n"
-                    f"Use qualified names (e.g., '{targets_found[0].qualified_name}') to disambiguate."
-                )
+                raise _ambiguous_target(name, "in child projects", targets_found)
             if targets_found:
                 return targets_found[0]
 
@@ -746,8 +867,26 @@ class Project(_ProjectBuilders):
         return None
 
     def get_targets(self, *names: str) -> list[Target]:
-        """Get multiple targets by name; raises KeyError if any is missing."""
+        """Get targets by name, raising KeyError if any is missing or ambiguous."""
         return [self.get_target(name) for name in names]
+
+    def has_target(self, name: str, recursive: bool = True) -> bool:
+        """Whether some target already answers to *name*.
+
+        A name matching targets in several environments counts as taken:
+        several targets answer to it, which is what the caller is asking. Use
+        this rather than ``get_target(..., raise_if_missing=False) is not
+        None``, which raises on that case.
+
+        Args:
+            name: The target name, qualified or not.
+            recursive: Search sub-projects too.
+        """
+        try:
+            found = self.get_target(name, raise_if_missing=False, recursive=recursive)
+        except KeyError:
+            return True
+        return found is not None
 
     @property
     def targets(self) -> list[Target]:
@@ -770,19 +909,48 @@ class Project(_ProjectBuilders):
         enclosing project's, so a library nested several levels down still
         finds the toolchain the top-level build set up.
 
+        An ``add_subdirectory(..., env=...)`` in progress wins over both:
+        the caller named the environment the included tree builds in, and
+        the script it includes asks its parent, which has environments of
+        its own.
+
         Raises:
             ValueError: If no environment is registered here or in any
                 enclosing project.
         """
+        env = self._resolve_default_environment()
+        if env is None:
+            raise ValueError(
+                f"No environments have been registered in project '{self.name}' "
+                f"or any enclosing project."
+            )
+        return env
+
+    def _resolve_default_environment(self) -> Env | None:
+        """The environment a caller who named none is asking for.
+
+        One rule, so that two callers asking the same question cannot get two
+        answers. The public ``default_environment`` raises when there is none
+        and ``_inherited_environment`` returns None, and that is the only way
+        they differ.
+        """
+        if Project.__default_env is not None:
+            return Project.__default_env
         project: Project | None = self
         while project is not None:
             if project._environments:
                 return project._environments[0]
             project = project._parent
-        raise ValueError(
-            f"No environments have been registered in project '{self.name}' "
-            f"or any enclosing project."
-        )
+        return None
+
+    def _inherited_environment(self) -> Env | None:
+        """The environment of a target created without one.
+
+        ``default_environment`` without the raise: a target that names no
+        environment may end up with none, which is what a project that has
+        registered none gives it.
+        """
+        return self._resolve_default_environment()
 
     def Alias(
         self, name: str, *targets: Target | Node | list[Target | Node]
@@ -1178,9 +1346,9 @@ class Project(_ProjectBuilders):
                 envs = ""
                 if len(env_names) == 2:
                     envs = (
-                        " They build in different environments, so an "
-                        "environment-keyed output_prefix (e.g. "
-                        'f"{env.name}/") would keep them apart.'
+                        " They build in different environments, so giving each "
+                        "one a build_prefix (e.g. env.build_prefix = "
+                        f'"{sorted(env_names)[0]}") would keep them apart.'
                     )
                 raise PconsError(
                     f"targets {other.qualified_name!r} and "
@@ -1345,7 +1513,6 @@ class Project(_ProjectBuilders):
 
         resolver = Resolver(self)
         resolver.resolve()
-        resolver.resolve_pending_sources()
 
         self._register_implicit_configure_deps()
         self._check_pending_stages()
@@ -1668,6 +1835,7 @@ class Project(_ProjectBuilders):
         self,
         name: str,
         *,
+        env: Env | None = None,
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: Literal[True] = True,
@@ -1679,6 +1847,7 @@ class Project(_ProjectBuilders):
         self,
         name: str,
         *,
+        env: Env | None = None,
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: bool,
@@ -1689,6 +1858,7 @@ class Project(_ProjectBuilders):
         self,
         name: str,
         *,
+        env: Env | None = None,
         version: str | None = None,
         components: Sequence[str] | None = None,
         required: bool = True,
@@ -1697,14 +1867,22 @@ class Project(_ProjectBuilders):
         """Find an external package and return it as an ImportedTarget.
 
         Searches for the package using the configured finder chain
-        (default: PkgConfigFinder → SystemFinder). Results are cached
-        so repeated calls with the same arguments return the same target.
+        (default: PkgConfigFinder → SystemFinder). Results are cached per
+        environment, so repeated calls with the same arguments return the
+        same target and two environments may hold two different answers for
+        one package name.
 
         The returned target can be used as a dependency via target.link()
         or applied directly to an environment via env.use().
 
         Args:
             name: Package name (e.g., "zlib", "openssl").
+            env: The environment the package is for. It selects the cache
+                slot and becomes the returned target's environment, so a
+                cross build and a host build each get their own. Without
+                one, the environment a target with none of its own inherits
+                is used, which in a single-environment project is that
+                environment.
             version: Optional version requirement (e.g., ">=3.0").
             components: Optional list of package components.
             required: If True (default), raises PackageNotFoundError when
@@ -1733,39 +1911,43 @@ class Project(_ProjectBuilders):
             app.link(zlib)
             env.use(openssl)
         """
-        cache_key = (name, version, tuple(components or []), system)
-        # One package is one target, and a target name is unique, so the two
-        # spellings of the same package cannot both exist. Say which two,
-        # rather than letting Target.__init__ report a name collision. A
-        # cached None is a package that was never found, so it owns no target
-        # and conflicts with nothing.
+        if env is None:
+            env = self._inherited_environment()
+        cache_key = _PackageKey(
+            name=name,
+            env=env.name if env is not None else None,
+            version=version,
+            components=tuple(components or []),
+            system=system,
+        )
+        # Within one environment a package is one target, so the two
+        # spellings of it cannot both exist. Say which two, rather than
+        # letting Target.__init__ report a name collision. A cached None is a
+        # package that was never found, so it owns no target and conflicts
+        # with nothing.
+        lookup = cache_key._replace(system=False)
         conflicting = next(
             (
                 k
                 for k, found in self._found_packages.items()
-                if k[:3] == cache_key[:3] and k[3] != system and found is not None
+                if k._replace(system=False) == lookup
+                and k.system != system
+                and found is not None
             ),
             None,
         )
         if conflicting is not None:
+            where = (
+                f" in environment '{env.name}'" if env is not None and env.name else ""
+            )
             raise ValueError(
-                f"Package '{name}' was already found with system={conflicting[3]}; "
-                f"requesting system={system} would need a second target of the "
-                f"same name. Pick one spelling for the whole project."
+                f"Package '{name}' was already found{where} with "
+                f"system={conflicting.system}; requesting system={system} would "
+                f"need a second target of the same name. Pick one spelling."
             )
         if cache_key not in self._found_packages:
-            if self._package_finder_chain is None:
-                from pcons.packages.finders import (
-                    FinderChain,
-                    PkgConfigFinder,
-                    SystemFinder,
-                )
-
-                self._package_finder_chain = FinderChain(
-                    [PkgConfigFinder(), SystemFinder()]
-                )
-
-            pkg = self._package_finder_chain.find(name, version, components)
+            chain = self._finder_chain_for(env)
+            pkg = chain.find(name, version, components)
             if pkg is None:
                 # Cache the negative result too: don't re-run the finder
                 # chain (and its subprocesses) for every repeat probe.
@@ -1774,7 +1956,7 @@ class Project(_ProjectBuilders):
                 from pcons.packages.imported import ImportedTarget
 
                 self._found_packages[cache_key] = ImportedTarget.from_package(
-                    pkg, components=components, system=system
+                    pkg, components=components, system=system, env=env
                 )
 
         target = self._found_packages[cache_key]
@@ -1784,14 +1966,52 @@ class Project(_ProjectBuilders):
             raise PackageNotFoundError(name, version)
         return target
 
-    def add_package_finder(self, finder: Any) -> None:
+    def _finder_chain_for(self, env: Env | None) -> Any:
+        """The chain an environment searches, built once and kept.
+
+        A cross environment searches its own target and not the machine
+        running the build, so each environment gets a chain of its own rather
+        than sharing one per project.
+        """
+        from pcons.packages.finders import FinderChain, host_finders, sysroot_finders
+
+        key = env.name if env is not None else None
+        chain = self._package_finder_chains.get(key)
+        if chain is None:
+            cross = env.cross if env is not None else None
+            if cross is None:
+                defaults = host_finders()
+            elif cross.sysroot:
+                defaults = sysroot_finders(Path(cross.sysroot).expanduser())
+            else:
+                defaults = []
+            added = list(reversed(self._extra_finders))
+            scoped = [f for scope, f in added if scope is not None and scope == key]
+            shared = [f for scope, f in added if scope is None]
+            chain = FinderChain([*scoped, *shared, *defaults])
+            self._package_finder_chains[key] = chain
+        return chain
+
+    def add_package_finder(self, finder: Any, *, env: Env | None = None) -> None:
         """Add a package finder to the front of the search chain.
 
         Custom finders are tried before the default finders (PkgConfig,
-        System). Use this to add Conan, vcpkg, or custom finders.
+        System), most recently added first. Use this to add Conan, vcpkg, or
+        custom finders.
+
+        A finder added after a package was already looked up still applies to
+        every later lookup: whether it is consulted must not depend on where
+        in the script it was added, since nothing would report that it never
+        was.
 
         Args:
             finder: A BaseFinder instance.
+            env: Search with this finder in that environment only. Without
+                one, the finder is used in every environment, which is what
+                a single-environment project wants. An environment scopes by
+                its name, so an unnamed one scopes to nothing and the finder
+                is used everywhere. A finder scoped to an environment is
+                tried before the project-wide ones.
 
         Example:
             from pcons.packages.finders import ConanFinder
@@ -1799,18 +2019,14 @@ class Project(_ProjectBuilders):
             project.add_package_finder(ConanFinder(config, conanfile="conanfile.txt"))
             zlib = project.find_package("zlib")  # Tries Conan first
         """
-        if self._package_finder_chain is None:
-            from pcons.packages.finders import (
-                FinderChain,
-                PkgConfigFinder,
-                SystemFinder,
+        if not finder.is_available():
+            logger.warning(
+                "Package finder %s is not available (its tool was not found);"
+                " skipping it",
+                type(finder).__name__,
             )
-
-            self._package_finder_chain = FinderChain(
-                [finder, PkgConfigFinder(), SystemFinder()]
-            )
-        else:
-            self._package_finder_chain.add(finder)
+        self._extra_finders.append((env.name if env is not None else None, finder))
+        self._package_finder_chains.clear()
 
     # Command is kept as a wrapper since it delegates to env.Command()
     # and doesn't fit the registry pattern well

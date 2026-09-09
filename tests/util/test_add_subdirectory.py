@@ -3,12 +3,15 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from pcons import get_var
 from pcons.core.project import Project
+from pcons.generators.generator import BaseGenerator
 from pcons.util.add_subdirectory import add_subdirectory
 
 
@@ -19,6 +22,231 @@ def _make_subdir(parent: Path | Project, name: str, content: str) -> Path:
     subdir.mkdir(parents=True, exist_ok=True)
     (subdir / "pcons-build.py").write_text(content)
     return subdir
+
+
+class TestSubdirectoryVars:
+    """`vars=` configures what an inclusion reads with `get_var`."""
+
+    def test_the_script_reads_what_the_caller_passed(
+        self, test_project: Project
+    ) -> None:
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons import get_var\nvalue = get_var('FEATURE', True)\n",
+        )
+
+        ns = add_subdirectory("child", vars={"FEATURE": False})
+
+        assert ns.value is False
+
+    def test_two_inclusions_read_their_own(self, test_project: Project) -> None:
+        """The value is read by an imported module, at import time."""
+        subdir = _make_subdir(
+            test_project, "child", "import settings\nvalue = settings.FEATURE\n"
+        )
+        (subdir / "settings.py").write_text(
+            "from pcons import get_var\nFEATURE = get_var('FEATURE', True)\n"
+        )
+
+        off = add_subdirectory("child", vars={"FEATURE": False})
+        on = add_subdirectory("child", vars={"FEATURE": True})
+
+        assert (off.value, on.value) == (False, True)
+
+    def test_it_is_gone_afterwards(self, test_project: Project) -> None:
+        _make_subdir(test_project, "child", "x = 1\n")
+
+        add_subdirectory("child", vars={"FEATURE": False})
+
+        assert get_var("FEATURE", True) is True
+
+    def test_the_project_method_forwards_them(self, test_project: Project) -> None:
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons import get_var\nvalue = get_var('FEATURE', True)\n",
+        )
+
+        ns = test_project.add_subdirectory("child", vars={"FEATURE": False})
+
+        assert ns.value is False
+
+
+class TestSubdirectoryScriptImports:
+    """A subdirectory script reaches its own neighbours, like a root script does."""
+
+    def test_it_imports_a_module_beside_it(self, test_project: Project) -> None:
+        subdir = _make_subdir(
+            test_project, "child", "import helper\nvalue = helper.V\n"
+        )
+        (subdir / "helper.py").write_text("V = 'from the child'\n")
+
+        ns = add_subdirectory("child")
+
+        assert ns.value == "from the child"
+
+    def test_a_nested_script_imports_its_own(self, test_project: Project) -> None:
+        outer = _make_subdir(
+            test_project,
+            "outer",
+            "import outer_helper\n"
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "inner = add_subdirectory('inner')\n"
+            "value = (outer_helper.V, inner.value)\n",
+        )
+        (outer / "outer_helper.py").write_text("V = 'outer'\n")
+        inner = _make_subdir(
+            outer, "inner", "import inner_helper\nvalue = inner_helper.V\n"
+        )
+        (inner / "inner_helper.py").write_text("V = 'inner'\n")
+
+        ns = add_subdirectory("outer")
+
+        assert ns.value == ("outer", "inner")
+
+    def test_two_subdirectories_keep_their_own(self, test_project: Project) -> None:
+        for name in ("a", "b"):
+            subdir = _make_subdir(
+                test_project, name, "import sources\nvalue = sources.NAME\n"
+            )
+            (subdir / "sources.py").write_text(f"NAME = 'from-{name}'\n")
+
+        first = add_subdirectory("a")
+        second = add_subdirectory("b")
+
+        assert (first.value, second.value) == ("from-a", "from-b")
+        assert "sources" not in sys.modules
+
+    def test_a_second_inclusion_imports_again(self, test_project: Project) -> None:
+        subdir = _make_subdir(
+            test_project, "child", "import counter\nvalue = counter.PASS\n"
+        )
+        (subdir / "counter.py").write_text(
+            "import itertools\n_seq = itertools.count(1)\nPASS = next(_seq)\n"
+        )
+
+        first = add_subdirectory("child")
+        second = add_subdirectory("child")
+
+        assert (first.value, second.value) == (1, 1)
+
+    def test_a_regular_package_is_released_with_its_submodules(
+        self, test_project: Project
+    ) -> None:
+        for name in ("a", "b"):
+            subdir = _make_subdir(
+                test_project,
+                name,
+                "import shapes.box\nvalue = (shapes.NAME, shapes.box.NAME)\n",
+            )
+            package = subdir / "shapes"
+            package.mkdir()
+            (package / "__init__.py").write_text(f"NAME = 'pkg-{name}'\n")
+            (package / "box.py").write_text(f"NAME = 'box-{name}'\n")
+
+        first = add_subdirectory("a")
+        second = add_subdirectory("b")
+
+        assert first.value == ("pkg-a", "box-a")
+        assert second.value == ("pkg-b", "box-b")
+        assert not [n for n in sys.modules if n.split(".")[0] == "shapes"]
+
+    def test_a_namespace_package_is_released_too(self, test_project: Project) -> None:
+        """No `__init__.py`, so no `__file__`: its search locations say where."""
+        for name in ("a", "b"):
+            subdir = _make_subdir(
+                test_project, name, "import parts.leaf\nvalue = parts.leaf.NAME\n"
+            )
+            package = subdir / "parts"
+            package.mkdir()
+            (package / "leaf.py").write_text(f"NAME = 'leaf-{name}'\n")
+
+        first = add_subdirectory("a")
+        second = add_subdirectory("b")
+
+        assert (first.value, second.value) == ("leaf-a", "leaf-b")
+        assert not [n for n in sys.modules if n.split(".")[0] == "parts"]
+
+    def test_package_sources_are_configure_dependencies(
+        self, test_project: Project
+    ) -> None:
+        subdir = _make_subdir(test_project, "child", "import shapes.box\n")
+        package = subdir / "shapes"
+        package.mkdir()
+        (package / "__init__.py").write_text("")
+        (package / "box.py").write_text("NAME = 'box'\n")
+
+        add_subdirectory("child")
+
+        deps = {
+            Path(p).parent.name + "/" + Path(p).name
+            for p in test_project.configure_dependencies
+        }
+        assert {"shapes/__init__.py", "shapes/box.py"} <= deps
+
+    def test_a_module_outside_the_subdirectory_stays_cached(
+        self, test_project: Project
+    ) -> None:
+        (test_project.root_dir / "shared.py").write_text("V = 'root'\n")
+        _make_subdir(test_project, "child", "import shared\nvalue = shared.V\n")
+        sys.path.insert(0, str(test_project.root_dir))
+        try:
+            ns = add_subdirectory("child")
+        finally:
+            sys.path.pop(0)
+            sys.modules.pop("shared", None)
+
+        assert ns.value == "root"
+
+    def test_a_released_module_is_a_configure_dependency(
+        self, test_project: Project
+    ) -> None:
+        subdir = _make_subdir(test_project, "child", "import helper\nx = helper.V\n")
+        (subdir / "helper.py").write_text("V = 1\n")
+
+        add_subdirectory("child")
+
+        deps = {Path(p).name for p in test_project.configure_dependencies}
+        assert "helper.py" in deps
+
+    def test_an_unresolvable_origin_is_left_alone(
+        self, test_project: Project, monkeypatch
+    ) -> None:
+        """A path that cannot be resolved is skipped, not fatal."""
+        from pcons.util import add_subdirectory as module
+
+        subdir = _make_subdir(test_project, "child", "import helper\nx = helper.V\n")
+        (subdir / "helper.py").write_text("V = 1\n")
+
+        def raising(_module: object) -> list[Path]:
+            raise OSError("no")
+
+        monkeypatch.setattr(module, "_module_origins", raising)
+
+        ns = add_subdirectory("child")
+
+        assert ns.x == 1
+        sys.modules.pop("helper", None)
+
+    def test_the_path_is_restored(self, test_project: Project) -> None:
+        _make_subdir(test_project, "child", "x = 1\n")
+        before = list(sys.path)
+
+        add_subdirectory("child")
+
+        assert sys.path == before
+
+    def test_the_path_is_restored_when_the_script_raises(
+        self, test_project: Project
+    ) -> None:
+        _make_subdir(test_project, "child", "raise RuntimeError('boom')\n")
+        before = list(sys.path)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            add_subdirectory("child")
+
+        assert sys.path == before
 
 
 class TestAddSubdirectory:
@@ -278,3 +506,421 @@ class TestSubprojectDirectories:
 
         assert alpha.lib.sources[0].path == Path("alpha/src/x.c")
         assert beta.lib.sources[0].path == Path("beta/src/x.c")
+
+
+class TestSubdirectoryEnvironment:
+    """``add_subdirectory(..., env=...)`` builds one tree per environment."""
+
+    SUB = (
+        "from pcons.core.project import Project\n"
+        "project = Project('sub')\n"
+        "env = project.parent.default_environment\n"
+        "lib = project.StaticLibrary('thing', env, sources=['src/thing.c'])\n"
+    )
+
+    @pytest.fixture
+    def two_envs(self, test_project: Project, gcc_toolchain):
+        host = test_project.Environment(toolchain=gcc_toolchain, name="host")
+        host.build_prefix = "host"
+        mcu = test_project.Environment(toolchain=gcc_toolchain, name="mcu")
+        mcu.build_prefix = "mcu"
+        return host, mcu
+
+    def _source(self, subdir: Path) -> None:
+        (subdir / "src").mkdir(parents=True, exist_ok=True)
+        (subdir / "src" / "thing.c").write_text("int g(void) { return 2; }\n")
+
+    def test_one_subdirectory_builds_once_per_environment(
+        self, test_project: Project, two_envs
+    ) -> None:
+        host, mcu = two_envs
+        self._source(_make_subdir(test_project, "sub", self.SUB))
+
+        first = add_subdirectory("sub", env=host)
+        second = add_subdirectory("sub", env=mcu)
+        test_project.resolve()
+
+        assert first.lib.env is host
+        assert second.lib.env is mcu
+        prefix = host._toolchain.get_output_prefix("static_library")
+        suffix = host._toolchain.get_output_suffix("static_library")
+        name = f"{prefix}thing{suffix}"
+        assert [n.path.as_posix() for n in first.lib.output_nodes] == [
+            f"build/host/sub/{name}"
+        ]
+        assert [n.path.as_posix() for n in second.lib.output_nodes] == [
+            f"build/mcu/sub/{name}"
+        ]
+        assert test_project.get_target("thing@host") is first.lib
+        assert test_project.get_target("thing@mcu") is second.lib
+
+    def test_the_project_method_forwards_the_environment(
+        self, test_project: Project, two_envs
+    ) -> None:
+        host, _mcu = two_envs
+        self._source(_make_subdir(test_project, "sub", self.SUB))
+
+        ns = test_project.add_subdirectory("sub", env=host)
+
+        assert ns.lib.env is host
+
+    def test_a_nested_inclusion_inherits_the_environment(
+        self, test_project: Project, two_envs
+    ) -> None:
+        host, _mcu = two_envs
+        self._source(_make_subdir(test_project, "sub/inner", self.SUB))
+        _make_subdir(
+            test_project,
+            "sub",
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "inner = add_subdirectory('inner')\n",
+        )
+
+        ns = add_subdirectory("sub", env=host)
+
+        assert ns.inner.lib.env is host
+
+    def test_an_inner_environment_wins_for_its_own_subtree(
+        self, test_project: Project, two_envs
+    ) -> None:
+        host, mcu = two_envs
+        self._source(_make_subdir(test_project, "sub/inner", self.SUB))
+        sub = _make_subdir(
+            test_project,
+            "sub",
+            "from pcons.core.project import Project\n"
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "project = Project('sub')\n"
+            "mcu = [e for e in project.top.environments if e.name == 'mcu'][0]\n"
+            "inner = add_subdirectory('inner', env=mcu)\n"
+            "after = project.parent.default_environment\n"
+            "lib = project.StaticLibrary('thing', after, sources=['src/thing.c'])\n",
+        )
+        self._source(sub)
+
+        ns = add_subdirectory("sub", env=host)
+
+        assert ns.inner.lib.env is mcu
+        assert ns.after is host
+        assert ns.lib.env is host
+
+    def test_the_environment_is_restored_after_the_inclusion(
+        self, test_project: Project, two_envs
+    ) -> None:
+        _host, mcu = two_envs
+        self._source(_make_subdir(test_project, "sub", self.SUB))
+
+        add_subdirectory("sub", env=mcu)
+
+        assert test_project.default_environment is test_project.environments[0]
+
+    def test_an_exception_in_the_sub_script_restores_the_environment(
+        self, test_project: Project, two_envs
+    ) -> None:
+        host, _mcu = two_envs
+        _make_subdir(test_project, "sub", "raise RuntimeError('boom')\n")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            add_subdirectory("sub", env=host)
+
+        assert test_project.default_environment is test_project.environments[0]
+
+    def test_without_an_environment_nothing_is_overridden(
+        self, test_project: Project, two_envs
+    ) -> None:
+        host, _mcu = two_envs
+        self._source(_make_subdir(test_project, "sub", self.SUB))
+
+        ns = add_subdirectory("sub")
+
+        assert ns.lib.env is host
+        assert test_project.default_environment is host
+
+    def test_enter_subdir_without_an_environment_changes_nothing(
+        self, test_project: Project, two_envs
+    ) -> None:
+        host, _mcu = two_envs
+
+        with test_project._enter_subdir("sub"):
+            assert test_project.default_environment is host
+        assert test_project.default_environment is host
+
+    def test_a_nested_enter_subdir_keeps_the_outer_environment(
+        self, test_project: Project, two_envs
+    ) -> None:
+        _host, mcu = two_envs
+
+        with test_project._enter_subdir("sub", env=mcu):
+            with test_project._enter_subdir("inner"):
+                assert test_project.default_environment is mcu
+            assert test_project.default_environment is mcu
+        assert test_project.default_environment is test_project.environments[0]
+
+    def test_the_override_survives_a_project_with_its_own_environments(
+        self, test_project: Project, two_envs, gcc_toolchain
+    ) -> None:
+        """A sub-project registering an environment still gets the override."""
+        _host, mcu = two_envs
+
+        with test_project._enter_subdir("sub", env=mcu):
+            child = Project("child", root_dir=test_project.root_dir)
+            child.Environment(toolchain=gcc_toolchain, name="own")
+            assert child.default_environment is mcu
+
+
+class TestSubdirectoryCommandPaths:
+    """``env.Command`` anchors both ends at the script that declares it.
+
+    A generator declared in a subdirectory writes into that subdirectory's
+    build directory and reads its inputs from that subdirectory, the same
+    way ``Program`` and ``StaticLibrary`` place their objects. Anchoring
+    either end at the top-level project instead puts the output in the
+    wrong place and names a source file that does not exist.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    CHILD = (
+        "from pcons.core.project import Project\n"
+        "project = Project.current()\n"
+        "env = project.default_environment\n"
+        "gen = env.Command(\n"
+        "    target='gen/extra.h',\n"
+        "    source='mk.py',\n"
+        "    command='python3 $SOURCE $TARGET',\n"
+        ")\n"
+    )
+
+    def test_command_target_lands_in_subdir_build_dir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(test_project, "child", self.CHILD)
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build child/gen/extra.h: " in text
+
+    def test_command_source_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(test_project, "child", self.CHILD)
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/mk.py" in text
+        assert "$topdir/mk.py" not in text
+
+    def test_nested_subdirectories_accumulate(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(test_project, "a/aa", self.CHILD)
+        _make_subdir(
+            test_project,
+            "a",
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "inner = add_subdirectory('aa')\n",
+        )
+
+        add_subdirectory("a")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build a/aa/gen/extra.h: " in text
+        assert "$topdir/a/aa/mk.py" in text
+
+    def test_subproject_with_own_project_object(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        """A subdir that creates its own Project anchors the same way.
+
+        Its ``build_dir`` already carries the offset, so the anchor must not
+        apply it twice.
+        """
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project('child')\n"
+            "env = project.Environment(toolchain='c')\n"
+            "gen = env.Command(\n"
+            "    target='gen/extra.h',\n"
+            "    source='mk.py',\n"
+            "    command='python3 $SOURCE $TARGET',\n"
+            ")\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build child/gen/extra.h: " in text
+        assert "$topdir/child/mk.py" in text
+
+    def test_nested_subproject_inheriting_the_parent_environment(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        """Two levels down, on an environment the top-level project owns.
+
+        The environment reached through ``project.parent`` belongs to the
+        top-level project, so its own offset is empty. The anchor is the
+        declaring script's, not the environment owner's, or the same edge
+        contradicts itself: the target and the source land one level down
+        while ``depends=`` lands two.
+        """
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "a/aa",
+            "from pcons.core.project import Project\n"
+            "project = Project('aa')\n"
+            "env = project.parent.default_environment\n"
+            "gen = env.Command(\n"
+            "    target='gen/extra.h',\n"
+            "    source='mk.py',\n"
+            "    command='python3 $SOURCE $TARGET',\n"
+            "    depends='schema.json',\n"
+            ")\n",
+        )
+        _make_subdir(
+            test_project,
+            "a",
+            "from pcons.core.project import Project\n"
+            "from pcons.util.add_subdirectory import add_subdirectory\n"
+            "project = Project('a')\n"
+            "inner = add_subdirectory('aa')\n",
+        )
+
+        add_subdirectory("a")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build a/aa/gen/extra.h: " in text
+        assert "$topdir/a/aa/mk.py" in text
+        assert "$topdir/a/aa/schema.json" in text
+
+    def test_top_level_command_unchanged(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        env = test_project.Environment(toolchain="c")
+        env.Command(
+            target="gen/extra.h",
+            source="mk.py",
+            command="python3 $SOURCE $TARGET",
+        )
+
+        text = self._ninja(test_project, tmp_path)
+
+        assert "build gen/extra.h: " in text
+        assert "$topdir/mk.py" in text
+
+    def test_command_depends_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "env = project.default_environment\n"
+            "gen = env.Command(\n"
+            "    target='gen/extra.h',\n"
+            "    source='mk.py',\n"
+            "    command='python3 $SOURCE $TARGET',\n"
+            "    depends='schema.json',\n"
+            ")\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/schema.json" in text
+
+
+class TestSubdirectoryInstallPaths:
+    """Install and archive sources anchor at the declaring script too.
+
+    These builders keep their sources pending until resolution, long after
+    the subdirectory script finished, so the offset has to come from the
+    target rather than from the project's current directory.
+    """
+
+    @staticmethod
+    def _ninja(project: Project, tmp_path: Path) -> str:
+        from pcons.generators.ninja import NinjaGenerator
+
+        gen = NinjaGenerator()
+        gen.generate(project)
+        BaseGenerator._generate_pending(project)
+        return (tmp_path / "build" / "build.ninja").read_text()
+
+    def test_install_source_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "inst = project.Install('share', ['data.txt'])\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/data.txt" in text
+
+    def test_install_as_source_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "inst = project.InstallAs('share/renamed.txt', 'data.txt')\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/data.txt" in text
+
+    def test_install_dir_source_anchors_at_declaring_subdir(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        _make_subdir(
+            test_project,
+            "child",
+            "from pcons.core.project import Project\n"
+            "project = Project.current()\n"
+            "inst = project.InstallDir('share/tree', 'assets')\n",
+        )
+
+        add_subdirectory("child")
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/child/assets" in text
+
+    def test_top_level_install_unchanged(
+        self, test_project: Project, tmp_path: Path
+    ) -> None:
+        test_project.Environment(toolchain="c")
+        test_project.Install("share", ["data.txt"])
+
+        text = self._ninja(test_project, tmp_path)
+
+        assert "$topdir/data.txt" in text

@@ -132,6 +132,27 @@ class TestNormalizeTargetPath:
         assert result == Path("build/foo.tar.gz")
         assert caplog.text == ""
 
+    def test_override_absorbs_either_build_dir(self, tmp_path: Path) -> None:
+        """With a build_dir override, both spellings still mean one file.
+
+        An environment with a build_prefix passes its own build directory as
+        the override, and a script may still write project.build_dir / "x".
+        """
+        project_root = tmp_path / "project"
+        project_root.mkdir()
+        resolver = PathResolver(project_root, Path("build"))
+        override = Path("build/mcu")
+
+        assert resolver.normalize_target_path(
+            "build/mcu/gen/x.h", build_dir=override
+        ) == Path("gen/x.h")
+        assert resolver.normalize_target_path(
+            "build/gen/x.h", build_dir=override
+        ) == Path("gen/x.h")
+        assert resolver.normalize_target_path("gen/x.h", build_dir=override) == Path(
+            "gen/x.h"
+        )
+
     def test_normalize_target_no_warn_different_prefix(self, tmp_path: Path) -> None:
         """Relative paths not starting with build_dir name should not warn."""
         project_root = tmp_path / "project"

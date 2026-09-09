@@ -56,7 +56,7 @@ def _make_internal_target_name(project: Project, user_name: str) -> str:
     base_name = f"test_{sanitized}"
     target_name = base_name
     counter = 1
-    while project.get_target(target_name, raise_if_missing=False) is not None:
+    while project.has_target(target_name):
         target_name = f"{base_name}_{counter}"
         counter += 1
     return target_name

@@ -8,13 +8,13 @@ and carries "usage requirements" that propagate to consumers (CMake-style).
 from __future__ import annotations
 
 import logging
-import re
 from collections import UserList
 from collections.abc import Callable, Iterable, MutableSequence, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeAlias, TypeVar
 
 from pcons.core.flags import merge_flags
+from pcons.core.names import validate_name
 from pcons.core.types import SourceSpec
 from pcons.util.source_location import SourceLocation, get_caller_location
 
@@ -316,23 +316,9 @@ class UsageRequirements(_UsageRequirementsStubs):
         return f"UsageRequirements({items_str})"
 
 
-# Characters not allowed in target names (would break ninja syntax or cause confusion).
-# Allow: word chars, dots, plus, minus, forward slash (for subdirectory-style names).
-_INVALID_TARGET_NAME_RE = re.compile(r"[^\w./+-]")
-
-
 def _validate_target_name(name: str) -> None:
     """Raise ValueError unless the target name is well-formed."""
-    if not name:
-        raise ValueError("Target name must not be empty.")
-    bad = _INVALID_TARGET_NAME_RE.findall(name)
-    if bad:
-        chars = "".join(sorted(set(bad)))
-        raise ValueError(
-            f"Target name {name!r} contains invalid characters: {chars!r}. "
-            f"Target names may contain letters, digits, underscores, dots, "
-            f"plus signs, hyphens, and forward slashes."
-        )
+    validate_name("Target", name)
 
 
 def split_qualified_name(
@@ -353,6 +339,30 @@ def split_qualified_name(
                 f"Invalid qualified name: {name!r}. Too many '::' separators."
             )
         return None, name
+
+
+def split_target_spec(spec: str) -> tuple[str | None, str, str | None]:
+    """Split ``"project::target@env"`` into (project, target, env).
+
+    ``@`` binds tighter than ``::``, so ``"sub::common@mcu"`` is target
+    ``common`` of project ``sub``, built in environment ``mcu``. Missing parts
+    come back as None.
+
+    Raises:
+        ValueError: On more than one ``@``, or an empty environment name.
+    """
+    project, target = split_qualified_name(spec)
+    parts = target.split("@")
+    if len(parts) == 1:
+        return project, target, None
+    if len(parts) > 2:
+        raise ValueError(f"Invalid target spec: {spec!r}. Too many '@' separators.")
+    name, env = parts
+    if not env:
+        raise ValueError(
+            f"Invalid target spec: {spec!r}. Name the environment after the '@'."
+        )
+    return project, name, env
 
 
 def is_qualified_name(name: str) -> bool:
@@ -488,12 +498,19 @@ class Target:
         builder: Builder | None = None,
         defined_at: SourceLocation | None = None,
         project: Project | None = None,
+        env: Environment | None = None,
     ) -> None:
         """Create a target. Toolchains define their own target_type strings.
 
         ``project`` is the owning project; builder factories pass the project
         they were reached through. Without it, the most recently created
         project owns the target (fine in a single-project script).
+
+        ``env`` is the environment the target builds in. A builder that has one
+        passes it here rather than assigning it afterwards: a target's name and
+        environment are its identity, and the project checks that identity as
+        soon as the target is registered, which happens before ``__init__``
+        returns.
         """
         _validate_target_name(name)
         self.name = name
@@ -507,7 +524,7 @@ class Target:
         self.defined_at = defined_at or get_caller_location()
         self._collected_requirements: UsageRequirements | None = None
         self.target_type: str | None = target_type
-        self._env: Environment | None = None
+        self._env: Environment | None = env
         self.intermediate_nodes: list[FileNode] = []
         self.output_nodes: list[FileNode] = []
         self._resolved: bool = False
@@ -549,8 +566,7 @@ class Target:
         self._subdir = project._node_offset
 
         if self._env is None:
-            # default to the last environment in the project, if available
-            self._env = project.environments[-1] if project.environments else None
+            self._env = project._inherited_environment()
 
         self.__project._add_target(self)
 
@@ -561,8 +577,21 @@ class Target:
 
     @property
     def qualified_name(self) -> str:
-        """The qualified name, "<project>::<target>"."""
-        return f"{self.project.name}::{self.name}"
+        """The full spelling, ``project::target@env``.
+
+        The ``@env`` half is there when the environment is named. An unnamed
+        environment cannot host a duplicate name and cannot be addressed, so
+        there is nothing to say about it.
+        """
+        env = self._env
+        env_name = env.name if env is not None else None
+        suffix = f"@{env_name}" if env_name else ""
+        return f"{self.project.name}::{self.name}{suffix}"
+
+    @property
+    def env(self) -> Environment | None:
+        """The environment this target builds in."""
+        return self._env
 
     @property
     def dependencies(self):
@@ -573,7 +602,19 @@ class Target:
         linked_private_targets = [
             t for t in self.private.link_libs if isinstance(t, Target)
         ]
-        return (*self._dependencies, *linked_public_targets, *linked_private_targets)
+        # A Target given as a source is a dependency too: its outputs are this
+        # target's inputs, so it must resolve first.
+        source_targets = [
+            t
+            for t in (self._pending_sources or ())
+            if isinstance(t, Target) and t not in self._dependencies
+        ]
+        return (
+            *self._dependencies,
+            *source_targets,
+            *linked_public_targets,
+            *linked_private_targets,
+        )
 
     @property
     def sources(self) -> list[Node]:
@@ -605,10 +646,14 @@ class Target:
     def build_dir(self) -> Path:
         """This target's build directory.
 
-        ``_subdir`` is the offset from the top-level root, so these anchor
-        there rather than at the owning project's own directories (which
-        already include that offset).
+        The environment places it: it holds the directory it was given and its
+        ``build_prefix``. ``_subdir`` is the offset from the top-level root, so
+        this anchors there rather than at the owning project's own directories,
+        which already include that offset.
         """
+        env = self._env
+        if env is not None:
+            return env.build_dir_for(self._subdir)
         top = self.__project.top
         return top.build_dir / self._subdir if self._subdir.parts else top.build_dir
 
@@ -668,7 +713,9 @@ class Target:
         Appends each argument to ``self.public.link_libs``: a ``Target``
         becomes a full dependency (its public headers, defines, flags, and
         transitive link libs propagate here), a ``str`` is a raw link token;
-        see :class:`UsageRequirements`. Public dependencies are re-exported
+        see :class:`UsageRequirements`. To link a target by name, look it up:
+        ``link(project.get_target("sub::common@mcu"))``. Public dependencies
+        are re-exported
         to this target's consumers, like CMake's ``target_link_libraries(...
         PUBLIC ...)``. Duplicates are ignored; argument order is preserved
         (link order can matter for static libraries).
@@ -790,7 +837,9 @@ class Target:
 
         Args:
             *items: Files or targets to depend on. Strings and Paths are
-                   converted to FileNodes via ``project.node()``.
+                   converted to FileNodes via ``project.node()``, read from
+                   the directory of the script that declared this target,
+                   like ``add_sources()``.
             propagate: If True (default), apply to all build steps
                       (intermediate + output). If False, only output.
 
@@ -834,6 +883,8 @@ class Target:
                     # str or Path — convert to FileNode via project
                     project = self.project
                     if project is not None:
+                        if self._subdir.parts:
+                            item = self._subdir / item
                         file_list.append(project.node(item))
                     else:
                         file_list.append(

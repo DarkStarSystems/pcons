@@ -26,6 +26,9 @@ This guide maps common CMake patterns to their pcons equivalents. It's designed 
 | `set_target_properties(t PROPERTIES OUTPUT_NAME n)` | `t.output_name = "n"` |
 | `set_target_properties(t PROPERTIES PREFIX "")` | `t.output_prefix = ""` |
 | `set_target_properties(t PROPERTIES SUFFIX ".ofx")` | `t.output_suffix = ".ofx"` |
+| `set(CMAKE_RUNTIME_OUTPUT_DIRECTORY bin)` | `env.runtime_directory = "bin"` |
+| `set(CMAKE_LIBRARY_OUTPUT_DIRECTORY lib)` | `env.library_directory = "lib"` |
+| `set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY lib)` | `env.archive_directory = "lib"` |
 | `find_package(Foo)` | `project.find_package("Foo")` |
 | `configure_file(in out)` | `configure_file(in, out, vars)` |
 | `check_include_file(h VAR)` | `checks.check_header("h")` |
@@ -445,6 +448,20 @@ mylib.output_suffix = ".plugin"  # override suffix
 
 - `output_name = "fyaml"` produces `libfyaml.so` (Linux), `libfyaml.dylib` (macOS), `fyaml.dll` (Windows)
 - Adding `output_prefix = ""` produces `fyaml.so`, `fyaml.dylib`, `fyaml.dll`
+
+`output_prefix` is a **filename** prefix, not a directory. Directories belong to
+the environment:
+
+```python
+env.build_prefix = "mcu"        # everything this environment writes
+env.archive_directory = "lib"   # its static libraries, below that
+```
+
+which gives `build/mcu/lib/libfyaml.a` on Linux and `build/mcu/lib/fyaml.lib` on
+Windows: the toolchain still supplies the `lib` and the suffix, which a
+hand-written `output_prefix = "mcu/lib"` would take away. `build_prefix` also
+moves object files and `env.Command()` outputs; the three `*_directory`
+settings move final artifacts only, like their CMake counterparts.
 
 ---
 

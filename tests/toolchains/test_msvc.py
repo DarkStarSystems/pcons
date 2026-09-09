@@ -442,6 +442,7 @@ class TestMsvcModulesBmiKeying:
             ),
             register_node=lambda _node: None,
             toolchains=(tc,),
+            name=None,
         )
 
         def make_obj(path, flags):

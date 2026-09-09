@@ -97,7 +97,7 @@ class _TestToolchain(UnixToolchain):
     def _configure_tools(self, config: object) -> bool:
         return True
 
-    def get_output_suffix(self, target_type: str) -> str:
+    def get_output_suffix(self, target_type: str, target=None) -> str:
         if target_type == "program":
             return ".js"
         if target_type == "shared_library":
