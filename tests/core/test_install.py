@@ -2,6 +2,7 @@
 """Tests for Project.Install() method."""
 
 import logging
+import os
 import subprocess
 import sys
 import time
@@ -411,15 +412,16 @@ class TestInstallWithNinja:
                 probe_file.unlink(missing_ok=True)
 
         def refresh_dependency_metadata(*paths: Path) -> None:
-            """Make filesystem metadata visible before ninja reads dependencies.
+            """Make directory metadata visible before ninja reads dependencies.
 
-            Windows can leave a directory's parent-index metadata stale briefly
-            after a child changes.  ``Path.stat()`` refreshes that metadata
-            before ninja reads the dependency, without changing any timestamps
-            or touching the source tree with a probe file.
+            Windows can leave a directory's NTFS parent-index entry stale after
+            a child changes.  ``os.listdir()`` opens and closes the directory,
+            refreshing the entry that Ninja reads through ``FindFirstFile``
+            without changing timestamps or touching the source tree.  Callers
+            pass only directories that still exist after the mutation.
             """
             for path in paths:
-                path.stat()
+                os.listdir(path)
 
         run_ninja()
         destination = tmp_path / "build" / "staged" / "assets"
@@ -444,7 +446,7 @@ class TestInstallWithNinja:
 
         wait_for_new_tick(install_stamp)
         (nested / "deep.txt").write_text("changed")
-        refresh_dependency_metadata(nested / "deep.txt")
+        refresh_dependency_metadata(nested)
         run_install_rebuild()
         assert (destination / "sub" / "deep.txt").read_text() == "changed"
 
