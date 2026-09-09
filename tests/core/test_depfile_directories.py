@@ -10,11 +10,11 @@ Both halves are checked here, because only the pair is evidence: the
 files-only case must fail to notice, or the directory case proves nothing.
 """
 
+import os
 import shutil
 import subprocess
 import sys
 import textwrap
-import time
 from pathlib import Path
 
 import pytest
@@ -126,36 +126,24 @@ def assert_names(deps: set[str], directory: Path) -> None:
     assert wanted in deps, f"{wanted} not among {sorted(deps)}"
 
 
-def advance_past(reference: Path) -> None:
-    """Wait until a file written now would be stamped later than *reference*.
+def gained_an_entry(directory: Path, after: Path) -> None:
+    """Stamp *directory* past *after*, and read it back, so a build tool sees it.
 
-    A change made inside the same filesystem tick as the build output looks no
-    newer than it, and the edge is then correctly left alone.
+    Two platform behaviours would otherwise decide the result instead of the
+    thing under test. make compares whole seconds on some hosts, so a change
+    made in the same second as the edge output looks no newer than it. And NTFS
+    keeps a directory's mtime in its parent's index entry, which ninja reads on
+    Windows rather than the directory itself; that entry is not refreshed by
+    waiting, only by enumerating the directory, so the next build is handed the
+    old stamp however long the test sleeps.
+
+    Neither is what these tests are about, so the stamp is set explicitly and the
+    directory listed once, which is what a directory that gained a file a few
+    seconds ago looks like to any build tool.
     """
-    deadline = time.monotonic() + 2.0
-    probe = reference.parent / ".tick"
-    try:
-        while True:
-            probe.write_text("")
-            if probe.stat().st_mtime_ns > reference.stat().st_mtime_ns:
-                return
-            assert time.monotonic() < deadline, "the filesystem clock did not advance"
-            time.sleep(0.01)
-    finally:
-        probe.unlink(missing_ok=True)
-
-
-def gained_an_entry(directory: Path) -> None:
-    """Read *directory* back, so the stamp a build tool reads next is current.
-
-    NTFS keeps a directory's mtime in its parent's index entry and updates it
-    lazily, and ninja's Windows stat cache reads mtimes from that index rather
-    than from the directory itself, so a build starting right after a write can
-    still be handed the old stamp. Stat'ing the directory settles the entry.
-    Diagnosed by the maintainer on #132, where these same cases failed the same
-    way.
-    """
-    directory.stat()
+    stamp = after.stat().st_mtime + 2
+    os.utime(directory, (stamp, stamp))
+    os.listdir(directory)
 
 
 needs_ninja = pytest.mark.skipif(
@@ -205,9 +193,8 @@ class TestNinjaDepfileDirectories:
         assert_names(recorded_deps(build_dir), tmp_path / "tree" / "sub")
 
         sub = tmp_path / "tree" / "sub"
-        advance_past(build_dir / "listing.txt")
         write(sub / "new.txt", "new\n")
-        gained_an_entry(sub)
+        gained_an_entry(sub, build_dir / "listing.txt")
         output = run_ninja(build_dir)
 
         assert "no work to do" not in output
@@ -219,9 +206,8 @@ class TestNinjaDepfileDirectories:
         run_ninja(build_dir)
 
         tree = tmp_path / "tree"
-        advance_past(build_dir / "listing.txt")
         write(tree / "top.txt", "top\n")
-        gained_an_entry(tree)
+        gained_an_entry(tree, build_dir / "listing.txt")
         run_ninja(build_dir)
 
         assert "top.txt" in listed_names(tmp_path)
@@ -240,9 +226,8 @@ class TestNinjaDepfileDirectories:
         run_ninja(build_dir)
 
         sub = tmp_path / "tree" / "sub"
-        advance_past(build_dir / "listing.txt")
         write(sub / "new.txt", "new\n")
-        gained_an_entry(sub)
+        gained_an_entry(sub, build_dir / "listing.txt")
         output = run_ninja(build_dir)
 
         assert "no work to do" in output
@@ -261,9 +246,8 @@ class TestMakefileDepfileDirectories:
         assert_names(written_deps(build_dir), tmp_path / "tree" / "sub")
 
         sub = tmp_path / "tree" / "sub"
-        advance_past(build_dir / "listing.txt")
         write(sub / "new.txt", "new\n")
-        gained_an_entry(sub)
+        gained_an_entry(sub, build_dir / "listing.txt")
         run_make(build_dir)
 
         assert "new.txt" in listed_names(tmp_path)
@@ -274,9 +258,8 @@ class TestMakefileDepfileDirectories:
         run_make(build_dir)
 
         sub = tmp_path / "tree" / "sub"
-        advance_past(build_dir / "listing.txt")
         write(sub / "new.txt", "new\n")
-        gained_an_entry(sub)
+        gained_an_entry(sub, build_dir / "listing.txt")
         run_make(build_dir)
 
         assert "new.txt" not in listed_names(tmp_path)
