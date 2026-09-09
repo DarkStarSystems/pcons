@@ -351,35 +351,6 @@ class ScannerResolver:
             for scanner in target._scanners:
                 self._wire(target, scanner)
 
-    def inherit_waits(self) -> None:
-        """Order every scan after whatever its governed edge waits for.
-
-        The scan reads what the governed command reads (a module scanner
-        runs a real compiler front end), so anything the governed edge
-        waits for — a generated header from target.depends(), a linked
-        dependency's generated outputs — must exist before the scan too.
-        Runs once the dependency edges are on the governed edges; see
-        FileNode.wait_for for how strongly each scan holds on to them.
-        """
-        for scope in self.project._scan_scopes.values():
-            for governed, info_node in zip(
-                scope.governed, scope.info_nodes, strict=True
-            ):
-                inherited = [
-                    dep
-                    for dep in (*governed.implicit_deps, *governed.order_only_deps)
-                    # Not the scope's own products: the governed edge waits
-                    # for the dyndep file this scan feeds, and a toolchain
-                    # may hang the edge's header tracking on the scan node
-                    # itself (GCC's module interfaces do). Either would read
-                    # back here as a cycle.
-                    if isinstance(dep, FileNode)
-                    and dep is not info_node
-                    and dep is not scope.collate_node
-                ]
-                if inherited:
-                    info_node.wait_for(inherited)
-
     # ------------------------------------------------------------------
     # Wiring one (target, scanner) scope
     # ------------------------------------------------------------------
@@ -754,6 +725,19 @@ class ScannerResolver:
         if scanner.scan_vars is not None:
             info_node._build_info["vars"] = scanner.scan_vars(env, scanned, governed)
         env.register_node(info_node)
+        # The scan reads what the governed command reads (a module scanner
+        # runs a real compiler front end), so it waits for whatever the
+        # governed edge waits for: a generated header from target.depends(),
+        # a linked dependency's generated outputs. Not the scan node itself:
+        # a toolchain may hang the governed edge's header tracking on it
+        # (GCC's module interfaces do), which would read back as a cycle.
+        inherited = [
+            dep
+            for dep in (*governed.implicit_deps, *governed.order_only_deps)
+            if isinstance(dep, FileNode) and dep is not info_node
+        ]
+        if inherited:
+            info_node.wait_for(inherited)
         return info_node
 
     def _wire_link_args(

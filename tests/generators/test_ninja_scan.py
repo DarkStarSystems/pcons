@@ -243,3 +243,40 @@ class TestEdgeArgsInNinja:
         content = build_ninja(tmp_path, monkeypatch)
 
         assert ".refs" not in content
+
+
+class TestAGovernedEdgeStillRebuildsOnWhatItDependsOn:
+    """A dyndep is written before the edge runs, from the declared sources,
+    so it cannot stand in for a depfile: a file the command depends() on
+    stays an implicit dep, and editing it re-runs the command."""
+
+    def test_a_file_dependency_of_a_scanned_command_is_implicit(
+        self, tmp_path, monkeypatch
+    ):
+        (tmp_path / "tools").mkdir()
+        (tmp_path / "tools" / "scan.py").write_text("# scan tool stub\n")
+        (tmp_path / "tools" / "pack.py").write_text("# packer stub\n")
+        (tmp_path / "a.scene").write_text("contents\n")
+        monkeypatch.chdir(tmp_path)
+
+        project = Project("t", root_dir=tmp_path, build_dir="build")
+        env = project.Environment()
+        a = env.Command(
+            target="packs/a.pack",
+            source=["a.scene"],
+            command=[sys.executable, "$SRCDIR/tools/pack.py", "$SOURCE", "$TARGET"],
+            depends=["tools/pack.py"],
+            name="pack_a",
+        )
+        make_scanner().attach(a)
+        project.resolve()
+
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+        content = normalize_path((tmp_path / "build" / "build.ninja").read_text())
+        edge = statement(content, "build packs/a.pack:")[0]
+
+        implicit, _, order_only = edge.partition("||")
+        assert "$topdir/tools/pack.py" in implicit
+        assert "$topdir/tools/pack.py" not in order_only
+        assert ".dyndep" in order_only

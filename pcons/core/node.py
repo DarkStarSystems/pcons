@@ -281,14 +281,14 @@ class FileNode(Node):
     @property
     def discovers_dependencies(self) -> bool:
         """True if this edge records what it read as it runs: a depfile,
-        MSVC's ``/showIncludes``, or a scanner's dyndep file -- the three
-        ways ninja learns dependencies it was not told about."""
+        or MSVC's ``/showIncludes``.
+
+        A scanner's dyndep is not that. It is written before this edge runs,
+        from what the scanner found in the declared sources, so it says
+        nothing about the other files the command read.
+        """
         info = self._build_info or {}
-        return bool(
-            info.get("depfile") is not None
-            or info.get("deps_style")
-            or info.get("dyndep")
-        )
+        return info.get("depfile") is not None or bool(info.get("deps_style"))
 
     def wait_for(self, *nodes: Node | Sequence[Node]) -> None:
         """Build *nodes* before this edge, as loosely as this edge allows.

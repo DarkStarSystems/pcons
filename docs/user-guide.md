@@ -2458,7 +2458,7 @@ the target. How each step your builder contains then handles it is up
 to the step, so a builder has three rules to follow:
 
 1. Let each step discover its dependencies whenever the tool can
-   report them: a depfile, `/showIncludes`, a scanner. Make the step with
+   report them: a depfile, or `/showIncludes`. Make the step with
    `GenericCommandBuilder(command, depfile=".d", deps_style="gcc")`, which
    tells pcons the step discovers, and have the command write the file at
    `$TARGET.d`. A step that discovers only

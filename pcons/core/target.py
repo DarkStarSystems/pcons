@@ -578,12 +578,18 @@ class Target:
     @property
     def dependencies(self) -> tuple[Target, ...]:
         """Every target that must be resolved before this one: the targets
-        it depends on (a source target among them) and the libraries it
-        links."""
-        return (
-            *self._dependency_targets(),
-            *(t for t in self.public.link_libs if isinstance(t, Target)),
-            *(t for t in self.private.link_libs if isinstance(t, Target)),
+        it depends on, the targets whose outputs are its sources, and the
+        libraries it links."""
+        pending = self._pending_sources or ()
+        return tuple(
+            dict.fromkeys(
+                (
+                    *self._dependency_targets(),
+                    *(t for t in pending if isinstance(t, Target)),
+                    *(t for t in self.public.link_libs if isinstance(t, Target)),
+                    *(t for t in self.private.link_libs if isinstance(t, Target)),
+                )
+            )
         )
 
     def _dependency_targets(self) -> list[Target]:
@@ -841,9 +847,9 @@ class Target:
     def _apply_dependencies(self) -> None:
         """Wire the depends() edges onto this target's nodes.
 
-        Called by the resolver once every target has its nodes and every
-        edge knows whether it discovers its own dependencies; see
-        :meth:`depends` and :meth:`FileNode.wait_for`.
+        Called by the resolver once this target's nodes exist and its
+        dependencies are resolved; see :meth:`depends` and
+        :meth:`FileNode.wait_for`.
         """
         nodes = self.intermediate_nodes + self.output_nodes
         for dep in self._dependencies:
@@ -1006,17 +1012,19 @@ class Target:
                 f"consumed twice."
             )
         self._pending_sources.append(source)
-        # A source target is a dependency whose outputs are also inputs.
+        # Any step of a compiled target may read any of a source target's
+        # outputs (a header beside a generated source), so the whole target
+        # waits for it, as for a depends() target.
         self.depends(source)
 
     def _add_pending_sources(
         self, sources: Sequence[Target | Node | Path | str]
     ) -> None:
         """Sources a factory turns into inputs once their targets resolve
-        (Install, Tarfile, env.Command). A source target is a dependency
-        whose outputs are also inputs."""
+        (Install, Tarfile, env.Command). Each step consumes the inputs it
+        lists and nothing else, so a source target orders this target's
+        resolution but is not a dependency of every step."""
         self._pending_sources = list(sources)
-        self.depends(*[s for s in sources if isinstance(s, Target)])
 
     def _add_source_node(self, node: Node, env: Environment | None) -> None:
         """Add one source node, rejecting a source the target already has.

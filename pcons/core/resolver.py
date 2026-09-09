@@ -232,16 +232,7 @@ class Resolver:
         # expansion (so per-edge vars exist when templates expand).
         from pcons.core.scan import ScannerResolver
 
-        scanners = ScannerResolver(self.project)
-        scanners.run(self._targets_in_build_order())
-
-        # Now every node exists and every edge knows whether it discovers
-        # its own dependencies, so the depends() edges can
-        # land on the nodes as loosely as each edge allows -- and the scans
-        # can inherit what their governed edges wait for.
-        for target in self.project.targets:
-            target._apply_dependencies()
-        scanners.inherit_waits()
+        ScannerResolver(self.project).run(self._targets_in_build_order())
 
         # Expand command templates for all nodes
         trace("resolve", "Starting command expansion")
@@ -286,6 +277,10 @@ class Resolver:
 
         if target._pending_sources is not None:
             self._resolve_pending_sources(target)
+
+        # The nodes exist and the dependencies are resolved: wire the
+        # depends() edges, as loosely as each node allows.
+        target._apply_dependencies()
 
         if target.output_nodes:
             trace(
