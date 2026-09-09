@@ -119,6 +119,9 @@ machinery to support this kind of dynamic dependencies.
     properly relinks without recompiling when `app.ld` changes.
     See `examples/84_asset_pipeline` for a custom three-step builder
     that shows much of this, including one input a depfile can't see.
+    For a file a step reads but never reports (a response file, a
+    sanitizer ignore-list), `depends(file, on_change=True)` makes every
+    step rerun when it changes; `on_change=False` makes it exist-first only.
   - A linked target's dependencies reach its consumers uniformly: the
     generators, generated sources and files a library `depends()` on order
     the compiles of every target that links it, whether the library is

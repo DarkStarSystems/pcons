@@ -39,7 +39,7 @@ class NodeLike(Protocol):
         """The builder that produces this node (None for sources)."""
         ...
 
-    def depends(self, *nodes: Any) -> None:
+    def depends(self, *nodes: Any, on_change: bool | None = None) -> None:
         """Add explicit dependencies."""
         ...
 

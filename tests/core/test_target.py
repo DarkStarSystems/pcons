@@ -917,6 +917,37 @@ class TestTargetDepends:
         assert dep in obj.order_only_deps
         assert dep in exe.implicit_deps
 
+    def test_on_change_makes_every_node_hold_the_file(self, test_project):  # noqa: F811
+        """A file a step reads but never reports (a response file) is an
+        implicit dep of every node, discovery or not."""
+        target, obj, exe = self._target_with_nodes()
+        rsp = FileNode("flags.rsp")
+        target.depends(rsp, on_change=True)
+        target._apply_dependencies()
+        assert rsp in obj.implicit_deps
+        assert rsp not in obj.order_only_deps
+        assert rsp in exe.implicit_deps
+
+    def test_on_change_applies_to_a_targets_outputs_too(self, test_project):  # noqa: F811
+        target, obj, exe = self._target_with_nodes()
+        gen = Target("gen")
+        rsp = FileNode("build/flags.rsp")
+        gen.output_nodes.append(rsp)
+        target.depends(gen, on_change=True)
+        target._apply_dependencies()
+        assert rsp in obj.implicit_deps
+        assert rsp in exe.implicit_deps
+
+    def test_on_change_false_only_orders(self, test_project):  # noqa: F811
+        """Exist-first only: order-only even on a node with no discovery."""
+        target, obj, exe = self._target_with_nodes()
+        stamp = FileNode("build/staged.stamp")
+        target.depends(stamp, on_change=False)
+        target._apply_dependencies()
+        assert stamp in obj.order_only_deps
+        assert stamp in exe.order_only_deps
+        assert stamp not in exe.implicit_deps
+
     def test_target_dep_waits_as_loosely_as_each_node_allows(self, test_project):  # noqa: F811
         """A compile with dependency discovery waits order-only for a
         dependency's outputs; a node without it takes them as implicit deps."""

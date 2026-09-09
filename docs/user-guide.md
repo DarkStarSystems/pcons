@@ -2284,6 +2284,13 @@ reruns whenever the dependency changes. A target given to `depends()`
 also passes its public usage requirements on, as if it were `link()`ed,
 but it is not passed to the linker command line.
 
+A step that discovers its dependencies can still miss one: a response
+file, a sanitizer ignore-list, anything the tool reads but never writes
+to its depfile. For those, say `target.depends(thing, on_change=True)`
+and every step reruns when it changes, whether or not the step's own
+record mentions it. The opposite, `on_change=False`, says the thing only
+has to exist first and never reruns a step by itself.
+
 You may pin a dependency to one step if you want, by building that
 step yourself: `obj = env.cc.Object(...)` then `obj.depends(thing)`. For
 an ordinary compile-and-link target that doesn't buy you anything,

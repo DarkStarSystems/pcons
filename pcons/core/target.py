@@ -431,6 +431,7 @@ class Target:
         "builder",
         "_sources",
         "_dependencies",
+        "_on_change",
         "public",
         "private",
         "required_languages",
@@ -506,6 +507,9 @@ class Target:
         self._source_set: set[Node] = set()
         # Every depends() edge: a target to build first, or a file to have.
         self._dependencies: list[Target | Node] = []
+        # depends(on_change=...) choices; a dependency absent here lets
+        # each step decide.
+        self._on_change: dict[Target | Node, bool] = {}
         self.public = _make_default_requirements(self.__link_libs_validator)
         self.private = _make_default_requirements(self.__link_libs_validator)
         self.required_languages: set[str] = set()
@@ -781,7 +785,9 @@ class Target:
             )  # ValidatedUniqueList: validates, de-dupes, invalidates cache
         return self
 
-    def depends(self, *items: Target | Node | Path | str) -> Target:
+    def depends(
+        self, *items: Target | Node | Path | str, on_change: bool | None = None
+    ) -> Target:
         """Build *items* before this target (fluent API).
 
         A target is built first, and its public usage requirements
@@ -801,6 +807,19 @@ class Target:
         that included what ``gen`` wrote. What a library you ``link()``
         waits for reaches your compiles the same way, so a library whose
         public headers are generated declares the generator once.
+
+        ``on_change`` overrides that choice for every step. ``True`` is for
+        a file a step reads but cannot report -- a response file, a
+        sanitizer ignore-list, an options file the tool never names in its
+        depfile: the step reruns when it changes. ``False`` is for
+        something a step only needs to exist: it never reruns the step by
+        itself.
+
+        Args:
+            items: Targets, or files as Node, Path or str.
+            on_change: ``True``, rerun every step when an item changes;
+                ``False``, only build the items first; ``None`` (default),
+                each step decides as described above.
 
         Returns:
             self for method chaining.
@@ -839,6 +858,8 @@ class Target:
                 item = self.project.node(item)
             if item not in self._dependencies:
                 self._dependencies.append(item)
+            if on_change is not None:
+                self._on_change[item] = on_change
         # Invalidate cached requirements
         self._collected_requirements = None
 
@@ -854,8 +875,14 @@ class Target:
         nodes = self.intermediate_nodes + self.output_nodes
         for dep in self._dependencies:
             outputs = dep.ordering_outputs() if isinstance(dep, Target) else [dep]
+            on_change = self._on_change.get(dep)
             for node in nodes:
-                node.wait_for(outputs)
+                if on_change is None:
+                    node.wait_for(outputs)
+                elif on_change:
+                    node.depends(outputs)
+                else:
+                    node.order_after(outputs)
 
     def ordering_outputs(self, seen: set[Target | Node] | None = None) -> list[Node]:
         """What a dependent of this target waits for.
