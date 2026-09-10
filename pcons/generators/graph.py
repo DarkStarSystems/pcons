@@ -44,15 +44,17 @@ EDGE_DISCOVERED = "discovered"
 
 
 def label_for(path: Path, build_dir: Path, root_dir: Path) -> str:
-    """Display label for a node path: relative to the build or the source dir."""
-    try:
-        return str(path.relative_to(build_dir))
-    except ValueError:
-        pass
-    try:
-        return str(path.relative_to(root_dir))
-    except ValueError:
-        return str(path)
+    """Display label for a node path: relative to the build or the source dir.
+
+    Always with forward slashes: a backslash starts an escape in a DOT
+    label, and the same label goes to Mermaid.
+    """
+    for base in (build_dir, root_dir):
+        try:
+            return path.relative_to(base).as_posix()
+        except ValueError:
+            pass
+    return path.as_posix()
 
 
 def sanitize_id(name: str) -> str:
