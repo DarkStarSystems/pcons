@@ -35,6 +35,7 @@ import platform
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from pcons.core.debug import is_enabled, trace
@@ -132,22 +133,29 @@ class PathToken:
     """
 
     prefix: str = ""
-    path: str = ""
+    path: str | Path = ""
     path_type: str = "project"  # "project", "build", or "absolute"
     suffix: str = ""
+
+    def __post_init__(self) -> None:
+        # A Path is welcome everywhere else in pcons, so here too; the
+        # generators concatenate, so it is kept as text.
+        if isinstance(self.path, Path):
+            object.__setattr__(self, "path", str(self.path))
 
     def relativize(self, relativizer: Callable[[str], str]) -> str:
         """Return the complete token: prefix + path + suffix, with the
         relativizer applied only to "project" paths (e.g. prepending $topdir
         for ninja); "build" and "absolute" paths pass through unchanged.
         """
-        if self.path_type in ("build", "absolute"):
-            return self.prefix + self.path + self.suffix
-        return self.prefix + relativizer(self.path) + self.suffix
+        path = str(self.path)
+        if self.path_type not in ("build", "absolute"):
+            path = relativizer(path)
+        return self.prefix + path + self.suffix
 
     def __str__(self) -> str:
         """Fallback string representation (no relativization)."""
-        return self.prefix + self.path + self.suffix
+        return self.prefix + str(self.path) + self.suffix
 
 
 @dataclass

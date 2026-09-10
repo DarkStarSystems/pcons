@@ -236,6 +236,7 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- `PathToken` accepts a `Path` as well as a string. (#146)
 - **`InstallDir` sees a file added, removed or renamed anywhere under its
   source tree.** It used to notice only the files that existed at configure
   time, so a new file in a subdirectory was never copied. The copy edge now
