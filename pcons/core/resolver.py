@@ -110,12 +110,47 @@ class NoOpFactory(PendingSourceFactory):
 
 
 class CommandNodeFactory(PendingSourceFactory):
-    """Factory for resolving Command target pending sources.
+    """Factory for the targets ``env.Command`` declares.
 
-    Command targets (created by env.Command) already have output_nodes
-    from GenericCommandBuilder. This factory wires up pending source
-    dependencies and updates build_info.
+    Command targets already have output_nodes from GenericCommandBuilder,
+    so this factory has two jobs on the build_info those nodes carry:
+    ``resolve`` turns whatever the command line names into paths, and
+    ``resolve_pending`` wires up sources given as Targets.
     """
+
+    def resolve(
+        self,
+        target: Target,
+        env: Environment | None,  # noqa: ARG002
+    ) -> None:
+        """Replace each Target or Node written into the command with its path.
+
+        ``env.Command(command=[tool, ...])`` names what runs the command, and
+        the token survives declaration as the object itself. The resolver
+        resolves a target's dependencies before dispatching here, and
+        ``env.Command`` recorded the tool and every Target written into the
+        list with ``depends()``, so the outputs those tokens stand for exist
+        by the time this runs. Each becomes a ``PathToken`` the generators
+        render the way they render every other path they produce.
+
+        The dependency edge is not made here: ``env.Command`` already made it,
+        which keeps the tool out of ``$SOURCES`` and leaves the caller's
+        indices meaning what they meant.
+        """
+        from pcons.core.target import Target as TargetClass
+
+        if not target.output_nodes:
+            return
+        build_info = target.output_nodes[0]._build_info or {}
+        command = build_info.get("command")
+        if not command or not any(
+            isinstance(token, (TargetClass, FileNode, ToolPath)) for token in command
+        ):
+            return
+        tool = (getattr(target, "_builder_data", None) or {}).get("tool")
+        build_info["command"] = [
+            _resolved_command_token(target, token, tool) for token in command
+        ]
 
     def resolve_pending(self, target: Target) -> None:
         """Add each source Target's outputs as dependencies of the command's
@@ -236,42 +271,10 @@ class Resolver:
 
         ScannerResolver(self.project).run(self._targets_in_build_order())
 
-        self._link_command_paths()
-
         # Expand command templates for all nodes
         trace("resolve", "Starting command expansion")
         self._expand_node_commands()
         trace("resolve", "Resolution complete")
-
-    def _link_command_paths(self) -> None:
-        """Replace each Target or Node written into a command with its path.
-
-        ``env.Command(command=[tool, ...])`` names what runs the command.
-        The token survives declaration as the object itself, because the
-        outputs it stands for do not exist until every target is resolved.
-        Here they do, so it becomes a ``PathToken`` the generators render
-        the way they render every other path they produce.
-
-        The dependency edge is not made here: ``env.Command`` already
-        recorded it with ``depends()``, which keeps the tool out of
-        ``$SOURCES`` and leaves the caller's indices meaning what they meant.
-        """
-        from pcons.core.target import Target as TargetClass
-
-        for target in self.project.targets:
-            if target._builder_name != "Command" or not target.output_nodes:
-                continue
-            build_info = target.output_nodes[0]._build_info or {}
-            command = build_info.get("command")
-            if not command or not any(
-                isinstance(token, (TargetClass, FileNode, ToolPath))
-                for token in command
-            ):
-                continue
-            tool = (getattr(target, "_builder_data", None) or {}).get("tool")
-            build_info["command"] = [
-                _resolved_command_token(target, token, tool) for token in command
-            ]
 
     def _targets_in_build_order(self) -> list[Target]:
         """Get targets in resolution order (dependencies before dependents)."""

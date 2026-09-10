@@ -192,3 +192,51 @@ def test_make_writes_the_same_path(tmp_path: Path, gcc_toolchain) -> None:
 
     assert "gen" in lines[rule].split("|")[0]
     assert file_name_in(lines[rule + 1].split()[0]) == gen.output_nodes[0].path.name
+
+
+def test_the_main_resolve_loop_reaches_every_command(
+    tmp_path: Path, gcc_toolchain
+) -> None:
+    """The rewrite runs in the Command factory, which only the main resolve
+    loop dispatches. A hook that created a Command target after that loop --
+    a toolchain's after_resolve, the scanner wiring -- would leave its command
+    naming objects the generators cannot render, so the invariant is that no
+    such target exists once resolve() returns."""
+    project = _project(tmp_path, gcc_toolchain)
+    env = project.Environment(toolchain=gcc_toolchain)
+    gen = project.Program("gen", env, sources=["gen.c"])
+    env.Command(
+        name="run",
+        target=project.build_dir / "out.txt",
+        source=["in.txt"],
+        command=[gen, "$SOURCE", "$TARGET"],
+    )
+    env.Command(
+        name="tooled",
+        target=project.build_dir / "tooled.txt",
+        tool=gen,
+        source=["in.txt"],
+        command="$TOOL $SOURCE $TARGET",
+    )
+
+    project.resolve()
+
+    commands = [t for t in project.targets if t._builder_name == "Command"]
+    assert commands
+    assert all(t._resolved for t in commands)
+
+    from pcons.core.node import FileNode
+    from pcons.core.subst import ToolPath
+    from pcons.core.target import Target
+
+    for node in project._nodes.values():
+        if not isinstance(node, FileNode) or not node._build_info:
+            continue
+        command = node._build_info.get("command") or []
+        if isinstance(command, str):
+            continue
+        assert not [
+            token
+            for token in command
+            if isinstance(token, (Target, FileNode, ToolPath))
+        ]
