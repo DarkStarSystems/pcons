@@ -3,6 +3,11 @@
 [test]
 description = "Qt Widgets app via QtProgram: automoc, .ui and .qrc in sources"
 
+# Often the first example its CI job runs on Windows, so it pays the cold
+# MSVC-discovery cost that has blown the default 60s on slow runners, the
+# same budget 01_hello_c carries.
+timeout = 180
+
 expected_outputs = [
     "build/qt.qt_widgets/src/moc_mainwindow.cpp",
     "build/qt.qt_widgets/src/ui_mainwindow.h",

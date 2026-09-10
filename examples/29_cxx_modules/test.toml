@@ -3,6 +3,11 @@
 [test]
 description = "Demonstrates C++20 named modules with Ninja dyndep ordering"
 
+# Often the first example its CI job runs on Windows, so it pays the cold
+# MSVC-discovery cost that has blown the default 60s on slow runners, the
+# same budget 01_hello_c carries.
+timeout = 180
+
 expected_outputs = [
     "build/obj.hello/src/MyMod.cppm.o",
     "build/obj.hello/src/main.cpp.o",
