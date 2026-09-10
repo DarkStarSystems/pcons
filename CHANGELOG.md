@@ -34,6 +34,13 @@ machinery to support this kind of dynamic dependencies.
   configure time. Not C++-specific: there's an example at  `examples/70_scene_packs` 
   that packs "scene" files that reference each other by  name. New doc at `docs/scanners.md`.
 
+- **The dependency graphs know about scanners.** `--graph` and `--mermaid`
+  no longer draw a scanner's dyndep file as if it were a source: the
+  machinery is elided and the edges it governs carry a `scanned: <scanner>`
+  line under their name. A new `--graph-detail` asks for more — `scan` draws the
+  machinery itself, `discovered` draws what the last build's dyndep files
+  actually found, and `headers` draws the compiler's `.d` edges.
+
 - **`env.Command` takes `depfile=` and `deps_style=`.** A custom command can
   now report the files it turned out to read, the way a compiler does:
   `deps_style="gcc"` for a make-style depfile, `"msvc"` for `/showIncludes`

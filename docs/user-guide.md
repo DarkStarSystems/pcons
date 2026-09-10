@@ -2628,6 +2628,16 @@ pcons generate --mermaid             # To stdout
 pcons generate --graph=deps.dot      # DOT format
 ```
 
+The graph shows what the script declares. Three kinds of detail come from a
+finished build instead, and `--graph-detail` asks for them: `headers` (the
+compiler's `.d` files), `scan` (a scanner's own edges, elided by default),
+and `discovered` (the dependencies a scanner found). See
+[Seeing it in the graph](scanners.md#seeing-it-in-the-graph).
+
+```bash
+pcons generate --graph=deps.dot --graph-detail=discovered
+```
+
 ---
 
 ## Command-line reference

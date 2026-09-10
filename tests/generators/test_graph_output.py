@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 
 from pcons.core.errors import PconsError
-from pcons.core.project import Project
+from pcons.core.project import Project, _graph_detail
 from pcons.generators.generator import BaseGenerator
 
 BUILD_SCRIPT = """\
@@ -209,3 +209,34 @@ class TestGraphFailuresAreContained:
         assert result.returncode == 1
         assert not (tmp_path / "g.dot").exists()
         assert not (tmp_path / "build" / "build.ninja").exists()
+
+
+class TestGraphDetail:
+    """PCONS_GRAPH_DETAIL turns --graph-detail items into generator options."""
+
+    def test_items_become_include_options(self) -> None:
+        assert _graph_detail("headers, scan,discovered") == {
+            "include_headers": True,
+            "include_scan": True,
+            "include_discovered": True,
+        }
+
+    def test_nothing_asked_for_is_no_options(self) -> None:
+        assert _graph_detail(None) == {}
+        assert _graph_detail("") == {}
+
+    def test_an_unknown_item_names_the_choices(self) -> None:
+        with pytest.raises(PconsError) as excinfo:
+            _graph_detail("scan,hedars")
+        assert "hedars" in str(excinfo.value)
+        assert "headers" in str(excinfo.value)
+
+    def test_detail_reaches_the_generator(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+    ) -> None:
+        """No scanner here, so the proof is that the option was accepted and
+        the header parsing it asked for ran."""
+        monkeypatch.setenv("PCONS_GRAPH", "-")
+        monkeypatch.setenv("PCONS_GRAPH_DETAIL", "headers")
+        _generate(_make_project(tmp_path))
+        assert "digraph" in capsys.readouterr().out

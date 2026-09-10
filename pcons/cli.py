@@ -1127,6 +1127,7 @@ def _generate(
     no_cache: bool = False,
     graph: str | None = None,
     mermaid: str | None = None,
+    graph_detail: str | None = None,
     jobs: int | None = None,
 ) -> tuple[int, list[Project]]:
     """Run the build script, which writes the build files into *build_dir*.
@@ -1138,6 +1139,7 @@ def _generate(
         script: The build script, or None to look for pcons-build.py here.
         graph: Where to write a DOT dependency graph, "-" for stdout.
         mermaid: The same, in Mermaid.
+        graph_detail: Comma-separated extra detail for those graphs.
         jobs: How many subprocesses configure may run at once. Configure has
             its own parallel work (C++ module scanning), and a user who capped
             the build's jobs meant to cap that too.
@@ -1165,6 +1167,8 @@ def _generate(
         extra_env["PCONS_GRAPH"] = graph
     if mermaid:
         extra_env["PCONS_MERMAID"] = mermaid
+    if graph_detail:
+        extra_env["PCONS_GRAPH_DETAIL"] = graph_detail
     if jobs:
         extra_env["PCONS_JOBS"] = str(jobs)
 
@@ -2399,6 +2403,14 @@ def cli_init(
     metavar="[FILE]",
     help="Output dependency graph in Mermaid format (default: stdout)",
 )
+@click.option(
+    "--graph-detail",
+    metavar="ITEMS",
+    help=(
+        "Extra detail for --graph/--mermaid (comma-separated): "
+        "headers, scan, discovered. Each needs a prior build."
+    ),
+)
 @jobs_option
 @click.argument("extra", nargs=-1)
 @pass_pcons_context
@@ -2413,6 +2425,7 @@ def cli_generate(
     no_cache: bool,
     graph: str | None,
     mermaid: str | None,
+    graph_detail: str | None,
     jobs: int | None,
     extra: tuple[str, ...],
     **declared_but_unused: object,
@@ -2430,6 +2443,7 @@ def cli_generate(
         no_cache=no_cache,
         graph=graph,
         mermaid=mermaid,
+        graph_detail=graph_detail,
         jobs=jobs,
     )
     if code == 0 and not projects:

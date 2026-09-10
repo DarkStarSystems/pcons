@@ -15,6 +15,7 @@ from pcons.core.collate import (
     SCAN_INFO_VERSION,
     collate,
     main,
+    read_dyndep_entries,
     sanitize_logical_name,
     write_dyndep_entries,
     write_text_if_changed,
@@ -158,6 +159,26 @@ class TestWriteDyndepEntries:
             "\n"
             "build b.o | b.pcm: dyndep\n"
         )
+
+
+class TestReadDyndepEntries:
+    """Reading a dyndep file back, for anyone reporting on a finished build."""
+
+    def test_round_trip(self, tmp_path: Path) -> None:
+        out = tmp_path / "x.dyndep"
+        entries = [("b.o", ["b.pcm"], []), ("a.o", [], ["a.pcm", "z.pcm"])]
+        write_dyndep_entries([(o, list(p), list(r)) for o, p, r in entries], out)
+
+        assert read_dyndep_entries(out) == sorted(entries)
+
+    def test_escaped_paths_come_back_whole(self, tmp_path: Path) -> None:
+        out = tmp_path / "x.dyndep"
+        write_dyndep_entries([("my obj.o", [], ["c:/x/a b.pcm"])], out)
+
+        assert read_dyndep_entries(out) == [("my obj.o", [], ["c:/x/a b.pcm"])]
+
+    def test_missing_file_reads_as_nothing(self, tmp_path: Path) -> None:
+        assert read_dyndep_entries(tmp_path / "never-built.dyndep") == []
 
 
 class TestSanitizeLogicalName:

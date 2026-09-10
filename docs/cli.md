@@ -41,6 +41,7 @@ Generate build files without building.
 |---|---|
 | `--graph [FILE]` | Write the dependency graph as DOT (default: stdout) |
 | `--mermaid [FILE]` | Write the dependency graph as Mermaid (default: stdout) |
+| `--graph-detail ITEMS` | Extra detail in those graphs: `headers`, `scan`, `discovered` (comma-separated). Each reads files a build writes, so build first. See [Scanners](scanners.md#seeing-it-in-the-graph) |
 
 ### `pcons build`
 
