@@ -119,6 +119,37 @@ class TestTheReportEdge:
         assert "qt.app/automoc.exports.json" in edges[0]
         assert "qt.mod/automoc.exports.json" in edges[0]
 
+    def test_a_shared_librarys_private_link_stays_behind_its_own_link(
+        self, shared_dir_tree
+    ):
+        """What the linker pulls in is what can collide.
+
+        A shared library resolves its private dependencies itself, so the
+        program that links it never sees their meta-object symbols.
+        """
+        (shared_dir_tree / "src" / "Widget.cpp").write_text(
+            '#include "Controller.hpp"\n'
+        )
+        project = Project(
+            "dup", root_dir=shared_dir_tree, build_dir=shared_dir_tree / "build"
+        )
+        env = cxx_env_with_qt(project)
+        module = project.QtQmlModule(
+            "mod", env, uri="a.b", sources=["src/Controller.cpp"]
+        )
+        shared = project.QtSharedLibrary("shared", env, sources=["src/Widget.cpp"])
+        shared.private.link_libs.append(module)
+        app = project.QtProgram("app", env, sources=["src/main.cpp"])
+        app.link(shared)
+
+        ninja = generate_ninja(project)
+
+        edges = _report_edges(ninja)
+        assert len(edges) == 1
+        assert "qt.app/automoc.exports.json" in edges[0]
+        assert "qt.shared/automoc.exports.json" in edges[0]
+        assert "qt.mod/automoc.exports.json" not in edges[0]
+
     def test_the_root_link_waits_for_the_report(self, shared_dir_tree):
         project = Project(
             "dup", root_dir=shared_dir_tree, build_dir=shared_dir_tree / "build"

@@ -201,7 +201,9 @@ and link together, so its meta-object code is compiled once per target ...
 The fix is to give the class one owner: keep the module's headers in a
 directory the other target's sources do not include from. The same
 header moc'ed by two targets that never meet at a link is two separate
-programs sharing a source file, which is fine, and is not reported.
+programs sharing a source file, which is fine, and is not reported. A
+shared library resolves its own private dependencies, so what it links
+privately is not in the closure of the program that links the library.
 
 A `.cpp` file with `Q_OBJECT` needs its moc output included at the end
 of the file (`#include "myfile.moc"`); the automoc edge fails the build

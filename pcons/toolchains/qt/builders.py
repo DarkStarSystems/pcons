@@ -282,30 +282,6 @@ def inherit_automoc_deps(project: Project) -> None:
             node.wait_for(inherited)
 
 
-def _link_closure(target: Target) -> list[Target]:
-    """*target* and every target reachable from it through link_libs.
-
-    ``transitive_dependencies()`` also follows ``depends()`` edges, which
-    order a build without linking anything, so the walk is done here over
-    the link edges alone.
-    """
-    from pcons.core.target import Target as TargetClass
-
-    found: dict[int, Target] = {}
-    stack = [target]
-    while stack:
-        current = stack.pop()
-        if id(current) in found:
-            continue
-        found[id(current)] = current
-        stack.extend(
-            lib
-            for lib in (*current.public.link_libs, *current.private.link_libs)
-            if isinstance(lib, TargetClass)
-        )
-    return list(found.values())
-
-
 _moc_exports: weakref.WeakKeyDictionary[
     Project, list[tuple[Target, FileNode, Environment]]
 ] = weakref.WeakKeyDictionary()
@@ -321,11 +297,13 @@ def wire_duplicate_moc_report(project: Project) -> None:
     exports that list with the include chain that reached each header, and
     this edge reads the closure's exports files back and warns.
 
-    The link closure is a static fact about the target graph, so the set of
-    exports files one report reads is known here. A header moc'ed by two
-    targets that never meet at a link is two separate programs sharing a
-    source file, which is correct, hence one edge per closure rather than
-    one per project.
+    The closure is ``transitive_link_dependencies()``: what the linker
+    actually pulls in, so a shared library's private dependencies stay
+    behind its own link and do not read as a duplicate. It is a static fact
+    about the target graph, so the set of exports files one report reads is
+    known here. A header moc'ed by two targets that never meet at a link is
+    two separate programs sharing a source file, which is correct, hence one
+    edge per closure rather than one per project.
     """
     from pcons.core.scan import scope_id_for
     from pcons.core.target import Target as TargetClass
@@ -344,7 +322,11 @@ def wire_duplicate_moc_report(project: Project) -> None:
         if id(root) in linked:
             continue
         closure = sorted(
-            (by_id[id(t)] for t in _link_closure(root) if id(t) in by_id),
+            (
+                by_id[id(t)]
+                for t in (root, *root.transitive_link_dependencies())
+                if id(t) in by_id
+            ),
             key=lambda entry: entry[0].name,
         )
         if len(closure) < 2:
