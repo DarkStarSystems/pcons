@@ -236,6 +236,11 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- The installer helpers (`create_pkg`, `create_component_pkg`, `create_dmg`,
+  `create_msix`) work in an environment with a `build_prefix`: staging and
+  outputs now sit under the prefix and the command lines say so, where
+  before pkgbuild wrote to one place and ninja looked in another. Staging
+  is also per environment, so two variants can package the same name. (#143)
 - Assigning a plain list to a flag variable (`env.cc.flags = ["-Wall"]`)
   keeps it a `FlagList`, so a `FlagPair` appended afterwards still reaches
   the command line as two tokens. (#144)

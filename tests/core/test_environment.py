@@ -783,3 +783,23 @@ class TestAssignedFlagsKeepGrouping:
             ("-include", "pch.h"),
             ("-O2",),
         ]
+
+
+class TestBuildRelative:
+    """env.build_relative(): a path as the build tool sees it, under the
+    environment's build_prefix."""
+
+    def test_without_a_prefix_the_path_is_itself(self, test_project):  # noqa: F811
+        env = test_project.Environment()
+        assert env.build_relative("stage/app") == Path("stage/app")
+
+    def test_the_prefix_is_put_in_front(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="rel")
+        env.build_prefix = "release/ae"
+        assert env.build_relative("stage/app") == Path("release/ae/stage/app")
+
+    def test_an_absolute_path_is_left_alone(self, test_project):  # noqa: F811
+        env = test_project.Environment(name="rel")
+        env.build_prefix = "release"
+        absolute = Path("/opt/out/app.pkg")
+        assert env.build_relative(absolute) == absolute

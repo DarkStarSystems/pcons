@@ -75,6 +75,7 @@ The same rule applies to the other named surfaces: `set_option()` takes only opt
 | `env.use_clang_tidy(tool=None, args=())` | Run clang-tidy alongside every C/C++ compile |
 | `env.use(package)` | Apply package settings |
 | `env.clone()` | Create a copy |
+| `env.build_relative(path)` | A relative path as a command sees it: under the environment's `build_prefix`, relative to the build directory |
 | `env.override(**kwargs)` | Context manager for temporary overrides |
 | `env.add_toolchain(toolchain)` | Add additional toolchain (e.g., CUDA) |
 | `env.toolchain` | The primary toolchain this environment was created with |
