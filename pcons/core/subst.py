@@ -142,20 +142,28 @@ class PathToken:
     #: :func:`pcons.core.paths.executable_form`.
     executable: bool = False
 
-    def relativize(self, relativizer: Callable[[str], str]) -> str:
+    def relativize(
+        self,
+        relativizer: Callable[[str], str],
+        *,
+        executable: Callable[[str], str] | None = None,
+    ) -> str:
         """Return the complete token: prefix + path + suffix, with the
         relativizer applied only to "project" paths (e.g. prepending $topdir
         for ninja); "build" and "absolute" paths pass through unchanged.
+
+        @param relativizer How a "project" path is rendered.
+        @param executable How the caller spells a path the shell it writes
+            for will execute. Only a token marked ``executable`` goes through
+            it, and without one such a token renders like any other path:
+            which shell runs the build is the generator's to know.
         """
         if self.path_type in ("build", "absolute"):
             path = self.path
         else:
             path = relativizer(self.path)
-        if self.executable:
-            from pcons.configure.platform import get_platform
-            from pcons.core.paths import executable_form
-
-            path = executable_form(path, windows=get_platform().is_windows)
+        if self.executable and executable is not None:
+            path = executable(path)
         return self.prefix + path + self.suffix
 
     def __str__(self) -> str:

@@ -289,7 +289,9 @@ class CompileCommandsGenerator(BaseGenerator):
                     path = str(Path(project.build_dir) / token.path)
                     result.append(f"{token.prefix}{path}{token.suffix}")
                 else:
-                    result.append(token.relativize(lambda p: p))
+                    result.append(
+                        token.relativize(lambda p: p, executable=self._executable_form)
+                    )
             else:
                 result.append(str(token))
         return result

@@ -847,3 +847,37 @@ class TestNinjaPathVariableQuoting:
         )
 
         assert line == 'clang-cl /c /Fo$out "-I$topdir/My Headers" $in'
+
+
+class TestExecutablePathToken:
+    """Which shell runs the build is the generator's to know, so a PathToken
+    only carries the fact that it is the program."""
+
+    def test_a_program_token_renders_plain_without_a_speller(self):
+        from pcons.core.subst import PathToken
+
+        token = PathToken(path="gen", path_type="build", executable=True)
+
+        assert token.relativize(lambda p: p) == "gen"
+
+    def test_the_caller_spells_the_program(self):
+        from pcons.core.subst import PathToken
+
+        token = PathToken(path="gen", path_type="build", executable=True)
+
+        assert token.relativize(lambda p: p, executable=lambda p: f"./{p}") == "./gen"
+
+    def test_only_the_program_goes_through_the_speller(self):
+        from pcons.core.subst import PathToken
+
+        token = PathToken(prefix="-I", path="inc", path_type="build")
+
+        assert token.relativize(lambda p: p, executable=lambda p: f"./{p}") == "-Iinc"
+
+    def test_subst_asks_no_platform_question(self):
+        """The import that used to answer it here."""
+        from pathlib import Path
+
+        import pcons.core.subst as subst
+
+        assert "get_platform" not in Path(subst.__file__).read_text(encoding="utf-8")
