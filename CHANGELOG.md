@@ -236,6 +236,9 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- Assigning a plain list to a flag variable (`env.cc.flags = ["-Wall"]`)
+  keeps it a `FlagList`, so a `FlagPair` appended afterwards still reaches
+  the command line as two tokens. (#144)
 - `PathToken` accepts a `Path` as well as a string. (#146)
 - **`InstallDir` sees a file added, removed or renamed anywhere under its
   source tree.** It used to notice only the files that existed at configure

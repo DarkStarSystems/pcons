@@ -750,3 +750,36 @@ class TestEnvironmentName:
         env = test_project.Environment(name="mcu")
         env.name = None
         assert env.name is None
+
+
+class TestAssignedFlagsKeepGrouping:
+    """Assigning a plain list to a flag variable keeps it a FlagList, so a
+    FlagPair appended afterwards still reaches the command line as two
+    tokens (#144)."""
+
+    def test_assignment_keeps_the_flaglist(self, test_project, gcc_toolchain):  # noqa: F811
+        from pcons.core.flags import FlagList, FlagPair
+
+        env = test_project.Environment(toolchain=gcc_toolchain)
+        assert isinstance(env.cc.flags, FlagList)
+        env.cc.flags = ["-Wall"]
+        env.cc.flags.append(FlagPair("-x", "c++"))
+
+        assert isinstance(env.cc.flags, FlagList)
+        assert list(env.cc.flags) == ["-Wall", "-x", "c++"]
+        assert env.cc.flags.groups[-1] == FlagPair("-x", "c++")
+
+    def test_assignment_keeps_the_grouping_rules(self, test_project):  # noqa: F811
+        """The separated-argument rules a toolchain declared survive too."""
+        from pcons.core.flags import FlagList
+
+        env = Environment()
+        env.add_tool("cc")
+        env.cc.flags = FlagList([], separated=frozenset({"-include"}))
+        env.cc.flags = ["-include", "pch.h", "-O2"]
+
+        assert env.cc.flags.separated == frozenset({"-include"})
+        assert [g.tokens for g in env.cc.flags.groups] == [
+            ("-include", "pch.h"),
+            ("-O2",),
+        ]
