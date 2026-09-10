@@ -2,7 +2,10 @@
 """Tests for Project.Install() method."""
 
 import logging
+import os
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -373,6 +376,146 @@ class TestInstallWithNinja:
         stamp = staged.output_nodes[0].path.relative_to("build").as_posix()
         assert "|" in edge, edge
         assert stamp in edge, edge
+
+    def test_install_dir_tracks_recursive_changes_and_stale_files(self, tmp_path):
+        """Ninja rebuilds an InstallDir for nested tree changes only."""
+        assets = tmp_path / "assets"
+        nested = assets / "sub"
+        nested.mkdir(parents=True)
+        (assets / "top.txt").write_text("top")
+        (nested / "deep.txt").write_text("deep")
+        (tmp_path / "pcons-build.py").write_text(
+            "from pcons import Project\n"
+            'project = Project("repro")\n'
+            'project.InstallDir("staged", project.root_dir / "assets", no_prefix=True)\n'
+        )
+
+        def run_ninja() -> subprocess.CompletedProcess[str]:
+            return subprocess.run(
+                [sys.executable, "-m", "pcons", "--build-dir", "build"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+
+        def run_install_rebuild() -> None:
+            result = subprocess.run(
+                ["ninja", "-C", "build"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            install_lines = [
+                line for line in result.stdout.splitlines() if "INSTALLDIR" in line
+            ]
+            assert len(install_lines) == 1, result.stdout
+
+            unchanged = subprocess.run(
+                ["ninja", "-C", "build"],
+                cwd=tmp_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            assert "no work to do" in unchanged.stdout
+            assert not any(
+                "INSTALLDIR" in line for line in unchanged.stdout.splitlines()
+            )
+
+        def wait_for_new_tick(reference_path: Path) -> None:
+            """Wait for the filesystem clock to advance past a build timestamp."""
+            reference_mtime = reference_path.stat().st_mtime_ns
+            probe_file = reference_path.parent / ".time_probe"
+            deadline = time.monotonic() + 2.0
+
+            try:
+                while True:
+                    probe_file.touch()
+                    current_mtime = probe_file.stat().st_mtime_ns
+                    if current_mtime > reference_mtime:
+                        return
+                    if time.monotonic() >= deadline:
+                        raise AssertionError(
+                            "filesystem timestamp did not advance past "
+                            f"{reference_mtime}"
+                        )
+                    time.sleep(0.01)
+            finally:
+                probe_file.unlink(missing_ok=True)
+
+        def refresh_dependency_metadata(*paths: Path) -> None:
+            """Make directory metadata visible before ninja reads dependencies.
+
+            Windows can leave a directory's NTFS parent-index entry stale after
+            a child changes.  ``os.listdir()`` opens and closes the directory,
+            refreshing the entry that Ninja reads through ``FindFirstFile``
+            without changing timestamps or touching the source tree.  Callers
+            pass only directories that still exist after the mutation.
+            """
+            for path in paths:
+                os.listdir(path)
+
+        run_ninja()
+        destination = tmp_path / "build" / "staged" / "assets"
+        assert (destination / "sub" / "deep.txt").read_text() == "deep"
+        install_stamp = tmp_path / "build" / ".stamps" / "staged_assets.stamp"
+        assert install_stamp.exists()
+
+        unchanged = subprocess.run(
+            ["ninja", "-C", "build"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "no work to do" in unchanged.stdout
+
+        wait_for_new_tick(install_stamp)
+        (nested / "added.txt").write_text("added")
+        refresh_dependency_metadata(nested)
+        run_install_rebuild()
+        assert (destination / "sub" / "added.txt").read_text() == "added"
+
+        wait_for_new_tick(install_stamp)
+        (nested / "deep.txt").write_text("changed")
+        refresh_dependency_metadata(nested)
+        run_install_rebuild()
+        assert (destination / "sub" / "deep.txt").read_text() == "changed"
+
+        wait_for_new_tick(install_stamp)
+        (nested / "added.txt").unlink()
+        refresh_dependency_metadata(nested)
+        run_install_rebuild()
+        assert not (destination / "sub" / "added.txt").exists()
+
+        wait_for_new_tick(install_stamp)
+        (nested / "deep.txt").rename(nested / "moved.txt")
+        refresh_dependency_metadata(nested)
+        run_install_rebuild()
+        assert not (destination / "sub" / "deep.txt").exists()
+        assert (destination / "sub" / "moved.txt").read_text() == "changed"
+
+        wait_for_new_tick(install_stamp)
+        new_nested = nested / "created-after-configure"
+        new_nested.mkdir()
+        (new_nested / "first.txt").write_text("first")
+        refresh_dependency_metadata(nested, new_nested)
+        run_install_rebuild()
+
+        wait_for_new_tick(install_stamp)
+        (new_nested / "second.txt").write_text("second")
+        refresh_dependency_metadata(new_nested)
+        run_install_rebuild()
+        assert (destination / "sub" / "created-after-configure" / "second.txt").exists()
+
+        wait_for_new_tick(install_stamp)
+        (nested / "created-after-configure").rename(nested / "renamed-directory")
+        refresh_dependency_metadata(nested)
+        run_install_rebuild()
+        assert not (destination / "sub" / "created-after-configure").exists()
+        assert (destination / "sub" / "renamed-directory" / "first.txt").exists()
 
     def test_installed_files_do_not_wait_on_each_other(self, tmp_path):
         """Install(dest, [a, b]) copies each file after its own producer

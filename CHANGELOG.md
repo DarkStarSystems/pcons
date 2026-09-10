@@ -222,6 +222,16 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- **`InstallDir` sees a file added, removed or renamed anywhere under its
+  source tree.** It used to notice only the files that existed at configure
+  time, so a new file in a subdirectory was never copied. The copy edge now
+  records every directory and file it read in a depfile, and a per-install
+  manifest removes files that no longer exist in the source, leaving files
+  that other installs put in the same destination alone. (#128, #132)
+- A generator declared with `lib.depends(gen)` now runs before every target
+  that links `lib`, not only before `lib` itself. A library whose public
+  headers are generated no longer needs each consumer to repeat the
+  `depends()`. See `examples/83_generated_public_headers`. (#139)
 - `target.depends()` on an install or archive target now orders the build.
   The resolver visits targets in dependency order in a single pass, so a
   target whose sources are other targets has its nodes by the time the edge
@@ -288,7 +298,8 @@ machinery to support this kind of dynamic dependencies.
 
 ### Contributors
 
-- Sylvain Garcia (@Garcia6l20): #107, #108, #116, #118, #127, #137, and the #133 fix
+- Sylvain Garcia (@Garcia6l20): #107, #108, #116, #118, #127, #137, #138, #139, and the #133 fix
+- Alex Smolya (@alexsmolya): #132
 - @afonsojanu: #114
 - @anisayakmitra-in: docs (#112)
 
