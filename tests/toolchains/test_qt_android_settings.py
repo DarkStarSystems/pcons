@@ -9,6 +9,7 @@ these tests pin what that version wants, not a universal schema.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -249,16 +250,27 @@ class TestAnAbiNobodyMapped:
 
 
 class TestWhereTheFileGoes:
-    def test_the_default_is_the_build_directory(self, found_qt, test_project) -> None:
-        env = _android_env()
-        env.build_dir = "build"
+    def test_the_default_is_the_projects_build_directory(
+        self, found_qt, test_project
+    ) -> None:
+        path = android_deployment_settings(test_project, _android_env(), app="myapp")
 
-        path = android_deployment_settings(test_project, env, app="myapp")
-
-        assert path == Path(test_project.root_dir) / "build" / (
+        assert path == Path(test_project.root_dir) / test_project.build_dir / (
             "android-deployment-settings.json"
         )
         assert json.loads(path.read_text())["abi"] == "arm64-v8a"
+
+    def test_an_environments_own_build_dir_does_not_move_it(
+        self, found_qt, test_project
+    ) -> None:
+        """Where the build writes is the project's answer. An environment
+        that carries a build_dir of its own is not a second one."""
+        env = _android_env()
+        env.build_dir = Path("elsewhere")
+
+        path = android_deployment_settings(test_project, env, app="myapp")
+
+        assert path.parent == Path(test_project.root_dir) / test_project.build_dir
 
     def test_a_relative_path_is_from_the_project_root(
         self, found_qt, test_project
@@ -268,3 +280,29 @@ class TestWhereTheFileGoes:
         )
 
         assert path == Path(test_project.root_dir) / "out" / "s.json"
+
+
+class TestRewritingIt:
+    def test_the_same_settings_leave_the_file_alone(
+        self, found_qt, test_project
+    ) -> None:
+        """A build edge reads this file, so a configure that decided the same
+        thing again must not make it look newer."""
+        first = android_deployment_settings(test_project, _android_env(), app="myapp")
+        stamp = first.stat().st_mtime_ns
+        os.utime(first, ns=(stamp - 2_000_000_000, stamp - 2_000_000_000))
+        before = first.stat().st_mtime_ns
+
+        again = android_deployment_settings(test_project, _android_env(), app="myapp")
+
+        assert again == first
+        assert again.stat().st_mtime_ns == before
+
+    def test_changed_settings_are_written(self, found_qt, test_project) -> None:
+        path = android_deployment_settings(test_project, _android_env(), app="myapp")
+
+        android_deployment_settings(
+            test_project, _android_env(), app="myapp", build_tools="37.0.0"
+        )
+
+        assert json.loads(path.read_text())["sdkBuildToolsRevision"] == "37.0.0"

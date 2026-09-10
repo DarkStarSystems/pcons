@@ -383,7 +383,8 @@ settings = android_deployment_settings(
 ```
 
 It is written at configure time, like `configure_file`, and the path is
-returned. Everything in it comes from the cross preset and from the Qt
+returned. A configure that decides the same settings again leaves the file
+alone, so androiddeployqt does not re-run for it. Everything in it comes from the cross preset and from the Qt
 found for that environment, so `android()` must be given `sdk=` as well as
 `ndk=`.
 

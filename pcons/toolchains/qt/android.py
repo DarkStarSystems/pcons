@@ -30,6 +30,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pcons.configure.config_file import write_file
 from pcons.toolchains.presets import CrossPreset
 
 if TYPE_CHECKING:
@@ -142,8 +143,10 @@ def android_deployment_settings(
 
     Written at configure time, like every other file whose content is
     decided by the build script rather than by running something: see
-    :func:`pcons.configure.config_file.configure_file`. Editing the build
-    script re-runs pcons, which rewrites this.
+    :func:`pcons.configure.config_file.write_file`, which does the writing.
+    Editing the build script re-runs pcons, which rewrites this. Content
+    that has not changed keeps its timestamp, so androiddeployqt does not
+    re-run for a configure that decided the same thing again.
 
     Args:
         project: The project.
@@ -166,12 +169,8 @@ def android_deployment_settings(
         settings["sdkBuildToolsRevision"] = build_tools
 
     if output is None:
-        output = (
-            Path(env.get("build_dir", "build")) / "android-deployment-settings.json"
-        )
+        output = project.build_dir / "android-deployment-settings.json"
     output = Path(output)
     if not output.is_absolute():
         output = Path(project.root_dir) / output
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(settings, indent=3) + "\n", encoding="utf-8")
-    return output
+    return write_file(output, json.dumps(settings, indent=3) + "\n")
