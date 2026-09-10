@@ -11,7 +11,12 @@ from pcons import Generator, Project
 from pcons.core.errors import PconsError
 from pcons.generators.generator import BaseGenerator
 
-from ._command_test_utils import built_path, file_name_in
+from ._command_test_utils import (
+    as_ninja_command,
+    built_path,
+    file_name_in,
+    runs_as,
+)
 
 
 def _ninja(project: Project) -> str:
@@ -48,7 +53,28 @@ def test_a_target_becomes_the_path_the_generator_writes_for_it(
     built = built_path(project, gen)
 
     assert f"build {built}:" in text
-    assert f"command = {built} $in $out" in text
+    assert f"command = {as_ninja_command(runs_as(built))} $in $out" in text
+
+
+def test_a_target_written_as_an_argument_stays_a_plain_path(
+    tmp_path: Path, gcc_toolchain
+) -> None:
+    """Only the first token is what runs; behind a wrapper the same target is
+    a file the wrapper is given."""
+    project = _project(tmp_path, gcc_toolchain)
+    env = project.Environment(toolchain=gcc_toolchain)
+    gen = project.Program("gen", env, sources=["gen.c"])
+    env.Command(
+        name="run",
+        target=project.build_dir / "out.txt",
+        source=["in.txt"],
+        command=["strip", gen, "$TARGET"],
+    )
+
+    text = _ninja(project)
+    built = built_path(project, gen)
+
+    assert f"command = strip {built} $out" in text
 
 
 def test_the_target_is_a_dependency_of_the_command(
@@ -111,7 +137,7 @@ def test_a_tool_from_another_environment_carries_its_prefix(
     text = _ninja(project)
     built = built_path(project, gen)
 
-    assert f"command = {built} $in $out" in text
+    assert f"command = {as_ninja_command(runs_as(built))} $in $out" in text
     assert f"| {built}" in _line(text, "build tgt/out.txt:")
 
 
@@ -133,7 +159,7 @@ def test_a_file_node_names_one_output_of_several(tmp_path: Path, gcc_toolchain) 
 
     text = _ninja(project)
 
-    assert "command = b.txt $out" in text
+    assert f"command = {as_ninja_command(runs_as('b.txt'))} $out" in text
     assert "| b.txt" in _line(text, "build out.txt:")
 
 

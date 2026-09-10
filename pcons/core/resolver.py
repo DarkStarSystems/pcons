@@ -149,7 +149,8 @@ class CommandNodeFactory(PendingSourceFactory):
             return
         tool = (getattr(target, "_builder_data", None) or {}).get("tool")
         build_info["command"] = [
-            _resolved_command_token(target, token, tool) for token in command
+            _resolved_command_token(target, token, tool, program=index == 0)
+            for index, token in enumerate(command)
         ]
 
     def resolve_pending(self, target: Target) -> None:
@@ -490,12 +491,24 @@ class Resolver:
         )
 
 
-def _resolved_command_token(owner: Target, token: Any, tool: Any) -> Any:
-    """One command token with whatever stands for a path turned into one."""
+def _resolved_command_token(
+    owner: Target, token: Any, tool: Any, *, program: bool = False
+) -> Any:
+    """One command token with whatever stands for a path turned into one.
+
+    @param owner The Command target whose command line this token sits in.
+    @param token The token as the script wrote it.
+    @param tool What ``tool=`` named, if anything.
+    @param program This token is the first of the line, so a Target or
+        FileNode here is what runs and is spelled to run.
+    @return The token, with anything standing for a path turned into a
+        ``PathToken``.
+    """
     from pcons.core.target import Target as TargetClass
 
     if isinstance(token, (TargetClass, FileNode)):
-        return _command_path(owner, token)
+        path = _command_path(owner, token)
+        return replace(path, executable=True) if program else path
     if isinstance(token, ToolPath):
         return _tool_token(owner, tool, token)
     return token

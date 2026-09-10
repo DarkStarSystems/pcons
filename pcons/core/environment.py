@@ -1459,6 +1459,12 @@ class Environment(_EnvironmentStubs):
                     produce: an absolute path to an installed program, or a
                     bare name looked up on ``$PATH``. Neither adds a
                     dependency, since there is nothing to build.
+
+                    This is the convenience form for naming a program by
+                    string. A command written as a list can name its program
+                    directly, by putting the ``Target`` or ``FileNode``
+                    first, which spells it the same way; where both are
+                    given, index 0 is what runs.
             source: Input file(s) that the command depends on. Can be Targets
                    (whose output files become sources), paths, or None. A
                    relative path is read from the directory of the script
@@ -1494,6 +1500,14 @@ class Environment(_EnvironmentStubs):
                     already wrote keep their meaning. A ``Target`` with
                     several outputs is ambiguous and raises; name the one
                     that is meant, ``tool.output_nodes[0]``.
+
+                    First in the list, such a token is the program the
+                    command runs, and is spelled the way the shell will run
+                    it, exactly as ``tool=`` is: no ``./`` written by hand
+                    and no platform conditional. Anywhere else it is an
+                    argument and stays a plain path. Passing ``tool=`` as
+                    well leaves index 0 the program; ``$TOOL`` is then one
+                    more path on the line.
 
                     **The command runs in the build directory**, unlike
                     ``sources=`` (read from the declaring script's

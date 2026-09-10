@@ -2203,6 +2203,18 @@ env.Command(
 
 `$TOOL` and `tool=` go together: one without the other is an error.
 
+**A list-form command can name its program directly.** In the list form a token may be a `Target` or a `FileNode` rather than a string. It expands to that output's path and becomes an implicit dependency, without joining `$SOURCES`:
+
+```python
+env.Command(
+    target=gen_dir / "entries.c",
+    source=def_files,
+    command=[collate_tool, "$TARGET", "$SOURCES"],
+)
+```
+
+First in the list, that token is the program, spelled to run just as `$TOOL` is. Anywhere else it is an argument and stays a plain path, which is what a wrapper reading the file wants. Where a command gives both, index 0 is what runs and `$TOOL` is one more path on the line. A `Target` that builds several files is ambiguous and raises: name the one that is meant, `parser.output_nodes[0]`.
+
 Text attached to a form that expands to *several* paths repeats on each of them, which is what such a flag always means: `-i${SOURCES[1:]}` becomes `-ione.def -itwo.def`, not one `-i` welded to the first path.
 
 A slice is the right tool when the input count is a property of the project rather than of the rule — adding a `.def` file above changes nothing in the build script. See `examples/59_codegen_sources`, which also shows why a glob needs `project.add_configure_dependency()` on the directory it read.
