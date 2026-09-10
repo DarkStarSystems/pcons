@@ -266,3 +266,25 @@ def test_the_main_resolve_loop_reaches_every_command(
             for token in command
             if isinstance(token, (Target, FileNode, ToolPath))
         ]
+
+
+def test_a_command_that_declares_no_output_resolves(
+    tmp_path: Path, gcc_toolchain
+) -> None:
+    """The rewrite reads the command off the first output node, so a command
+    with no output has nothing to rewrite and has to say so rather than
+    reaching for a node that is not there."""
+    project = _project(tmp_path, gcc_toolchain)
+    env = project.Environment(toolchain=gcc_toolchain)
+    gen = project.Program("gen", env, sources=["gen.c"])
+    outputless = env.Command(
+        name="run",
+        target=[],
+        source=["in.txt"],
+        command=[gen, "$SOURCE"],
+    )
+
+    project.resolve()
+
+    assert outputless._resolved
+    assert not outputless.output_nodes
