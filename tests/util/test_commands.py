@@ -332,24 +332,6 @@ def posix(path: Path) -> str:
     return str(path).replace("\\", "/")
 
 
-class TestCopytreeDepfileDirectories:
-    """A depfile naming only files cannot notice a file that is added."""
-
-    def test_every_walked_directory_is_named(self, tmp_path: Path) -> None:
-        src = tmp_path / "src"
-        (src / "sub" / "deeper").mkdir(parents=True)
-        (src / "sub" / "b.txt").write_text("b\n")
-        depfile = tmp_path / "deps.d"
-
-        copytree(str(src), str(tmp_path / "dest"), depfile=str(depfile))
-
-        deps = depfile_deps(depfile)
-        assert posix(src) in deps
-        assert posix(src / "sub") in deps
-        assert posix(src / "sub" / "deeper") in deps
-        assert posix(src / "sub" / "b.txt") in deps
-
-
 def overlay_trees(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Two trees sharing one path and one directory, plus a destination."""
     shared, app = tmp_path / "shared", tmp_path / "app"

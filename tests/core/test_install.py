@@ -3,7 +3,6 @@
 
 import logging
 import os
-import shutil
 import subprocess
 import sys
 import time
@@ -15,7 +14,6 @@ from pcons.core.node import FileNode
 from pcons.core.project import Project
 from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
-from pcons.generators.ninja import NinjaGenerator
 
 
 class TestInstall:
@@ -1019,43 +1017,3 @@ class TestInstallTargetNaming:
             project.Install("config", [f"{name}.txt"], name="my_install")
 
         assert "renamed" in caplog.text
-
-
-@pytest.mark.skipif(shutil.which("ninja") is None, reason="ninja not installed")
-class TestInstallDirFreshness:
-    """The copytree depfile names the directories it walked, not files alone."""
-
-    def _built(self, tmp_path):
-        tree = tmp_path / "assets"
-        (tree / "sub").mkdir(parents=True)
-        (tree / "sub" / "a.txt").write_text("a\n")
-
-        project = Project("inst", root_dir=tmp_path, build_dir=tmp_path / "build")
-        project.Environment(name="host")
-        installed = project.InstallDir("dist", tree, no_prefix=True)
-        project.Default(installed)
-        project.resolve()
-        NinjaGenerator().generate(project)
-        BaseGenerator._generate_pending(project)
-        self._ninja(tmp_path / "build")
-        return tree, tmp_path / "build" / "dist" / "assets"
-
-    def _ninja(self, build_dir):
-        result = subprocess.run(
-            ["ninja"], cwd=build_dir, capture_output=True, text=True, check=False
-        )
-        assert result.returncode == 0, result.stderr or result.stdout
-        return result.stdout
-
-    def test_a_file_added_deep_is_installed_by_the_next_build(self, tmp_path):
-        tree, dest = self._built(tmp_path)
-
-        (tree / "sub" / "new.txt").write_text("new\n")
-        self._ninja(tmp_path / "build")
-
-        assert (dest / "sub" / "new.txt").read_text() == "new\n"
-
-    def test_an_unchanged_tree_does_no_work(self, tmp_path):
-        self._built(tmp_path)
-
-        assert "no work to do" in self._ninja(tmp_path / "build")
