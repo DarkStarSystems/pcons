@@ -110,12 +110,12 @@ else is rejected.
 
 A scope resolves a required name against its own provides and against the
 exports of the scopes it *depends on*. So `pack_level2` needs
-`add_dependency(pack_level1)` (or `link()`, for a library) before it can see
+`depends(pack_level1)` (or `link()`, for a library) before it can see
 the name `level1` at all.
 
-The dependency carries the exports; content decides the order. Declaring the
-dependency doesn't order any particular compile or pack — it only says where
-to look. What gets used, and in what order, comes out of the scan.
+The dependency carries the exports, and builds the dependency first, as any
+`depends()` does. It does not decide what a scope uses: which artifacts
+a pack or a compile needs, and in what order, comes out of the scan.
 
 ## Discovered flags
 
@@ -199,7 +199,7 @@ def pack(name: str, *scenes: str) -> Target:
 
 pack_common = pack("common", "assets/common.scene")
 pack_level1 = pack("level1", "assets/level1.scene")
-pack_level1.add_dependency(pack_common)  # exports, not order
+pack_level1.depends(pack_common)  # carries common's exports
 
 scene_refs = Scanner(
     "scene-refs",

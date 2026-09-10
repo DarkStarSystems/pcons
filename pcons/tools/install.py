@@ -228,7 +228,7 @@ def _make_install_target(
     )
     install_target._builder_name = builder_name
     install_target._builder_data = builder_data
-    install_target._pending_sources = list(sources)
+    install_target._add_pending_sources(sources)
     return install_target
 
 

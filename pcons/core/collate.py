@@ -439,7 +439,7 @@ def _plan(manifest: dict[str, Any], build_dir: Path) -> _Plan:
             f"A name is resolvable when this scope provides it or a scanned "
             f"dependency exports it — if another target provides it, this "
             f"scope's target needs a dependency on that target "
-            f"(link()/add_dependency()), which is what carries its exports "
+            f"(link()/depends()), which is what carries its exports "
             f"here."
         )
 

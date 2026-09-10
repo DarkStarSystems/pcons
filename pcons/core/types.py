@@ -39,7 +39,7 @@ class NodeLike(Protocol):
         """The builder that produces this node (None for sources)."""
         ...
 
-    def depends(self, *nodes: Any) -> None:
+    def depends(self, *nodes: Any, on_change: bool | None = None) -> None:
         """Add explicit dependencies."""
         ...
 
@@ -111,8 +111,12 @@ class TargetLike(Protocol):
         """Add targets as dependencies."""
         ...
 
-    def transitive_dependencies(self, *, for_link: bool = False) -> list[Any]:
+    def transitive_dependencies(self) -> list[Any]:
         """Return all dependencies transitively."""
+        ...
+
+    def transitive_link_dependencies(self) -> list[Any]:
+        """Return all linked dependencies transitively."""
         ...
 
     def get_all_languages(self) -> set[str]:

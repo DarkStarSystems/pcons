@@ -330,8 +330,8 @@ class CargoBuildBuilder:
         # .a/.lib is recognized as a link input and lands on the
         # consumer's link line, while the generated header becomes an
         # implicit dep of the consumer's compile steps.
-        imported.add_dependency(cargo_target)
+        imported.depends(cargo_target)
         if cbindgen_target is not None:
-            imported.add_dependency(cbindgen_target)
+            imported.depends(cbindgen_target)
 
         return imported

@@ -278,6 +278,33 @@ class FileNode(Node):
     def name(self) -> str:
         return str(self.path)
 
+    @property
+    def discovers_dependencies(self) -> bool:
+        """True if this edge records what it read as it runs: a depfile,
+        or MSVC's ``/showIncludes``.
+
+        A scanner's dyndep is not that. It is written before this edge runs,
+        from what the scanner found in the declared sources, so it says
+        nothing about the other files the command read.
+        """
+        info = self._build_info or {}
+        return info.get("depfile") is not None or bool(info.get("deps_style"))
+
+    def wait_for(self, *nodes: Node | Sequence[Node]) -> None:
+        """Build *nodes* before this edge, as loosely as this edge allows.
+
+        An edge that discovers its own dependencies only needs them to exist
+        first: an order-only dependency, so a generated header it never
+        reads does not rebuild it, and the ones it did read are recorded
+        from the first build on. Any other edge has nothing to take that
+        over and gets an implicit dependency instead: it rebuilds when they
+        change.
+        """
+        if self.discovers_dependencies:
+            self.order_after(*nodes)
+        else:
+            self.depends(*nodes)
+
     def exists(self) -> bool:
         """Check if the file exists on disk."""
         return self.path.exists()

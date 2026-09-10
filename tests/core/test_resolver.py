@@ -22,14 +22,9 @@ class TestResolverCreation:
 
 
 class TestResolverImplicitDependsCycle:
-    """A cycle formed purely via target.depends() (implicit target deps).
-
-    target.dependencies (used for topological sort / cycle detection)
-    excludes _implicit_target_deps, so a depends()-only cycle isn't caught
-    by validate() before resolve() runs. Without a guard, _resolve_target's
-    eager recursion into depends() targets recurses forever. It must raise
-    a clean DependencyCycleError instead.
-    """
+    """A cycle formed purely via target.depends() is a cycle like any other:
+    depends() edges are in target.dependencies, so the build-order sort
+    reports it before anything resolves."""
 
     def test_depends_only_cycle_raises_cleanly(self, test_project):  # noqa: F811
         a = Target("A")
@@ -259,27 +254,21 @@ class TestResolverHeaderOnlyLibrary:
 
         # The dependency lands on the consumer's compile instead.
         app_obj = app.intermediate_nodes[0]
-        assert gen.output_nodes[0] in app_obj.implicit_deps
+        assert gen.output_nodes[0] in app_obj.deps
 
-    def test_unresolved_compiled_dependency_is_not_treated_as_interface(
+    def test_compiled_dependency_reached_by_depends_is_waited_for_itself(
         self, tmp_path, gcc_toolchain
     ):
-        """A compiled target reached only through a non-link dependency edge
-        can still be unresolved when its consumer is resolved (that edge
-        isn't part of the topological sort), and its node lists are then
-        empty for the same reason an interface target's always are: nothing
-        has run yet, not because it builds nothing. The forwarding loop has
-        to resolve it first and check its nodes afterwards, or it treats an
-        ordinary compiled target as if it were interface-only and forwards
-        its dependency onto the consumer instead of leaving it on its own
-        compile step, where the dependency actually belongs.
+        """A compiled target reached through depends() keeps its
+        generator on its own compile. The consumer's compile waits for the
+        dependency's outputs, and those wait for the generator, so nothing
+        is inherited. Resolving the consumer directly resolves the
+        dependency first, the way build order would have.
         """
         src_file = tmp_path / "main.c"
         src_file.write_text("int main() { return 0; }")
         lib_src = tmp_path / "lib.c"
         lib_src.write_text("int helper(void) { return 0; }")
-        generated = tmp_path / "generated.h"
-        generated.write_text("")
 
         project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment(toolchain=gcc_toolchain)
@@ -292,29 +281,27 @@ class TestResolverHeaderOnlyLibrary:
         tool.depends(gen)
 
         app = project.Program("myapp", env, sources=[str(src_file)])
-        app.add_dependency(tool)
+        app.depends(tool)
 
         resolver = Resolver(project)
         assert not tool._resolved
         resolver._resolve_target(app)
+        # The dependency edges are wired once everything has resolved.
+        resolver.resolve()
 
-        # Resolving the consumer resolved the still-unresolved compiled
-        # dependency on demand, and gen's dependency stayed on tool's own
-        # compile step rather than getting forwarded onto app's.
         assert tool._resolved
         tool_obj = tool.intermediate_nodes[0]
-        assert gen.output_nodes[0] in tool_obj.implicit_deps
+        assert gen.output_nodes[0] in tool_obj.deps
 
         app_obj = app.intermediate_nodes[0]
-        assert gen.output_nodes[0] not in app_obj.implicit_deps
+        assert tool.output_nodes[0] in app_obj.deps
+        assert gen.output_nodes[0] not in app_obj.deps
 
     def test_interface_target_file_dep_forwards_and_resolves_on_demand(
         self, tmp_path, gcc_toolchain
     ):
-        """Same forwarding (#111), exercised for the other _resolve_target
-        forwarding path: a file-level depends() (_extra_implicit_deps, set
-        when the depends() argument isn't a Target) rather than a target
-        dep, and with the interface target still unresolved when its
+        """Same forwarding (#111) for a file-level depends() rather than a
+        target dep, and with the interface target still unresolved when its
         consumer is resolved.
 
         The normal project.resolve() loop always resolves a link_lib before
@@ -342,12 +329,14 @@ class TestResolverHeaderOnlyLibrary:
         resolver = Resolver(project)
         assert not header_lib._resolved
         resolver._resolve_target(app)
+        # The dependency edges are wired once everything has resolved.
+        resolver.resolve()
 
         # Resolving the consumer resolved the still-unresolved interface
         # target on demand, and its file-level dep landed on the consumer.
         assert header_lib._resolved
         app_obj = app.intermediate_nodes[0]
-        assert generated_node in app_obj.implicit_deps
+        assert generated_node in app_obj.deps
 
 
 class TestResolverObjectCaching:
@@ -1447,8 +1436,28 @@ class TestSourceTargetsResolveFirst:
         project.resolve()
 
         assert staged.output_nodes, "install target produced no nodes"
+        # The install stamp has a depfile, so it waits order-only.
         for node in staged.output_nodes:
-            assert gen.output_nodes[0] in node.implicit_deps
+            assert gen.output_nodes[0] in node.order_only_deps
+
+    def test_depends_orders_a_command_after_its_dependency(self, tmp_path):
+        """A command target waits for a depends() target's outputs as an
+        implicit dependency, since the command tracks nothing itself."""
+        project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        gen = env.Command(
+            target=project.build_dir / "gen.txt",
+            command="echo gen > $TARGET",
+            name="gen",
+        )
+        cmd = env.Command(
+            target=project.build_dir / "out.txt",
+            command="echo done > $TARGET",
+            name="after",
+        )
+        cmd.depends(gen)
+        project.resolve()
+        assert gen.output_nodes[0] in cmd.output_nodes[0].implicit_deps
 
     def test_install_dir_file_dep_reaches_its_nodes(self, tmp_path):
         project = Project("bug", root_dir=tmp_path, build_dir=tmp_path / "build")
@@ -1463,7 +1472,7 @@ class TestSourceTargetsResolveFirst:
 
         assert staged.output_nodes, "install target produced no nodes"
         for node in staged.output_nodes:
-            assert any(d.path.name == stamp_input.name for d in node.implicit_deps)
+            assert any(d.path.name == stamp_input.name for d in node.deps)
 
     def test_dependency_reached_out_of_order_resolves_its_sources(self, tmp_path):
         """A depends() edge can reach a target before build order does. Its
@@ -1518,6 +1527,28 @@ class TestSourceTargetsResolveFirst:
         link_inputs = {n.path.name for n in app.output_nodes[0].explicit_deps}
         assert lib.output_nodes[0].path.name in link_inputs
 
+    def test_depends_on_an_install_target_does_not_link_the_installed_copy(
+        self, tmp_path, gcc_toolchain
+    ):
+        """A dependency is not a link input, whatever its outputs look like:
+        depends(Install([lib])) makes the program wait for the installed
+        library without linking it."""
+        (tmp_path / "main.c").write_text("int main(void) { return 0; }\n")
+        (tmp_path / "lib.c").write_text("int f(void) { return 1; }\n")
+        project = Project("inst", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        lib = project.StaticLibrary("lib", env, sources=["lib.c"])
+        installed = project.Install(tmp_path / "dist", [lib])
+        app = project.Program("app", env, sources=["main.c"])
+        app.depends(installed)
+        project.resolve()
+
+        link = app.output_nodes[0]
+        installed_paths = {n.path for n in installed.output_nodes}
+        assert installed_paths
+        assert installed_paths.isdisjoint(n.path for n in link.explicit_deps)
+        assert installed_paths <= {n.path for n in link.implicit_deps}
+
     def test_source_target_deps_are_not_forwarded_to_consumers(self, tmp_path):
         """An install target has nodes of its own, so its depends() belong on
         them and not on whoever consumes it, unlike an interface target."""
@@ -1537,14 +1568,14 @@ class TestSourceTargetsResolveFirst:
             command="echo done > $TARGET",
             name="consumer",
         )
-        consumer.add_dependency(staged)
+        consumer.depends(staged)
 
         project.resolve()
 
         for node in staged.output_nodes:
-            assert gen.output_nodes[0] in node.implicit_deps
+            assert gen.output_nodes[0] in node.order_only_deps
         for node in consumer.intermediate_nodes + consumer.output_nodes:
-            assert gen.output_nodes[0] not in node.implicit_deps
+            assert gen.output_nodes[0] not in node.deps
 
     def test_source_targets_without_a_factory_warn(self, tmp_path, caplog):
         """A builder that registered no factory cannot turn Target sources
@@ -1573,11 +1604,11 @@ class TestSourceTargetsResolveFirst:
         assert empty._pending_sources is None
 
 
-class TestOutputOnlyFileDeps:
-    """depends(path, propagate=False) records a file dep in a second list
-    that the resolver did not apply, so it never reached any node."""
+class TestFileDepOnACommand:
+    """A file dep on its own once went to a list the resolver never applied
+    (#130); a command, which tracks nothing, holds it as an implicit dep."""
 
-    def test_output_only_file_dep_lands_on_the_output_node(self, tmp_path):
+    def test_file_dep_lands_on_the_output_node(self, tmp_path):
         project = Project("oo", root_dir=tmp_path, build_dir=tmp_path / "build")
         env = project.Environment()
 
@@ -1589,7 +1620,7 @@ class TestOutputOnlyFileDeps:
             command="echo x > $TARGET",
             name="c",
         )
-        cmd.depends(version, propagate=False)
+        cmd.depends(version)
 
         project.resolve()
 

@@ -97,21 +97,11 @@ def detect_cycles_in_targets(targets: list[Target]) -> list[list[str]]:
     colors: dict[str, int] = dict.fromkeys(target_map, 0)
     path: list[str] = []
 
-    def target_deps(target: Target) -> list[Target]:
-        # Include implicit target deps from target.depends(other_target):
-        # they are real must-resolve-before edges (see Resolver._resolve_target)
-        # even though they don't propagate into .dependencies.
-        return [
-            *target.dependencies,
-            *target._implicit_target_deps,
-            *target._implicit_target_deps_output_only,
-        ]
-
     def dfs(name: str) -> None:
         colors[name] = 1  # Gray - in progress
         path.append(name)
 
-        for dep in target_deps(target_map[name]):
+        for dep in target_map[name].dependencies:
             dep_name = dep.qualified_name
             if dep_name not in colors:
                 # External dependency, skip

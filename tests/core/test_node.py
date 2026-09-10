@@ -325,3 +325,28 @@ class TestNodeDependencies:
         assert obj in app.deps
         # Note: deps are not transitive automatically
         assert src not in app.deps
+
+
+class TestDiscoversDependencies:
+    """Which edges may hold a dependency order-only: only one that records
+    what it read as it runs, so the record takes over change propagation."""
+
+    def test_a_depfile_discovers(self):
+        node = FileNode("out.o")
+        node._build_info = {"depfile": "out.o.d"}
+        assert node.discovers_dependencies
+
+    def test_showincludes_discovers(self):
+        node = FileNode("out.obj")
+        node._build_info = {"deps_style": "msvc"}
+        assert node.discovers_dependencies
+
+    def test_a_dyndep_alone_does_not(self):
+        """A dyndep is written before the edge runs, from the declared
+        sources; it never records what the command read."""
+        node = FileNode("out.pack")
+        node._build_info = {"dyndep": "scan/t.dyndep"}
+        assert not node.discovers_dependencies
+
+    def test_nothing_does_not(self):
+        assert not FileNode("out.txt").discovers_dependencies

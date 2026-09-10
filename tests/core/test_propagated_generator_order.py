@@ -3,9 +3,7 @@
 
 ``lib.public.include_dirs`` reaches every target that links ``lib``, so a
 generator that fills one of those directories has to be waited for by every
-one of those targets too, not only by ``lib``'s own compiles. The API
-reference calls ``depends()`` the fluent form of ``add_dependency()``, and
-the two must agree about that.
+one of those targets too, not only by ``lib``'s own compiles.
 
 Every assertion here reads the emitted ``build.ninja`` or the build's own
 output back out.
@@ -22,10 +20,11 @@ from pathlib import Path
 import pytest
 
 from pcons.core.errors import DependencyCycleError
+from pcons.core.node import FileNode
 from pcons.core.project import Project
+from pcons.core.target import Target
 from pcons.generators.generator import BaseGenerator
 from pcons.generators.ninja import NinjaGenerator
-from pcons.tools.compile_link import CompileLinkFactory
 
 SLOW_GENERATOR = textwrap.dedent(
     """\
@@ -56,12 +55,8 @@ def write(path: Path, text: str) -> Path:
     return path
 
 
-def consumer_project(root: Path, spelling: str) -> Project:
-    """A library with a generated public header, and a program linking it.
-
-    *spelling* picks between ``depends`` and ``add_dependency`` for the edge
-    that says the library's public headers come from a generator.
-    """
+def consumer_project(root: Path) -> Project:
+    """A library with a generated public header, and a program linking it."""
     write(root / "mk.py", SLOW_GENERATOR)
     write(
         root / "lib" / "lib.c",
@@ -83,7 +78,7 @@ def consumer_project(root: Path, spelling: str) -> Project:
         command=[sys.executable, "$SOURCE", str(gen_dir / "generated.h"), "$TARGET"],
     )
     lib = project.StaticLibrary("shared_bits", env, sources=["lib/lib.c"])
-    getattr(lib, spelling)(gen)
+    lib.depends(gen)
     lib.public.include_dirs.append(gen_dir)
     app = project.Program("app", env, sources=["app/main.c"])
     app.link(lib)
@@ -122,9 +117,8 @@ def edge_for(build_ninja: str, output: str) -> str:
 
 
 class TestOrderReachesTheConsumer:
-    @pytest.mark.parametrize("spelling", ["depends", "add_dependency"])
-    def test_the_consumer_compile_waits_for_the_generator(self, tmp_path, spelling):
-        project = consumer_project(tmp_path, spelling)
+    def test_the_consumer_compile_waits_for_the_generator(self, tmp_path):
+        project = consumer_project(tmp_path)
         build_dir = build_files(project)
         text = (build_dir / "build.ninja").read_text()
 
@@ -135,9 +129,8 @@ class TestOrderReachesTheConsumer:
 
 @needs_ninja
 class TestTheBuildConverges:
-    @pytest.mark.parametrize("spelling", ["depends", "add_dependency"])
-    def test_a_clean_build_succeeds_and_settles_in_one_pass(self, tmp_path, spelling):
-        project = consumer_project(tmp_path, spelling)
+    def test_a_clean_build_succeeds_and_settles_in_one_pass(self, tmp_path):
+        project = consumer_project(tmp_path)
         build_dir = build_files(project)
 
         first = subprocess.run(
@@ -157,10 +150,10 @@ class TestABackEdgeStopsAtTheTarget:
 
     ``lib.depends(app)`` with ``app.link(lib)`` closes a loop, and the
     resolver says so. The walk that carries a dependency's generators to its
-    consumers still has to answer for the shape, because it reads the same
-    ``depends()`` list: whatever it collects for ``app``, ``app``'s own link
-    output is not part of it. A compile that waited for the program it is
-    linked into would be an edge ninja cannot schedule.
+    consumers still has to answer for the same graph, because it reads the
+    same ``depends()`` list: whatever it collects for ``app``, ``app``'s own
+    link output is not part of it. A compile that waited for the program it
+    is linked into would be an edge ninja cannot schedule.
     """
 
     def test_the_resolver_rejects_the_back_edge(self, tmp_path):
@@ -180,14 +173,15 @@ class TestABackEdgeStopsAtTheTarget:
             project.resolve()
 
     def test_a_targets_own_output_stays_out_of_its_compile_ordering(self, tmp_path):
-        project = consumer_project(tmp_path, "depends")
-        lib = project.get_target("shared_bits")
-        app = project.get_target("app")
-        lib.depends(app)
+        Project("backedge", root_dir=tmp_path, build_dir=tmp_path / "build")
+        gen = Target("gen")
+        gen.output_nodes.append(FileNode(tmp_path / "build" / "gen.stamp"))
+        app = Target("app")
+        app.output_nodes.append(FileNode(tmp_path / "build" / "app"))
+        lib = Target("shared_bits")
+        lib.depends(gen, app)
+        app.link(lib)
 
-        ordering = CompileLinkFactory(project)._ordering_dependency_outputs(app)
-        paths = {node.path for node in ordering}
+        paths = {node.path for node in app.inherited_dependency_outputs()}
 
-        assert app.output_nodes
-        assert paths.isdisjoint({node.path for node in app.output_nodes})
-        assert any(path.name == "gen.stamp" for path in paths)
+        assert paths == {gen.output_nodes[0].path}

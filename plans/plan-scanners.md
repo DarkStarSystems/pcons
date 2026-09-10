@@ -100,7 +100,7 @@ dies.
 against its own provides and the exports of the scopes it depends on — not
 against anything anywhere in the build. The dependency carries the exports;
 content decides the order. This is a behavior change for Fortran: a
-cross-target `USE` now needs a declared `link()` / `add_dependency()`.
+cross-target `USE` now needs a declared `link()` / `depends()`.
 
 **Generators refuse rather than mislead.** `Generator.find_dyndep_use()` plus
 a `_reject_dyndep()` call in the Makefile and Xcode generators converts

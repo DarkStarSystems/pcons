@@ -2,17 +2,17 @@
 """Target resolution system — tool-agnostic factory dispatch.
 
 The Resolver turns high-level Target descriptions into concrete build nodes
-in three phases:
+in two phases:
 
 1. **Main resolution** (resolve() -> _resolve_target()): for each target in
    dependency order, dispatch to its registered factory (via BuilderRegistry)
    to create build nodes. All tool-specific logic lives in the factories
    (CompileLinkFactory, InstallNodeFactory, ArchiveNodeFactory,
-   CommandNodeFactory below).
-2. **Pending source resolution** (resolve_pending_sources()): targets that
-   reference other targets' outputs (Install, Tarfile, ...) store those
-   sources as "pending" and resolve them here, after output_nodes exist.
-3. **Command expansion** (_expand_node_commands()): expand each node's
+   CommandNodeFactory below). A target whose sources are other targets
+   (Install, Tarfile, ...) gets its nodes from those targets' outputs in the
+   same pass, since dependency order has resolved them already; then the
+   target's depends() edges are wired onto its nodes.
+2. **Command expansion** (_expand_node_commands()): expand each node's
    command template (env.<tool>.<command_var> plus ToolchainContext
    overrides) into node._build_info["command"].
 
@@ -28,7 +28,6 @@ from typing import TYPE_CHECKING, Any
 
 from pcons.core.builder_registry import BuilderRegistry
 from pcons.core.debug import is_enabled, trace, trace_value
-from pcons.core.errors import DependencyCycleError
 from pcons.core.graph import topological_sort_targets
 from pcons.core.node import FileNode, Node
 from pcons.core.subst import TargetPath
@@ -196,15 +195,6 @@ class Resolver:
         # Register Command factory (env.Command doesn't use builder registry)
         self._builder_factories["Command"] = CommandNodeFactory(project)
 
-        # Stack of qualified_names currently being resolved. _resolve_target()
-        # recurses eagerly into target.depends() targets (_implicit_target_deps),
-        # which aren't reflected in the topological-order graph (that only
-        # covers .dependencies), so a depends()-only cycle isn't caught by
-        # _targets_in_build_order()'s cycle detection. This stack lets that
-        # recursion detect re-entrancy and raise a clean DependencyCycleError
-        # instead of recursing until RecursionError.
-        self._resolving: list[str] = []
-
     def resolve(self) -> None:
         """Resolve all targets in build order, then expand command templates."""
         trace("resolve", "Starting resolution phase")
@@ -258,108 +248,48 @@ class Resolver:
         if target._resolved:
             return
 
-        qualified_name = target.qualified_name
-        if qualified_name in self._resolving:
-            # A depends()-only cycle: this target is already being resolved
-            # further up the call stack (reached via _implicit_target_deps
-            # recursion below), so raise instead of recursing forever.
-            cycle_start = self._resolving.index(qualified_name)
-            raise DependencyCycleError([*self._resolving[cycle_start:], qualified_name])
-
         trace("resolve", "Resolving target: %s", target.name)
 
-        self._resolving.append(qualified_name)
-        try:
-            env = target._env
+        env = target._env
 
-            # Build order resolves a target's dependencies first: the
-            # libraries it links and the targets whose outputs are its
-            # sources. A target reached out of order through a depends()
-            # edge resolves them here, before its factory reads them.
-            for dep in target.dependencies:
-                if not dep._resolved:
-                    self._resolve_target(dep)
+        # Build order resolves a target's dependencies first: the targets it
+        # depends on, the libraries it links and the targets whose outputs
+        # are its sources. A target reached out of order (a caller resolving
+        # one target directly) resolves them here, before its factory reads
+        # them.
+        for dep in target.dependencies:
+            if not dep._resolved:
+                self._resolve_target(dep)
 
-            # Dispatch to registered factory via _builder_name
-            builder_name = target._builder_name
-            if builder_name is not None and builder_name in self._builder_factories:
-                factory = self._builder_factories[builder_name]
-                factory.resolve(target, env)
-            elif env is None:
-                trace("resolve", "  Skipping target without env")
-            else:
-                logger.debug(
-                    "Target '%s' has no factory registered for builder '%s'",
-                    target.name,
-                    builder_name,
-                )
-
-            if target._pending_sources is not None:
-                self._resolve_pending_sources(target)
-
-            if target.output_nodes:
-                trace(
-                    "resolve",
-                    "  Output: %s",
-                    [str(n.path) for n in target.output_nodes],
-                )
-
-            # Apply any extra implicit deps added via target.depends()
-            target._apply_extra_implicit_deps()
-
-            # Apply implicit target dependencies from target.depends(other_target).
-            # Propagated deps: outputs become implicit deps on all build nodes
-            # (intermediate + output). Output-only deps: only on output nodes.
-            self._apply_implicit_target_deps(
-                target._implicit_target_deps,
-                target.intermediate_nodes + target.output_nodes,
-            )
-            self._apply_implicit_target_deps(
-                target._implicit_target_deps_output_only, target.output_nodes
+        # Dispatch to registered factory via _builder_name
+        builder_name = target._builder_name
+        if builder_name is not None and builder_name in self._builder_factories:
+            factory = self._builder_factories[builder_name]
+            factory.resolve(target, env)
+        elif env is None:
+            trace("resolve", "  Skipping target without env")
+        else:
+            logger.debug(
+                "Target '%s' has no factory registered for builder '%s'",
+                target.name,
+                builder_name,
             )
 
-            # An interface target (e.g. HeaderOnlyLibrary) builds nothing of its
-            # own, so a depends() call on it above has no node to attach the
-            # dependency to and would otherwise be silently dropped (#111). Its
-            # ordering can only hold in whoever consumes it, so forward any
-            # interface dependency's own unappliable implicit deps onto this
-            # target's nodes instead - the same rule depends() documents, just
-            # applied where it can actually take effect.
-            for iface_dep in target.transitive_dependencies():
-                if not iface_dep._resolved:
-                    self._resolve_target(iface_dep)
-                if iface_dep.intermediate_nodes or iface_dep.output_nodes:
-                    continue  # has its own nodes; its deps already applied to itself
-                if (
-                    iface_dep._extra_implicit_deps
-                    or iface_dep._extra_implicit_deps_output_only
-                ):
-                    iface_dep._apply_extra_implicit_deps(dest=target)
-                self._apply_implicit_target_deps(
-                    iface_dep._implicit_target_deps,
-                    target.intermediate_nodes + target.output_nodes,
-                )
-                self._apply_implicit_target_deps(
-                    iface_dep._implicit_target_deps_output_only, target.output_nodes
-                )
-        finally:
-            self._resolving.pop()
+        if target._pending_sources is not None:
+            self._resolve_pending_sources(target)
+
+        # The nodes exist and the dependencies are resolved: wire the
+        # depends() edges, as loosely as each node allows.
+        target._apply_dependencies()
+
+        if target.output_nodes:
+            trace(
+                "resolve",
+                "  Output: %s",
+                [str(n.path) for n in target.output_nodes],
+            )
 
         target._resolved = True
-
-    def _apply_implicit_target_deps(
-        self, dep_targets: list[Target], dest_nodes: list[FileNode]
-    ) -> None:
-        """Make every node in ``dest_nodes`` implicitly depend on each of
-        ``dep_targets``'s output nodes, resolving a dep target first if
-        needed."""
-        for dep_target in dep_targets:
-            if not dep_target._resolved:
-                self._resolve_target(dep_target)
-            for node in dest_nodes:
-                for dep_node in dep_target.output_nodes:
-                    if dep_node not in node.implicit_deps:
-                        node.implicit_deps.append(dep_node)
 
     def _resolve_pending_sources(self, target: Target) -> None:
         """Let the target's factory create its nodes from its Target sources,

@@ -18,11 +18,11 @@ A `Scanner` settles it at build time. No compiler is involved anywhere here.
    time; only the content is decided at build time. So `tools/pack_scene.py`
    never parses a scene for refs -- it is told.
 
-3. **Target dependencies carry the *exports*, not the order.** A scope resolves
-   a required name against the scopes it depends on, so `pack_level2` needs
-   `add_dependency(pack_level1)` to see the name "level1" at all. That
-   dependency says where to look; the scene's content decides what is used and
-   in which order.
+3. **Target dependencies carry the *exports*.** A scope resolves a required
+   name against the scopes it depends on, so `pack_level2` needs
+   `depends(pack_level1)` to see the name "level1" at all. That
+   dependency says where to look (and builds level1 first, as any dependency
+   does); the scene's content decides what is used and in which order.
 
 4. **Generated sources need no phases.** Two generations of them here: the
    build assembles `genscene1.py` from checked-in fragments, runs it to get a
@@ -109,9 +109,9 @@ pack_common = pack("common", "assets/common.scene")
 pack_level1 = pack("level1", "assets/level1.scene", gen_dir / "generated1.scene")
 pack_level2 = pack("level2", gen_dir / "generated2.scene")
 
-# Exports, not order: see point 3 above.
-pack_level1.add_dependency(pack_common)
-pack_level2.add_dependency(pack_level1)
+# Carry the exports: see point 3 above.
+pack_level1.depends(pack_common)
+pack_level2.depends(pack_level1)
 
 
 def pack_of_edge(env: Any, scenes: Any, governed: Any) -> dict[str, str]:

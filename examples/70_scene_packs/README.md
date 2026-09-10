@@ -42,10 +42,11 @@ write each pack edge a `.refs` file — `common packs/common.pack` — and appen
 content decided at build time, so `tools/pack_scene.py` is *told* which packs
 to read rather than parsing a scene for refs.
 
-**Target dependencies carry the exports, not the order.** A scope resolves a
-required name only against the scopes it depends on, so `pack_level2` needs
-`add_dependency(pack_level1)` to see the name `level1` at all. The dependency
-says where to look; the scene content decides what gets used, and when.
+**Target dependencies carry the exports.** A scope resolves a required name
+only against the scopes it depends on, so `pack_level2` needs
+`depends(pack_level1)` to see the name `level1` at all. The dependency
+says where to look (and builds `level1` first, as any dependency does); the
+scene content decides what gets used, and when.
 
 ## Generated sources, twice over
 

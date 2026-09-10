@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 from pcons.core.debug import is_enabled, trace, trace_value
 from pcons.core.errors import PconsError
-from pcons.core.node import FileNode
+from pcons.core.node import FileNode, Node
 from pcons.core.subst import PathToken, TargetPath
 from pcons.toolchains.build_context import CompileLinkContext
 from pcons.tools.requirements import (
@@ -825,22 +825,18 @@ class CompileLinkFactory:
         auxiliary_inputs = builder_data.get("auxiliary_inputs", [])
         auxiliary_input_paths = {node.path for node, _, _ in auxiliary_inputs}
 
-        dep_outputs = self._collect_dependency_outputs(target)
-        dep_libs = [d for d in dep_outputs if _is_link_input(d.path)]
-        dep_aux = [d for d in dep_outputs if not _is_link_input(d.path)]
+        dep_libs = [
+            d
+            for d in self._collect_dependency_outputs(target)
+            if _is_link_input(d.path) and d.path not in auxiliary_input_paths
+        ]
         if dep_libs:
-            dep_libs = [d for d in dep_libs if d.path not in auxiliary_input_paths]
-            if dep_libs:
-                output_node.add_inputs(dep_libs)
+            output_node.add_inputs(dep_libs)
 
-        # Non-link outputs from transitive deps (e.g., a generated header
-        # produced by a code generator that also produces a library, like
-        # cargo + cbindgen). The link step must wait on them but they don't
-        # belong on the link command line. The compiles are ordered after
-        # them separately, for every target type -- see
-        # _order_compiles_after_dependency_outputs.
-        if dep_aux:
-            output_node.depends(dep_aux)
+        # Whatever else the link must wait for without it being on the
+        # command line: see _dependency_wait_outputs.
+        _, link_waits = self._dependency_wait_outputs(target)
+        output_node.depends(link_waits)
 
         if auxiliary_inputs:
             linker_input_nodes = [node for node, _, _ in auxiliary_inputs]
@@ -896,63 +892,50 @@ class CompileLinkFactory:
         return link_language, context
 
     def _order_compiles_after_dependency_outputs(self, target: Target) -> None:
-        """Order every compile in *target* after its dependencies' non-link
-        outputs -- a generated header, say.
+        """Order every compile in *target* after the non-link outputs its
+        dependencies produce or wait for -- a generated header, say.
 
         The file has to exist before anything that might include it compiles,
-        and before the first build nothing knows which sources do. For a
-        compile that records what it read (a depfile, or MSVC's
-        /showIncludes), that is all this states: order-only, so regenerating
-        the file doesn't recompile sources that never read it -- from the
-        first build onward the recorded deps report the ones that did. A
-        compile with no dependency tracking (preprocessed assembly, resource
-        compilers) has nothing to take over, so it keeps the plain implicit
-        dep and rebuilds whenever the generated file changes.
+        and before the first build nothing knows which sources do; see
+        FileNode.wait_for for how strongly each compile holds on to it.
 
         How the target itself is put together has no bearing on this, so a
         static library or an object-only target needs it exactly as much as a
         program does -- and gets no link step to hang it off.
         """
-        dep_aux = [
-            node
-            for node in self._ordering_dependency_outputs(target)
-            if not _is_link_input(node.path)
-        ]
-        if not dep_aux:
+        compile_waits, _ = self._dependency_wait_outputs(target)
+        if not compile_waits:
             return
         for node in target.intermediate_nodes:
-            bi = getattr(node, "_build_info", None) or {}
-            if bi.get("depfile") is not None or bi.get("deps_style"):
-                node.order_after(dep_aux)
-            else:
-                node.depends(dep_aux)
+            node.wait_for(compile_waits)
 
-    def _ordering_dependency_outputs(self, target: Target) -> list[FileNode]:
-        """Everything a compile in *target* has to wait for.
+    def _dependency_wait_outputs(self, target: Target) -> tuple[list[Node], list[Node]]:
+        """What *target* waits for beyond its link inputs, as (what the
+        compiles wait for, what the link waits for).
 
-        The link closure's own outputs, plus the outputs of the generators
-        each of those dependencies declared with ``depends()``. A dependency's
-        public include dirs are on this target's compile line, so a generator
-        that fills one of them has to run before this target compiles, not
-        only before the dependency does -- otherwise the ordering that makes a
-        public header usable stops at the target that declared it, and every
-        consumer races the generator.
-
-        ``add_dependency()`` needs nothing here: ``transitive_dependencies()``
-        already walks those edges. ``depends(propagate=False)`` is left out on
-        purpose, being the spelling for "only my own final output waits".
+        Both start from the link closure's own outputs that are not link
+        inputs (a generated header a linked Command target produces beside
+        its library, say). The compiles also wait for what the linked
+        targets wait for themselves -- the generator behind a library's
+        public headers reaches the library's consumers this way -- except a
+        link-like file among those (a library built by a depends() target,
+        like cargo's), which concerns only the link step: a compile waiting
+        for it would just serialize the build, and the link step needs it to
+        relink when it changes.
         """
-        outputs = self._collect_dependency_outputs(target)
-        seen = {id(node) for node in outputs}
-        for dep in target.transitive_dependencies(for_link=True):
-            for generator in dep._implicit_target_deps:
-                if generator is target:
-                    continue
-                for node in generator.output_nodes:
-                    if id(node) not in seen:
-                        seen.add(id(node))
-                        outputs.append(node)
-        return outputs
+        closure_aux: list[Node] = [
+            node
+            for node in self._collect_dependency_outputs(target)
+            if not _is_link_input(node.path)
+        ]
+        compile_waits = list(closure_aux)
+        link_waits = list(closure_aux)
+        for node in target.inherited_dependency_outputs():
+            if isinstance(node, FileNode) and _is_link_input(node.path):
+                link_waits.append(node)
+            else:
+                compile_waits.append(node)
+        return compile_waits, link_waits
 
     def _collect_dependency_outputs(self, target: Target) -> list[FileNode]:
         """Collect output nodes from all dependencies.
@@ -960,14 +943,14 @@ class CompileLinkFactory:
         For SharedLibrary dependencies on Windows, returns the import library
         (.lib) instead of the DLL (.dll) since that's what the linker needs.
 
-        transitive_dependencies() lists dependencies before dependents. Static
+        transitive_link_dependencies() lists dependencies before dependents. Static
         linkers (GNU ld) resolve symbols left-to-right and need the reverse:
         a library must precede the libraries it depends on, so we reverse here.
         """
         import sys
 
         result: list[FileNode] = []
-        for dep in reversed(target.transitive_dependencies(for_link=True)):
+        for dep in reversed(target.transitive_link_dependencies()):
             for node in dep.output_nodes:
                 if sys.platform == "win32" and dep.target_type == "shared_library":
                     build_info = getattr(node, "_build_info", {})

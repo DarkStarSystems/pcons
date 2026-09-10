@@ -517,6 +517,33 @@ class TestInstallWithNinja:
         assert not (destination / "sub" / "created-after-configure").exists()
         assert (destination / "sub" / "renamed-directory" / "first.txt").exists()
 
+    def test_installed_files_do_not_wait_on_each_other(self, tmp_path):
+        """Install(dest, [a, b]) copies each file after its own producer
+        only. A source target is an input of the step that copies it, not
+        a dependency of every step, or the edges grow with the square of
+        the file count and any change re-copies everything."""
+        from pcons.generators.ninja import NinjaGenerator
+
+        project = Project("test", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment()
+        a = env.Command(
+            target=project.build_dir / "a.txt", command="echo a > $TARGET", name="a"
+        )
+        b = env.Command(
+            target=project.build_dir / "b.txt", command="echo b > $TARGET", name="b"
+        )
+        project.Install("dist", [a, b])
+
+        project.resolve()
+        NinjaGenerator().generate(project)
+        BaseGenerator._generate_pending(project)
+
+        content = (tmp_path / "build" / "build.ninja").read_text()
+        copy_a = next(ln for ln in content.splitlines() if "dist/a.txt:" in ln)
+        copy_b = next(ln for ln in content.splitlines() if "dist/b.txt:" in ln)
+        assert "b.txt" not in copy_a, copy_a
+        assert "a.txt" not in copy_b, copy_b
+
     def test_install_output_rendered_relocatably(self, tmp_path):
         """Install destinations under the project root render via $topdir."""
         from pcons.generators.ninja import NinjaGenerator

@@ -702,28 +702,6 @@ class ScannerResolver:
         info_node.add_inputs(scanned)
         if scanner.scan_deps:
             info_node.depends([project.node(d) for d in scanner.scan_deps])
-        # The scan reads what the governed command reads (a module scanner
-        # runs a real compiler front end), so anything the governed edge
-        # waits for — a generated header from target.depends(), a linked
-        # dependency's generated outputs — must exist before the scan too.
-        # Order-only: the scan's own depfile records what was actually read
-        # and carries change propagation from there.
-        inherited = [
-            dep
-            for dep in (*governed.implicit_deps, *governed.order_only_deps)
-            # Not the scan output itself: a toolchain may hang the governed
-            # edge's header tracking on its own scan node (GCC's module
-            # interfaces do), which would read back here as a self-cycle.
-            if isinstance(dep, FileNode) and dep is not info_node
-        ]
-        if inherited:
-            if scanner.scan_depfile or scanner.scan_deps_style == "msvc":
-                info_node.order_after(inherited)
-            else:
-                # No dep tracking on the scan: nothing takes over from
-                # order-only, so a regenerated input must dirty the scan
-                # itself (the same rule the compiles follow).
-                info_node.depends(inherited)
 
         tokens = [_tokenize_one(t) for t in scanner.scan_command]
         info_node._build_info = {
@@ -747,6 +725,19 @@ class ScannerResolver:
         if scanner.scan_vars is not None:
             info_node._build_info["vars"] = scanner.scan_vars(env, scanned, governed)
         env.register_node(info_node)
+        # The scan reads what the governed command reads (a module scanner
+        # runs a real compiler front end), so it waits for whatever the
+        # governed edge waits for: a generated header from target.depends(),
+        # a linked dependency's generated outputs. Not the scan node itself:
+        # a toolchain may hang the governed edge's header tracking on it
+        # (GCC's module interfaces do), which would read back as a cycle.
+        inherited = [
+            dep
+            for dep in (*governed.implicit_deps, *governed.order_only_deps)
+            if isinstance(dep, FileNode) and dep is not info_node
+        ]
+        if inherited:
+            info_node.wait_for(inherited)
         return info_node
 
     def _wire_link_args(

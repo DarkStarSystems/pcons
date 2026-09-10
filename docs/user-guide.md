@@ -437,7 +437,7 @@ recognized there, from the scan.
 !!! note
     - **A cross-target import needs the target dependency.** A scope resolves
       a module name against its own units and against the exports of the
-      targets it depends on, so `app` must `link()` (or `add_dependency()`)
+      targets it depends on, so `app` must `link()` (or `depends()`)
       the target that compiles the interface. The dependency carries the
       exports; the content decides the compile order.
 
@@ -761,6 +761,10 @@ When you run `pcons build`, Ninja uses this graph to:
 1. Check timestamps on all files
 2. Rebuild only files whose dependencies changed
 3. Execute builds in parallel where possible
+
+A dependency you declare yourself with `target.depends()` joins this graph
+before every step of the target; how each step holds it is described under
+[Custom Commands](#custom-commands-with-envcommand).
 
 ### Default and Alias Targets
 
@@ -2262,8 +2266,41 @@ You can also add dependencies to any target after creation using `target.depends
 
 ```python
 app = project.Program("app", ["main.c"])
-app.depends("version.txt")  # Rebuild when version.txt changes
+app.depends("app.ld")  # Relink when the linker script changes
+app.depends(gen)       # Build the generator first; don't link it
 ```
+
+**What `depends()` means.** If anything in your target needs something built
+first, whether the target's own output or one of its objects, say
+`target.depends(thing)`. The thing can be a target or a file. Pcons
+builds it (if needed) before any step of your target, then each step
+of that builder then decides for itself whether a change to it means
+rerunning: a step that discovers its dependencies as it runs (like a
+compile, through its depfile, that records all included file paths)
+reruns only when what it discovered changes, so a generated header it
+never included doesn't recompile it, and neither does a linker script;
+a step that doesn't do any discovery (the link step, an `env.Command`)
+reruns whenever the dependency changes. A target given to `depends()`
+also passes its public usage requirements on, as if it were `link()`ed,
+but it is not passed to the linker command line.
+
+A step that discovers its dependencies can still miss one: a response
+file, a sanitizer ignore-list, anything the tool reads but never writes
+to its depfile. For those, say `target.depends(thing, on_change=True)`
+and every step reruns when it changes, whether or not the step's own
+record mentions it. The opposite, `on_change=False`, says the thing only
+has to exist first and never reruns a step by itself.
+
+You may pin a dependency to one step if you want, by building that
+step yourself: `obj = env.cc.Object(...)` then `obj.depends(thing)`. For
+an ordinary compile-and-link target that doesn't buy you anything,
+because the compile already discovers what extra files it read.
+
+The dependency edge is propagated forward: a library whose public
+headers are generated says `lib.depends(gen)` once, and every target
+that links `lib` compiles after the generator too. See
+`examples/83_generated_public_headers`. If you write a builder of your
+own, see [Custom Builders](#custom-builders) for your half of the rule.
 
 Use `$$` for a literal dollar sign. pcons delivers it to the command *verbatim*: it is quoted and escaped so that neither ninja, nor make, nor the shell gets to interpret it. That is what tools that have their own use for a dollar need — the ELF dynamic linker, `awk`, `sed`:
 
@@ -2421,6 +2458,29 @@ protoc_tool = ProtobufTool()
 protoc_tool.setup(env)
 env.protoc.Compile("build/message.pb.cc", "proto/message.proto")
 ```
+
+**What `depends()` means to the steps you create.** A build script says
+`target.depends(thing)` and pcons builds the thing before any step of
+the target. How each step your builder contains then handles it is up
+to the step, so a builder has three rules to follow:
+
+1. Let each step discover its dependencies whenever the tool can
+   report them: a depfile, or `/showIncludes`. Make the step with
+   `GenericCommandBuilder(command, depfile=".d", deps_style="gcc")`, which
+   tells pcons the step discovers, and have the command write the file at
+   `$TARGET.d`. A step that discovers only
+   waits for a dependency to exist, and reruns when what it discovered
+   changes (ninja records the files and timestamp). A step that
+   doesn't have discovery (i.e. no depfile) reruns whenever any
+   dependency changes.
+2. If a step reads something it cannot discover at runtime (a response
+   file, an options file) and its name is known up front, declare it
+   on that step's node with `node.depends()`.
+3. Don't touch a target's `depends()` list from inside a builder. It belongs
+   to the build script.
+
+`examples/84_asset_pipeline` is a custom three-step builder that walks through
+all three, with rebuild tests for each.
 
 ---
 
