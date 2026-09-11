@@ -269,6 +269,11 @@ machinery to support this kind of dynamic dependencies.
 
 ### Fixed
 
+- An `ObjectLibrary` used as another target's source no longer makes each
+  of its objects an order-only dependency of itself and of every sibling,
+  which ninja refused as a cycle. A node a dependency produces is not one of
+  the consumer's own steps, so it doesn't wait for that dependency, and a
+  node never depends on itself.
 - Conan packages link in dependents-first order. The finder folded a
   package's `Requires` in the order the `.pc` file listed them, which put
   `opencv_core` before `opencv_imgproc` and broke static links with GNU ld;

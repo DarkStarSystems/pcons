@@ -1627,3 +1627,39 @@ class TestFileDepOnACommand:
         assert any(
             d.path.name == version.name for d in cmd.output_nodes[0].implicit_deps
         )
+
+
+class TestObjectLibraryAsSource:
+    """An ObjectLibrary's objects used as another target's sources are that
+    target's link inputs, built by the ObjectLibrary's own edges. They are
+    not steps of the consumer that wait for the ObjectLibrary: that made
+    every object an order-only dependency of itself and of all its siblings
+    (found by a real build: ninja refused the self-cycle)."""
+
+    def test_adopted_objects_do_not_wait_for_themselves_or_siblings(
+        self, tmp_path, gcc_toolchain
+    ):
+        for name in ("a", "b", "c"):
+            (tmp_path / f"{name}.c").write_text(f"int {name}(void) {{ return 1; }}\n")
+        (tmp_path / "main.c").write_text("int main(void) { return 0; }\n")
+        project = Project("t", root_dir=tmp_path, build_dir=tmp_path / "build")
+        env = project.Environment(toolchain=gcc_toolchain)
+        objs = project.ObjectLibrary("objs", env, sources=["a.c", "b.c", "c.c"])
+        lib = project.SharedLibrary("lib", env, sources=["main.c", objs])
+        project.resolve()
+
+        adopted = {id(n) for n in objs.output_nodes}
+        for node in lib.intermediate_nodes + lib.output_nodes:
+            assert node not in node.order_only_deps and node not in node.implicit_deps
+            if id(node) in adopted:
+                assert not any(id(d) in adopted for d in node.order_only_deps), (
+                    node.path
+                )
+
+    def test_a_node_never_depends_on_itself(self):
+        from pcons.core.node import FileNode
+
+        node = FileNode("x.o")
+        node.depends([node])
+        node.order_after([node])
+        assert node.implicit_deps == [] and node.order_only_deps == []

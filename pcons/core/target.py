@@ -874,7 +874,7 @@ class Target:
         """
         nodes = self.intermediate_nodes + self.output_nodes
         for dep in self._dependencies:
-            outputs = dep.ordering_outputs() if isinstance(dep, Target) else [dep]
+            outputs = self._waited_outputs(dep)
             on_change = self._on_change.get(dep)
             for node in nodes:
                 if on_change is None:
@@ -883,6 +883,20 @@ class Target:
                     node.depends(outputs)
                 else:
                     node.order_after(outputs)
+
+    def _waited_outputs(self, dep: Target | Node) -> list[Node]:
+        """What this target's steps wait for on account of *dep*: its
+        outputs, less any that are this target's own nodes.
+
+        An ObjectLibrary given as a source is a dependency whose outputs
+        are adopted as this target's own objects. Each is built by the
+        ObjectLibrary's edge; a compile here waiting for a sibling object
+        is at best idle and at worst a cycle, through whatever generated
+        that sibling's source, and waiting for itself is a cycle outright.
+        """
+        outputs = dep.ordering_outputs() if isinstance(dep, Target) else [dep]
+        own = {id(n) for n in (*self.intermediate_nodes, *self.output_nodes)}
+        return [out for out in outputs if id(out) not in own]
 
     def ordering_outputs(self, seen: set[Target | Node] | None = None) -> list[Node]:
         """What a dependent of this target waits for.
@@ -929,8 +943,7 @@ class Target:
             for dep in member._dependencies:
                 if dep is self:
                     continue
-                outputs = dep.ordering_outputs() if isinstance(dep, Target) else [dep]
-                for node in outputs:
+                for node in member._waited_outputs(dep):
                     if id(node) not in seen:
                         seen.add(id(node))
                         result.append(node)
