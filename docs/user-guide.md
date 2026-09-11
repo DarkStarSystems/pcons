@@ -1594,7 +1594,7 @@ with env.override() as careful:
 
 The file stays part of the target, so it keeps the target's include dirs, defines, and everything inherited from its dependencies — only the environment layer changes.
 
-`env.cc.Object()` (see `examples/17_object_sources`) is another way to apply unique flags: compiling a standalone object that several targets can link directly. It sits outside any target, so no target's usage requirements apply to it, and it can use its own or any environment.
+`env.cc.Object()` (see `examples/17_object_sources`) is another way to apply unique flags: compiling a standalone object that several targets can link directly. It sits outside any target, so no target's usage requirements apply to it, and it can use its own or any environment. Its first argument is the object's path; a relative one is placed in the environment's build directory (under its `build_prefix`, if any), so `env.cc.Object("helper.o", "src/helper.c")` and the example's `build_dir / "helper.o"` land in the same place.
 
 ### Multiple Toolchains
 
