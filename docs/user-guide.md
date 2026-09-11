@@ -2003,9 +2003,10 @@ env = project.Environment(toolchain=toolchain)
 env.set_variant(variant)
 env.cxx.flags.append("-std=c++17")
 
-# Sync Conan profile with toolchain settings.
-# cppstd can be set explicitly, or inferred from env.cxx.flags.
-conan.sync_profile(toolchain, env=env, build_type=variant.capitalize())
+# Sync Conan profile with toolchain settings. build_type follows the
+# environment's variant; cppstd can be set explicitly, or inferred from
+# env.cxx.flags.
+conan.sync_profile(toolchain, env=env)
 
 # Install packages (cached, only runs when needed)
 packages = conan.install()
@@ -2032,13 +2033,22 @@ project.Default(hello)
 ```python
 conan.sync_profile(
     toolchain,  # Detects compiler, version, OS, arch
-    env=env,  # Infers cppstd from env.cxx.flags (optional)
-    build_type="Release",  # Release, Debug, RelWithDebInfo, MinSizeRel
+    env=env,  # build_type from env.variant; cppstd from env.cxx.flags
+    build_type="Release",  # Overrides the variant: Release, Debug, RelWithDebInfo, MinSizeRel
     cppstd="23",  # Explicit C++ standard (overrides env inference)
 )
 ```
 
+`build_type` follows the environment's variant when you leave it out: `debug` is `Debug`, `release` and `release-fastest` are `Release`, `relwithdebinfo` and `minsizerel` their Conan names. With one environment per variant, one `ConanFinder` per variant (each with its own `output_folder`) gives each its matching packages.
+
 The `cppstd` parameter sets `compiler.cppstd` in the Conan profile, which many packages require. If omitted, it's inferred from `env.cxx.flags` (e.g., `-std=c++23` becomes `compiler.cppstd=23`). You can also use the lower-level `conan.set_profile_setting("compiler.cppstd", "23")` before calling `sync_profile()`.
+
+A conf entry set with `conan.set_profile_conf()`, such as `tools.build:cxxflags`, is not part of Conan's package id: changing it reuses the binary Conan already built unless you tell Conan the conf matters:
+
+```python
+conan.set_profile_conf("tools.build:cxxflags", '["-march=native"]')
+conan.set_profile_conf("tools.info.package_id:confs", '["tools.build:cxxflags"]')
+```
 
 ### The env.use() Helper
 
